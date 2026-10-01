@@ -35,6 +35,8 @@ type FinanceService interface {
 	DailyCashUp(ctx context.Context, day string) (client.CashUp, error)
 	IncomeByConcept(ctx context.Context, from, to string) (client.Income, error)
 	VoidDeposit(ctx context.Context, id, reason string) error
+	CorrectDeposit(ctx context.Context, in client.CorrectionInput) (client.CorrectionResult, error)
+	DepositCorrections(ctx context.Context, depositID string) ([]client.DepositCorrection, error)
 	ListOverdue(ctx context.Context, cycleID string) ([]client.Charge, error)
 }
 
@@ -226,6 +228,8 @@ type paymentResponse struct {
 	Reference   string `json:"reference"`
 	PaidAt      string `json:"paidAt"`
 	CardType    string `json:"cardType,omitempty"`
+	// DepositID is the receipt this payment is a slice of (T9).
+	DepositID string `json:"depositId,omitempty"`
 }
 
 // toPaymentResponses maps a list of payments to the camelCase shape the front
@@ -247,6 +251,7 @@ func toPaymentResponse(p client.Payment) paymentResponse {
 		Reference:   p.Reference,
 		PaidAt:      p.PaidAt,
 		CardType:    p.CardType,
+		DepositID:   p.DepositID,
 	}
 }
 

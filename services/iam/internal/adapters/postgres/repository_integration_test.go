@@ -632,6 +632,9 @@ func TestSeededRolesHoldTheirPermissions(t *testing.T) {
 			"levels:delete",
 			// T2: deleting a user account is the director's alone (0025).
 			"users:delete",
+			// T9: correcting a registered payment (0026). The owner holds it
+			// by default and may delegate it.
+			"payments:edit",
 		}},
 		// Task 9: the cashier. Reads the counter, takes money, finds pupils.
 		{"cobranza", []string{"students:read", "students:list", "collections:read", "payments:write"}},

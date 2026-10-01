@@ -20,6 +20,13 @@ import (
 // needs. It records the last input and returns canned results/errors so each
 // handler is exercised in isolation (no Connect round-trip).
 type fakeFinance struct {
+	// T9: the correction asked for, and what the service answers.
+	correction       client.CorrectionInput
+	correctCalls     int
+	correctionResult client.CorrectionResult
+	history          []client.DepositCorrection
+	historyOf        string
+
 	depositChargeIDs []string
 	depositReceiver  client.Receiver
 	payReceiver      client.Receiver
@@ -138,6 +145,17 @@ func (f *fakeFinance) DailyCashUp(_ context.Context, day string) (client.CashUp,
 func (f *fakeFinance) IncomeByConcept(_ context.Context, from, to string) (client.Income, error) {
 	f.incomeFrom, f.incomeTo = from, to
 	return f.income, f.err
+}
+
+func (f *fakeFinance) CorrectDeposit(_ context.Context, in client.CorrectionInput) (client.CorrectionResult, error) {
+	f.correction = in
+	f.correctCalls++
+	return f.correctionResult, f.err
+}
+
+func (f *fakeFinance) DepositCorrections(_ context.Context, id string) ([]client.DepositCorrection, error) {
+	f.historyOf = id
+	return f.history, f.err
 }
 
 func (f *fakeFinance) VoidDeposit(_ context.Context, id, reason string) error {
@@ -617,7 +635,7 @@ func TestFinanceGetAccountUsesPathStudentID(t *testing.T) {
 	svc := &fakeFinance{account: client.AccountStatement{
 		Charges: []client.Charge{sampleCharge},
 		Payments: []client.Payment{{ID: "pay-1", ChargeID: "chg-1", AmountCents: 50000,
-			Method: "cash", PaidAt: "2026-09-01T10:00:00Z"}},
+			Method: "cash", PaidAt: "2026-09-01T10:00:00Z", DepositID: "dep-1"}},
 		TotalBalanceCents: 100000,
 	}}
 	h := handler.NewFinanceHandler(svc)
@@ -643,6 +661,10 @@ func TestFinanceGetAccountUsesPathStudentID(t *testing.T) {
 	}
 	if out.Payments[0]["amountCents"] != float64(50000) {
 		t.Errorf("payment = %v", out.Payments[0])
+	}
+	// T9: which receipt each payment came from, for the correction drawer.
+	if out.Payments[0]["depositId"] != "dep-1" {
+		t.Errorf("payment deposit = %v", out.Payments[0])
 	}
 }
 

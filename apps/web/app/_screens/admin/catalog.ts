@@ -80,6 +80,9 @@ export const PERMISSION_CATALOG: readonly PermissionGroup[] = [
     permissions: [
       { value: "collections:read", label: "Consultar adeudos y corte (ventanilla)" },
       { value: "payments:write", label: "Registrar cobros" },
+      // T9: correcting a registered payment. The owner's by default; the
+      // director may delegate it (owner answer 6), so it is not ownerOnly.
+      { value: "payments:edit", label: "Corregir pagos registrados" },
     ],
   },
   {

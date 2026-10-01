@@ -412,6 +412,9 @@ func fromDomainDeposit(d domain.Deposit) depositModel {
 		VoidReason:      d.VoidReason(),
 		ReceivedBy:      nullableUUID(d.ReceivedBy().UserID),
 		ReceivedByName:  d.ReceivedBy().Name,
+		// Written with the deposit; the superseded pair is written by the
+		// correction itself, under the original's row lock.
+		CorrectsDepositID: nullableUUID(d.Corrects()),
 	}
 	if d.Voided() {
 		at := d.VoidedAt()
@@ -439,7 +442,10 @@ func fromDomainTenders(d domain.Deposit) []depositTenderModel {
 // method and card type are their summary, re-derived here by WithTenders.
 // A deposit with no tender rows (none since migration 0021 backfilled them)
 // falls back to its own single method.
-func toDomainDeposit(m depositModel, tenderRows []depositTenderModel) (domain.Deposit, error) {
+//
+// folios resolves the receipt numbers of the deposits this one is linked to by
+// a correction (T9): read for the whole page in one query by the caller.
+func toDomainDeposit(m depositModel, tenderRows []depositTenderModel, folios map[string]string) (domain.Deposit, error) {
 	method := m.Method
 	if len(tenderRows) > 0 {
 		method = tenderRows[0].Method
@@ -458,6 +464,12 @@ func toDomainDeposit(m depositModel, tenderRows []depositTenderModel) (domain.De
 		receiver.UserID = *m.ReceivedBy
 	}
 	d = d.WithReceiver(receiver).WithCapturedAt(m.CreatedAt).WithFolio(m.Folio)
+	if m.CorrectsDepositID != nil {
+		d = d.WithCorrects(*m.CorrectsDepositID, folios[*m.CorrectsDepositID])
+	}
+	if m.SupersededAt != nil && m.SupersededBy != nil {
+		d = d.RehydrateSupersession(*m.SupersededAt, *m.SupersededBy, folios[*m.SupersededBy])
+	}
 	if m.VoidedAt == nil {
 		return d, nil
 	}
@@ -482,4 +494,98 @@ func withStoredTenders(d domain.Deposit, cardType string, rows []depositTenderMo
 		tenders = append(tenders, t)
 	}
 	return d.WithTenders(tenders)
+}
+
+// --- corrections (T9) ------------------------------------------------------
+
+// snapshotJSON is a deposit snapshot as deposit_corrections stores it: plain
+// JSON a person reading the row with psql can follow.
+type snapshotJSON struct {
+	DepositID   string         `json:"depositId"`
+	Folio       string         `json:"folio"`
+	AmountCents int64          `json:"amountCents"`
+	PaidAt      time.Time      `json:"paidAt"`
+	Tenders     []tenderJSON   `json:"tenders"`
+	Lines       []snapLineJSON `json:"lines"`
+}
+
+type tenderJSON struct {
+	Method      string `json:"method"`
+	AmountCents int64  `json:"amountCents"`
+	Reference   string `json:"reference,omitempty"`
+	CardType    string `json:"cardType,omitempty"`
+}
+
+type snapLineJSON struct {
+	ChargeID    string `json:"chargeId"`
+	AmountCents int64  `json:"amountCents"`
+}
+
+func toSnapshotJSON(s domain.DepositSnapshot) ([]byte, error) {
+	out := snapshotJSON{DepositID: s.DepositID, Folio: s.Folio, AmountCents: s.AmountCents, PaidAt: s.PaidAt,
+		Tenders: make([]tenderJSON, 0, len(s.Tenders)), Lines: make([]snapLineJSON, 0, len(s.Lines))}
+	for _, t := range s.Tenders {
+		out.Tenders = append(out.Tenders, tenderJSON(t))
+	}
+	for _, l := range s.Lines {
+		out.Lines = append(out.Lines, snapLineJSON(l))
+	}
+	raw, err := json.Marshal(out)
+	if err != nil {
+		return nil, glerrors.Wrap(glerrors.KindInternal, "encoding a correction snapshot", err)
+	}
+	return raw, nil
+}
+
+func fromSnapshotJSON(raw []byte) (domain.DepositSnapshot, error) {
+	var in snapshotJSON
+	if err := json.Unmarshal(raw, &in); err != nil {
+		return domain.DepositSnapshot{}, glerrors.Wrap(glerrors.KindInternal, "a stored correction snapshot is unreadable", err)
+	}
+	out := domain.DepositSnapshot{DepositID: in.DepositID, Folio: in.Folio, AmountCents: in.AmountCents, PaidAt: in.PaidAt}
+	for _, t := range in.Tenders {
+		out.Tenders = append(out.Tenders, domain.TenderSnapshot(t))
+	}
+	for _, l := range in.Lines {
+		out.Lines = append(out.Lines, domain.SnapshotLine(l))
+	}
+	return out, nil
+}
+
+func fromDomainCorrection(c domain.DepositCorrection) (depositCorrectionModel, error) {
+	before, err := toSnapshotJSON(c.Before())
+	if err != nil {
+		return depositCorrectionModel{}, err
+	}
+	after, err := toSnapshotJSON(c.After())
+	if err != nil {
+		return depositCorrectionModel{}, err
+	}
+	return depositCorrectionModel{
+		ID: c.ID(), TenantID: c.TenantID(), StudentID: c.StudentID(),
+		OriginalDepositID: c.OriginalID(), CorrectedDepositID: c.CorrectedID(), Reason: c.Reason(),
+		Before: before, After: after,
+		CorrectedBy: nullableUUID(c.By().UserID), CorrectedByName: c.By().Name, CorrectedAt: c.At(),
+	}, nil
+}
+
+func toDomainCorrection(m depositCorrectionModel) (domain.DepositCorrection, error) {
+	before, err := fromSnapshotJSON(m.Before)
+	if err != nil {
+		return domain.DepositCorrection{}, err
+	}
+	after, err := fromSnapshotJSON(m.After)
+	if err != nil {
+		return domain.DepositCorrection{}, err
+	}
+	by := domain.Receiver{Name: m.CorrectedByName}
+	if m.CorrectedBy != nil {
+		by.UserID = *m.CorrectedBy
+	}
+	c, err := domain.NewDepositCorrection(m.ID, m.TenantID, m.StudentID, m.OriginalDepositID, m.CorrectedDepositID,
+		m.Reason, before, after, by, m.CorrectedAt)
+	if err != nil {
+		return domain.DepositCorrection{}, glerrors.Wrap(glerrors.KindInternal, "a stored correction is invalid", err)
+	}
+	return c, nil
 }

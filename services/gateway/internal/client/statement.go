@@ -40,6 +40,11 @@ type StatementMovement struct {
 	NotYetDue    bool   `json:"notYetDue"`
 	Voided       bool   `json:"voided"`
 	VoidReason   string `json:"voidReason,omitempty"`
+	// T9: a receipt replaced by its correction (office only, not counted),
+	// and on a correction's lines the receipt it replaces.
+	Superseded        bool   `json:"superseded"`
+	SupersededByFolio string `json:"supersededByFolio,omitempty"`
+	CorrectsFolio     string `json:"correctsFolio,omitempty"`
 }
 
 // StatementTotals: BalanceCents = ChargedCents − DiscountCents − PaidCents.
@@ -82,6 +87,7 @@ func toStatement(m *financev1.GetStatementResponse) Statement {
 			ChargeID: mv.GetChargeId(), DepositID: mv.GetDepositId(),
 			Method: mv.GetMethod(), CardType: mv.GetCardType(), Reference: mv.GetReference(), Folio: mv.GetFolio(),
 			Accrued: mv.GetAccrued(), NotYetDue: mv.GetNotYetDue(), Voided: mv.GetVoided(), VoidReason: mv.GetVoidReason(),
+			Superseded: mv.GetSuperseded(), SupersededByFolio: mv.GetSupersededByFolio(), CorrectsFolio: mv.GetCorrectsFolio(),
 		})
 	}
 	t := m.GetTotals()

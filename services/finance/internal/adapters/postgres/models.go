@@ -163,9 +163,32 @@ type depositModel struct {
 	CreatedAt      time.Time `gorm:"column:created_at"`
 	// Folio is the receipt number (task 12, migration 0018).
 	Folio string `gorm:"column:folio"`
+	// The correction link (T9, migration 0023): the deposit that replaced
+	// this one, and the one this one corrects.
+	SupersededAt      *time.Time `gorm:"column:superseded_at"`
+	SupersededBy      *string    `gorm:"column:superseded_by"`
+	CorrectsDepositID *string    `gorm:"column:corrects_deposit_id"`
 }
 
 func (depositModel) TableName() string { return "deposits" }
+
+// depositCorrectionModel is the GORM row for `deposit_corrections` (T9,
+// migration 0023): one correction of a deposit, before and after as JSON.
+type depositCorrectionModel struct {
+	ID                 string    `gorm:"column:id;primaryKey"`
+	TenantID           string    `gorm:"column:tenant_id"`
+	StudentID          string    `gorm:"column:student_id"`
+	OriginalDepositID  string    `gorm:"column:original_deposit_id"`
+	CorrectedDepositID string    `gorm:"column:corrected_deposit_id"`
+	Reason             string    `gorm:"column:reason"`
+	Before             []byte    `gorm:"column:before;type:jsonb"`
+	After              []byte    `gorm:"column:after;type:jsonb"`
+	CorrectedBy        *string   `gorm:"column:corrected_by"`
+	CorrectedByName    string    `gorm:"column:corrected_by_name"`
+	CorrectedAt        time.Time `gorm:"column:corrected_at"`
+}
+
+func (depositCorrectionModel) TableName() string { return "deposit_corrections" }
 
 // depositTenderModel is the GORM row for `deposit_tenders` (T8, migration
 // 0021): one method a deposit came in by, in the order the cashier listed it.

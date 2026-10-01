@@ -13,12 +13,16 @@ import {
 } from "../../finance/statement";
 import { Btn } from "../Controls";
 import { DrawerShell } from "../DrawerShell";
+import { Icon } from "../Icon";
+import { CorrectPaymentDrawer } from "../payments/CorrectPaymentDrawer";
 
 export interface StudentStatementDrawerProps {
   studentId: string;
   /** The pupil's name as the list shows it (surnames first). */
   name: string;
   subtitle?: string;
+  /** May correct a registered payment (payments:edit, T9). UX only: the gateway decides. */
+  canCorrect?: boolean;
   onClose: () => void;
 }
 
@@ -54,8 +58,11 @@ type Load = { state: "loading" } | { state: "failed"; message: string } | { stat
  * what the counter asks for today — and computes nothing: the parents' app and
  * the PDF read the same numbers.
  */
-export function StudentStatementDrawer({ studentId, name, subtitle, onClose }: StudentStatementDrawerProps): ReactElement {
+export function StudentStatementDrawer({ studentId, name, subtitle, canCorrect = false, onClose }: StudentStatementDrawerProps): ReactElement {
   const [load, setLoad] = useState<Load>({ state: "loading" });
+  // The receipt being corrected (T9). One dialog at a time: while it is open
+  // the statement steps aside, and comes back re-read.
+  const [correcting, setCorrecting] = useState<string | undefined>(undefined);
   const [downloading, setDownloading] = useState(false);
   const [pdfProblem, setPdfProblem] = useState<string | undefined>(undefined);
   const request = useRef(0);
@@ -92,6 +99,16 @@ export function StudentStatementDrawer({ studentId, name, subtitle, onClose }: S
     </div>
   );
 
+  if (correcting !== undefined) {
+    return (
+      <CorrectPaymentDrawer
+        depositId={correcting}
+        studentId={studentId}
+        onClose={() => { setCorrecting(undefined); read(); }}
+      />
+    );
+  }
+
   return (
     <DrawerShell title={`Estado de cuenta · ${name}`} subtitle={subtitle} icon="finance" size="lg" onClose={onClose} footer={footer}>
       {load.state === "loading" && <p style={{ color: "var(--text-muted)" }}>Cargando estado de cuenta…</p>}
@@ -101,13 +118,22 @@ export function StudentStatementDrawer({ studentId, name, subtitle, onClose }: S
           <Btn kind="ghost" onClick={read}>Reintentar</Btn>
         </div>
       )}
-      {load.state === "ready" && <Ledger statement={load.statement} />}
+      {load.state === "ready" && <Ledger statement={load.statement} onCorrect={canCorrect ? setCorrecting : undefined} />}
     </DrawerShell>
   );
 }
 
-function Ledger({ statement }: { statement: Statement }): ReactElement {
+function Ledger({ statement, onCorrect }: { statement: Statement; onCorrect?: (depositId: string) => void }): ReactElement {
   const { totals } = statement;
+  // A receipt paid by several methods is several lines: it is corrected once,
+  // from its first line. A cancelled or replaced receipt is not corrected.
+  const correctable = new Set<number>();
+  const seen = new Set<string>();
+  statement.movements.forEach((m, i) => {
+    if (m.depositId === undefined || m.voided || m.superseded === true || seen.has(m.depositId)) return;
+    seen.add(m.depositId);
+    correctable.add(i);
+  });
   return (
     <div style={{ display: "grid", gap: 20 }}>
       <Totals statement={statement} />
@@ -129,7 +155,13 @@ function Ledger({ statement }: { statement: Statement }): ReactElement {
               </tr>
             </thead>
             <tbody>
-              {statement.movements.map((m, i) => <MovementRow key={`${m.kind}-${m.chargeId ?? ""}-${m.depositId ?? ""}-${i}`} m={m} />)}
+              {statement.movements.map((m, i) => (
+                <MovementRow
+                  key={`${m.kind}-${m.chargeId ?? ""}-${m.depositId ?? ""}-${i}`}
+                  m={m}
+                  onCorrect={onCorrect !== undefined && correctable.has(i) && m.depositId !== undefined ? () => onCorrect(m.depositId ?? "") : undefined}
+                />
+              ))}
             </tbody>
           </table>
         </div>
@@ -146,17 +178,30 @@ function Ledger({ statement }: { statement: Statement }): ReactElement {
 const th: CSSProperties = { padding: "8px 10px", borderBottom: "1px solid var(--border)", fontWeight: 600 };
 const td: CSSProperties = { padding: "10px", borderBottom: "1px solid var(--border)", verticalAlign: "top" };
 
-function MovementRow({ m }: { m: StatementMovement }): ReactElement {
-  const muted = m.voided || m.notYetDue;
+function MovementRow({ m, onCorrect }: { m: StatementMovement; onCorrect?: () => void }): ReactElement {
+  const struck = m.voided || m.superseded === true;
+  const muted = struck || m.notYetDue;
   const amount = formatCents(m.amountCents);
   const detail = detailOf(m);
   return (
-    <tr style={{ color: muted ? "var(--text-faint)" : "var(--text)", textDecoration: m.voided ? "line-through" : "none" }}>
+    <tr style={{ color: muted ? "var(--text-faint)" : "var(--text)", textDecoration: struck ? "line-through" : "none" }}>
       <td style={{ ...td, whiteSpace: "nowrap" }}>{dayOf(m.date)}</td>
       <td style={td}>
         <div style={{ fontWeight: 600 }}>{m.description}</div>
         {detail !== "" && <div style={{ fontSize: 12.5, color: "var(--text-muted)" }}>{detail}</div>}
         {m.voided && <div style={{ fontSize: 12.5, color: "var(--red)" }}>{`Cancelado${m.voidReason ? `: ${m.voidReason}` : ""}`}</div>}
+        {m.superseded === true && <div style={{ fontSize: 12.5, color: "var(--text-muted)" }}>{`Sustituido${m.supersededByFolio ? ` por ${m.supersededByFolio}` : ""}`}</div>}
+        {m.correctsFolio !== undefined && m.correctsFolio !== "" && <div style={{ fontSize: 12.5, color: "var(--text-muted)" }}>{`Corrige a ${m.correctsFolio}`}</div>}
+        {onCorrect !== undefined && (
+          <button
+            type="button"
+            onClick={onCorrect}
+            aria-label={`Corregir pago ${m.folio ?? ""}`.trim()}
+            style={{ display: "inline-flex", alignItems: "center", gap: 6, minHeight: 44, marginTop: 2, padding: "0 4px", fontSize: 13.5, fontWeight: 600, color: "var(--forest)", background: "none", border: "none", cursor: "pointer", textDecoration: "none" }}
+          >
+            <Icon name="edit" size={15} />Corregir
+          </button>
+        )}
         {m.notYetDue && <Tag>Aún no exigible</Tag>}
         {m.accrued && <Tag>Acumulado a hoy</Tag>}
       </td>

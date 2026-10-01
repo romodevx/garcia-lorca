@@ -6,7 +6,7 @@
 // is deliberately small (register a device, read a student's feed, mark one
 // read). Everything in the feed is materialised as a side effect of consuming
 // another service's domain event — attendance's AbsenceRecorded /
-// AttendanceMarked, finance's PaymentRegistered — whose protos ARE the wire
+// AttendanceMarked, finance's PaymentRegistered and PaymentCorrected — whose protos ARE the wire
 // contract; comms never redefines them.
 //
 // Because the transport is at-least-once, the consumer's correctness rests on

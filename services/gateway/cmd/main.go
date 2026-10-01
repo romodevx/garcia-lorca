@@ -645,6 +645,16 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("GET /api/v1/finance/cash-up", collectionsRead(http.HandlerFunc(financeH.DailyCashUp)))
 	mux.Handle("GET /api/v1/finance/income", financeRead(financeH.IncomeByConcept))
 	mux.Handle("POST /api/v1/finance/deposits/{id}/void", financeWrite(financeH.VoidDeposit))
+	// T9: correcting a registered payment answers to payments:edit alone — the
+	// owner's by default, delegable by the director (iam 0026) — never to
+	// payments:write (taking money at the listed price) nor finance:write.
+	// Its history is readable by whoever may correct, and by finance:read.
+	paymentsEdit := func(h http.HandlerFunc) http.Handler {
+		return guard.Protect("finance", requireAuthChanged(middleware.RequirePermission("payments:edit")(h)))
+	}
+	mux.Handle("POST /api/v1/finance/deposits/{id}/correct", paymentsEdit(financeH.CorrectDeposit))
+	mux.Handle("GET /api/v1/finance/deposits/{id}/corrections", guard.Protect("finance",
+		requireAuthChanged(middleware.RequireAnyPermission("payments:edit", "finance:read")(http.HandlerFunc(financeH.DepositCorrections)))))
 	mux.Handle("GET /api/v1/finance/accounts/{studentId}", collectionsRead(http.HandlerFunc(financeH.GetAccount)))
 	// T7: the student's ledger (one computation, finance's) and its PDF, behind
 	// the same permissions as the account it details.

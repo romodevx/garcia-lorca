@@ -129,6 +129,14 @@ func (w *writer) header(r Receipt) {
 		w.text(familyBold, 13, "CANCELADO")
 		w.text(familyRegular, 9, prefixed("Motivo: ", r.VoidReason))
 	}
+	if r.Superseded {
+		// T9: kept, never torn up — the correction replaced it.
+		w.text(familyBold, 13, "SUSTITUIDO")
+		w.text(familyRegular, 9, prefixed("Sustituido por ", r.SupersededByFolio))
+	}
+	if r.CorrectsFolio != "" {
+		w.text(familyBold, 10, "Corrige a "+r.CorrectsFolio)
+	}
 }
 
 func (w *writer) parties(r Receipt) {

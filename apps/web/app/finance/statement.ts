@@ -33,6 +33,11 @@ export interface StatementMovement {
   /** A cancelled deposit. Shown struck through, not counted. */
   voided: boolean;
   voidReason?: string;
+  /** T9: a receipt replaced by its correction. Shown struck through, not counted. */
+  superseded?: boolean;
+  supersededByFolio?: string;
+  /** T9: on a correction's lines, the receipt it replaces. */
+  correctsFolio?: string;
 }
 
 export interface StatementTotals {

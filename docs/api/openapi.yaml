@@ -3030,6 +3030,114 @@ paths:
         '409':
           description: The deposit was already cancelled.
 
+  /api/v1/finance/deposits/{id}/correct:
+    post:
+      tags: [finance-payments]
+      summary: Correct a registered payment
+      description: >
+        T9. A payment keyed wrong ($500 for $1,000, the wrong day, cash for a
+        transfer, the wrong months) is corrected, never edited in place. The
+        original deposit is kept and marked superseded — it counts for nothing
+        and its receipt prints "Sustituido por P-…" — and a NEW deposit with its
+        own folio carries the corrected amount, date, methods and concepts,
+        split by the same rule as any deposit on the corrected date, so
+        surcharges and the early-payment reward are worked out again. Who
+        received the money stays the original cashier; who corrected it, when
+        and why go to the history. The family is notified with the corrected
+        amount. Requires `payments:edit` (the owner's by default, delegable).
+
+
+        Send an idempotencyKey: a retried correction under the same key
+        changes nothing and answers with the stored one (`replayed`).
+      operationId: correctDeposit
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - { $ref: '#/components/parameters/CsrfToken' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amountCents, tenders, reason]
+              properties:
+                amountCents:
+                  type: integer
+                  format: int64
+                  minimum: 1
+                  description: The amount the family really handed over.
+                  example: 100000
+                paidAt:
+                  type: string
+                  format: date
+                  description: The corrected day. Empty keeps the original's; a future day is refused.
+                  example: '2026-09-09'
+                tenders:
+                  type: array
+                  minItems: 1
+                  maxItems: 4
+                  description: The methods, adding up exactly to amountCents (ADR 0025).
+                  items: { $ref: '#/components/schemas/Tender' }
+                chargeIds:
+                  type: array
+                  maxItems: 100
+                  description: The charges the money may pay; empty is oldest debt first.
+                  items: { type: string, format: uuid }
+                reason:
+                  type: string
+                  minLength: 1
+                  maxLength: 500
+                  description: Required — why the payment is corrected.
+                  example: Se capturó $500 y la familia entregó $1,000
+                idempotencyKey: { type: string, maxLength: 120, example: corr-6f1c }
+      responses:
+        '200':
+          description: Corrected (or replayed).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DepositCorrectionResult' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+        '409':
+          description: The deposit was cancelled, or already corrected (correct its replacement).
+
+  /api/v1/finance/deposits/{id}/corrections:
+    get:
+      tags: [finance-payments]
+      summary: A payment's correction history
+      description: >
+        T9. Every correction in the receipt's chain, oldest first, whichever
+        link is asked about: before and after (amount, date, methods, concepts),
+        who, when and why. Requires `payments:edit` or `finance:read`.
+      operationId: listDepositCorrections
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The history.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [corrections]
+                properties:
+                  corrections:
+                    type: array
+                    items: { $ref: '#/components/schemas/DepositCorrection' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+
   /api/v1/finance/accounts/{studentId}/statement:
     get:
       tags: [finance-payments]
@@ -4873,6 +4981,69 @@ components:
           description: >
             When the deposit was keyed. It differs from paidAt when a payment is
             captured late with the day the family paid.
+        folio: { type: string, example: 'P-2026-000123' }
+        supersededAt:
+          type: string
+          format: date-time
+          description: T9 — when a correction replaced this deposit. It then counts for nothing.
+        supersededBy: { type: string, format: uuid, description: The deposit that replaced it. }
+        supersededByFolio: { type: string, example: 'P-2026-000124' }
+        correctsDepositId: { type: string, format: uuid, description: 'On a correction: the deposit it replaces.' }
+        correctsFolio: { type: string, example: 'P-2026-000123' }
+
+    DepositSnapshot:
+      type: object
+      description: A deposit as it stood on one side of a correction (T9).
+      required: [depositId, folio, amountCents, tenders, lines]
+      properties:
+        depositId: { type: string, format: uuid }
+        folio: { type: string, example: 'P-2026-000123' }
+        amountCents: { type: integer, format: int64, example: 50000 }
+        paidAt: { type: string, format: date-time }
+        tenders:
+          type: array
+          items: { $ref: '#/components/schemas/Tender' }
+        lines:
+          type: array
+          description: What the deposit put on each charge.
+          items:
+            type: object
+            required: [chargeId, amountCents]
+            properties:
+              chargeId: { type: string, format: uuid }
+              description: { type: string, example: 'Colegiatura septiembre 2026' }
+              amountCents: { type: integer, format: int64, example: 50000 }
+
+    DepositCorrection:
+      type: object
+      description: One correction of a payment (T9) — before, after, who, when and why.
+      required: [id, originalDepositId, correctedDepositId, reason, before, after, correctedAt]
+      properties:
+        id: { type: string, format: uuid }
+        originalDepositId: { type: string, format: uuid }
+        correctedDepositId: { type: string, format: uuid }
+        reason: { type: string, example: 'Se capturó $500 y la familia entregó $1,000' }
+        before: { $ref: '#/components/schemas/DepositSnapshot' }
+        after: { $ref: '#/components/schemas/DepositSnapshot' }
+        correctedByName: { type: string, example: Directora Ruiz }
+        correctedAt: { type: string, format: date-time }
+
+    DepositCorrectionResult:
+      type: object
+      description: What a correction did (T9).
+      required: [original, deposit, allocations, surcharges, unallocatedCents, replayed, correction]
+      properties:
+        original: { $ref: '#/components/schemas/Deposit' }
+        deposit: { $ref: '#/components/schemas/Deposit' }
+        allocations:
+          type: array
+          items: { type: object }
+        surcharges:
+          type: array
+          items: { type: object }
+        unallocatedCents: { type: integer, format: int64, minimum: 0 }
+        replayed: { type: boolean }
+        correction: { $ref: '#/components/schemas/DepositCorrection' }
 
     DepositResult:
       type: object
@@ -5025,6 +5196,14 @@ components:
           type: boolean
           description: A cancelled deposit. Listed for the office struck through, not counted.
         voidReason: { type: string, example: 'importe capturado mal' }
+        superseded:
+          type: boolean
+          description: T9 — a deposit replaced by its correction. Listed for the office, not counted; the family is not shown it.
+        supersededByFolio: { type: string, example: 'P-2026-000124' }
+        correctsFolio:
+          type: string
+          description: On a correction's lines, the receipt it replaces.
+          example: 'P-2026-000123'
     StatementTotals:
       type: object
       required: [chargedCents, discountCents, paidCents, balanceCents, notYetDueCents]
@@ -5057,6 +5236,12 @@ components:
         cancelled:
           type: array
           description: Voided that day. They count for nothing and are shown anyway.
+          items: { $ref: '#/components/schemas/Deposit' }
+        superseded:
+          type: array
+          description: >
+            T9 — deposits of that day replaced by a correction. They count for
+            nothing (the correction counts on the day it is dated) and are shown.
           items: { $ref: '#/components/schemas/Deposit' }
         payments:
           type: array

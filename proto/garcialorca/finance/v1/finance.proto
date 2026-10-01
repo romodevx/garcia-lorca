@@ -125,6 +125,16 @@ service FinanceService {
   // GetDepositReceipt returns a deposit and what it paid, concept by concept,
   // for its receipt (task 12). A voided deposit comes back with no lines.
   rpc GetDepositReceipt(GetDepositReceiptRequest) returns (GetDepositReceiptResponse);
+  // CorrectDeposit corrects a registered payment (T9): the original is kept,
+  // superseded and counting for nothing; a new deposit with its own folio
+  // carries the corrected amount, date, tenders and charges, split by the same
+  // rule on the corrected date; the history records before, after, who, when
+  // and why (the reason is required). Idempotent by idempotency_key. A
+  // cancelled or already corrected deposit is a conflict (AlreadyExists).
+  rpc CorrectDeposit(CorrectDepositRequest) returns (CorrectDepositResponse);
+  // ListDepositCorrections is the correction history of a deposit: every
+  // correction in its chain, oldest first.
+  rpc ListDepositCorrections(ListDepositCorrectionsRequest) returns (ListDepositCorrectionsResponse);
 
   // --- tuition (M15: what each level costs, and the monthly run) ---
   // UpsertTuitionPlan sets (or replaces) the tuition table for one level of one
@@ -253,6 +263,9 @@ message Payment {
   google.protobuf.Timestamp paid_at = 7;
   // debit | credit on a card payment (T8), empty otherwise.
   string card_type = 8;
+  // The deposit this payment is a slice of (T9: what a correction preselects);
+  // empty for a payment made straight against its charge.
+  string deposit_id = 9;
 }
 
 // --- Concept RPC messages -------------------------------------------------
@@ -495,6 +508,12 @@ message StatementMovement {
   // A cancelled deposit: shown to the office struck through, not counted.
   bool voided = 14;
   string void_reason = 15;
+  // A deposit replaced by its correction (T9): shown to the office with the
+  // folio that replaced it, not counted. The family is not shown it.
+  bool superseded = 16;
+  string superseded_by_folio = 17;
+  // On a correction's lines: the folio it corrects.
+  string corrects_folio = 18;
 }
 
 // StatementTotals: balance = charged - discount - paid.
@@ -549,6 +568,21 @@ message PaymentRegistered {
   int64 amount_cents = 5;
   string method = 6;
   google.protobuf.Timestamp paid_at = 7;
+}
+
+// PaymentCorrected fires when a registered payment is corrected (T9): the
+// family is told the right amount. payment_id is the corrected deposit;
+// original_payment_id the deposit it replaced.
+message PaymentCorrected {
+  string payment_id = 1;
+  string original_payment_id = 2;
+  string student_id = 3;
+  string tenant_id = 4;
+  int64 amount_cents = 5;
+  int64 previous_amount_cents = 6;
+  string method = 7;
+  google.protobuf.Timestamp paid_at = 8;
+  string folio = 9;
 }
 
 // ChargeSettled fires the moment a charge becomes fully covered — the crossing
@@ -820,6 +854,14 @@ message Deposit {
   // The methods the money came in by, in order (T8). Always at least one: a
   // deposit made before T8 is one tender with its own method.
   repeated Tender tenders = 15;
+  // T9: a deposit replaced by its correction is superseded — kept, counting
+  // for nothing — and names the deposit (and folio) that replaced it.
+  google.protobuf.Timestamp superseded_at = 16;
+  string superseded_by = 17;
+  string superseded_by_folio = 18;
+  // On a correction: the deposit (and folio) it corrects.
+  string corrects_deposit_id = 19;
+  string corrects_folio = 20;
 }
 
 message RegisterDepositRequest {
@@ -925,6 +967,9 @@ message DailyCashUpResponse {
   // What credit notes settled that day (T8). Not money: in neither the
   // per-method figures nor total_cents.
   int64 credit_note_cents = 8;
+  // Deposits of the day replaced by a correction (T9). They count for nothing;
+  // their correction counts on the day it is dated.
+  repeated Deposit superseded = 9;
 }
 
 // CashUpPayment is a payment taken outside a deposit, with what it paid for.
@@ -1020,6 +1065,78 @@ message GetDepositReceiptResponse {
   repeated ReceiptLine lines = 2;
   // unallocated_cents is what no charge claimed: the family's credit.
   int64 unallocated_cents = 3;
+}
+
+// --- corrections (T9) -------------------------------------------------------
+
+message CorrectDepositRequest {
+  // The deposit to correct.
+  string deposit_id = 1;
+  int64 amount_cents = 2;
+  // The corrected day the money changed hands. Empty keeps the original's; a
+  // future date is refused.
+  google.protobuf.Timestamp paid_at = 3;
+  // 1 to 4 tenders adding up exactly to amount_cents.
+  repeated Tender tenders = 4;
+  // The charges the money may pay; empty means every charge, oldest first.
+  repeated string charge_ids = 5;
+  // Required: why the payment is corrected.
+  string reason = 6;
+  // Optional: a retried correction under the same key changes nothing.
+  string idempotency_key = 7;
+  // The authenticated caller, set by the gateway — never by a client.
+  string corrected_by = 8;
+  string corrected_by_name = 9;
+}
+
+message CorrectDepositResponse {
+  // The original, now superseded.
+  Deposit original = 1;
+  // The corrected deposit and its split.
+  Deposit deposit = 2;
+  repeated Payment allocations = 3;
+  repeated Charge surcharges = 4;
+  int64 unallocated_cents = 5;
+  bool replayed = 6;
+  DepositCorrection correction = 7;
+}
+
+message ListDepositCorrectionsRequest {
+  string deposit_id = 1;
+}
+
+message ListDepositCorrectionsResponse {
+  repeated DepositCorrection corrections = 1;
+}
+
+// DepositCorrection is one correction: before, after, who, when and why.
+message DepositCorrection {
+  string id = 1;
+  string original_deposit_id = 2;
+  string corrected_deposit_id = 3;
+  string reason = 4;
+  DepositSnapshot before = 5;
+  DepositSnapshot after = 6;
+  string corrected_by = 7;
+  string corrected_by_name = 8;
+  google.protobuf.Timestamp corrected_at = 9;
+}
+
+// DepositSnapshot is a deposit as it stood on one side of a correction.
+message DepositSnapshot {
+  string deposit_id = 1;
+  string folio = 2;
+  int64 amount_cents = 3;
+  google.protobuf.Timestamp paid_at = 4;
+  repeated Tender tenders = 5;
+  repeated SnapshotLine lines = 6;
+}
+
+// SnapshotLine is what a deposit put on one charge.
+message SnapshotLine {
+  string charge_id = 1;
+  string description = 2;
+  int64 amount_cents = 3;
 }
 
 // --- level deletion (ADR 0021) ---------------------------------------------

@@ -91,6 +91,8 @@ export interface Payment {
   method: PaymentMethod;
   reference: string;
   paidAt: string;
+  /** The receipt this payment is a slice of (T9); absent when paid straight against its charge. */
+  depositId?: string;
 }
 
 /** A student's full statement: what was charged, what was paid, what is left. */
@@ -145,6 +147,13 @@ export interface Deposit {
   receivedByName?: string;
   /** When it was keyed; a later day than paidAt means it was captured late. */
   capturedAt?: string;
+  /** T9: a correction replaced it — kept, counting for nothing. */
+  supersededAt?: string;
+  supersededBy?: string;
+  supersededByFolio?: string;
+  /** T9: on a correction, the receipt it replaces. */
+  correctsDepositId?: string;
+  correctsFolio?: string;
 }
 
 /** What a deposit did: where the money landed and what is left over. */
@@ -663,6 +672,8 @@ export interface CashUp {
   deposits: Deposit[];
   /** Voided that day. They count for nothing and are shown anyway. */
   cancelled: Deposit[];
+  /** Replaced by a correction (T9). They count for nothing; the correction counts on its own day. */
+  superseded: Deposit[];
   /** Taken outside a deposit (a counter sale's). The totals already count them. */
   payments: CashUpPayment[];
   cashCents: number;
@@ -693,6 +704,7 @@ export async function getCashUp(baseURL: string, day: string): Promise<CashUp> {
   const res = await getJSON<{
     deposits?: WireDeposit[];
     cancelled?: WireDeposit[];
+    superseded?: WireDeposit[];
     payments?: Wire<CashUpPayment, "method">[];
     cashCents?: number;
     cardCents?: number;
@@ -703,6 +715,7 @@ export async function getCashUp(baseURL: string, day: string): Promise<CashUp> {
   return {
     deposits: (res.deposits ?? []).map(toDeposit),
     cancelled: (res.cancelled ?? []).map(toDeposit),
+    superseded: (res.superseded ?? []).map(toDeposit),
     payments: (res.payments ?? []).map((p) => ({ ...p, method: oneOf(PAYMENT_METHODS, p.method, "cash") })),
     cashCents: res.cashCents ?? 0,
     cardCents: res.cardCents ?? 0,
@@ -805,7 +818,141 @@ function toDeposit(d: WireDeposit): Deposit {
     ...(d.receivedByName !== undefined && d.receivedByName !== "" ? { receivedByName: d.receivedByName } : {}),
     ...(d.capturedAt !== undefined && d.capturedAt !== "" ? { capturedAt: d.capturedAt } : {}),
     ...(d.folio !== undefined && d.folio !== "" ? { folio: d.folio } : {}),
+    ...present("supersededAt", d.supersededAt),
+    ...present("supersededBy", d.supersededBy),
+    ...present("supersededByFolio", d.supersededByFolio),
+    ...present("correctsDepositId", d.correctsDepositId),
+    ...present("correctsFolio", d.correctsFolio),
   };
+}
+
+/** `{ key: value }` when the wire sent a value, `{}` when it sent nothing or "". */
+function present<K extends string>(key: K, value: string | undefined): Partial<Record<K, string>> {
+  return value !== undefined && value !== "" ? ({ [key]: value } as Record<K, string>) : {};
+}
+
+// --- corrections (T9) -------------------------------------------------------
+
+/** A payment correction as the office types it. */
+export interface CorrectDepositInput {
+  amountCents: number;
+  /** aaaa-mm-dd; "" keeps the original's day. */
+  paidAt: string;
+  tenders: Tender[];
+  /** The charges the money may pay; empty is oldest debt first. */
+  chargeIds: string[];
+  reason: string;
+  /** One per correction ATTEMPT, reused across its retries. */
+  idempotencyKey: string;
+}
+
+/** What one side of a correction put on a charge. */
+export interface SnapshotLine {
+  chargeId: string;
+  description?: string;
+  amountCents: number;
+}
+
+/** A receipt as it stood on one side of a correction. */
+export interface DepositSnapshot {
+  depositId: string;
+  folio: string;
+  amountCents: number;
+  paidAt?: string;
+  tenders: Tender[];
+  lines: SnapshotLine[];
+}
+
+/** One correction: before, after, who, when and why. */
+export interface DepositCorrection {
+  id: string;
+  originalDepositId: string;
+  correctedDepositId: string;
+  reason: string;
+  before: DepositSnapshot;
+  after: DepositSnapshot;
+  correctedByName?: string;
+  correctedAt: string;
+}
+
+/** What a correction did. */
+export interface CorrectionResult {
+  original: Deposit;
+  deposit: Deposit;
+  allocations: Payment[];
+  unallocatedCents: number;
+  replayed: boolean;
+  correction: DepositCorrection;
+}
+
+type WireSnapshot = Partial<Omit<DepositSnapshot, "tenders">> & { tenders?: WireTender[] };
+type WireCorrection = Partial<Omit<DepositCorrection, "before" | "after">> & { before?: WireSnapshot; after?: WireSnapshot };
+
+const toSnapshot = (s: WireSnapshot | undefined): DepositSnapshot => ({
+  depositId: s?.depositId ?? "",
+  folio: s?.folio ?? "",
+  amountCents: s?.amountCents ?? 0,
+  ...present("paidAt", s?.paidAt),
+  tenders: (s?.tenders ?? []).map(toTender),
+  lines: s?.lines ?? [],
+});
+
+const toCorrection = (c: WireCorrection): DepositCorrection => ({
+  id: c.id ?? "",
+  originalDepositId: c.originalDepositId ?? "",
+  correctedDepositId: c.correctedDepositId ?? "",
+  reason: c.reason ?? "",
+  before: toSnapshot(c.before),
+  after: toSnapshot(c.after),
+  ...present("correctedByName", c.correctedByName),
+  correctedAt: c.correctedAt ?? "",
+});
+
+// Deposit ids are uuids; anything else never reaches the network (it would be a path).
+const DEPOSIT_ID = /^[0-9a-fA-F-]{36}$/;
+
+function depositPath(id: string, suffix: string): string {
+  if (!DEPOSIT_ID.test(id)) {
+    throw new Error("Ese pago no existe.");
+  }
+  return `/deposits/${encodeURIComponent(id)}/${suffix}`;
+}
+
+/**
+ * Correct a registered payment (T9, payments:edit). The original receipt is
+ * kept, superseded; the server creates the corrected one with its own folio,
+ * re-splits it on the corrected date and tells the family.
+ */
+export async function correctDeposit(baseURL: string, id: string, input: CorrectDepositInput): Promise<CorrectionResult> {
+  const res = await sendJSON<{
+    original: WireDeposit;
+    deposit: WireDeposit;
+    allocations?: Wire<Payment, "method">[];
+    unallocatedCents?: number;
+    replayed?: boolean;
+    correction?: WireCorrection;
+  }>(baseURL, depositPath(id, "correct"), "POST", {
+    amountCents: input.amountCents,
+    ...(input.paidAt !== "" ? { paidAt: input.paidAt } : {}),
+    reason: input.reason,
+    idempotencyKey: input.idempotencyKey,
+    tenders: input.tenders,
+    ...(input.chargeIds.length > 0 ? { chargeIds: input.chargeIds } : {}),
+  });
+  return {
+    original: toDeposit(res.original),
+    deposit: toDeposit(res.deposit),
+    allocations: (res.allocations ?? []).map(toPayment),
+    unallocatedCents: res.unallocatedCents ?? 0,
+    replayed: res.replayed ?? false,
+    correction: toCorrection(res.correction ?? {}),
+  };
+}
+
+/** A receipt's correction history, oldest first, whichever link is asked about. */
+export async function listDepositCorrections(baseURL: string, id: string): Promise<DepositCorrection[]> {
+  const rows = await getList<WireCorrection>(baseURL, depositPath(id, "corrections"), "corrections");
+  return rows.map(toCorrection);
 }
 
 // --- tuition (M15) ----------------------------------------------------------

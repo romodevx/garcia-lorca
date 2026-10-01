@@ -12,6 +12,8 @@ import { tenderLabel, tenderSummary } from "../../_design/payments/tenders";
 export interface CashUpPanelProps {
   /** The day the money changed hands, "2026-10-10". Empty means today. */
   day: string;
+  /** Opens the correction of a receipt (T9). Absent: the caller may not correct (payments:edit). */
+  onCorrect?: (deposit: Deposit) => void;
 }
 
 /**
@@ -24,7 +26,7 @@ export interface CashUpPanelProps {
  * Cancelled deposits are shown, counted as nothing. Hiding them would leave a
  * gap between the receipts and the drawer that nobody could account for.
  */
-export function CashUpPanel({ day }: CashUpPanelProps): ReactElement {
+export function CashUpPanel({ day, onCorrect }: CashUpPanelProps): ReactElement {
   const [cut, setCut] = useState<CashUp | null>(null);
   const [failed, setFailed] = useState(false);
 
@@ -76,7 +78,7 @@ export function CashUpPanel({ day }: CashUpPanelProps): ReactElement {
         )}
       </div>
 
-      {cut.deposits.length === 0 && cut.cancelled.length === 0 && cut.payments.length === 0 && (
+      {cut.deposits.length === 0 && cut.cancelled.length === 0 && cut.superseded.length === 0 && cut.payments.length === 0 && (
         <p style={{ color: "var(--text-muted)", fontSize: 15, margin: 0 }}>No se recibió nada este día.</p>
       )}
 
@@ -110,6 +112,18 @@ export function CashUpPanel({ day }: CashUpPanelProps): ReactElement {
                 >
                   <Icon name="documents" size={18} />
                 </button>
+                {onCorrect !== undefined && (
+                  // T9: the receipt is kept and a corrected one issued.
+                  <button
+                    type="button"
+                    aria-label={`Corregir ${d.folio ?? "pago"}`}
+                    title="Corregir pago"
+                    onClick={() => onCorrect(d)}
+                    style={{ minWidth: 44, minHeight: 44, display: "grid", placeItems: "center", borderRadius: "var(--r-md)", color: "var(--text-muted)" }}
+                  >
+                    <Icon name="edit" size={18} />
+                  </button>
+                )}
               </span>
             </div>
           ))}
@@ -126,6 +140,27 @@ export function CashUpPanel({ day }: CashUpPanelProps): ReactElement {
                 {`${hourOf(p.paidAt)} · ${tenderLabel(p.method)} · ${p.description}`}
               </span>
               <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 15.5, color: "var(--text)" }}>{formatCents(p.amountCents)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {cut.superseded.length > 0 && (
+        // T9: replaced by a correction. They count for nothing — the
+        // correction counts on the day it is dated — and are shown so the
+        // day's receipts still add up.
+        <div style={{ borderRadius: "var(--r-lg)", border: "1px solid var(--border)", background: "var(--surface)", overflow: "hidden" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 20px", background: "var(--surface-2)", fontSize: 13, fontWeight: 700, color: "var(--text-muted)", fontFamily: "var(--font-display)" }}>
+            <Icon name="edit" size={16} />Sustituidos · no cuentan
+          </div>
+          {cut.superseded.map((d) => (
+            <div key={d.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "13px 20px", borderTop: "1px solid var(--border)" }}>
+              <span style={{ fontSize: 14, color: "var(--text-muted)" }}>
+                {`${d.folio ?? "Pago"} · sustituido por ${d.supersededByFolio ?? "otro comprobante"}`}
+              </span>
+              <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 15.5, color: "var(--text-faint)", textDecoration: "line-through" }}>
+                {formatCents(d.amountCents)}
+              </span>
             </div>
           ))}
         </div>

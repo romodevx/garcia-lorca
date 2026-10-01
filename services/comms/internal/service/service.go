@@ -25,7 +25,9 @@ const (
 	eventAbsenceRecorded   = "AbsenceRecorded"
 	eventAttendanceMarked  = "AttendanceMarked"
 	eventPaymentRegistered = "PaymentRegistered"
-	eventGradesPublished   = "GradesPublished"
+	// eventPaymentCorrected is a registered payment the office corrected (T9).
+	eventPaymentCorrected = "PaymentCorrected"
+	eventGradesPublished  = "GradesPublished"
 )
 
 // attrType is the routing attribute carrying the event type name. It comes from
@@ -521,6 +523,17 @@ func (s *CommsService) decode(eventType string, data []byte) (decodedEvent, erro
 		}
 		return s.checked(eventType, e.GetPaymentId(), unversioned, e.GetStudentId(), e.GetTenantId(), decodedEvent{
 			kind: kindPayment, amountCents: e.GetAmountCents(),
+		})
+
+	case eventPaymentCorrected:
+		var e financev1.PaymentCorrected
+		if err := proto.Unmarshal(data, &e); err != nil {
+			return decodedEvent{}, fmt.Errorf("%w: unreadable %s payload: %w", errUndeliverable, eventType, err)
+		}
+		// Keyed on the corrected deposit, under its own event type: a
+		// correction is news of its own, never a redelivery of the payment.
+		return s.checked(eventType, e.GetPaymentId(), unversioned, e.GetStudentId(), e.GetTenantId(), decodedEvent{
+			kind: kindPaymentCorrected, amountCents: e.GetAmountCents(),
 		})
 
 	case eventGradesPublished:

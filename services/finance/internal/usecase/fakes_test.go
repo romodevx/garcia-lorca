@@ -122,6 +122,13 @@ type spyPublisher struct {
 	// outage is simulated without also breaking the receipt notification.
 	settledErr   error
 	settledCalls int
+	// corrected are the PaymentCorrected publications (T9).
+	corrected []ports.PaymentCorrectedEvent
+}
+
+func (s *spyPublisher) PublishPaymentCorrected(_ context.Context, e ports.PaymentCorrectedEvent) error {
+	s.corrected = append(s.corrected, e)
+	return s.err
 }
 
 func (s *spyPublisher) PublishChargeSettled(_ context.Context, e ports.ChargeSettledEvent) error {
@@ -153,6 +160,8 @@ type fakeRepo struct {
 	// as the money, still there when publishing fails. A fake that dropped it
 	// would prove the opposite of what these tests claim.
 	outbox []ports.OutboxEvent
+	// corrections are the deposit_corrections rows (T9).
+	corrections []domain.DepositCorrection
 
 	// Recorded call arguments, for the tests that assert on the call itself.
 	overdueCycleID      string
@@ -672,10 +681,21 @@ func (f *fakeRepo) VoidDeposit(_ context.Context, d domain.Deposit) error {
 		if stored.ID() != d.ID() {
 			continue
 		}
-		if stored.Voided() {
-			return glerrors.New(glerrors.KindConflict, "this deposit is already cancelled")
+		if stored.Voided() || stored.Superseded() {
+			return glerrors.New(glerrors.KindConflict, "this deposit is already cancelled or corrected")
 		}
 		f.deposits[i] = d
+		return f.release(d, false)
+	}
+	return glerrors.ErrNotFound
+}
+
+// release mirrors the repository's releaseDeposit: the deposit's allocations
+// go, the charges they touched are re-derived, the price-at-payment-date
+// discount goes with it and — on a correction — the early-payment reward the
+// rule gave it (when it was the last payment on the month).
+func (f *fakeRepo) release(d domain.Deposit, resetEarned bool) error {
+	{
 		touched := map[string]bool{}
 		for chargeID, ps := range f.payments {
 			var kept []domain.Payment
@@ -690,6 +710,14 @@ func (f *fakeRepo) VoidDeposit(_ context.Context, d domain.Deposit) error {
 		}
 		for chargeID := range touched {
 			c := f.charges[chargeID]
+			if c.DiscountReason() == domain.ReasonPriceAtPaymentDate ||
+				(resetEarned && c.DiscountReason() == domain.ReasonEarlyPayment && len(f.payments[chargeID]) == 0) {
+				cleared, err := c.WithDiscount(0, f.paidFor(chargeID), "")
+				if err != nil {
+					return err
+				}
+				c = cleared
+			}
 			f.charges[chargeID] = c.WithStatus(f.paidFor(chargeID))
 		}
 		// As the repository does: the daily surcharges this deposit wrote go
@@ -707,7 +735,6 @@ func (f *fakeRepo) VoidDeposit(_ context.Context, d domain.Deposit) error {
 		}
 		return nil
 	}
-	return glerrors.ErrNotFound
 }
 
 // byIdempotencyKey finds a payment already posted under key. An empty key never
@@ -999,4 +1026,92 @@ func (f *fakeRepo) conceptOfKind(kind string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// CorrectDeposit mirrors the repository (T9): replay by the corrected key,
+// then supersede the original, release it, split the correction through
+// RegisterDeposit's own path, and record the history row.
+func (f *fakeRepo) CorrectDeposit(
+	ctx context.Context,
+	w ports.DepositCorrectionWrite,
+	plan func(open []ports.ChargeWithPaid) (ports.DepositWrite, error),
+	outbox func(record ports.CorrectionRecord) []ports.OutboxEvent,
+) (ports.CorrectionRecord, bool, error) {
+	if prior, found := f.depositByKey(w.Corrected.IdempotencyKey()); found {
+		if prior.Corrects() != w.OriginalID {
+			return ports.CorrectionRecord{}, false, glerrors.New(glerrors.KindConflict, "key belongs to another payment")
+		}
+		for _, c := range f.corrections {
+			if c.CorrectedID() == prior.ID() {
+				original, _ := f.GetDeposit(ctx, c.OriginalID())
+				return ports.CorrectionRecord{Original: original, Corrected: ports.DepositRecord{Deposit: prior}, Correction: c}, true, nil
+			}
+		}
+	}
+	at := -1
+	for i, d := range f.deposits {
+		if d.ID() == w.OriginalID {
+			at = i
+		}
+	}
+	if at < 0 {
+		return ports.CorrectionRecord{}, false, glerrors.ErrNotFound
+	}
+	original := f.deposits[at]
+	superseded, err := original.Supersede(w.Corrected.ID(), w.At)
+	if err != nil {
+		return ports.CorrectionRecord{}, false, err
+	}
+	var before []domain.Payment
+	for _, ps := range f.payments {
+		for _, p := range ps {
+			if f.depositOfPayment[p.ID()] == original.ID() {
+				before = append(before, p)
+			}
+		}
+	}
+	if err := f.release(original, true); err != nil {
+		return ports.CorrectionRecord{}, false, err
+	}
+	stored, _, err := f.RegisterDeposit(ctx, w.Corrected.WithCorrects(original.ID(), original.Folio()), plan, nil)
+	if err != nil {
+		return ports.CorrectionRecord{}, false, err
+	}
+	superseded = superseded.RehydrateSupersession(w.At, stored.Deposit.ID(), stored.Deposit.Folio())
+	f.deposits[at] = superseded
+	correction, err := domain.NewDepositCorrection(w.CorrectionID, testTenant, original.StudentID(), original.ID(),
+		stored.Deposit.ID(), w.Reason, domain.SnapshotOf(original, before), domain.SnapshotOf(stored.Deposit, stored.Allocations), w.By, w.At)
+	if err != nil {
+		return ports.CorrectionRecord{}, false, err
+	}
+	f.corrections = append(f.corrections, correction)
+	record := ports.CorrectionRecord{Original: superseded, Corrected: stored, Correction: correction}
+	if outbox != nil {
+		f.outbox = append(f.outbox, outbox(record)...)
+	}
+	return record, false, nil
+}
+
+func (f *fakeRepo) ListDepositCorrections(_ context.Context, studentID string) ([]domain.DepositCorrection, error) {
+	var out []domain.DepositCorrection
+	for _, c := range f.corrections {
+		if c.StudentID() == studentID {
+			out = append(out, c)
+		}
+	}
+	return out, nil
+}
+
+// setFolio stamps a folio on a stored deposit (the fake allocates none).
+func (f *fakeRepo) setFolio(id, folio string) {
+	for i, d := range f.deposits {
+		if d.ID() == id {
+			f.deposits[i] = d.WithFolio(folio)
+		}
+	}
+	for i, d := range f.deposits {
+		if d.Corrects() == id {
+			f.deposits[i] = d.WithCorrects(id, folio)
+		}
+	}
 }

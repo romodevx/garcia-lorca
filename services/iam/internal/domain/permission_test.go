@@ -131,6 +131,8 @@ func TestIsOwnerOnly(t *testing.T) {
 		// T2: deleting a user account is the director's decision alone (owner
 		// answer 4). users:write (create, suspend, edit roles) stays delegable.
 		{"users:delete", true},
+		// T9 (owner answer 6): correcting payments is delegable.
+		{"payments:edit", false},
 		{"users:write", false},
 		{"config:write", false},
 		// Task 9: the counter's permissions are the Cobranza role's, so they

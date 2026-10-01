@@ -250,11 +250,49 @@ type DepositRecord struct {
 	Settled []ChargeWithPaid
 }
 
+// DepositCorrectionWrite is a correction as the use case hands it over: the
+// deposit to supersede, the corrected deposit (WithCorrects set; the folio is
+// the repository's to allocate), and who corrected it, when and why.
+type DepositCorrectionWrite struct {
+	OriginalID   string
+	Corrected    domain.Deposit
+	CorrectionID string
+	Reason       string
+	By           domain.Receiver
+	At           time.Time
+}
+
+// CorrectionRecord is a stored correction with what it did: the original as
+// it now stands (superseded), the corrected deposit and its split, and the
+// history row.
+type CorrectionRecord struct {
+	Original   domain.Deposit
+	Corrected  DepositRecord
+	Correction domain.DepositCorrection
+}
+
+// PaymentCorrectedEvent announces that a registered payment was corrected
+// (T9): the family is told the right amount. PaymentID is the corrected
+// deposit; OriginalPaymentID the one it replaced.
+type PaymentCorrectedEvent struct {
+	PaymentID           string
+	OriginalPaymentID   string
+	StudentID           string
+	TenantID            string
+	Method              string
+	AmountCents         int64
+	PreviousAmountCents int64
+	PaidAt              time.Time
+	Folio               string
+}
+
 // The event types the outbox carries. They are the names the messaging boundary
 // stamps, so a row read with psql says what it is without a lookup.
 const (
 	OutboxChargeSettled     = "ChargeSettled"
 	OutboxPaymentRegistered = "PaymentRegistered"
+	// OutboxPaymentCorrected is a corrected payment (T9).
+	OutboxPaymentCorrected = "PaymentCorrected"
 )
 
 // OutboxEvent is a domain event queued inside the transaction that produced it.
@@ -280,6 +318,8 @@ type PaymentPublisher interface {
 	PublishPaymentRegistered(ctx context.Context, e PaymentRegisteredEvent) error
 	// PublishChargeSettled fires only on the payment that closes the charge.
 	PublishChargeSettled(ctx context.Context, e ChargeSettledEvent) error
+	// PublishPaymentCorrected tells the family a payment was corrected (T9).
+	PublishPaymentCorrected(ctx context.Context, e PaymentCorrectedEvent) error
 }
 
 // FinanceRepository loads and persists the ledger: the charge catalog, the
@@ -412,6 +452,22 @@ type FinanceRepository interface {
 	// transaction. The deposit row survives with its reason; the payments it
 	// created do not, so the charges they settled go back to being owed.
 	VoidDeposit(ctx context.Context, d domain.Deposit) error
+
+	// CorrectDeposit replaces a registered deposit with its correction, in ONE
+	// transaction (T9): the original's allocations are released as a void
+	// releases them and the original is marked superseded (kept, with its
+	// folio); the corrected deposit gets a folio of its own, is split by plan
+	// against the student's charges locked as RegisterDeposit locks them, and a
+	// deposit_corrections row records before, after, who, when and why. A
+	// repeat under the corrected deposit's idempotency key returns what was
+	// stored and changes nothing (replayed = true). A cancelled or already
+	// corrected original is KindConflict.
+	CorrectDeposit(ctx context.Context, w DepositCorrectionWrite,
+		plan func(open []ChargeWithPaid) (DepositWrite, error),
+		outbox func(record CorrectionRecord) []OutboxEvent) (CorrectionRecord, bool, error)
+	// ListDepositCorrections returns every correction of a student's deposits,
+	// oldest first.
+	ListDepositCorrections(ctx context.Context, studentID string) ([]domain.DepositCorrection, error)
 
 	// CancelChargeIfUnpaid voids a charge only if nothing was collected against
 	// it, deciding under the charge's row lock so the read cannot go stale

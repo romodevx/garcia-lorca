@@ -270,6 +270,10 @@ func toProtoMovement(m domain.Movement) *financev1.StatementMovement {
 		NotYetDue:    m.NotYetDue,
 		Voided:       m.Voided,
 		VoidReason:   m.VoidReason,
+		// T9: a receipt replaced by its correction, and the correction's lines.
+		Superseded:        m.Superseded,
+		SupersededByFolio: m.SupersededByFolio,
+		CorrectsFolio:     m.CorrectsFolio,
 	}
 }
 
@@ -428,6 +432,7 @@ func (h *FinanceHandler) DailyCashUp(ctx context.Context, req *connect.Request[f
 	return connect.NewResponse(&financev1.DailyCashUpResponse{
 		Deposits:      toProtoDeposits(cut.Deposits),
 		Cancelled:     toProtoDeposits(cut.Cancelled),
+		Superseded:    toProtoDeposits(cut.Superseded),
 		CashCents:     cut.ByMethod[domain.MethodCash],
 		CardCents:     cut.ByMethod[domain.MethodCard],
 		TransferCents: cut.ByMethod[domain.MethodTransfer],
@@ -538,8 +543,103 @@ func toProtoDeposit(d domain.Deposit) *financev1.Deposit {
 	if d.Voided() {
 		out.VoidedAt = timestamppb.New(d.VoidedAt())
 	}
+	if d.Superseded() {
+		out.SupersededAt = timestamppb.New(d.SupersededAt())
+		out.SupersededBy = d.SupersededBy()
+		out.SupersededByFolio = d.SupersededByFolio()
+	}
+	out.CorrectsDepositId, out.CorrectsFolio = d.Corrects(), d.CorrectsFolio()
 	if !d.CapturedAt().IsZero() {
 		out.CapturedAt = timestamppb.New(d.CapturedAt())
+	}
+	return out
+}
+
+// --- corrections (T9) ------------------------------------------------------
+
+// CorrectDeposit corrects a registered payment. An id that cannot be a
+// deposit's is "no such deposit" — never a query the database refuses.
+func (h *FinanceHandler) CorrectDeposit(ctx context.Context, req *connect.Request[financev1.CorrectDepositRequest]) (*connect.Response[financev1.CorrectDepositResponse], error) {
+	m := req.Msg
+	if !usecase.IsDepositID(m.GetDepositId()) {
+		return nil, connectErr(glerrors.ErrNotFound)
+	}
+	var paidAt time.Time
+	if ts := m.GetPaidAt(); ts != nil {
+		paidAt = ts.AsTime()
+	}
+	got, err := h.finance.CorrectDeposit(ctx, usecase.CorrectionInput{
+		DepositID:      m.GetDepositId(),
+		AmountCents:    m.GetAmountCents(),
+		PaidAt:         paidAt,
+		Tenders:        fromProtoTenders(m.GetTenders()),
+		ChargeIDs:      m.GetChargeIds(),
+		Reason:         m.GetReason(),
+		IdempotencyKey: m.GetIdempotencyKey(),
+		By:             domain.Receiver{UserID: m.GetCorrectedBy(), Name: m.GetCorrectedByName()},
+	})
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	allocations := make([]*financev1.Payment, 0, len(got.Corrected.Allocations))
+	for _, p := range got.Corrected.Allocations {
+		allocations = append(allocations, toProtoPayment(p))
+	}
+	surcharges := make([]*financev1.Charge, 0, len(got.Corrected.Surcharges))
+	for _, c := range got.Corrected.Surcharges {
+		surcharges = append(surcharges, toProtoCharge(ports.ChargeWithPaid{Charge: c}))
+	}
+	return connect.NewResponse(&financev1.CorrectDepositResponse{
+		Original:         toProtoDeposit(got.Original),
+		Deposit:          toProtoDeposit(got.Corrected.Deposit),
+		Allocations:      allocations,
+		Surcharges:       surcharges,
+		UnallocatedCents: got.Corrected.UnallocatedCents,
+		Replayed:         got.Replayed,
+		Correction:       toProtoCorrection(got.Correction, nil),
+	}), nil
+}
+
+// ListDepositCorrections is a receipt's correction history, its chain whole.
+func (h *FinanceHandler) ListDepositCorrections(ctx context.Context, req *connect.Request[financev1.ListDepositCorrectionsRequest]) (*connect.Response[financev1.ListDepositCorrectionsResponse], error) {
+	if !usecase.IsDepositID(req.Msg.GetDepositId()) {
+		return nil, connectErr(glerrors.ErrNotFound)
+	}
+	history, err := h.finance.DepositCorrections(ctx, req.Msg.GetDepositId())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	out := make([]*financev1.DepositCorrection, 0, len(history.Corrections))
+	for _, c := range history.Corrections {
+		out = append(out, toProtoCorrection(c, history.Descriptions))
+	}
+	return connect.NewResponse(&financev1.ListDepositCorrectionsResponse{Corrections: out}), nil
+}
+
+func toProtoCorrection(c domain.DepositCorrection, descriptions map[string]string) *financev1.DepositCorrection {
+	return &financev1.DepositCorrection{
+		Id:                 c.ID(),
+		OriginalDepositId:  c.OriginalID(),
+		CorrectedDepositId: c.CorrectedID(),
+		Reason:             c.Reason(),
+		Before:             toProtoSnapshot(c.Before(), descriptions),
+		After:              toProtoSnapshot(c.After(), descriptions),
+		CorrectedBy:        c.By().UserID,
+		CorrectedByName:    c.By().Name,
+		CorrectedAt:        timestamppb.New(c.At()),
+	}
+}
+
+func toProtoSnapshot(s domain.DepositSnapshot, descriptions map[string]string) *financev1.DepositSnapshot {
+	out := &financev1.DepositSnapshot{DepositId: s.DepositID, Folio: s.Folio, AmountCents: s.AmountCents}
+	if !s.PaidAt.IsZero() {
+		out.PaidAt = timestamppb.New(s.PaidAt)
+	}
+	for _, t := range s.Tenders {
+		out.Tenders = append(out.Tenders, &financev1.Tender{Method: t.Method, AmountCents: t.AmountCents, Reference: t.Reference, CardType: t.CardType})
+	}
+	for _, l := range s.Lines {
+		out.Lines = append(out.Lines, &financev1.SnapshotLine{ChargeId: l.ChargeID, Description: descriptions[l.ChargeID], AmountCents: l.AmountCents})
 	}
 	return out
 }
@@ -641,6 +741,7 @@ func toProtoPayment(p domain.Payment) *financev1.Payment {
 		Reference:   p.Reference(),
 		PaidAt:      timestamppb.New(p.PaidAt()),
 		CardType:    p.CardType(),
+		DepositId:   p.DepositID(),
 	}
 }
 

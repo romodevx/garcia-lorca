@@ -30,6 +30,8 @@ export interface PaymentsScreenProps {
   canGrantDiscounts?: boolean;
   /** What the cashier may do with a pupil's notes, shown beside the counter (T6). */
   notes?: NotesAccess;
+  /** payments:edit: may correct a registered payment from the day's cut (T9). */
+  canCorrectPayments?: boolean;
 }
 
 /**
@@ -43,7 +45,7 @@ export interface PaymentsScreenProps {
  * The whole flow is one question: which pupil? Everything else happens in the
  * drawer.
  */
-export function PaymentsScreen({ onBack, canGrantDiscounts = false, notes }: PaymentsScreenProps): ReactElement {
+export function PaymentsScreen({ onBack, canGrantDiscounts = false, notes, canCorrectPayments = false }: PaymentsScreenProps): ReactElement {
   const [students, setStudents] = useState<Student[]>([]);
   // Three states, not two. "Empty" and "we could not ask" look the same on
   // screen and mean opposite things: one says the pupil is not registered, the
@@ -194,7 +196,7 @@ export function PaymentsScreen({ onBack, canGrantDiscounts = false, notes }: Pay
           <Icon name="check" size={20} stroke={2.6} />{toast}
         </div>
       )}
-      {cashUp && <CashUpDrawer onClose={() => setCashUp(false)} />}
+      {cashUp && <CashUpDrawer canCorrect={canCorrectPayments} onClose={() => setCashUp(false)} />}
     </Page>
   );
 }

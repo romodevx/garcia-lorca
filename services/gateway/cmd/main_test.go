@@ -103,6 +103,8 @@ func (stubIAM) ValidateToken(_ context.Context, req *connect.Request[iamv1.Valid
 		// Task 9: the cashier. Reads collections and takes money; nothing else
 		// in finance.
 		"cobranza": {"students:read", "students:list", "collections:read", "payments:write"},
+		// T9: a role the director handed payments:edit (iam 0026, delegable).
+		"payments-editor": {"payments:edit"},
 		// T2: the maestro role, exactly as migrations/iam/0022 seeds it.
 		"maestro": {"teaching:read", "teaching:write", "attendance_own:read", "attendance_own:write"},
 		// "Dar acceso al sistema" needs teachers:write AND users:write, and the

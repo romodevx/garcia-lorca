@@ -17,7 +17,7 @@ const deposit = (id: string, cents: number, method: financeApi.PaymentMethod): f
 beforeEach(() => {
   finance.getCashUp.mockResolvedValue({
     deposits: [deposit("d1", 320000, "cash"), deposit("d2", 150000, "transfer")],
-    cancelled: [],
+    cancelled: [], superseded: [],
     payments: [],
     cashCents: 320000,
     cardCents: 0,
@@ -43,7 +43,7 @@ describe("CashUpPanel", () => {
   it("shows what was cancelled, counted as nothing", async () => {
     finance.getCashUp.mockResolvedValue({
       deposits: [deposit("d1", 320000, "cash")],
-      cancelled: [{ ...deposit("d2", 150000, "cash"), voidedAt: "2026-10-10T16:00:00Z", voidReason: "importe capturado mal" }],
+      cancelled: [{ ...deposit("d2", 150000, "cash"), voidedAt: "2026-10-10T16:00:00Z", voidReason: "importe capturado mal" }], superseded: [],
       payments: [],
       cashCents: 320000, cardCents: 0, transferCents: 0, totalCents: 320000, creditNoteCents: 0,
     });
@@ -59,7 +59,7 @@ describe("CashUpPanel", () => {
   it("lists the payments taken outside a deposit, with what they paid for", async () => {
     finance.getCashUp.mockResolvedValue({
       deposits: [deposit("d1", 550000, "cash")],
-      cancelled: [],
+      cancelled: [], superseded: [],
       payments: [{
         id: "p1", chargeId: "c1", amountCents: 135000, method: "cash", reference: "",
         paidAt: "2026-10-10T17:44:00Z", description: "Uniformes · U-2026-000001",
@@ -78,7 +78,7 @@ describe("CashUpPanel", () => {
 
   it("says so plainly when nothing came in", async () => {
     finance.getCashUp.mockResolvedValue({
-      deposits: [], cancelled: [], payments: [], cashCents: 0, cardCents: 0, transferCents: 0, totalCents: 0, creditNoteCents: 0,
+      deposits: [], cancelled: [], superseded: [], payments: [], cashCents: 0, cardCents: 0, transferCents: 0, totalCents: 0, creditNoteCents: 0,
     });
 
     render(<CashUpPanel day="2026-10-10" />);
@@ -97,7 +97,7 @@ describe("CashUpPanel", () => {
         { ...deposit("d1", 320000, "cash"), paidAt: "2026-10-10T00:00:00Z", receivedByName: "Laura Caja", capturedAt: "2026-10-10T17:00:00" },
         { ...deposit("d2", 150000, "cash"), receivedByName: "Pedro Caja", capturedAt: "2026-10-13T10:00:00" },
       ],
-      cancelled: [],
+      cancelled: [], superseded: [],
       payments: [], cashCents: 470000, cardCents: 0, transferCents: 0, totalCents: 470000, creditNoteCents: 0,
     } as unknown as financeApi.CashUp);
     render(<CashUpPanel day="2026-10-10" />);
@@ -115,7 +115,7 @@ describe("CashUpPanel", () => {
   it("reprints a payment's ticket", async () => {
     finance.getCashUp.mockResolvedValue({
       deposits: [{ ...deposit("d1", 320000, "cash"), folio: "P-2026-000042" }],
-      cancelled: [],
+      cancelled: [], superseded: [],
       payments: [], cashCents: 320000, cardCents: 0, transferCents: 0, totalCents: 320000, creditNoteCents: 0,
     } as unknown as financeApi.CashUp);
     const open = vi.spyOn(window, "open").mockImplementation(() => null);
@@ -131,7 +131,7 @@ describe("CashUpPanel", () => {
   it("names the day of a past cut, and invents no hour for a cancelled back-dated payment", async () => {
     finance.getCashUp.mockResolvedValue({
       deposits: [],
-      cancelled: [{ ...deposit("d9", 100000, "cash"), paidAt: "2026-10-03T00:00:00Z", capturedAt: "2026-10-12T10:00:00", voidedAt: "2026-10-12T11:00:00Z", voidReason: "doble" }],
+      cancelled: [{ ...deposit("d9", 100000, "cash"), paidAt: "2026-10-03T00:00:00Z", capturedAt: "2026-10-12T10:00:00", voidedAt: "2026-10-12T11:00:00Z", voidReason: "doble" }], superseded: [],
       payments: [], cashCents: 0, cardCents: 0, transferCents: 0, totalCents: 0, creditNoteCents: 0,
     } as unknown as financeApi.CashUp);
     render(<CashUpPanel day="2026-10-03" />);
@@ -150,7 +150,7 @@ describe("CashUpPanel · nota de crédito y pago combinado (tarea 8)", () => {
         ...deposit("d1", 150000, "cash"), method: "mixed",
         tenders: [{ method: "credit_note", amountCents: 50000, reference: "NC-12" }, { method: "cash", amountCents: 100000 }],
       }],
-      cancelled: [], payments: [],
+      cancelled: [], superseded: [], payments: [],
       cashCents: 100000, cardCents: 0, transferCents: 0, totalCents: 100000, creditNoteCents: 50000,
     });
 
@@ -168,7 +168,7 @@ describe("CashUpPanel · nota de crédito y pago combinado (tarea 8)", () => {
         ...deposit("d1", 150000, "cash"), method: "mixed",
         tenders: [{ method: "credit_note", amountCents: 50000 }, { method: "cash", amountCents: 100000 }],
       }],
-      cancelled: [], payments: [],
+      cancelled: [], superseded: [], payments: [],
       cashCents: 100000, cardCents: 0, transferCents: 0, totalCents: 100000, creditNoteCents: 50000,
     });
 
@@ -181,7 +181,7 @@ describe("CashUpPanel · nota de crédito y pago combinado (tarea 8)", () => {
 
   it("names a credit-note payment taken outside a deposit", async () => {
     finance.getCashUp.mockResolvedValue({
-      deposits: [], cancelled: [],
+      deposits: [], cancelled: [], superseded: [],
       payments: [{ id: "p1", chargeId: "c1", amountCents: 30000, method: "credit_note", reference: "", paidAt: "2026-10-10T17:44:00Z", description: "Uniformes · U-2026-000002" }],
       cashCents: 0, cardCents: 0, transferCents: 0, totalCents: 0, creditNoteCents: 30000,
     });
@@ -195,5 +195,37 @@ describe("CashUpPanel · nota de crédito y pago combinado (tarea 8)", () => {
     render(<CashUpPanel day="2026-10-10" />);
     await screen.findByTestId("cash-up-total");
     expect(screen.queryByTestId("cash-up-credit-note")).toBeNull();
+  });
+
+  // T9: a receipt replaced by its correction is listed apart, counting for
+  // nothing, with the folio that replaced it.
+  it("lists what was corrected that day, counted as nothing", async () => {
+    finance.getCashUp.mockResolvedValue({
+      deposits: [], cancelled: [], payments: [],
+      superseded: [{ ...deposit("d3", 50000, "cash"), folio: "P-2026-000001", supersededBy: "d4", supersededByFolio: "P-2026-000002" }],
+      cashCents: 0, cardCents: 0, transferCents: 0, totalCents: 0, creditNoteCents: 0,
+    });
+
+    render(<CashUpPanel day="2026-10-10" />);
+
+    expect(await screen.findByText(/Sustituidos · no cuentan/)).toBeInTheDocument();
+    expect(screen.getByText(/P-2026-000001 · sustituido por P-2026-000002/)).toBeInTheDocument();
+    expect(screen.queryByText("No se recibió nada este día.")).toBeNull();
+  });
+
+  it("offers to correct a payment only to whoever may", async () => {
+    const user = userEvent.setup();
+    const onCorrect = vi.fn();
+    const { unmount } = render(<CashUpPanel day="2026-10-10" />);
+    await screen.findByTestId("cash-up-total");
+    expect(screen.queryByRole("button", { name: /Corregir/ })).toBeNull();
+    unmount();
+
+    render(<CashUpPanel day="2026-10-10" onCorrect={onCorrect} />);
+    await screen.findByTestId("cash-up-total");
+    const buttons = screen.getAllByRole("button", { name: /Corregir/ });
+    expect(buttons).toHaveLength(2);
+    await user.click(buttons[0] as HTMLElement);
+    expect(onCorrect).toHaveBeenCalledWith(expect.objectContaining({ id: "d1" }));
   });
 });

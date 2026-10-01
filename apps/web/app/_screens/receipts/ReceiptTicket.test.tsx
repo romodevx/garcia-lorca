@@ -40,6 +40,21 @@ describe("ReceiptTicket (tarea 12)", () => {
     expect(screen.getByText(/capturado mal/)).toBeInTheDocument();
   });
 
+  // T9: both receipts of a correction print again, each naming the other.
+  it("says SUSTITUIDO on a corrected one, and names its replacement", () => {
+    render(<ReceiptTicket receipt={{ ...receipt, superseded: true, supersededByFolio: "P-2026-000002" }} />);
+
+    expect(screen.getByText("SUSTITUIDO")).toBeInTheDocument();
+    expect(screen.getByText(/Sustituido por P-2026-000002/)).toBeInTheDocument();
+  });
+
+  it("names the receipt a correction replaces", () => {
+    render(<ReceiptTicket receipt={{ ...receipt, correctsFolio: "P-2026-000001" }} />);
+
+    expect(screen.getByText(/Corrige a P-2026-000001/)).toBeInTheDocument();
+    expect(screen.queryByText("SUSTITUIDO")).toBeNull();
+  });
+
   it("titles a uniforms sale as a sale", () => {
     render(<ReceiptTicket receipt={{ ...receipt, kind: "sale", folio: "U-2026-000007" }} />);
 

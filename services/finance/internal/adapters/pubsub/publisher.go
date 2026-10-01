@@ -26,6 +26,7 @@ const (
 
 	typePaymentRegistered = "PaymentRegistered"
 	typeChargeSettled     = "ChargeSettled"
+	typePaymentCorrected  = "PaymentCorrected"
 
 	attrType     = "type"
 	attrTenantID = "tenant_id"
@@ -71,6 +72,22 @@ func (p *EventPublisher) PublishChargeSettled(ctx context.Context, e ports.Charg
 		ExternalRef: e.ExternalRef,
 		AmountCents: e.AmountCents,
 		SettledAt:   timestamppb.New(e.SettledAt),
+	})
+}
+
+// PublishPaymentCorrected announces that a registered payment was corrected
+// (T9), on the same topic, told apart by its "type" attribute.
+func (p *EventPublisher) PublishPaymentCorrected(ctx context.Context, e ports.PaymentCorrectedEvent) error {
+	return p.publish(ctx, e.TenantID, typePaymentCorrected, &financev1.PaymentCorrected{
+		PaymentId:           e.PaymentID,
+		OriginalPaymentId:   e.OriginalPaymentID,
+		StudentId:           e.StudentID,
+		TenantId:            e.TenantID,
+		AmountCents:         e.AmountCents,
+		PreviousAmountCents: e.PreviousAmountCents,
+		Method:              e.Method,
+		PaidAt:              timestamppb.New(e.PaidAt),
+		Folio:               e.Folio,
 	})
 }
 

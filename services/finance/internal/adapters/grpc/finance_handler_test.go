@@ -94,6 +94,10 @@ type fakeRepo struct {
 	receipt  *ports.DepositReceipt
 	loose    []ports.LoosePayment
 	deposits []domain.Deposit
+	// correction is what CorrectDeposit stores (T9); gotCorrection what it was asked.
+	correction    *ports.CorrectionRecord
+	gotCorrection ports.DepositCorrectionWrite
+	history       []domain.DepositCorrection
 }
 
 func newFakeRepo() *fakeRepo {
@@ -139,8 +143,31 @@ func (f *fakeRepo) DepositReceipt(_ context.Context, _ string) (ports.DepositRec
 	return *f.receipt, nil
 }
 
-func (f *fakeRepo) GetDeposit(_ context.Context, _ string) (domain.Deposit, error) {
+func (f *fakeRepo) GetDeposit(_ context.Context, id string) (domain.Deposit, error) {
+	for _, d := range f.deposits {
+		if d.ID() == id {
+			return d, nil
+		}
+	}
 	return domain.Deposit{}, glerrors.ErrNotFound
+}
+
+func (f *fakeRepo) CorrectDeposit(_ context.Context, w ports.DepositCorrectionWrite,
+	plan func(open []ports.ChargeWithPaid) (ports.DepositWrite, error),
+	_ func(record ports.CorrectionRecord) []ports.OutboxEvent,
+) (ports.CorrectionRecord, bool, error) {
+	f.gotCorrection = w
+	if _, err := plan(nil); err != nil {
+		return ports.CorrectionRecord{}, false, err
+	}
+	if f.correction == nil {
+		return ports.CorrectionRecord{}, false, glerrors.ErrNotFound
+	}
+	return *f.correction, false, nil
+}
+
+func (f *fakeRepo) ListDepositCorrections(_ context.Context, _ string) ([]domain.DepositCorrection, error) {
+	return f.history, nil
 }
 
 func (f *fakeRepo) ListDeposits(_ context.Context, _ string) ([]domain.Deposit, error) {
@@ -981,5 +1008,164 @@ func TestDailyCashUpCarriesLoosePayments(t *testing.T) {
 	got := res.Msg.GetPayments()[0]
 	if got.GetDescription() != "Uniformes · U-2026-000001" || got.GetPayment().GetId() != "pay-1" || got.GetPayment().GetAmountCents() != 135000 {
 		t.Errorf("payment = %+v", got)
+	}
+}
+
+// T9: the correction crosses the wire with both ends of the link, the history
+// row, and who corrected it — taken from the request the gateway stamped.
+func TestCorrectDepositMapsTheWire(t *testing.T) {
+	f := newFixture(t)
+	const originalID, correctedID = "62000000-0000-0000-0000-000000000001", "62000000-0000-0000-0000-000000000002"
+	original, err := domain.NewDeposit(originalID, testTenant, testStudent, 50000, domain.MethodCash, "", fixedNow, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	original = original.WithFolio("P-2026-000001")
+	f.repo.deposits = []domain.Deposit{original}
+	corrected, err := domain.NewDeposit(correctedID, testTenant, testStudent, 100000, domain.MethodCash, "", fixedNow, "k", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	corrected = corrected.WithFolio("P-2026-000002").WithCorrects(originalID, "P-2026-000001")
+	by := domain.Receiver{UserID: "u-1", Name: "Directora"}
+	correction, err := domain.NewDepositCorrection("cor-1", testTenant, testStudent, originalID, correctedID, "monto",
+		domain.DepositSnapshot{AmountCents: 50000, Folio: "P-2026-000001", PaidAt: fixedNow},
+		domain.DepositSnapshot{AmountCents: 100000, Folio: "P-2026-000002", PaidAt: fixedNow,
+			Tenders: []domain.TenderSnapshot{{Method: domain.MethodCash, AmountCents: 100000}},
+			Lines:   []domain.SnapshotLine{{ChargeID: "ch-1", AmountCents: 100000}}},
+		by, fixedNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	superseded, err := original.Supersede(correctedID, fixedNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.repo.correction = &ports.CorrectionRecord{
+		Original:   superseded.RehydrateSupersession(fixedNow, correctedID, "P-2026-000002"),
+		Corrected:  ports.DepositRecord{Deposit: corrected, UnallocatedCents: 100000},
+		Correction: correction,
+	}
+
+	res, err := f.h.CorrectDeposit(context.Background(), connect.NewRequest(&financev1.CorrectDepositRequest{
+		DepositId: originalID, AmountCents: 100000, Reason: "monto", IdempotencyKey: "k",
+		Tenders:     []*financev1.Tender{{Method: domain.MethodCash, AmountCents: 100000}},
+		CorrectedBy: "u-1", CorrectedByName: "Directora",
+	}))
+	if err != nil {
+		t.Fatalf("CorrectDeposit: %v", err)
+	}
+	if f.repo.gotCorrection.By != by || f.repo.gotCorrection.Reason != "monto" || f.repo.gotCorrection.Corrected.Amount().Int64() != 100000 {
+		t.Errorf("asked = %+v", f.repo.gotCorrection)
+	}
+	got := res.Msg
+	if got.GetOriginal().GetSupersededBy() != correctedID || got.GetOriginal().GetSupersededByFolio() != "P-2026-000002" || got.GetOriginal().GetSupersededAt() == nil {
+		t.Errorf("original = %+v", got.GetOriginal())
+	}
+	if got.GetDeposit().GetCorrectsDepositId() != originalID || got.GetDeposit().GetCorrectsFolio() != "P-2026-000001" {
+		t.Errorf("deposit = %+v", got.GetDeposit())
+	}
+	c := got.GetCorrection()
+	if c.GetReason() != "monto" || c.GetCorrectedByName() != "Directora" || c.GetBefore().GetAmountCents() != 50000 ||
+		c.GetAfter().GetAmountCents() != 100000 || len(c.GetAfter().GetTenders()) != 1 || c.GetAfter().GetLines()[0].GetChargeId() != "ch-1" {
+		t.Errorf("correction = %+v", c)
+	}
+}
+
+func TestCorrectDepositRefusesAMalformedIdAsNotFound(t *testing.T) {
+	f := newFixture(t)
+	_, err := f.h.CorrectDeposit(context.Background(), connect.NewRequest(&financev1.CorrectDepositRequest{
+		DepositId: "nope", AmountCents: 100, Reason: "x", Tenders: []*financev1.Tender{{Method: domain.MethodCash, AmountCents: 100}},
+	}))
+	if connect.CodeOf(err) != connect.CodeNotFound {
+		t.Errorf("code = %v, want NotFound", connect.CodeOf(err))
+	}
+	if _, err := f.h.ListDepositCorrections(context.Background(), connect.NewRequest(&financev1.ListDepositCorrectionsRequest{DepositId: "nope"})); connect.CodeOf(err) != connect.CodeNotFound {
+		t.Errorf("history code = %v, want NotFound", connect.CodeOf(err))
+	}
+}
+
+func TestListDepositCorrectionsNamesTheConcepts(t *testing.T) {
+	f := newFixture(t)
+	const id = "62000000-0000-0000-0000-000000000003"
+	d, err := domain.NewDeposit(id, testTenant, testStudent, 50000, domain.MethodCash, "", fixedNow, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.repo.deposits = []domain.Deposit{d}
+	concept := f.seedConcept(t, "Colegiatura", 320000)
+	charge := f.seedCharge(t, concept.GetId(), 320000)
+	c, err := domain.NewDepositCorrection("cor-1", testTenant, testStudent, "62000000-0000-0000-0000-000000000009", id, "fecha",
+		domain.DepositSnapshot{AmountCents: 50000}, domain.DepositSnapshot{AmountCents: 50000,
+			Lines: []domain.SnapshotLine{{ChargeID: charge.GetId(), AmountCents: 50000}}},
+		domain.Receiver{Name: "Directora"}, fixedNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.repo.history = []domain.DepositCorrection{c}
+
+	res, err := f.h.ListDepositCorrections(context.Background(), connect.NewRequest(&financev1.ListDepositCorrectionsRequest{DepositId: id}))
+	if err != nil {
+		t.Fatalf("ListDepositCorrections: %v", err)
+	}
+	if len(res.Msg.GetCorrections()) != 1 || res.Msg.GetCorrections()[0].GetAfter().GetLines()[0].GetDescription() == "" {
+		t.Errorf("history = %+v", res.Msg.GetCorrections())
+	}
+}
+
+// The original day's cut lists the superseded receipt apart and counts it for
+// nothing; the office statement marks its line.
+func TestASupersededDepositIsCarriedApart(t *testing.T) {
+	f := newFixture(t)
+	d, err := domain.NewDeposit("62000000-0000-0000-0000-000000000004", testTenant, testStudent, 50000, domain.MethodCash, "", fixedNow, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	superseded, err := d.Supersede("62000000-0000-0000-0000-000000000005", fixedNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.repo.deposits = []domain.Deposit{superseded.RehydrateSupersession(fixedNow, "62000000-0000-0000-0000-000000000005", "P-2026-000005")}
+
+	cut, err := f.h.DailyCashUp(context.Background(), connect.NewRequest(&financev1.DailyCashUpRequest{Day: "2026-09-15"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cut.Msg.GetTotalCents() != 0 || len(cut.Msg.GetSuperseded()) != 1 || len(cut.Msg.GetDeposits()) != 0 {
+		t.Errorf("cut = %+v", cut.Msg)
+	}
+	st, err := f.h.GetStatement(context.Background(), connect.NewRequest(&financev1.GetStatementRequest{StudentId: testStudent}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var marked bool
+	for _, m := range st.Msg.GetMovements() {
+		if m.GetDepositId() == d.ID() {
+			marked = m.GetSuperseded() && m.GetSupersededByFolio() == "P-2026-000005"
+		}
+	}
+	if !marked {
+		t.Errorf("statement movements = %+v", st.Msg.GetMovements())
+	}
+}
+
+// T9: a payment names the deposit it is a slice of, so the office can tell
+// which months a receipt paid when it corrects it.
+func TestAnAccountsPaymentsNameTheirDeposit(t *testing.T) {
+	f := newFixture(t)
+	concept := f.seedConcept(t, "Colegiatura", 320000)
+	charge := f.seedCharge(t, concept.GetId(), 320000)
+	p, err := domain.NewPayment("pay-1", testTenant, charge.GetId(), 1000, domain.MethodCash, "", fixedNow, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.repo.payments[charge.GetId()] = []domain.Payment{p.WithDepositID("dep-1")}
+
+	res, err := f.h.GetAccount(context.Background(), connect.NewRequest(&financev1.GetAccountRequest{StudentId: testStudent}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Msg.GetPayments()) != 1 || res.Msg.GetPayments()[0].GetDepositId() != "dep-1" {
+		t.Errorf("payments = %+v", res.Msg.GetPayments())
 	}
 }

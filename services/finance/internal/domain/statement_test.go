@@ -39,6 +39,8 @@ func TestBuildStatementKeepsNoEffectRowsOutOfTheBalance(t *testing.T) {
 		{Kind: domain.MovementCharge, Date: day(2026, 9, 10), ChargeID: "sep", AmountCents: 1_000_00},
 		// A voided deposit: shown, struck through, moves nothing.
 		{Kind: domain.MovementPayment, Date: day(2026, 9, 11), DepositID: "void", AmountCents: 1_000_00, Voided: true},
+		// A deposit replaced by its correction (T9): shown, moves nothing.
+		{Kind: domain.MovementPayment, Date: day(2026, 9, 12), DepositID: "old", AmountCents: 500_00, Superseded: true, SupersededByFolio: "P-2026-000002"},
 		// A charge that has not opened (T5): shown to the office, owed by nobody yet.
 		{Kind: domain.MovementCharge, Date: day(2027, 1, 10), ChargeID: "jan", AmountCents: 1_000_00, NotYetDue: true},
 		{Kind: domain.MovementDiscount, Date: day(2027, 1, 10), ChargeID: "jan", AmountCents: 100_00, NotYetDue: true},

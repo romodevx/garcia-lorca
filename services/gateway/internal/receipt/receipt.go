@@ -56,6 +56,11 @@ type Receipt struct {
 	ReceivedBy string       `json:"receivedBy,omitempty"`
 	Voided     bool         `json:"voided,omitempty"`
 	VoidReason string       `json:"voidReason,omitempty"`
+	// T9: a receipt replaced by its correction, and the correction's own
+	// receipt naming the one it replaces. Both print again.
+	Superseded        bool   `json:"superseded,omitempty"`
+	SupersededByFolio string `json:"supersededByFolio,omitempty"`
+	CorrectsFolio     string `json:"correctsFolio,omitempty"`
 }
 
 // TenderLine is one method of the payment, as the receipt prints it.
@@ -149,6 +154,8 @@ func (b *Builder) Payment(ctx context.Context, depositID string) (Receipt, error
 		CreditCents: got.UnallocatedCents, TotalCents: d.AmountCents,
 		Reference: d.Reference, ReceivedBy: d.ReceivedByName,
 		Voided: d.VoidedAt != "", VoidReason: d.VoidReason,
+		Superseded: d.SupersededBy != "", SupersededByFolio: d.SupersededByFolio,
+		CorrectsFolio: d.CorrectsFolio,
 	}
 	tenders := d.Tenders
 	if len(tenders) == 0 {

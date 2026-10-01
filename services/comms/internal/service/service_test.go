@@ -256,6 +256,22 @@ func paymentMessage(t *testing.T, paymentID, student, tenant string, cents int64
 	}, tenant)
 }
 
+// correctedMessage is finance's PaymentCorrected (T9).
+func correctedMessage(t *testing.T, paymentID, student, tenant string, cents, previous int64) pubsub.Message {
+	t.Helper()
+	return protoMessage(t, "PaymentCorrected", &financev1.PaymentCorrected{
+		PaymentId:           paymentID,
+		OriginalPaymentId:   "ffffffff-9000-0000-0000-000000000001",
+		StudentId:           student,
+		TenantId:            tenant,
+		AmountCents:         cents,
+		PreviousAmountCents: previous,
+		Method:              "cash",
+		PaidAt:              timestamppb.New(fixedNow),
+		Folio:               "P-2026-000002",
+	}, tenant)
+}
+
 func markedMessage(t *testing.T, recordID, student, tenant, date, status string) pubsub.Message {
 	t.Helper()
 	return protoMessage(t, "AttendanceMarked", &attendancev1.AttendanceMarked{
@@ -842,6 +858,14 @@ func TestHandleEventRendersEveryNotifiableEvent(t *testing.T) {
 			wantTitle: "Pago recibido",
 			wantBody:  "Recibimos tu pago de $0.05 MXN.",
 		},
+		{
+			// T9: the family is told the corrected amount.
+			name:      "payment corrected",
+			msg:       correctedMessage(t, "ffffffff-1000-0000-0000-000000000003", studentID, tenantID, 100000, 50000),
+			wantType:  "payment",
+			wantTitle: "Pago actualizado",
+			wantBody:  "Tu pago fue actualizado: $1000.00 MXN.",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1072,5 +1096,42 @@ func TestMarkNotificationReadIsIdempotent(t *testing.T) {
 	}
 	if _, err := svc.MarkNotificationRead(ctx, ""); glerrors.KindOf(err) != glerrors.KindInvalid {
 		t.Errorf("an empty id gave %v, want KindInvalid", err)
+	}
+}
+
+// T9: a redelivered correction is told once, and a correction is a notification
+// of its own — not deduplicated against the payment it corrects.
+func TestHandleEventPaymentCorrectedIsIdempotentAndDistinct(t *testing.T) {
+	repo := newFakeRepo()
+	svc, _ := newService(t, repo, newFakeGuardians(), nil)
+	ctx := context.Background()
+	const id = "ffffffff-2000-0000-0000-000000000001"
+
+	if err := svc.HandleEvent(ctx, paymentMessage(t, id, studentID, tenantID, 50000)); err != nil {
+		t.Fatal(err)
+	}
+	corrected := correctedMessage(t, id, studentID, tenantID, 100000, 50000)
+	for i := 0; i < 2; i++ {
+		if err := svc.HandleEvent(ctx, corrected); err != nil {
+			t.Fatalf("delivery %d: %v", i+1, err)
+		}
+	}
+	if len(repo.notifications) != 2 {
+		t.Fatalf("stored %d notifications, want the payment and ONE correction", len(repo.notifications))
+	}
+}
+
+// T9: the correction's push opens the payments screen, like any payment.
+func TestHandleEventPaymentCorrectedPushesAsAPayment(t *testing.T) {
+	repo := newFakeRepo()
+	sender := &spySender{}
+	svc, _ := newService(t, repo, newFakeGuardians(), sender)
+	repo.devices = []service.Device{{ID: "device-1", UserID: userID, FCMToken: "token-abc"}}
+
+	if err := svc.HandleEvent(context.Background(), correctedMessage(t, "ffffffff-3000-0000-0000-000000000001", studentID, tenantID, 100000, 50000)); err != nil {
+		t.Fatal(err)
+	}
+	if sender.calls != 1 || sender.title != "Pago actualizado" || sender.data["type"] != "payment" || sender.data["studentId"] != studentID {
+		t.Errorf("push = %d %q %+v", sender.calls, sender.title, sender.data)
 	}
 }

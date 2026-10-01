@@ -88,13 +88,19 @@ type Movement struct {
 	// Voided marks a cancelled deposit: shown, struck through, never counted.
 	Voided     bool
 	VoidReason string
+	// Superseded marks a deposit replaced by its correction (T9): shown to the
+	// office with the folio that replaced it, never counted.
+	Superseded        bool
+	SupersededByFolio string
+	// CorrectsFolio is, on the correction's lines, the receipt it replaces.
+	CorrectsFolio string
 	// BalanceCents is the running balance after this line, set by
 	// BuildStatement. Negative is money the school holds for the family.
 	BalanceCents int64
 }
 
 // counts reports whether the line moves the balance.
-func (m Movement) counts() bool { return !m.Voided && !m.NotYetDue }
+func (m Movement) counts() bool { return !m.Voided && !m.Superseded && !m.NotYetDue }
 
 // StatementTotals are the statement's footing. BalanceCents = ChargedCents −
 // DiscountCents − PaidCents; negative is credit in the family's favour.
