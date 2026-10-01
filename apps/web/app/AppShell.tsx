@@ -22,7 +22,7 @@ import { canDeleteLevels } from "./config/permissions";
 import { canDeleteUsers } from "./admin/permissions";
 import { AdminScreen } from "./_screens/admin/AdminScreen";
 import { StudentEditScreen } from "./_screens/students/StudentEditScreen";
-import { StudentsScreen, startFreshStudentsVisit, studentsListPath } from "./_screens/students/StudentsScreen";
+import { StudentsScreen, markStudentsVisit, studentsListPath } from "./_screens/students/StudentsScreen";
 import { GradesScreen } from "./_screens/grades/GradesScreen";
 import { Login } from "./_screens/Login";
 import { ChangePassword } from "./_screens/ChangePassword";
@@ -107,13 +107,15 @@ export function AppShell(): ReactElement {
   const addressedView = useMemo(() => pathToView(pathname), [pathname]);
 
   /** Navegar dejando huella: "atrás" regresa aquí. */
-  // Each deliberate visit counts: a screen keyed on it starts fresh even when
-  // the address does not change screens (Estudiantes from the palette while
-  // /alumnos?nivel=… is open must drop the filters the URL just dropped).
+  // Each deliberate visit to Estudiantes counts: the list is keyed on it, so it
+  // starts fresh even when the address does not change screens (Estudiantes
+  // from the palette while /alumnos?nivel=… is open must drop the filters the
+  // URL just dropped). Other screens do not count: no wasted remounts.
   const [visit, setVisit] = useState(0);
   const go = useCallback((next: View): void => {
-    if (next.screen === "students") startFreshStudentsVisit();
-    setVisit((v) => v + 1);
+    const toStudents = next.screen === "students";
+    markStudentsVisit(toStudents);
+    if (toStudents) setVisit((v) => v + 1);
     router.push(viewToPath(next));
   }, [router]);
 

@@ -152,6 +152,11 @@ describe("studentFacets", () => {
     expect(f.grades).toEqual([]);
   });
 
+  it("still shows a chosen grade of a level that lost its grades, so it can be turned off", () => {
+    const f = studentFacets(roll, { ...catalog, grades: [] }, chooseGrade(chooseLevel(EMPTY_FILTER, "pre"), "pre-1"));
+    expect(f.grades).toEqual([{ id: "pre-1", label: "(ya no existe)", count: 0 }]);
+  });
+
   it("keeps the chosen chip visible even when the search empties it, so it can be turned off", () => {
     const f = studentFacets(roll, catalog, { ...chooseLevel(EMPTY_FILTER, NONE), q: "perez" });
     expect(f.levels.at(-1)).toEqual({ id: NONE, label: "Sin nivel", count: 0 });

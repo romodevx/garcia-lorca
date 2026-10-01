@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as studentsApi from "../../students/api";
 import * as configApi from "../../config/api";
 import * as csv from "../../_lib/csv";
-import { StudentsScreen, startFreshStudentsVisit, studentsListPath } from "./StudentsScreen";
+import { StudentsScreen, markStudentsVisit, studentsListPath } from "./StudentsScreen";
 
 // T4: level → grade → group chips, chained, over the pupils' ACTIVE enrolment
 // of the cycle; the view lives in the URL; "Seleccionar todos" over the result.
@@ -180,6 +180,23 @@ describe("StudentsScreen — filtros cuando algo falta (revisión T4)", () => {
     expect(rows()).toHaveLength(4);
   });
 
+  it("drops a URL grade and says why when the school's grades cannot be read", async () => {
+    window.history.replaceState(null, "", "/alumnos?nivel=pre&grado=pre-1");
+    config.listGradeLevels.mockRejectedValue(new Error("config down"));
+    render(<StudentsScreen onBack={() => {}} />);
+    expect(await screen.findByText(/No pudimos leer los grupos de este ciclo/)).toBeInTheDocument();
+    await waitFor(() => expect(rows()).toEqual(["Arce Ana", "Bello Beto", "Cano Ceci", "Estrada Eva"]));
+  });
+
+  it("waits for the school's grades too before judging a grade from the URL", async () => {
+    window.history.replaceState(null, "", "/alumnos?nivel=pre&grado=pre-1");
+    config.listGradeLevels.mockReturnValue(new Promise(() => {}));
+    render(<StudentsScreen onBack={() => {}} />);
+    await waitFor(() => expect(students.listEnrollments).toHaveBeenCalled());
+    expect(screen.queryByText("Sin alumnos en esta vista")).toBeNull();
+    expect(screen.getByText("Cargando…")).toBeInTheDocument();
+  });
+
   it("waits for the enrolments before judging a grade from the URL (no false 'Sin alumnos')", async () => {
     window.history.replaceState(null, "", "/alumnos?nivel=pre&grado=pre-1");
     students.listEnrollments.mockReturnValue(new Promise(() => {}));
@@ -219,7 +236,7 @@ describe("StudentsScreen — filtros cuando algo falta (revisión T4)", () => {
 describe("StudentsScreen — visita deliberada (revisión T4)", () => {
   it("opens clean when Estudiantes is chosen on purpose, even if the address still has filters", async () => {
     window.history.replaceState(null, "", "/alumnos?nivel=pre");
-    startFreshStudentsVisit();
+    markStudentsVisit(true);
     render(<StudentsScreen onBack={() => {}} />);
     await screen.findByText("Arce Ana");
     expect(rows()).toHaveLength(5);

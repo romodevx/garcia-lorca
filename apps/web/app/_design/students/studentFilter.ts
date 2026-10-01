@@ -123,7 +123,8 @@ function facet(
 ): FacetOption[] {
   const out = options.map((o) => ({ id: o.id, label: o.label, count: counted.get(o.id) ?? 0 }));
   const none = counted.get("") ?? 0;
-  if (none > 0 || chosen === NONE) out.push({ id: NONE, label: noneLabel, count: none });
+  // "Sin …" only beside real options: alone it would say nothing useful.
+  if ((none > 0 && options.length > 0) || chosen === NONE) out.push({ id: NONE, label: noneLabel, count: none });
   if (chosen !== "" && !out.some((o) => o.id === chosen)) out.push({ id: chosen, label: GONE_LABEL, count: 0 });
   return out;
 }
@@ -142,8 +143,9 @@ export function studentFacets(items: readonly FilterableStudent[], catalog: Filt
     .filter((g) => g.levelId === f.levelId)
     .sort((a, b) => a.ordinal - b.ordinal)
     .map((g) => ({ id: g.id, label: g.name }));
-  // A level with no grades configured has nothing to choose: no row at all.
-  if (gradeOptions.length === 0) return { levels, grades: [], groups: [] };
+  // A level with no grades configured has nothing to choose: no row at all,
+  // unless a grade is already chosen (an old link) and must be turned off.
+  if (gradeOptions.length === 0 && f.gradeId === "") return { levels, grades: [], groups: [] };
   const grades = facet(gradeOptions, countBy(inLevel, (s) => s.gradeLevelId), NO_GRADE_LABEL, f.gradeId);
   if (f.gradeId === "" || f.gradeId === NONE) return { levels, grades, groups: [] };
 
@@ -152,7 +154,7 @@ export function studentFacets(items: readonly FilterableStudent[], catalog: Filt
     .filter((g) => g.gradeLevelId === f.gradeId)
     .map((g) => ({ id: g.id, label: g.name }))
     .sort((a, b) => a.label.localeCompare(b.label, "es"));
-  if (groupOptions.length === 0) return { levels, grades, groups: [] };
+  if (groupOptions.length === 0 && f.groupId === "") return { levels, grades, groups: [] };
   return { levels, grades, groups: facet(groupOptions, countBy(inGrade, (s) => s.groupId), NO_GROUP_LABEL, f.groupId) };
 }
 

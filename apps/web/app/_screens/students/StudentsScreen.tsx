@@ -92,11 +92,12 @@ let freshVisit = false;
 
 /**
  * The next list opens with no filters, whatever the address bar still says:
- * the shell calls it when somebody chooses Estudiantes on purpose. Browser
- * Back and the edit page's Back do not, so they keep the view.
+ * the shell marks every deliberate navigation (true only for Estudiantes, so
+ * a stale mark never survives the next one). Browser Back and the edit page's
+ * Back do not pass here, so they keep the view.
  */
-export function startFreshStudentsVisit(): void {
-  freshVisit = true;
+export function markStudentsVisit(fresh: boolean): void {
+  freshVisit = fresh;
 }
 
 /** Where "Volver" from a pupil's page goes: the list as it was left, filters included. */
@@ -726,6 +727,7 @@ export function StudentsScreen({ onBack, onEdit, canWriteNotes = false, canVerif
   // Every level's grades, so the sheet can tell which level a group belongs to.
   const [gradeLevels, setGradeLevels] = useState<GradeLevel[]>([]);
   const [gradeLevelsFailed, setGradeLevelsFailed] = useState(false);
+  const [gradeLevelsLoaded, setGradeLevelsLoaded] = useState(false);
   // The cycle whose groups the sheet offers (the active one, or the first).
   const [groupsCycleId, setGroupsCycleId] = useState("");
   const [loading, setLoading] = useState(true);
@@ -768,7 +770,7 @@ export function StudentsScreen({ onBack, onEdit, canWriteNotes = false, canVerif
     reload();
     listLevels(API_URL).then(setLevels).catch(() => setLevels([]));
     listGradeLevels(API_URL, "")
-      .then((all) => { setGradeLevels(all); setGradeLevelsFailed(false); })
+      .then((all) => { setGradeLevels(all); setGradeLevelsFailed(false); setGradeLevelsLoaded(true); })
       .catch(() => setGradeLevelsFailed(true));
     listCycles(API_URL).then((cs) => {
       setCycles(cs);
@@ -811,7 +813,11 @@ export function StudentsScreen({ onBack, onEdit, canWriteNotes = false, canVerif
     for (const s of students) if (s.levelId !== "") onRoll.set(s.levelId, s.level);
     return [...onRoll].map(([id, name]) => ({ id, name }));
   }, [levels, students]);
-  const placementReady = placement === "ok" && !gradeLevelsFailed;
+  // Grades and groups need three reads: the school's grades, the cycle's
+  // groups and its enrolments. One failed = failed; one pending = loading.
+  const placementStatus: PlacementState =
+    placement === "failed" || gradeLevelsFailed ? "failed" : placement === "ok" && gradeLevelsLoaded ? "ok" : "loading";
+  const placementReady = placementStatus === "ok";
   // Until the cycle is placed there are no grade or group chips to offer.
   const catalog = useMemo(
     () => ({ levels: catalogLevels, grades: placementReady ? gradeLevels : [], groups: placementReady ? groups : [] }),
@@ -856,9 +862,9 @@ export function StudentsScreen({ onBack, onEdit, canWriteNotes = false, canVerif
   const { chooseGrade } = filter;
   const urlGrade = filter.state.gradeId;
   useEffect(() => {
-    if (placement === "failed" && urlGrade !== "") chooseGrade(urlGrade);
-  }, [placement, urlGrade, chooseGrade]);
-  const waitingForPlacement = placement === "loading" && (filter.state.gradeId !== "" || filter.state.groupId !== "");
+    if (placementStatus === "failed" && urlGrade !== "") chooseGrade(urlGrade);
+  }, [placementStatus, urlGrade, chooseGrade]);
+  const waitingForPlacement = placementStatus === "loading" && (filter.state.gradeId !== "" || filter.state.groupId !== "");
 
   // The padrón as it is on screen: the tab, the chips and the search. A file
   // that quietly held every pupil would look right and be wrong.
@@ -985,7 +991,7 @@ export function StudentsScreen({ onBack, onEdit, canWriteNotes = false, canVerif
             </div>
           }
         />
-        {placement === "failed" && (
+        {placementStatus === "failed" && (
           <p role="alert" style={{ color: "var(--bad-fg)", fontSize: 13.5, margin: "10px 0 0" }}>
             No pudimos leer los grupos de este ciclo: por ahora sólo se filtra por nivel. Recarga la página en un momento.
           </p>
