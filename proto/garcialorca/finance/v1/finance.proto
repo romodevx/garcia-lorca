@@ -240,7 +240,8 @@ message Charge {
 }
 
 // Payment is one amount applied to a charge. `method` is one of:
-// cash | card | transfer. `reference` is the folio / "con qué se pagó"
+// cash | card | transfer | credit_note (T8: a credit note the school issued by
+// hand — it settles debt but is not money). `reference` is the folio / "con qué se pagó"
 // (transfer id, card voucher, receipt number) — free text.
 message Payment {
   string id = 1;
@@ -371,10 +372,24 @@ message CancelChargeResponse {
 
 // --- Payment + account RPC messages ---------------------------------------
 
+// Tender is one method a payment came in by, and how much of it (T8). A
+// combined payment is a credit note completed with cash, say. A credit note is
+// not money: cash-ups and income reports keep it apart.
+message Tender {
+  // cash | card | transfer | credit_note.
+  string method = 1;
+  int64 amount_cents = 2;
+  // Free text: a credit note's folio, a voucher, a transfer id.
+  string reference = 3;
+  // debit | credit, only when method is card.
+  string card_type = 4;
+}
+
 message RegisterPaymentRequest {
   string charge_id = 1;
   int64 amount_cents = 2;
-  // method is one of: cash | card | transfer.
+  // method is one of: cash | card | transfer | credit_note. Ignored when
+  // tenders are given.
   string method = 3;
   // reference is the folio / voucher / transfer id.
   string reference = 4;
@@ -391,12 +406,19 @@ message RegisterPaymentRequest {
   google.protobuf.Timestamp paid_at = 6;
   // The authenticated caller, set by the gateway — never by a client (task 7).
   string received_by = 7;
+  // tenders, when given, combine methods (T8): one payment row per tender, all
+  // in one transaction. They must add up exactly to amount_cents. Empty means
+  // the single method above.
+  repeated Tender tenders = 8;
 }
 
 message RegisterPaymentResponse {
+  // payment is the first row (the only one for a single method).
   Payment payment = 1;
   // charge carries the recomputed paid/remaining/status after the payment.
   Charge charge = 2;
+  // payments are every row, one per tender (T8).
+  repeated Payment payments = 3;
 }
 
 message GetAccountRequest {
@@ -446,7 +468,8 @@ message GetStatementRequest {
 // StatementMovement is one line of the ledger. amount_cents is always
 // positive; `kind` says which way it moves the balance:
 // charge | surcharge raise it; discount | scholarship | payment | credit_note
-// lower it. scholarship (T18) and credit_note (T8) are reserved.
+// lower it. scholarship (T18) is reserved; credit_note is a tender paid by a
+// credit note (T8).
 message StatementMovement {
   string kind = 1;
   // YYYY-MM-DD: a charge's due date, the day money arrived, or the
@@ -458,7 +481,7 @@ message StatementMovement {
   int64 balance_cents = 5;
   string charge_id = 6;
   string deposit_id = 7;
-  // cash | card | transfer, on money lines.
+  // cash | card | transfer | credit_note, on money lines.
   string method = 8;
   string card_type = 9;
   string reference = 10;
@@ -768,7 +791,8 @@ message Deposit {
   string id = 1;
   string student_id = 2;
   int64 amount_cents = 3;
-  // method is one of: cash | card | transfer.
+  // method is one of: cash | card | transfer | credit_note, or mixed when the
+  // deposit combined several tenders (T8). A summary: read the tenders.
   string method = 4;
   string reference = 5;
   google.protobuf.Timestamp paid_at = 6;
@@ -791,12 +815,16 @@ message Deposit {
   google.protobuf.Timestamp captured_at = 13;
   // folio is the receipt number, P-<year>-<six digits> (task 12).
   string folio = 14;
+  // The methods the money came in by, in order (T8). Always at least one: a
+  // deposit made before T8 is one tender with its own method.
+  repeated Tender tenders = 15;
 }
 
 message RegisterDepositRequest {
   string student_id = 1;
   int64 amount_cents = 2;
-  // method is one of: cash | card | transfer.
+  // method is one of: cash | card | transfer | credit_note. Ignored when
+  // tenders are given.
   string method = 3;
   string reference = 4;
   // paid_at is when the money changed hands, which is not always when it was
@@ -821,6 +849,9 @@ message RegisterDepositRequest {
   // Empty means every charge, oldest first. A charge that is not the
   // student's is refused.
   repeated string charge_ids = 11;
+  // tenders, when given, combine methods (T8): they must add up exactly to
+  // amount_cents and replace method, reference and card_type.
+  repeated Tender tenders = 12;
 }
 
 message RegisterDepositResponse {
@@ -889,6 +920,9 @@ message DailyCashUpResponse {
   // Payments taken outside a deposit (a counter sale's, paid straight against
   // its charge). They are in the drawer, so they are in the totals too.
   repeated CashUpPayment payments = 7;
+  // What credit notes settled that day (T8). Not money: in neither the
+  // per-method figures nor total_cents.
+  int64 credit_note_cents = 8;
 }
 
 // CashUpPayment is a payment taken outside a deposit, with what it paid for.
@@ -914,6 +948,9 @@ message IncomeLine {
 message IncomeByConceptResponse {
   repeated IncomeLine lines = 1;
   int64 total_cents = 2;
+  // What credit notes settled in the period (T8). Not income: in neither the
+  // lines nor total_cents.
+  int64 credit_note_cents = 3;
 }
 
 // ExpectedTodayRequest asks what is due as of a date.

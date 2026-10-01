@@ -16,12 +16,18 @@ const (
 	MethodCard = "card"
 	// MethodTransfer is a bank transfer (SPEI and friends).
 	MethodTransfer = "transfer"
+	// MethodCreditNote is a credit note the school issued by hand (T8). It
+	// settles a debt but brings no money in, so it is never counted as income.
+	MethodCreditNote = "credit_note"
+	// MethodMixed is not a method anyone pays with: it is what a deposit paid
+	// by several tenders reports as its summary method (T8).
+	MethodMixed = "mixed"
 )
 
 // validateMethod enforces the closed payment-method vocabulary.
 func validateMethod(method string) error {
 	switch method {
-	case MethodCash, MethodCard, MethodTransfer:
+	case MethodCash, MethodCard, MethodTransfer, MethodCreditNote:
 		return nil
 	default:
 		return glerrors.New(glerrors.KindInvalid, "invalid payment method")

@@ -633,23 +633,27 @@ func (r *Repository) SaveCharge(ctx context.Context, c domain.Charge) (domain.Ch
 // fails rather than double-charging.
 func (r *Repository) RegisterPayment(
 	ctx context.Context,
-	p domain.Payment,
+	ps []domain.Payment,
 	derive func(charge domain.Charge, newPaidCents int64) (string, error),
 	outbox func(charge ports.ChargeWithPaid) []ports.OutboxEvent,
-) (domain.Payment, ports.ChargeWithPaid, bool, error) {
+) ([]domain.Payment, ports.ChargeWithPaid, bool, error) {
+	if len(ps) == 0 {
+		return nil, ports.ChargeWithPaid{}, false, glerrors.New(glerrors.KindInvalid, "a payment needs at least one row")
+	}
+	first := ps[0]
 	var (
-		storedPayment domain.Payment
-		result        ports.ChargeWithPaid
-		replayed      bool
+		storedPayments []domain.Payment
+		result         ports.ChargeWithPaid
+		replayed       bool
 	)
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
 		var row chargeModel
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("id = ?", p.ChargeID()).First(&row).Error; err != nil {
+			Where("id = ?", first.ChargeID()).First(&row).Error; err != nil {
 			return translateFindErr(err)
 		}
 
-		currentPaid, err := paidFor(tx, p.ChargeID())
+		currentPaid, err := paidFor(tx, first.ChargeID())
 		if err != nil {
 			return err
 		}
@@ -658,45 +662,54 @@ func (r *Repository) RegisterPayment(
 			return err
 		}
 
-		original, found, err := paymentByIdempotencyKey(tx, p.IdempotencyKey())
+		original, found, err := paymentsByIdempotencyKey(tx, first.IdempotencyKey())
 		if err != nil {
 			return err
 		}
 		if found {
-			storedPayment = original
+			storedPayments = original
 			result = ports.ChargeWithPaid{Charge: charge, PaidCents: currentPaid}
 			replayed = true
 			return nil
 		}
 
-		newPaid := currentPaid + p.Amount().Int64()
+		newPaid := currentPaid
+		for _, p := range ps {
+			if p.ChargeID() != first.ChargeID() {
+				return glerrors.New(glerrors.KindInvalid, "a combined payment pays one charge")
+			}
+			newPaid += p.Amount().Int64()
+		}
 		status, err := derive(charge, newPaid)
 		if err != nil {
 			return err
 		}
 
-		payment := fromDomainPayment(p)
-		if err := tx.Create(&payment).Error; err != nil {
-			// The partial unique index caught a same-key attempt that did not
-			// serialize on this charge's lock. It is a retry, not a new payment,
-			// so the caller sees a conflict rather than a duplicated collection.
-			if isUniqueViolation(err) {
-				return glerrors.Wrap(glerrors.KindConflict, "payment already registered under this idempotency key", err)
+		storedPayments = make([]domain.Payment, 0, len(ps))
+		for _, p := range ps {
+			payment := fromDomainPayment(p)
+			if err := tx.Create(&payment).Error; err != nil {
+				// The partial unique index caught a same-key attempt that did not
+				// serialize on this charge's lock. It is a retry, not a new payment,
+				// so the caller sees a conflict rather than a duplicated collection.
+				if isUniqueViolation(err) {
+					return glerrors.Wrap(glerrors.KindConflict, "payment already registered under this idempotency key", err)
+				}
+				return glerrors.Wrap(glerrors.KindInternal, "storing payment", err)
 			}
-			return glerrors.Wrap(glerrors.KindInternal, "storing payment", err)
+			d, err := toDomainPayment(payment)
+			if err != nil {
+				return err
+			}
+			storedPayments = append(storedPayments, d)
 		}
-		if err := tx.Model(&chargeModel{}).Where("id = ?", p.ChargeID()).Updates(map[string]any{
+		if err := tx.Model(&chargeModel{}).Where("id = ?", first.ChargeID()).Updates(map[string]any{
 			"status":     status,
 			"updated_at": gorm.Expr("now()"),
 		}).Error; err != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "updating charge status", err)
 		}
 
-		d, err := toDomainPayment(payment)
-		if err != nil {
-			return err
-		}
-		storedPayment = d
 		// derive has already vetoed cancelled and overpaying charges, so
 		// re-deriving from the new total reproduces exactly the status written.
 		result = ports.ChargeWithPaid{Charge: charge.WithStatus(newPaid), PaidCents: newPaid}
@@ -710,32 +723,41 @@ func (r *Repository) RegisterPayment(
 		return nil
 	})
 	if err != nil {
-		return domain.Payment{}, ports.ChargeWithPaid{}, false, err
+		return nil, ports.ChargeWithPaid{}, false, err
 	}
-	return storedPayment, result, replayed, nil
+	return storedPayments, result, replayed, nil
 }
 
-// paymentByIdempotencyKey looks up the payment already posted under key, if any.
-// An empty key never matches — it means the caller opted out of deduplication,
-// and the partial unique index excludes blank keys for the same reason. The
-// query is tenant-bound by RLS, so a key is only ever a duplicate within its own
-// school.
-func paymentByIdempotencyKey(tx *gorm.DB, key string) (domain.Payment, bool, error) {
+// paymentsByIdempotencyKey looks up the payment set already posted under key,
+// if any: the row carrying the key itself and, for a combined payment (T8),
+// the rows carrying "key#2", "key#3"… in that order. An empty key never
+// matches — it means the caller opted out of deduplication, and the partial
+// unique index excludes blank keys for the same reason. The query is
+// tenant-bound by RLS, so a key is only ever a duplicate within its own school.
+//
+// The prefix is compared with left(), not LIKE: a key is caller text, and a
+// '%' or '_' in it must not widen the match.
+func paymentsByIdempotencyKey(tx *gorm.DB, key string) ([]domain.Payment, bool, error) {
 	if key == "" {
-		return domain.Payment{}, false, nil
+		return nil, false, nil
 	}
-	var m paymentModel
-	if err := tx.Where("idempotency_key = ?", key).First(&m).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return domain.Payment{}, false, nil
+	var rows []paymentModel
+	if err := tx.Where("idempotency_key = ? OR left(idempotency_key, ?) = ?", key, len([]rune(key))+1, key+"#").
+		Order("length(idempotency_key), idempotency_key").Find(&rows).Error; err != nil {
+		return nil, false, glerrors.Wrap(glerrors.KindInternal, "looking up payment by idempotency key", err)
+	}
+	if len(rows) == 0 {
+		return nil, false, nil
+	}
+	out := make([]domain.Payment, 0, len(rows))
+	for _, m := range rows {
+		stored, err := toDomainPayment(m)
+		if err != nil {
+			return nil, false, err
 		}
-		return domain.Payment{}, false, glerrors.Wrap(glerrors.KindInternal, "looking up payment by idempotency key", err)
+		out = append(out, stored)
 	}
-	stored, err := toDomainPayment(m)
-	if err != nil {
-		return domain.Payment{}, false, err
-	}
-	return stored, true, nil
+	return out, true, nil
 }
 
 // ListPayments returns every payment posted against the student's charges, for
@@ -1149,6 +1171,10 @@ func (r *Repository) RegisterDeposit(
 			}
 			return glerrors.Wrap(glerrors.KindInternal, "storing deposit", err)
 		}
+		tenders := fromDomainTenders(d)
+		if err := tx.Create(&tenders).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "storing the deposit's tenders", err)
+		}
 
 		// The discounts come first: the allocations that follow assume the new,
 		// lower amount, and a charge saved after them would be a row whose
@@ -1383,11 +1409,40 @@ func depositByIdempotencyKey(tx *gorm.DB, key string) (domain.Deposit, bool, err
 	if err != nil {
 		return domain.Deposit{}, false, glerrors.Wrap(glerrors.KindInternal, "looking up deposit", err)
 	}
-	d, derr := toDomainDeposit(row)
+	ds, derr := toDomainDeposits(tx, []depositModel{row})
 	if derr != nil {
 		return domain.Deposit{}, false, derr
 	}
-	return d, true, nil
+	return ds[0], true, nil
+}
+
+// toDomainDeposits rebuilds stored deposits with their tenders, read in ONE
+// query for the whole page (no read per deposit).
+func toDomainDeposits(tx *gorm.DB, rows []depositModel) ([]domain.Deposit, error) {
+	if len(rows) == 0 {
+		return []domain.Deposit{}, nil
+	}
+	ids := make([]string, 0, len(rows))
+	for _, m := range rows {
+		ids = append(ids, m.ID)
+	}
+	var tenderRows []depositTenderModel
+	if err := tx.Where("deposit_id IN ?", ids).Order("deposit_id, position").Find(&tenderRows).Error; err != nil {
+		return nil, glerrors.Wrap(glerrors.KindInternal, "reading the deposits' tenders", err)
+	}
+	byDeposit := make(map[string][]depositTenderModel, len(rows))
+	for _, t := range tenderRows {
+		byDeposit[t.DepositID] = append(byDeposit[t.DepositID], t)
+	}
+	out := make([]domain.Deposit, 0, len(rows))
+	for _, m := range rows {
+		d, err := toDomainDeposit(m, byDeposit[m.ID])
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, nil
 }
 
 // rebuildDepositRecord reconstructs what a stored deposit did, so a replay
@@ -1425,10 +1480,11 @@ func (r *Repository) DepositReceipt(ctx context.Context, id string) (ports.Depos
 		if err := tx.Where("id = ?", id).First(&m).Error; err != nil {
 			return translateFindErr(err)
 		}
-		d, err := toDomainDeposit(m)
+		ds, err := toDomainDeposits(tx, []depositModel{m})
 		if err != nil {
 			return err
 		}
+		d := ds[0]
 		var rows []struct {
 			ChargeID      string
 			Description   string
@@ -1455,13 +1511,24 @@ func (r *Repository) DepositReceipt(ctx context.Context, id string) (ports.Depos
 		}
 		out = ports.DepositReceipt{Deposit: d, Lines: make([]ports.ReceiptLine, 0, len(rows))}
 		var allocated int64
+		// A charge paid by two tenders (T8) is two payment rows and ONE concept
+		// on the receipt: the rows of a charge are adjacent (ordered by due
+		// date), so they fold into the line before. The discount rides on one
+		// of them at most.
+		at := map[string]int{}
 		for _, row := range rows {
+			allocated += row.AmountCents
+			if i, seen := at[row.ChargeID]; seen {
+				out.Lines[i].AmountCents += row.AmountCents
+				out.Lines[i].DiscountCents = max(out.Lines[i].DiscountCents, row.DiscountCents)
+				continue
+			}
+			at[row.ChargeID] = len(out.Lines)
 			out.Lines = append(out.Lines, ports.ReceiptLine{
 				ChargeID: row.ChargeID, Description: row.Description, AmountCents: row.AmountCents,
 				Surcharge:     row.Kind == domain.KindLateFee || domain.IsFeeRef(row.ExternalRef),
 				DiscountCents: row.DiscountCents,
 			})
-			allocated += row.AmountCents
 		}
 		if !d.Voided() {
 			out.UnallocatedCents = d.Amount().Int64() - allocated
@@ -1514,6 +1581,8 @@ func (r *Repository) UnallocatedCents(ctx context.Context, studentID string) (in
 //
 // Payments against a cancelled charge are excluded. That money is a correction
 // to make, not income to report.
+//
+// Rows paid by a credit note come back as their own lines, CreditNote set.
 func (r *Repository) IncomeLines(ctx context.Context, from, to time.Time) ([]ports.IncomeLine, error) {
 	start := time.Date(from.Year(), from.Month(), from.Day(), 0, 0, 0, 0, from.Location())
 	end := time.Date(to.Year(), to.Month(), to.Day(), 0, 0, 0, 0, to.Location()).AddDate(0, 0, 1)
@@ -1521,11 +1590,14 @@ func (r *Repository) IncomeLines(ctx context.Context, from, to time.Time) ([]por
 	var rows []ports.IncomeLine
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
 		return tx.Table("payments p").
-			Select("c.concept_id AS concept_id, k.name AS concept, COALESCE(SUM(p.amount_cents), 0) AS amount_cents").
+			Select("c.concept_id AS concept_id, k.name AS concept, COALESCE(SUM(p.amount_cents), 0) AS amount_cents, "+
+				"p.method = ? AS credit_note", domain.MethodCreditNote).
 			Joins("JOIN charges c ON c.id = p.charge_id").
 			Joins("JOIN charge_concepts k ON k.id = c.concept_id").
 			Where("p.paid_at >= ? AND p.paid_at < ? AND c.status <> ?", start, end, domain.StatusCancelled).
-			Group("c.concept_id, k.name").
+			// What a credit note settled is grouped apart (T8): it is not money,
+			// and the use case reports it on its own line.
+			Group("c.concept_id, k.name, credit_note").
 			Scan(&rows).Error
 	})
 	if err != nil {
@@ -1542,9 +1614,12 @@ func (r *Repository) GetDeposit(ctx context.Context, id string) (domain.Deposit,
 		if err := tx.Where("id = ?", id).First(&m).Error; err != nil {
 			return translateFindErr(err)
 		}
-		var derr error
-		out, derr = toDomainDeposit(m)
-		return derr
+		ds, derr := toDomainDeposits(tx, []depositModel{m})
+		if derr != nil {
+			return derr
+		}
+		out = ds[0]
+		return nil
 	})
 	if err != nil {
 		return domain.Deposit{}, err
@@ -1565,15 +1640,9 @@ func (r *Repository) ListDeposits(ctx context.Context, studentID string) ([]doma
 		if err := q.Find(&rows).Error; err != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "listing deposits", err)
 		}
-		out = make([]domain.Deposit, 0, len(rows))
-		for _, m := range rows {
-			d, derr := toDomainDeposit(m)
-			if derr != nil {
-				return derr
-			}
-			out = append(out, d)
-		}
-		return nil
+		var derr error
+		out, derr = toDomainDeposits(tx, rows)
+		return derr
 	})
 	if err != nil {
 		return nil, err
@@ -1594,15 +1663,9 @@ func (r *Repository) ListDepositsOn(ctx context.Context, day time.Time) ([]domai
 			Order("paid_at ASC, id ASC").Limit(maxListLimit).Find(&rows).Error; err != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "listing the day's deposits", err)
 		}
-		out = make([]domain.Deposit, 0, len(rows))
-		for _, m := range rows {
-			d, derr := toDomainDeposit(m)
-			if derr != nil {
-				return derr
-			}
-			out = append(out, d)
-		}
-		return nil
+		var derr error
+		out, derr = toDomainDeposits(tx, rows)
+		return derr
 	})
 	if err != nil {
 		return nil, err

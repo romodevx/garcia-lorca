@@ -419,17 +419,38 @@ func fromDomainDeposit(d domain.Deposit) depositModel {
 	return m
 }
 
-func toDomainDeposit(m depositModel) (domain.Deposit, error) {
+// fromDomainTenders is a deposit's tenders as rows, numbered in order.
+func fromDomainTenders(d domain.Deposit) []depositTenderModel {
+	tenders := d.Tenders()
+	out := make([]depositTenderModel, 0, len(tenders))
+	for i, t := range tenders {
+		out = append(out, depositTenderModel{
+			TenantID: d.TenantID(), DepositID: d.ID(), Position: i,
+			Method: t.Method(), AmountCents: t.Amount().Int64(),
+			Reference: t.Reference(), CardType: t.CardType(),
+		})
+	}
+	return out
+}
+
+// toDomainDeposit rebuilds a stored deposit from its row and its tenders
+// (ordered by position). The tenders are the source of truth: the row's
+// method and card type are their summary, re-derived here by WithTenders.
+// A deposit with no tender rows (none since migration 0021 backfilled them)
+// falls back to its own single method.
+func toDomainDeposit(m depositModel, tenderRows []depositTenderModel) (domain.Deposit, error) {
+	method := m.Method
+	if len(tenderRows) > 0 {
+		method = tenderRows[0].Method
+	}
 	d, err := domain.NewDeposit(m.ID, m.TenantID, m.StudentID, m.AmountCents,
-		m.Method, m.Reference, m.PaidAt, m.IdempotencyKey, m.CalendarVersion)
+		method, m.Reference, m.PaidAt, m.IdempotencyKey, m.CalendarVersion)
 	if err != nil {
 		return domain.Deposit{}, err
 	}
-	if m.CardType != "" {
-		d, err = d.WithCardType(m.CardType)
-		if err != nil {
-			return domain.Deposit{}, err
-		}
+	d, err = withStoredTenders(d, m.CardType, tenderRows)
+	if err != nil {
+		return domain.Deposit{}, err
 	}
 	receiver := domain.Receiver{Name: m.ReceivedByName}
 	if m.ReceivedBy != nil {
@@ -443,4 +464,21 @@ func toDomainDeposit(m depositModel) (domain.Deposit, error) {
 	// deliberately cannot produce a cancelled deposit, but a stored one has to
 	// come back exactly as it was written, reason included.
 	return d.Rehydrate(*m.VoidedAt, m.VoidReason), nil
+}
+
+// withStoredTenders puts a stored deposit's tenders back on it, or its card
+// type when it has none.
+func withStoredTenders(d domain.Deposit, cardType string, rows []depositTenderModel) (domain.Deposit, error) {
+	if len(rows) == 0 {
+		return d.WithCardType(cardType)
+	}
+	tenders := make([]domain.Tender, 0, len(rows))
+	for _, r := range rows {
+		t, err := domain.NewTender(r.Method, r.AmountCents, r.Reference, r.CardType)
+		if err != nil {
+			return domain.Deposit{}, glerrors.Wrap(glerrors.KindInternal, "a stored deposit tender is invalid", err)
+		}
+		tenders = append(tenders, t)
+	}
+	return d.WithTenders(tenders)
 }

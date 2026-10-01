@@ -205,6 +205,9 @@ func newCharge(t *testing.T, id, tenant, student, cycle, conceptID string, amoun
 	return c
 }
 
+// one is a payment of a single method, as RegisterPayment takes it (T8).
+func one(p domain.Payment) []domain.Payment { return []domain.Payment{p} }
+
 // newPayment builds a payment that opts out of deduplication — the historical
 // behaviour, and what every test that is not about idempotency wants.
 func newPayment(t *testing.T, id, tenant, chargeID string, amount int64, at time.Time) domain.Payment {
@@ -368,7 +371,7 @@ func TestRLSIsolatesPayments(t *testing.T) {
 		student   = "50000000-0000-0000-0000-0000000000a3"
 	)
 	seedConceptAndCharge(t, tenantA, conceptID, "rls-payment", chargeID, student, cycleOne, 10000, 0, today)
-	if _, _, _, err := appRepo(t, tenantA).RegisterPayment(ctx, newPayment(t, paymentID, tenantA, chargeID, 5000, paidAt), derive, nil); err != nil {
+	if _, _, _, err := appRepo(t, tenantA).RegisterPayment(ctx, one(newPayment(t, paymentID, tenantA, chargeID, 5000, paidAt)), derive, nil); err != nil {
 		t.Fatalf("seed payment: %v", err)
 	}
 
@@ -407,7 +410,7 @@ func TestRegisterPaymentIsAtomicAndDerivesStatus(t *testing.T) {
 	seedConceptAndCharge(t, tenantA, conceptID, "atomic-payment", chargeID, student, cycleOne, 10000, 0, today)
 	repo := appRepo(t, tenantA)
 
-	_, first, _, err := repo.RegisterPayment(ctx, newPayment(t, "f0000000-0000-0000-0000-0000000000b1", tenantA, chargeID, 4000, paidAt), derive, nil)
+	_, first, _, err := repo.RegisterPayment(ctx, one(newPayment(t, "f0000000-0000-0000-0000-0000000000b1", tenantA, chargeID, 4000, paidAt)), derive, nil)
 	if err != nil {
 		t.Fatalf("first payment: %v", err)
 	}
@@ -415,7 +418,7 @@ func TestRegisterPaymentIsAtomicAndDerivesStatus(t *testing.T) {
 		t.Errorf("after 4000: paid = %d, status = %q; want 4000 / partially_paid", first.PaidCents, first.Charge.Status())
 	}
 
-	_, second, _, err := repo.RegisterPayment(ctx, newPayment(t, "f0000000-0000-0000-0000-0000000000b2", tenantA, chargeID, 6000, paidAt.Add(time.Hour)), derive, nil)
+	_, second, _, err := repo.RegisterPayment(ctx, one(newPayment(t, "f0000000-0000-0000-0000-0000000000b2", tenantA, chargeID, 6000, paidAt.Add(time.Hour))), derive, nil)
 	if err != nil {
 		t.Fatalf("second payment: %v", err)
 	}
@@ -424,7 +427,7 @@ func TestRegisterPaymentIsAtomicAndDerivesStatus(t *testing.T) {
 	}
 
 	// One cent more than owed: derive vetoes it and the transaction rolls back.
-	if _, _, _, err := repo.RegisterPayment(ctx, newPayment(t, "f0000000-0000-0000-0000-0000000000b3", tenantA, chargeID, 1, paidAt.Add(2*time.Hour)), derive, nil); err == nil {
+	if _, _, _, err := repo.RegisterPayment(ctx, one(newPayment(t, "f0000000-0000-0000-0000-0000000000b3", tenantA, chargeID, 1, paidAt.Add(2*time.Hour))), derive, nil); err == nil {
 		t.Fatal("overpay was accepted; derive must veto it")
 	}
 	if n := countPayments(t, tenantA, chargeID); n != 2 {
@@ -464,7 +467,7 @@ func TestRegisterPaymentRejectsCancelled(t *testing.T) {
 		t.Fatalf("stored status = %q, want cancelled", saved.Status())
 	}
 
-	if _, _, _, err := repo.RegisterPayment(ctx, newPayment(t, "f0000000-0000-0000-0000-0000000000b4", tenantA, chargeID, 1000, paidAt), derive, nil); err == nil {
+	if _, _, _, err := repo.RegisterPayment(ctx, one(newPayment(t, "f0000000-0000-0000-0000-0000000000b4", tenantA, chargeID, 1000, paidAt)), derive, nil); err == nil {
 		t.Fatal("payment against a cancelled charge was accepted")
 	}
 	if n := countPayments(t, tenantA, chargeID); n != 0 {
@@ -498,7 +501,7 @@ func TestRegisterPaymentIsIdempotent(t *testing.T) {
 	repo := appRepo(t, tenantA)
 
 	stored, first, replayed, err := repo.RegisterPayment(ctx,
-		newKeyedPayment(t, firstID, tenantA, chargeID, 4000, paidAt, "attempt-1"), derive, nil)
+		one(newKeyedPayment(t, firstID, tenantA, chargeID, 4000, paidAt, "attempt-1")), derive, nil)
 	if err != nil {
 		t.Fatalf("first payment: %v", err)
 	}
@@ -512,15 +515,15 @@ func TestRegisterPaymentIsIdempotent(t *testing.T) {
 	// The same attempt again — a retry after a lost response. It must return the
 	// payment already stored, NOT a new one.
 	again, second, replayed, err := repo.RegisterPayment(ctx,
-		newKeyedPayment(t, retryID, tenantA, chargeID, 4000, paidAt.Add(time.Minute), "attempt-1"), derive, nil)
+		one(newKeyedPayment(t, retryID, tenantA, chargeID, 4000, paidAt.Add(time.Minute), "attempt-1")), derive, nil)
 	if err != nil {
 		t.Fatalf("retry: %v", err)
 	}
 	if !replayed {
 		t.Error("retry did not report a replay")
 	}
-	if again.ID() != stored.ID() {
-		t.Errorf("retry returned payment %q, want the original %q", again.ID(), stored.ID())
+	if len(again) != 1 || again[0].ID() != stored[0].ID() {
+		t.Errorf("retry returned %+v, want the original %q", again, stored[0].ID())
 	}
 	if second.PaidCents != 4000 || second.Charge.Status() != domain.StatusPartiallyPaid {
 		t.Errorf("after retry: paid = %d, status = %q; want the charge untouched at 4000 / partially_paid",
@@ -533,14 +536,14 @@ func TestRegisterPaymentIsIdempotent(t *testing.T) {
 	// A different key is a different attempt, and an absent key opts out of
 	// deduplication entirely — both still collect.
 	if _, _, replayed, err = repo.RegisterPayment(ctx,
-		newKeyedPayment(t, otherID, tenantA, chargeID, 3000, paidAt.Add(time.Hour), "attempt-2"), derive, nil); err != nil {
+		one(newKeyedPayment(t, otherID, tenantA, chargeID, 3000, paidAt.Add(time.Hour), "attempt-2")), derive, nil); err != nil {
 		t.Fatalf("second attempt: %v", err)
 	}
 	if replayed {
 		t.Error("a distinct key was treated as a replay")
 	}
 	_, third, _, err := repo.RegisterPayment(ctx,
-		newPayment(t, keylessID, tenantA, chargeID, 3000, paidAt.Add(2*time.Hour)), derive, nil)
+		one(newPayment(t, keylessID, tenantA, chargeID, 3000, paidAt.Add(2*time.Hour))), derive, nil)
 	if err != nil {
 		t.Fatalf("keyless payment: %v", err)
 	}
@@ -707,7 +710,7 @@ func TestGetAccountBalanceMath(t *testing.T) {
 	seedConceptAndCharge(t, tenantA, conceptTwo, "balance-uniform", chargeTwo, student, cycleOne, 5000, 0, tomorrow())
 
 	repo := appRepo(t, tenantA)
-	if _, _, _, err := repo.RegisterPayment(ctx, newPayment(t, "f0000000-0000-0000-0000-0000000000d1", tenantA, chargeOne, 3000, paidAt), derive, nil); err != nil {
+	if _, _, _, err := repo.RegisterPayment(ctx, one(newPayment(t, "f0000000-0000-0000-0000-0000000000d1", tenantA, chargeOne, 3000, paidAt)), derive, nil); err != nil {
 		t.Fatalf("partial payment: %v", err)
 	}
 
@@ -765,7 +768,7 @@ func TestListOverdueSelectsPastDueWithBalance(t *testing.T) {
 	seed(cancelledID, "50000000-0000-0000-0000-0000000000e4", yesterday())
 
 	// Past due but fully collected: no balance, so not overdue.
-	if _, _, _, err := repo.RegisterPayment(ctx, newPayment(t, "f0000000-0000-0000-0000-0000000000e3", tenantA, settledID, 1000, paidAt), derive, nil); err != nil {
+	if _, _, _, err := repo.RegisterPayment(ctx, one(newPayment(t, "f0000000-0000-0000-0000-0000000000e3", tenantA, settledID, 1000, paidAt)), derive, nil); err != nil {
 		t.Fatalf("settle charge: %v", err)
 	}
 	// Past due but withdrawn by the school: cancelled is never overdue.
@@ -976,7 +979,7 @@ func TestCancelChargeIfUnpaidRefusesCollectedMoney(t *testing.T) {
 		t.Fatalf("seed charge: %v", err)
 	}
 	if _, _, _, err := repo.RegisterPayment(ctx,
-		newPayment(t, "e0000000-0000-0000-0000-00000000ab07", tenantA, chargeID, 89000, paidAt), derive, nil); err != nil {
+		one(newPayment(t, "e0000000-0000-0000-0000-00000000ab07", tenantA, chargeID, 89000, paidAt)), derive, nil); err != nil {
 		t.Fatalf("cashier collects: %v", err)
 	}
 
@@ -1067,12 +1070,12 @@ func TestRescheduleUnpaidMovesOnlyWhatItShould(t *testing.T) {
 
 	// The second one is settled, so it is history. The fourth carries an abono
 	// and is still owing, so it moves (T5).
-	if _, _, _, err := repo.RegisterPayment(ctx, newPayment(t, "f0000000-0000-0000-0000-0000000000c2",
-		tenantA, paid.ID(), 8000, today), derive, nil); err != nil {
+	if _, _, _, err := repo.RegisterPayment(ctx, one(newPayment(t, "f0000000-0000-0000-0000-0000000000c2",
+		tenantA, paid.ID(), 8000, today)), derive, nil); err != nil {
 		t.Fatalf("seed payment: %v", err)
 	}
-	if _, _, _, err := repo.RegisterPayment(ctx, newPayment(t, "f0000000-0000-0000-0000-0000000000c4",
-		tenantA, partly.ID(), 1000, today), derive, nil); err != nil {
+	if _, _, _, err := repo.RegisterPayment(ctx, one(newPayment(t, "f0000000-0000-0000-0000-0000000000c4",
+		tenantA, partly.ID(), 1000, today)), derive, nil); err != nil {
 		t.Fatalf("seed abono: %v", err)
 	}
 

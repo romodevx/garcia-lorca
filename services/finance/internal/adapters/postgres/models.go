@@ -165,6 +165,24 @@ type depositModel struct {
 
 func (depositModel) TableName() string { return "deposits" }
 
+// depositTenderModel is the GORM row for `deposit_tenders` (T8, migration
+// 0021): one method a deposit came in by, in the order the cashier listed it.
+// The table is the source of truth for "how was this paid"; deposits.method
+// and deposits.card_type are a summary written beside it.
+type depositTenderModel struct {
+	// The database mints the id: a tender has no domain identity.
+	ID          string `gorm:"column:id;primaryKey;default:gen_random_uuid()"`
+	TenantID    string `gorm:"column:tenant_id"`
+	DepositID   string `gorm:"column:deposit_id"`
+	Position    int    `gorm:"column:position"`
+	Method      string `gorm:"column:method"`
+	AmountCents int64  `gorm:"column:amount_cents"`
+	Reference   string `gorm:"column:reference"`
+	CardType    string `gorm:"column:card_type"`
+}
+
+func (depositTenderModel) TableName() string { return "deposit_tenders" }
+
 // outboxModel is the GORM row for `finance_outbox`: a domain event queued in
 // the same transaction that produced it, waiting to be published.
 type outboxModel struct {

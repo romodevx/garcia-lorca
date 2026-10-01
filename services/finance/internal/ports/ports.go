@@ -214,6 +214,9 @@ type IncomeLine struct {
 	ConceptID   string
 	Concept     string
 	AmountCents int64
+	// CreditNote marks what credit notes settled on the concept (T8): the
+	// use case reports it apart, because no money came in.
+	CreditNote bool
 }
 
 // ReceiptLine is one concept a deposit paid, as its receipt prints it (task 12).
@@ -441,12 +444,16 @@ type FinanceRepository interface {
 	// returns the events this payment produced. Queuing them here rather than
 	// publishing after the commit is what stops an event being lost when the
 	// broker is down or the container dies in between.
+	//
+	// T8: ps is one payment per tender of a combined payment, all against the
+	// same charge; derive sees their sum. The first row's key identifies the
+	// set: a replay returns every row stored under it ("key", "key#2", …).
 	RegisterPayment(
 		ctx context.Context,
-		p domain.Payment,
+		ps []domain.Payment,
 		derive func(charge domain.Charge, newPaidCents int64) (status string, err error),
 		outbox func(charge ChargeWithPaid) []OutboxEvent,
-	) (stored domain.Payment, charge ChargeWithPaid, replayed bool, err error)
+	) (stored []domain.Payment, charge ChargeWithPaid, replayed bool, err error)
 	// ListPayments returns every payment posted against the student's charges,
 	// for the account statement.
 	ListPayments(ctx context.Context, studentID string) ([]domain.Payment, error)

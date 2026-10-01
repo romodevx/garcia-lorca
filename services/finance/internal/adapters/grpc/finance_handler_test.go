@@ -148,7 +148,7 @@ func (f *fakeRepo) ListDeposits(_ context.Context, _ string) ([]domain.Deposit, 
 }
 
 func (f *fakeRepo) ListDepositsOn(_ context.Context, _ time.Time) ([]domain.Deposit, error) {
-	return nil, nil
+	return f.deposits, nil
 }
 
 func (f *fakeRepo) ListLoosePaymentsOn(_ context.Context, _ time.Time) ([]ports.LoosePayment, error) {
@@ -282,29 +282,41 @@ func (f *fakeRepo) SaveCharge(_ context.Context, c domain.Charge) (domain.Charge
 // the total the new payment would bring the charge to, and aborts on its error.
 func (f *fakeRepo) RegisterPayment(
 	_ context.Context,
-	p domain.Payment,
+	ps []domain.Payment,
 	derive func(charge domain.Charge, newPaidCents int64) (string, error),
 	_ func(charge ports.ChargeWithPaid) []ports.OutboxEvent,
-) (domain.Payment, ports.ChargeWithPaid, bool, error) {
-	charge, ok := f.charges[p.ChargeID()]
+) ([]domain.Payment, ports.ChargeWithPaid, bool, error) {
+	first := ps[0]
+	charge, ok := f.charges[first.ChargeID()]
 	if !ok {
-		return domain.Payment{}, ports.ChargeWithPaid{}, false, glerrors.ErrNotFound
+		return nil, ports.ChargeWithPaid{}, false, glerrors.ErrNotFound
 	}
-	if original, found := f.byIdempotencyKey(p.IdempotencyKey()); found {
-		return original, ports.ChargeWithPaid{Charge: charge, PaidCents: f.paidFor(p.ChargeID())}, true, nil
+	if original, found := f.byIdempotencyKey(first.IdempotencyKey()); found {
+		set := []domain.Payment{original}
+		for i := 2; ; i++ {
+			next, more := f.byIdempotencyKey(fmt.Sprintf("%s#%d", first.IdempotencyKey(), i))
+			if !more {
+				break
+			}
+			set = append(set, next)
+		}
+		return set, ports.ChargeWithPaid{Charge: charge, PaidCents: f.paidFor(first.ChargeID())}, true, nil
 	}
-	newPaid := f.paidFor(p.ChargeID()) + p.Amount().Int64()
+	newPaid := f.paidFor(first.ChargeID())
+	for _, p := range ps {
+		newPaid += p.Amount().Int64()
+	}
 	status, err := derive(charge, newPaid)
 	if err != nil {
-		return domain.Payment{}, ports.ChargeWithPaid{}, false, err
+		return nil, ports.ChargeWithPaid{}, false, err
 	}
-	f.payments[p.ChargeID()] = append(f.payments[p.ChargeID()], p)
+	f.payments[first.ChargeID()] = append(f.payments[first.ChargeID()], ps...)
 	updated := charge.WithStatus(newPaid)
 	if updated.Status() != status {
-		return domain.Payment{}, ports.ChargeWithPaid{}, false, fmt.Errorf("derive said %q but the charge derived %q", status, updated.Status())
+		return nil, ports.ChargeWithPaid{}, false, fmt.Errorf("derive said %q but the charge derived %q", status, updated.Status())
 	}
 	f.charges[updated.ID()] = updated
-	return p, ports.ChargeWithPaid{Charge: updated, PaidCents: newPaid}, false, nil
+	return ps, ports.ChargeWithPaid{Charge: updated, PaidCents: newPaid}, false, nil
 }
 
 // byIdempotencyKey finds a payment already posted under key; an empty key never

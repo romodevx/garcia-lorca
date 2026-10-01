@@ -379,27 +379,31 @@ func (f *fakeRepo) SaveCharge(_ context.Context, c domain.Charge) (domain.Charge
 // nothing, exactly like the real transaction.
 func (f *fakeRepo) RegisterPayment(
 	_ context.Context,
-	p domain.Payment,
+	ps []domain.Payment,
 	derive func(charge domain.Charge, newPaidCents int64) (string, error),
 	outbox func(charge ports.ChargeWithPaid) []ports.OutboxEvent,
-) (domain.Payment, ports.ChargeWithPaid, bool, error) {
-	c, ok := f.charges[p.ChargeID()]
+) ([]domain.Payment, ports.ChargeWithPaid, bool, error) {
+	first := ps[0]
+	c, ok := f.charges[first.ChargeID()]
 	if !ok {
-		return domain.Payment{}, ports.ChargeWithPaid{}, false, glerrors.ErrNotFound
+		return nil, ports.ChargeWithPaid{}, false, glerrors.ErrNotFound
 	}
-	if existing, found := f.byIdempotencyKey(p.IdempotencyKey()); found {
-		replayedCharge := f.charges[existing.ChargeID()]
-		paid := f.paidFor(existing.ChargeID())
+	if existing := f.paymentSetByKey(first.IdempotencyKey()); len(existing) > 0 {
+		replayedCharge := f.charges[existing[0].ChargeID()]
+		paid := f.paidFor(existing[0].ChargeID())
 		return existing, ports.ChargeWithPaid{Charge: replayedCharge, PaidCents: paid}, true, nil
 	}
-	newPaid := f.paidFor(p.ChargeID()) + p.Amount().Int64()
+	newPaid := f.paidFor(first.ChargeID())
+	for _, p := range ps {
+		newPaid += p.Amount().Int64()
+	}
 	status, err := derive(c, newPaid)
 	if err != nil {
 		// The transaction aborts: neither the payment nor the status is stored.
-		return domain.Payment{}, ports.ChargeWithPaid{}, false, err
+		return nil, ports.ChargeWithPaid{}, false, err
 	}
 	f.lastDerivedStatus = status
-	f.payments[p.ChargeID()] = append(f.payments[p.ChargeID()], p)
+	f.payments[first.ChargeID()] = append(f.payments[first.ChargeID()], ps...)
 	// WithStatus re-derives from the same total, so it yields exactly the status
 	// the callback returned — recorded above for the tests to assert on.
 	updated := c.WithStatus(newPaid)
@@ -408,7 +412,24 @@ func (f *fakeRepo) RegisterPayment(
 	if outbox != nil {
 		f.outbox = append(f.outbox, outbox(result)...)
 	}
-	return p, result, false, nil
+	return ps, result, false, nil
+}
+
+// paymentSetByKey is the rows stored under key and, for a combined payment,
+// under "key#2", "key#3"…, in that order — as the repository reads them.
+func (f *fakeRepo) paymentSetByKey(key string) []domain.Payment {
+	first, found := f.byIdempotencyKey(key)
+	if !found {
+		return nil
+	}
+	out := []domain.Payment{first}
+	for i := 2; ; i++ {
+		next, more := f.byIdempotencyKey(fmt.Sprintf("%s#%d", key, i))
+		if !more {
+			return out
+		}
+		out = append(out, next)
+	}
 }
 
 // RegisterDeposit mirrors the real repository closely enough to be worth
@@ -564,7 +585,11 @@ func (f *fakeRepo) UnallocatedCents(_ context.Context, studentID string) (int64,
 
 func (f *fakeRepo) IncomeLines(_ context.Context, from, to time.Time) ([]ports.IncomeLine, error) {
 	end := to.AddDate(0, 0, 1)
-	byConcept := map[string]int64{}
+	type key struct {
+		concept    string
+		creditNote bool
+	}
+	byConcept := map[key]int64{}
 	for chargeID, ps := range f.payments {
 		charge, ok := f.charges[chargeID]
 		if !ok || charge.Status() == domain.StatusCancelled {
@@ -574,15 +599,16 @@ func (f *fakeRepo) IncomeLines(_ context.Context, from, to time.Time) ([]ports.I
 			if p.PaidAt().Before(from) || !p.PaidAt().Before(end) {
 				continue
 			}
-			byConcept[charge.ConceptID()] += p.Amount().Int64()
+			byConcept[key{charge.ConceptID(), p.Method() == domain.MethodCreditNote}] += p.Amount().Int64()
 		}
 	}
 	out := make([]ports.IncomeLine, 0, len(byConcept))
-	for conceptID, cents := range byConcept {
+	for k, cents := range byConcept {
 		out = append(out, ports.IncomeLine{
-			ConceptID:   conceptID,
-			Concept:     f.concepts[conceptID].Name(),
+			ConceptID:   k.concept,
+			Concept:     f.concepts[k.concept].Name(),
 			AmountCents: cents,
+			CreditNote:  k.creditNote,
 		})
 	}
 	return out, nil

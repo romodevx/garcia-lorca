@@ -275,7 +275,7 @@ func TestIncomeLinesGroupsCollectedMoneyByConcept(t *testing.T) {
 	repo := appRepo(t, tenant)
 	paidOn := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
 	if _, _, _, err := repo.RegisterPayment(context.Background(),
-		newPayment(t, "91000000-0000-0000-0000-000000000061", tenant, charge.ID(), 200000, paidOn), derive, nil); err != nil {
+		one(newPayment(t, "91000000-0000-0000-0000-000000000061", tenant, charge.ID(), 200000, paidOn)), derive, nil); err != nil {
 		t.Fatalf("RegisterPayment: %v", err)
 	}
 
@@ -900,7 +900,7 @@ func TestListLoosePaymentsOnReadsOnlyPaymentsOutsideADeposit(t *testing.T) {
 
 	repo := appRepo(t, tenant)
 	if _, _, _, err := repo.RegisterPayment(context.Background(),
-		newPayment(t, "91000000-0000-0000-0000-0000000000c7", tenant, loose.ID(), 135000, paidOn), derive, nil); err != nil {
+		one(newPayment(t, "91000000-0000-0000-0000-0000000000c7", tenant, loose.ID(), 135000, paidOn)), derive, nil); err != nil {
 		t.Fatalf("RegisterPayment: %v", err)
 	}
 	dep := newDeposit(t, "62000000-0000-0000-0000-0000000000c8", tenant, student, 250000, paidOn, "")
