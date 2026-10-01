@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { getStatement, StatementError, statementPdf } from "./statement";
+import { downloadBlob } from "../_lib/downloadBlob";
+import { downloadStatementPdf, getStatement, StatementError, statementPdf } from "./statement";
+
+vi.mock("../_lib/downloadBlob", () => ({ downloadBlob: vi.fn() }));
 
 const BASE = "http://gw";
 
@@ -74,12 +77,8 @@ describe("downloadStatementPdf", () => {
       status: 200,
       headers: { "Content-Disposition": 'attachment; filename="estado-de-cuenta-2026-10-01.pdf"' },
     })));
-    const blobs = await import("../_lib/downloadBlob");
-    const spy = vi.spyOn(blobs, "downloadBlob").mockImplementation(() => {});
-    const { downloadStatementPdf } = await import("./statement");
-
     await downloadStatementPdf(BASE, "st-1");
 
-    expect(spy).toHaveBeenCalledWith(expect.any(Blob), "estado-de-cuenta-2026-10-01.pdf");
+    expect(vi.mocked(downloadBlob)).toHaveBeenCalledWith(expect.anything(), "estado-de-cuenta-2026-10-01.pdf");
   });
 });
