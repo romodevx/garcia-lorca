@@ -24,6 +24,15 @@
 
 /** How often a concept is charged. */
 import { authFetch } from "../auth/authFetch";
+import {
+  fromWireExpense,
+  fromWireTotals,
+  toClosure,
+  type CashCutClosure,
+  type Expense,
+  type MethodTotals,
+  type WireExpense,
+} from "../expenses/api";
 
 export type Recurrence = "once" | "monthly";
 
@@ -683,6 +692,17 @@ export interface CashUp {
   totalCents: number;
   /** Credit notes taken that day (T8). NOT money: in no other figure here. */
   creditNoteCents: number;
+  /** T10 — the day's expenses (cancelled ones listed, not counted). */
+  expenses?: Expense[];
+  expensesByMethod?: MethodTotals;
+  /** T10 — the cash the drawer should hold: cash in − cash out. */
+  expectedCashCents?: number;
+  /** T10 — the day's live closure; absent while the day is open. */
+  closure?: CashCutClosure;
+  /** T10 — a movement of the day changed after it was closed. */
+  modifiedAfterClose?: boolean;
+  /** T10 — earlier closures of the day that were reopened, newest first. */
+  reopened?: CashCutClosure[];
 }
 
 /** A payment taken outside a deposit, with what it paid for. */
@@ -711,6 +731,12 @@ export async function getCashUp(baseURL: string, day: string): Promise<CashUp> {
     transferCents?: number;
     totalCents?: number;
     creditNoteCents?: number;
+    expenses?: WireExpense[];
+    expensesByMethod?: Partial<MethodTotals>;
+    expectedCashCents?: number;
+    closure?: CashCutClosure;
+    modifiedAfterClose?: boolean;
+    reopened?: CashCutClosure[];
   }>(baseURL, day === "" ? "/cash-up" : `/cash-up?day=${encodeURIComponent(day)}`);
   return {
     deposits: (res.deposits ?? []).map(toDeposit),
@@ -722,6 +748,12 @@ export async function getCashUp(baseURL: string, day: string): Promise<CashUp> {
     transferCents: res.transferCents ?? 0,
     totalCents: res.totalCents ?? 0,
     creditNoteCents: res.creditNoteCents ?? 0,
+    expenses: (res.expenses ?? []).map(fromWireExpense),
+    expensesByMethod: fromWireTotals(res.expensesByMethod),
+    expectedCashCents: res.expectedCashCents ?? res.cashCents ?? 0,
+    ...(res.closure !== undefined ? { closure: toClosure(res.closure) } : {}),
+    modifiedAfterClose: res.modifiedAfterClose ?? false,
+    reopened: (res.reopened ?? []).map(toClosure),
   };
 }
 

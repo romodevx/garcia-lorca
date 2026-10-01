@@ -86,6 +86,15 @@ export const PERMISSION_CATALOG: readonly PermissionGroup[] = [
     ],
   },
   {
+    // T10: the Egresos module. Both delegable (owner answer 7); reopening a
+    // closed cut stays the director's (finance:write, owner-only here).
+    resource: "Egresos",
+    permissions: [
+      { value: "expenses:read", label: "Ver egresos, balance y reportes" },
+      { value: "expenses:write", label: "Registrar egresos y cerrar el corte" },
+    ],
+  },
+  {
     // The Maestro (teacher) role: self-scoped capture over ONLY the teacher's own
     // assigned groups, distinct from the school-wide grades:* above.
     resource: "Docencia",

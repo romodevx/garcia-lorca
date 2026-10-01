@@ -14,6 +14,8 @@ import { TeacherLoadScreen } from "./_screens/teachers/TeacherLoadScreen";
 import { TeachersScreen } from "./_screens/teachers/TeachersScreen";
 import { canEditTeachingLoad, canGrantTeacherAccess, canListUsers } from "./teachers/permissions";
 import { UniformsScreen } from "./_screens/uniforms/UniformsScreen";
+import { ExpensesScreen } from "./_screens/expenses/ExpensesScreen";
+import type { CutAccess } from "./_screens/finance/CashCutClosing";
 import { FinanceScreen } from "./_screens/finance/FinanceScreen";
 import { Catalog } from "./_screens/config/Catalog";
 import { LevelDeleteScreen } from "./_screens/config/levelDeletion/LevelDeleteScreen";
@@ -224,6 +226,8 @@ export function AppShell(): ReactElement {
   const adminEnabled = useFlag("module_iam");
   const teachersEnabled = useFlag("module_teachers");
   const uniformsEnabled = useFlag("module_uniforms");
+  // T10: Egresos. Its data lives in finance, so both flags must be on.
+  const expensesEnabled = useFlag("module_expenses") && financeEnabled;
 
   /**
    * Arranque: las cookies de sesión son HttpOnly (el JavaScript no las ve), así
@@ -451,6 +455,13 @@ export function AppShell(): ReactElement {
   // T9: correcting a registered payment (payments:edit — the owner's by default,
   // delegable). UX only: the gateway refuses the correction without it.
   const canCorrectPayments = financeEnabled && principal?.permissions?.includes("payments:edit") === true;
+  // T10: the cut shows what went out and closes with expenses:write; the
+  // director (finance:write) reopens a closed day. UX only.
+  const cutAccess = useMemo<CutAccess | undefined>(() => {
+    if (!expensesEnabled) return undefined;
+    const perms = principal?.permissions ?? [];
+    return { expenses: true, canClose: perms.includes("expenses:write"), canReopen: perms.includes("finance:write") };
+  }, [expensesEnabled, principal]);
   // Owner-only (levels:delete). UX only: the gateway refuses the delete without it.
   const mayDeleteLevels = canDeleteLevels(principal?.permissions);
   const openLevelDelete = (levelId: string): void => go({ screen: "levelDelete", levelId });
@@ -497,6 +508,10 @@ export function AppShell(): ReactElement {
     }
     if (id === "uniforms") {
       go({ screen: "uniforms" });
+      return;
+    }
+    if (id === "expenses") {
+      go({ screen: "expenses" });
       return;
     }
     if (id === "payments") {
@@ -596,7 +611,7 @@ export function AppShell(): ReactElement {
       )}
       {view.screen === "finance" &&
         (financeEnabled ? (
-          <FinanceScreen onBack={home} notes={notesAccess} canCorrectPayments={canCorrectPayments} />
+          <FinanceScreen onBack={home} notes={notesAccess} canCorrectPayments={canCorrectPayments} cutAccess={cutAccess} />
         ) : (
           // Flag OFF: do not render the finance surface; show the friendly stub
           // instead so navigation never dead-ends. (Backend 404 is authoritative.)
@@ -604,7 +619,7 @@ export function AppShell(): ReactElement {
         ))}
       {view.screen === "payments" &&
         (financeEnabled ? (
-          <PaymentsScreen onBack={home} canGrantDiscounts={principal?.permissions?.includes("finance:write") === true} notes={notesAccess} canCorrectPayments={canCorrectPayments} />
+          <PaymentsScreen onBack={home} canGrantDiscounts={principal?.permissions?.includes("finance:write") === true} notes={notesAccess} canCorrectPayments={canCorrectPayments} cutAccess={cutAccess} />
         ) : (
           <ModulePlaceholder m={MODULES.find((m) => m.id === "payments") as ModuleDef} onBack={home} />
         ))}
@@ -699,6 +714,14 @@ export function AppShell(): ReactElement {
           // Flag OFF: never render the shop; show the friendly stub so navigation
           // never dead-ends. (Backend 404 is authoritative.)
           <ModulePlaceholder m={MODULES.find((m) => m.id === "uniforms") as ModuleDef} onBack={home} />
+        ))}
+      {view.screen === "expenses" &&
+        (expensesEnabled ? (
+          <ExpensesScreen onBack={home} permissions={principal?.permissions} />
+        ) : (
+          // Flag OFF: never render the module; the friendly stub keeps
+          // navigation from dead-ending. (Backend 404 is authoritative.)
+          <ModulePlaceholder m={MODULES.find((m) => m.id === "expenses") as ModuleDef} onBack={home} />
         ))}
       {view.screen === "admin" &&
         (adminEnabled ? (

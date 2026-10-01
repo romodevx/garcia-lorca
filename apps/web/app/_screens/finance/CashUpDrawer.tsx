@@ -7,6 +7,7 @@ import { CorrectPaymentDrawer } from "../../_design/payments/CorrectPaymentDrawe
 import type { Deposit } from "../../finance/api";
 import { DateField } from "../../_design/form";
 import { localISODate } from "../../_lib/localDate";
+import type { CutAccess } from "./CashCutClosing";
 import { CashUpPanel } from "./CashUpPanel";
 
 export interface CashUpDrawerProps {
@@ -14,6 +15,8 @@ export interface CashUpDrawerProps {
   today?: string;
   /** May correct a registered payment (payments:edit, T9). UX only: the gateway decides. */
   canCorrect?: boolean;
+  /** T10: expenses and closing the day. Absent: module_expenses is off. */
+  cutAccess?: CutAccess;
   onClose: () => void;
 }
 
@@ -23,7 +26,7 @@ export interface CashUpDrawerProps {
  * closing the day — and any past day can be chosen, since a payment captured
  * late is dated the day the family paid and lands on that day's cut (task 7).
  */
-export function CashUpDrawer({ today, canCorrect = false, onClose }: CashUpDrawerProps): ReactElement {
+export function CashUpDrawer({ today, canCorrect = false, cutAccess, onClose }: CashUpDrawerProps): ReactElement {
   const cutToday = today ?? localISODate();
   const [cutDay, setCutDay] = useState(cutToday);
   // The receipt being corrected (T9): one dialog at a time, so the cut steps
@@ -49,7 +52,7 @@ export function CashUpDrawer({ today, canCorrect = false, onClose }: CashUpDrawe
     >
       <DateField label="Día del corte" value={cutDay} max={cutToday} onChange={(v) => v !== "" && setCutDay(v)} />
       {/* Today is asked as "" so the server keeps its own day, as before. */}
-      <CashUpPanel key={reads} day={cutDay === cutToday ? "" : cutDay} onCorrect={canCorrect ? setCorrecting : undefined} />
+      <CashUpPanel key={reads} day={cutDay === cutToday ? "" : cutDay} onCorrect={canCorrect ? setCorrecting : undefined} access={cutAccess} />
     </DrawerShell>
   );
 }

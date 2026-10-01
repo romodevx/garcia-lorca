@@ -229,6 +229,8 @@ export interface StatCardDef {
   value: string;
   sub: string;
   onClick?: () => void;
+  /** For tests and QA: the card's data-testid. */
+  testId?: string;
 }
 
 /**
@@ -247,6 +249,7 @@ export function StatCards({ cards }: { cards: readonly StatCardDef[] }): ReactEl
         return (
           <button
             key={card.label}
+            data-testid={card.testId}
             onClick={card.onClick}
             disabled={!clickable}
             style={{

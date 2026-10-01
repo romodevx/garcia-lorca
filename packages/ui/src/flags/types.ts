@@ -18,7 +18,8 @@ export type FlagKey =
   | "module_teachers"
   | "module_uniforms"
   | "module_reports"
-  | "module_student_card";
+  | "module_student_card"
+  | "module_expenses";
 
 /** Map of flag key -> enabled. Absent or false means OFF (flags default OFF). */
 export type FlagSet = Partial<Record<FlagKey, boolean>>;
