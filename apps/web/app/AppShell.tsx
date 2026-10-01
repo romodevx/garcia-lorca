@@ -22,7 +22,7 @@ import { canDeleteLevels } from "./config/permissions";
 import { canDeleteUsers } from "./admin/permissions";
 import { AdminScreen } from "./_screens/admin/AdminScreen";
 import { StudentEditScreen } from "./_screens/students/StudentEditScreen";
-import { StudentsScreen } from "./_screens/students/StudentsScreen";
+import { StudentsScreen, markStudentsVisit, studentsListPath } from "./_screens/students/StudentsScreen";
 import { GradesScreen } from "./_screens/grades/GradesScreen";
 import { Login } from "./_screens/Login";
 import { ChangePassword } from "./_screens/ChangePassword";
@@ -107,7 +107,17 @@ export function AppShell(): ReactElement {
   const addressedView = useMemo(() => pathToView(pathname), [pathname]);
 
   /** Navegar dejando huella: "atrás" regresa aquí. */
-  const go = useCallback((next: View): void => { router.push(viewToPath(next)); }, [router]);
+  // Each deliberate visit to Estudiantes counts: the list is keyed on it, so it
+  // starts fresh even when the address does not change screens (Estudiantes
+  // from the palette while /alumnos?nivel=… is open must drop the filters the
+  // URL just dropped). Other screens do not count: no wasted remounts.
+  const [visit, setVisit] = useState(0);
+  const go = useCallback((next: View): void => {
+    const toStudents = next.screen === "students";
+    markStudentsVisit(toStudents);
+    if (toStudents) setVisit((v) => v + 1);
+    router.push(viewToPath(next));
+  }, [router]);
 
   /**
    * Navegar SIN dejar huella. Para las pantallas a las que no vale la pena
@@ -608,12 +618,14 @@ export function AppShell(): ReactElement {
           studentId={view.studentId}
           userId={principal?.userId ?? ""}
           permissions={principal?.permissions}
-          onBack={() => go({ screen: "students" })}
+          // Back to the list as it was left: level, grade, group and search (T4).
+          onBack={() => router.push(studentsListPath())}
         />
       )}
       {(view.screen === "students" || (view.screen === "studentEdit" && !(studentsEnabled && canEditStudents))) &&
         (studentsEnabled ? (
           <StudentsScreen
+            key={visit}
             onBack={home}
             onEdit={canEditStudents ? editStudent : undefined}
             canWriteNotes={principal?.permissions?.includes("students:notes_write") === true}

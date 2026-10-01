@@ -15,6 +15,7 @@ import { StudentsScreen } from "./StudentsScreen";
 vi.mock("../../students/api", async (importOriginal) => ({
   ...(await importOriginal<typeof studentsApi>()),
   listStudents: vi.fn(),
+  listEnrollments: vi.fn(),
 }));
 vi.mock("../../config/api", () => ({
   listCycles: vi.fn(),
@@ -40,6 +41,9 @@ const pupil = (id: string, first: string, level: string, gradeGroup: string): st
 });
 
 beforeEach(() => {
+  // The list keeps its view in the URL (T4): every test starts from a clean one.
+  window.history.replaceState(null, "", "/alumnos");
+  students.listEnrollments.mockResolvedValue([]);
   students.listStudents.mockResolvedValue([
     pupil("1", "Regina", "SECUNDARIA", "A"),
     pupil("2", "Diego", "", ""),
@@ -58,7 +62,7 @@ describe("StudentsScreen — alumnos sin nivel (nivel eliminado)", () => {
     render(<StudentsScreen onBack={() => {}} />);
     await screen.findByText("Prueba Diego");
 
-    expect(screen.getByRole("button", { name: "Sin nivel" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Sin nivel/ })).toBeInTheDocument();
     expect(screen.getByTestId("per-group")).toHaveTextContent("Sin grupo");
     expect(screen.getAllByText("Sin nivel").length).toBeGreaterThan(1);
   });
@@ -68,7 +72,7 @@ describe("StudentsScreen — alumnos sin nivel (nivel eliminado)", () => {
     render(<StudentsScreen onBack={() => {}} />);
     await screen.findByText("Prueba Diego");
 
-    await user.click(screen.getByRole("button", { name: "Sin nivel" }));
+    await user.click(screen.getByRole("button", { name: /^Sin nivel/ }));
 
     expect(screen.getByText("Prueba Diego")).toBeInTheDocument();
     expect(screen.getByText("Prueba Emilia")).toBeInTheDocument();

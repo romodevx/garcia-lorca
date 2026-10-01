@@ -43,6 +43,20 @@ test.describe("the school on a phone", () => {
     expect(overflow, "the uniforms screen scrolls sideways on a phone").toBeLessThanOrEqual(1);
   });
 
+  // T4: the status tabs and the six-column table pushed Estudiantes 116px
+  // sideways at 390px. The table now folds to checkbox, name and actions.
+  test("the students list and its filters fit a phone", async ({ page }) => {
+    await signIn(page);
+    await page.goto("/alumnos");
+    await expect(page.getByRole("heading", { name: "Estudiantes", level: 1 })).toBeVisible();
+    await expect(page.getByRole("group", { name: "Nivel" })).toBeVisible();
+
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(overflow, "the students screen scrolls sideways on a phone").toBeLessThanOrEqual(1);
+  });
+
   test("the order list answers on a phone as it does on a desktop", async ({ request }) => {
     // The narrow layout is a rendering choice, not a different query: the same
     // endpoint backs both, and this pins that it is still reachable and shaped.
