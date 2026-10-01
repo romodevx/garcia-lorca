@@ -23,7 +23,7 @@ const KIND_LOOK: Record<MovementKind, { icon: IconName; tint: TintName; label: s
   credit_note: { icon: "check-circle", tint: "forest", label: "Nota de crédito", credit: true },
 };
 
-const METHOD_LABEL: Record<string, string> = { cash: "Efectivo", card: "Tarjeta", transfer: "Transferencia" };
+const METHOD_LABEL: Record<string, string> = { cash: "Efectivo", card: "Tarjeta", transfer: "Transferencia", credit_note: "Nota de crédito" };
 
 const PDF_MESSAGES = {
   network: "No pudimos descargar el estado de cuenta. Revisa tu conexión e inténtalo de nuevo.",
@@ -36,7 +36,9 @@ const PDF_MESSAGES = {
 /** The row's second line: what the line is, its day, and how money came. */
 function subOf(m: FamilyMovement): string {
   const parts = [KIND_LOOK[m.kind]?.label ?? m.kind, formatDate(m.date)];
-  if (m.method) parts.push(METHOD_LABEL[m.method] ?? m.method);
+  const method = m.method ? (METHOD_LABEL[m.method] ?? m.method) : "";
+  // A credit note's method is its kind (T8): said once, not twice.
+  if (method !== parts[0]) parts.push(method);
   if (m.folio) parts.push(m.folio);
   return parts.filter(Boolean).join(" · ");
 }

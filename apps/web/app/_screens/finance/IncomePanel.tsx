@@ -45,6 +45,14 @@ export function IncomePanel({ from, to }: IncomePanelProps): ReactElement {
           {formatCents(income.totalCents)}
         </div>
         <p style={{ fontSize: 13, color: "var(--text-faint)", marginTop: 6 }}>{from} → {to}</p>
+        {income.creditNoteCents > 0 && (
+          // Credit notes settled debt in the period but are not income (T8):
+          // apart, and outside the total above.
+          <div data-testid="income-credit-notes" style={{ display: "flex", justifyContent: "space-between", gap: 12, marginTop: 14, paddingTop: 12, borderTop: "1px dashed var(--border)" }}>
+            <span style={{ fontSize: 14, color: "var(--text-muted)" }}>Notas de crédito aplicadas — no es ingreso</span>
+            <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 16, color: "var(--text-muted)" }}>{formatCents(income.creditNoteCents)}</span>
+          </div>
+        )}
       </div>
 
       {income.lines.length === 0

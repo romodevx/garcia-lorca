@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import { pesosToCents } from "../../_lib/money";
 import { Btn } from "../../_design/Controls";
-import { MoneyField } from "../../_design/form";
+import { MoneyField, useFocusFirstInvalid } from "../../_design/form";
+import { TenderEditor } from "../../_design/payments/TenderEditor";
+import { useTenders } from "../../_design/payments/useTenders";
 import { Icon } from "../../_design/Icon";
 import { SizeQuantityPicker, type SizePick } from "../../_design/SizeQuantityPicker";
 import { counterSale, UniformsError, type SaleLine, type UniformItem, type UniformOrder } from "../../uniforms/api";
@@ -45,8 +47,6 @@ export function CounterSalePanel({
   const [anonymous, setAnonymous] = useState(false);
   const [student, setStudent] = useState<Student | null>(null);
   const [note, setNote] = useState("");
-  const [method, setMethod] = useState<"cash" | "card" | "transfer">("cash");
-  const [reference, setReference] = useState("");
   const [received, setReceived] = useState("");
   const [pending, setPending] = useState(false);
   const [failure, setFailure] = useState<UniformsError | null>(null);
@@ -69,26 +69,39 @@ export function CounterSalePanel({
   const [saleKey, setSaleKey] = useState(() => newSaleKey());
 
   const total = useMemo(() => cart.reduce((sum, line) => sum + line.unitPriceCents * line.qty, 0), [cart]);
+  // How the sale is paid, method by method (T8). The server prices the sale and
+  // checks the tenders against its own total.
+  const tenders = useTenders(total);
+  const resetTenders = tenders.reset;
+  const focusFirstInvalid = useFocusFirstInvalid();
+  // The change is counted against what the CASH tenders cover: with a credit
+  // note paying part, the parent hands over cash for the rest only.
+  const cashDue = useMemo(
+    () => tenders.rows.reduce((sum, row) => {
+      const cents = row.method === "cash" ? pesosToCents(row.amount) : 0;
+      return Number.isFinite(cents) ? sum + cents : sum;
+    }, 0),
+    [tenders.rows],
+  );
   const change = useMemo(() => {
     // Estricto a propósito: el lector permisivo que había aquí leía "1850,50"
     // como 185050 pesos y anunciaba un cambio cien veces mayor del que hay en
     // la caja. Un monto que no se entiende no produce cambio.
     const paid = pesosToCents(received);
-    return !Number.isNaN(paid) && paid > total ? paid - total : 0;
-  }, [received, total]);
+    return !Number.isNaN(paid) && paid > cashDue ? paid - cashDue : 0;
+  }, [received, cashDue]);
 
   const reset = useCallback((): void => {
     setCart([]);
     setSelectedItem(null);
     setStudent(null);
     setNote("");
-    setReference("");
     setReceived("");
-    setMethod("cash");
+    resetTenders();
     setAnonymous(false);
     setFailure(null);
     setSaleKey(newSaleKey());
-  }, []);
+  }, [resetTenders]);
 
   // Every size chosen for the garment, in one go (task 11): a size already in
   // the cart grows, a new one joins it.
@@ -108,6 +121,12 @@ export function CounterSalePanel({
   }, []);
 
   const sell = useCallback(async (): Promise<void> => {
+    if (!tenders.validate()) {
+      focusFirstInvalid();
+      return;
+    }
+    const split = tenders.toTenders();
+    const [first] = split;
     setPending(true);
     setFailure(null);
     try {
@@ -124,8 +143,10 @@ export function CounterSalePanel({
           // correctly — had no idea what to do with it.
           studentId: anonymous ? undefined : (student?.id ?? ""),
           lines,
-          method,
-          reference: method === "cash" ? undefined : reference,
+          // The first tender, for a server that reads only one method.
+          method: first?.method ?? "cash",
+          reference: first?.reference,
+          tenders: split,
           note,
         },
         saleKey,
@@ -137,7 +158,7 @@ export function CounterSalePanel({
     } finally {
       setPending(false);
     }
-  }, [anonymous, cart, method, note, onSold, reference, saleKey, student]);
+  }, [anonymous, cart, focusFirstInvalid, note, onSold, saleKey, student, tenders]);
 
   // The account may run the storeroom without being allowed to take money. Say
   // so at the door, with the reason — not after six lines have been keyed in.
@@ -324,45 +345,8 @@ export function CounterSalePanel({
 
       <section style={{ display: "grid", gap: 12 }}>
         <p style={label}>4. Cobro</p>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {(["cash", "card", "transfer"] as const).map((m) => (
-            <button
-              key={m}
-              aria-pressed={method === m}
-              onClick={() => setMethod(m)}
-              style={{
-                height: 44,
-                padding: "0 18px",
-                borderRadius: 99,
-                fontWeight: 600,
-                fontSize: 14,
-                border: method === m ? "1.5px solid var(--forest)" : "1px solid var(--border)",
-                background: method === m ? "color-mix(in oklab, var(--forest) 12%, var(--surface))" : "var(--surface)",
-                color: method === m ? "var(--forest)" : "var(--text-muted)",
-              }}
-            >
-              {m === "cash" ? "Efectivo" : m === "card" ? "Tarjeta" : "Transferencia"}
-            </button>
-          ))}
-        </div>
-        {method !== "cash" && (
-          <div>
-          <FieldLabel
-            htmlFor="counter-ref"
-            help="El folio del voucher o el número de la transferencia: lo que te permita reconocer este cobro después."
-          >
-            Referencia
-          </FieldLabel>
-          <input
-            id="counter-ref"
-            style={field}
-            aria-describedby="counter-ref-help"
-            value={reference}
-            onChange={(e) => setReference(e.target.value)}
-          />
-          </div>
-        )}
-        {method === "cash" && cart.length > 0 && (
+        <TenderEditor tenders={tenders} />
+        {cashDue > 0 && (
           <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
             <div style={{ maxWidth: 180, minWidth: 0 }}>
               <MoneyField label="Efectivo recibido" value={received} onChange={setReceived} />

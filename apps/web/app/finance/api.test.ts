@@ -6,6 +6,7 @@ import {
   createConcept,
   generateCharges,
   getAccount,
+  getIncome,
   getOverdue,
   listCharges,
   listConcepts,
@@ -384,5 +385,36 @@ describe("charges write path", () => {
     expect(url).toBe("http://gw/api/v1/finance/charges/ch1/cancel");
     expect(init.method).toBe("POST");
     expect(init.body).toBeUndefined();
+  });
+});
+
+describe("registerPayment · tenders (tarea 8)", () => {
+  it("sends the breakdown and reads one payment per tender", async () => {
+    const second = { ...payment, id: "p2", method: "credit_note", amountCents: 50000 };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ payment, payments: [payment, second], charge }, 201));
+    vi.stubGlobal("fetch", fetchMock);
+    const tenders = [
+      { method: "cash" as const, amountCents: 185000 },
+      { method: "credit_note" as const, amountCents: 50000, reference: "NC-1" },
+    ];
+
+    const res = await registerPayment(BASE, { chargeId: "ch1", amountCents: 235000, method: "cash", reference: "", tenders });
+
+    expect(JSON.parse(lastCall(fetchMock)[1].body as string).tenders).toEqual(tenders);
+    expect(res.payments.map((p) => p.method)).toEqual(["cash", "credit_note"]);
+  });
+
+  it("reads a response without payments as the single one", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ payment, charge }, 201)));
+    const res = await registerPayment(BASE, { chargeId: "ch1", amountCents: 185000, method: "cash", reference: "" });
+    expect(res.payments).toEqual([payment]);
+  });
+});
+
+describe("getIncome · credit notes (tarea 8)", () => {
+  it("keeps the period's credit notes apart from the money", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ lines: [], totalCents: 100000, creditNoteCents: 50000 })));
+    const income = await getIncome(BASE, "2026-10-01", "2026-10-31");
+    expect(income).toEqual({ lines: [], totalCents: 100000, creditNoteCents: 50000 });
   });
 });

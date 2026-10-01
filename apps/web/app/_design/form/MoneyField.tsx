@@ -31,7 +31,7 @@ function withThousands(plain: string): string {
  * `pesosToCents` al guardar. Ningún flotante regresa.
  */
 export function MoneyField(props: BaseFieldProps): ReactElement {
-  const { label, value, onChange, required, error, onClearError, help, disabled } = props;
+  const { label, value, onChange, required, error, onClearError, help, disabled, onBlur } = props;
 
   const format = (): void => {
     if (value.trim() === "") return;
@@ -72,7 +72,10 @@ export function MoneyField(props: BaseFieldProps): ReactElement {
               onChange(e.target.value);
               onClearError?.();
             }}
-            onBlur={format}
+            onBlur={() => {
+              format();
+              onBlur?.();
+            }}
             style={{ ...inputStyle(error !== undefined), paddingLeft: PREFIX_WIDTH }}
           />
         </div>

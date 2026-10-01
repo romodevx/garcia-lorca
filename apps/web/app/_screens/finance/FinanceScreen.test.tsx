@@ -48,8 +48,8 @@ beforeEach(() => {
   finance.getOverdue.mockResolvedValue([]);
   finance.getAccount.mockResolvedValue({ charges: [], payments: [], totalBalanceCents: 0, unallocatedCents: 0, dueTodayCents: 0, surchargeCents: 0, earlyDiscountCents: 0, asOf: "" });
   finance.previewDeposit.mockResolvedValue({ allocations: [], surcharges: [], unallocatedCents: 0 });
-  finance.getCashUp.mockResolvedValue({ deposits: [], cancelled: [], payments: [], cashCents: 0, cardCents: 0, transferCents: 0, totalCents: 0 });
-  finance.getIncome.mockResolvedValue({ lines: [], totalCents: 0 });
+  finance.getCashUp.mockResolvedValue({ deposits: [], cancelled: [], payments: [], cashCents: 0, cardCents: 0, transferCents: 0, totalCents: 0, creditNoteCents: 0 });
+  finance.getIncome.mockResolvedValue({ lines: [], totalCents: 0, creditNoteCents: 0 });
 });
 afterEach(() => vi.clearAllMocks());
 
@@ -72,9 +72,9 @@ describe("FinanceScreen", () => {
 
     await user.click(screen.getAllByRole("button", { name: /Registrar pago/ })[0] as HTMLElement);
     const dialog = await screen.findByRole("dialog", { name: "Registrar pago" });
-    await user.clear(within(dialog).getByLabelText("Monto"));
-    await user.clear(within(dialog).getByLabelText("Monto"));
-    await user.type(within(dialog).getByLabelText("Monto"), "500");
+    await user.clear(within(dialog).getByLabelText("Monto a pagar", { selector: "input" }));
+    await user.clear(within(dialog).getByLabelText("Monto a pagar", { selector: "input" }));
+    await user.type(within(dialog).getByLabelText("Monto a pagar", { selector: "input" }), "500");
     await user.click(within(dialog).getByRole("button", { name: /Registrar pago/ }));
 
     await waitFor(() =>
@@ -135,8 +135,8 @@ describe("PayDrawer — money safety", () => {
     const user = await openDrawer();
 
     const dialog = screen.getByRole("dialog", { name: /Registrar pago/i });
-    await user.clear(within(dialog).getByLabelText("Monto"));
-    await user.type(within(dialog).getByLabelText("Monto"), "500");
+    await user.clear(within(dialog).getByLabelText("Monto a pagar", { selector: "input" }));
+    await user.type(within(dialog).getByLabelText("Monto a pagar", { selector: "input" }), "500");
     await user.click(within(dialog).getByRole("button", { name: /^Registrar pago$/i }));
 
     await waitFor(() => expect(finance.registerPayment).toHaveBeenCalled());
@@ -152,8 +152,8 @@ describe("PayDrawer — money safety", () => {
     const user = await openDrawer();
 
     const dialog = screen.getByRole("dialog", { name: /Registrar pago/i });
-    await user.clear(within(dialog).getByLabelText("Monto"));
-    await user.type(within(dialog).getByLabelText("Monto"), "500");
+    await user.clear(within(dialog).getByLabelText("Monto a pagar", { selector: "input" }));
+    await user.type(within(dialog).getByLabelText("Monto a pagar", { selector: "input" }), "500");
     const save = within(dialog).getByRole("button", { name: /^Registrar pago$/i });
     await user.click(save);
     await screen.findByText(/network|No se pudo/i);
@@ -193,13 +193,14 @@ describe("PayDrawer — money safety", () => {
     // silently threw away a typed amount.
     const user = await openDrawer();
     const dialog = screen.getByRole("dialog", { name: /Registrar pago/i });
-    await user.clear(within(dialog).getByLabelText("Monto"));
-    await user.type(within(dialog).getByLabelText("Monto"), "500");
+    await user.clear(within(dialog).getByLabelText("Monto a pagar", { selector: "input" }));
+    await user.type(within(dialog).getByLabelText("Monto a pagar", { selector: "input" }), "500");
 
     await user.click(screen.getByTestId("drawer-backdrop"));
 
     expect(screen.getByRole("dialog", { name: /Registrar pago/i })).toBeInTheDocument();
-    expect(within(dialog).getByLabelText("Monto")).toHaveValue("500");
+    // Leaving the field formats it (MoneyField); the amount itself survives.
+    expect(within(dialog).getByLabelText("Monto a pagar", { selector: "input" })).toHaveValue("500.00");
   });
 
   it("still closes on the backdrop when nothing has been typed", async () => {
@@ -217,7 +218,7 @@ describe("FinanceScreen — corte de caja", () => {
   it("opens the day's takings", async () => {
     const user = userEvent.setup();
     finance.getCashUp.mockResolvedValue({
-      deposits: [], cancelled: [], payments: [], cashCents: 320000, cardCents: 0, transferCents: 150000, totalCents: 470000,
+      deposits: [], cancelled: [], payments: [], cashCents: 320000, cardCents: 0, transferCents: 150000, totalCents: 470000, creditNoteCents: 0,
     });
     render(<FinanceScreen onBack={() => {}} />);
     await screen.findByText("Cruz Valentina");
@@ -235,7 +236,7 @@ describe("FinanceScreen — el corte de otro día (tarea 7)", () => {
   it("opens the cut of a day the office chooses", async () => {
     const user = userEvent.setup();
     finance.getCashUp.mockResolvedValue({
-      deposits: [], cancelled: [], payments: [], cashCents: 0, cardCents: 0, transferCents: 0, totalCents: 0,
+      deposits: [], cancelled: [], payments: [], cashCents: 0, cardCents: 0, transferCents: 0, totalCents: 0, creditNoteCents: 0,
     });
     render(<FinanceScreen onBack={() => {}} today="2026-10-12" />);
     await screen.findByText("Cruz Valentina");
@@ -305,5 +306,74 @@ describe("FinanceScreen — filtro por mes", () => {
 
     expect(await screen.findByText("Sánchez Mateo")).toBeInTheDocument();
     expect(screen.queryByText("Cruz Valentina")).not.toBeInTheDocument();
+  });
+});
+
+// T8: one charge, paid with a credit note and whatever completes it.
+describe("PayDrawer · nota de crédito + pago combinado (tarea 8)", () => {
+  async function openDrawer(): Promise<{ user: ReturnType<typeof userEvent.setup>; dialog: HTMLElement }> {
+    const user = userEvent.setup();
+    render(<FinanceScreen onBack={() => {}} />);
+    const rows = await screen.findAllByRole("button", { name: /Registrar pago/i });
+    await user.click(rows[0]!);
+    const dialog = await screen.findByRole("dialog", { name: /Registrar pago/i });
+    return { user, dialog };
+  }
+  const tenderRow = (dialog: HTMLElement, n: number): HTMLElement => within(dialog).getByRole("group", { name: `Forma de pago ${n}` });
+  const submit = (user: ReturnType<typeof userEvent.setup>, dialog: HTMLElement): Promise<void> =>
+    user.click(within(dialog).getByRole("button", { name: /^Registrar pago$/i }));
+
+  it("sends one cash tender for the charge's balance on the happy path", async () => {
+    finance.registerPayment.mockResolvedValue({} as financeApi.PaymentResult);
+    const { user, dialog } = await openDrawer();
+
+    await submit(user, dialog);
+
+    await waitFor(() => expect(finance.registerPayment).toHaveBeenCalled());
+    expect(finance.registerPayment.mock.calls[0]?.[1]).toMatchObject({
+      amountCents: 100000, method: "cash", tenders: [{ method: "cash", amountCents: 100000 }],
+    });
+  });
+
+  it("completes a credit note with a transfer", async () => {
+    finance.registerPayment.mockResolvedValue({} as financeApi.PaymentResult);
+    const { user, dialog } = await openDrawer();
+
+    await user.click(within(tenderRow(dialog, 1)).getByRole("button", { name: "Nota de crédito" }));
+    await user.clear(within(tenderRow(dialog, 1)).getByLabelText("Monto"));
+    await user.type(within(tenderRow(dialog, 1)).getByLabelText("Monto"), "300");
+    await user.click(within(dialog).getByRole("button", { name: "Agregar método" }));
+    await user.click(within(tenderRow(dialog, 2)).getByRole("button", { name: "Transferencia" }));
+    await submit(user, dialog);
+
+    await waitFor(() => expect(finance.registerPayment).toHaveBeenCalled());
+    expect(finance.registerPayment.mock.calls[0]?.[1]?.tenders).toEqual([
+      { method: "credit_note", amountCents: 30000 },
+      { method: "transfer", amountCents: 70000 },
+    ]);
+  });
+
+  it("refuses more than the charge's balance, and goes to the amount", async () => {
+    const { user, dialog } = await openDrawer();
+    const amount = within(dialog).getByLabelText("Monto a pagar", { selector: "input" });
+
+    await user.clear(amount);
+    await user.type(amount, "1500");
+    await submit(user, dialog);
+
+    expect(await within(dialog).findByText(/No puede ser mayor que el saldo del cargo/)).toBeInTheDocument();
+    await waitFor(() => expect(document.activeElement).toBe(amount));
+    expect(finance.registerPayment).not.toHaveBeenCalled();
+  });
+
+  it("refuses tenders that do not add up to the amount to pay", async () => {
+    const { user, dialog } = await openDrawer();
+
+    await user.clear(within(tenderRow(dialog, 1)).getByLabelText("Monto"));
+    await user.type(within(tenderRow(dialog, 1)).getByLabelText("Monto"), "200");
+    await submit(user, dialog);
+
+    expect(await within(dialog).findByText("La suma de las formas de pago debe ser igual al monto a pagar.")).toBeInTheDocument();
+    expect(finance.registerPayment).not.toHaveBeenCalled();
   });
 });

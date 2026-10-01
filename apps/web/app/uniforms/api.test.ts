@@ -313,3 +313,18 @@ describe("the base url", () => {
     expect(lastCall(fetchMock)[0]).toBe("http://gw/api/v1/uniforms/items");
   });
 });
+
+describe("counterSale · tenders (tarea 8)", () => {
+  it("sends the payment breakdown; the server checks it against its own total", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ id: "ord-1" }, 201));
+    vi.stubGlobal("fetch", fetchMock);
+    const tenders = [
+      { method: "credit_note" as const, amountCents: 30000, reference: "NC-3" },
+      { method: "cash" as const, amountCents: 35000 },
+    ];
+
+    await counterSale(BASE, { lines: [{ itemId: "it-1", sizeLabel: "8", qty: 1 }], method: "credit_note", tenders }, "k");
+
+    expect(JSON.parse(lastCall(fetchMock)[1].body as string).tenders).toEqual(tenders);
+  });
+});

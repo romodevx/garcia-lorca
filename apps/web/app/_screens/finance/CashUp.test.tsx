@@ -11,6 +11,7 @@ const finance = vi.mocked(financeApi);
 const deposit = (id: string, cents: number, method: financeApi.PaymentMethod): financeApi.Deposit => ({
   id, studentId: "s1", amountCents: cents, method, reference: "",
   paidAt: "2026-10-10T15:00:00Z", calendarVersion: "abc",
+  tenders: [{ method, amountCents: cents }],
 });
 
 beforeEach(() => {
@@ -21,7 +22,7 @@ beforeEach(() => {
     cashCents: 320000,
     cardCents: 0,
     transferCents: 150000,
-    totalCents: 470000,
+    totalCents: 470000, creditNoteCents: 0,
   });
 });
 afterEach(() => vi.clearAllMocks());
@@ -44,7 +45,7 @@ describe("CashUpPanel", () => {
       deposits: [deposit("d1", 320000, "cash")],
       cancelled: [{ ...deposit("d2", 150000, "cash"), voidedAt: "2026-10-10T16:00:00Z", voidReason: "importe capturado mal" }],
       payments: [],
-      cashCents: 320000, cardCents: 0, transferCents: 0, totalCents: 320000,
+      cashCents: 320000, cardCents: 0, transferCents: 0, totalCents: 320000, creditNoteCents: 0,
     });
 
     render(<CashUpPanel day="2026-10-10" />);
@@ -63,7 +64,7 @@ describe("CashUpPanel", () => {
         id: "p1", chargeId: "c1", amountCents: 135000, method: "cash", reference: "",
         paidAt: "2026-10-10T17:44:00Z", description: "Uniformes · U-2026-000001",
       }],
-      cashCents: 685000, cardCents: 0, transferCents: 0, totalCents: 685000,
+      cashCents: 685000, cardCents: 0, transferCents: 0, totalCents: 685000, creditNoteCents: 0,
     });
 
     render(<CashUpPanel day="2026-10-10" />);
@@ -77,7 +78,7 @@ describe("CashUpPanel", () => {
 
   it("says so plainly when nothing came in", async () => {
     finance.getCashUp.mockResolvedValue({
-      deposits: [], cancelled: [], payments: [], cashCents: 0, cardCents: 0, transferCents: 0, totalCents: 0,
+      deposits: [], cancelled: [], payments: [], cashCents: 0, cardCents: 0, transferCents: 0, totalCents: 0, creditNoteCents: 0,
     });
 
     render(<CashUpPanel day="2026-10-10" />);
@@ -97,7 +98,7 @@ describe("CashUpPanel", () => {
         { ...deposit("d2", 150000, "cash"), receivedByName: "Pedro Caja", capturedAt: "2026-10-13T10:00:00" },
       ],
       cancelled: [],
-      payments: [], cashCents: 470000, cardCents: 0, transferCents: 0, totalCents: 470000,
+      payments: [], cashCents: 470000, cardCents: 0, transferCents: 0, totalCents: 470000, creditNoteCents: 0,
     } as unknown as financeApi.CashUp);
     render(<CashUpPanel day="2026-10-10" />);
 
@@ -115,7 +116,7 @@ describe("CashUpPanel", () => {
     finance.getCashUp.mockResolvedValue({
       deposits: [{ ...deposit("d1", 320000, "cash"), folio: "P-2026-000042" }],
       cancelled: [],
-      payments: [], cashCents: 320000, cardCents: 0, transferCents: 0, totalCents: 320000,
+      payments: [], cashCents: 320000, cardCents: 0, transferCents: 0, totalCents: 320000, creditNoteCents: 0,
     } as unknown as financeApi.CashUp);
     const open = vi.spyOn(window, "open").mockImplementation(() => null);
     const user = userEvent.setup();
@@ -131,12 +132,68 @@ describe("CashUpPanel", () => {
     finance.getCashUp.mockResolvedValue({
       deposits: [],
       cancelled: [{ ...deposit("d9", 100000, "cash"), paidAt: "2026-10-03T00:00:00Z", capturedAt: "2026-10-12T10:00:00", voidedAt: "2026-10-12T11:00:00Z", voidReason: "doble" }],
-      payments: [], cashCents: 0, cardCents: 0, transferCents: 0, totalCents: 0,
+      payments: [], cashCents: 0, cardCents: 0, transferCents: 0, totalCents: 0, creditNoteCents: 0,
     } as unknown as financeApi.CashUp);
     render(<CashUpPanel day="2026-10-03" />);
 
     expect(await screen.findByText("Recibido el 3 oct")).toBeInTheDocument();
     expect(screen.queryByText("Recibido hoy")).not.toBeInTheDocument();
     expect(screen.getByText(/doble/)).not.toHaveTextContent(/p\. ?m\.|a\. ?m\./i);
+  });
+});
+
+// T8: a credit note settles debt but brings no money into the drawer.
+describe("CashUpPanel · nota de crédito y pago combinado (tarea 8)", () => {
+  it("shows the day's credit notes on their own row, outside the money total", async () => {
+    finance.getCashUp.mockResolvedValue({
+      deposits: [{
+        ...deposit("d1", 150000, "cash"), method: "mixed",
+        tenders: [{ method: "credit_note", amountCents: 50000, reference: "NC-12" }, { method: "cash", amountCents: 100000 }],
+      }],
+      cancelled: [], payments: [],
+      cashCents: 100000, cardCents: 0, transferCents: 0, totalCents: 100000, creditNoteCents: 50000,
+    });
+
+    render(<CashUpPanel day="2026-10-10" />);
+
+    expect(await screen.findByTestId("cash-up-total")).toHaveTextContent("$1,000.00");
+    expect(screen.getByTestId("cash-up-credit-note")).toHaveTextContent(/Notas de crédito/);
+    expect(screen.getByTestId("cash-up-credit-note")).toHaveTextContent(/no es ingreso/);
+    expect(screen.getByTestId("cash-up-credit-note")).toHaveTextContent("$500.00");
+  });
+
+  it("lists a split deposit by its tenders, not by a single method", async () => {
+    finance.getCashUp.mockResolvedValue({
+      deposits: [{
+        ...deposit("d1", 150000, "cash"), method: "mixed",
+        tenders: [{ method: "credit_note", amountCents: 50000 }, { method: "cash", amountCents: 100000 }],
+      }],
+      cancelled: [], payments: [],
+      cashCents: 100000, cardCents: 0, transferCents: 0, totalCents: 100000, creditNoteCents: 50000,
+    });
+
+    render(<CashUpPanel day="2026-10-10" />);
+
+    const row = await screen.findByTestId("cash-up-row");
+    expect(row).toHaveTextContent("Nota de crédito $500.00 + Efectivo $1,000.00");
+    expect(row).not.toHaveTextContent("Combinado");
+  });
+
+  it("names a credit-note payment taken outside a deposit", async () => {
+    finance.getCashUp.mockResolvedValue({
+      deposits: [], cancelled: [],
+      payments: [{ id: "p1", chargeId: "c1", amountCents: 30000, method: "credit_note", reference: "", paidAt: "2026-10-10T17:44:00Z", description: "Uniformes · U-2026-000002" }],
+      cashCents: 0, cardCents: 0, transferCents: 0, totalCents: 0, creditNoteCents: 30000,
+    });
+
+    render(<CashUpPanel day="2026-10-10" />);
+
+    expect(await screen.findByTestId("cash-up-row")).toHaveTextContent("Nota de crédito");
+  });
+
+  it("does not show the credit-note row on a day without one", async () => {
+    render(<CashUpPanel day="2026-10-10" />);
+    await screen.findByTestId("cash-up-total");
+    expect(screen.queryByTestId("cash-up-credit-note")).toBeNull();
   });
 });

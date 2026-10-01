@@ -106,4 +106,18 @@ describe("StudentStatementDrawer (T7)", () => {
 
     expect(await within(dialog).findByText("Sin movimientos")).toBeInTheDocument();
   });
+
+  // T8: a credit note reaches the statement as its own kind, with its method in words.
+  it("names a credit note's method in words", async () => {
+    api.getStatement.mockResolvedValue({
+      ...ledger,
+      movements: [{ kind: "credit_note", date: "2026-10-12", description: "Nota de crédito", amountCents: 50000, balanceCents: 0, method: "credit_note", reference: "NC-7", folio: "P-2026-000050", accrued: false, notYetDue: false, voided: false }],
+    });
+    render(<StudentStatementDrawer studentId="st-1" name="Cruz Valentina" onClose={() => {}} />);
+    const dialog = await screen.findByRole("dialog", { name: "Estado de cuenta · Cruz Valentina" });
+
+    const detail = await within(dialog).findByText(/P-2026-000050/);
+    expect(detail).toHaveTextContent("P-2026-000050 · Nota de crédito · ref. NC-7");
+    expect(detail).not.toHaveTextContent("credit_note");
+  });
 });

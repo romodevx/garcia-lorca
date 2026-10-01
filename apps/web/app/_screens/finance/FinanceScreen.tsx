@@ -1,9 +1,5 @@
 "use client";
 
-/** Lo que el (?) de Referencia explica, en los dos lugares donde se cobra. */
-const REFERENCIA_AYUDA =
-  "El folio del voucher o el número de la transferencia: lo que te permita reconocer este pago después. En efectivo puede quedar vacío.";
-
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactElement } from "react";
 import { Avatar } from "../../_design/Brand";
 import { Btn } from "../../_design/Controls";
@@ -11,11 +7,14 @@ import { DrawerShell } from "../../_design/DrawerShell";
 import { Icon, type IconName } from "../../_design/Icon";
 import { Page } from "../../_design/Page";
 import type { ColorKey } from "../../_design/colors";
-import { DateField, HelpTip, useFocusFirstInvalid } from "../../_design/form";
+import { DateField, MoneyField, useFocusFirstInvalid } from "../../_design/form";
+import { TenderEditor } from "../../_design/payments/TenderEditor";
+import { AMOUNT_ERROR } from "../../_design/payments/tenders";
+import { useTenders } from "../../_design/payments/useTenders";
 import { paymentDateError } from "./CollectDrawer";
 import { StudentNotesBeside, useNotesBeside, type NotesAccess } from "../../_design/students/StudentNotesBeside";
 import { listCycles, type Cycle } from "../../config/api";
-import { getOverdue, listCharges, registerPayment, type Charge, type PaymentMethod } from "../../finance/api";
+import { getOverdue, listCharges, registerPayment, type Charge } from "../../finance/api";
 import { localISODate } from "../../_lib/localDate";
 import { centsToPesosInput, formatCents, pesosToCents } from "../../_lib/money";
 import { listStudents, type Student } from "../../students/api";
@@ -44,14 +43,8 @@ const STATUS: Record<VisualStatus, { label: string; dot: string; bg: string; fg:
   overdue: { label: "Vencido", dot: "var(--red)", bg: "var(--bad-bg)", fg: "var(--bad-fg)" },
   cancelled: { label: "Cancelado", dot: "var(--text-faint)", bg: "var(--surface-3)", fg: "var(--text-muted)" },
 };
-const METHODS: { value: PaymentMethod; label: string }[] = [
-  { value: "cash", label: "Efectivo" },
-  { value: "card", label: "Tarjeta" },
-  { value: "transfer", label: "Transferencia" },
-];
 
 const pager = (disabled: boolean): CSSProperties => ({ display: "inline-flex", alignItems: "center", gap: 6, height: 40, padding: "0 16px", borderRadius: 99, fontSize: 14, fontWeight: 600, fontFamily: "var(--font-display)", border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text)", cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.45 : 1 });
-const fi: CSSProperties = { width: "100%", height: 50, padding: "0 16px", borderRadius: "var(--r-md)", border: "1.5px solid var(--border)", background: "var(--surface)", color: "var(--text)", fontSize: 15.5, outline: "none" };
 
 interface Row {
   charge: Charge;
@@ -70,13 +63,18 @@ function StatusPill({ status }: { status: VisualStatus }): ReactElement {
   );
 }
 
+/** What is wrong with the amount paid against one charge, if anything: never more than it still owes. */
+export function chargeAmountError(cents: number, remainingCents: number): string | undefined {
+  if (!Number.isFinite(cents) || cents <= 0) return AMOUNT_ERROR;
+  return cents > remainingCents ? `No puede ser mayor que el saldo del cargo (${money(remainingCents)}).` : undefined;
+}
+
 // ── payment slide-over: pay a charge in one panel ──
 function PayDrawer({ charge, name, today, notes, onClose, onPaid }: { charge: Charge; name: string; today?: string; notes?: NotesAccess; onClose: () => void; onPaid: () => void }): ReactElement {
   // The pupil's notes on the left, as at the counter (T6).
   const beside = useNotesBeside(charge.studentId, notes);
   const [amount, setAmount] = useState(centsToPesosInput(charge.remainingCents));
-  const [method, setMethod] = useState<PaymentMethod>("cash");
-  const [reference, setReference] = useState("");
+  const [amountError, setAmountError] = useState<string | undefined>(undefined);
   // The day the family paid (task 7): not always the day it is keyed.
   const day = today ?? localISODate();
   const [paidOn, setPaidOn] = useState(day);
@@ -95,24 +93,39 @@ function PayDrawer({ charge, name, today, notes, onClose, onPaid }: { charge: Ch
   // Anything typed makes the drawer dirty: a stray click on the backdrop then
   // stops closing it. Losing a captured amount at counter speed, with a parent
   // waiting, is worse than an extra click on the X.
-  const dirty = amount.trim() !== "" || reference.trim() !== "";
-
   // pesosToCents is locale-aware (handles thousands commas) and returns NaN for
   // anything ambiguous — never a truncated parseFloat.
   const cents = pesosToCents(amount);
-  const ready = Number.isFinite(cents) && cents > 0 && !saving;
+  // How it is paid, method by method (T8): the rows must add up to the amount.
+  const tenders = useTenders(cents);
+  const dirty = amount.trim() !== "" || tenders.dirty;
 
   const submit = async (): Promise<void> => {
-    const wrong = paymentDateError(paidOn, day);
-    if (wrong !== undefined) {
-      setDateError(wrong);
+    if (saving) return;
+    const wrongDate = paymentDateError(paidOn, day);
+    const wrongAmount = chargeAmountError(cents, charge.remainingCents);
+    setDateError(wrongDate);
+    setAmountError(wrongAmount);
+    const tendersOk = wrongAmount === undefined && tenders.validate();
+    if (wrongDate !== undefined || !tendersOk) {
       focusFirstInvalid();
       return;
     }
+    const split = tenders.toTenders();
+    const [first] = split;
     setSaving(true);
     setError(undefined);
     try {
-      await registerPayment(API_URL, { chargeId: charge.id, amountCents: cents, method, reference: reference.trim(), idempotencyKey: attemptKey, ...(sentDate !== "" ? { paidAt: sentDate } : {}) });
+      await registerPayment(API_URL, {
+        chargeId: charge.id,
+        amountCents: cents,
+        // The first tender, for a gateway that reads only one method.
+        method: first?.method ?? "cash",
+        reference: first?.reference ?? "",
+        tenders: split,
+        idempotencyKey: attemptKey,
+        ...(sentDate !== "" ? { paidAt: sentDate } : {}),
+      });
       onPaid();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "No se pudo registrar el pago.");
@@ -140,7 +153,7 @@ function PayDrawer({ charge, name, today, notes, onClose, onPaid }: { charge: Ch
         <>
           <Btn kind="ghost" onClick={onClose}>Cancelar</Btn>
           <div style={{ flex: 1 }} />
-          <Btn icon="check" onClick={() => void submit()} style={{ opacity: ready ? 1 : 0.45, pointerEvents: ready ? "auto" : "none", height: 52, fontSize: 16 }}>Registrar pago</Btn>
+          <Btn icon="check" onClick={() => void submit()} style={{ height: 52, fontSize: 16 }}>Registrar pago</Btn>
         </>
       }
     >
@@ -149,19 +162,19 @@ function PayDrawer({ charge, name, today, notes, onClose, onPaid }: { charge: Ch
               <span style={{ fontSize: 14, color: "var(--text-muted)" }}>Saldo del cargo</span>
               <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 18, color: "var(--text)" }}>{money(charge.remainingCents)}</span>
             </div>
-            <label style={{ display: "block" }}>
-              <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)", marginLeft: 3 }}>Monto (pesos)</span>
-              <div style={{ marginTop: 8 }}><input autoFocus value={amount} onChange={(e) => setAmount(e.target.value)} aria-label="Monto" style={fi} /></div>
-            </label>
-            <div>
-              <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)", marginLeft: 3 }}>Método</span>
-              <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
-                {METHODS.map((m) => {
-                  const on = method === m.value;
-                  return <button key={m.value} onClick={() => setMethod(m.value)} style={{ height: 44, padding: "0 18px", borderRadius: 99, fontSize: 14.5, fontWeight: 600, fontFamily: "var(--font-display)", cursor: "pointer", border: `1.5px solid ${on ? "var(--lime)" : "var(--border)"}`, background: on ? "color-mix(in oklab, var(--lime) 12%, var(--surface))" : "var(--surface)", color: on ? "var(--forest)" : "var(--text-muted)" }}>{m.label}</button>;
-                })}
-              </div>
-            </div>
+            <MoneyField
+              label="Monto a pagar"
+              value={amount}
+              onChange={(v) => {
+                setAmount(v);
+                if (chargeAmountError(pesosToCents(v), charge.remainingCents) === undefined) setAmountError(undefined);
+              }}
+              onBlur={() => setAmountError(chargeAmountError(cents, charge.remainingCents))}
+              error={amountError}
+              help="Lo que la familia paga ahora de este cargo: puede ser un abono, nunca más que su saldo."
+              required
+            />
+            <TenderEditor tenders={tenders} />
             <DateField
               label="Fecha de pago"
               value={paidOn}
@@ -174,13 +187,6 @@ function PayDrawer({ charge, name, today, notes, onClose, onPaid }: { charge: Ch
               error={dateError}
               help="El día en que la familia pagó. Si capturas tarde, pon ese día: el recargo y el pronto pago se calculan con él."
             />
-            <label style={{ display: "block" }}>
-              <span style={{ display: "inline-flex", alignItems: "baseline", gap: 6, marginLeft: 3 }}>
-                <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)" }}>Referencia (opcional)</span>
-                <HelpTip id="pago-ref-help" label="Referencia" text={REFERENCIA_AYUDA} />
-              </span>
-              <div style={{ marginTop: 8 }}><input value={reference} onChange={(e) => setReference(e.target.value)} aria-label="Referencia" aria-describedby="pago-ref-help" style={fi} /></div>
-            </label>
             {error !== undefined && <p role="alert" style={{ color: "var(--bad-fg)", fontSize: 14, margin: 0 }}>{error}</p>}
       </StudentNotesBeside>
     </DrawerShell>

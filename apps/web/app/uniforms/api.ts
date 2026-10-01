@@ -19,6 +19,7 @@
  * deriving it is two chances to disagree with the till.
  */
 import { authFetch } from "../auth/authFetch";
+import type { PaymentMethod, Tender } from "../finance/api";
 
 const BASE_PATH = "/api/v1/uniforms";
 
@@ -413,8 +414,13 @@ export async function adjustStock(
 export interface CounterSale {
   studentId?: string;
   lines: SaleLine[];
-  method: "cash" | "card" | "transfer";
+  method: PaymentMethod;
   reference?: string;
+  /**
+   * How it was paid, method by method (T8). The server prices the sale and
+   * refuses tenders that do not add up to its own total.
+   */
+  tenders?: Tender[];
   note?: string;
 }
 

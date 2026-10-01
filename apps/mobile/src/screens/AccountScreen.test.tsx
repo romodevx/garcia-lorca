@@ -74,6 +74,23 @@ describe("AccountScreen (the backend's ledger, T7)", () => {
     expect(screen.getByText("Saldo $2,200.00")).toBeTruthy();
   });
 
+  // T8: a credit note is its own line, named once — not "Nota de crédito · … · credit_note".
+  it("names a credit note in words, once", async () => {
+    mockFetch({
+      movements: [line("credit_note", "2026-10-12", "Nota de crédito", 50000, 0, { method: "credit_note", folio: "P-2026-000050" })],
+      totals: ZERO,
+      dueTodayCents: 0,
+      asOf: "2026-10-12",
+    });
+
+    await renderWithProviders(<AccountScreen />);
+
+    await waitFor(() => expect(screen.getByText(/P-2026-000050/)).toBeTruthy());
+    const sub = screen.getByText(/P-2026-000050/).props.children as string;
+    expect(sub).not.toContain("credit_note");
+    expect(sub.match(/Nota de crédito/g)).toHaveLength(1);
+  });
+
   it("leads with today's figure and keeps the pending balance beside it", async () => {
     mockFetch({ movements: [], totals: { ...ZERO, balanceCents: 3200000 }, dueTodayCents: 775000, surchargeCents: 15000, earlyDiscountCents: 10000, asOf: "2026-11-20" });
 

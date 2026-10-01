@@ -24,6 +24,9 @@ const center: CSSProperties = { textAlign: "center" };
 const rule: CSSProperties = { border: 0, borderTop: `1px dashed ${ink}`, margin: "6px 0" };
 const row: CSSProperties = { display: "flex", justifyContent: "space-between", gap: 8 };
 
+/** How the gateway names a credit-note tender on a receipt (T8). */
+const CREDIT_NOTE_LABEL = "Nota de crédito";
+
 /**
  * The 80 mm ticket of a receipt (task 12): what the school hands over at the
  * counter. The browser prints it (`@page { size: 80mm auto }` on its page).
@@ -70,11 +73,30 @@ export function ReceiptTicket({ receipt: r }: { receipt: Receipt }): ReactElemen
         <span data-testid="ticket-total">{formatCents(r.totalCents)}</span>
       </div>
       <hr style={rule} />
-      {r.method !== "" && <p>Forma de pago: {[r.method, r.reference !== undefined && r.reference !== "" ? `ref. ${r.reference}` : ""].filter(Boolean).join(" · ")}</p>}
+      {byTender(r) ? (
+        // Split across methods, or a credit note (T8): one row per tender.
+        <>
+          <p style={{ fontWeight: 700 }}>Forma de pago</p>
+          {(r.tenders ?? []).map((t, i) => (
+            <div key={i} data-testid="ticket-tender" style={row}>
+              <span>{[t.method, t.reference !== undefined && t.reference !== "" ? `ref. ${t.reference}` : ""].filter(Boolean).join(" · ")}</span>
+              <span style={{ whiteSpace: "nowrap" }}>{formatCents(t.amountCents)}</span>
+            </div>
+          ))}
+        </>
+      ) : (
+        r.method !== "" && <p>Forma de pago: {[r.method, r.reference !== undefined && r.reference !== "" ? `ref. ${r.reference}` : ""].filter(Boolean).join(" · ")}</p>
+      )}
       {r.receivedBy !== undefined && r.receivedBy !== "" && <p>Recibió: {r.receivedBy}</p>}
       {s.legend !== "" && <p style={{ ...center, marginTop: 8 }}>{s.legend}</p>}
     </article>
   );
+}
+
+/** The gateway labels each tender already; a credit note is never folded into one line. */
+function byTender(r: Receipt): boolean {
+  const tenders = r.tenders ?? [];
+  return tenders.length > 1 || tenders.some((t) => t.method === CREDIT_NOTE_LABEL);
 }
 
 function Total({ label, cents }: { label: string; cents: number }): ReactElement {
