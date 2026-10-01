@@ -30,6 +30,9 @@ type fakeExpenseRepo struct {
 	creditNote int64
 	// changedDays forces DayChangedSince to answer true for a day.
 	changedDays map[string]bool
+	// beforeUpdate runs inside UpdateExpense before the row is read: another
+	// writer getting there first.
+	beforeUpdate func()
 }
 
 func newFakeExpenseRepo() *fakeExpenseRepo {
@@ -84,6 +87,10 @@ func (r *fakeExpenseRepo) CreateExpense(_ context.Context, e domain.Expense, ev 
 }
 
 func (r *fakeExpenseRepo) UpdateExpense(_ context.Context, id string, change ports.ExpenseChange) (domain.Expense, error) {
+	if r.beforeUpdate != nil {
+		r.beforeUpdate()
+		r.beforeUpdate = nil
+	}
 	cur, ok := r.expenses[id]
 	if !ok {
 		return domain.Expense{}, glerrors.ErrNotFound
@@ -204,9 +211,10 @@ func (r *fakeExpenseRepo) DayChangedSince(_ context.Context, day, since time.Tim
 
 // fakeReceiptStore keeps objects in memory and remembers what was deleted.
 type fakeReceiptStore struct {
-	objects map[string][]byte
-	deleted []string
-	putErr  error
+	objects   map[string][]byte
+	deleted   []string
+	putErr    error
+	deleteErr error
 }
 
 func newFakeReceiptStore() *fakeReceiptStore {
@@ -230,6 +238,9 @@ func (s *fakeReceiptStore) Get(_ context.Context, key string) ([]byte, error) {
 }
 
 func (s *fakeReceiptStore) Delete(_ context.Context, key string) error {
+	if s.deleteErr != nil {
+		return s.deleteErr
+	}
 	delete(s.objects, key)
 	s.deleted = append(s.deleted, key)
 	return nil

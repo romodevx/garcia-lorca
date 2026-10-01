@@ -118,6 +118,24 @@ describe("ExpensesScreen (T10)", () => {
     await waitFor(() => expect(m.uploadReceipt).toHaveBeenCalledWith(expect.any(String), EXP, file));
   });
 
+  // Review T10: the expense is saved before its receipt goes up. A failed
+  // upload closes the drawer and says so, so a retry cannot record it twice.
+  it("a failed receipt upload does not invite a second create", async () => {
+    m.createExpense.mockResolvedValue(toner);
+    m.uploadReceipt.mockRejectedValue(new Error("el comprobante debe ser una imagen JPG o PNG, o un PDF"));
+    const user = userEvent.setup();
+    renderScreen();
+    await user.click(await screen.findByRole("button", { name: /Registrar egreso/ }));
+    const dialog = await screen.findByRole("dialog");
+    await user.selectOptions(within(dialog).getByRole("combobox", { name: /Categoría/ }), CAT);
+    await user.type(within(dialog).getByRole("textbox", { name: /Monto/ }), "10");
+    await user.upload(within(dialog).getByLabelText("Comprobante", { selector: "input" }), new File(["x"], "falso.pdf", { type: "application/pdf" }));
+    await user.click(within(dialog).getByRole("button", { name: "Registrar egreso" }));
+    expect(await screen.findByRole("status")).toHaveTextContent(/no se subió/);
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(m.createExpense).toHaveBeenCalledTimes(1);
+  });
+
   it("opens an expense with its history, edits it with a reason, and cancels it with one", async () => {
     m.updateExpense.mockResolvedValue({ ...toner, amountCents: 100000 });
     m.cancelExpense.mockResolvedValue({ ...toner, status: "cancelled" });

@@ -703,6 +703,8 @@ export interface CashUp {
   modifiedAfterClose?: boolean;
   /** T10 — earlier closures of the day that were reopened, newest first. */
   reopened?: CashCutClosure[];
+  /** The day this cut is (aaaa-mm-dd), the server's when none was asked for. */
+  day?: string;
 }
 
 /** A payment taken outside a deposit, with what it paid for. */
@@ -737,6 +739,7 @@ export async function getCashUp(baseURL: string, day: string): Promise<CashUp> {
     closure?: CashCutClosure;
     modifiedAfterClose?: boolean;
     reopened?: CashCutClosure[];
+    day?: string;
   }>(baseURL, day === "" ? "/cash-up" : `/cash-up?day=${encodeURIComponent(day)}`);
   return {
     deposits: (res.deposits ?? []).map(toDeposit),
@@ -754,6 +757,7 @@ export async function getCashUp(baseURL: string, day: string): Promise<CashUp> {
     ...(res.closure !== undefined ? { closure: toClosure(res.closure) } : {}),
     modifiedAfterClose: res.modifiedAfterClose ?? false,
     reopened: (res.reopened ?? []).map(toClosure),
+    ...(res.day !== undefined && res.day !== "" ? { day: res.day } : {}),
   };
 }
 

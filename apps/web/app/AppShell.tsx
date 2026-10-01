@@ -458,8 +458,9 @@ export function AppShell(): ReactElement {
   // T10: the cut shows what went out and closes with expenses:write; the
   // director (finance:write) reopens a closed day. UX only.
   const cutAccess = useMemo<CutAccess | undefined>(() => {
-    if (!expensesEnabled) return undefined;
     const perms = principal?.permissions ?? [];
+    // The gateway sends the cut's expenses and closures only to expenses:read.
+    if (!expensesEnabled || !perms.includes("expenses:read")) return undefined;
     return { expenses: true, canClose: perms.includes("expenses:write"), canReopen: perms.includes("finance:write") };
   }, [expensesEnabled, principal]);
   // Owner-only (levels:delete). UX only: the gateway refuses the delete without it.

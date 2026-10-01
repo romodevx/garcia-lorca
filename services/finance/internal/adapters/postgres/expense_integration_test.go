@@ -327,6 +327,27 @@ func TestCashCutClosuresAndChanges(t *testing.T) {
 	if changed, _ := repo.DayChangedSince(ctx, day, closedAt); changed {
 		t.Fatalf("another day's expense must not flag this one")
 	}
+	// A receipt attached, or a description reworded, on an expense of the
+	// closed day after closing moves no figure: not a change.
+	ofDay, _ := domain.NewExpense("e1000000-0000-0000-0000-000000000042", domain.ExpenseDraft{SpentOn: day, CategoryID: cat.ID(), AmountCents: 7, Method: domain.MethodCash}, day, expActor)
+	if _, err := repo.CreateExpense(ctx, ofDay, domain.ExpenseEvent{ID: "f1000000-0000-0000-0000-000000000043", ExpenseID: ofDay.ID(), Kind: domain.ExpenseEventCreated, After: ofDay, At: closedAt.Add(-time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpdateExpense(ctx, ofDay.ID(), func(cur domain.Expense) (domain.Expense, domain.ExpenseEvent, error) {
+		next, err := cur.WithReceipt(domain.ExpenseReceiptRef{Key: "k", ContentType: "image/png", SizeBytes: 1})
+		return next, domain.ExpenseEvent{ID: "f1000000-0000-0000-0000-000000000044", ExpenseID: cur.ID(), Kind: domain.ExpenseEventReceiptAttached, Before: cur, After: next, At: closedAt.Add(time.Hour)}, err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpdateExpense(ctx, ofDay.ID(), func(cur domain.Expense) (domain.Expense, domain.ExpenseEvent, error) {
+		next, err := cur.Edit(domain.ExpenseDraft{SpentOn: day, CategoryID: cat.ID(), AmountCents: 7, Method: domain.MethodCash, Description: "otra"}, day)
+		return next, domain.ExpenseEvent{ID: "f1000000-0000-0000-0000-000000000045", ExpenseID: cur.ID(), Kind: domain.ExpenseEventEdited, Before: cur, After: next, At: closedAt.Add(time.Hour)}, err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if changed, _ := repo.DayChangedSince(ctx, day, closedAt); changed {
+		t.Fatalf("a receipt or a reworded description must not flag the day")
+	}
 	// Moving that expense INTO the closed day after closing flags it.
 	if _, err := repo.UpdateExpense(ctx, other.ID(), func(cur domain.Expense) (domain.Expense, domain.ExpenseEvent, error) {
 		next, err := cur.Edit(domain.ExpenseDraft{SpentOn: day, CategoryID: cat.ID(), AmountCents: 1, Method: domain.MethodCash}, day.AddDate(0, 0, 1))

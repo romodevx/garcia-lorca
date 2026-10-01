@@ -325,6 +325,9 @@ func TestDailyCashUpCarriesExpensesAndTheClosure(t *testing.T) {
 		t.Fatalf("cash-up: %v", err)
 	}
 	m := res.Msg
+	if m.GetDay() != "2026-09-15" {
+		t.Fatalf("the cut names its day: %q", m.GetDay())
+	}
 	if len(m.GetExpenses()) != 1 || m.GetExpensesByMethod().GetCashCents() != 300 || m.GetExpectedCashCents() != 1700 {
 		t.Fatalf("got %+v", m)
 	}

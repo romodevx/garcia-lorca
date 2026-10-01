@@ -16,7 +16,13 @@ import (
 	"github.com/garcia-lorca/services/gateway/internal/report"
 )
 
-const dayLayout = "2006-01-02"
+const (
+	dayLayout = "2006-01-02"
+	// listCap is finance's bound on one list of expenses. A period with more
+	// lists the newest ones and says so; its totals are always the whole
+	// period's (FinanceSummary sums in SQL, uncapped).
+	listCap = 500
+)
 
 // Source is the finance surface a report reads.
 type Source interface {
@@ -39,6 +45,8 @@ type Report struct {
 	Summary  client.FinanceSummary `json:"summary"`
 	Income   client.Income         `json:"incomeByConcept"`
 	Expenses []client.Expense      `json:"expenses"`
+	// ExpensesTruncated: the period has more expenses than the list carries.
+	ExpensesTruncated bool `json:"expensesTruncated"`
 }
 
 // Builder reads a report's parts from finance and the school's details.
@@ -80,6 +88,7 @@ func (b *Builder) Report(ctx context.Context, kind string, anchor time.Time) (Re
 	if err := g.Wait(); err != nil {
 		return Report{}, err
 	}
+	rep.ExpensesTruncated = len(rep.Expenses) >= listCap
 	return rep, nil
 }
 
@@ -167,8 +176,12 @@ func categoryTable(rep Report) report.Table {
 var methodLabels = map[string]string{"cash": "Efectivo", "card": "Tarjeta", "transfer": "Transferencia"}
 
 func expensesTable(rep Report) report.Table {
+	title := "Egresos"
+	if rep.ExpensesTruncated {
+		title = fmt.Sprintf("Egresos (los %d más recientes; el total es del periodo completo)", listCap)
+	}
 	t := report.Table{
-		Title: "Egresos",
+		Title: title,
 		Columns: []report.Column{
 			{Header: "Fecha", Kind: report.Text, Weight: 1.2}, {Header: "Categoría", Kind: report.Text, Weight: 1.6},
 			{Header: "Descripción", Kind: report.Text, Weight: 3}, {Header: "Forma de pago", Kind: report.Text, Weight: 1.3},

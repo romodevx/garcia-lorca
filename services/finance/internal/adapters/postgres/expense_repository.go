@@ -443,12 +443,22 @@ func (r *Repository) ReopenCashCutClosure(ctx context.Context, c domain.CashCutC
 	})
 }
 
+// moneyEvent keeps the expense events that move a day's figures: a record or
+// a cancel, and an edit that changed the amount, the method or the day. A
+// receipt attached the next morning or a reworded description changes no
+// figure, and flagging the cut for it would make the warning noise.
+const moneyEvent = `(kind IN ('created', 'cancelled') OR (kind = 'edited' AND (
+        before->'amountCents' IS DISTINCT FROM after->'amountCents'
+     OR before->'method' IS DISTINCT FROM after->'method'
+     OR before->'spentOn' IS DISTINCT FROM after->'spentOn')))`
+
 // DayChangedSince reports whether a movement dated day changed after since.
 //
 //   - a deposit dated that day captured, voided or superseded after it (a late
 //     capture, a void, a T9 correction — whose new deposit is captured then);
 //   - a payment taken outside a deposit (a counter sale) captured after it;
-//   - an expense event after it that touches the day: dated it, or moved off it.
+//   - an expense event after it that touches the day's money (moneyEvent):
+//     dated it, or moved off it.
 func (r *Repository) DayChangedSince(ctx context.Context, day, since time.Time) (bool, error) {
 	start := domain.CalendarDay(day)
 	end := start.AddDate(0, 0, 1)
@@ -464,8 +474,12 @@ SELECT EXISTS (
      WHERE deposit_id IS NULL AND paid_at >= ? AND paid_at < ? AND created_at > ?
 ) OR EXISTS (
     SELECT 1 FROM expense_events
-     WHERE (spent_on = ? OR previous_spent_on = ?) AND at > ?
-)`, start, end, since, since, since, start, end, since, start.Format(dateLayout), start.Format(dateLayout), since).
+     WHERE spent_on = ? AND at > ? AND `+moneyEvent+`
+) OR EXISTS (
+    SELECT 1 FROM expense_events
+     WHERE previous_spent_on = ? AND at > ? AND `+moneyEvent+`
+)`, start, end, since, since, since, start, end, since,
+			start.Format(dateLayout), since, start.Format(dateLayout), since).
 			Scan(&changed).Error
 		if err != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "checking the day for changes", err)

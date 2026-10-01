@@ -3291,7 +3291,9 @@ paths:
         missing) — and who closed it, when. Who closes is the signed-in caller.
         If a movement of that day changes afterwards (a correction, a void, a
         late capture, an expense edited or cancelled) the cut reports
-        `modifiedAfterClose`. Requires `expenses:write` and module_expenses.
+        `modifiedAfterClose` (receipts and reworded descriptions do not count:
+        they move no figure). Send the cut's `day`. Requires `expenses:write`
+        and module_expenses.
       operationId: closeCashCut
       security: [{ sessionCookie: [] }]
       parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
@@ -5792,9 +5794,20 @@ components:
           description: >
             What credit notes settled that day (T8), on its own line: not money,
             so in none of the per-method figures nor in totalCents.
+        day:
+          type: string
+          format: date
+          description: >
+            The day this cut is — the server's day when none was asked for.
+            Closing sends it back, so the day on screen is the one closed.
         expenses:
           type: array
-          description: T10 — the day's expenses; cancelled ones listed, not counted.
+          description: >
+            T10 — the day's expenses; cancelled ones listed, not counted. This
+            and every T10 field below (expensesByMethod, expectedCashCents,
+            closure, modifiedAfterClose, reopened) are filled only for a caller
+            holding `expenses:read` while module_expenses is on; anyone else
+            (the cashier's collections:read) gets them empty.
           items: { $ref: '#/components/schemas/Expense' }
         expensesByMethod: { $ref: '#/components/schemas/MethodTotals' }
         expectedCashCents:
@@ -5931,7 +5944,11 @@ components:
         incomeByConcept: { $ref: '#/components/schemas/Income' }
         expenses:
           type: array
+          description: The period's live expenses, newest first, at most 500.
           items: { $ref: '#/components/schemas/Expense' }
+        expensesTruncated:
+          type: boolean
+          description: The period has more expenses than the list carries; the totals are the whole period's.
 
     CashCutClosure:
       type: object

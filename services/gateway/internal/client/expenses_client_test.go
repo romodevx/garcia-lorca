@@ -55,8 +55,11 @@ func TestTheCashUpCarriesExpensesAndTheClosure(t *testing.T) {
 		Expenses:          []*financev1.Expense{{Id: "e-1"}},
 		ExpensesByMethod:  &financev1.MethodTotals{CashCents: 300, CardCents: 1, TransferCents: 2, TotalCents: 303},
 		ExpectedCashCents: 1700, Closure: closure, ModifiedAfterClose: true,
-		Reopened: []*financev1.CashCutClosure{closure},
+		Reopened: []*financev1.CashCutClosure{closure}, Day: "2026-10-01",
 	})
+	if cut.Day != "2026-10-01" {
+		t.Errorf("day = %q", cut.Day)
+	}
 	if len(cut.Expenses) != 1 || cut.ExpensesByMethod.TotalCents != 303 || cut.ExpensesByMethod.TransferCents != 2 || cut.ExpectedCashCents != 1700 || !cut.ModifiedAfterClose {
 		t.Errorf("cut = %+v", cut)
 	}

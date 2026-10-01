@@ -56,6 +56,9 @@ export function CashCutClosing({
   onChanged: () => void;
 }): ReactElement {
   const expenses = cut.expenses ?? [];
+  // Close and reopen THE DAY ON SCREEN. "Today" was asked as "", and the
+  // server's day may roll over (UTC) between reading the cut and the POST.
+  const cutDay = day !== "" ? day : cut.day ?? "";
   const expected = cut.expectedCashCents ?? cut.cashCents;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
@@ -67,9 +70,9 @@ export function CashCutClosing({
         </span>
       </div>
       {cut.closure !== undefined ? (
-        <ClosedCut closure={cut.closure} modified={cut.modifiedAfterClose === true} day={day} canReopen={access.canReopen} onChanged={onChanged} />
+        <ClosedCut closure={cut.closure} modified={cut.modifiedAfterClose === true} day={cutDay} canReopen={access.canReopen} onChanged={onChanged} />
       ) : (
-        access.canClose && <CloseForm day={day} expectedCents={expected} onChanged={onChanged} />
+        access.canClose && <CloseForm day={cutDay} expectedCents={expected} onChanged={onChanged} />
       )}
       {(cut.reopened ?? []).length > 0 && (
         <p style={{ fontSize: 13.5, color: "var(--text-muted)", margin: 0 }}>

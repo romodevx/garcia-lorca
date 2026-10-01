@@ -445,6 +445,7 @@ func (h *FinanceHandler) DailyCashUp(ctx context.Context, req *connect.Request[f
 // takingsResponse renders the day's takings: what came in, and in what form.
 func takingsResponse(cut usecase.CashUp) *financev1.DailyCashUpResponse {
 	return &financev1.DailyCashUpResponse{
+		Day:           cut.Day.Format(dayLayout),
 		Deposits:      toProtoDeposits(cut.Deposits),
 		Cancelled:     toProtoDeposits(cut.Cancelled),
 		Superseded:    toProtoDeposits(cut.Superseded),

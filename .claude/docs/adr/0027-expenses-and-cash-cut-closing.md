@@ -42,7 +42,13 @@
   asked of the database, not inferred from totals: a deposit dated that day
   captured, voided or superseded (T9) after the close, a counter payment
   captured after it, or an expense event after it that dates the expense on
-  that day or moved it off it. **Reopen** (with reason) stamps the closure; the
+  that day or moved it off it — counting only events that move money (a
+  record, a cancel, an edit of amount, method or day; a receipt attached the
+  next morning or a reworded description does not flag the cut). The closure
+  is stamped with the app's clock before the cut is read, so a movement
+  committed in between flags the cut (a false "modified" is preferred to a
+  missed one). The web closes the day the cut names (`day` in the response),
+  never "today" at the moment of the POST. **Reopen** (with reason) stamps the closure; the
   day may be closed again and keeps its history.
 - **Permissions** (iam/0027): `expenses:read` (list, history, receipts, the
   summary and reports — aggregates only, no family named, which is why it may
@@ -50,6 +56,9 @@
   (record, edit, cancel, categories, receipts, **close** the cut). Both the
   owner's by default, delegable (owner answer 7). **Reopening** a closed cut is
   the director's: `finance:write`.
+- **Visibility**: the cash-up GET (finance:read OR collections:read) carries
+  the T10 fields only to a caller with `expenses:read` while module_expenses
+  is on; the gateway empties them for everyone else (the cashier).
 - **Flag** `module_expenses` (default OFF). Every T10 route needs
   `module_finance` AND `module_expenses`. The cash-up GET keeps answering to
   `module_finance` and carries the new fields (empty when unused).

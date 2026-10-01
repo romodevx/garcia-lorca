@@ -97,3 +97,23 @@ func TestDocumentLaysOutEveryTable(t *testing.T) {
 		t.Fatalf("summary rows = %+v", summary.Rows)
 	}
 }
+
+type manyExpenses struct{ fakeSource }
+
+func (manyExpenses) ListExpenses(context.Context, client.ExpenseQuery) ([]client.Expense, error) {
+	return make([]client.Expense, 500), nil
+}
+
+// A year with more expenses than one list holds says the list is partial;
+// its totals stay the whole period's.
+func TestReportSaysWhenTheListIsPartial(t *testing.T) {
+	b := expensereport.NewBuilder(&manyExpenses{}, fakeProfile{})
+	rep, err := b.Report(context.Background(), "yearly", time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC))
+	if err != nil || !rep.ExpensesTruncated {
+		t.Fatalf("truncated = %v, %v", rep.ExpensesTruncated, err)
+	}
+	doc, _ := b.Document(context.Background(), rep)
+	if !strings.Contains(doc.Tables[4].Title, "500 más recientes") {
+		t.Fatalf("title = %q", doc.Tables[4].Title)
+	}
+}

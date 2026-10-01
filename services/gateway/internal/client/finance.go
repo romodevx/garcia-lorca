@@ -600,6 +600,9 @@ type CashUp struct {
 	ModifiedAfterClose bool `json:"modifiedAfterClose"`
 	// Reopened are the day's earlier, reopened closures, newest first.
 	Reopened []CashCutClosure `json:"reopened"`
+	// Day is the day this cut is (YYYY-MM-DD): the server's day when none
+	// was asked for. Closing sends it back, so the day on screen is closed.
+	Day string `json:"day"`
 }
 
 // CashUpPayment is a payment taken outside a deposit, with what it paid for.
@@ -649,6 +652,7 @@ func toCashUp(m *financev1.DailyCashUpResponse) CashUp {
 		Closure:            optionalClosure(m.GetClosure()),
 		ModifiedAfterClose: m.GetModifiedAfterClose(),
 		Reopened:           toClosures(m.GetReopened()),
+		Day:                m.GetDay(),
 	}
 }
 

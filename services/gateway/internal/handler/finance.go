@@ -4,9 +4,11 @@ import (
 	"context"
 	"net/http"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
+	"github.com/garcia-lorca/pkg/featureflag"
 	"github.com/garcia-lorca/services/gateway/internal/client"
 	"github.com/garcia-lorca/services/gateway/internal/middleware"
 )
@@ -53,6 +55,9 @@ type FinanceService interface {
 type FinanceHandler struct {
 	svc   FinanceService
 	names UserNamer
+	// cutFlags decides whether the cash-up may carry T10's expenses and
+	// closures (module_expenses); nil never shows them.
+	cutFlags featureflag.Checker
 }
 
 // FinanceOption configures a FinanceHandler.
@@ -62,6 +67,14 @@ type FinanceOption func(*FinanceHandler)
 // Without it the name falls back to the token's email.
 func WithNames(names UserNamer) FinanceOption {
 	return func(h *FinanceHandler) { h.names = names }
+}
+
+// WithCutExtras lets the cash-up carry the day's expenses, the expected cash
+// and the closures (T10) — to a caller holding expenses:read, while
+// module_expenses is on. Everyone else gets the takings alone: the cashier
+// (collections:read) reads the counter, not what the school paid out.
+func WithCutExtras(flags featureflag.Checker) FinanceOption {
+	return func(h *FinanceHandler) { h.cutFlags = flags }
 }
 
 // NewFinanceHandler wires the handler to a finance service.
@@ -611,7 +624,30 @@ func (h *FinanceHandler) DailyCashUp(w http.ResponseWriter, r *http.Request) {
 		writeConnectError(w, err)
 		return
 	}
+	if !h.mayReadCutExtras(r) {
+		cut = takingsOnly(cut)
+	}
 	writeJSON(w, http.StatusOK, cut)
+}
+
+// mayReadCutExtras: module_expenses on and the caller holds expenses:read.
+func (h *FinanceHandler) mayReadCutExtras(r *http.Request) bool {
+	if h.cutFlags == nil || !h.cutFlags.Enabled(r.Context(), featureflag.Key("expenses")) {
+		return false
+	}
+	p, _ := middleware.PrincipalFrom(r.Context())
+	return slices.Contains(p.Permissions, "expenses:read")
+}
+
+// takingsOnly drops T10's expense and closure fields from a cut.
+func takingsOnly(cut client.CashUp) client.CashUp {
+	cut.Expenses = []client.Expense{}
+	cut.ExpensesByMethod = client.MethodTotals{}
+	cut.ExpectedCashCents = 0
+	cut.Closure = nil
+	cut.ModifiedAfterClose = false
+	cut.Reopened = []client.CashCutClosure{}
+	return cut
 }
 
 // IncomeByConcept handles GET /api/v1/finance/income?from=…&to=… — what the

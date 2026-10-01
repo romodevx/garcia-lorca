@@ -124,6 +124,12 @@ func (s *ExpenseService) UpdateExpense(ctx context.Context, id string, d domain.
 	}
 	at := s.now()
 	return s.repo.UpdateExpense(ctx, id, func(cur domain.Expense) (domain.Expense, domain.ExpenseEvent, error) {
+		// The category check above was made against the expense as read
+		// before its lock. If somebody re-filed it in between, that check no
+		// longer holds: refuse rather than apply it to a different expense.
+		if cur.CategoryID() != current.CategoryID() {
+			return domain.Expense{}, domain.ExpenseEvent{}, errExpenseChanged
+		}
 		next, err := cur.Edit(d, at)
 		if err != nil {
 			return domain.Expense{}, domain.ExpenseEvent{}, err
@@ -201,6 +207,10 @@ func (s *ExpenseService) GetExpense(ctx context.Context, id string) (domain.Expe
 // --- receipts --------------------------------------------------------------
 
 var errReceiptsUnavailable = glerrors.New(glerrors.KindNotFound, "receipts are not enabled")
+
+// errExpenseChanged: the expense was re-filed by somebody else while this
+// edit was being made.
+var errExpenseChanged = glerrors.New(glerrors.KindConflict, "el egreso cambió mientras lo editabas; ábrelo de nuevo")
 
 // AttachReceipt stores a receipt (JPEG, PNG or PDF by its bytes, at most 5 MB)
 // and points the expense at it, replacing any previous one. The file goes up
@@ -292,7 +302,11 @@ func (s *ExpenseService) RemoveReceipt(ctx context.Context, id string, by domain
 	if err != nil {
 		return domain.Expense{}, err
 	}
-	return saved, s.receipts.Delete(ctx, removed.Key)
+	// Best-effort, like the replaced file in AttachReceipt: the detach is
+	// committed and is the answer; a failed delete leaves an unreferenced
+	// object the store logs with its key.
+	_ = s.receipts.Delete(ctx, removed.Key)
+	return saved, nil
 }
 
 // --- the period's money ----------------------------------------------------

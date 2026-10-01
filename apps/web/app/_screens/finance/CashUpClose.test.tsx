@@ -131,3 +131,17 @@ describe("CashUpPanel · egresos y cierre (T10)", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("el corte de ese día ya está cerrado");
   });
 });
+
+// Review T10: closing "today" closes the day the cut was read for, never the
+// server's day at the moment of the POST (UTC rolls over at 18:00 local).
+describe("CashUpPanel · el día que se cierra", () => {
+  it("sends the cut's own day when the drawer asked for today", async () => {
+    finance.getCashUp.mockResolvedValue(cut({ day: "2026-10-10" }));
+    expenses.closeCashCut.mockResolvedValue(closure);
+    const user = userEvent.setup();
+    render(<CashUpPanel day="" access={access} />);
+    await user.type(await screen.findByRole("textbox", { name: /Efectivo contado/ }), "2900");
+    await user.click(screen.getByRole("button", { name: "Cerrar corte" }));
+    expect(expenses.closeCashCut).toHaveBeenCalledWith(expect.any(String), { day: "2026-10-10", countedCashCents: 290000, note: "" });
+  });
+});

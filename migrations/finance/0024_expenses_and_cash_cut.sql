@@ -97,8 +97,11 @@ CREATE TABLE expense_events (
 );
 
 CREATE INDEX idx_expense_events_expense ON expense_events (tenant_id, expense_id, at);
--- "Did anything dated this day change after it was closed?"
-CREATE INDEX idx_expense_events_days ON expense_events (tenant_id, spent_on, previous_spent_on, at);
+-- "Did anything dated this day change after it was closed?" — asked of both
+-- the day an event leaves the expense on and the day it moved it from; one
+-- index each, so neither arm scans the tenant's whole history.
+CREATE INDEX idx_expense_events_day ON expense_events (tenant_id, spent_on, at);
+CREATE INDEX idx_expense_events_previous_day ON expense_events (tenant_id, previous_spent_on, at);
 
 CREATE TABLE cash_cut_closures (
     id                  uuid PRIMARY KEY,

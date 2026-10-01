@@ -493,3 +493,42 @@ func TestAttachReceiptReportsAStoreFailure(t *testing.T) {
 		t.Fatalf("a failed upload attaches nothing")
 	}
 }
+
+// A detach that committed is the answer even when the file could not be
+// deleted: reporting it as a failure would send the office to retry a removal
+// that already happened.
+func TestRemoveReceiptSucceedsWhenTheFileDeleteFails(t *testing.T) {
+	f := newExpenseFixture()
+	c := f.category(t, "Papelería")
+	e := f.expense(t, c.ID(), 1, domain.MethodCash, expToday)
+	ctx := context.Background()
+	if _, err := f.svc.AttachReceipt(ctx, e.ID(), []byte("%PDF-1.4"), cashier); err != nil {
+		t.Fatal(err)
+	}
+	f.store.deleteErr = errBoom
+	got, err := f.svc.RemoveReceipt(ctx, e.ID(), cashier)
+	if err != nil {
+		t.Fatalf("want success, got %v", err)
+	}
+	if _, has := got.Receipt(); has {
+		t.Fatalf("still attached")
+	}
+}
+
+// An expense re-filed by somebody else between the read and the lock is a
+// conflict, not an edit applied over a category check that no longer holds.
+func TestUpdateExpenseRefusesAnExpenseReFiledMeanwhile(t *testing.T) {
+	f := newExpenseFixture()
+	a := f.category(t, "A")
+	b := f.category(t, "B")
+	e := f.expense(t, a.ID(), 1, domain.MethodCash, expToday)
+	ctx := context.Background()
+	f.repo.beforeUpdate = func() {
+		moved, _ := f.repo.expenses[e.ID()].Edit(domain.ExpenseDraft{SpentOn: expToday, CategoryID: b.ID(), AmountCents: 1, Method: domain.MethodCash}, expToday)
+		f.repo.expenses[e.ID()] = moved
+	}
+	_, err := f.svc.UpdateExpense(ctx, e.ID(), domain.ExpenseDraft{SpentOn: expToday, CategoryID: a.ID(), AmountCents: 5, Method: domain.MethodCash}, "", cashier)
+	if glerrors.KindOf(err) != glerrors.KindConflict {
+		t.Fatalf("want KindConflict, got %v", err)
+	}
+}

@@ -120,11 +120,20 @@ export function ExpenseDrawer({ expense, categories, today, canWrite, onClose, o
       const saved = editing
         ? await updateExpense(API_URL, expense.id, { ...input, reason: reason.trim() })
         : await createExpense(API_URL, input);
+      let note = "";
       if (file !== null) {
-        await uploadReceipt(API_URL, saved.id, file);
+        // The expense is saved by now. A failed upload must not leave a
+        // "new expense" form whose retry records it twice: say what happened
+        // and close; the receipt can be attached by opening the expense.
+        try {
+          await uploadReceipt(API_URL, saved.id, file);
+        } catch (err) {
+          note = ` — el comprobante no se subió (${err instanceof Error ? err.message : "error"}); ábrelo para adjuntarlo`;
+          keepOpen = false;
+        }
       }
       if (keepOpen) reset();
-      onSaved(editing ? "Egreso actualizado" : "Egreso registrado", keepOpen);
+      onSaved(`${editing ? "Egreso actualizado" : "Egreso registrado"}${note}`, keepOpen);
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo guardar el egreso.");
     } finally {
