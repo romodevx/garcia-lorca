@@ -33,8 +33,8 @@ func sampleStatement() client.Statement {
 // movement with its running balance, the totals — accents included.
 func TestTheStatementPDFSaysWhatTheLedgerSays(t *testing.T) {
 	doc, err := receipt.StatementPDF(receipt.StatementDoc{
-		School:    client.SchoolProfile{Name: "COLEGIO GARCÍA LORCA", RFC: "EGL150101AB1"},
-		Pupil:     "Zamora Sánchez Camila", PupilDetail: "1° A",
+		School: client.SchoolProfile{Name: "COLEGIO GARCÍA LORCA", RFC: "EGL150101AB1"},
+		Pupil:  "Zamora Sánchez Camila", PupilDetail: "1° A",
 		Statement: sampleStatement(),
 	})
 	if err != nil {
