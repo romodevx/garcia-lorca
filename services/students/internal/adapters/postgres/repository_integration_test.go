@@ -122,7 +122,21 @@ func sqlFiles() ([]string, error) {
 	return files, nil
 }
 
+// migrate sets the app role up the way production does (docker/postgres-init.sh,
+// deploy/terraform/db/setup_app_role.sql) — the role and its DEFAULT privileges
+// exist BEFORE the migrations run — so a migration that narrows a table's
+// privileges (a REVOKE on an append-only ledger) is tested as it will apply.
 func migrate(db *gorm.DB) error {
+	for _, stmt := range []string{
+		"CREATE ROLE app LOGIN PASSWORD '" + appPass + "' NOBYPASSRLS NOSUPERUSER NOCREATEDB NOCREATEROLE",
+		"GRANT USAGE ON SCHEMA public TO app",
+		"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO app",
+		"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO app",
+	} {
+		if err := db.Exec(stmt).Error; err != nil {
+			return fmt.Errorf("%q: %w", stmt, err)
+		}
+	}
 	files, err := sqlFiles()
 	if err != nil {
 		return err
@@ -134,15 +148,6 @@ func migrate(db *gorm.DB) error {
 		}
 		if err := db.Exec(string(sql)).Error; err != nil {
 			return fmt.Errorf("apply %s: %w", f, err)
-		}
-	}
-	for _, stmt := range []string{
-		"CREATE ROLE app LOGIN PASSWORD '" + appPass + "' NOBYPASSRLS NOSUPERUSER NOCREATEDB NOCREATEROLE",
-		"GRANT USAGE ON SCHEMA public TO app",
-		"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app",
-	} {
-		if err := db.Exec(stmt).Error; err != nil {
-			return fmt.Errorf("%q: %w", stmt, err)
 		}
 	}
 	return nil

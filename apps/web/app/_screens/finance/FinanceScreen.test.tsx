@@ -18,7 +18,7 @@ vi.mock("../../finance/api", () => ({
   getIncome: vi.fn(),
 }));
 vi.mock("../../config/api", () => ({ listCycles: vi.fn() }));
-vi.mock("../../students/api", () => ({ listStudents: vi.fn() }));
+vi.mock("../../students/api", () => ({ listStudents: vi.fn(), listNotes: vi.fn(), addNote: vi.fn(), editNote: vi.fn(), voidNote: vi.fn(), StudentsError: class extends Error {} }));
 
 const finance = vi.mocked(financeApi);
 const config = vi.mocked(configApi);
@@ -80,6 +80,35 @@ describe("FinanceScreen", () => {
     await waitFor(() =>
       expect(finance.registerPayment).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ chargeId: "ch1", amountCents: 50000, method: "cash" })),
     );
+  });
+});
+
+// T6: Registrar pago of one charge shows that pupil's notes on its left.
+describe("FinanceScreen · notas al registrar pago", () => {
+  it("shows the charge's pupil's notes beside the payment, in a wider drawer", async () => {
+    const user = userEvent.setup();
+    students.listNotes.mockResolvedValue([{
+      id: "n-1", studentId: "s1", body: "Pagan con transferencia del abuelo", authorUserId: "u-dir", authorName: "Dirección",
+      createdAt: "2026-09-20T15:00:00Z", voided: false,
+    }]);
+    render(<FinanceScreen onBack={() => {}} notes={{ userId: "u-me", canRead: true, canWrite: true, canVoidAny: false }} />);
+    await screen.findByText("Cruz Valentina");
+    await user.click(screen.getAllByRole("button", { name: /Registrar pago/ })[0] as HTMLElement);
+    const dialog = await screen.findByRole("dialog", { name: "Registrar pago" });
+    const panel = await within(dialog).findByRole("complementary", { name: "Notas del alumno" });
+    expect(panel).toHaveTextContent("Pagan con transferencia del abuelo");
+    expect(students.listNotes).toHaveBeenCalledWith(expect.any(String), "s1");
+    expect(dialog.className).toContain("drawer-lg");
+  });
+
+  it("reads no notes without access to them", async () => {
+    const user = userEvent.setup();
+    render(<FinanceScreen onBack={() => {}} />);
+    await screen.findByText("Cruz Valentina");
+    await user.click(screen.getAllByRole("button", { name: /Registrar pago/ })[0] as HTMLElement);
+    const dialog = await screen.findByRole("dialog", { name: "Registrar pago" });
+    expect(students.listNotes).not.toHaveBeenCalled();
+    expect(dialog.className).toContain("drawer-md");
   });
 });
 

@@ -27,6 +27,7 @@ import { DebtList } from "./DebtList";
 import { ReceiptActions } from "../receipts/ReceiptActions";
 import { centsToPesosInput, formatCents, pesosToCents } from "../../_lib/money";
 import { formatStudentName } from "../../_design/students/studentName";
+import { StudentNotesBeside, useNotesBeside, type NotesAccess } from "../../_design/students/StudentNotesBeside";
 
 /**
  * What is missing, or over, against what should have been paid. Zero when the
@@ -80,6 +81,11 @@ export interface CollectDrawerProps {
    * refuses it anyway.
    */
   canGrantDiscounts?: boolean;
+  /**
+   * What the cashier may do with the pupil's notes (T6). Without it, or
+   * without students:read, the counter shows no notes.
+   */
+  notes?: NotesAccess;
 }
 
 const FUTURE_PAYMENT = "La fecha de pago no puede ser futura.";
@@ -117,7 +123,10 @@ export function paymentDateError(paidOn: string, day: string): string | undefine
  * arithmetic the system already knows how to do. Here the split is previewed
  * while they type and taken when they press Enter.
  */
-export function CollectDrawer({ student, onClose, onCollected, today, canGrantDiscounts = false }: CollectDrawerProps): ReactElement {
+export function CollectDrawer({ student, onClose, onCollected, today, canGrantDiscounts = false, notes }: CollectDrawerProps): ReactElement {
+  // The pupil's notes on the left of the counter (T6): what the office must
+  // remember about this family while it takes their money.
+  const beside = useNotesBeside(student.id, notes);
   const day = today ?? localISODate();
   // The day the family paid, which is not always the day it is keyed: a
   // cashier catching up on Monday records Friday. Every rule reads it — the
@@ -295,7 +304,7 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
       title={`Cobrar · ${name}`}
       subtitle={student.gradeGroup ?? ""}
       icon="card"
-      size="lg"
+      size={receipt === null && beside.wide ? "xl" : "lg"}
       onClose={onClose}
       // El velo original de este cajón NO tenía onClick ni Esc, a propósito: es
       // la ventanilla, y el monto, la forma de pago y la referencia ya tecleados
@@ -308,157 +317,159 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
         {receipt !== null
           ? <Receipt result={receipt} describe={describe.current} onClose={onClose} />
           : (
-            <form
-              onSubmit={(e) => { e.preventDefault(); void submit(); }}
-              style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
-              <div style={{ flex: 1, overflowY: "auto", padding: "22px 26px", display: "flex", flexDirection: "column", gap: 20 }}>
-                <div style={{ padding: "18px 20px", borderRadius: "var(--r-md)", background: "var(--surface-3)", border: "1px solid var(--border)" }}>
-                  <span style={{ fontSize: 14, color: "var(--text-muted)" }}>{expectedFor === "" ? "Monto esperado hoy" : `Monto esperado al ${shortDayLabel(expectedFor)}`}</span>
-                  <div data-testid="amount-expected" style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 38, color: "var(--text)", marginTop: 4 }}>
-                    {expected === null ? "…" : formatCents(expected.amountCents)}
-                  </div>
-                  <p style={{ fontSize: 13, color: "var(--text-faint)", marginTop: 6 }}>
-                    {expected !== null && expected.surchargeCents > 0 && `Incluye ${formatCents(expected.surchargeCents)} de recargo. `}
-                    {expected !== null && expected.discountCents > 0 && `Ya con ${formatCents(expected.discountCents)} de pronto pago. `}
-                    Del año debe <b data-testid="amount-owed">{owed === null ? "…" : formatCents(owed)}</b>.
-                  </p>
-                  {credit > 0 && (
-                    <p style={{ fontSize: 13.5, color: "var(--text-muted)", marginTop: 6 }}>
-                      Tiene {formatCents(credit)} a favor.
-                    </p>
-                  )}
-                </div>
-
-                <DebtList lines={lines} chosen={chosen} selectedCents={selectedCents} onToggle={toggle} />
-
-                <MoneyField
-                  label="Monto recibido"
-                  value={amount}
-                  onChange={(v) => {
-                    if (pesosToCents(v) !== prefilledCents.current) amountEdited.current = true;
-                    setAmount(v);
-                  }}
-                  required
-                />
-
-                {expected !== null && (
-                  <div
-                    data-testid="difference"
-                    style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", borderRadius: "var(--r-md)", background: difference(cents, target) === 0 ? "var(--ok-bg)" : "var(--warn-bg)" }}>
-                    <span style={{ fontSize: 14, color: "var(--text-muted)" }}>Diferencia</span>
-                    <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 17, color: difference(cents, target) === 0 ? "var(--ok-fg)" : "var(--warn-fg)" }}>
-                      {formatCents(difference(cents, target))}
-                    </span>
-                  </div>
-                )}
-
-                {canGrantDiscounts && expected !== null && expected.discountCents === 0 && (
-                  <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
-                    <input type="checkbox" checked={grantEarly} onChange={(e) => setGrantEarly(e.target.checked)} aria-label="Aplicar pronto pago" style={{ width: 18, height: 18 }} />
-                    <span style={{ fontSize: 14, color: "var(--text-muted)" }}>
-                      Aplicar pronto pago de todos modos
-                    </span>
-                  </label>
-                )}
-
-                {preview !== null && (
-                  <div data-testid="preview" style={{ borderRadius: "var(--r-md)", border: "1px solid var(--border)", overflow: "hidden" }}>
-                    <div style={{ padding: "10px 16px", background: "var(--surface-2)", fontSize: 13, fontWeight: 700, color: "var(--text-muted)", fontFamily: "var(--font-display)" }}>
-                      Cubre
+            <StudentNotesBeside beside={beside} studentId={student.id} bare>
+              <form
+                onSubmit={(e) => { e.preventDefault(); void submit(); }}
+                style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
+                <div style={{ flex: 1, overflowY: "auto", padding: "22px 26px", display: "flex", flexDirection: "column", gap: 20 }}>
+                  <div style={{ padding: "18px 20px", borderRadius: "var(--r-md)", background: "var(--surface-3)", border: "1px solid var(--border)" }}>
+                    <span style={{ fontSize: 14, color: "var(--text-muted)" }}>{expectedFor === "" ? "Monto esperado hoy" : `Monto esperado al ${shortDayLabel(expectedFor)}`}</span>
+                    <div data-testid="amount-expected" style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 38, color: "var(--text)", marginTop: 4 }}>
+                      {expected === null ? "…" : formatCents(expected.amountCents)}
                     </div>
-                    {preview.allocations.map((a) => (
-                      <div key={a.id} style={{ display: "flex", justifyContent: "space-between", padding: "12px 16px", borderTop: "1px solid var(--border)" }}>
-                        <span style={{ fontSize: 14.5, color: "var(--text)" }}>{label(a.chargeId, preview.surcharges, describe.current)}</span>
-                        <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 15, color: "var(--text)" }}>{formatCents(a.amountCents)}</span>
-                      </div>
-                    ))}
-                    {preview.allocations.length === 0 && (
-                      <p style={{ padding: "12px 16px", margin: 0, fontSize: 14, color: "var(--text-muted)" }}>
-                        No hay nada vencido; todo queda a favor.
+                    <p style={{ fontSize: 13, color: "var(--text-faint)", marginTop: 6 }}>
+                      {expected !== null && expected.surchargeCents > 0 && `Incluye ${formatCents(expected.surchargeCents)} de recargo. `}
+                      {expected !== null && expected.discountCents > 0 && `Ya con ${formatCents(expected.discountCents)} de pronto pago. `}
+                      Del año debe <b data-testid="amount-owed">{owed === null ? "…" : formatCents(owed)}</b>.
+                    </p>
+                    {credit > 0 && (
+                      <p style={{ fontSize: 13.5, color: "var(--text-muted)", marginTop: 6 }}>
+                        Tiene {formatCents(credit)} a favor.
                       </p>
                     )}
-                    {preview.unallocatedCents > 0 && (
-                      <div style={{ display: "flex", justifyContent: "space-between", padding: "12px 16px", borderTop: "1px solid var(--border)", background: "var(--surface-2)" }}>
-                        <span style={{ fontSize: 14.5, color: "var(--text-muted)" }}>Queda a favor</span>
-                        <span data-testid="credit" style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 15, color: "var(--forest)" }}>
-                          {formatCents(preview.unallocatedCents)}
-                        </span>
+                  </div>
+
+                  <DebtList lines={lines} chosen={chosen} selectedCents={selectedCents} onToggle={toggle} />
+
+                  <MoneyField
+                    label="Monto recibido"
+                    value={amount}
+                    onChange={(v) => {
+                      if (pesosToCents(v) !== prefilledCents.current) amountEdited.current = true;
+                      setAmount(v);
+                    }}
+                    required
+                  />
+
+                  {expected !== null && (
+                    <div
+                      data-testid="difference"
+                      style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", borderRadius: "var(--r-md)", background: difference(cents, target) === 0 ? "var(--ok-bg)" : "var(--warn-bg)" }}>
+                      <span style={{ fontSize: 14, color: "var(--text-muted)" }}>Diferencia</span>
+                      <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 17, color: difference(cents, target) === 0 ? "var(--ok-fg)" : "var(--warn-fg)" }}>
+                        {formatCents(difference(cents, target))}
+                      </span>
+                    </div>
+                  )}
+
+                  {canGrantDiscounts && expected !== null && expected.discountCents === 0 && (
+                    <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
+                      <input type="checkbox" checked={grantEarly} onChange={(e) => setGrantEarly(e.target.checked)} aria-label="Aplicar pronto pago" style={{ width: 18, height: 18 }} />
+                      <span style={{ fontSize: 14, color: "var(--text-muted)" }}>
+                        Aplicar pronto pago de todos modos
+                      </span>
+                    </label>
+                  )}
+
+                  {preview !== null && (
+                    <div data-testid="preview" style={{ borderRadius: "var(--r-md)", border: "1px solid var(--border)", overflow: "hidden" }}>
+                      <div style={{ padding: "10px 16px", background: "var(--surface-2)", fontSize: 13, fontWeight: 700, color: "var(--text-muted)", fontFamily: "var(--font-display)" }}>
+                        Cubre
                       </div>
-                    )}
-                  </div>
-                )}
+                      {preview.allocations.map((a) => (
+                        <div key={a.id} style={{ display: "flex", justifyContent: "space-between", padding: "12px 16px", borderTop: "1px solid var(--border)" }}>
+                          <span style={{ fontSize: 14.5, color: "var(--text)" }}>{label(a.chargeId, preview.surcharges, describe.current)}</span>
+                          <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 15, color: "var(--text)" }}>{formatCents(a.amountCents)}</span>
+                        </div>
+                      ))}
+                      {preview.allocations.length === 0 && (
+                        <p style={{ padding: "12px 16px", margin: 0, fontSize: 14, color: "var(--text-muted)" }}>
+                          No hay nada vencido; todo queda a favor.
+                        </p>
+                      )}
+                      {preview.unallocatedCents > 0 && (
+                        <div style={{ display: "flex", justifyContent: "space-between", padding: "12px 16px", borderTop: "1px solid var(--border)", background: "var(--surface-2)" }}>
+                          <span style={{ fontSize: 14.5, color: "var(--text-muted)" }}>Queda a favor</span>
+                          <span data-testid="credit" style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 15, color: "var(--forest)" }}>
+                            {formatCents(preview.unallocatedCents)}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
-                <div>
-                  <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)", marginLeft: 3 }}>Método</span>
-                  <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
-                    {METHODS.map((m) => {
-                      const on = method === m.value;
-                      return (
-                        <button
-                          key={m.value}
-                          type="button"
-                          onClick={() => setMethod(m.value)}
-                          style={{ height: 44, padding: "0 18px", borderRadius: 99, fontSize: 14.5, fontWeight: 600, fontFamily: "var(--font-display)", cursor: "pointer", border: `1.5px solid ${on ? "var(--lime)" : "var(--border)"}`, background: on ? "color-mix(in oklab, var(--lime) 12%, var(--surface))" : "var(--surface)", color: on ? "var(--forest)" : "var(--text-muted)" }}>
-                          {m.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {method === "card" && (
                   <div>
-                    <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)", marginLeft: 3 }}>Tipo de tarjeta</span>
-                    <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                      {([["debit", "Débito"], ["credit", "Crédito"]] as [CardType, string][]).map(([value, label]) => {
-                        const on = cardType === value;
+                    <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)", marginLeft: 3 }}>Método</span>
+                    <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                      {METHODS.map((m) => {
+                        const on = method === m.value;
                         return (
                           <button
-                            key={value}
+                            key={m.value}
                             type="button"
-                            onClick={() => setCardType(value)}
-                            aria-label={label}
+                            onClick={() => setMethod(m.value)}
                             style={{ height: 44, padding: "0 18px", borderRadius: 99, fontSize: 14.5, fontWeight: 600, fontFamily: "var(--font-display)", cursor: "pointer", border: `1.5px solid ${on ? "var(--lime)" : "var(--border)"}`, background: on ? "color-mix(in oklab, var(--lime) 12%, var(--surface))" : "var(--surface)", color: on ? "var(--forest)" : "var(--text-muted)" }}>
-                            {label}
+                            {m.label}
                           </button>
                         );
                       })}
                     </div>
                   </div>
-                )}
 
-                <DateField
-                  label="Fecha de pago"
-                  value={paidOn}
-                  max={day}
-                  onChange={(v) => {
-                    setPaidOn(v);
-                    if (paymentDateError(v, day) === undefined) setDateError(undefined);
-                  }}
-                  onBlur={() => setDateError(paymentDateError(paidOn, day))}
-                  error={dateError}
-                  help="El día en que la familia pagó. Si capturas tarde, pon ese día: los recargos, el pronto pago y el precio de la inscripción se calculan con él."
-                />
+                  {method === "card" && (
+                    <div>
+                      <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)", marginLeft: 3 }}>Tipo de tarjeta</span>
+                      <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                        {([["debit", "Débito"], ["credit", "Crédito"]] as [CardType, string][]).map(([value, label]) => {
+                          const on = cardType === value;
+                          return (
+                            <button
+                              key={value}
+                              type="button"
+                              onClick={() => setCardType(value)}
+                              aria-label={label}
+                              style={{ height: 44, padding: "0 18px", borderRadius: 99, fontSize: 14.5, fontWeight: 600, fontFamily: "var(--font-display)", cursor: "pointer", border: `1.5px solid ${on ? "var(--lime)" : "var(--border)"}`, background: on ? "color-mix(in oklab, var(--lime) 12%, var(--surface))" : "var(--surface)", color: on ? "var(--forest)" : "var(--text-muted)" }}>
+                              {label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
 
-                <label style={{ display: "block" }}>
-                  <span style={{ display: "inline-flex", alignItems: "baseline", gap: 6, marginLeft: 3 }}>
-                    <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)" }}>Referencia (opcional)</span>
-                    <HelpTip id="cobro-ref-help" label="Referencia" text={REFERENCIA_AYUDA} />
-                  </span>
-                  <div style={{ marginTop: 8 }}>
-                    <input value={reference} onChange={(e) => setReference(e.target.value)} aria-label="Referencia" aria-describedby="cobro-ref-help" style={{ ...field, height: 50, fontSize: 15.5, fontWeight: 400 }} />
-                  </div>
-                </label>
+                  <DateField
+                    label="Fecha de pago"
+                    value={paidOn}
+                    max={day}
+                    onChange={(v) => {
+                      setPaidOn(v);
+                      if (paymentDateError(v, day) === undefined) setDateError(undefined);
+                    }}
+                    onBlur={() => setDateError(paymentDateError(paidOn, day))}
+                    error={dateError}
+                    help="El día en que la familia pagó. Si capturas tarde, pon ese día: los recargos, el pronto pago y el precio de la inscripción se calculan con él."
+                  />
 
-                {error !== undefined && <p role="alert" style={{ color: "var(--bad-fg)", fontSize: 14, margin: 0 }}>{error}</p>}
-              </div>
+                  <label style={{ display: "block" }}>
+                    <span style={{ display: "inline-flex", alignItems: "baseline", gap: 6, marginLeft: 3 }}>
+                      <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)" }}>Referencia (opcional)</span>
+                      <HelpTip id="cobro-ref-help" label="Referencia" text={REFERENCIA_AYUDA} />
+                    </span>
+                    <div style={{ marginTop: 8 }}>
+                      <input value={reference} onChange={(e) => setReference(e.target.value)} aria-label="Referencia" aria-describedby="cobro-ref-help" style={{ ...field, height: 50, fontSize: 15.5, fontWeight: 400 }} />
+                    </div>
+                  </label>
 
-              <div style={{ display: "flex", gap: 12, alignItems: "center", padding: "18px 26px", borderTop: "1px solid var(--border)", background: "var(--surface-2)" }}>
-                <Btn kind="ghost" type="button" onClick={onClose}>Cancelar</Btn>
-                <div style={{ flex: 1 }} />
-                <Btn icon="check" type="submit" style={{ opacity: ready ? 1 : 0.45, height: 52, fontSize: 16 }}>Cobrar</Btn>
-              </div>
-            </form>
+                  {error !== undefined && <p role="alert" style={{ color: "var(--bad-fg)", fontSize: 14, margin: 0 }}>{error}</p>}
+                </div>
+
+                <div style={{ display: "flex", gap: 12, alignItems: "center", padding: "18px 26px", borderTop: "1px solid var(--border)", background: "var(--surface-2)" }}>
+                  <Btn kind="ghost" type="button" onClick={onClose}>Cancelar</Btn>
+                  <div style={{ flex: 1 }} />
+                  <Btn icon="check" type="submit" style={{ opacity: ready ? 1 : 0.45, height: 52, fontSize: 16 }}>Cobrar</Btn>
+                </div>
+              </form>
+            </StudentNotesBeside>
           )}
       </>
     </DrawerShell>

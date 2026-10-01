@@ -57,6 +57,21 @@ func (h *StudentsHandler) VoidStudentNote(ctx context.Context, req *connect.Requ
 	return connect.NewResponse(&studentsv1.VoidStudentNoteResponse{Note: toProtoNote(note)}), nil
 }
 
+// EditStudentNote replaces a note's text. The editor fields and edits_any come
+// from the gateway's authenticated caller.
+func (h *StudentsHandler) EditStudentNote(ctx context.Context, req *connect.Request[studentsv1.EditStudentNoteRequest]) (*connect.Response[studentsv1.EditStudentNoteResponse], error) {
+	if h.notes == nil {
+		return nil, errNotesNotServed
+	}
+	m := req.Msg
+	note, err := h.notes.EditNote(ctx, m.GetStudentId(), m.GetNoteId(), m.GetBody(), m.GetExpectedBody(),
+		domain.NoteAuthor{UserID: m.GetEditorUserId(), Name: m.GetEditorName()}, m.GetEditsAny())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&studentsv1.EditStudentNoteResponse{Note: toProtoNote(note)}), nil
+}
+
 func toProtoNote(n domain.Note) *studentsv1.StudentNote {
 	out := &studentsv1.StudentNote{
 		Id: n.ID(), StudentId: n.StudentID(), Body: n.Body(),
@@ -66,6 +81,11 @@ func toProtoNote(n domain.Note) *studentsv1.StudentNote {
 	if n.IsVoided() {
 		out.VoidedAt = timestamppb.New(n.VoidedAt())
 		out.VoidedBy = n.VoidedBy()
+	}
+	if n.IsEdited() {
+		out.UpdatedAt = timestamppb.New(n.UpdatedAt())
+		out.UpdatedBy = n.UpdatedBy().UserID
+		out.UpdatedByName = n.UpdatedBy().Name
 	}
 	return out
 }

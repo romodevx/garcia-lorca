@@ -23,9 +23,10 @@ type NoteAuthor struct {
 
 // Note is one entry in a pupil's history, written by staff.
 //
-// A note is never edited: a history that can be rewritten is not a history. A
-// wrong note is VOIDED — kept, marked, and hidden from the ordinary list — so
-// what the school once wrote about a child can always be accounted for.
+// A wrong note is VOIDED — kept, marked, and hidden from the ordinary list. A
+// note may also be EDITED, but the text an edit replaces is never lost: every
+// edit yields a NoteRevision with the previous text, who replaced it and when,
+// so what the school once wrote about a child can always be accounted for.
 type Note struct {
 	id        string
 	tenantID  string
@@ -35,22 +36,46 @@ type Note struct {
 	createdAt time.Time
 	voidedAt  time.Time
 	voidedBy  string
+	updatedAt time.Time
+	updatedBy NoteAuthor
+}
+
+// NoteRevision is the text one edit replaced: what the note said before, and
+// who replaced it, when.
+type NoteRevision struct {
+	NoteID       string
+	PreviousBody string
+	EditedBy     NoteAuthor
+	EditedAt     time.Time
 }
 
 // NewNote validates a note as written: a body of 1 to 2000 letters, trimmed,
 // and an author account.
 func NewNote(id, tenantID, studentID, body string, author NoteAuthor, at time.Time) (Note, error) {
-	trimmed := strings.TrimSpace(body)
-	if trimmed == "" || utf8.RuneCountInString(trimmed) > maxNoteChars {
-		return Note{}, glerrors.New(glerrors.KindInvalid, "a note has 1 to 2000 characters")
+	trimmed, err := noteBody(body)
+	if err != nil {
+		return Note{}, err
 	}
 	if strings.TrimSpace(author.UserID) == "" {
 		return Note{}, glerrors.New(glerrors.KindInvalid, "a note needs its author")
 	}
 	return Note{
 		id: id, tenantID: tenantID, studentID: studentID, body: trimmed,
-		author: NoteAuthor{UserID: author.UserID, Name: strings.TrimSpace(author.Name)}, createdAt: at,
+		author: cleanAuthor(author), createdAt: at,
 	}, nil
+}
+
+// noteBody is a body trimmed, or KindInvalid outside 1 to 2000 letters.
+func noteBody(body string) (string, error) {
+	trimmed := strings.TrimSpace(body)
+	if trimmed == "" || utf8.RuneCountInString(trimmed) > maxNoteChars {
+		return "", glerrors.New(glerrors.KindInvalid, "a note has 1 to 2000 characters")
+	}
+	return trimmed, nil
+}
+
+func cleanAuthor(a NoteAuthor) NoteAuthor {
+	return NoteAuthor{UserID: a.UserID, Name: strings.TrimSpace(a.Name)}
 }
 
 // RestoreNote rebuilds a stored note without judging it.
@@ -76,6 +101,53 @@ func (n Note) Void(by string, at time.Time, voidsAny bool) (Note, error) {
 	n.voidedBy = by
 	return n, nil
 }
+
+// Edit replaces the note's text with `body`, by `editor` at `at`, and returns
+// the edited note with the revision that keeps the text it replaced.
+//
+// Its author may edit it at any time — the revision keeps the history, so the
+// 15-minute window that guards a void is not needed here. Anyone else's note
+// only a caller who may edit any note (editsAny: whoever may void any, the
+// owner). A voided note is not edited; nor is a note "edited" to the same text.
+func (n Note) Edit(body string, editor NoteAuthor, at time.Time, editsAny bool) (Note, NoteRevision, error) {
+	if n.IsVoided() {
+		return Note{}, NoteRevision{}, glerrors.New(glerrors.KindConflict, "a voided note is not edited")
+	}
+	if strings.TrimSpace(editor.UserID) == "" {
+		return Note{}, NoteRevision{}, glerrors.New(glerrors.KindInvalid, "an edit needs its editor")
+	}
+	if editor.UserID != n.author.UserID && !editsAny {
+		return Note{}, NoteRevision{}, glerrors.New(glerrors.KindForbidden, "only its author may edit this note")
+	}
+	trimmed, err := noteBody(body)
+	if err != nil {
+		return Note{}, NoteRevision{}, err
+	}
+	if trimmed == n.body {
+		return Note{}, NoteRevision{}, glerrors.New(glerrors.KindInvalid, "the note already says that")
+	}
+	rev := NoteRevision{NoteID: n.id, PreviousBody: n.body, EditedBy: cleanAuthor(editor), EditedAt: at}
+	n.body = trimmed
+	n.updatedAt = at
+	n.updatedBy = rev.EditedBy
+	return n, rev, nil
+}
+
+// WithStoredEdit rebuilds a stored note's last edit without judging it.
+func (n Note) WithStoredEdit(at time.Time, by NoteAuthor) Note {
+	n.updatedAt = at
+	n.updatedBy = by
+	return n
+}
+
+// IsEdited reports whether the note's text was ever replaced.
+func (n Note) IsEdited() bool { return !n.updatedAt.IsZero() }
+
+// UpdatedAt is when the note was last edited; zero if it never was.
+func (n Note) UpdatedAt() time.Time { return n.updatedAt }
+
+// UpdatedBy is who last edited it; empty if no one did.
+func (n Note) UpdatedBy() NoteAuthor { return n.updatedBy }
 
 // ID is the note's identity.
 func (n Note) ID() string { return n.id }

@@ -325,14 +325,18 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	// Notes on a pupil (task 6). Reading them is reading the pupil; writing
 	// needs students:notes_write. Voiding needs either permission: the author
 	// voids their own within 15 minutes, a holder of students:notes_void any
-	// note at any time — the students service applies those rules. The author
-	// is the authenticated caller, named from iam's directory.
+	// note at any time — the students service applies those rules. Editing
+	// (T6) is the same pair: the author edits their own at any time, a holder of
+	// students:notes_void any note; every edit keeps the replaced text. The
+	// author and editor are the authenticated caller, named from iam's directory.
 	notesH := handler.NewNotesHandler(studentsClient, authClient)
 	mux.Handle("GET /api/v1/students/{id}/notes", studentsRead(notesH.List))
 	mux.Handle("POST /api/v1/students/{id}/notes", guard.Protect("students", requireAuthChanged(
 		middleware.RequirePermission("students:notes_write")(http.HandlerFunc(notesH.Add)))))
 	mux.Handle("POST /api/v1/students/{id}/notes/{noteId}/void", guard.Protect("students", requireAuthChanged(
 		middleware.RequireAnyPermission("students:notes_write", "students:notes_void")(http.HandlerFunc(notesH.Void)))))
+	mux.Handle("PATCH /api/v1/students/{id}/notes/{noteId}", guard.Protect("students", requireAuthChanged(
+		middleware.RequireAnyPermission("students:notes_write", "students:notes_void")(http.HandlerFunc(notesH.Edit)))))
 	// Correcting the file (task 5) needs students:update.
 	mux.Handle("PUT /api/v1/students/{id}", guard.Protect("students", requireAuthChanged(
 		middleware.RequirePermission("students:update")(http.HandlerFunc(studentsH.Update)))))

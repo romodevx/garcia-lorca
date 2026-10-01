@@ -46,8 +46,10 @@ import { Icon, type IconName } from "./Icon";
  * grandes, que además se acomodan en dos columnas en un monitor ancho ·
  * `full` la cámara del pase de lista por QR: la pantalla entera en un teléfono,
  * una columna de alto completo en un monitor. No es para formas.
+ * `xl` el cobro con las notas del alumno a su lado (T6): el ancho de `lg` más el
+ * del panel de notas.
  */
-export type DrawerSize = "sm" | "md" | "lg" | "full";
+export type DrawerSize = "sm" | "md" | "lg" | "xl" | "full";
 
 const closeButton: CSSProperties = {
   width: 40,

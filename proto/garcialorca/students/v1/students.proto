@@ -38,11 +38,14 @@ service StudentsService {
   rpc GetStudentPhoto(GetStudentPhotoRequest) returns (GetStudentPhotoResponse);
   rpc DeleteStudentPhoto(DeleteStudentPhotoRequest) returns (DeleteStudentPhotoResponse);
 
-  // Notes staff keep about a pupil. Never edited: a wrong one is voided (kept
-  // and marked). The author comes from the authenticated caller at the edge.
+  // Notes staff keep about a pupil. A wrong one is voided (kept and marked);
+  // an edit keeps the replaced text as a revision. The author and editor come
+  // from the authenticated caller at the edge.
   rpc AddStudentNote(AddStudentNoteRequest) returns (AddStudentNoteResponse);
   rpc ListStudentNotes(ListStudentNotesRequest) returns (ListStudentNotesResponse);
   rpc VoidStudentNote(VoidStudentNoteRequest) returns (VoidStudentNoteResponse);
+  // Replaces a note's text, keeping the replaced text as a revision (T6).
+  rpc EditStudentNote(EditStudentNoteRequest) returns (EditStudentNoteResponse);
 
   // --- virtual card (task 13) ---
   // GetCardCode returns the code a pupil's card shows as a QR (GLCARD:<token>),
@@ -332,6 +335,11 @@ message StudentNote {
   // Unset while the note stands.
   google.protobuf.Timestamp voided_at = 7;
   string voided_by = 8;
+  // Unset until the note is edited; then the last edit.
+  google.protobuf.Timestamp updated_at = 9;
+  string updated_by = 10;
+  // The last editor's name as it read when they edited.
+  string updated_by_name = 11;
 }
 
 message AddStudentNoteRequest {
@@ -366,6 +374,25 @@ message VoidStudentNoteRequest {
 }
 
 message VoidStudentNoteResponse {
+  StudentNote note = 1;
+}
+
+message EditStudentNoteRequest {
+  string student_id = 1;
+  string note_id = 2;
+  string body = 3;
+  // The authenticated caller, set by the gateway — never by a client.
+  string editor_user_id = 4;
+  string editor_name = 5;
+  // Whether the caller may edit any note (students:notes_void), set by the gateway.
+  bool edits_any = 6;
+  // The text the editor started from. When set, a note that no longer says it
+  // (someone else edited it meanwhile) is refused with FailedPrecondition/Conflict
+  // instead of being overwritten.
+  string expected_body = 7;
+}
+
+message EditStudentNoteResponse {
   StudentNote note = 1;
 }
 

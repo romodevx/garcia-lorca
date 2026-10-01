@@ -21,8 +21,9 @@ vi.mock("../../students/api", async (importOriginal) => {
 });
 vi.mock("../../students/photoResize", () => ({ resizeToJpeg: vi.fn() }));
 vi.mock("./ContactsPanel", () => ({ ContactsPanel: () => <div>contactos</div> }));
-vi.mock("./NotesPanel", () => ({
-  NotesPanel: (p: { userId: string; canWrite: boolean; canVoidAny: boolean }) => (
+vi.mock("../../_design/students/useStudentNotes", () => ({ useStudentNotes: () => ({ notes: [] }) }));
+vi.mock("../../_design/students/StudentNotesPanel", () => ({
+  StudentNotesPanel: (p: { userId: string; canWrite: boolean; canVoidAny: boolean }) => (
     <div>{`notas de ${p.userId} write=${String(p.canWrite)} voidAny=${String(p.canVoidAny)}`}</div>
   ),
 }));
