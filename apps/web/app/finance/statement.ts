@@ -1,3 +1,4 @@
+import { downloadBlob } from "../_lib/downloadBlob";
 import { authFetch } from "../auth/authFetch";
 
 /**
@@ -112,10 +113,5 @@ export async function statementPdf(baseURL: string, studentId: string): Promise<
 /** Saves the statement's PDF through the browser's own download. */
 export async function downloadStatementPdf(baseURL: string, studentId: string): Promise<void> {
   const { blob, filename } = await statementPdf(baseURL, studentId);
-  const href = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = href;
-  link.download = filename;
-  link.click();
-  URL.revokeObjectURL(href);
+  downloadBlob(blob, filename);
 }

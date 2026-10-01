@@ -67,3 +67,19 @@ describe("statement api (T7)", () => {
     await expect(getStatement(BASE, "st-1")).rejects.toMatchObject({ status: 403 });
   });
 });
+
+describe("downloadStatementPdf", () => {
+  it("hands the PDF to the shared download helper with the gateway's name", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("%PDF-1.4", {
+      status: 200,
+      headers: { "Content-Disposition": 'attachment; filename="estado-de-cuenta-2026-10-01.pdf"' },
+    })));
+    const blobs = await import("../_lib/downloadBlob");
+    const spy = vi.spyOn(blobs, "downloadBlob").mockImplementation(() => {});
+    const { downloadStatementPdf } = await import("./statement");
+
+    await downloadStatementPdf(BASE, "st-1");
+
+    expect(spy).toHaveBeenCalledWith(expect.any(Blob), "estado-de-cuenta-2026-10-01.pdf");
+  });
+});

@@ -553,14 +553,14 @@ func inPlayOn(now time.Time) func(ports.ChargeWithPaid) bool {
 
 // account is the statement over the charges `shown` keeps.
 func (s *FinanceService) account(ctx context.Context, studentID string, shown func(ports.ChargeWithPaid) bool) (AccountStatement, error) {
-	statement, _, err := s.accountWithTerms(ctx, studentID, shown)
+	statement, _, err := s.accountWithTerms(ctx, studentID, shown, s.now())
 	return statement, err
 }
 
 // accountWithTerms is account plus the collection terms it was worked out
 // under, for the ledger (T7) to reuse without reading them twice.
 func (s *FinanceService) accountWithTerms(
-	ctx context.Context, studentID string, shown func(ports.ChargeWithPaid) bool,
+	ctx context.Context, studentID string, shown func(ports.ChargeWithPaid) bool, when time.Time,
 ) (AccountStatement, collectionTerms, error) {
 	all, err := s.repo.ListCharges(ctx, studentID, "")
 	if err != nil {
@@ -595,7 +595,6 @@ func (s *FinanceService) accountWithTerms(
 	// counter uses — but against the charges ALREADY read above, and without the
 	// two idempotent writes EnsureConceptOfKind performs. A statement is a read,
 	// and this is the endpoint the parents' app hits most.
-	when := s.now()
 	terms, err := s.collectionTermsFor(ctx, studentID)
 	if err != nil {
 		return AccountStatement{}, collectionTerms{}, err

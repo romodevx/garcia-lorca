@@ -225,3 +225,60 @@ func TestACancelledChargeIsNotAMovement(t *testing.T) {
 		t.Errorf("a cancelled charge left %+v / %+v", st.Movements, st.Totals)
 	}
 }
+
+// Review T7: a charge cancelled after money was taken against it. The money
+// is not a credit — it paid for something — so the statement keeps what was
+// collected on it and reads the same balance as the account.
+func TestACancelledChargeWithMoneyOnItKeepsWhatWasCollected(t *testing.T) {
+	f := newFixture(t)
+	concept := f.seedConcept(t, "Excursión", 50000)
+	charge := f.seedCharge(t, concept.ID(), 50000)
+	pay(t, f, charge.ID(), 50000)
+	if _, err := f.svc.CancelCharge(context.Background(), charge.ID()); err != nil {
+		t.Fatalf("CancelCharge: %v", err)
+	}
+
+	st := statementOf(t, f, testStudent)
+
+	account, err := f.svc.GetAccount(context.Background(), testStudent)
+	requireNoError(t, err)
+	if want := account.TotalBalanceCents - account.UnallocatedCents; st.Totals.BalanceCents != want {
+		t.Errorf("balance = %d, want the account's %d — the cancelled charge's money became a false credit", st.Totals.BalanceCents, want)
+	}
+}
+
+// Review T7: an unpaid inscription the ladder has climbed is owed at today's
+// price. The statement's balance carries the same price the counter quotes.
+func TestTheStatementPricesAnUnpaidInscriptionAtTheCounters(t *testing.T) {
+	f := ladderFixture(t)
+	runOn(t, f, "2026-09-15")
+	f.clock = aug(2026, time.November, 15)
+
+	st := statementOf(t, f, testStudent)
+
+	counter, err := f.svc.ExpectedToday(context.Background(), testStudent, f.clock)
+	requireNoError(t, err)
+	if want := counter.AnnualBalanceCents - st.UnallocatedCents; st.Totals.BalanceCents != want {
+		t.Errorf("balance = %d, the counter's year is %d", st.Totals.BalanceCents, counter.AnnualBalanceCents)
+	}
+}
+
+// A reason the office typed by hand is internal: the family reads "Descuento".
+func TestTheFamilyDoesNotReadAReasonTypedByTheOffice(t *testing.T) {
+	f := newFixture(t)
+	concept := f.seedConcept(t, "Colegiatura", 100000)
+	charge := f.seedCharge(t, concept.ID(), 100000)
+	if _, err := f.svc.ApplyDiscount(context.Background(), charge.ID(), 20000, "hijo de maestra, autorizó dirección"); err != nil {
+		t.Fatalf("ApplyDiscount: %v", err)
+	}
+
+	staff := movementsOf(statementOf(t, f, testStudent), domain.MovementDiscount)
+	family := movementsOf(familyStatementOf(t, f, testStudent), domain.MovementDiscount)
+
+	if len(staff) != 1 || staff[0].Description != "hijo de maestra, autorizó dirección · "+charge.Description() {
+		t.Errorf("office reads %+v", staff)
+	}
+	if len(family) != 1 || family[0].Description != "Descuento · "+charge.Description() {
+		t.Errorf("family reads %+v", family)
+	}
+}

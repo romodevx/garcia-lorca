@@ -47,7 +47,9 @@ func (s *FinanceService) statement(ctx context.Context, studentID string, family
 	if family {
 		shown = inPlay
 	}
-	account, terms, err := s.accountWithTerms(ctx, studentID, shown)
+	// One instant for the whole read: the accrued line, the ladder price and
+	// the counter's figures are all worked out for the same day.
+	account, terms, err := s.accountWithTerms(ctx, studentID, shown, now)
 	if err != nil {
 		return Statement{}, err
 	}
@@ -56,9 +58,10 @@ func (s *FinanceService) statement(ctx context.Context, studentID string, family
 		return Statement{}, err
 	}
 
-	accrued := accruedSurcharges(account.Charges, terms.plan.Policy(), terms.calendar, terms.lateFeeID, now)
-	asOf := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
-	movements := chargeMovements(account.Charges, terms.lateFeeID, accrued, inPlay, asOf)
+	movements, err := chargeMovements(account.Charges, terms, inPlay, now, family)
+	if err != nil {
+		return Statement{}, err
+	}
 	movements = append(movements, depositMovements(deposits, family)...)
 	movements = append(movements, loosePaymentMovements(account.Payments, account.Charges)...)
 
@@ -77,30 +80,53 @@ func (s *FinanceService) statement(ctx context.Context, studentID string, family
 // chargeMovements turns the charges into ledger lines: the charge (or written
 // surcharge), its discount, and the surcharge the daily rule has earned on it.
 //
-// Skipped, as the counter skips them: cancelled charges, and surcharges whose
-// month was cancelled — nobody owes those.
+// The counter's rules, applied the counter's way:
+//   - surcharges of a cancelled month owe nothing and are not lines;
+//   - a cancelled charge with nothing collected is not a line; one that had
+//     money taken against it keeps a line for what was collected, so that
+//     money reads as spent and not as a credit (as the account counts it);
+//   - an unpaid inscription is priced by the ladder on `now`
+//     (inscriptionPaidOn), so the balance carries the counter's price.
 func chargeMovements(
-	charges []ports.ChargeWithPaid, lateFeeID string, accrued map[string]int64,
-	inPlay func(ports.ChargeWithPaid) bool, asOf time.Time,
-) []domain.Movement {
+	charges []ports.ChargeWithPaid, terms collectionTerms,
+	inPlay func(ports.ChargeWithPaid) bool, now time.Time, family bool,
+) ([]domain.Movement, error) {
 	cancelled := map[string]bool{}
 	for _, c := range charges {
 		if c.Charge.Status() == domain.StatusCancelled {
 			cancelled[c.Charge.ID()] = true
 		}
 	}
+	accrued := accruedSurcharges(charges, terms.plan.Policy(), terms.calendar, terms.lateFeeID, now)
+	asOf := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 	out := make([]domain.Movement, 0, len(charges))
 	for _, c := range charges {
 		ch := c.Charge
 		if cancelled[ch.ID()] {
+			if c.PaidCents > 0 {
+				out = append(out, domain.Movement{
+					Kind: domain.MovementCharge, Date: ch.DueDate(),
+					Description: ch.Description() + " · cancelado (se conserva lo cobrado)",
+					AmountCents: c.PaidCents, ChargeID: ch.ID(),
+				})
+			}
 			continue
 		}
 		kind := domain.MovementCharge
-		if ch.ConceptID() == lateFeeID {
+		if ch.ConceptID() == terms.lateFeeID {
 			if parent, ok := feeParent(ch.ExternalRef()); ok && cancelled[parent] {
 				continue
 			}
 			kind = domain.MovementSurcharge
+		}
+		if owed(c) > 0 {
+			priced, change, err := inscriptionPaidOn(c, terms.plan, terms.enrolmentID, now, now)
+			if err != nil {
+				return nil, err
+			}
+			if change != priceUnchanged {
+				ch = priced
+			}
 		}
 		notYetDue := !inPlay(c)
 		out = append(out, domain.Movement{
@@ -108,9 +134,10 @@ func chargeMovements(
 			AmountCents: ch.Amount().Int64(), ChargeID: ch.ID(), NotYetDue: notYetDue,
 		})
 		if d := ch.Discount().Int64(); d > 0 {
+			// T18 maps the scholarship's reason to MovementScholarship here.
 			out = append(out, domain.Movement{
-				Kind: discountKind(ch.DiscountReason()), Date: ch.DueDate(),
-				Description: discountLabel(ch.DiscountReason()) + " · " + ch.Description(),
+				Kind: domain.MovementDiscount, Date: ch.DueDate(),
+				Description: discountLabel(ch.DiscountReason(), family) + " · " + ch.Description(),
 				AmountCents: d, ChargeID: ch.ID(), NotYetDue: notYetDue,
 			})
 		}
@@ -122,7 +149,7 @@ func chargeMovements(
 			})
 		}
 	}
-	return out
+	return out, nil
 }
 
 // depositMovements is the money as it arrived: one line per deposit, whatever
@@ -170,16 +197,10 @@ func loosePaymentMovements(payments []domain.Payment, charges []ports.ChargeWith
 	return out
 }
 
-// discountKind says which ledger line a discount is. Every reason is a
-// discount today; T18 maps the scholarship's reason to MovementScholarship
-// here, and every reader already renders that kind.
-func discountKind(string) domain.MovementKind {
-	return domain.MovementDiscount
-}
-
 // discountLabel names a discount reason the way the office says it. A reason
-// the school typed itself is shown as typed.
-func discountLabel(reason string) string {
+// the office typed itself is shown as typed to the office and as "Descuento"
+// to the family: it is an internal note.
+func discountLabel(reason string, family bool) string {
 	switch reason {
 	case "":
 		return "Descuento"
@@ -192,6 +213,9 @@ func discountLabel(reason string) string {
 	case domain.ReasonPriceAtPaymentDate:
 		return "Precio a la fecha de pago"
 	default:
+		if family {
+			return "Descuento"
+		}
 		return reason
 	}
 }

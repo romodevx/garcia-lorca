@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/garcia-lorca/services/gateway/internal/client"
 )
 
@@ -44,19 +46,35 @@ func (b *StatementBuilder) Ledger(ctx context.Context, studentID string, family 
 	return b.statements.GetStatement(ctx, studentID)
 }
 
-// Document is the ledger with the pupil and the school, ready to print.
+// Document is the ledger with the pupil and the school, ready to print. The
+// three reads share nothing, so they run at once.
 func (b *StatementBuilder) Document(ctx context.Context, studentID string, family bool) (StatementDoc, error) {
-	ledger, err := b.Ledger(ctx, studentID, family)
-	if err != nil {
+	var (
+		doc   StatementDoc
+		pupil client.StudentResult
+	)
+	g, gctx := errgroup.WithContext(ctx)
+	g.Go(func() error {
+		ledger, err := b.Ledger(gctx, studentID, family)
+		doc.Statement = ledger
+		return err
+	})
+	g.Go(func() error {
+		got, err := b.students.GetStudent(gctx, studentID)
+		if err != nil {
+			return fmt.Errorf("reading the pupil of the statement: %w", err)
+		}
+		pupil = got
+		return nil
+	})
+	g.Go(func() error {
+		school, err := schoolOf(gctx, b.profiles)
+		doc.School = school
+		return err
+	})
+	if err := g.Wait(); err != nil {
 		return StatementDoc{}, err
 	}
-	pupil, err := b.students.GetStudent(ctx, studentID)
-	if err != nil {
-		return StatementDoc{}, fmt.Errorf("reading the pupil of the statement: %w", err)
-	}
-	school, err := schoolOf(ctx, b.profiles)
-	if err != nil {
-		return StatementDoc{}, err
-	}
-	return StatementDoc{School: school, Pupil: pupil.FullName(), PupilDetail: pupil.GradeGroup, Statement: ledger}, nil
+	doc.Pupil, doc.PupilDetail = pupil.FullName(), pupil.GradeGroup
+	return doc, nil
 }

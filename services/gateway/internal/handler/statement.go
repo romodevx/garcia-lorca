@@ -56,7 +56,14 @@ func (h *FamilyHandler) StatementPDF(w http.ResponseWriter, r *http.Request) {
 
 // ownedChild is the path's child when it is the principal's own (401 with no
 // principal, 404 for anyone else's — the answer a missing id gets).
+//
+// A handler composed without the ledger (WithFamilyStatements) has no such
+// route: 404, rather than a nil call.
 func (h *FamilyHandler) ownedChild(w http.ResponseWriter, r *http.Request) (string, bool) {
+	if h.statements == nil {
+		writeNotFound(w)
+		return "", false
+	}
 	p, ok := middleware.PrincipalFrom(r.Context())
 	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)

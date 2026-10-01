@@ -22,9 +22,12 @@
   `expectedFrom`, and both call it. What the daily rule has earned up to today
   and nobody wrote down is an `accrued` surcharge line dated today. It counts.
   `dueTodayCents` is `expectedFrom`'s figure — exactly what Registrar pago asks.
-- **Early payment and the inscription ladder** are contingent (they depend on
-  paying today), so they are not movements: they live in `dueTodayCents`. A
-  discount once written on a charge is a `discount` line with its reason.
+- **Early payment** is contingent (it depends on paying today), so it is not a
+  movement: it lives in `dueTodayCents`. An **unpaid inscription** is priced by
+  the ladder on today's date (`inscriptionPaidOn`, the counter's function), so
+  the balance carries the price the counter asks. A discount written on a
+  charge is a `discount` line with its reason; a reason the office typed by
+  hand reads "Descuento" to the family (it is an internal note).
 - **Payments** are one line per deposit (money as it arrived: method, folio),
   plus payments made straight against a charge. A deposit's slices are not
   lines. Overpayment shows as a negative balance (the family's credit).
@@ -35,7 +38,10 @@
   already did); shown to the office marked "aún no exigible", outside the
   balance. A charge with money on it is always in play. Hence the office and the
   family read the SAME balance.
-- **Cancelled charges**, and surcharges of a cancelled month, are not movements.
+- **Cancelled charges**, and surcharges of a cancelled month, are not movements
+  — except a cancelled charge that had money collected on it, which keeps a
+  line for what was collected so that money reads as spent, not as a false
+  credit (the account counts it the same way).
 - The old `/finance/accounts/{id}` and `/family/students/{id}/account` stay for
   the payment counter and app builds already installed; the app's own build
   reads `/statement` and `toLedger` is gone.

@@ -133,3 +133,15 @@ func TestAFamilyStatementWithoutAPrincipalIs401(t *testing.T) {
 		t.Errorf("status = %d, want 401", rec.Code)
 	}
 }
+
+// A handler composed without the ledger answers 404, never a nil-pointer panic.
+func TestAFamilyHandlerWithoutTheLedgerIs404(t *testing.T) {
+	h := handler.NewFamilyHandler(oneChild(), &fakeFamilyComms{}, nil, nil, nil, nil)
+	for name, serve := range map[string]http.HandlerFunc{"json": h.Statement, "pdf": h.StatementPDF} {
+		rec := httptest.NewRecorder()
+		serve(rec, guardianRequest(http.MethodGet, "/x", "usr-9", "studentId", "stu-1"))
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("%s: status = %d, want 404", name, rec.Code)
+		}
+	}
+}
