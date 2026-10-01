@@ -119,7 +119,7 @@ services:
       ATTENDANCE_BASE_URL: "http://attendance:8080"
       COMMS_BASE_URL: "http://comms:8080"
       UNIFORMS_BASE_URL: "http://uniforms:8080"
-      ENABLED_MODULES: "iam,gateway,students,config,teachers,grades,finance,attendance,comms,uniforms"
+      ENABLED_MODULES: "iam,gateway,students,config,teachers,grades,finance,attendance,comms,uniforms,expenses"
       # Browser origin(s) allowed to call the gateway cross-origin with cookies.
       # Tracks WEB_HOST_PORT so a remapped web port stays permitted.
       WEB_ORIGIN: "http://localhost:${WEB_HOST_PORT:-3000}"
@@ -232,6 +232,9 @@ services:
       # students (the debtor + the enrollments a bulk generation expands over).
       CONFIG_BASE_URL: "http://config:8080"
       STUDENTS_BASE_URL: "http://students:8080"
+      # T10: expense receipts — a private bucket, the emulator locally.
+      EXPENSE_RECEIPTS_BUCKET: "garcia-lorca-expense-receipts-local"
+      STORAGE_EMULATOR_HOST: "http://fake-gcs:4443"
     ports: ["8093:8080"]
     depends_on:
       postgres:
@@ -244,6 +247,8 @@ services:
         condition: service_started
       # payment-events publishing needs the emulator reachable.
       pubsub:
+        condition: service_started
+      fake-gcs:
         condition: service_started
 
   grades:

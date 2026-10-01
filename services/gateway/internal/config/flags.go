@@ -28,6 +28,8 @@ var AllModuleFlags = []string{
 	featureflag.Key("uniforms"),
 	featureflag.Key("reports"),
 	featureflag.Key("student_card"),
+	// T10: Egresos (expenses, cash-cut closing, finance reports).
+	featureflag.Key("expenses"),
 }
 
 // ParseEnabledModules turns a comma-separated list of module names (or full

@@ -105,6 +105,9 @@ func (stubIAM) ValidateToken(_ context.Context, req *connect.Request[iamv1.Valid
 		"cobranza": {"students:read", "students:list", "collections:read", "payments:write"},
 		// T9: a role the director handed payments:edit (iam 0026, delegable).
 		"payments-editor": {"payments:edit"},
+		// T10: the Egresos module's two permissions (iam 0027, delegable).
+		"expenses-writer": {"expenses:write", "expenses:read"},
+		"expenses-reader": {"expenses:read"},
 		// T2: the maestro role, exactly as migrations/iam/0022 seeds it.
 		"maestro": {"teaching:read", "teaching:write", "attendance_own:read", "attendance_own:write"},
 		// "Dar acceso al sistema" needs teachers:write AND users:write, and the

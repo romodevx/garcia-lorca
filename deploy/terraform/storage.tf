@@ -49,3 +49,42 @@ resource "google_storage_bucket_iam_member" "student_photos_runtime" {
   role   = "roles/storage.objectUser"
   member = "serviceAccount:${google_service_account.runtime.email}"
 }
+
+# ---- Expense receipts (T10) -------------------------------------------------
+#
+# The same posture as the pupils' photos: PRIVATE, no public or signed URL, the
+# finance service reads the bytes and the gateway serves them only after its
+# own permission check (expenses:read). Versioned with the same 7-day window
+# for a replaced or removed receipt.
+resource "google_storage_bucket" "expense_receipts" {
+  project                     = var.project_id
+  name                        = "${var.project_id}-expense-receipts-${var.env}"
+  location                    = var.region
+  uniform_bucket_level_access = true
+  public_access_prevention    = "enforced"
+  force_destroy               = false
+  labels                      = local.labels
+
+  versioning {
+    enabled = true
+  }
+
+  lifecycle_rule {
+    condition {
+      days_since_noncurrent_time = 7
+    }
+    action {
+      type = "Delete"
+    }
+  }
+
+  depends_on = [google_project_service.apis]
+}
+
+# Object read/write on THIS bucket only, for the runtime service account the
+# finance service runs as (shared; bucket-scoped grant, as for the photos).
+resource "google_storage_bucket_iam_member" "expense_receipts_runtime" {
+  bucket = google_storage_bucket.expense_receipts.name
+  role   = "roles/storage.objectUser"
+  member = "serviceAccount:${google_service_account.runtime.email}"
+}

@@ -121,7 +121,7 @@ locals {
     # assignments (M14), and uniforms is a real Clean-Architecture service with
     # its own migrations since M12 — not a stub. There is deliberately NO
     # `tuition` entry: M15 rides on module_finance (FLAGS.md).
-    ENABLED_MODULES = "iam,gateway,students,config,grades,finance,attendance,comms,teachers,uniforms"
+    ENABLED_MODULES = "iam,gateway,students,config,grades,finance,attendance,comms,teachers,uniforms,expenses"
     # CORS allow-list for clients that call the gateway cross-origin. The web app
     # does not: it proxies same-origin. This is a plain variable rather than
     # module.web.uri on purpose — see var.web_origin for the dependency cycle.
@@ -162,6 +162,8 @@ locals {
     CONFIG_BASE_URL      = module.config.uri
     PUBSUB_PUSH_MODE     = "true"
     PUBSUB_PUSH_SA_EMAIL = google_service_account.pubsub_push.email
+    # T10: expense receipts, the private bucket in storage.tf.
+    EXPENSE_RECEIPTS_BUCKET = google_storage_bucket.expense_receipts.name
   })
 
   # grades publishes GradesPublished on grades-events after a period close

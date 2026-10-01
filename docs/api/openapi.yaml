@@ -42,6 +42,11 @@ servers:
     description: Production
 
 tags:
+  - name: expenses
+    description: >
+      T10 — Egresos: expenses, categories, receipts, the period's money and
+      its reports, and closing the cash cut. module_expenses; `expenses:read` /
+      `expenses:write`.
   - name: uniforms-catalogue
     description: Garments and their sizes. Requires `uniforms:stock`.
   - name: uniforms-inventory
@@ -3274,6 +3279,517 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/ModuleDisabled' }
 
+  /api/v1/finance/cash-up/close:
+    post:
+      tags: [expenses]
+      summary: Close the day's cash cut
+      description: >
+        T10. Closes a day with the cash counted in the drawer. The closure is a
+        snapshot of the cut as it stands — income and expenses by method, what
+        credit notes settled, the cash expected (cash in − cash out), the cash
+        counted and the difference (counted − expected; negative is money
+        missing) — and who closed it, when. Who closes is the signed-in caller.
+        If a movement of that day changes afterwards (a correction, a void, a
+        late capture, an expense edited or cancelled) the cut reports
+        `modifiedAfterClose`. Requires `expenses:write` and module_expenses.
+      operationId: closeCashCut
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [countedCashCents]
+              properties:
+                day:
+                  type: string
+                  format: date
+                  description: The day to close; empty is today. A future day is refused.
+                  example: '2026-10-01'
+                countedCashCents: { type: integer, format: int64, minimum: 0, example: 165000 }
+                note: { type: string, maxLength: 500, example: Faltan $50 de cambio }
+      responses:
+        '200':
+          description: Closed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CashCutClosure' }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409':
+          description: The day is already closed (reopen it first).
+          content:
+            text/plain:
+              schema: { type: string }
+
+  /api/v1/finance/cash-up/reopen:
+    post:
+      tags: [expenses]
+      summary: Reopen a closed cash cut
+      description: >
+        T10. Reopens a closed day so it can be closed again (with a reason).
+        The earlier closure stays in the day's history (`reopened`). The
+        director's decision: requires `finance:write` and module_expenses.
+      operationId: reopenCashCut
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                day: { type: string, format: date, example: '2026-10-01' }
+                reason: { type: string, minLength: 1, maxLength: 500, example: Se corrigió un pago de ese día }
+      responses:
+        '200':
+          description: Reopened.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CashCutClosure' }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404':
+          description: The day is not closed, or the module is off.
+          content:
+            text/plain:
+              schema: { type: string }
+        '409':
+          description: The closure was reopened in between.
+          content:
+            text/plain:
+              schema: { type: string }
+
+  /api/v1/expense-categories:
+    get:
+      tags: [expenses]
+      summary: Expense categories
+      description: The school's own list, by name. Requires `expenses:read`.
+      operationId: listExpenseCategories
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: includeInactive
+          in: query
+          required: false
+          schema: { type: boolean }
+      responses:
+        '200':
+          description: The categories.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [categories]
+                properties:
+                  categories:
+                    type: array
+                    items: { $ref: '#/components/schemas/ExpenseCategory' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+    post:
+      tags: [expenses]
+      summary: Add an expense category
+      description: Active from the start. A name already used (any case) is a conflict. Requires `expenses:write`.
+      operationId: createExpenseCategory
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 80, example: Papelería }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExpenseCategory' }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409':
+          description: The name is taken.
+          content:
+            text/plain:
+              schema: { type: string }
+
+  /api/v1/expense-categories/{id}:
+    put:
+      tags: [expenses]
+      summary: Rename or (de)activate a category
+      description: >
+        Recorded expenses keep pointing at a category whatever happens to it: it
+        is deactivated, never deleted. Requires `expenses:write`.
+      operationId: updateExpenseCategory
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/CsrfToken' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, active]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 80, example: Mantenimiento }
+                active: { type: boolean, example: true }
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExpenseCategory' }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409':
+          description: The name is taken.
+          content:
+            text/plain:
+              schema: { type: string }
+
+  /api/v1/expenses:
+    get:
+      tags: [expenses]
+      summary: Expenses of a period
+      description: >
+        Expenses dated between two days (both inclusive, at most a year),
+        newest first, at most 500. Cancelled ones only when asked. Requires
+        `expenses:read` and module_expenses (and module_finance).
+      operationId: listExpenses
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: string, format: date } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date }, description: Inclusive. }
+        - { name: categoryId, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: includeCancelled, in: query, required: false, schema: { type: boolean } }
+      responses:
+        '200':
+          description: The expenses.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [expenses]
+                properties:
+                  expenses:
+                    type: array
+                    items: { $ref: '#/components/schemas/Expense' }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+    post:
+      tags: [expenses]
+      summary: Record an expense
+      description: >
+        Money the school paid out, filed under an active category. Who recorded
+        it is the signed-in caller. Its history starts with a "created" entry.
+        Requires `expenses:write`.
+      operationId: createExpense
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ExpenseInput' }
+      responses:
+        '201':
+          description: Recorded.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Expense' }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
+  /api/v1/expenses/{id}:
+    get:
+      tags: [expenses]
+      summary: An expense and its history
+      description: Every change, oldest first, with the expense before and after, who and when. Requires `expenses:read`.
+      operationId: getExpense
+      security: [{ sessionCookie: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses:
+        '200':
+          description: The expense.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [expense, events]
+                properties:
+                  expense: { $ref: '#/components/schemas/Expense' }
+                  events:
+                    type: array
+                    items: { $ref: '#/components/schemas/ExpenseEvent' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+    put:
+      tags: [expenses]
+      summary: Edit an expense
+      description: >
+        Replaces the editable fields; the history keeps the expense as it was.
+        A cancelled expense cannot be edited (409). Moving it to a deactivated
+        category is refused. Requires `expenses:write`.
+      operationId: updateExpense
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/CsrfToken' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - { $ref: '#/components/schemas/ExpenseInput' }
+                - type: object
+                  properties:
+                    reason: { type: string, maxLength: 500, description: Optional — why it was edited., example: Se capturó con otro monto }
+      responses:
+        '200':
+          description: Edited.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Expense' }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409':
+          description: The expense is cancelled.
+          content:
+            text/plain:
+              schema: { type: string }
+
+  /api/v1/expenses/{id}/cancel:
+    post:
+      tags: [expenses]
+      summary: Cancel an expense
+      description: >
+        Cancelled is a state, never a deletion: the expense stays, listed and
+        counting for nothing. The reason is required. Requires `expenses:write`.
+      operationId: cancelExpense
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/CsrfToken' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 1, maxLength: 500, example: Capturado dos veces }
+      responses:
+        '200':
+          description: Cancelled.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Expense' }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409':
+          description: Already cancelled.
+          content:
+            text/plain:
+              schema: { type: string }
+
+  /api/v1/expenses/{id}/receipt:
+    get:
+      tags: [expenses]
+      summary: The expense's receipt (comprobante)
+      description: >
+        The file's bytes, read from a private bucket and served only after the
+        permission check (`expenses:read`). Served with the type its bytes
+        proved to be, nosniff, no-store and a sandboxing Content-Security-Policy.
+      operationId: getExpenseReceipt
+      security: [{ sessionCookie: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses:
+        '200':
+          description: The receipt.
+          content:
+            image/jpeg: { schema: { type: string, format: binary } }
+            image/png: { schema: { type: string, format: binary } }
+            application/pdf: { schema: { type: string, format: binary } }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404':
+          description: No receipt, no such expense, or receipts are not enabled.
+          content:
+            text/plain:
+              schema: { type: string }
+    put:
+      tags: [expenses]
+      summary: Attach or replace the receipt
+      description: >
+        The raw file as the body: a JPEG, PNG or PDF judged by its bytes (never
+        by the Content-Type or a name), at most 5 MB. Replaces any previous
+        receipt. Requires `expenses:write`.
+      operationId: putExpenseReceipt
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/CsrfToken' }
+      requestBody:
+        required: true
+        content:
+          application/octet-stream: { schema: { type: string, format: binary } }
+      responses:
+        '200':
+          description: Attached.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Expense' }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409':
+          description: The expense is cancelled.
+          content:
+            text/plain:
+              schema: { type: string }
+        '413':
+          description: Larger than 5 MB.
+    delete:
+      tags: [expenses]
+      summary: Remove the receipt
+      description: Recorded in the history. Requires `expenses:write`.
+      operationId: deleteExpenseReceipt
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/CsrfToken' }
+      responses:
+        '200':
+          description: Removed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Expense' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
+  /api/v1/expenses/summary:
+    get:
+      tags: [expenses]
+      summary: Income, expenses and balance of a period
+      description: >
+        Money received (deposits and counter sales, on the day it changed hands)
+        and money paid out, by method, and the balance (income − expenses) per
+        method and in total. Credit notes are NOT income (ADR 0025): they come
+        apart in `creditNoteCents`. Aggregates only — no family is named.
+        Requires `expenses:read`.
+      operationId: financeSummary
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: string, format: date } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date }, description: Inclusive; at most a year after from. }
+      responses:
+        '200':
+          description: The period's money.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FinanceSummary' }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
+  /api/v1/expenses/reports:
+    get:
+      tags: [expenses]
+      summary: The finance report of a day, week, month or year
+      description: >
+        The period that holds `date` (today when empty, on finance's UTC day):
+        a day, its week (Monday–Sunday), its month or its year. The summary by
+        method, income by concept, expenses by category and the expenses.
+        `/pdf` and `/xlsx` export the same report. Requires `expenses:read`.
+      operationId: expensesReport
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/ReportPeriod'
+        - $ref: '#/components/parameters/ReportDate'
+      responses:
+        '200':
+          description: The report.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FinanceReport' }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
+  /api/v1/expenses/reports/pdf:
+    get:
+      tags: [expenses]
+      summary: The finance report as a PDF
+      description: Letter pages, the receipts' engine and faces (ADR 0017). Requires `expenses:read`.
+      operationId: expensesReportPdf
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/ReportPeriod'
+        - $ref: '#/components/parameters/ReportDate'
+      responses:
+        '200':
+          description: reporte-finanzas-<period>-<from>.pdf
+          content:
+            application/pdf: { schema: { type: string, format: binary } }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
+  /api/v1/expenses/reports/xlsx:
+    get:
+      tags: [expenses]
+      summary: The finance report as an Excel workbook
+      description: >
+        One sheet per table; money cells are numbers with a currency format,
+        text never becomes a formula. Requires `expenses:read`.
+      operationId: expensesReportXlsx
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/ReportPeriod'
+        - $ref: '#/components/parameters/ReportDate'
+      responses:
+        '200':
+          description: reporte-finanzas-<period>-<from>.xlsx
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet: { schema: { type: string, format: binary } }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
   /api/v1/finance/outbox/drain:
     post:
       tags: [finance-payments]
@@ -4044,6 +4560,18 @@ components:
       in: path
       required: true
       schema: { type: string, format: uuid }
+    ReportPeriod:
+      name: period
+      in: query
+      required: true
+      schema: { type: string, enum: [daily, weekly, monthly, yearly] }
+      description: The span the report covers (a week runs Monday to Sunday).
+    ReportDate:
+      name: date
+      in: query
+      required: false
+      schema: { type: string, format: date, example: '2026-10-15' }
+      description: Any day inside the period; empty is today.
     CsrfToken:
       name: X-CSRF-Token
       in: header
@@ -5264,6 +5792,25 @@ components:
           description: >
             What credit notes settled that day (T8), on its own line: not money,
             so in none of the per-method figures nor in totalCents.
+        expenses:
+          type: array
+          description: T10 — the day's expenses; cancelled ones listed, not counted.
+          items: { $ref: '#/components/schemas/Expense' }
+        expensesByMethod: { $ref: '#/components/schemas/MethodTotals' }
+        expectedCashCents:
+          type: integer
+          format: int64
+          description: T10 — the cash the drawer should hold, cash in − cash out.
+        closure: { $ref: '#/components/schemas/CashCutClosure' }
+        modifiedAfterClose:
+          type: boolean
+          description: >
+            T10 — a movement of the day changed after it was closed (a
+            correction, a void, a late capture, an expense edited or cancelled).
+        reopened:
+          type: array
+          description: T10 — earlier closures of the day that were reopened, newest first.
+          items: { $ref: '#/components/schemas/CashCutClosure' }
 
     CashUpPayment:
       type: object
@@ -5281,6 +5828,130 @@ components:
           type: string
           enum: [debit, credit]
           description: Only on a card payment (T8).
+
+    MethodTotals:
+      type: object
+      description: An amount per method and their sum. A balance may be negative.
+      required: [cashCents, cardCents, transferCents, totalCents]
+      properties:
+        cashCents: { type: integer, format: int64, example: 500000 }
+        cardCents: { type: integer, format: int64, example: 120000 }
+        transferCents: { type: integer, format: int64, example: 80000 }
+        totalCents: { type: integer, format: int64, example: 700000 }
+
+    ExpenseCategory:
+      type: object
+      required: [id, name, active]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, example: Papelería }
+        active: { type: boolean, example: true }
+
+    ExpenseInput:
+      type: object
+      required: [spentOn, categoryId, amountCents, method]
+      properties:
+        spentOn: { type: string, format: date, description: The day the money left; never in the future., example: '2026-10-01' }
+        categoryId: { type: string, format: uuid }
+        amountCents: { type: integer, format: int64, minimum: 1, example: 125050 }
+        method: { type: string, enum: [cash, card, transfer], example: cash }
+        description: { type: string, maxLength: 500, example: Hojas y tóner para dirección }
+
+    Expense:
+      type: object
+      description: Money the school paid out (T10).
+      required: [id, spentOn, categoryId, categoryName, amountCents, method, description, status]
+      properties:
+        id: { type: string, format: uuid }
+        spentOn: { type: string, format: date, example: '2026-10-01' }
+        categoryId: { type: string, format: uuid }
+        categoryName: { type: string, example: Papelería }
+        amountCents: { type: integer, format: int64, minimum: 1, example: 125050 }
+        method: { type: string, enum: [cash, card, transfer] }
+        description: { type: string, example: Hojas y tóner }
+        status: { type: string, enum: [active, cancelled] }
+        cancelReason: { type: string }
+        cancelledAt: { type: string, format: date-time }
+        receipt:
+          type: object
+          description: Absent when no receipt is attached.
+          required: [contentType, sizeBytes]
+          properties:
+            contentType: { type: string, enum: [image/jpeg, image/png, application/pdf] }
+            sizeBytes: { type: integer, format: int64, example: 248331 }
+        createdByName: { type: string, example: Laura Caja }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    ExpenseEvent:
+      type: object
+      description: One change of an expense — before and after, who, when, why.
+      required: [id, kind, before, after, at]
+      properties:
+        id: { type: string, format: uuid }
+        kind: { type: string, enum: [created, edited, cancelled, receipt_attached, receipt_removed] }
+        before: { type: object, description: 'The expense before (empty object on create).', additionalProperties: true }
+        after: { type: object, additionalProperties: true }
+        reason: { type: string }
+        actorName: { type: string, example: Laura Caja }
+        at: { type: string, format: date-time }
+
+    FinanceSummary:
+      type: object
+      required: [income, creditNoteCents, expenses, balance, expensesByCategory]
+      properties:
+        income: { $ref: '#/components/schemas/MethodTotals' }
+        creditNoteCents:
+          type: integer
+          format: int64
+          minimum: 0
+          description: What credit notes settled. Not income — outside every figure.
+        expenses: { $ref: '#/components/schemas/MethodTotals' }
+        balance: { $ref: '#/components/schemas/MethodTotals' }
+        expensesByCategory:
+          type: array
+          items:
+            type: object
+            required: [categoryId, categoryName, amountCents, count]
+            properties:
+              categoryId: { type: string, format: uuid }
+              categoryName: { type: string, example: Papelería }
+              amountCents: { type: integer, format: int64 }
+              count: { type: integer, format: int32 }
+
+    FinanceReport:
+      type: object
+      required: [period, from, to, label, summary, incomeByConcept, expenses]
+      properties:
+        period: { type: string, enum: [daily, weekly, monthly, yearly] }
+        from: { type: string, format: date, example: '2026-10-01' }
+        to: { type: string, format: date, example: '2026-10-31' }
+        label: { type: string, example: Octubre de 2026 }
+        summary: { $ref: '#/components/schemas/FinanceSummary' }
+        incomeByConcept: { $ref: '#/components/schemas/Income' }
+        expenses:
+          type: array
+          items: { $ref: '#/components/schemas/Expense' }
+
+    CashCutClosure:
+      type: object
+      description: One closure of a day's cut — the snapshot taken when it was closed.
+      required: [id, day, expectedCashCents, countedCashCents, differenceCents, income, expenses, creditNoteCents, closedAt]
+      properties:
+        id: { type: string, format: uuid }
+        day: { type: string, format: date }
+        expectedCashCents: { type: integer, format: int64, example: 170000 }
+        countedCashCents: { type: integer, format: int64, minimum: 0, example: 165000 }
+        differenceCents: { type: integer, format: int64, description: counted − expected; negative is money missing., example: -5000 }
+        income: { $ref: '#/components/schemas/MethodTotals' }
+        expenses: { $ref: '#/components/schemas/MethodTotals' }
+        creditNoteCents: { type: integer, format: int64 }
+        note: { type: string }
+        closedByName: { type: string, example: Laura Caja }
+        closedAt: { type: string, format: date-time }
+        reopenedAt: { type: string, format: date-time }
+        reopenedByName: { type: string }
+        reopenReason: { type: string }
 
     BillingRun:
       type: object
