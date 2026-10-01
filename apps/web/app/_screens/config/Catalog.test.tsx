@@ -57,7 +57,7 @@ const PLAN_ANTERIOR = {
   id: "p1", cycleId: "c1", levelId: "l1", enrollmentCents: 0, monthlyCents: 280000,
   months: 10, firstBilledMonth: 9, dueDay: 10, lateFeeCents: 0, active: true,
   policy: { dailyMode: false, lateFeeDailyCents: 0, surchargeCountsAllDays: true, earlyPaymentCents: 0, earlyPaymentDays: 0 },
-  schedule: [], monthlyDiscountCents: 0, fees: [], enrollmentDueOn: "",
+  schedule: [], monthlyDiscountCents: 0, fees: [], enrollmentDueOn: "", enrollmentStartsOn: "",
   enrollmentConcepts: [{ name: "INSCRIPCIÓN", tiers: [{ effectiveFrom: "2025-08-31", effectiveTo: "", amountCents: 450000 }] }],
 };
 
@@ -467,6 +467,7 @@ describe("editar un tabulador existente", () => {
         months: 11,
         dueDay: 7,
         enrollmentDueOn: "2026-06-30",
+        enrollmentStartsOn: "",
         fees: [{ name: "CUOTA DE JULIO", amountCents: 160000, months: [9, 10] }],
       },
     ]);

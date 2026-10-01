@@ -16,6 +16,7 @@ import {
   billedMonths,
   centsToPesos,
   inscriptionTotals,
+  inscriptionWindowProblem,
   ladderProblem,
   monthlyTotals,
   pesosToCents,
@@ -80,6 +81,24 @@ export function TuitionPage({
   // El plazo propio de la inscripción. Es un cargo aparte y el colegio lo cobra
   // en su fecha — en junio, para un año que abre en agosto.
   const [enrollmentDue, setEnrollmentDue] = useState(plan?.enrollmentDueOn ?? "");
+  // Desde cuándo se le muestra y se le pide a la familia (T5). Vacío: desde
+  // que se emite, como siempre.
+  const [enrollmentStart, setEnrollmentStart] = useState(plan?.enrollmentStartsOn ?? "");
+  /**
+   * El aviso del rango vive EN el campo de inicio, no en el renglón de abajo:
+   * se dice al salir del campo y se quita en cuanto el rango queda bien.
+   */
+  const [windowError, setWindowError] = useState<string | undefined>(undefined);
+  const startRef = useRef<HTMLDivElement>(null);
+  const checkWindow = (start: string, due: string): string => {
+    const problem = inscriptionWindowProblem(start, due);
+    setWindowError(problem === "" ? undefined : problem);
+    return problem;
+  };
+  /** Al teclear sólo se QUITA el aviso; ponerlo es cosa del blur o del guardado. */
+  const clearWindowIfFixed = (start: string, due: string): void => {
+    if (windowError !== undefined && inscriptionWindowProblem(start, due) === "") setWindowError(undefined);
+  };
   const [fees, setFees] = useState<Fee[]>(plan?.fees ?? []);
   const [concepts, setConcepts] = useState<EnrollmentConcept[]>(() => seedConcepts(plan, cycle));
   const [error, setError] = useState<string | undefined>(undefined);
@@ -116,6 +135,8 @@ export function TuitionPage({
     setEarlyAmount(copy.policy.earlyPaymentCents === 0 ? "" : centsToPesos(copy.policy.earlyPaymentCents));
     setEarlyDays(String(copy.policy.earlyPaymentDays));
     setEnrollmentDue(copy.enrollmentDueOn);
+    setEnrollmentStart(copy.enrollmentStartsOn);
+    setWindowError(undefined);
     setFees(copy.fees);
     setConcepts(copy.enrollmentConcepts);
     setError(undefined);
@@ -179,6 +200,11 @@ export function TuitionPage({
       setError("Captura la inscripción: al menos un concepto con su monto y vigencia.");
       return;
     }
+    if (checkWindow(enrollmentStart, enrollmentDue) !== "") {
+      // El foco va al campo con problema, que es donde está el aviso.
+      startRef.current?.querySelector("input")?.focus();
+      return;
+    }
     const ladder = ladderProblem(concepts);
     if (ladder !== "") {
       setError(ladder);
@@ -225,6 +251,7 @@ export function TuitionPage({
         active: true,
         fees,
         enrollmentDueOn: enrollmentDue.trim(),
+        enrollmentStartsOn: enrollmentStart.trim(),
         policy: {
           dailyMode,
           lateFeeDailyCents: dailyCents,
@@ -300,11 +327,37 @@ export function TuitionPage({
           onError={setError}
           draftRef={inscriptionDraft}
         />
-        <DateField
-          label="Fecha límite de inscripción"
-          value={enrollmentDue}
-          onChange={setEnrollmentDue}
-        />
+        {/* Inicio y límite lado a lado: son UN rango, la única pareja que las
+            reglas de formularios permiten en la misma fila. */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
+          <div ref={startRef}>
+            <DateField
+              label="Fecha de inicio de inscripción"
+              value={enrollmentStart}
+              onChange={(v) => {
+                setEnrollmentStart(v);
+                clearWindowIfFixed(v, enrollmentDue);
+              }}
+              onBlur={() => {
+                checkWindow(enrollmentStart, enrollmentDue);
+              }}
+              error={windowError}
+              help="Desde este día la familia ve la inscripción en la app y se le pide en caja. Vacío: desde que se genera."
+            />
+          </div>
+          <DateField
+            label="Fecha límite de inscripción"
+            value={enrollmentDue}
+            onChange={(v) => {
+              setEnrollmentDue(v);
+              clearWindowIfFixed(enrollmentStart, v);
+            }}
+            onBlur={() => {
+              if (enrollmentStart.trim() !== "") checkWindow(enrollmentStart, enrollmentDue);
+            }}
+            help="El último día para pagarla sin recargo. Si la cambias, se mueve en los cargos que aún deben; los pagados no se tocan."
+          />
+        </div>
       </FormSection>
 
       <FormSection

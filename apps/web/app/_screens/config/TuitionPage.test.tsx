@@ -41,6 +41,7 @@ const PREVIOUS: TuitionPlan = {
   monthlyDiscountCents: 0,
   fees: [],
   enrollmentDueOn: "2025-06-30",
+  enrollmentStartsOn: "",
   enrollmentConcepts: [
     {
       name: "INSCRIPCIÓN",
@@ -392,5 +393,95 @@ describe("dos renglones que sólo difieren en acentos", () => {
     // Found by /qa on 2026-09-30
     // Report: .gstack/qa-reports/run-20260930T170040Z/qa-report-localhost-2026-09-30.md
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+});
+
+/**
+ * T5: la inscripción tiene un rango — desde cuándo se le muestra y se le pide a
+ * la familia, y hasta cuándo se paga sin recargo.
+ */
+describe("el rango de fechas de la inscripción", () => {
+  async function capturaMinima(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+    await user.type(screen.getByLabelText("Colegiatura mensual"), "2800");
+    await user.type(screen.getByLabelText("Nuevo concepto"), "INSCRIPCIÓN");
+    await user.click(screen.getByRole("button", { name: /Agregar concepto/ }));
+    await user.type(screen.getByLabelText("Monto"), "4500");
+    await user.type(screen.getByLabelText("Vigente desde"), "2026-08-01");
+    await user.click(screen.getByRole("button", { name: /Agregar monto/ }));
+  }
+
+  it("guarda la fecha de inicio junto con la fecha límite", async () => {
+    const user = userEvent.setup();
+    open();
+    await capturaMinima(user);
+
+    await user.type(screen.getByLabelText("Fecha de inicio de inscripción"), "2026-06-01");
+    await user.type(screen.getByLabelText("Fecha límite de inscripción"), "2026-06-30");
+    await user.click(screen.getByRole("button", { name: "Guardar tabulador" }));
+
+    expect(finance.upsertTuitionPlan).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ enrollmentStartsOn: "2026-06-01", enrollmentDueOn: "2026-06-30" }),
+    );
+  });
+
+  it("abre con las fechas que ya tenía el tabulador", () => {
+    open({ plan: { ...PREVIOUS, enrollmentStartsOn: "2025-06-01" } });
+
+    expect(screen.getByLabelText("Fecha de inicio de inscripción")).toHaveValue("2025-06-01");
+    expect(screen.getByLabelText("Fecha límite de inscripción")).toHaveValue("2025-06-30");
+  });
+
+  it("al salir del campo avisa que el inicio no puede ser posterior al límite", async () => {
+    const user = userEvent.setup();
+    open();
+
+    await user.type(screen.getByLabelText("Fecha límite de inscripción"), "2026-06-30");
+    await user.type(screen.getByLabelText("Fecha de inicio de inscripción"), "2026-07-15");
+    // Mientras se escribe no se regaña: el aviso llega al salir del campo.
+    expect(screen.queryByText(/no puede ser posterior/i)).toBeNull();
+    await user.tab();
+
+    expect(screen.getByText(/no puede ser posterior a la fecha límite/i)).toBeInTheDocument();
+  });
+
+  it("al guardar no envía un rango al revés y lleva el foco al inicio", async () => {
+    const user = userEvent.setup();
+    open();
+    await capturaMinima(user);
+
+    await user.type(screen.getByLabelText("Fecha de inicio de inscripción"), "2026-07-15");
+    await user.type(screen.getByLabelText("Fecha límite de inscripción"), "2026-06-30");
+    await user.click(screen.getByRole("button", { name: "Guardar tabulador" }));
+
+    expect(finance.upsertTuitionPlan).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Fecha de inicio de inscripción")).toHaveFocus();
+    expect(screen.getByText(/no puede ser posterior a la fecha límite/i)).toBeInTheDocument();
+  });
+
+  it("pide la fecha límite cuando sólo hay inicio", async () => {
+    const user = userEvent.setup();
+    open();
+    await capturaMinima(user);
+
+    await user.type(screen.getByLabelText("Fecha de inicio de inscripción"), "2026-06-01");
+    await user.click(screen.getByRole("button", { name: "Guardar tabulador" }));
+
+    expect(finance.upsertTuitionPlan).not.toHaveBeenCalled();
+    expect(screen.getByText(/necesita su fecha límite/i)).toBeInTheDocument();
+  });
+
+  it("el aviso se quita en cuanto el rango queda bien", async () => {
+    const user = userEvent.setup();
+    open();
+    await user.type(screen.getByLabelText("Fecha límite de inscripción"), "2026-06-30");
+    await user.type(screen.getByLabelText("Fecha de inicio de inscripción"), "2026-07-15");
+    await user.tab();
+    expect(screen.getByText(/no puede ser posterior/i)).toBeInTheDocument();
+
+    await user.clear(screen.getByLabelText("Fecha de inicio de inscripción"));
+    await user.type(screen.getByLabelText("Fecha de inicio de inscripción"), "2026-06-01");
+
+    expect(screen.queryByText(/no puede ser posterior/i)).toBeNull();
   });
 });

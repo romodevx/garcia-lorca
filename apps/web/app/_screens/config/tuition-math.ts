@@ -279,3 +279,23 @@ export function wholeInRange(raw: string, min: number, max: number): number | nu
   const n = Number(raw.trim());
   return n >= min && n <= max ? n : null;
 }
+
+/**
+ * Lo que está mal en el rango de la inscripción (T5), o "" si nada.
+ *
+ * La misma regla que `domain.ValidateChargeWindow` en finance: sin inicio, la
+ * inscripción se muestra desde que se emite; con inicio, necesita su fecha
+ * límite y no puede empezar después de ella. Dicha aquí para que se lea al
+ * salir del campo, no como un 400 al guardar.
+ *
+ * Las fechas son aaaa-mm-dd, así que compararlas como texto es compararlas
+ * como días — sin `Date`, sin zona horaria.
+ */
+export function inscriptionWindowProblem(startsOn: string, dueOn: string): string {
+  const start = startsOn.trim();
+  const due = dueOn.trim();
+  if (start === "") return "";
+  if (due === "") return "Una fecha de inicio necesita su fecha límite.";
+  if (start > due) return "La fecha de inicio no puede ser posterior a la fecha límite.";
+  return "";
+}

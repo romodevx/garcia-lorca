@@ -780,6 +780,13 @@ export interface TuitionPlan {
    */
   enrollmentDueOn: string;
   /**
+   * The first day the inscription opens to families (YYYY-MM-DD, T5): before it
+   * the parents' app does not show it and the counter does not ask for it.
+   * Empty keeps it open from the day it is issued. Needs `enrollmentDueOn` and
+   * may not come after it.
+   */
+  enrollmentStartsOn: string;
+  /**
    * The lines the inscription is broken into, each with its own price ladder.
    * Empty keeps `enrollmentCents`; the two are mutually exclusive (ADR 0011).
    */
@@ -908,7 +915,13 @@ export async function listTuitionPlans(baseURL: string, cycleId: string): Promis
     Partial<TuitionPlan> &
       Omit<
         TuitionPlan,
-        "policy" | "schedule" | "monthlyDiscountCents" | "fees" | "enrollmentDueOn" | "enrollmentConcepts"
+        | "policy"
+        | "schedule"
+        | "monthlyDiscountCents"
+        | "fees"
+        | "enrollmentDueOn"
+        | "enrollmentStartsOn"
+        | "enrollmentConcepts"
       >
   >(baseURL, `/tuition-plans?cycleId=${encodeURIComponent(cycleId)}`, "plans");
   return plans.map((p) => ({
@@ -918,6 +931,8 @@ export async function listTuitionPlans(baseURL: string, cycleId: string): Promis
     monthlyDiscountCents: p.monthlyDiscountCents ?? 0,
     fees: p.fees ?? [],
     enrollmentDueOn: p.enrollmentDueOn ?? "",
+    // A plan stored before T5 has no start: open from the day it is issued.
+    enrollmentStartsOn: p.enrollmentStartsOn ?? "",
     // A plan stored before M18 comes back without them, which is the
     // single-amount inscription it has always had.
     enrollmentConcepts: p.enrollmentConcepts ?? [],

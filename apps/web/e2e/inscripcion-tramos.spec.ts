@@ -88,6 +88,7 @@ function planShell(cycleId: string, levelId: string, concepts: unknown[]): unkno
     fees: [],
     active: true,
     enrollmentDueOn: "",
+    enrollmentStartsOn: "",
     policy: {
       dailyMode: false,
       lateFeeDailyCents: 0,
