@@ -93,6 +93,7 @@ type fakeRepo struct {
 	plans    []domain.TuitionPlan
 	receipt  *ports.DepositReceipt
 	loose    []ports.LoosePayment
+	deposits []domain.Deposit
 }
 
 func newFakeRepo() *fakeRepo {
@@ -143,7 +144,7 @@ func (f *fakeRepo) GetDeposit(_ context.Context, _ string) (domain.Deposit, erro
 }
 
 func (f *fakeRepo) ListDeposits(_ context.Context, _ string) ([]domain.Deposit, error) {
-	return nil, nil
+	return f.deposits, nil
 }
 
 func (f *fakeRepo) ListDepositsOn(_ context.Context, _ time.Time) ([]domain.Deposit, error) {

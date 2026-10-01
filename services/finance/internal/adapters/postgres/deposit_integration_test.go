@@ -925,4 +925,21 @@ func TestListLoosePaymentsOnReadsOnlyPaymentsOutsideADeposit(t *testing.T) {
 	if got[0].Description != loose.Description() {
 		t.Errorf("description = %q, want the charge's %q", got[0].Description, loose.Description())
 	}
+
+	// The statement (T7) tells the two apart the same way: a slice names its
+	// deposit, a loose payment names none.
+	all, err := repo.ListPayments(context.Background(), student)
+	if err != nil {
+		t.Fatalf("ListPayments: %v", err)
+	}
+	byID := map[string]string{}
+	for _, p := range all {
+		byID[p.ID()] = p.DepositID()
+	}
+	if byID["91000000-0000-0000-0000-0000000000c7"] != "" {
+		t.Errorf("loose payment carries deposit %q, want none", byID["91000000-0000-0000-0000-0000000000c7"])
+	}
+	if byID["91000000-0000-0000-0000-0000000000c8"] != dep.ID() {
+		t.Errorf("deposit slice carries deposit %q, want %q", byID["91000000-0000-0000-0000-0000000000c8"], dep.ID())
+	}
 }

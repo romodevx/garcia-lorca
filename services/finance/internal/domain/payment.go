@@ -51,7 +51,20 @@ type Payment struct {
 	paidAt         time.Time
 	idempotencyKey string
 	receivedBy     string
+	depositID      string
 }
+
+// WithDepositID returns the payment as a slice of the deposit it came from.
+// Read-side only: the repository writes the column from the deposit itself
+// when it stores the allocation.
+func (p Payment) WithDepositID(depositID string) Payment {
+	p.depositID = depositID
+	return p
+}
+
+// DepositID is the deposit this payment is a slice of, or empty for a payment
+// made straight against its charge (a counter sale, the original API).
+func (p Payment) DepositID() string { return p.depositID }
 
 // WithReceivedBy returns the payment attributed to the account that took the
 // money (task 7).

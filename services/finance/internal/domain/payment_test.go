@@ -85,3 +85,16 @@ func TestNewPaymentValidation(t *testing.T) {
 		})
 	}
 }
+
+func TestAPaymentNamesTheDepositItIsASliceOf(t *testing.T) {
+	p, err := domain.NewPayment("p", "t", "c", 100, domain.MethodCash, "", time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.DepositID() != "" {
+		t.Fatalf("a payment made straight against a charge names no deposit, got %q", p.DepositID())
+	}
+	if got := p.WithDepositID("d").DepositID(); got != "d" {
+		t.Fatalf("want deposit d, got %q", got)
+	}
+}
