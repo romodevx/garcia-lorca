@@ -221,11 +221,33 @@ func TestRegisterPaymentPassesTheIdempotencyKey(t *testing.T) {
 	stub := &stubFinance{}
 	c := clientFor(t, stub)
 
-	if err := c.RegisterPayment(context.Background(), "chg-1", 64000, "cash", "", "ful-1"); err != nil {
+	if err := c.RegisterPayment(context.Background(), "chg-1", 64000,
+		[]ports.Tender{{Method: "cash", AmountCents: 64000}}, "ful-1"); err != nil {
 		t.Fatalf("RegisterPayment: %v", err)
 	}
 	if len(stub.payments) != 1 || stub.payments[0].GetIdempotencyKey() != "ful-1" {
 		t.Errorf("the idempotency key did not reach finance: %+v", stub.payments)
+	}
+	if stub.payments[0].GetMethod() != "cash" {
+		t.Errorf("a single tender must also fill method for an older finance: %+v", stub.payments[0])
+	}
+}
+
+// T8: a combined payment reaches finance tender by tender.
+func TestRegisterPaymentCarriesTheTenders(t *testing.T) {
+	stub := &stubFinance{}
+	c := clientFor(t, stub)
+
+	if err := c.RegisterPayment(context.Background(), "chg-1", 64000, []ports.Tender{
+		{Method: "credit_note", AmountCents: 20000, Reference: "NC-12"},
+		{Method: "card", AmountCents: 44000, CardType: "debit"},
+	}, "ful-2"); err != nil {
+		t.Fatalf("RegisterPayment: %v", err)
+	}
+	got := stub.payments[0].GetTenders()
+	if len(got) != 2 || got[0].GetMethod() != "credit_note" || got[0].GetReference() != "NC-12" ||
+		got[1].GetCardType() != "debit" || got[1].GetAmountCents() != 44000 {
+		t.Errorf("tenders = %+v", got)
 	}
 }
 

@@ -419,7 +419,7 @@ message CounterSaleRequest {
   string student_id = 1;
   string cycle_id = 2;
   repeated SaleLine lines = 3;
-  // cash | card | transfer.
+  // cash | card | transfer | credit_note. Ignored when tenders are given.
   string method = 4;
   string reference = 5;
   string note = 6;
@@ -429,6 +429,21 @@ message CounterSaleRequest {
   // money in one act; a double click or a retried timeout without it is a second
   // sale of goods that left once.
   string idempotency_key = 8;
+  // tenders combine methods (T8): a credit note completed with cash. They must
+  // add up exactly to the sale's total as the shop prices it, or the sale is
+  // refused before anything moves.
+  repeated SaleTender tenders = 9;
+}
+
+// SaleTender is one method a counter sale was paid by (T8).
+message SaleTender {
+  // cash | card | transfer | credit_note.
+  string method = 1;
+  int64 amount_cents = 2;
+  // Free text: a credit note's folio, a voucher, a transfer id.
+  string reference = 3;
+  // debit | credit, only on a card.
+  string card_type = 4;
 }
 
 message CounterSaleResponse {

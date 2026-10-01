@@ -26,9 +26,9 @@ type FinanceService interface {
 	ListCharges(ctx context.Context, studentID, cycleID string) ([]client.Charge, error)
 	ApplyDiscount(ctx context.Context, chargeID string, discountCents int64, reason string) (client.Charge, error)
 	CancelCharge(ctx context.Context, chargeID string) (client.Charge, error)
-	RegisterPaymentAt(ctx context.Context, chargeID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time, receiver client.Receiver) (client.Payment, client.Charge, error)
+	RegisterTenderedPayment(ctx context.Context, in client.TenderedPayment) ([]client.Payment, client.Charge, error)
 	GetAccount(ctx context.Context, studentID string) (client.AccountStatement, error)
-	RegisterDeposit(ctx context.Context, studentID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time, grantEarlyPayment bool, cardType string, receiver client.Receiver, chargeIDs []string) (client.DepositResult, error)
+	RegisterDeposit(ctx context.Context, studentID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time, grantEarlyPayment bool, cardType string, receiver client.Receiver, chargeIDs []string, tenders []client.Tender) (client.DepositResult, error)
 	ExpectedToday(ctx context.Context, studentID, on string) (client.Expected, error)
 	PreviewDeposit(ctx context.Context, studentID string, amountCents int64, paidAt time.Time, chargeIDs []string) (client.DepositResult, error)
 	ListDeposits(ctx context.Context, studentID string) ([]client.Deposit, error)
@@ -151,6 +151,8 @@ type registerPaymentRequest struct {
 	// PaidAt "" ⇒ now. A date like "2026-09-04": the counter records the DAY the
 	// money changed hands, which is not always the day it was captured.
 	PaidAt string `json:"paidAt"`
+	// Tenders combine methods (T8); empty means the single method above.
+	Tenders []client.Tender `json:"tenders"`
 }
 
 // --- response bodies -------------------------------------------------------
@@ -390,14 +392,26 @@ func (h *FinanceHandler) RegisterPayment(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "paidAt must be a date like 2026-09-04", http.StatusBadRequest)
 		return
 	}
-	payment, charge, err := h.svc.RegisterPaymentAt(r.Context(), req.ChargeID, req.AmountCents, req.Method, req.Reference, req.IdempotencyKey, paidAt, accountOf(r))
+	if msg := invalidTenders(req.Tenders); msg != "" {
+		http.Error(w, msg, http.StatusBadRequest)
+		return
+	}
+	tenders := req.Tenders
+	if len(tenders) == 0 {
+		tenders = []client.Tender{{Method: req.Method, AmountCents: req.AmountCents, Reference: req.Reference}}
+	}
+	payments, charge, err := h.svc.RegisterTenderedPayment(r.Context(), client.TenderedPayment{
+		ChargeID: req.ChargeID, AmountCents: req.AmountCents, Tenders: tenders,
+		IdempotencyKey: req.IdempotencyKey, PaidAt: paidAt, Receiver: accountOf(r),
+	})
 	if err != nil {
 		writeConnectError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{
-		"payment": toPaymentResponse(payment),
-		"charge":  toChargeResponse(charge),
+		"payment":  toPaymentResponse(payments[0]),
+		"payments": toPaymentResponses(payments),
+		"charge":   toChargeResponse(charge),
 	})
 }
 
@@ -420,6 +434,38 @@ type registerDepositRequest struct {
 	// ChargeIDs are the charges the money may pay, chosen at the counter
 	// (task 8). Empty means every charge, oldest first.
 	ChargeIDs []string `json:"chargeIds"`
+	// Tenders combine methods (T8) and replace method, reference and cardType.
+	Tenders []client.Tender `json:"tenders"`
+}
+
+// The contract's bounds on a combined payment (Tender in openapi.yaml).
+const (
+	maxTenders         = 4
+	maxTenderReference = 120
+)
+
+// tenderMethods is the contract's method vocabulary for a tender.
+var tenderMethods = map[string]bool{"cash": true, "card": true, "transfer": true, "credit_note": true}
+
+// invalidTenders checks the counter's tenders against the contract at the
+// edge: at most four, a known method, a positive amount, a bounded reference.
+// Whether they add up to the amount is finance's rule, and finance enforces it.
+// Empty means no tenders were sent, which is valid.
+func invalidTenders(ts []client.Tender) string {
+	if len(ts) > maxTenders {
+		return "a payment combines at most four methods"
+	}
+	for _, t := range ts {
+		switch {
+		case !tenderMethods[t.Method]:
+			return "tender method must be cash, card, transfer or credit_note"
+		case t.AmountCents <= 0:
+			return "every tender needs an amount greater than zero"
+		case len([]rune(t.Reference)) > maxTenderReference:
+			return "a tender reference is at most 120 characters"
+		}
+	}
+	return ""
 }
 
 // grantsDiscounts is the permission that may lower what a family owes.
@@ -448,6 +494,10 @@ func (h *FinanceHandler) RegisterDeposit(w http.ResponseWriter, r *http.Request)
 		http.Error(w, msg, http.StatusBadRequest)
 		return
 	}
+	if msg := invalidTenders(req.Tenders); msg != "" {
+		http.Error(w, msg, http.StatusBadRequest)
+		return
+	}
 	// The late reward is a discount the school grants, and discounts are
 	// finance:write's: payments:write alone takes money at the listed price
 	// (ADR 0015).
@@ -456,7 +506,7 @@ func (h *FinanceHandler) RegisterDeposit(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	got, derr := h.svc.RegisterDeposit(r.Context(), req.StudentID, req.AmountCents,
-		req.Method, req.Reference, req.IdempotencyKey, paidAt, req.GrantEarlyPayment, req.CardType, h.receiverOf(r), req.ChargeIDs)
+		req.Method, req.Reference, req.IdempotencyKey, paidAt, req.GrantEarlyPayment, req.CardType, h.receiverOf(r), req.ChargeIDs, req.Tenders)
 	if derr != nil {
 		writeConnectError(w, derr)
 		return

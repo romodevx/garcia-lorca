@@ -274,6 +274,8 @@ type fakeFinance struct {
 	conceptID string
 	charges   []ports.CreateChargeInput
 	payments  []string
+	// tenders are the methods of each recorded payment, in order (T8).
+	tenders [][]ports.Tender
 	// Injected failures, one per step, so a test can kill the call exactly where
 	// it wants to see what the system is left holding.
 	failConcept error
@@ -307,11 +309,12 @@ func (f *fakeFinance) CreateCharge(_ context.Context, in ports.CreateChargeInput
 	return ports.ChargeRef{ID: fmt.Sprintf("chg-%d", f.nextID)}, nil
 }
 
-func (f *fakeFinance) RegisterPayment(_ context.Context, chargeID string, _ int64, _, _, _ string) error {
+func (f *fakeFinance) RegisterPayment(_ context.Context, chargeID string, _ int64, tenders []ports.Tender, _ string) error {
 	if f.failPayment != nil {
 		return f.failPayment
 	}
 	f.payments = append(f.payments, chargeID)
+	f.tenders = append(f.tenders, tenders)
 	return nil
 }
 

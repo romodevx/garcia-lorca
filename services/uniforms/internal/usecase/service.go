@@ -190,9 +190,13 @@ type CounterSaleInput struct {
 	// Note must say who bought it.
 	StudentID string
 	Lines     []SaleLineInput
-	// Method is cash | card | transfer.
-	Method      string
-	Reference   string
+	// Method is cash | card | transfer | credit_note: the single method.
+	// Tenders, when given, replace it (and Reference).
+	Method    string
+	Reference string
+	// Tenders combine methods (T8): a credit note completed with cash. They
+	// must add up exactly to the sale's total as the shop prices it.
+	Tenders     []Tender
 	Note        string
 	ActorUserID string
 	// IdempotencyKey is REQUIRED, and minted when the till drawer opens rather
@@ -200,7 +204,57 @@ type CounterSaleInput struct {
 	IdempotencyKey string
 }
 
-var validMethods = map[string]bool{"cash": true, "card": true, "transfer": true}
+var validMethods = map[string]bool{"cash": true, "card": true, "transfer": true, "credit_note": true}
+
+// Tender is one method of a combined payment at the counter (T8).
+type Tender struct {
+	Method      string
+	AmountCents int64
+	Reference   string
+	// CardType is debit or credit, only on a card.
+	CardType string
+}
+
+// maxTenders is how many methods one sale may combine.
+const maxTenders = 4
+
+// checkTenders refuses tenders the counter cannot have meant: an unknown
+// method, an amount of nothing, more than four. Whether they add up is
+// checked once the shop has priced the sale (tendersFor).
+func checkTenders(tenders []Tender) error {
+	if len(tenders) > maxTenders {
+		return glerrors.New(glerrors.KindInvalid, "una venta admite como máximo cuatro formas de pago")
+	}
+	for _, t := range tenders {
+		if !validMethods[t.Method] {
+			return glerrors.New(glerrors.KindInvalid, "unknown payment method")
+		}
+		if t.AmountCents <= 0 {
+			return glerrors.New(glerrors.KindInvalid, "cada forma de pago necesita un monto mayor a cero")
+		}
+	}
+	return nil
+}
+
+// tendersFor is how the sale's total is paid: the counter's tenders, which
+// must add up to it exactly (the rule the school approved — a sale whose
+// methods do not cover the total is not made), or the single method for all
+// of it.
+func tendersFor(in CounterSaleInput, total int64) ([]ports.Tender, error) {
+	if len(in.Tenders) == 0 {
+		return []ports.Tender{{Method: in.Method, AmountCents: total, Reference: in.Reference}}, nil
+	}
+	out := make([]ports.Tender, 0, len(in.Tenders))
+	var sum int64
+	for _, t := range in.Tenders {
+		sum += t.AmountCents
+		out = append(out, ports.Tender{Method: t.Method, AmountCents: t.AmountCents, Reference: strings.TrimSpace(t.Reference), CardType: t.CardType})
+	}
+	if sum != total {
+		return nil, glerrors.New(glerrors.KindInvalid, "la suma de las formas de pago no coincide con el total de la venta")
+	}
+	return out, nil
+}
 
 // CounterSale sells and hands over in one act.
 //
@@ -220,8 +274,11 @@ func (s *Service) CounterSale(ctx context.Context, in CounterSaleInput) (ports.O
 		return ports.OrderAggregate{}, glerrors.New(glerrors.KindInvalid,
 			"a counter sale needs an idempotency key: it moves goods and money at once")
 	}
-	if !validMethods[in.Method] {
+	if len(in.Tenders) == 0 && !validMethods[in.Method] {
 		return ports.OrderAggregate{}, glerrors.New(glerrors.KindInvalid, "unknown payment method")
+	}
+	if err := checkTenders(in.Tenders); err != nil {
+		return ports.OrderAggregate{}, err
 	}
 	settings, err := s.repo.GetSettings(ctx)
 	if err != nil {
@@ -242,6 +299,12 @@ func (s *Service) CounterSale(ctx context.Context, in CounterSaleInput) (ports.O
 	if err != nil {
 		return ports.OrderAggregate{}, err
 	}
+	// Before anything moves: tenders that do not cover the total refuse the
+	// sale while the garments are still on the shelf.
+	tenders, err := tendersFor(in, total)
+	if err != nil {
+		return ports.OrderAggregate{}, err
+	}
 
 	saved, replayed, err := s.repo.CounterSale(ctx, ports.CounterSaleCommand{
 		OrderID: orderID, FulfillmentID: fulfillmentID, TenantID: s.tenantID,
@@ -258,7 +321,7 @@ func (s *Service) CounterSale(ctx context.Context, in CounterSaleInput) (ports.O
 		return saved, nil
 	}
 
-	s.recordMoney(ctx, saved, in, total)
+	s.recordMoney(ctx, saved, tenders, total)
 	return saved, nil
 }
 
@@ -341,7 +404,7 @@ func (s *Service) priceLines(ctx context.Context, orderID string, inputs []SaleL
 // recordMoney raises the charge and records the payment for a sale that has
 // already happened. Every failure ends the same way: the delivery is flagged,
 // because the goods are gone and no automatic answer is honest.
-func (s *Service) recordMoney(ctx context.Context, saved ports.OrderAggregate, in CounterSaleInput, total int64) {
+func (s *Service) recordMoney(ctx context.Context, saved ports.OrderAggregate, tenders []ports.Tender, total int64) {
 	if len(saved.Fulfillments) == 0 {
 		return
 	}
@@ -371,7 +434,7 @@ func (s *Service) recordMoney(ctx context.Context, saved ports.OrderAggregate, i
 		s.flag(ctx, fulfillmentID, "el cobro se creó pero no quedó ligado a la venta")
 		return
 	}
-	if err := s.finance.RegisterPayment(ctx, charge.ID, total, in.Method, in.Reference, fulfillmentID); err != nil {
+	if err := s.finance.RegisterPayment(ctx, charge.ID, total, tenders, fulfillmentID); err != nil {
 		// Worse than the previous case, not better: the family now owes for
 		// something they already paid for and carried out.
 		s.flag(ctx, fulfillmentID, "se cobró en caja pero el pago no quedó registrado en Finanzas")

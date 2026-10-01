@@ -298,6 +298,8 @@ type CounterSaleInput struct {
 	Note           string
 	ActorUserID    string
 	IdempotencyKey string
+	// Tenders combine methods (T8); the shop checks they add up to its total.
+	Tenders []Tender
 }
 
 // CounterSale sells and hands over in one act.
@@ -306,9 +308,16 @@ func (c *UniformsClient) CounterSale(ctx context.Context, in CounterSaleInput) (
 	for _, l := range in.Lines {
 		lines = append(lines, &uniformsv1.SaleLine{ItemId: l.ItemID, SizeLabel: l.SizeLabel, Qty: l.Qty})
 	}
+	tenders := make([]*uniformsv1.SaleTender, 0, len(in.Tenders))
+	for _, t := range in.Tenders {
+		tenders = append(tenders, &uniformsv1.SaleTender{
+			Method: t.Method, AmountCents: t.AmountCents, Reference: t.Reference, CardType: t.CardType,
+		})
+	}
 	res, err := c.rpc.CounterSale(ctx, connect.NewRequest(&uniformsv1.CounterSaleRequest{
 		StudentId: in.StudentID, Lines: lines, Method: in.Method, Reference: in.Reference,
 		Note: in.Note, ActorUserId: in.ActorUserID, IdempotencyKey: in.IdempotencyKey,
+		Tenders: tenders,
 	}))
 	if err != nil {
 		return UniformOrder{}, err

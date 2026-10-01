@@ -141,3 +141,26 @@ func TestCashUpCarriesLoosePayments(t *testing.T) {
 		t.Errorf("total = %d", cut.TotalCents)
 	}
 }
+
+// T8, both directions of the wire: the tenders go out as sent and come back on
+// the deposit, and the credit-note line of the cash-up is read.
+func TestTendersCrossTheWireBothWays(t *testing.T) {
+	sent := []Tender{
+		{Method: "credit_note", AmountCents: 200000, Reference: "NC-7"},
+		{Method: "card", AmountCents: 150000, CardType: "credit"},
+	}
+	back := fromProtoTenders(toProtoTenders(sent))
+	if len(back) != 2 || back[0] != sent[0] || back[1] != sent[1] {
+		t.Errorf("round trip = %+v, want %+v", back, sent)
+	}
+
+	d := toDeposit(&financev1.Deposit{Id: "dep-1", Method: "mixed", Tenders: toProtoTenders(sent)})
+	if d.Method != "mixed" || len(d.Tenders) != 2 || d.Tenders[0] != sent[0] {
+		t.Errorf("deposit = %+v", d)
+	}
+
+	cut := toCashUp(&financev1.DailyCashUpResponse{CashCents: 1, TotalCents: 1, CreditNoteCents: 200000})
+	if cut.CreditNoteCents != 200000 || cut.TotalCents != 1 {
+		t.Errorf("cash-up credit notes = %d, total = %d", cut.CreditNoteCents, cut.TotalCents)
+	}
+}

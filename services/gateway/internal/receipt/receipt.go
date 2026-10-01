@@ -42,15 +42,46 @@ type Receipt struct {
 	Lines       []Line               `json:"lines"`
 	// The parts of the total a family asks about: late fees, discounts, and
 	// money no concept claimed (their credit).
-	SurchargeCents int64  `json:"surchargeCents"`
-	DiscountCents  int64  `json:"discountCents"`
-	CreditCents    int64  `json:"creditCents"`
-	TotalCents     int64  `json:"totalCents"`
-	Method         string `json:"method"`
-	Reference      string `json:"reference,omitempty"`
-	ReceivedBy     string `json:"receivedBy,omitempty"`
-	Voided         bool   `json:"voided,omitempty"`
-	VoidReason     string `json:"voidReason,omitempty"`
+	SurchargeCents int64 `json:"surchargeCents"`
+	DiscountCents  int64 `json:"discountCents"`
+	CreditCents    int64 `json:"creditCents"`
+	TotalCents     int64 `json:"totalCents"`
+	// Method is how it was paid, in words: the one method, or every method
+	// joined with " + " when several were combined (T8).
+	Method    string `json:"method"`
+	Reference string `json:"reference,omitempty"`
+	// Tenders is the breakdown by method (T8): a credit note completed with
+	// cash prints both, each with its amount.
+	Tenders    []TenderLine `json:"tenders"`
+	ReceivedBy string       `json:"receivedBy,omitempty"`
+	Voided     bool         `json:"voided,omitempty"`
+	VoidReason string       `json:"voidReason,omitempty"`
+}
+
+// TenderLine is one method of the payment, as the receipt prints it.
+type TenderLine struct {
+	Method      string `json:"method"`
+	AmountCents int64  `json:"amountCents"`
+	Reference   string `json:"reference,omitempty"`
+}
+
+// tenderLines puts the tenders in the office's words.
+func tenderLines(ts []client.Tender) []TenderLine {
+	out := make([]TenderLine, 0, len(ts))
+	for _, t := range ts {
+		out = append(out, TenderLine{Method: methodLabel(t.Method, t.CardType), AmountCents: t.AmountCents, Reference: t.Reference})
+	}
+	return out
+}
+
+// methodsLabel is every method of the payment, joined: "Nota de crédito +
+// Efectivo".
+func methodsLabel(lines []TenderLine) string {
+	labels := make([]string, 0, len(lines))
+	for _, l := range lines {
+		labels = append(labels, l.Method)
+	}
+	return strings.Join(labels, " + ")
 }
 
 // The reads a receipt needs, each defined here, where it is consumed.
@@ -112,9 +143,16 @@ func (b *Builder) Payment(ctx context.Context, depositID string) (Receipt, error
 		BuyerDetail: pupil.GradeGroup,
 		Lines:       make([]Line, 0, len(got.Lines)),
 		CreditCents: got.UnallocatedCents, TotalCents: d.AmountCents,
-		Method: methodLabel(d.Method, d.CardType), Reference: d.Reference, ReceivedBy: d.ReceivedByName,
+		Reference: d.Reference, ReceivedBy: d.ReceivedByName,
 		Voided: d.VoidedAt != "", VoidReason: d.VoidReason,
 	}
+	tenders := d.Tenders
+	if len(tenders) == 0 {
+		// A finance from before T8 sends the single method only.
+		tenders = []client.Tender{{Method: d.Method, AmountCents: d.AmountCents, Reference: d.Reference, CardType: d.CardType}}
+	}
+	r.Tenders = tenderLines(tenders)
+	r.Method = methodsLabel(r.Tenders)
 	for _, l := range got.Lines {
 		r.Lines = append(r.Lines, Line{Description: l.Description, AmountCents: l.AmountCents, Surcharge: l.Surcharge, DiscountCents: l.DiscountCents})
 		// Every line's discount counts, so the lines and the totals agree.
@@ -146,6 +184,7 @@ func (b *Builder) Sale(ctx context.Context, orderID string) (Receipt, error) {
 		Kind: KindSale, Folio: order.Folio, School: school, PaidOn: dateOf(order.CreatedAt),
 		Buyer: buyerOf(order), BuyerDetail: order.StudentGradeGroup,
 		Lines: make([]Line, 0, len(order.Lines)), TotalCents: order.TotalCents,
+		Tenders: []TenderLine{},
 	}
 	for _, l := range order.Lines {
 		r.Lines = append(r.Lines, Line{
@@ -154,11 +193,15 @@ func (b *Builder) Sale(ctx context.Context, orderID string) (Receipt, error) {
 		})
 	}
 	if order.StudentID != "" {
-		method, reference, err := b.paymentOf(ctx, order)
+		tenders, err := b.paymentOf(ctx, order)
 		if err != nil {
 			return Receipt{}, err
 		}
-		r.Method, r.Reference = method, reference
+		r.Tenders = tenderLines(tenders)
+		r.Method = methodsLabel(r.Tenders)
+		if len(tenders) == 1 {
+			r.Reference = tenders[0].Reference
+		}
 	}
 	return r, nil
 }
@@ -180,9 +223,10 @@ func schoolOf(ctx context.Context, profiles ProfileReader) (client.SchoolProfile
 	return p, nil
 }
 
-// paymentOf finds how a sale was paid: the payment on one of its deliveries'
-// charges. Empty when finance never recorded it (a flagged delivery).
-func (b *Builder) paymentOf(ctx context.Context, order client.UniformOrder) (string, string, error) {
+// paymentOf finds how a sale was paid: every payment on its deliveries'
+// charges, one per method it combined (T8). Empty when finance never recorded
+// it (a flagged delivery).
+func (b *Builder) paymentOf(ctx context.Context, order client.UniformOrder) ([]client.Tender, error) {
 	charges := map[string]bool{}
 	for _, f := range order.Fulfillments {
 		if f.FinanceChargeID != "" {
@@ -190,18 +234,19 @@ func (b *Builder) paymentOf(ctx context.Context, order client.UniformOrder) (str
 		}
 	}
 	if len(charges) == 0 {
-		return "", "", nil
+		return nil, nil
 	}
 	account, err := b.accounts.GetAccount(ctx, order.StudentID)
 	if err != nil {
-		return "", "", fmt.Errorf("reading how sale %s was paid: %w", order.Folio, err)
+		return nil, fmt.Errorf("reading how sale %s was paid: %w", order.Folio, err)
 	}
+	var out []client.Tender
 	for _, p := range account.Payments {
 		if charges[p.ChargeID] {
-			return methodLabel(p.Method, ""), p.Reference, nil
+			out = append(out, client.Tender{Method: p.Method, AmountCents: p.AmountCents, Reference: p.Reference})
 		}
 	}
-	return "", "", nil
+	return out, nil
 }
 
 func buyerOf(order client.UniformOrder) string {
@@ -226,6 +271,10 @@ func methodLabel(method, cardType string) string {
 		return "Efectivo"
 	case "transfer":
 		return "Transferencia"
+	case "credit_note":
+		return "Nota de crédito"
+	case "mixed":
+		return "Combinado"
 	case "card":
 		switch cardType {
 		case "debit":

@@ -159,6 +159,17 @@ type ChargeRef struct {
 	Status         string
 }
 
+// Tender is one method a counter sale was paid by (T8): cash | card |
+// transfer | credit_note, with its amount. A credit note is one the school
+// issued by hand; finance keeps it out of the takings.
+type Tender struct {
+	Method      string
+	AmountCents int64
+	Reference   string
+	// CardType is debit or credit, only on a card.
+	CardType string
+}
+
 // FinanceWriter raises and settles the money side of the shop. It is a WRITE
 // seam into another bounded context, which is unusual here and deliberate: the
 // alternative was a second till, and a school cannot reconcile two.
@@ -170,8 +181,10 @@ type FinanceWriter interface {
 	// retry after a lost response returns the original charge instead of billing
 	// the family twice (ADR 0008).
 	CreateCharge(ctx context.Context, in CreateChargeInput) (ChargeRef, error)
-	// RegisterPayment records money taken at the counter.
-	RegisterPayment(ctx context.Context, chargeID string, amountCents int64, method, reference, idempotencyKey string) error
+	// RegisterPayment records money taken at the counter, by the methods it
+	// came in (T8): one tender, or a credit note completed with cash. The
+	// tenders add up to amountCents.
+	RegisterPayment(ctx context.Context, chargeID string, amountCents int64, tenders []Tender, idempotencyKey string) error
 	// CancelChargeIfUnpaid voids a charge ONLY if nothing was collected, decided
 	// under the charge's row lock. It is what makes the expiry sweep safe to run
 	// while a cashier is collecting.
