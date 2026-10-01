@@ -32,6 +32,7 @@ import { useStudentFilter } from "../../_design/students/useStudentFilter";
 import { EMPTY_FILTER, filterFromParams, filterToParams, type FilterableStudent, type StudentFilterState } from "../../_design/students/studentFilter";
 import { placeStudents } from "../../_design/students/placement";
 import { StudentNotesDialog } from "../../_design/students/StudentNotesDialog";
+import { StudentStatementDrawer } from "../../_design/students/StudentStatementDrawer";
 import { fold } from "@garcia-lorca/ui/command-core";
 
 /** The floating "Nuevo alumno": its height, its distance from the bottom, and
@@ -709,6 +710,8 @@ export interface StudentsScreenProps {
   canVerifyCard?: boolean;
   /** module_student_card and students:update: a card can be revoked. */
   canRevokeCard?: boolean;
+  /** module_finance and finance:read or collections:read: the row opens the pupil's account statement (T7). */
+  canReadStatement?: boolean;
 }
 
 /** What the school reads in Excel, in the order the table shows it. */
@@ -723,7 +726,7 @@ const EXPORT_COLUMNS: readonly CsvColumn<Row>[] = [
   { label: "Estado", value: (r) => statusOf(r.student.admissionStatus).label },
 ];
 
-export function StudentsScreen({ onBack, onEdit, canWriteNotes = false, canVoidAnyNote = false, userId = "", canVerifyCard = false, canRevokeCard = false }: StudentsScreenProps): ReactElement {
+export function StudentsScreen({ onBack, onEdit, canWriteNotes = false, canVoidAnyNote = false, userId = "", canVerifyCard = false, canRevokeCard = false, canReadStatement = false }: StudentsScreenProps): ReactElement {
   const [verifying, setVerifying] = useState(false);
   const [students, setStudents] = useState<Student[]>([]);
   const [cycles, setCycles] = useState<Cycle[]>([]);
@@ -748,6 +751,8 @@ export function StudentsScreen({ onBack, onEdit, canWriteNotes = false, canVoidA
   const [sheet, setSheet] = useState<Student | null>(null);
   // The pupil whose notes are open from the list (T6), without the edit page.
   const [notesOf, setNotesOf] = useState<Student | null>(null);
+  // The pupil whose account statement is open from the list (T7).
+  const [statementOf, setStatementOf] = useState<Student | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [pageSize, setPageSize] = useState(20);
   const [page, setPage] = useState(0);
@@ -1065,6 +1070,7 @@ export function StudentsScreen({ onBack, onEdit, canWriteNotes = false, canVoidA
                 onOpen={() => setSheet(row.student)}
                 onEdit={onEdit === undefined ? undefined : () => onEdit(row.id)}
                 onNotes={() => setNotesOf(row.student)}
+                onStatement={canReadStatement ? () => setStatementOf(row.student) : undefined}
               />
             ))
           )}
@@ -1108,6 +1114,14 @@ export function StudentsScreen({ onBack, onEdit, canWriteNotes = false, canVoidA
           canWrite={canWriteNotes}
           canVoidAny={canVoidAnyNote}
           onClose={() => setNotesOf(null)}
+        />
+      )}
+      {statementOf !== null && (
+        <StudentStatementDrawer
+          studentId={statementOf.id}
+          name={formatStudentName(statementOf)}
+          subtitle={statementOf.gradeGroup}
+          onClose={() => setStatementOf(null)}
         />
       )}
       {verifying && <VerifyCardDrawer onClose={() => setVerifying(false)} />}
@@ -1194,10 +1208,10 @@ function RevokeCard({ studentId }: { studentId: string }): ReactElement {
 const ROW_COLUMNS = "auto 2.4fr 1.1fr 1.6fr 1fr auto";
 /** The checkbox cell: a 44 px target. */
 const CHECK_CELL = 44;
-/** Notes, edit and open: three 36 px round buttons and their gaps. */
-const ACTIONS_WIDTH = 126;
+/** Statement, notes, edit and open: four 36 px round buttons and their gaps. */
+const ACTIONS_WIDTH = 162;
 
-function StuRow({ st, room, levelName, i, selected, onToggle, onOpen, onEdit, onNotes }: {
+function StuRow({ st, room, levelName, i, selected, onToggle, onOpen, onEdit, onNotes, onStatement }: {
   st: Student;
   room: string;
   levelName: string;
@@ -1207,6 +1221,7 @@ function StuRow({ st, room, levelName, i, selected, onToggle, onOpen, onEdit, on
   onOpen: () => void;
   onEdit?: () => void;
   onNotes: () => void;
+  onStatement?: () => void;
 }): ReactElement {
   const [hov, setHov] = useState(false);
   const s = statusOf(st.admissionStatus);
@@ -1236,6 +1251,9 @@ function StuRow({ st, room, levelName, i, selected, onToggle, onOpen, onEdit, on
       <div className="students-col-wide" style={{ minWidth: 0, fontSize: 14, color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{st.guardianName}</div>
       <div className="students-col-wide"><StatusPill status={st.admissionStatus} /></div>
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, width: ACTIONS_WIDTH }}>
+        {onStatement !== undefined && (
+          <button onClick={(ev) => { ev.stopPropagation(); onStatement(); }} title="Estado de cuenta" aria-label={`Estado de cuenta de ${formatStudentName(st)}`} style={qb}><Icon name="finance" size={18} /></button>
+        )}
         <button onClick={(ev) => { ev.stopPropagation(); onNotes(); }} title="Notas" aria-label={`Notas de ${formatStudentName(st)}`} style={qb}><Icon name="message" size={18} /></button>
         {onEdit !== undefined && (
           <button onClick={(ev) => { ev.stopPropagation(); onEdit(); }} title="Editar ficha" aria-label={`Editar ficha de ${formatStudentName(st)}`} style={qb}><Icon name="user" size={18} /></button>
