@@ -315,10 +315,10 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
       icon="card"
       size={receipt === null && beside.wide ? "xl" : "lg"}
       onClose={onClose}
-      // El velo original de este cajón NO tenía onClick ni Esc, a propósito: es
-      // la ventanilla, y el monto, las formas de pago y sus referencias ya tecleados
-      // no pueden irse con un clic fuera de lugar. La cáscara común cierra por
-      // omisión, así que aquí hay que decirlo. El ✕ y Cancelar siguen cerrando.
+      // This drawer's backdrop never closed it, on purpose: it is the counter,
+      // and an amount, payment methods and references already typed must not be
+      // lost to a stray click. The shared shell closes by default, so it has to
+      // be said here. The ✕ and Cancelar still close it.
       dismissible={false}
       padded={false}
     >

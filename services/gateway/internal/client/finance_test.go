@@ -159,6 +159,10 @@ func TestTendersCrossTheWireBothWays(t *testing.T) {
 		t.Errorf("deposit = %+v", d)
 	}
 
+	if p := toPayment(&financev1.Payment{Id: "p1", Method: "card", CardType: "credit"}); p.CardType != "credit" {
+		t.Errorf("payment card type = %q, want credit", p.CardType)
+	}
+
 	cut := toCashUp(&financev1.DailyCashUpResponse{CashCents: 1, TotalCents: 1, CreditNoteCents: 200000})
 	if cut.CreditNoteCents != 200000 || cut.TotalCents != 1 {
 		t.Errorf("cash-up credit notes = %d, total = %d", cut.CreditNoteCents, cut.TotalCents)

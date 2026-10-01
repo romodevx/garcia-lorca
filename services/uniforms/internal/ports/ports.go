@@ -130,6 +130,9 @@ type CounterSaleCommand struct {
 	ActorUserID       string
 	IdempotencyKey    string
 	SoldAt            time.Time
+	// Admit runs after the replay check and before anything is written; its
+	// error refuses the sale (T8: tenders that do not add up). Nil admits.
+	Admit func() error
 }
 
 // StudentRef is the uniform shop's view of a students record: who they are, what

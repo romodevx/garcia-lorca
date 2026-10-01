@@ -225,6 +225,7 @@ type paymentResponse struct {
 	Method      string `json:"method"`
 	Reference   string `json:"reference"`
 	PaidAt      string `json:"paidAt"`
+	CardType    string `json:"cardType,omitempty"`
 }
 
 // toPaymentResponses maps a list of payments to the camelCase shape the front
@@ -245,6 +246,7 @@ func toPaymentResponse(p client.Payment) paymentResponse {
 		Method:      p.Method,
 		Reference:   p.Reference,
 		PaidAt:      p.PaidAt,
+		CardType:    p.CardType,
 	}
 }
 
@@ -448,7 +450,8 @@ const (
 var tenderMethods = map[string]bool{"cash": true, "card": true, "transfer": true, "credit_note": true}
 
 // invalidTenders checks the counter's tenders against the contract at the
-// edge: at most four, a known method, a positive amount, a bounded reference.
+// edge: at most four, a known method, a positive amount, a card type only on a
+// card, a bounded reference.
 // Whether they add up to the amount is finance's rule, and finance enforces it.
 // Empty means no tenders were sent, which is valid.
 func invalidTenders(ts []client.Tender) string {
@@ -461,6 +464,8 @@ func invalidTenders(ts []client.Tender) string {
 			return "tender method must be cash, card, transfer or credit_note"
 		case t.AmountCents <= 0:
 			return "every tender needs an amount greater than zero"
+		case t.CardType != "" && (t.Method != "card" || (t.CardType != "debit" && t.CardType != "credit")):
+			return "cardType is debit or credit, and only on a card"
 		case len([]rune(t.Reference)) > maxTenderReference:
 			return "a tender reference is at most 120 characters"
 		}

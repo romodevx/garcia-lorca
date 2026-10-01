@@ -221,20 +221,39 @@ const maxTenders = 4
 // checkTenders refuses tenders the counter cannot have meant: an unknown
 // method, an amount of nothing, more than four. Whether they add up is
 // checked once the shop has priced the sale (tendersFor).
-func checkTenders(tenders []Tender) error {
+func checkTenders(tenders []Tender, anonymous bool) error {
 	if len(tenders) > maxTenders {
 		return glerrors.New(glerrors.KindInvalid, "una venta admite como máximo cuatro formas de pago")
 	}
 	for _, t := range tenders {
-		if !validMethods[t.Method] {
-			return glerrors.New(glerrors.KindInvalid, "unknown payment method")
-		}
-		if t.AmountCents <= 0 {
-			return glerrors.New(glerrors.KindInvalid, "cada forma de pago necesita un monto mayor a cero")
+		if err := checkTender(t, anonymous); err != nil {
+			return err
 		}
 	}
 	return nil
 }
+
+// checkTender applies finance's rules for one tender here, where a refusal
+// still costs nothing: finance refusing it later would leave the garments gone
+// and the payment unrecorded.
+func checkTender(t Tender, anonymous bool) error {
+	switch {
+	case !validMethods[t.Method]:
+		return glerrors.New(glerrors.KindInvalid, "unknown payment method")
+	case t.AmountCents <= 0:
+		return glerrors.New(glerrors.KindInvalid, "cada forma de pago necesita un monto mayor a cero")
+	case t.CardType != "" && (t.Method != "card" || (t.CardType != "debit" && t.CardType != "credit")):
+		return glerrors.New(glerrors.KindInvalid, "el tipo de tarjeta es débito o crédito, y sólo en un pago con tarjeta")
+	case anonymous && t.Method == creditNote:
+		// A credit note is a family's; a sale to nobody in particular never
+		// reaches a family's account, so it would vanish from every report.
+		return glerrors.New(glerrors.KindInvalid, "una venta sin alumno no se puede pagar con nota de crédito")
+	}
+	return nil
+}
+
+// creditNote is the method of a credit note the school issued by hand.
+const creditNote = "credit_note"
 
 // tendersFor is how the sale's total is paid: the counter's tenders, which
 // must add up to it exactly (the rule the school approved — a sale whose
@@ -274,10 +293,13 @@ func (s *Service) CounterSale(ctx context.Context, in CounterSaleInput) (ports.O
 		return ports.OrderAggregate{}, glerrors.New(glerrors.KindInvalid,
 			"a counter sale needs an idempotency key: it moves goods and money at once")
 	}
-	if len(in.Tenders) == 0 && !validMethods[in.Method] {
-		return ports.OrderAggregate{}, glerrors.New(glerrors.KindInvalid, "unknown payment method")
+	anonymous := strings.TrimSpace(in.StudentID) == ""
+	if len(in.Tenders) == 0 {
+		if err := checkTender(Tender{Method: in.Method, AmountCents: 1}, anonymous); err != nil {
+			return ports.OrderAggregate{}, err
+		}
 	}
-	if err := checkTenders(in.Tenders); err != nil {
+	if err := checkTenders(in.Tenders, anonymous); err != nil {
 		return ports.OrderAggregate{}, err
 	}
 	settings, err := s.repo.GetSettings(ctx)
@@ -299,12 +321,10 @@ func (s *Service) CounterSale(ctx context.Context, in CounterSaleInput) (ports.O
 	if err != nil {
 		return ports.OrderAggregate{}, err
 	}
-	// Before anything moves: tenders that do not cover the total refuse the
-	// sale while the garments are still on the shelf.
-	tenders, err := tendersFor(in, total)
-	if err != nil {
-		return ports.OrderAggregate{}, err
-	}
+	// Tenders that do not cover the total refuse the sale while the garments
+	// are still on the shelf. Checked by the repository AFTER its replay check:
+	// a retry of a sale that went through returns it even if the price moved.
+	tenders, tenderErr := tendersFor(in, total)
 
 	saved, replayed, err := s.repo.CounterSale(ctx, ports.CounterSaleCommand{
 		OrderID: orderID, FulfillmentID: fulfillmentID, TenantID: s.tenantID,
@@ -312,6 +332,7 @@ func (s *Service) CounterSale(ctx context.Context, in CounterSaleInput) (ports.O
 		StudentGradeGroup: student.GradeGroup, CycleID: student.CycleID,
 		Lines: lines, TotalCents: total, Note: strings.TrimSpace(in.Note),
 		ActorUserID: in.ActorUserID, IdempotencyKey: in.IdempotencyKey, SoldAt: s.now(),
+		Admit: func() error { return tenderErr },
 	})
 	if err != nil {
 		return ports.OrderAggregate{}, err

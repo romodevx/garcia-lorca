@@ -62,11 +62,13 @@ describe("tenderErrors · what blocks the submit", () => {
 });
 
 describe("toTenders · what travels", () => {
-  it("sends cents, a trimmed reference only when there is one, and the card type only on a card", () => {
+  // Review of T8: the Referencia field is hidden for cash, so a reference typed
+  // under another method and left behind must not travel unseen.
+  it("sends cents, a trimmed reference only when there is one (never on cash), and the card type only on a card", () => {
     expect(toTenders([
       row("a", "credit_note", "500", { reference: "  NC-12 " }),
       row("b", "card", "1,000.00", { cardType: "credit" }),
-      row("c", "cash", "10", { cardType: "credit" }),
+      row("c", "cash", "10", { cardType: "credit", reference: "SPEI-123" }),
     ])).toEqual([
       { method: "credit_note", amountCents: 50000, reference: "NC-12" },
       { method: "card", amountCents: 100000, cardType: "credit" },

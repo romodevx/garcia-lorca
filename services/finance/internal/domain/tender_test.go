@@ -173,3 +173,35 @@ func TestSplitByTenderCutsAllocationsAtTenderBoundaries(t *testing.T) {
 		t.Error("the surcharge slice lost its surcharge mark")
 	}
 }
+
+// Review of T8: a credit note is spent before money. When the deposit is more
+// than the chosen debts, what is left as the family's credit is money they
+// handed over, never a credit note — so the cash-up and the income report
+// agree about how much the credit note settled.
+func TestSplitByTenderSpendsCreditNotesFirst(t *testing.T) {
+	tenders := []domain.Tender{
+		aTender(t, domain.MethodCash, 300000, "", ""),
+		aTender(t, domain.MethodCreditNote, 100000, "NC-1", ""),
+	}
+	got := domain.SplitByTender([]domain.Allocation{{ChargeID: "sep", AmountCents: 300000}}, tenders)
+	if len(got) != 2 || got[0].Tender.Method() != domain.MethodCreditNote || got[0].AmountCents != 100000 ||
+		got[1].Tender.Method() != domain.MethodCash || got[1].AmountCents != 200000 {
+		t.Errorf("slices = %+v, want the credit note's 100000 first, then 200000 cash", got)
+	}
+}
+
+// Review of T8: a payment row remembers debit or credit, like the deposit did.
+func TestAPaymentKeepsItsCardType(t *testing.T) {
+	p, err := domain.NewPayment("p1", "t1", "c1", 100, domain.MethodCard, "", day(2026, time.October, 10), "")
+	if err != nil {
+		t.Fatalf("NewPayment: %v", err)
+	}
+	withCard, err := p.WithCardType(domain.CardCredit)
+	if err != nil || withCard.CardType() != domain.CardCredit {
+		t.Fatalf("WithCardType = %q, %v", withCard.CardType(), err)
+	}
+	cash, _ := domain.NewPayment("p2", "t1", "c1", 100, domain.MethodCash, "", day(2026, time.October, 10), "")
+	if _, err := cash.WithCardType(domain.CardDebit); glerrors.KindOf(err) != glerrors.KindInvalid {
+		t.Errorf("card type on cash: want KindInvalid, got %v", err)
+	}
+}

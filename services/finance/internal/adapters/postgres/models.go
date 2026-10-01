@@ -134,6 +134,8 @@ type paymentModel struct {
 	// DepositID is set when this payment is one slice of a deposit. NULL means a
 	// payment made the old way, against one named charge.
 	DepositID *string `gorm:"column:deposit_id"`
+	// CardType is debit or credit on a card payment (T8, migration 0022).
+	CardType string `gorm:"column:card_type"`
 }
 
 func (paymentModel) TableName() string { return "payments" }

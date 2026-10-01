@@ -58,7 +58,22 @@ type Payment struct {
 	idempotencyKey string
 	receivedBy     string
 	depositID      string
+	// cardType is debit or credit on a card payment (T8), empty otherwise.
+	cardType string
 }
+
+// WithCardType returns the card payment marked debit or credit. The office
+// reconciles each card payment against the terminal, so the row keeps it.
+func (p Payment) WithCardType(cardType string) (Payment, error) {
+	if err := validateCardType(p.method, cardType); err != nil {
+		return Payment{}, err
+	}
+	p.cardType = cardType
+	return p, nil
+}
+
+// CardType is debit or credit on a card payment, empty otherwise.
+func (p Payment) CardType() string { return p.cardType }
 
 // WithDepositID returns the payment as a slice of the deposit it came from.
 // Read-side only: the repository writes the column from the deposit itself

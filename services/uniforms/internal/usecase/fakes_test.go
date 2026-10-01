@@ -187,6 +187,11 @@ func (r *fakeRepo) CounterSale(_ context.Context, cmd ports.CounterSaleCommand) 
 	if prior, ok := r.byKey[cmd.IdempotencyKey]; ok && cmd.IdempotencyKey != "" {
 		return prior, true, nil
 	}
+	if cmd.Admit != nil {
+		if err := cmd.Admit(); err != nil {
+			return ports.OrderAggregate{}, false, err
+		}
+	}
 	// The order is built BEFORE anything moves, in the same order as the real
 	// transaction. It matters: Postgres rolls the whole thing back when the order
 	// is refused, and a fake that had already emptied the shelf by then would let

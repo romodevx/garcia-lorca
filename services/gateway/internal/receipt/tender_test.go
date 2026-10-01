@@ -24,8 +24,8 @@ func TestAPaymentReceiptBreaksDownItsTenders(t *testing.T) {
 		t.Fatalf("Payment: %v", err)
 	}
 	want := []receipt.TenderLine{
-		{Method: "Nota de crédito", AmountCents: 200000, Reference: "NC-7"},
-		{Method: "Tarjeta de crédito", AmountCents: 150000},
+		{Code: "credit_note", Method: "Nota de crédito", AmountCents: 200000, Reference: "NC-7"},
+		{Code: "card", Method: "Tarjeta de crédito", AmountCents: 150000},
 	}
 	if len(got.Tenders) != 2 || got.Tenders[0] != want[0] || got.Tenders[1] != want[1] {
 		t.Errorf("tenders = %+v, want %+v", got.Tenders, want)
@@ -55,7 +55,7 @@ func TestASaleReceiptBreaksDownItsTenders(t *testing.T) {
 		account: client.AccountStatement{Payments: []client.Payment{
 			{ChargeID: "ch-other", Method: "cash", AmountCents: 1},
 			{ChargeID: "ch-8", Method: "credit_note", AmountCents: 30000, Reference: "NC-12"},
-			{ChargeID: "ch-8", Method: "cash", AmountCents: 55000},
+			{ChargeID: "ch-8", Method: "card", CardType: "debit", AmountCents: 55000},
 		}},
 	}
 	got, err := builder(f).Sale(context.Background(), "ord-8")
@@ -63,10 +63,10 @@ func TestASaleReceiptBreaksDownItsTenders(t *testing.T) {
 		t.Fatalf("Sale: %v", err)
 	}
 	if len(got.Tenders) != 2 || got.Tenders[0].Method != "Nota de crédito" || got.Tenders[0].Reference != "NC-12" ||
-		got.Tenders[1].Method != "Efectivo" || got.Tenders[1].AmountCents != 55000 {
+		got.Tenders[1].Method != "Tarjeta de débito" || got.Tenders[1].AmountCents != 55000 {
 		t.Errorf("tenders = %+v", got.Tenders)
 	}
-	if got.Method != "Nota de crédito + Efectivo" {
+	if got.Method != "Nota de crédito + Tarjeta de débito" {
 		t.Errorf("method = %q", got.Method)
 	}
 }

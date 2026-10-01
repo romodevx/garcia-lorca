@@ -136,7 +136,7 @@ func TestACombinedPaymentIsAtomicAndReplays(t *testing.T) {
 	repo := appRepo(t, tenant)
 	set := []domain.Payment{
 		methodPayment(t, "91000000-0000-0000-0000-0000000008b1", tenant, charge.ID(), 40000, paidOn, domain.MethodCreditNote, "sale-1"),
-		methodPayment(t, "91000000-0000-0000-0000-0000000008b2", tenant, charge.ID(), 60000, paidOn, domain.MethodCash, "sale-1#2"),
+		cardPayment(t, methodPayment(t, "91000000-0000-0000-0000-0000000008b2", tenant, charge.ID(), 60000, paidOn, domain.MethodCard, "sale-1#2")),
 	}
 	stored, after, replayed, err := repo.RegisterPayment(ctx, set, derive, nil)
 	if err != nil || replayed {
@@ -145,7 +145,19 @@ func TestACombinedPaymentIsAtomicAndReplays(t *testing.T) {
 	if len(stored) != 2 || after.PaidCents != 100000 || after.Charge.Status() != domain.StatusPaid {
 		t.Fatalf("stored %d rows, paid %d (%s); want 2 rows paying it", len(stored), after.PaidCents, after.Charge.Status())
 	}
-
+	listed, err := repo.ListPayments(ctx, student)
+	if err != nil {
+		t.Fatalf("ListPayments: %v", err)
+	}
+	var card string
+	for _, p := range listed {
+		if p.Method() == domain.MethodCard {
+			card = p.CardType()
+		}
+	}
+	if card != domain.CardCredit {
+		t.Errorf("stored card type = %q, want credit (migration 0022)", card)
+	}
 	retry := []domain.Payment{
 		methodPayment(t, "91000000-0000-0000-0000-0000000008b3", tenant, charge.ID(), 40000, paidOn, domain.MethodCreditNote, "sale-1"),
 		methodPayment(t, "91000000-0000-0000-0000-0000000008b4", tenant, charge.ID(), 60000, paidOn, domain.MethodCash, "sale-1#2"),
@@ -197,4 +209,13 @@ func countTenders(t *testing.T, tenant, depositID string) int64 {
 		t.Fatalf("count tenders: %v", err)
 	}
 	return n
+}
+
+func cardPayment(t *testing.T, p domain.Payment) domain.Payment {
+	t.Helper()
+	out, err := p.WithCardType(domain.CardCredit)
+	if err != nil {
+		t.Fatalf("WithCardType: %v", err)
+	}
+	return out
 }

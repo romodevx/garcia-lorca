@@ -66,6 +66,8 @@ type Payment struct {
 	Method      string
 	Reference   string
 	PaidAt      string
+	// CardType is debit or credit on a card payment (T8), empty otherwise.
+	CardType string
 }
 
 // AccountStatement is a student's full financial picture: every charge, every
@@ -585,6 +587,7 @@ type CashUpPayment struct {
 	Reference   string `json:"reference"`
 	PaidAt      string `json:"paidAt"`
 	Description string `json:"description"`
+	CardType    string `json:"cardType,omitempty"`
 }
 
 // DailyCashUp returns what came in on one day, and in what form.
@@ -602,7 +605,7 @@ func toCashUp(m *financev1.DailyCashUpResponse) CashUp {
 		paid := toPayment(p.GetPayment())
 		payments = append(payments, CashUpPayment{
 			ID: paid.ID, ChargeID: paid.ChargeID, AmountCents: paid.AmountCents, Method: paid.Method,
-			Reference: paid.Reference, PaidAt: paid.PaidAt, Description: p.GetDescription(),
+			Reference: paid.Reference, PaidAt: paid.PaidAt, Description: p.GetDescription(), CardType: paid.CardType,
 		})
 	}
 	return CashUp{
@@ -744,6 +747,7 @@ func toPayment(p *financev1.Payment) Payment {
 		Method:      p.GetMethod(),
 		Reference:   p.GetReference(),
 		PaidAt:      paidAt,
+		CardType:    p.GetCardType(),
 	}
 }
 

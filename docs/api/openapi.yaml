@@ -5092,6 +5092,10 @@ components:
         reference: { type: string }
         paidAt: { type: string, format: date-time }
         description: { type: string, example: "Uniformes · U-2026-000001" }
+        cardType:
+          type: string
+          enum: [debit, credit]
+          description: Only on a card payment (T8).
 
     BillingRun:
       type: object

@@ -60,6 +60,10 @@ type Receipt struct {
 
 // TenderLine is one method of the payment, as the receipt prints it.
 type TenderLine struct {
+	// Code is the method as the ledger names it (cash, card, transfer,
+	// credit_note), for a reader that must tell them apart; Method is the
+	// office's words for it.
+	Code        string `json:"code"`
 	Method      string `json:"method"`
 	AmountCents int64  `json:"amountCents"`
 	Reference   string `json:"reference,omitempty"`
@@ -69,7 +73,7 @@ type TenderLine struct {
 func tenderLines(ts []client.Tender) []TenderLine {
 	out := make([]TenderLine, 0, len(ts))
 	for _, t := range ts {
-		out = append(out, TenderLine{Method: methodLabel(t.Method, t.CardType), AmountCents: t.AmountCents, Reference: t.Reference})
+		out = append(out, TenderLine{Code: t.Method, Method: methodLabel(t.Method, t.CardType), AmountCents: t.AmountCents, Reference: t.Reference})
 	}
 	return out
 }
@@ -243,7 +247,7 @@ func (b *Builder) paymentOf(ctx context.Context, order client.UniformOrder) ([]c
 	var out []client.Tender
 	for _, p := range account.Payments {
 		if charges[p.ChargeID] {
-			out = append(out, client.Tender{Method: p.Method, AmountCents: p.AmountCents, Reference: p.Reference})
+			out = append(out, client.Tender{Method: p.Method, AmountCents: p.AmountCents, Reference: p.Reference, CardType: p.CardType})
 		}
 	}
 	return out, nil

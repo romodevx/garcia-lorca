@@ -69,8 +69,8 @@ describe("ReceiptTicket · formas de pago (tarea 8)", () => {
     expect(rows[1]).toHaveTextContent(/Efectivo.*\$3,000\.00/);
   });
 
-  it("prints a lone credit note as its own row too", () => {
-    render(<ReceiptTicket receipt={{ ...receipt, method: "Nota de crédito", tenders: [{ method: "Nota de crédito", amountCents: 350000 }] }} />);
+  it("prints a lone credit note as its own row too, known by its code and not its wording", () => {
+    render(<ReceiptTicket receipt={{ ...receipt, method: "NC", tenders: [{ code: "credit_note", method: "NC", amountCents: 350000 }] }} />);
     expect(screen.getAllByTestId("ticket-tender")).toHaveLength(1);
   });
 

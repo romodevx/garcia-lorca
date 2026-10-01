@@ -27,7 +27,7 @@ func TestRegisterPaymentCarriesTenders(t *testing.T) {
 	}
 	rows := res.Msg.GetPayments()
 	if len(rows) != 2 || rows[0].GetMethod() != domain.MethodCreditNote || rows[0].GetReference() != "NC-3" ||
-		rows[1].GetMethod() != domain.MethodCard || rows[1].GetAmountCents() != 70000 {
+		rows[1].GetMethod() != domain.MethodCard || rows[1].GetAmountCents() != 70000 || rows[1].GetCardType() != domain.CardDebit {
 		t.Fatalf("payments = %+v", rows)
 	}
 	if res.Msg.GetPayment().GetId() != rows[0].GetId() {
@@ -39,7 +39,7 @@ func TestRegisterPaymentCarriesTenders(t *testing.T) {
 
 	if _, err := f.h.RegisterPayment(context.Background(), connect.NewRequest(&financev1.RegisterPaymentRequest{
 		ChargeId: charge.GetId(), AmountCents: 50000,
-		Tenders:  []*financev1.Tender{{Method: domain.MethodCash, AmountCents: 10000}},
+		Tenders: []*financev1.Tender{{Method: domain.MethodCash, AmountCents: 10000}},
 	})); connect.CodeOf(err) != connect.CodeInvalidArgument {
 		t.Errorf("tenders short of the amount: want InvalidArgument, got %v", err)
 	}

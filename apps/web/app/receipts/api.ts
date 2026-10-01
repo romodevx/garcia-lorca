@@ -28,6 +28,8 @@ export interface ReceiptLine {
 
 /** One method of a split payment (T8), already in words: "Nota de crédito", "Tarjeta de débito". */
 export interface ReceiptTender {
+  /** The method as the ledger names it: cash | card | transfer | credit_note. */
+  code?: string;
   method: string;
   amountCents: number;
   reference?: string;

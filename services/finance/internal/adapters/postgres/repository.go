@@ -735,14 +735,19 @@ func (r *Repository) RegisterPayment(
 // unique index excludes blank keys for the same reason. The query is
 // tenant-bound by RLS, so a key is only ever a duplicate within its own school.
 //
-// The prefix is compared with left(), not LIKE: a key is caller text, and a
-// '%' or '_' in it must not widen the match.
+// The set's keys are named exactly (IN, never a prefix match): the lookup stays
+// on the partial unique index while the charge is locked, and a caller's key
+// that merely starts with another's "key#" is never mistaken for its row.
 func paymentsByIdempotencyKey(tx *gorm.DB, key string) ([]domain.Payment, bool, error) {
 	if key == "" {
 		return nil, false, nil
 	}
+	keys := make([]string, 0, domain.MaxTenders)
+	for i := range domain.MaxTenders {
+		keys = append(keys, domain.TenderKey(key, i))
+	}
 	var rows []paymentModel
-	if err := tx.Where("idempotency_key = ? OR left(idempotency_key, ?) = ?", key, len([]rune(key))+1, key+"#").
+	if err := tx.Where("idempotency_key IN ?", keys).
 		Order("length(idempotency_key), idempotency_key").Find(&rows).Error; err != nil {
 		return nil, false, glerrors.Wrap(glerrors.KindInternal, "looking up payment by idempotency key", err)
 	}

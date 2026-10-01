@@ -365,7 +365,7 @@ func toDomainPayment(m paymentModel) (domain.Payment, error) {
 	if m.ReceivedBy != nil {
 		p = p.WithReceivedBy(*m.ReceivedBy)
 	}
-	return p, nil
+	return p.WithCardType(m.CardType)
 }
 
 // fromDomainPayment projects a domain Payment into its GORM row for insert.
@@ -381,6 +381,7 @@ func fromDomainPayment(p domain.Payment) paymentModel {
 		IdempotencyKey: p.IdempotencyKey(),
 		PaidAt:         p.PaidAt(),
 		ReceivedBy:     nullableUUID(p.ReceivedBy()),
+		CardType:       p.CardType(),
 	}
 }
 

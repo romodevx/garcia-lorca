@@ -27,15 +27,18 @@
   working. Existing deposits were backfilled 1:1 (additive; reversible by
   dropping the table). New code reads `Deposit.Tenders()`.
 - **Payments carry one method each.** A deposit's allocations are cut where one
-  tender ends and the next begins (`domain.SplitByTender`, tenders consumed in the
-  order the cashier listed them, allocations oldest debt first). A combined
+  tender ends and the next begins (`domain.SplitByTender`, allocations oldest
+  debt first; **credit notes are spent first**, then money in the cashier's
+  order — so what a deposit leaves as the family's credit is money, and the
+  cash-up and income report agree on what the note settled). Each payment row
+  keeps its card type (`payments.card_type`, finance/0022). A combined
   payment against one charge (Registrar pago, uniforms) is one payment row per
   tender in one transaction under the charge lock. So "how much of this concept a
   credit note settled" is a SUM, never an apportionment.
 - **Idempotency** holds for the whole set: a deposit by its key as before; a
   combined payment stores the caller's key on the first row and `key#2`,
-  `key#3`… on the rest, and a replay returns every row (prefix compared with
-  `left()`, not `LIKE`).
+  `key#3`… on the rest (`domain.TenderKey`), and a replay looks the set up by
+  those exact keys (`IN`, on the unique index) and returns every row.
 - **A credit note is not money.** `DailyCashUp` puts it in `credit_note_cents`,
   outside the per-method figures and the total; `IncomeByConcept` likewise
   (`credit_note_cents`, outside the lines and the total). The statement emits a
@@ -44,8 +47,10 @@
   per payment (method `mixed` when combined) — a family is told once.
 - Receipts (ticket + PDF) print one line per method when there are several;
   the uniforms sale receipt reads every payment on the sale's charge.
-- Uniforms checks the tenders against the total it prices **before** the
-  garments leave the shelf, then hands them to finance.
+- Uniforms checks the tenders (methods, card type, and that they add up to
+  the total it prices) **before** the garments leave the shelf — after its
+  replay check, so a retried sale still replays — then hands them to finance.
+  A sale with no student cannot use a credit note (a note is a family's).
 
 ## Consequences
 

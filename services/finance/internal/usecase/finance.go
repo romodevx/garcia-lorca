@@ -3,7 +3,6 @@ package usecase
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strings"
 	"time"
 
@@ -447,23 +446,16 @@ func (s *FinanceService) tenderedPayments(in TenderedPaymentInput, when time.Tim
 	out := make([]domain.Payment, 0, len(tenders))
 	for i, t := range tenders {
 		payment, err := domain.NewPayment(s.newID(), s.tenantID, in.ChargeID, t.Amount().Int64(),
-			t.Method(), t.Reference(), when, tenderKey(in.IdempotencyKey, i))
+			t.Method(), t.Reference(), when, domain.TenderKey(in.IdempotencyKey, i))
 		if err != nil {
+			return nil, err
+		}
+		if payment, err = payment.WithCardType(t.CardType()); err != nil {
 			return nil, err
 		}
 		out = append(out, payment.WithReceivedBy(in.ReceivedBy))
 	}
 	return out, nil
-}
-
-// tenderKey is the idempotency key of the i-th row of a combined payment: the
-// caller's key on the first, and "#2", "#3"… after it. An empty key stays
-// empty — the caller opted out of deduplication.
-func tenderKey(key string, i int) string {
-	if key == "" || i == 0 {
-		return key
-	}
-	return fmt.Sprintf("%s#%d", key, i+1)
 }
 
 // derivePaidStatus is the rule the repository runs inside the payment

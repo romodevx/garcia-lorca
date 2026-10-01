@@ -251,6 +251,8 @@ message Payment {
   string method = 5;
   string reference = 6;
   google.protobuf.Timestamp paid_at = 7;
+  // debit | credit on a card payment (T8), empty otherwise.
+  string card_type = 8;
 }
 
 // --- Concept RPC messages -------------------------------------------------

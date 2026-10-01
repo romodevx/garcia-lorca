@@ -972,6 +972,9 @@ func (p *depositPlanner) plan(open []ports.ChargeWithPaid) (ports.DepositWrite, 
 		if err != nil {
 			return ports.DepositWrite{}, err
 		}
+		if payment, err = payment.WithCardType(a.Tender.CardType()); err != nil {
+			return ports.DepositWrite{}, err
+		}
 		payments = append(payments, payment.WithReceivedBy(p.deposit.ReceivedBy().UserID))
 	}
 	return ports.DepositWrite{

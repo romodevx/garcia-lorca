@@ -211,7 +211,7 @@ func loosePaymentMovements(payments []domain.Payment, charges []ports.ChargeWith
 		out = append(out, domain.Movement{
 			Kind: tenderKind(p.Method()), Date: p.PaidAt(), Description: description,
 			AmountCents: p.Amount().Int64(), ChargeID: p.ChargeID(),
-			Method: p.Method(), Reference: p.Reference(),
+			Method: p.Method(), CardType: p.CardType(), Reference: p.Reference(),
 		})
 	}
 	return out

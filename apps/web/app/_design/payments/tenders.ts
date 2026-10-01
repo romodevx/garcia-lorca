@@ -94,7 +94,9 @@ export function tenderErrors(rows: readonly TenderRow[], totalCents: number): Re
 /** The rows as the wire wants them: cents, a reference only when there is one, the card kind only on a card. */
 export function toTenders(rows: readonly TenderRow[]): Tender[] {
   return rows.map((row) => {
-    const reference = row.reference.trim();
+    // Cash has no Referencia field: what was typed under another method and left
+    // behind must not travel unseen.
+    const reference = row.method === "cash" ? "" : row.reference.trim();
     return {
       method: row.method,
       amountCents: rowCents(row),

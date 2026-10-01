@@ -24,9 +24,6 @@ const center: CSSProperties = { textAlign: "center" };
 const rule: CSSProperties = { border: 0, borderTop: `1px dashed ${ink}`, margin: "6px 0" };
 const row: CSSProperties = { display: "flex", justifyContent: "space-between", gap: 8 };
 
-/** How the gateway names a credit-note tender on a receipt (T8). */
-const CREDIT_NOTE_LABEL = "Nota de crédito";
-
 /**
  * The 80 mm ticket of a receipt (task 12): what the school hands over at the
  * counter. The browser prints it (`@page { size: 80mm auto }` on its page).
@@ -96,7 +93,7 @@ export function ReceiptTicket({ receipt: r }: { receipt: Receipt }): ReactElemen
 /** The gateway labels each tender already; a credit note is never folded into one line. */
 function byTender(r: Receipt): boolean {
   const tenders = r.tenders ?? [];
-  return tenders.length > 1 || tenders.some((t) => t.method === CREDIT_NOTE_LABEL);
+  return tenders.length > 1 || tenders.some((t) => t.code === "credit_note");
 }
 
 function Total({ label, cents }: { label: string; cents: number }): ReactElement {

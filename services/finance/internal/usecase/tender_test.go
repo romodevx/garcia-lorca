@@ -217,7 +217,7 @@ func TestARegisteredPaymentCombinesTenders(t *testing.T) {
 
 	if _, _, err := f.svc.RegisterTenderedPayment(context.Background(), usecase.TenderedPaymentInput{
 		ChargeID: open.Charge.ID(), AmountCents: 50000,
-		Tenders:  []usecase.TenderInput{{Method: domain.MethodCash, AmountCents: 40000}},
+		Tenders: []usecase.TenderInput{{Method: domain.MethodCash, AmountCents: 40000}},
 	}); glerrors.KindOf(err) != glerrors.KindInvalid {
 		t.Errorf("tenders short of the amount: want KindInvalid, got %v", err)
 	}
@@ -236,4 +236,32 @@ func firstOpenCharge(t *testing.T, f *fixture) ports.ChargeWithPaid {
 	}
 	t.Fatal("the fixture left no charge open")
 	return ports.ChargeWithPaid{}
+}
+
+// Review of T8: debit or credit reaches the payment rows, on a combined
+// payment and on a deposit's slices.
+func TestCardTypeReachesThePaymentRows(t *testing.T) {
+	f := depositFixture(t)
+	open := firstOpenCharge(t, f)
+	payments, _, err := f.svc.RegisterTenderedPayment(context.Background(), usecase.TenderedPaymentInput{
+		ChargeID: open.Charge.ID(), AmountCents: 50000,
+		Tenders: []usecase.TenderInput{{Method: domain.MethodCard, AmountCents: 50000, CardType: domain.CardCredit}},
+	})
+	if err != nil {
+		t.Fatalf("RegisterTenderedPayment: %v", err)
+	}
+	if payments[0].CardType() != domain.CardCredit {
+		t.Errorf("payment card type = %q, want credit", payments[0].CardType())
+	}
+
+	got, err := tenderedDeposit(t, f, 100000, "card-dep",
+		usecase.TenderInput{Method: domain.MethodCard, AmountCents: 100000, CardType: domain.CardDebit})
+	if err != nil {
+		t.Fatalf("RegisterDeposit: %v", err)
+	}
+	for _, p := range got.Allocations {
+		if p.CardType() != domain.CardDebit {
+			t.Errorf("allocation card type = %q, want debit", p.CardType())
+		}
+	}
 }

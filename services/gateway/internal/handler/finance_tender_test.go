@@ -56,10 +56,12 @@ func TestFinanceForwardsTenders(t *testing.T) {
 func TestFinanceRefusesTendersOutsideTheContract(t *testing.T) {
 	five := strings.Repeat(`{"method":"cash","amountCents":100},`, 5)
 	cases := map[string]string{
-		"unknown method": `[{"method":"vale","amountCents":1000}]`,
-		"zero amount":    `[{"method":"cash","amountCents":0}]`,
-		"too many":       "[" + strings.TrimSuffix(five, ",") + "]",
-		"long reference": `[{"method":"credit_note","amountCents":1000,"reference":"` + strings.Repeat("x", 121) + `"}]`,
+		"unknown method":    `[{"method":"vale","amountCents":1000}]`,
+		"zero amount":       `[{"method":"cash","amountCents":0}]`,
+		"too many":          "[" + strings.TrimSuffix(five, ",") + "]",
+		"card type on cash": `[{"method":"cash","amountCents":1000,"cardType":"debit"}]`,
+		"unknown card type": `[{"method":"card","amountCents":1000,"cardType":"despensa"}]`,
+		"long reference":    `[{"method":"credit_note","amountCents":1000,"reference":"` + strings.Repeat("x", 121) + `"}]`,
 	}
 	for name, tenders := range cases {
 		t.Run(name, func(t *testing.T) {

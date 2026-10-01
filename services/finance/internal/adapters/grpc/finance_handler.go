@@ -640,6 +640,7 @@ func toProtoPayment(p domain.Payment) *financev1.Payment {
 		Method:      p.Method(),
 		Reference:   p.Reference(),
 		PaidAt:      timestamppb.New(p.PaidAt()),
+		CardType:    p.CardType(),
 	}
 }
 
