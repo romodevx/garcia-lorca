@@ -250,6 +250,8 @@ export function FinanceScreen({ onBack, today: officeDay, notes }: FinanceScreen
   // an answer to that.
   const [month, setMonth] = useState("todos");
   const [pay, setPay] = useState<Row | null>(null);
+  // Bumped by every payment so the period's income is read again (QA ISSUE-001).
+  const [paidCount, setPaidCount] = useState(0);
   // The counter: pick a pupil, then take whatever the parent hands over. Kept
   // separate from `pay`, which is the older per-charge path.
   /*
@@ -342,7 +344,7 @@ export function FinanceScreen({ onBack, today: officeDay, notes }: FinanceScreen
     say(`${filtered.length} renglones exportados`);
   };
 
-  const onPaid = (): void => { setPay(null); if (activeCycleId !== undefined) load(activeCycleId); say("Pago registrado"); };
+  const onPaid = (): void => { setPay(null); setPaidCount((n) => n + 1); if (activeCycleId !== undefined) load(activeCycleId); say("Pago registrado"); };
 
   const tabs: [typeof tab, string][] = [["all", "Todos"], ["overdue", "Vencidos"], ["due", "Por vencer"], ["paid", "Pagados"]];
   const stats: { icon: IconName; c: string; label: string; val: string; sub: string }[] = [
@@ -396,7 +398,7 @@ export function FinanceScreen({ onBack, today: officeDay, notes }: FinanceScreen
       {/* What came IN, before what is owed. The director's first question is
           how the month is going, and it used to take opening a drawer. */}
       <div className="fade-up" style={{ marginBottom: 26 }}>
-        <IncomePanel from={monthStart()} to={today()} />
+        <IncomePanel key={paidCount} from={monthStart()} to={today()} />
       </div>
 
       <h2 className="fade-up" style={{ fontSize: 20, fontWeight: 700, color: "var(--text)", marginBottom: 14 }}>Adeudos</h2>
