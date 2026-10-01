@@ -12,6 +12,8 @@ export interface PdfDownloadTarget {
   /** Used when the server's filename is unavailable, from fallbackPdfName. */
   fallbackName: string;
   title: string;
+  /** What to say on failure, when the document is not a boleta. */
+  messages?: Partial<Record<PdfErrorKind, string>>;
 }
 
 const MESSAGES: Record<PdfErrorKind, string> = {
@@ -63,7 +65,7 @@ export function usePdfDownload(target: PdfDownloadTarget | null): { state: PdfDo
         update({ status: "idle" });
       } catch (failure) {
         const kind = failure instanceof PdfError ? failure.kind : "network";
-        update({ status: "failed", message: MESSAGES[kind] });
+        update({ status: "failed", message: target.messages?.[kind] ?? MESSAGES[kind] });
       } finally {
         busy.current = false;
       }

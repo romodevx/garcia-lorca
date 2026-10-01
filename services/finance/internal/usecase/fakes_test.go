@@ -707,7 +707,13 @@ func (f *fakeRepo) ListPayments(_ context.Context, studentID string) ([]domain.P
 		if !ok || c.StudentID() != studentID {
 			continue
 		}
-		out = append(out, ps...)
+		// As the repository reads it: a deposit's slice names its deposit.
+		for _, p := range ps {
+			if d, sliced := f.depositOfPayment[p.ID()]; sliced {
+				p = p.WithDepositID(d)
+			}
+			out = append(out, p)
+		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID() < out[j].ID() })
 	return out, nil

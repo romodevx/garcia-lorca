@@ -7,6 +7,7 @@ import (
 	"time"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
+	"github.com/garcia-lorca/pkg/schoolcal"
 	"github.com/garcia-lorca/services/finance/internal/domain"
 	"github.com/garcia-lorca/services/finance/internal/ports"
 )
@@ -538,17 +539,32 @@ func (s *FinanceService) GetAccount(ctx context.Context, studentID string) (Acco
 // A charge that already has money on it stays, opened or not: the payment is in
 // the family's history, and a payment whose charge is missing explains nothing.
 func (s *FinanceService) GetFamilyAccount(ctx context.Context, studentID string) (AccountStatement, error) {
-	now := s.now()
-	return s.account(ctx, studentID, func(c ports.ChargeWithPaid) bool {
+	return s.account(ctx, studentID, inPlayOn(s.now()))
+}
+
+// inPlayOn is the family's view of a charge on `now` (T5): opened, or carrying
+// money already. The statement (T7) counts exactly these in the balance, for
+// the office as for the family, so both read one number.
+func inPlayOn(now time.Time) func(ports.ChargeWithPaid) bool {
+	return func(c ports.ChargeWithPaid) bool {
 		return c.PaidCents > 0 || c.Charge.OpenOn(now)
-	})
+	}
 }
 
 // account is the statement over the charges `shown` keeps.
 func (s *FinanceService) account(ctx context.Context, studentID string, shown func(ports.ChargeWithPaid) bool) (AccountStatement, error) {
+	statement, _, err := s.accountWithTerms(ctx, studentID, shown, s.now())
+	return statement, err
+}
+
+// accountWithTerms is account plus the collection terms it was worked out
+// under, for the ledger (T7) to reuse without reading them twice.
+func (s *FinanceService) accountWithTerms(
+	ctx context.Context, studentID string, shown func(ports.ChargeWithPaid) bool, when time.Time,
+) (AccountStatement, collectionTerms, error) {
 	all, err := s.repo.ListCharges(ctx, studentID, "")
 	if err != nil {
-		return AccountStatement{}, err
+		return AccountStatement{}, collectionTerms{}, err
 	}
 	charges := make([]ports.ChargeWithPaid, 0, len(all))
 	for _, c := range all {
@@ -558,12 +574,12 @@ func (s *FinanceService) account(ctx context.Context, studentID string, shown fu
 	}
 	payments, err := s.repo.ListPayments(ctx, studentID)
 	if err != nil {
-		return AccountStatement{}, err
+		return AccountStatement{}, collectionTerms{}, err
 	}
 
 	credit, err := s.repo.UnallocatedCents(ctx, studentID)
 	if err != nil {
-		return AccountStatement{}, err
+		return AccountStatement{}, collectionTerms{}, err
 	}
 
 	var balance int64
@@ -579,10 +595,15 @@ func (s *FinanceService) account(ctx context.Context, studentID string, shown fu
 	// counter uses — but against the charges ALREADY read above, and without the
 	// two idempotent writes EnsureConceptOfKind performs. A statement is a read,
 	// and this is the endpoint the parents' app hits most.
-	when := s.now()
-	expected, err := s.expectedForStatement(ctx, studentID, charges, when)
+	terms, err := s.collectionTermsFor(ctx, studentID)
 	if err != nil {
-		return AccountStatement{}, err
+		return AccountStatement{}, collectionTerms{}, err
+	}
+	// The statement needs the totals, not the counter's list: no lines.
+	expected, err := expectedFrom(charges, terms.plan, terms.calendar,
+		terms.lateFeeID, terms.tuitionID, terms.enrolmentID, when, when, false)
+	if err != nil {
+		return AccountStatement{}, collectionTerms{}, err
 	}
 	return AccountStatement{
 		Charges:            charges,
@@ -593,42 +614,46 @@ func (s *FinanceService) account(ctx context.Context, studentID string, shown fu
 		SurchargeCents:     expected.SurchargeCents,
 		EarlyDiscountCents: expected.DiscountCents,
 		AsOf:               when.Format(dueDateLayout),
-	}, nil
+	}, terms, nil
 }
 
-// expectedForStatement is what the counter would collect today, worked out from
-// charges the caller has already loaded.
+// collectionTerms is what the counter's arithmetic needs besides the charges:
+// the student's plan, the school calendar and the system concepts' ids.
+type collectionTerms struct {
+	plan                              domain.TuitionPlan
+	calendar                          *schoolcal.Calendar
+	lateFeeID, tuitionID, enrolmentID string
+}
+
+// collectionTermsFor reads the terms a statement is worked out under.
 //
 // It resolves the concepts by READING the catalog rather than ensuring them:
 // a statement must not write, and by the time a family has charges at all, the
 // concepts those charges point at necessarily exist. A school with no concepts
 // yet has no charges either, and the arithmetic over an empty list is zero
 // whichever id it was given.
-func (s *FinanceService) expectedForStatement(
-	ctx context.Context, studentID string, charges []ports.ChargeWithPaid, when time.Time,
-) (Expected, error) {
+func (s *FinanceService) collectionTermsFor(ctx context.Context, studentID string) (collectionTerms, error) {
 	calendar, _ := s.schoolCalendar(ctx, studentID)
 	plan, err := s.planFor(ctx, studentID)
 	if err != nil {
-		return Expected{}, err
+		return collectionTerms{}, err
 	}
 	byKind, err := s.repo.ListConcepts(ctx, true)
 	if err != nil {
-		return Expected{}, err
+		return collectionTerms{}, err
 	}
-	var lateFeeID, tuitionID, enrolmentID string
+	terms := collectionTerms{plan: plan, calendar: calendar}
 	for _, c := range byKind {
 		switch c.Kind() {
 		case domain.KindLateFee:
-			lateFeeID = c.ID()
+			terms.lateFeeID = c.ID()
 		case domain.KindTuition:
-			tuitionID = c.ID()
+			terms.tuitionID = c.ID()
 		case domain.KindEnrollment:
-			enrolmentID = c.ID()
+			terms.enrolmentID = c.ID()
 		}
 	}
-	// The statement needs the totals, not the counter's list: no lines.
-	return expectedFrom(charges, plan, calendar, lateFeeID, tuitionID, enrolmentID, when, when, false)
+	return terms, nil
 }
 
 // ListOverdue returns the charges past due that still owe money, as of the

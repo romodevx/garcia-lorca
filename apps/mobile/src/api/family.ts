@@ -43,50 +43,63 @@ export interface FamilyProfile extends FamilyStudent {
   currentEnrollment: FamilyEnrollment | null;
 }
 
-/** One finance charge on a child's account. Amounts are integer cents. */
-export interface FamilyCharge {
-  id: string;
+/**
+ * What a ledger line records. scholarship (T18) and credit_note (T8) are
+ * reserved: no line carries them yet, the screen already renders them.
+ */
+export type MovementKind = "charge" | "surcharge" | "discount" | "scholarship" | "payment" | "credit_note";
+
+/**
+ * One line of the child's ledger (T7), as finance worked it out. Amounts are
+ * integer cents; `amountCents` is always positive and `kind` says which way it
+ * moves the balance. The family's view never carries a voided deposit nor a
+ * charge that has not opened.
+ */
+export interface FamilyMovement {
+  kind: MovementKind;
+  /** YYYY-MM-DD. */
+  date: string;
   description: string;
   amountCents: number;
+  /** The running balance after this line. Negative is the family's credit. */
+  balanceCents: number;
+  method?: string;
+  cardType?: string;
+  reference?: string;
+  folio?: string;
+  /** A surcharge earned up to today and not yet written down. */
+  accrued: boolean;
+  notYetDue: boolean;
+  voided: boolean;
+}
+
+export interface FamilyStatementTotals {
+  chargedCents: number;
   discountCents: number;
   paidCents: number;
-  remainingCents: number;
-  dueDate: string;
-  status: string;
+  /** charged − discounts − paid. Negative is credit in the family's favour. */
+  balanceCents: number;
+  notYetDueCents: number;
 }
 
-/** One payment applied to a child's charge. Amounts are integer cents. */
-export interface FamilyPayment {
-  id: string;
-  chargeId: string;
-  amountCents: number;
-  method: string;
-  reference: string;
-  paidAt: string;
-}
-
-/** A child's full finance statement. */
-export interface FamilyAccount {
-  charges: FamilyCharge[];
-  payments: FamilyPayment[];
-  totalBalanceCents: number;
+/**
+ * The child's account statement: the SAME ledger the school reads
+ * (`finance.GetStatement`), in the family's view. The app renders it and
+ * derives nothing from it.
+ */
+export interface FamilyStatement {
+  movements: FamilyMovement[];
+  totals: FamilyStatementTotals;
   /**
    * What the school is asking for TODAY: the months that have come due, already
-   * carrying the surcharge that has accrued and net of the early-payment reward.
-   *
-   * `totalBalanceCents` is what the YEAR still owes. Both are true at once, and
-   * a parent shown only the year is told a number nobody is asking them for —
-   * they are also the one person who cannot walk to the office and ask.
+   * carrying the surcharge that has accrued and net of the early-payment reward
+   * — the counter's figure.
    */
   dueTodayCents: number;
   /** Its parts, so the screen can explain its own figure. */
   surchargeCents: number;
   earlyDiscountCents: number;
-  /**
-   * The day those three were worked out for, YYYY-MM-DD. EMPTY when the gateway
-   * is older than M18 and sent none: the screen withholds the figure rather than
-   * showing $0.00 to a family that owes money.
-   */
+  /** The day those figures were worked out for, YYYY-MM-DD; empty when unknown. */
   asOf: string;
 }
 
@@ -130,21 +143,27 @@ export async function getProfile(studentId: string): Promise<FamilyProfile> {
   return unwrap<FamilyProfile>(await apiFetch(`/api/v1/family/students/${studentId}/profile`), "profile");
 }
 
-/** Reads one child's finance statement (charges, payments, outstanding balance). */
-export async function getAccount(studentId: string): Promise<FamilyAccount> {
-  const data = await unwrap<Partial<FamilyAccount>>(
-    await apiFetch(`/api/v1/family/students/${studentId}/account`),
-    "account",
+const EMPTY_TOTALS: FamilyStatementTotals = { chargedCents: 0, discountCents: 0, paidCents: 0, balanceCents: 0, notYetDueCents: 0 };
+
+/** Reads one child's account statement (T7): the ledger, its totals and today's figure. */
+export async function getStatement(studentId: string): Promise<FamilyStatement> {
+  const data = await unwrap<Partial<FamilyStatement> & { movements?: FamilyMovement[] | null }>(
+    await apiFetch(`/api/v1/family/students/${studentId}/statement`),
+    "statement",
   );
   return {
-    charges: data.charges ?? [],
-    payments: data.payments ?? [],
-    totalBalanceCents: data.totalBalanceCents ?? 0,
+    movements: data.movements ?? [],
+    totals: { ...EMPTY_TOTALS, ...data.totals },
     dueTodayCents: data.dueTodayCents ?? 0,
     surchargeCents: data.surchargeCents ?? 0,
     earlyDiscountCents: data.earlyDiscountCents ?? 0,
     asOf: data.asOf ?? "",
   };
+}
+
+/** The authenticated path of the statement's PDF. */
+export function statementPdfPath(studentId: string): string {
+  return `/api/v1/family/students/${studentId}/statement/pdf`;
 }
 
 /** Reads one child's grade entries, optionally narrowed to a single term. */

@@ -164,12 +164,17 @@ func (b *Builder) Sale(ctx context.Context, orderID string) (Receipt, error) {
 }
 
 func (b *Builder) school(ctx context.Context) (client.SchoolProfile, error) {
-	p, found, err := b.profiles.GetSchoolProfile(ctx)
+	return schoolOf(ctx, b.profiles)
+}
+
+// schoolOf reads the school's details for a printed document. A school that
+// has not filled them in still gets its document.
+func schoolOf(ctx context.Context, profiles ProfileReader) (client.SchoolProfile, error) {
+	p, found, err := profiles.GetSchoolProfile(ctx)
 	if err != nil {
 		return client.SchoolProfile{}, fmt.Errorf("reading the school's details: %w", err)
 	}
 	if !found {
-		// A school that has not filled its details still gets a receipt.
 		return client.SchoolProfile{}, nil
 	}
 	return p, nil

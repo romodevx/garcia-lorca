@@ -82,6 +82,11 @@ service FinanceService {
   // payment, and the total outstanding balance.
   rpc GetAccount(GetAccountRequest) returns (GetAccountResponse);
 
+  // GetStatement returns a student's ledger (T7): every movement in date
+  // order with the running balance, and its totals. The one computation the
+  // office, the parents' app and the PDF all read.
+  rpc GetStatement(GetStatementRequest) returns (GetStatementResponse);
+
   // ListOverdue lists charges past their due date with a remaining balance,
   // optionally filtered by cycle. Cancelled and fully paid charges are excluded.
   // Returns at most 500 rows (earliest due first); explicit pagination is a
@@ -429,6 +434,63 @@ message GetAccountResponse {
   // because these amounts move on their own overnight, and a screen that cannot
   // say which day it is quoting cannot be trusted the morning after.
   string as_of = 8;
+}
+
+message GetStatementRequest {
+  string student_id = 1;
+  // family_view is the family's ledger: without the charges that have not
+  // opened (T5) and without voided deposits. The balance is the same.
+  bool family_view = 2;
+}
+
+// StatementMovement is one line of the ledger. amount_cents is always
+// positive; `kind` says which way it moves the balance:
+// charge | surcharge raise it; discount | scholarship | payment | credit_note
+// lower it. scholarship (T18) and credit_note (T8) are reserved.
+message StatementMovement {
+  string kind = 1;
+  // YYYY-MM-DD: a charge's due date, the day money arrived, or the
+  // statement's day for a surcharge still accruing.
+  string date = 2;
+  string description = 3;
+  int64 amount_cents = 4;
+  // The running balance after this line. Negative is the family's credit.
+  int64 balance_cents = 5;
+  string charge_id = 6;
+  string deposit_id = 7;
+  // cash | card | transfer, on money lines.
+  string method = 8;
+  string card_type = 9;
+  string reference = 10;
+  string folio = 11;
+  // A surcharge the daily rule has earned up to today, not yet written down.
+  bool accrued = 12;
+  // A charge that has not opened (T5): shown to the office, not counted.
+  bool not_yet_due = 13;
+  // A cancelled deposit: shown to the office struck through, not counted.
+  bool voided = 14;
+  string void_reason = 15;
+}
+
+// StatementTotals: balance = charged - discount - paid.
+message StatementTotals {
+  int64 charged_cents = 1;
+  int64 discount_cents = 2;
+  int64 paid_cents = 3;
+  int64 balance_cents = 4;
+  // What the charges not yet opened will ask for, net. Not in the balance.
+  int64 not_yet_due_cents = 5;
+}
+
+message GetStatementResponse {
+  repeated StatementMovement movements = 1;
+  StatementTotals totals = 2;
+  // The counter's figures for today, as on GetAccountResponse.
+  int64 due_today_cents = 3;
+  int64 surcharge_cents = 4;
+  int64 early_discount_cents = 5;
+  int64 unallocated_cents = 6;
+  string as_of = 7;
 }
 
 message ListOverdueRequest {

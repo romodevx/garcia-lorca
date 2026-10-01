@@ -1,82 +1,73 @@
 import { useFlag } from "@garcia-lorca/ui/flags";
 import { router } from "expo-router";
-import { type ReactElement } from "react";
+import { useMemo, type ReactElement } from "react";
 import { StyleSheet, Text, View } from "react-native";
-import type { FamilyAccount, FamilyCharge, FamilyPayment } from "../api";
+import { statementPdfPath, type FamilyMovement, type MovementKind } from "../api";
 import type { IconName } from "../icons";
 import { useAppState } from "../state/AppState";
-import { useChildAccount } from "../state/familyData";
+import { useChildStatement } from "../state/familyData";
 import { useRefreshHandler } from "../components/refresh";
 import { useTheme, type TintName } from "../theme";
-import { Card, Chip, EmptyState, ListRow, ScreenTitle, SectionLabel, TintIcon } from "../ui";
+import { Button, Card, Chip, EmptyState, ListRow, ScreenTitle, SectionLabel, TintIcon } from "../ui";
 import { AsyncErrorState, AsyncLoading, StaleNotice } from "./AsyncStates";
+import { usePdfDownload } from "./grades/usePdfDownload";
 import { formatDate, pesos } from "./format";
 
-const CHARGE_STATUS_LABEL: Record<string, string> = {
-  pending: "Pendiente",
-  partial: "Abono parcial",
-  paid: "Pagado",
-  overdue: "Vencido",
+/** How each kind of ledger line looks. The ledger itself is finance's (T7). */
+const KIND_LOOK: Record<MovementKind, { icon: IconName; tint: TintName; label: string; credit: boolean }> = {
+  charge: { icon: "receipt", tint: "orange", label: "Cargo", credit: false },
+  surcharge: { icon: "alert", tint: "orange", label: "Recargo", credit: false },
+  discount: { icon: "check-circle", tint: "forest", label: "Descuento", credit: true },
+  scholarship: { icon: "check-circle", tint: "forest", label: "Beca", credit: true },
+  payment: { icon: "check-circle", tint: "forest", label: "Pago", credit: true },
+  credit_note: { icon: "check-circle", tint: "forest", label: "Nota de crédito", credit: true },
 };
 
-/** One row in the movements ledger, derived from a charge or a payment. */
-interface Movement {
-  key: string;
-  icon: IconName;
-  tint: TintName;
-  title: string;
-  sub: string;
-  amountCents: number;
-  /** A credit (payment) renders in green with a minus sign. */
-  credit: boolean;
-  chip?: string;
-  /** Epoch ms used to sort the ledger newest-first. */
-  sortAt: number;
-}
+const METHOD_LABEL: Record<string, string> = { cash: "Efectivo", card: "Tarjeta", transfer: "Transferencia" };
 
-function epoch(iso: string): number {
-  const t = new Date(iso).getTime();
-  return Number.isNaN(t) ? 0 : t;
-}
+const PDF_MESSAGES = {
+  network: "No pudimos descargar el estado de cuenta. Revisa tu conexión e inténtalo de nuevo.",
+  server: "La escuela no pudo entregar el estado de cuenta en este momento. Inténtalo más tarde.",
+  storage: "No pudimos guardar el estado de cuenta en el teléfono. Libera espacio e inténtalo de nuevo.",
+  not_found: "El estado de cuenta no está disponible.",
+  session: "Tu sesión terminó. Vuelve a iniciar sesión para descargar el estado de cuenta.",
+};
 
-/** Builds the newest-first ledger from the statement's charges and payments. */
-function toLedger(account: FamilyAccount): Movement[] {
-  const charges: Movement[] = account.charges.map((c: FamilyCharge) => ({
-    key: `charge-${c.id}`,
-    icon: "receipt",
-    tint: "orange",
-    title: c.description,
-    sub: `${CHARGE_STATUS_LABEL[c.status] ?? c.status} · Vence ${formatDate(c.dueDate)}`,
-    amountCents: c.amountCents - c.discountCents,
-    credit: false,
-    chip: c.remainingCents <= 0 ? "Pagado" : undefined,
-    sortAt: epoch(c.dueDate),
-  }));
-  const payments: Movement[] = account.payments.map((p: FamilyPayment) => ({
-    key: `payment-${p.id}`,
-    icon: "check-circle",
-    tint: "forest",
-    title: "Pago recibido",
-    sub: `Pago · ${formatDate(p.paidAt)}`,
-    amountCents: p.amountCents,
-    credit: true,
-    sortAt: epoch(p.paidAt),
-  }));
-  return [...charges, ...payments].sort((a, b) => b.sortAt - a.sortAt);
+/** The row's second line: what the line is, its day, and how money came. */
+function subOf(m: FamilyMovement): string {
+  const parts = [KIND_LOOK[m.kind]?.label ?? m.kind, formatDate(m.date)];
+  if (m.method) parts.push(METHOD_LABEL[m.method] ?? m.method);
+  if (m.folio) parts.push(m.folio);
+  return parts.filter(Boolean).join(" · ");
 }
 
 /**
- * Cuenta/Saldo: the child's real finance statement from
- * `GET /api/v1/family/students/{id}/account` — the outstanding balance and the
- * charges/payments ledger. Read-only: there is no guardian payment endpoint yet,
- * so the screen never fabricates a settled state. Handles loading/error/empty.
+ * Cuenta/Saldo: the child's account statement from
+ * `GET /api/v1/family/students/{id}/statement` — the SAME ledger the school
+ * reads (finance.GetStatement, T7): every movement with its running balance,
+ * the pending balance and today's figure. The screen renders it newest first
+ * and derives nothing. Read-only; never fabricates a settled state.
  */
 export function AccountScreen(): ReactElement {
   const { selectedChildId, childLoading, childError, refreshChildren } = useAppState();
-  const { data, loading, error, reload } = useChildAccount(selectedChildId);
+  const { data, loading, error, reload } = useChildStatement(selectedChildId);
   useRefreshHandler(reload);
   const cardEnabled = useFlag("module_student_card");
   const theme = useTheme();
+  const pdfTarget = useMemo(
+    () =>
+      selectedChildId === null
+        ? null
+        : {
+            path: statementPdfPath(selectedChildId),
+            studentId: selectedChildId,
+            fallbackName: "estado-de-cuenta.pdf",
+            title: "Estado de cuenta",
+            messages: PDF_MESSAGES,
+          },
+    [selectedChildId],
+  );
+  const pdf = usePdfDownload(pdfTarget);
 
   // The child bootstrap failed, so there is no child to read against. Surface that
   // error (retrying the child load) instead of falling through to a fabricated
@@ -117,20 +108,22 @@ export function AccountScreen(): ReactElement {
     );
   }
 
-  // What the school is asking for TODAY leads; the year's balance sits beside it.
-  // Both are true at once, and a parent shown only the year is told a number
-  // nobody is asking them for — they are also the one person who cannot walk to
-  // the office and ask which is which.
+  // What the school is asking for TODAY leads; the pending balance sits beside
+  // it. Both are true at once, and a parent shown only the balance is told a
+  // number nobody is asking them for — they are also the one person who cannot
+  // walk to the office and ask which is which.
   //
-  // An EMPTY asOf means the gateway is older than M18 and sent none of it.
-  // Rendering the day's figure as $0.00 there would tell a family that owes
-  // $32,000 that they are settled — the same fabricated "Al corriente" this
-  // screen already refuses when the child bootstrap fails (bug_005). So the hero
-  // falls back to the year, and says nothing about today.
+  // An EMPTY asOf means the day is unknown. Rendering the day's figure as $0.00
+  // there would tell a family that owes money that they are settled — the same
+  // fabricated "Al corriente" this screen refuses when the child bootstrap
+  // fails (bug_005). So the hero falls back to the balance.
   const hasToday = (data?.asOf ?? "") !== "";
-  const heroCents = hasToday ? (data?.dueTodayCents ?? 0) : (data?.totalBalanceCents ?? 0);
+  const balanceCents = data?.totals.balanceCents ?? 0;
+  const heroCents = hasToday ? (data?.dueTodayCents ?? 0) : balanceCents;
   const settled = heroCents <= 0;
-  const movements = data ? toLedger(data) : [];
+  // Newest first: the order a parent reads a bank app in. The balances are
+  // finance's, per line, whatever the order they are shown in.
+  const movements = [...(data?.movements ?? [])].reverse();
 
   return (
     <>
@@ -150,10 +143,10 @@ export function AccountScreen(): ReactElement {
         {hasToday && (
           <>
             <Text
-              accessibilityLabel="Saldo del año"
+              accessibilityLabel={balanceCents < 0 ? "Saldo a favor" : "Saldo pendiente"}
               style={[styles.year, { color: theme.colors.text2, fontFamily: theme.fonts.ui }]}
             >
-              {pesos(Math.max(data?.totalBalanceCents ?? 0, 0))}
+              {pesos(Math.abs(balanceCents))}
             </Text>
             <Text
               accessibilityLabel="Detalle del saldo"
@@ -184,37 +177,55 @@ export function AccountScreen(): ReactElement {
         </Card>
       )}
 
-      <SectionLabel>Movimientos recientes</SectionLabel>
+      <SectionLabel>Movimientos</SectionLabel>
       {movements.length === 0 ? (
         <EmptyState icon="receipt" title="Sin movimientos" subtitle="Aquí verás los cargos y pagos de tu cuenta." />
       ) : (
         <Card>
           {movements.map((m, i) => (
-            <MovementRow key={m.key} movement={m} divider={i > 0} />
+            <MovementRow key={`${m.kind}-${m.date}-${i}`} movement={m} divider={i > 0} />
           ))}
         </Card>
       )}
+
+      <View style={styles.action}>
+        <Button label="Descargar estado de cuenta" icon="download" onPress={pdf.start} accessibilityLabel="Descargar estado de cuenta" />
+        {pdf.state.status === "downloading" ? (
+          <Text accessibilityLiveRegion="polite" style={[styles.status, { color: theme.colors.text2, fontFamily: theme.fonts.uiSemi }]}>
+            Descargando…
+          </Text>
+        ) : null}
+        {pdf.state.status === "failed" ? (
+          <Text accessibilityRole="alert" style={[styles.status, { color: theme.colors.bad, fontFamily: theme.fonts.uiSemi }]}>
+            {pdf.state.message}
+          </Text>
+        ) : null}
+      </View>
     </>
   );
 }
 
-function MovementRow({ movement, divider }: { movement: Movement; divider: boolean }): ReactElement {
+function MovementRow({ movement, divider }: { movement: FamilyMovement; divider: boolean }): ReactElement {
   const theme = useTheme();
-  const amount = movement.credit ? -movement.amountCents : movement.amountCents;
+  const look = KIND_LOOK[movement.kind] ?? KIND_LOOK.charge;
+  const amount = look.credit ? -movement.amountCents : movement.amountCents;
   return (
-    <ListRow divider={divider}>
-      <TintIcon name={movement.icon} tint={movement.tint} />
-      <View style={{ flex: 1 }}>
-        <Text style={[styles.rowTitle, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]}>{movement.title}</Text>
-        <Text style={[styles.rowSub, { color: theme.colors.text3, fontFamily: theme.fonts.uiSemi }]}>{movement.sub}</Text>
-      </View>
-      <View style={styles.trail}>
-        <Text style={[styles.amountVal, { color: movement.credit ? theme.colors.ok : theme.colors.text, fontFamily: theme.fonts.display }]}>
-          {pesos(amount)}
-        </Text>
-        {movement.chip ? <Chip kind="ok">{movement.chip}</Chip> : null}
-      </View>
-    </ListRow>
+    <View accessible accessibilityLabel={`Movimiento ${movement.description}`}>
+      <ListRow divider={divider}>
+        <TintIcon name={look.icon} tint={look.tint} />
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.rowTitle, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]}>{movement.description}</Text>
+          <Text style={[styles.rowSub, { color: theme.colors.text3, fontFamily: theme.fonts.uiSemi }]}>{subOf(movement)}</Text>
+        </View>
+        <View style={styles.trail}>
+          <Text style={[styles.amountVal, { color: look.credit ? theme.colors.ok : theme.colors.text, fontFamily: theme.fonts.display }]}>
+            {pesos(amount)}
+          </Text>
+          <Text style={[styles.rowSub, { color: theme.colors.text3, fontFamily: theme.fonts.uiSemi }]}>{`Saldo ${pesos(movement.balanceCents)}`}</Text>
+          {movement.accrued ? <Chip kind="warn">Acumulado a hoy</Chip> : null}
+        </View>
+      </ListRow>
+    </View>
   );
 }
 
@@ -230,4 +241,6 @@ const styles = StyleSheet.create({
   rowSub: { fontSize: 12.5, fontWeight: "600", marginTop: 3 },
   trail: { alignItems: "flex-end", gap: 4 },
   amountVal: { fontSize: 16, fontWeight: "700", letterSpacing: -0.2 },
+  action: { marginTop: 18, gap: 10 },
+  status: { fontSize: 16, fontWeight: "600", textAlign: "center" },
 });

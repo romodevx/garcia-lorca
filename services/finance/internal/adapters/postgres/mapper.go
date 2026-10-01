@@ -356,10 +356,16 @@ func fromDomainCharge(c domain.Charge) chargeModel {
 // took the money when it was recorded.
 func toDomainPayment(m paymentModel) (domain.Payment, error) {
 	p, err := domain.NewPayment(m.ID, m.TenantID, m.ChargeID, m.AmountCents, m.Method, m.Reference, m.PaidAt, m.IdempotencyKey)
-	if err != nil || m.ReceivedBy == nil {
+	if err != nil {
 		return p, err
 	}
-	return p.WithReceivedBy(*m.ReceivedBy), nil
+	if m.DepositID != nil {
+		p = p.WithDepositID(*m.DepositID)
+	}
+	if m.ReceivedBy != nil {
+		p = p.WithReceivedBy(*m.ReceivedBy)
+	}
+	return p, nil
 }
 
 // fromDomainPayment projects a domain Payment into its GORM row for insert.

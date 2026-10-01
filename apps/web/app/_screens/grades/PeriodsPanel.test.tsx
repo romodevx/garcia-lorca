@@ -6,7 +6,7 @@ import * as configApi from "../../config/api";
 import { GradeRequestError } from "../../grades/monthly";
 import * as periodsApi from "../../grades/periods";
 import type { GradingPeriod, PeriodCaptureProgress, PeriodsClient } from "../../grades/periods";
-import { downloadBlob } from "./periods/downloadBlob";
+import { downloadBlob } from "../../_lib/downloadBlob";
 import { PeriodsPanel } from "./PeriodsPanel";
 
 vi.mock("../../config/api", () => ({
@@ -15,7 +15,7 @@ vi.mock("../../config/api", () => ({
   listLabelledGroups: vi.fn(),
 }));
 vi.mock(import("../../grades/periods"), async (original) => ({ ...(await original()), periodsClient: vi.fn() }));
-vi.mock("./periods/downloadBlob", () => ({ downloadBlob: vi.fn() }));
+vi.mock("../../_lib/downloadBlob", () => ({ downloadBlob: vi.fn() }));
 
 const config = vi.mocked(configApi);
 const periods = vi.mocked(periodsApi);

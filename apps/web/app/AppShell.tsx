@@ -645,6 +645,7 @@ export function AppShell(): ReactElement {
             userId={principal?.userId ?? ""}
             canVerifyCard={cardEnabled}
             canRevokeCard={cardEnabled && canEditStudents}
+            canReadStatement={financeEnabled && (principal?.permissions?.some((p) => p === "finance:read" || p === "collections:read") === true)}
           />
         ) : (
           // Flag OFF: never render the enrollment surface; show the friendly stub

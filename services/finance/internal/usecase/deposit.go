@@ -333,17 +333,13 @@ func expectedFrom(
 			cancelled[c.Charge.ID()] = true
 		}
 	}
-	materialised := map[string]int64{}
+	accrued := accruedSurcharges(charges, policy, calendar, lateFeeID, when)
 	// unpaidFees is the part of a charge's written-down surcharges still owed,
 	// so its line can carry it (task 8).
 	unpaidFees := map[string]int64{}
 	for _, c := range charges {
 		if c.Charge.Status() == domain.StatusCancelled || c.Charge.ConceptID() != lateFeeID {
 			continue
-		}
-		// Only daily surcharges are subtracted from what the daily rule earns.
-		if parent, ok := surchargeParent(c.Charge.ExternalRef()); ok {
-			materialised[parent] += c.Charge.Effective().Int64()
 		}
 		// Any written-down surcharge, daily or monthly, rides on its month.
 		if parent, ok := feeParent(c.Charge.ExternalRef()); ok && !cancelled[parent] && owed(c) > 0 && expectedBy(c.Charge.DueDate(), when) {
@@ -422,13 +418,10 @@ func expectedFrom(
 		line.Due = true
 		line.SurchargeCents += unpaidFees[c.Charge.ID()]
 		// What the daily rule has earned and nobody has written down yet.
-		if p := policy; p.DailyMode {
-			pending := domain.Surcharge(p, calendar, c.Charge.DueDate(), when) - materialised[c.Charge.ID()]
-			if pending > 0 {
-				out.AmountCents += pending
-				out.SurchargeCents += pending
-				line.SurchargeCents += pending
-			}
+		if pending := accrued[c.Charge.ID()]; pending > 0 {
+			out.AmountCents += pending
+			out.SurchargeCents += pending
+			line.SurchargeCents += pending
 		}
 		if c.Charge.ConceptID() == tuitionID && c.Charge.Discount().Int64() == 0 {
 			if d := earlyReward(policy, calendar, c.Charge.DueDate(), when); d > 0 {
@@ -448,6 +441,46 @@ func expectedFrom(
 		out.Lines = sortedLines(lines)
 	}
 	return out, nil
+}
+
+// accruedSurcharges is, per charge, what the daily rule has earned up to `when`
+// and nobody has written down yet: the surcharge a month asked for that day is
+// carrying. ONE rule for the counter's quote (expectedFrom) and the account
+// statement (T7), so the two can never quote different late fees.
+//
+// A month earns only while it is owed, due by `when` and open (T5). What a
+// deposit already wrote down as a daily surcharge row is subtracted — that part
+// is a charge of its own now.
+func accruedSurcharges(
+	charges []ports.ChargeWithPaid, policy domain.CollectionPolicy, calendar *schoolcal.Calendar,
+	lateFeeID string, when time.Time,
+) map[string]int64 {
+	if !policy.DailyMode {
+		return nil
+	}
+	materialised := map[string]int64{}
+	for _, c := range charges {
+		if c.Charge.Status() == domain.StatusCancelled || c.Charge.ConceptID() != lateFeeID {
+			continue
+		}
+		// Only daily surcharges are subtracted from what the daily rule earns.
+		if parent, ok := surchargeParent(c.Charge.ExternalRef()); ok {
+			materialised[parent] += c.Charge.Effective().Int64()
+		}
+	}
+	out := map[string]int64{}
+	for _, c := range charges {
+		if c.Charge.Status() == domain.StatusCancelled || c.Charge.ConceptID() == lateFeeID || owed(c) <= 0 {
+			continue
+		}
+		if !expectedBy(c.Charge.DueDate(), when) || !c.Charge.OpenOn(when) {
+			continue
+		}
+		if pending := domain.Surcharge(policy, calendar, c.Charge.DueDate(), when) - materialised[c.Charge.ID()]; pending > 0 {
+			out[c.Charge.ID()] = pending
+		}
+	}
+	return out
 }
 
 // earlyReward is the early-payment discount a month due on `due` earns when paid

@@ -205,6 +205,61 @@ func (h *FinanceHandler) GetAccount(ctx context.Context, req *connect.Request[fi
 	}), nil
 }
 
+// GetStatement returns a student's ledger (T7): movements with the running
+// balance, totals, and the counter's figures for today.
+func (h *FinanceHandler) GetStatement(ctx context.Context, req *connect.Request[financev1.GetStatementRequest]) (*connect.Response[financev1.GetStatementResponse], error) {
+	read := h.finance.GetStatement
+	if req.Msg.GetFamilyView() {
+		read = h.finance.GetFamilyStatement
+	}
+	statement, err := read(ctx, req.Msg.GetStudentId())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	movements := make([]*financev1.StatementMovement, 0, len(statement.Movements))
+	for _, m := range statement.Movements {
+		movements = append(movements, toProtoMovement(m))
+	}
+	t := statement.Totals
+	return connect.NewResponse(&financev1.GetStatementResponse{
+		Movements: movements,
+		Totals: &financev1.StatementTotals{
+			ChargedCents:   t.ChargedCents,
+			DiscountCents:  t.DiscountCents,
+			PaidCents:      t.PaidCents,
+			BalanceCents:   t.BalanceCents,
+			NotYetDueCents: t.NotYetDueCents,
+		},
+		DueTodayCents:      statement.DueTodayCents,
+		SurchargeCents:     statement.SurchargeCents,
+		EarlyDiscountCents: statement.EarlyDiscountCents,
+		UnallocatedCents:   statement.UnallocatedCents,
+		AsOf:               statement.AsOf,
+	}), nil
+}
+
+// toProtoMovement projects one ledger line. Dates go out as the calendar day
+// (UTC, this service's school day — see school-day-is-utc-day).
+func toProtoMovement(m domain.Movement) *financev1.StatementMovement {
+	return &financev1.StatementMovement{
+		Kind:         string(m.Kind),
+		Date:         m.Date.UTC().Format(dueDateLayout),
+		Description:  m.Description,
+		AmountCents:  m.AmountCents,
+		BalanceCents: m.BalanceCents,
+		ChargeId:     m.ChargeID,
+		DepositId:    m.DepositID,
+		Method:       m.Method,
+		CardType:     m.CardType,
+		Reference:    m.Reference,
+		Folio:        m.Folio,
+		Accrued:      m.Accrued,
+		NotYetDue:    m.NotYetDue,
+		Voided:       m.Voided,
+		VoidReason:   m.VoidReason,
+	}
+}
+
 // ListOverdue lists charges past their due date that still owe money.
 func (h *FinanceHandler) ListOverdue(ctx context.Context, req *connect.Request[financev1.ListOverdueRequest]) (*connect.Response[financev1.ListOverdueResponse], error) {
 	charges, err := h.finance.ListOverdue(ctx, req.Msg.GetCycleId())

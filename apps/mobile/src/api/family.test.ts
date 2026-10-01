@@ -1,7 +1,8 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
-  getAccount,
   getGrades,
+  getStatement,
+  statementPdfPath,
   getProfile,
   listChildren,
   markNotificationRead,
@@ -83,76 +84,50 @@ describe("family API client", () => {
     });
   });
 
-  describe("getAccount", () => {
-    it("returns the statement, defaulting null charge/payment lists to empty", async () => {
+  // T7: the ledger is the backend's (finance.GetStatement). The app renders it
+  // as it comes; it never rebuilds one from charges and payments again.
+  describe("getStatement", () => {
+    it("reads the family's ledger, defaulting what is missing", async () => {
       const fetchMock = jest.fn().mockResolvedValue(
         jsonOk({
-          charges: [
-            {
-              id: "c1",
-              description: "Colegiatura junio",
-              amountCents: 240000,
-              discountCents: 0,
-              paidCents: 0,
-              remainingCents: 240000,
-              dueDate: "2026-06-15",
-              status: "pending",
-            },
+          movements: [
+            { kind: "charge", date: "2026-09-10", description: "Colegiatura septiembre", amountCents: 320000, balanceCents: 320000, accrued: false, notYetDue: false, voided: false },
           ],
-          payments: null,
-          totalBalanceCents: 240000,
+          totals: { chargedCents: 320000, discountCents: 0, paidCents: 0, balanceCents: 320000, notYetDueCents: 0 },
+          dueTodayCents: 320000,
+          asOf: "2026-10-01",
         }),
       );
       globalThis.fetch = fetchMock as unknown as typeof fetch;
 
-      const account = await getAccount("s1");
+      const statement = await getStatement("s1");
 
-      expect(account.totalBalanceCents).toBe(240000);
-      expect(account.charges).toHaveLength(1);
-      expect(account.payments).toEqual([]);
-      expect(lastUrl(fetchMock)).toContain("/api/v1/family/students/s1/account");
+      expect(lastUrl(fetchMock)).toContain("/api/v1/family/students/s1/statement");
+      expect(statement.movements).toHaveLength(1);
+      expect(statement.movements[0]?.balanceCents).toBe(320000);
+      expect(statement.totals.balanceCents).toBe(320000);
+      expect(statement.dueTodayCents).toBe(320000);
+      expect(statement.surchargeCents).toBe(0);
+      expect(statement.asOf).toBe("2026-10-01");
     });
 
-    // What the school is asking for TODAY, which is not the same as the year.
-    // The parent is the one person who cannot walk to the office and ask.
-    it("carries the day's figure and the day it was worked out for", async () => {
-      globalThis.fetch = jest.fn().mockResolvedValue(
-        jsonOk({
-          charges: [],
-          payments: [],
-          totalBalanceCents: 3200000,
-          dueTodayCents: 775000,
-          surchargeCents: 15000,
-          earlyDiscountCents: 10000,
-          asOf: "2026-11-20",
-        }),
-      ) as unknown as typeof fetch;
+    it("turns null lists and missing totals into empty ones", async () => {
+      globalThis.fetch = jest.fn().mockResolvedValue(jsonOk({ movements: null })) as unknown as typeof fetch;
 
-      const account = await getAccount("s1");
+      const statement = await getStatement("s1");
 
-      expect(account.dueTodayCents).toBe(775000);
-      expect(account.surchargeCents).toBe(15000);
-      expect(account.earlyDiscountCents).toBe(10000);
-      expect(account.asOf).toBe("2026-11-20");
-    });
-
-    // A gateway older than M18 sends none of it. Zero would tell a family that
-    // owes money that they owe nothing, so the EMPTY asOf is what the screen
-    // reads to withhold the figure instead of inventing one.
-    it("leaves the day unknown when the gateway did not send it", async () => {
-      globalThis.fetch = jest.fn().mockResolvedValue(
-        jsonOk({ charges: [], payments: [], totalBalanceCents: 240000 }),
-      ) as unknown as typeof fetch;
-
-      const account = await getAccount("s1");
-
-      expect(account.asOf).toBe("");
-      expect(account.dueTodayCents).toBe(0);
+      expect(statement.movements).toEqual([]);
+      expect(statement.totals).toEqual({ chargedCents: 0, discountCents: 0, paidCents: 0, balanceCents: 0, notYetDueCents: 0 });
+      expect(statement.asOf).toBe("");
     });
 
     it("throws an ApiError on a non-2xx response", async () => {
       globalThis.fetch = jest.fn().mockResolvedValue(notOk(404)) as unknown as typeof fetch;
-      await expect(getAccount("s1")).rejects.toMatchObject({ status: 404 });
+      await expect(getStatement("s1")).rejects.toMatchObject({ status: 404 });
+    });
+
+    it("names the PDF's path", () => {
+      expect(statementPdfPath("s1")).toBe("/api/v1/family/students/s1/statement/pdf");
     });
   });
 

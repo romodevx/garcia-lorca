@@ -7,7 +7,7 @@ import { Icon } from "../../../_design/Icon";
 import { SelectField } from "../../../_design/form";
 import { boletaFileName, NO_GRADES_NOTICE, reportCardHasGrades, type GradingPeriod, type PeriodsClient, type ReportCard } from "../../../grades/periods";
 import { EmptyHint, ErrorAlert } from "../../config/parts";
-import { downloadBlob } from "./downloadBlob";
+import { downloadBlob } from "../../../_lib/downloadBlob";
 import { periodTitle } from "./format";
 import { useLevelGroups, useReportCards } from "./useReportCards";
 
