@@ -58,6 +58,10 @@ type TuitionPlanSpec struct {
 	// the run has always used — the plan's due day in the cycle's first month —
 	// so a plan written before this field goes on meaning what it meant.
 	EnrollmentDueOn time.Time
+	// EnrollmentStartsOn is the first day the inscription is shown to families
+	// and asked for (T5). Zero is open from the day it is issued. It needs
+	// EnrollmentDueOn and may not come after it (ValidateChargeWindow).
+	EnrollmentStartsOn time.Time
 	// EnrollmentConcepts breaks the inscription into the lines the school prints,
 	// each priced by when the family settles it. Empty keeps EnrollmentCents,
 	// which is what every plan written before ADR 0011 means.
@@ -111,6 +115,7 @@ type TuitionPlan struct {
 	monthlyDiscountCents int64
 	fees                 []Fee
 	enrollmentDueOn      time.Time
+	enrollmentStartsOn   time.Time
 	enrollmentConcepts   []EnrollmentConcept
 	active               bool
 }
@@ -153,6 +158,9 @@ func NewTuitionPlan(spec TuitionPlanSpec) (TuitionPlan, error) {
 		// A charge that owes negative money would pay for itself and then some.
 		return TuitionPlan{}, glerrors.New(glerrors.KindInvalid,
 			"the discount cannot be bigger than the month it comes off")
+	}
+	if err := ValidateChargeWindow(spec.EnrollmentStartsOn, spec.EnrollmentDueOn); err != nil {
+		return TuitionPlan{}, err
 	}
 	if len(spec.Fees) > maxFeesPerPlan {
 		return TuitionPlan{}, glerrors.New(glerrors.KindInvalid, "that is more fees than a level can carry")
@@ -213,6 +221,7 @@ func NewTuitionPlan(spec TuitionPlanSpec) (TuitionPlan, error) {
 		monthlyDiscountCents: spec.MonthlyDiscountCents,
 		fees:                 spec.Fees,
 		enrollmentDueOn:      spec.EnrollmentDueOn,
+		enrollmentStartsOn:   spec.EnrollmentStartsOn,
 		enrollmentConcepts:   cloneConcepts(spec.EnrollmentConcepts),
 	}, nil
 }
@@ -402,6 +411,10 @@ func (p TuitionPlan) Fees() []Fee { return p.fees }
 // EnrollmentDueOn is the day the inscription falls due, or the zero time when
 // the school did not set one and the run should derive it.
 func (p TuitionPlan) EnrollmentDueOn() time.Time { return p.enrollmentDueOn }
+
+// EnrollmentStartsOn is the first day the inscription opens to families, or the
+// zero time when it is open from the day it is issued.
+func (p TuitionPlan) EnrollmentStartsOn() time.Time { return p.enrollmentStartsOn }
 
 // FeeInstallments places every fee's shares on the calendar: what falls due,
 // when, for how much, and which part of which fee it is.

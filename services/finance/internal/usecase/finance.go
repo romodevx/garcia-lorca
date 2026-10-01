@@ -528,9 +528,33 @@ const drainBatch = 50
 // cycle with what has been collected against it, every payment received, and
 // the total still owed.
 func (s *FinanceService) GetAccount(ctx context.Context, studentID string) (AccountStatement, error) {
-	charges, err := s.repo.ListCharges(ctx, studentID, "")
+	return s.account(ctx, studentID, func(ports.ChargeWithPaid) bool { return true })
+}
+
+// GetFamilyAccount is the statement a family is shown (T5): the school's own,
+// less the charges that have not opened yet. Balance and "due today" are worked
+// out over what is left, so the app never asks for money it does not show.
+//
+// A charge that already has money on it stays, opened or not: the payment is in
+// the family's history, and a payment whose charge is missing explains nothing.
+func (s *FinanceService) GetFamilyAccount(ctx context.Context, studentID string) (AccountStatement, error) {
+	now := s.now()
+	return s.account(ctx, studentID, func(c ports.ChargeWithPaid) bool {
+		return c.PaidCents > 0 || c.Charge.OpenOn(now)
+	})
+}
+
+// account is the statement over the charges `shown` keeps.
+func (s *FinanceService) account(ctx context.Context, studentID string, shown func(ports.ChargeWithPaid) bool) (AccountStatement, error) {
+	all, err := s.repo.ListCharges(ctx, studentID, "")
 	if err != nil {
 		return AccountStatement{}, err
+	}
+	charges := make([]ports.ChargeWithPaid, 0, len(all))
+	for _, c := range all {
+		if shown(c) {
+			charges = append(charges, c)
+		}
 	}
 	payments, err := s.repo.ListPayments(ctx, studentID)
 	if err != nil {

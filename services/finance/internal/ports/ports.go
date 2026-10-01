@@ -314,9 +314,10 @@ type FinanceRepository interface {
 	// deadline it had already billed. Setting the inscription's due date did
 	// nothing for pupils already charged, so the setting looked broken.
 	//
-	// It moves ONLY what is unpaid and only where the date actually differs. A
-	// settled charge is history; re-dating it would rewrite when a family was
-	// due to pay something they have already paid.
+	// It moves the whole window (start and deadline, T5) of what is STILL
+	// OWING — untouched or part paid (abono) — and only where a date actually
+	// differs. A settled charge is history; re-dating it would rewrite when a
+	// family was due to pay something they have already paid.
 	RescheduleUnpaid(ctx context.Context, items []ChargeReschedule) (movedCount int, err error)
 	// RepriceUnpaid sets the amount of charges identified by external ref.
 	//
@@ -511,9 +512,11 @@ type ChargeReprice struct {
 	AmountCents int64
 }
 
-// ChargeReschedule is one charge's new deadline, named by its external ref.
+// ChargeReschedule is one charge's new window, named by its external ref:
+// the day it opens to the family (zero = open from issue) and its deadline.
 type ChargeReschedule struct {
 	ExternalRef string
+	StartsOn    time.Time
 	DueOn       time.Time
 }
 

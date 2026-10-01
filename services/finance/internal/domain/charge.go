@@ -48,7 +48,10 @@ type Charge struct {
 	// the price list deserves an answer that outlives whoever applied it.
 	discountReason string
 	dueDate        time.Time
-	status         string
+	// startsOn is the first day the family is shown the charge and asked for
+	// it (T5). Zero is open from the day it was issued. See WithStartsOn.
+	startsOn time.Time
+	status   string
 	// externalRef ties this charge to the row that caused it in another module
 	// (e.g. a uniforms fulfillment). Empty for the school's own charges —
 	// tuition and the like — which is what keeps the "one concept per cycle"

@@ -299,10 +299,19 @@ func (f *fakeRepo) RescheduleUnpaid(_ context.Context, items []ports.ChargeResch
 	moved := 0
 	for _, item := range items {
 		for id, c := range f.charges {
-			if c.ExternalRef() != item.ExternalRef || c.DueDate().Equal(item.DueOn) || f.paidFor(id) > 0 {
+			// The real guards (SQL): a charge still owing — untouched or part
+			// paid — whose window actually differs. Settled and cancelled ones
+			// are history.
+			if c.ExternalRef() != item.ExternalRef || c.Status() == domain.StatusCancelled ||
+				f.paidFor(id) >= c.Effective().Int64() ||
+				(c.DueDate().Equal(item.DueOn) && c.StartsOn().Equal(item.StartsOn)) {
 				continue
 			}
-			f.charges[id] = c.WithDueDate(item.DueOn)
+			moved2, err := c.WithDueDate(item.DueOn).WithStartsOn(item.StartsOn)
+			if err != nil {
+				return 0, err
+			}
+			f.charges[id] = moved2
 			moved++
 		}
 	}

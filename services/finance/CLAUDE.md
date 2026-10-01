@@ -81,6 +81,16 @@ ledger operations run in a single transaction (Unit of Work).
   is NOT priced by any concept's ladder — neither by the run nor at the counter.
   `TuitionPlan.SharedLineName` refuses, on save only, two concepts that reduce to
   one key, or two such fees sharing a month.
+- **Inscription window (T5, migration 0020).** `tuition_plans.enrollment_starts_on`
+  + `enrollment_due_on` are the inscription's range; `charges.starts_on` is the
+  day each charge opens. ONE rule, `domain.ValidateChargeWindow` (start needs a
+  deadline, start ≤ deadline), read by the plan and by `Charge.WithStartsOn`, and
+  mirrored by two CHECKs. Saving a plan re-dates the level's inscriptions still
+  owing (untouched or part paid) at once via `RescheduleUnpaid`; paid ones are
+  never touched; surcharge/early reward re-evaluate on read. A charge not yet
+  open: hidden from `GetFamilyAccount` (unless it already has money on it) and
+  listed but not asked for in `expectedFrom`. Fees and tuition months keep their
+  due-day rule (no window).
 - Surcharges are separate charges and are **excluded from their own input**: a
   fee that earned fees would turn a fixed monthly charge into compound interest.
 - A level with no table is **reported by name**, never billed at zero.

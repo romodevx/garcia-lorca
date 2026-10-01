@@ -398,8 +398,9 @@ func expectedFrom(
 				lines[c.Charge.ID()] = line
 			}
 		}
-		if !expectedBy(c.Charge.DueDate(), when) {
-			// Billed, but not yet asked for. Its line still shows the reward
+		if !expectedBy(c.Charge.DueDate(), when) || !c.Charge.OpenOn(when) {
+			// Billed, but not yet asked for — not due this month, or not open
+			// yet (T5): a charge the family is not shown is not asked for. Its line still shows the reward
 			// paying it ahead would earn — the deposit grants it (earlyPayment),
 			// so the total the counter fills in is the total it takes.
 			if line != nil && c.Charge.ConceptID() == tuitionID && c.Charge.Discount().Int64() == 0 {

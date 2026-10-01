@@ -71,6 +71,9 @@ type TuitionPlanInput struct {
 	// EnrollmentDueOn is the deadline the school set for the inscription. Zero
 	// keeps the rule the run has always used.
 	EnrollmentDueOn time.Time
+	// EnrollmentStartsOn is the first day the inscription opens to families
+	// (T5). Zero keeps it open from the day it is issued.
+	EnrollmentStartsOn time.Time
 	// EnrollmentConcepts breaks the inscription into the lines the school prints,
 	// each with its own price ladder. Empty keeps EnrollmentCents.
 	EnrollmentConcepts []domain.EnrollmentConcept
@@ -120,6 +123,7 @@ func (s *FinanceService) UpsertTuitionPlan(ctx context.Context, in TuitionPlanIn
 		MonthlyDiscountCents: in.MonthlyDiscountCents,
 		Fees:                 in.Fees,
 		EnrollmentDueOn:      in.EnrollmentDueOn,
+		EnrollmentStartsOn:   in.EnrollmentStartsOn,
 		EnrollmentConcepts:   in.EnrollmentConcepts,
 	})
 	if err != nil {
@@ -128,7 +132,125 @@ func (s *FinanceService) UpsertTuitionPlan(ctx context.Context, in TuitionPlanIn
 	if err := plan.SharedLineName(); err != nil {
 		return domain.TuitionPlan{}, err
 	}
-	return s.repo.UpsertTuitionPlan(ctx, plan)
+	saved, err := s.repo.UpsertTuitionPlan(ctx, plan)
+	if err != nil {
+		return domain.TuitionPlan{}, err
+	}
+	if err := s.redateInscriptions(ctx, saved); err != nil {
+		return domain.TuitionPlan{}, err
+	}
+	return saved, nil
+}
+
+// redateInscriptions carries a saved plan's inscription window to the charges
+// of its level that are still owing (T5), at once rather than at the next run:
+// a director who moves a deadline expects the families to see the new date, not
+// to learn that nothing happens until somebody presses "generar".
+//
+// Only the dates move, and only through RescheduleUnpaid's guards — a settled
+// charge is never touched. Nothing is issued here; charges not yet issued are
+// issued by the run, with the dates in force when it runs.
+func (s *FinanceService) redateInscriptions(ctx context.Context, plan domain.TuitionPlan) error {
+	if !plan.Active() {
+		return nil
+	}
+	cycle, err := s.cycles.ByID(ctx, plan.CycleID())
+	if err != nil {
+		return err
+	}
+	levelOfGroup, err := s.levelOfGroup(ctx, plan.CycleID())
+	if err != nil {
+		return err
+	}
+	enrollments, err := s.enrollments.ListByCycle(ctx, plan.CycleID(), "")
+	if err != nil {
+		return err
+	}
+	concept, err := s.repo.EnsureConceptOfKind(ctx, s.newID(), domain.KindEnrollment, enrollmentConceptName)
+	if err != nil {
+		return err
+	}
+	asOf, err := resolveAsOf("", s.now)
+	if err != nil {
+		return err
+	}
+	wanted, err := s.wantedInscriptions(plan.CycleID(), enrollments,
+		map[string]domain.TuitionPlan{plan.LevelID(): plan}, levelOfGroup,
+		cycle.StartsOn, concept.ID(), asOf, s.closedDays(ctx, plan.CycleID()))
+	if err != nil || len(wanted) == 0 {
+		return err
+	}
+	issuedRows, err := s.repo.ListIssuedLines(ctx, plan.CycleID(), "")
+	if err != nil {
+		return err
+	}
+	wanted, _, err = newIssuedLines(issuedRows).adoptAll(wanted)
+	if err != nil {
+		return err
+	}
+	_, err = s.repo.RescheduleUnpaid(ctx, reschedules(wanted))
+	return err
+}
+
+// reschedules is the window each wanted inscription should have.
+func reschedules(charges []domain.Charge) []ports.ChargeReschedule {
+	out := make([]ports.ChargeReschedule, 0, len(charges))
+	for _, c := range charges {
+		out = append(out, ports.ChargeReschedule{ExternalRef: c.ExternalRef(), StartsOn: c.StartsOn(), DueOn: c.DueDate()})
+	}
+	return out
+}
+
+// closedDays is the school's calendar for a cycle, so no charge falls due on one.
+// A due date on a day the office was shut is a date nobody could have paid on,
+// and with the surcharge counting every day it would charge a family for the
+// school's own holiday. Best effort: a calendar that cannot be read leaves every
+// day open, as it always has.
+func (s *FinanceService) closedDays(ctx context.Context, cycleID string) *schoolcal.Calendar {
+	if s.calendar != nil {
+		if snap, err := s.calendar.NonWorkingDays(ctx, cycleID); err == nil {
+			return schoolcal.New(snap.Days)
+		}
+	}
+	return schoolcal.New(nil)
+}
+
+// wantedInscriptions is every inscription line the active pupils of the priced
+// levels owe, priced as of asOf and dated by their plan's window. Shared by the
+// run and by the plan's save, so both reach the same rows under the same refs.
+func (s *FinanceService) wantedInscriptions(
+	cycleID string,
+	enrollments []ports.EnrollmentRef,
+	planByLevel map[string]domain.TuitionPlan,
+	levelOfGroup map[string]string,
+	cycleStart time.Time,
+	conceptID string,
+	asOf time.Time,
+	calendar *schoolcal.Calendar,
+) ([]domain.Charge, error) {
+	var out []domain.Charge
+	for _, enr := range enrollments {
+		if enr.Status != enrolmentStatusActive {
+			continue
+		}
+		plan, ok := planByLevel[levelOfGroup[enr.GroupID]]
+		if !ok {
+			continue
+		}
+		// One charge per line the school prints, priced at the tier in force
+		// TODAY. Asking the plan for EnrollmentCents here instead would issue a
+		// charge for NOTHING on any plan that carries concepts — it is forced to
+		// zero (ADR 0011), NewCents(0) is legal, and the bulk insert makes that
+		// zero permanent: a family charged nothing, a problem a school
+		// discovers in June.
+		lines, err := s.enrollmentCharges(enr.StudentID, cycleID, conceptID,
+			plan, asOf, calendar.NextWorkingDay(enrollmentDueDate(cycleStart, plan, enr.EnrolledAt)))
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, lines...)
+	}
+	return out, nil
 }
 
 // refuseDeletingLevel refuses a plan for a level whose deletion runs
@@ -210,17 +332,17 @@ func (s *FinanceService) RunBilling(ctx context.Context, cycleID, asOfDate strin
 	// day the office was shut is a date nobody could have paid on, and with the
 	// surcharge counting every day it would charge a family for the school's own
 	// holiday.
-	calendar := schoolcal.New(nil)
-	if s.calendar != nil {
-		if snap, cerr := s.calendar.NonWorkingDays(ctx, cycleID); cerr == nil {
-			calendar = schoolcal.New(snap.Days)
-		}
-	}
+	calendar := s.closedDays(ctx, cycleID)
 
 	// Kept apart so the counts reported back are exact. A single bulk insert
 	// returns one number, and splitting it afterwards would be arithmetic
 	// pretending to be knowledge.
-	var wantedEnrollment, wantedTuition, wantedFees []domain.Charge
+	wantedEnrollment, err := s.wantedInscriptions(cycleID, enrollments, planByLevel, levelOfGroup,
+		cycle.StartsOn, concepts[domain.KindEnrollment].ID(), asOf, calendar)
+	if err != nil {
+		return BillingResult{}, err
+	}
+	var wantedTuition, wantedFees []domain.Charge
 	for _, enr := range enrollments {
 		if enr.Status != enrolmentStatusActive {
 			continue
@@ -232,19 +354,6 @@ func (s *FinanceService) RunBilling(ctx context.Context, cycleID, asOfDate strin
 			// discovers in June.
 			continue
 		}
-
-		// One charge per line the school prints, priced at the tier in force
-		// TODAY. Asking the plan for EnrollmentCents here instead would issue a
-		// charge for NOTHING on any plan that carries concepts — it is forced to
-		// zero (ADR 0011), NewCents(0) is legal, and the bulk insert makes that
-		// zero permanent. That is the "family charged nothing" this file warns
-		// about below, produced by the feature meant to prevent it.
-		lines, err := s.enrollmentCharges(enr.StudentID, cycleID, concepts[domain.KindEnrollment].ID(),
-			plan, asOf, calendar.NextWorkingDay(enrollmentDueDate(cycle.StartsOn, plan, enr.EnrolledAt)))
-		if err != nil {
-			return BillingResult{}, err
-		}
-		wantedEnrollment = append(wantedEnrollment, lines...)
 
 		// The WHOLE year, not just the months that have arrived. The school asked
 		// for "el monto total que debe pagar el año", and it is what makes a
@@ -341,11 +450,7 @@ func (s *FinanceService) RunBilling(ctx context.Context, cycleID, asOfDate strin
 	// Only the inscription, and only when it is unpaid. Tuition months are not
 	// re-dated: moving eleven deadlines because somebody adjusted the due day is
 	// a bigger thing than a school expects from pressing "generar".
-	moves := make([]ports.ChargeReschedule, 0, len(wantedEnrollment))
-	for _, c := range wantedEnrollment {
-		moves = append(moves, ports.ChargeReschedule{ExternalRef: c.ExternalRef(), DueOn: c.DueDate()})
-	}
-	enrollmentMoved, err := s.repo.RescheduleUnpaid(ctx, moves)
+	enrollmentMoved, err := s.repo.RescheduleUnpaid(ctx, reschedules(wantedEnrollment))
 	if err != nil {
 		return BillingResult{}, err
 	}
@@ -600,6 +705,12 @@ func (s *FinanceService) enrollmentCharges(
 			description: description, amount: line.AmountCents, due: due, ref: ref,
 		})
 		if err != nil {
+			return nil, err
+		}
+		// The window the school set (T5). The due date here is never before the
+		// plan's own deadline — it only moves later, for a late joiner or off a
+		// closed day — so the plan's start still precedes it.
+		if charge, err = charge.WithStartsOn(plan.EnrollmentStartsOn()); err != nil {
 			return nil, err
 		}
 		out = append(out, charge)

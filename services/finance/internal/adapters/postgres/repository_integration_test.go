@@ -1062,43 +1062,102 @@ func TestRescheduleUnpaidMovesOnlyWhatItShould(t *testing.T) {
 	unpaid := seed("c1", "50000000-0000-0000-0000-0000000000c1", "enrollment:"+cycle+":c1")
 	paid := seed("c2", "50000000-0000-0000-0000-0000000000c2", "enrollment:"+cycle+":c2")
 	sameDay := seed("c3", "50000000-0000-0000-0000-0000000000c3", "enrollment:"+cycle+":c3")
+	partly := seed("c4", "50000000-0000-0000-0000-0000000000c4", "enrollment:"+cycle+":c4")
+	startOnly := seed("c5", "50000000-0000-0000-0000-0000000000c5", "enrollment:"+cycle+":c5")
 
-	// Something has been collected against the second one, so it is history.
+	// The second one is settled, so it is history. The fourth carries an abono
+	// and is still owing, so it moves (T5).
 	if _, _, _, err := repo.RegisterPayment(ctx, newPayment(t, "f0000000-0000-0000-0000-0000000000c2",
-		tenantA, paid.ID(), 1000, today), derive, nil); err != nil {
+		tenantA, paid.ID(), 8000, today), derive, nil); err != nil {
 		t.Fatalf("seed payment: %v", err)
 	}
+	if _, _, _, err := repo.RegisterPayment(ctx, newPayment(t, "f0000000-0000-0000-0000-0000000000c4",
+		tenantA, partly.ID(), 1000, today), derive, nil); err != nil {
+		t.Fatalf("seed abono: %v", err)
+	}
 
-	moveTo := today.AddDate(0, -2, 0)
+	moveTo := today.AddDate(0, 2, 0)
+	opensOn := today.AddDate(0, 1, 0)
 	moved, err := repo.RescheduleUnpaid(ctx, []ports.ChargeReschedule{
-		{ExternalRef: unpaid.ExternalRef(), DueOn: moveTo},
-		{ExternalRef: paid.ExternalRef(), DueOn: moveTo},
+		{ExternalRef: unpaid.ExternalRef(), StartsOn: opensOn, DueOn: moveTo},
+		{ExternalRef: paid.ExternalRef(), StartsOn: opensOn, DueOn: moveTo},
 		// Already on the day asked for: not a move, and must not be counted as
 		// one, or the run would report four hundred moves every month.
 		{ExternalRef: sameDay.ExternalRef(), DueOn: today},
+		{ExternalRef: partly.ExternalRef(), StartsOn: opensOn, DueOn: moveTo},
+		// Only the start differs: still a move.
+		{ExternalRef: startOnly.ExternalRef(), StartsOn: today.AddDate(0, 0, -3), DueOn: today},
 	})
 	if err != nil {
 		t.Fatalf("RescheduleUnpaid: %v", err)
 	}
-	if moved != 1 {
-		t.Fatalf("moved = %d, want 1 — only the unpaid charge whose date differs", moved)
+	if moved != 3 {
+		t.Fatalf("moved = %d, want 3 — the unpaid, the part-paid and the start-only charge", moved)
 	}
 
-	got, err := repo.GetCharge(ctx, unpaid.ID())
-	if err != nil {
-		t.Fatalf("GetCharge: %v", err)
-	}
-	if !got.Charge.DueDate().Equal(moveTo) {
-		t.Errorf("the unpaid charge falls due %s, want %s",
-			got.Charge.DueDate().Format("2006-01-02"), moveTo.Format("2006-01-02"))
+	for _, id := range []string{unpaid.ID(), partly.ID()} {
+		got, err := repo.GetCharge(ctx, id)
+		if err != nil {
+			t.Fatalf("GetCharge: %v", err)
+		}
+		if !got.Charge.DueDate().Equal(moveTo) || !got.Charge.StartsOn().Equal(opensOn) {
+			t.Errorf("%s: window %s..%s, want %s..%s", id,
+				got.Charge.StartsOn().Format("2006-01-02"), got.Charge.DueDate().Format("2006-01-02"),
+				opensOn.Format("2006-01-02"), moveTo.Format("2006-01-02"))
+		}
 	}
 	settled, err := repo.GetCharge(ctx, paid.ID())
 	if err != nil {
 		t.Fatalf("GetCharge: %v", err)
 	}
-	if !settled.Charge.DueDate().Equal(today) {
-		t.Errorf("a charge with money on it was re-dated to %s",
-			settled.Charge.DueDate().Format("2006-01-02"))
+	if !settled.Charge.DueDate().Equal(today) || !settled.Charge.StartsOn().IsZero() {
+		t.Errorf("a settled charge was re-dated to %s..%s",
+			settled.Charge.StartsOn().Format("2006-01-02"), settled.Charge.DueDate().Format("2006-01-02"))
+	}
+	opened, err := repo.GetCharge(ctx, startOnly.ID())
+	if err != nil {
+		t.Fatalf("GetCharge: %v", err)
+	}
+	if !opened.Charge.StartsOn().Equal(today.AddDate(0, 0, -3)) {
+		t.Errorf("start-only move: starts %s", opened.Charge.StartsOn().Format("2006-01-02"))
+	}
+}
+
+// The window a charge is issued with is the window it is read back with (T5),
+// and the database refuses one that opens after its deadline.
+func TestAChargeKeepsItsWindow(t *testing.T) {
+	ctx := context.Background()
+	const conceptID = "c0000000-0000-0000-0000-0000000000fe"
+	const cycle = "a0000000-0000-0000-0000-0000000000fe"
+	repo := appRepo(t, tenantA)
+	if _, err := repo.CreateConcept(ctx, newConcept(t, conceptID, tenantA, "window", 8000)); err != nil {
+		t.Fatalf("seed concept: %v", err)
+	}
+	c := withExternalRef(t, newCharge(t, "e0000000-0000-0000-0000-0000000000fe",
+		tenantA, "50000000-0000-0000-0000-0000000000fe", cycle, conceptID, 8000, 0, today),
+		"enrollment:"+cycle+":fe")
+	opens := today.AddDate(0, 0, -10)
+	c, err := c.WithStartsOn(opens)
+	if err != nil {
+		t.Fatalf("WithStartsOn: %v", err)
+	}
+	if n, err := repo.CreateChargesBulk(ctx, []domain.Charge{c}); err != nil || n != 1 {
+		t.Fatalf("CreateChargesBulk = %d, %v", n, err)
+	}
+	got, err := repo.GetCharge(ctx, c.ID())
+	if err != nil {
+		t.Fatalf("GetCharge: %v", err)
+	}
+	if !got.Charge.StartsOn().Equal(opens) {
+		t.Errorf("starts on %s, want %s", got.Charge.StartsOn().Format("2006-01-02"), opens.Format("2006-01-02"))
+	}
+
+	// The CHECK is the backstop for a writer that skipped the domain.
+	moved, err := repo.RescheduleUnpaid(ctx, []ports.ChargeReschedule{
+		{ExternalRef: c.ExternalRef(), StartsOn: today.AddDate(0, 0, 5), DueOn: today},
+	})
+	if err == nil {
+		t.Fatalf("a start after the deadline was stored (moved %d)", moved)
 	}
 }
 

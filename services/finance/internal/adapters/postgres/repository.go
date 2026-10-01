@@ -202,58 +202,53 @@ func (r *Repository) CreateCharge(ctx context.Context, c domain.Charge) (domain.
 	return out, nil
 }
 
-// CreateChargesBulk issues many charges in ONE statement, skipping the rows
-// whose (student, cycle, concept) key already exists instead of failing the
-// batch. Postgres reports only the rows actually inserted, so re-running a
-// generation is idempotent and the caller can infer the skipped count from
-// len(cs) - created.
-// RescheduleUnpaid moves the due date of charges named by external ref.
+// RescheduleUnpaid moves the window — opening day and deadline — of charges
+// named by external ref.
 //
 // The run never re-issues a charge it has already written — that is what makes
 // it idempotent — and that left a school unable to correct a deadline it had
 // already billed: setting the inscription's date did nothing for the four
 // hundred pupils already charged, so the setting looked broken.
 //
-// Two guards, both in the WHERE and not in Go: a charge is moved only when it is
-// UNPAID and only when the date actually differs. Unpaid, because a settled
-// charge is history and re-dating it would rewrite when a family was due to pay
-// something they have already paid. Different, because the returned count is
-// what the run reports to a person, and "moved 400" every month teaches them to
-// stop reading it.
+// Guards, all in the WHERE and not in Go: a charge is moved only while it is
+// STILL OWING — nothing paid, or part paid (abono, T5) — and only when a date
+// actually differs. Still owing, because a settled charge is history and
+// re-dating it would rewrite when a family was due to pay something they have
+// already paid. Different, because the returned count is what the run reports
+// to a person, and "moved 400" every month teaches them to stop reading it.
 func (r *Repository) RescheduleUnpaid(ctx context.Context, items []ports.ChargeReschedule) (int, error) {
 	if len(items) == 0 {
 		return 0, nil
 	}
-	refs := make([]string, 0, len(items))
-	dueByRef := make(map[string]time.Time, len(items))
+	type window struct{ starts, due time.Time }
+	byWindow := make(map[window][]string, len(items))
+	seen := make(map[string]bool, len(items))
 	for _, item := range items {
-		if _, seen := dueByRef[item.ExternalRef]; seen {
+		if seen[item.ExternalRef] {
 			continue
 		}
-		refs = append(refs, item.ExternalRef)
-		dueByRef[item.ExternalRef] = item.DueOn
+		seen[item.ExternalRef] = true
+		w := window{starts: item.StartsOn, due: item.DueOn}
+		byWindow[w] = append(byWindow[w], item.ExternalRef)
 	}
 
 	var moved int
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
-		// One statement per distinct date rather than one per charge: a school
+		// One statement per distinct window rather than one per charge: a school
 		// prices a level at a time, so the four hundred pupils of a level share
-		// the one deadline. Grouping keeps this a handful of round trips instead
+		// the one window. Grouping keeps this a handful of round trips instead
 		// of four hundred.
-		byDate := make(map[time.Time][]string, len(refs))
-		for _, ref := range refs {
-			due := dueByRef[ref]
-			byDate[due] = append(byDate[due], ref)
-		}
-		for due, group := range byDate {
+		for w, group := range byWindow {
+			starts := optionalDate(w.starts)
 			res := tx.Model(&chargeModel{}).
 				Where("external_ref IN ?", group).
-				Where("due_date <> ?", due).
+				Where("(due_date <> ? OR starts_on IS DISTINCT FROM ?::date)", w.due, starts).
 				Where("status <> ?", domain.StatusCancelled).
-				// Nothing collected. The subquery is the same tenant-bound view
-				// the policy allows, so RLS still applies to it.
-				Where("NOT EXISTS (SELECT 1 FROM payments p WHERE p.charge_id = charges.id)").
-				Updates(map[string]any{"due_date": due, "updated_at": gorm.Expr("now()")})
+				// Still owing. The subquery is the same tenant-bound view the
+				// policy allows, so RLS still applies to it.
+				Where("(SELECT COALESCE(SUM(p.amount_cents), 0) FROM payments p WHERE p.charge_id = charges.id) " +
+					"< charges.amount_cents - charges.discount_cents").
+				Updates(map[string]any{"due_date": w.due, "starts_on": starts, "updated_at": gorm.Expr("now()")})
 			if res.Error != nil {
 				return glerrors.Wrap(glerrors.KindInternal, "moving a deadline", res.Error)
 			}
@@ -267,6 +262,11 @@ func (r *Repository) RescheduleUnpaid(ctx context.Context, items []ports.ChargeR
 	return moved, nil
 }
 
+// CreateChargesBulk issues many charges in ONE statement, skipping the rows
+// whose (student, cycle, concept) key already exists instead of failing the
+// batch. Postgres reports only the rows actually inserted, so re-running a
+// generation is idempotent and the caller can infer the skipped count from
+// len(cs) - created.
 func (r *Repository) CreateChargesBulk(ctx context.Context, cs []domain.Charge) (int, error) {
 	if len(cs) == 0 {
 		return 0, nil
@@ -1029,7 +1029,7 @@ func (r *Repository) UpsertTuitionPlan(ctx context.Context, p domain.TuitionPlan
 				"late_fee_daily_cents", "late_fee_mode", "surcharge_counts_all_days",
 				"early_payment_cents", "early_payment_days", "schedule",
 				"monthly_discount_cents", "fees", "enrollment_due_on",
-				"enrollment_concepts",
+				"enrollment_starts_on", "enrollment_concepts",
 			}),
 		}).Create(&model).Error; err != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "storing the tuition table", err)

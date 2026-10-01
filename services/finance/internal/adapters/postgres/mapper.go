@@ -39,9 +39,12 @@ func toDomainPlan(m tuitionPlanModel) (domain.TuitionPlan, error) {
 	if err != nil {
 		return domain.TuitionPlan{}, err
 	}
-	var enrollmentDue time.Time
+	var enrollmentDue, enrollmentStarts time.Time
 	if m.EnrollmentDueOn != nil {
 		enrollmentDue = *m.EnrollmentDueOn
+	}
+	if m.EnrollmentStartsOn != nil {
+		enrollmentStarts = *m.EnrollmentStartsOn
 	}
 	return domain.NewTuitionPlan(domain.TuitionPlanSpec{
 		ID: m.ID, TenantID: m.TenantID, CycleID: m.CycleID, LevelID: m.LevelID,
@@ -52,6 +55,7 @@ func toDomainPlan(m tuitionPlanModel) (domain.TuitionPlan, error) {
 		MonthlyDiscountCents: m.MonthlyDiscountCents,
 		Fees:                 fees,
 		EnrollmentDueOn:      enrollmentDue,
+		EnrollmentStartsOn:   enrollmentStarts,
 		EnrollmentConcepts:   concepts,
 		Policy: domain.CollectionPolicy{
 			// A row written before M16 has mode 'monthly' by default, so it keeps
@@ -84,7 +88,8 @@ func fromDomainPlan(p domain.TuitionPlan) (tuitionPlanModel, error) {
 		Schedule:               scheduleFromDomain(p.Schedule()),
 		MonthlyDiscountCents:   p.MonthlyDiscountCents(),
 		Fees:                   feesFromDomain(p.Fees()),
-		EnrollmentDueOn:        enrollmentDueFromDomain(p.EnrollmentDueOn()),
+		EnrollmentDueOn:        optionalDate(p.EnrollmentDueOn()),
+		EnrollmentStartsOn:     optionalDate(p.EnrollmentStartsOn()),
 		EnrollmentConcepts:     concepts,
 	}, nil
 }
@@ -211,9 +216,9 @@ func feesFromDomain(in []domain.Fee) []byte {
 	return raw
 }
 
-// enrollmentDueFromDomain keeps "the school set no deadline" as NULL. Writing
-// the zero time instead would bill every inscription as due in year 1.
-func enrollmentDueFromDomain(t time.Time) *time.Time {
+// optionalDate keeps "no date set" as NULL — no deadline, no opening day.
+// Writing the zero time instead would bill every inscription as due in year 1.
+func optionalDate(t time.Time) *time.Time {
 	if t.IsZero() {
 		return nil
 	}
@@ -297,6 +302,11 @@ func toDomainCharge(m chargeModel, paidCents int64) (domain.Charge, error) {
 			return domain.Charge{}, err
 		}
 	}
+	if m.StartsOn != nil {
+		if c, err = c.WithStartsOn(*m.StartsOn); err != nil {
+			return domain.Charge{}, err
+		}
+	}
 	if m.Status == domain.StatusCancelled {
 		return c.Cancel()
 	}
@@ -336,6 +346,7 @@ func fromDomainCharge(c domain.Charge) chargeModel {
 		DiscountCents:  c.Discount().Int64(),
 		DiscountReason: c.DiscountReason(),
 		DueDate:        c.DueDate(),
+		StartsOn:       optionalDate(c.StartsOn()),
 		Status:         c.Status(),
 		ExternalRef:    c.ExternalRef(),
 	}

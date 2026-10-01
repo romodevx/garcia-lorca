@@ -229,6 +229,9 @@ message Charge {
   // (e.g. a uniforms fulfillment). Empty for the school's own charges, which is
   // what keeps the "one concept per cycle" rule applying to them alone.
   string external_ref = 13;
+  // starts_on is the first day the charge opens to the family (YYYY-MM-DD,
+  // T5). Empty is open from the day it was issued.
+  string starts_on = 14;
 }
 
 // Payment is one amount applied to a charge. `method` is one of:
@@ -393,6 +396,10 @@ message RegisterPaymentResponse {
 
 message GetAccountRequest {
   string student_id = 1;
+  // family_view returns the statement a family is shown (T5): without the
+  // charges that have not opened yet (and have no money on them), with the
+  // balance and today's figure worked out over what is left.
+  bool family_view = 2;
 }
 
 // GetAccountResponse is the student's account statement.
@@ -525,6 +532,10 @@ message TuitionPlan {
   // enrollment_cents above, so a plan written before this field goes on meaning
   // what it meant. See ADR 0011.
   repeated EnrollmentConcept enrollment_concepts = 17;
+  // The first day the inscription opens to families (YYYY-MM-DD, T5). Empty is
+  // open from the day it is issued. Needs enrollment_due_on and may not come
+  // after it.
+  string enrollment_starts_on = 18;
 }
 
 // EnrollmentConcept is one line of the inscription: a name the family reads and
@@ -640,6 +651,8 @@ message UpsertTuitionPlanRequest {
   string enrollment_due_on = 14;
   // The inscription broken into priced lines. Empty keeps enrollment_cents.
   repeated EnrollmentConcept enrollment_concepts = 15;
+  // YYYY-MM-DD, or empty for open from issue (T5). Not after enrollment_due_on.
+  string enrollment_starts_on = 16;
 }
 
 message UpsertTuitionPlanResponse {

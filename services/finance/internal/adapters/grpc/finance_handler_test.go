@@ -774,6 +774,55 @@ func TestGetAccountReturnsChargesPaymentsAndBalance(t *testing.T) {
 	}
 }
 
+// T5: the family's statement leaves out a charge that has not opened; the
+// school's keeps it, and says the day it opens.
+func TestTheFamilyViewLeavesOutWhatHasNotOpened(t *testing.T) {
+	f := newFixture(t)
+	concept := f.seedConcept(t, "Inscripción", 50000)
+	open := f.seedCharge(t, concept.GetId(), 100000)
+	later, err := domain.NewCharge("ch-later", testTenant, testStudent, testCycle, concept.GetId(),
+		"Inscripción 2027", 50000, 0, fixedNow.AddDate(0, 2, 0))
+	if err != nil {
+		t.Fatalf("NewCharge: %v", err)
+	}
+	opensOn := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	if later, err = later.WithStartsOn(opensOn); err != nil {
+		t.Fatalf("WithStartsOn: %v", err)
+	}
+	f.repo.charges[later.ID()] = later
+	ctx := context.Background()
+
+	staff, err := f.h.GetAccount(ctx, connect.NewRequest(&financev1.GetAccountRequest{StudentId: testStudent}))
+	if err != nil {
+		t.Fatalf("GetAccount: %v", err)
+	}
+	if len(staff.Msg.GetCharges()) != 2 {
+		t.Fatalf("the school sees %d charges, want 2", len(staff.Msg.GetCharges()))
+	}
+	for _, c := range staff.Msg.GetCharges() {
+		if c.GetId() == later.ID() && c.GetStartsOn() != "2026-10-01" {
+			t.Errorf("starts_on = %q, want 2026-10-01", c.GetStartsOn())
+		}
+		if c.GetId() == open.GetId() && c.GetStartsOn() != "" {
+			t.Errorf("a charge with no start says %q", c.GetStartsOn())
+		}
+	}
+
+	family, err := f.h.GetAccount(ctx, connect.NewRequest(&financev1.GetAccountRequest{
+		StudentId: testStudent, FamilyView: true,
+	}))
+	if err != nil {
+		t.Fatalf("GetAccount(family): %v", err)
+	}
+	if len(family.Msg.GetCharges()) != 1 || family.Msg.GetCharges()[0].GetId() != open.GetId() {
+		t.Errorf("the family sees %+v, want only the open charge", family.Msg.GetCharges())
+	}
+	if family.Msg.GetTotalBalanceCents() != 100000 {
+		t.Errorf("family balance = %d, want 100000 — the unopened charge must not count",
+			family.Msg.GetTotalBalanceCents())
+	}
+}
+
 func TestListOverdueReturnsThePastDueCharge(t *testing.T) {
 	f := newFixture(t)
 	concept := f.seedConcept(t, "Colegiatura", 250000)

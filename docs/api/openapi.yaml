@@ -2718,7 +2718,7 @@ paths:
                         surchargeCents: { type: integer, format: int64, example: 30000 }
                         discountCents: { type: integer, format: int64, example: 0 }
                         totalCents: { type: integer, format: int64, example: 350000 }
-                        due: { type: boolean, description: "Asked for that day: due, or falling due later that month." }
+                        due: { type: boolean, description: "Asked for that day: due, or falling due later that month — and already open (T5)." }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -4227,6 +4227,17 @@ components:
             The deadline the school set for the inscription. Empty keeps the
             default rule — the due day in the cycle's first month — so a plan
             written before this field existed goes on meaning what it meant.
+        enrollmentStartsOn:
+          type: string
+          format: date
+          example: "2026-06-01"
+          description: >
+            The first day the inscription opens to families (T5). Before it the
+            charge is not shown in the parents' app nor asked for at the
+            counter. Empty keeps it open from the day it is issued. Requires
+            enrollmentDueOn and may not come after it (400 otherwise). Changing
+            either date moves the inscriptions still owing — untouched or part
+            paid — at once; settled ones are never touched.
 
     Contact:
       type: object
@@ -4486,6 +4497,7 @@ components:
           type: array
           items: { $ref: '#/components/schemas/Fee' }
         enrollmentDueOn: { type: string, format: date, example: "2026-06-30" }
+        enrollmentStartsOn: { type: string, format: date, example: "2026-06-01" }
 
     Deposit:
       type: object
