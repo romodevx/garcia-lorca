@@ -242,7 +242,7 @@ func TestAttachReceiptRefusesAnythingButImagesAndPDF(t *testing.T) {
 	}
 }
 
-func TestAttachReceiptCleansUpWhenTheExpenseCannotTakeIt(t *testing.T) {
+func TestAttachReceiptUploadsNothingForAnExpenseThatCannotTakeIt(t *testing.T) {
 	f := newExpenseFixture()
 	c := f.category(t, "Papelería")
 	e := f.expense(t, c.ID(), 500_00, domain.MethodCash, expToday)
@@ -253,8 +253,14 @@ func TestAttachReceiptCleansUpWhenTheExpenseCannotTakeIt(t *testing.T) {
 	if _, err := f.svc.AttachReceipt(ctx, e.ID(), []byte("%PDF-1.4"), cashier); glerrors.KindOf(err) != glerrors.KindConflict {
 		t.Fatalf("want KindConflict, got %v", err)
 	}
+	if len(f.store.objects) != 0 || len(f.store.deleted) != 0 {
+		t.Fatalf("nothing is uploaded for a cancelled expense: %d stored, %d deleted", len(f.store.objects), len(f.store.deleted))
+	}
+	if _, err := f.svc.AttachReceipt(ctx, "no-such", []byte("%PDF-1.4"), cashier); glerrors.KindOf(err) != glerrors.KindNotFound {
+		t.Fatalf("an unknown expense: want KindNotFound, got %v", err)
+	}
 	if len(f.store.objects) != 0 {
-		t.Fatalf("the orphaned upload must be deleted, have %d", len(f.store.objects))
+		t.Fatalf("nothing is uploaded for an unknown expense")
 	}
 }
 

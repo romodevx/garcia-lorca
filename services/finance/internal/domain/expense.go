@@ -177,14 +177,14 @@ func CalendarDay(t time.Time) time.Time {
 	return time.Date(u.Year(), u.Month(), u.Day(), 0, 0, 0, 0, time.UTC)
 }
 
-// errExpenseCancelled refuses any change to a cancelled expense.
-var errExpenseCancelled = glerrors.New(glerrors.KindConflict, "el egreso está cancelado")
+// ErrExpenseCancelled refuses any change to a cancelled expense.
+var ErrExpenseCancelled = glerrors.New(glerrors.KindConflict, "el egreso está cancelado")
 
 // Edit returns the expense with the draft's fields. A cancelled expense is
 // final: editing it is a conflict.
 func (e Expense) Edit(d ExpenseDraft, today time.Time) (Expense, error) {
 	if e.Cancelled() {
-		return Expense{}, errExpenseCancelled
+		return Expense{}, ErrExpenseCancelled
 	}
 	return e.apply(d, today)
 }
@@ -202,7 +202,7 @@ func ValidateExpenseReason(reason string) (string, error) {
 // counts for nothing, and stays.
 func (e Expense) Cancel(reason string, at time.Time) (Expense, error) {
 	if e.Cancelled() {
-		return Expense{}, errExpenseCancelled
+		return Expense{}, ErrExpenseCancelled
 	}
 	trimmed, err := ValidateExpenseReason(reason)
 	if err != nil {
@@ -218,7 +218,7 @@ func (e Expense) Cancel(reason string, at time.Time) (Expense, error) {
 // WithReceipt returns the expense with its receipt attached (or replaced).
 func (e Expense) WithReceipt(ref ExpenseReceiptRef) (Expense, error) {
 	if e.Cancelled() {
-		return Expense{}, errExpenseCancelled
+		return Expense{}, ErrExpenseCancelled
 	}
 	if ref.Key == "" || ref.ContentType == "" || ref.SizeBytes <= 0 {
 		return Expense{}, glerrors.New(glerrors.KindInvalid, "receipt reference is incomplete")

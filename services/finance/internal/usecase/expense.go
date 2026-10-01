@@ -214,6 +214,15 @@ func (s *ExpenseService) AttachReceipt(ctx context.Context, id string, data []by
 	if err != nil {
 		return domain.Expense{}, err
 	}
+	// The expense first: nothing is uploaded for an expense that does not
+	// exist or can no longer take a receipt.
+	current, err := s.repo.GetExpense(ctx, id)
+	if err != nil {
+		return domain.Expense{}, err
+	}
+	if current.Cancelled() {
+		return domain.Expense{}, domain.ErrExpenseCancelled
+	}
 	ref := domain.ExpenseReceiptRef{
 		Key:         "expenses/" + id + "/" + s.newID(),
 		ContentType: file.ContentType(),
