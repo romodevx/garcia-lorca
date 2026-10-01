@@ -5,7 +5,7 @@ import { Icon } from "../icons";
 import { useAppState } from "../state/AppState";
 import { toChildView } from "../state/childView";
 import { useRefreshHandler } from "../components/refresh";
-import { useChildAccount } from "../state/familyData";
+import { useChildStatement } from "../state/familyData";
 import { useTheme } from "../theme";
 import { Card, Chip, SectionLabel, TintIcon } from "../ui";
 import { AsyncErrorState } from "./AsyncStates";
@@ -16,7 +16,7 @@ import { pesos } from "./format";
 /**
  * Inicio: greeting + actionable summary cards, each routing to its detail. The
  * attendance and balance summaries are derived from the SAME real family reads
- * the detail screens use ( `/family/.../attendance` and `/.../account` ); when
+ * the detail screens use ( `/family/.../attendance` and `/.../statement` ); when
  * there is no data yet the cards show a neutral state rather than a fabricated one.
  * The agenda/next-event tile is intentionally absent — it has no backend.
  */
@@ -24,7 +24,7 @@ export function HomeScreen(): ReactElement {
   const theme = useTheme();
   const { child, selectedChildId, unreadCount, childError, refreshChildren, refreshNotifications } = useAppState();
   const view = toChildView(child);
-  const account = useChildAccount(selectedChildId);
+  const account = useChildStatement(selectedChildId);
   const { resource: attendance, today: todayRecord } = useSchoolMonth(selectedChildId);
   useRefreshHandler(async () => {
     await Promise.all([account.reload(), attendance.reload(), refreshNotifications()]);
@@ -43,7 +43,7 @@ export function HomeScreen(): ReactElement {
     );
   }
 
-  const balanceCents = account.data?.totalBalanceCents ?? null;
+  const balanceCents = account.data?.totals.balanceCents ?? null;
   const settled = balanceCents !== null && balanceCents <= 0;
 
   const dateLabel = new Date().toLocaleDateString("es-MX", { weekday: "long", day: "numeric", month: "long" });
