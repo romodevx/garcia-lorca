@@ -588,6 +588,10 @@ type CashUp struct {
 	// listed anyway: a cash-up that hid them could not explain why the drawer
 	// holds less than the receipts say.
 	Cancelled []domain.Deposit
+	// Superseded are the day's deposits replaced by a correction (T9). They
+	// count for nothing — their correction counts on the day it is dated — and
+	// are listed so the day's receipts still add up.
+	Superseded []domain.Deposit
 	// CreditNoteCents is what credit notes settled that day (T8). Not money:
 	// it is in neither ByMethod nor TotalCents, and is reported on its own line.
 	CreditNoteCents int64
@@ -624,6 +628,10 @@ func (s *FinanceService) DailyCashUp(ctx context.Context, day time.Time) (CashUp
 			cut.Cancelled = append(cut.Cancelled, d)
 			continue
 		}
+		if d.Superseded() {
+			cut.Superseded = append(cut.Superseded, d)
+			continue
+		}
 		cut.Deposits = append(cut.Deposits, d)
 		for _, t := range d.Tenders() {
 			cut.count(t.Method(), t.Amount().Int64())
@@ -649,6 +657,11 @@ func (s *FinanceService) DepositReceipt(ctx context.Context, id string) (ports.D
 	}
 	return s.repo.DepositReceipt(ctx, id)
 }
+
+// IsDepositID reports whether id has the shape of a deposit's id. The edges
+// check it so a malformed id is "no such deposit", never a query the database
+// refuses and reports as an internal error.
+func IsDepositID(id string) bool { return uuidShape.MatchString(id) }
 
 // uuidShape is the canonical 8-4-4-4-12 form: a shape check, not a parse.
 var uuidShape = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)

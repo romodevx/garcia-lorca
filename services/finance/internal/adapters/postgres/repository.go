@@ -1145,89 +1145,11 @@ func (r *Repository) RegisterDeposit(
 			return nil
 		}
 
-		open, err := lockedChargesOf(tx, d.StudentID())
+		stored, err := r.storeDeposit(tx, d, plan)
 		if err != nil {
 			return err
 		}
-		write, err := plan(open)
-		if err != nil {
-			return err
-		}
-
-		folio, capturedAt, err := r.nextDepositFolio(tx)
-		if err != nil {
-			return err
-		}
-		d = d.WithFolio(folio)
-		row := fromDomainDeposit(d)
-		// One clock for the folio's year and the capture it names.
-		row.CreatedAt = capturedAt
-		if err := tx.Create(&row).Error; err != nil {
-			if violates(err, folioUniqueConstraint) {
-				// The counter is behind the stored folios (a restore, a hand
-				// edit): a fault to fix, never "this payment already exists".
-				return glerrors.Wrap(glerrors.KindInternal, "the deposit folio counter is behind its folios", err)
-			}
-			if isUniqueViolation(err) {
-				// A concurrent request carrying the same key got there first.
-				// It is a retry, not a second collection.
-				return glerrors.Wrap(glerrors.KindConflict,
-					"deposit already registered under this idempotency key", err)
-			}
-			return glerrors.Wrap(glerrors.KindInternal, "storing deposit", err)
-		}
-		tenders := fromDomainTenders(d)
-		if err := tx.Create(&tenders).Error; err != nil {
-			return glerrors.Wrap(glerrors.KindInternal, "storing the deposit's tenders", err)
-		}
-
-		// The discounts come first: the allocations that follow assume the new,
-		// lower amount, and a charge saved after them would be a row whose
-		// payments were computed against a price it no longer has.
-		// The re-prices come first of all: the discounts and the allocations that
-		// follow are both computed against the new amount, and a price written
-		// after them would be a row whose payments answer to a number it no
-		// longer has. This write is also what FREEZES the ladder — the money
-		// landing below is the first peso (ADR 0011).
-		for _, c := range write.Repriced {
-			if err := tx.Model(&chargeModel{}).Where("id = ?", c.ID()).Updates(map[string]any{
-				"amount_cents": c.Amount().Int64(),
-				"updated_at":   gorm.Expr("now()"),
-			}).Error; err != nil {
-				return glerrors.Wrap(glerrors.KindInternal, "re-pricing an inscription", err)
-			}
-		}
-
-		for _, c := range write.Discounted {
-			if err := tx.Model(&chargeModel{}).Where("id = ?", c.ID()).Updates(map[string]any{
-				"discount_cents":  c.Discount().Int64(),
-				"discount_reason": c.DiscountReason(),
-				"updated_at":      gorm.Expr("now()"),
-			}).Error; err != nil {
-				return glerrors.Wrap(glerrors.KindInternal, "applying discount", err)
-			}
-		}
-
-		for _, fee := range write.Surcharges {
-			model := fromDomainCharge(fee)
-			if err := tx.Create(&model).Error; err != nil {
-				return glerrors.Wrap(glerrors.KindInternal, "storing surcharge", err)
-			}
-		}
-
-		settled, err := applyAllocations(tx, d, write.Allocations,
-			replaceCharges(replaceCharges(open, write.Repriced), write.Discounted), write.Surcharges)
-		if err != nil {
-			return err
-		}
-
-		record = ports.DepositRecord{
-			Deposit:          d,
-			Surcharges:       write.Surcharges,
-			Allocations:      write.Allocations,
-			UnallocatedCents: write.UnallocatedCents,
-			Settled:          settled,
-		}
+		record = stored
 		if outbox != nil {
 			if err := writeOutbox(tx, r.tenantID, outbox(record)); err != nil {
 				return err
@@ -1239,6 +1161,103 @@ func (r *Repository) RegisterDeposit(
 		return ports.DepositRecord{}, false, err
 	}
 	return record, replayed, nil
+}
+
+// storeDeposit writes a new deposit and what it splits into, inside the
+// caller's transaction: the student's charges are locked FOR UPDATE first (in
+// due-date order, so concurrent deposits cannot deadlock), the plan runs
+// against that locked balance, the folio is allocated, and the re-prices,
+// discounts, surcharges and allocations are written in that order. Shared by
+// RegisterDeposit and CorrectDeposit (T9), so a correction is split by
+// exactly the path a deposit is.
+func (r *Repository) storeDeposit(
+	tx *gorm.DB,
+	d domain.Deposit,
+	plan func(open []ports.ChargeWithPaid) (ports.DepositWrite, error),
+) (ports.DepositRecord, error) {
+	open, err := lockedChargesOf(tx, d.StudentID())
+	if err != nil {
+		return ports.DepositRecord{}, err
+	}
+	write, err := plan(open)
+	if err != nil {
+		return ports.DepositRecord{}, err
+	}
+
+	folio, capturedAt, err := r.nextDepositFolio(tx)
+	if err != nil {
+		return ports.DepositRecord{}, err
+	}
+	d = d.WithFolio(folio)
+	row := fromDomainDeposit(d)
+	// One clock for the folio's year and the capture it names.
+	row.CreatedAt = capturedAt
+	if err := tx.Create(&row).Error; err != nil {
+		if violates(err, folioUniqueConstraint) {
+			// The counter is behind the stored folios (a restore, a hand
+			// edit): a fault to fix, never "this payment already exists".
+			return ports.DepositRecord{}, glerrors.Wrap(glerrors.KindInternal, "the deposit folio counter is behind its folios", err)
+		}
+		if isUniqueViolation(err) {
+			// A concurrent request carrying the same key got there first.
+			// It is a retry, not a second collection.
+			return ports.DepositRecord{}, glerrors.Wrap(glerrors.KindConflict,
+				"deposit already registered under this idempotency key", err)
+		}
+		return ports.DepositRecord{}, glerrors.Wrap(glerrors.KindInternal, "storing deposit", err)
+	}
+	tenders := fromDomainTenders(d)
+	if err := tx.Create(&tenders).Error; err != nil {
+		return ports.DepositRecord{}, glerrors.Wrap(glerrors.KindInternal, "storing the deposit's tenders", err)
+	}
+
+	// The discounts come first: the allocations that follow assume the new,
+	// lower amount, and a charge saved after them would be a row whose
+	// payments were computed against a price it no longer has.
+	// The re-prices come first of all: the discounts and the allocations that
+	// follow are both computed against the new amount, and a price written
+	// after them would be a row whose payments answer to a number it no
+	// longer has. This write is also what FREEZES the ladder — the money
+	// landing below is the first peso (ADR 0011).
+	for _, c := range write.Repriced {
+		if err := tx.Model(&chargeModel{}).Where("id = ?", c.ID()).Updates(map[string]any{
+			"amount_cents": c.Amount().Int64(),
+			"updated_at":   gorm.Expr("now()"),
+		}).Error; err != nil {
+			return ports.DepositRecord{}, glerrors.Wrap(glerrors.KindInternal, "re-pricing an inscription", err)
+		}
+	}
+
+	for _, c := range write.Discounted {
+		if err := tx.Model(&chargeModel{}).Where("id = ?", c.ID()).Updates(map[string]any{
+			"discount_cents":  c.Discount().Int64(),
+			"discount_reason": c.DiscountReason(),
+			"updated_at":      gorm.Expr("now()"),
+		}).Error; err != nil {
+			return ports.DepositRecord{}, glerrors.Wrap(glerrors.KindInternal, "applying discount", err)
+		}
+	}
+
+	for _, fee := range write.Surcharges {
+		model := fromDomainCharge(fee)
+		if err := tx.Create(&model).Error; err != nil {
+			return ports.DepositRecord{}, glerrors.Wrap(glerrors.KindInternal, "storing surcharge", err)
+		}
+	}
+
+	settled, err := applyAllocations(tx, d, write.Allocations,
+		replaceCharges(replaceCharges(open, write.Repriced), write.Discounted), write.Surcharges)
+	if err != nil {
+		return ports.DepositRecord{}, err
+	}
+
+	return ports.DepositRecord{
+		Deposit:          d,
+		Surcharges:       write.Surcharges,
+		Allocations:      write.Allocations,
+		UnallocatedCents: write.UnallocatedCents,
+		Settled:          settled,
+	}, nil
 }
 
 // applyAllocations writes the payments a deposit split into and re-derives the
@@ -1439,13 +1458,47 @@ func toDomainDeposits(tx *gorm.DB, rows []depositModel) ([]domain.Deposit, error
 	for _, t := range tenderRows {
 		byDeposit[t.DepositID] = append(byDeposit[t.DepositID], t)
 	}
+	folios, err := linkedFolios(tx, rows)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]domain.Deposit, 0, len(rows))
 	for _, m := range rows {
-		d, err := toDomainDeposit(m, byDeposit[m.ID])
+		d, err := toDomainDeposit(m, byDeposit[m.ID], folios)
 		if err != nil {
 			return nil, err
 		}
 		out = append(out, d)
+	}
+	return out, nil
+}
+
+// linkedFolios reads, in ONE query, the folios of the deposits a page of
+// deposits is linked to by a correction (T9): the one each corrects and the
+// one that replaced it. Most pages link to nothing and make no query.
+func linkedFolios(tx *gorm.DB, rows []depositModel) (map[string]string, error) {
+	var ids []string
+	for _, m := range rows {
+		if m.CorrectsDepositID != nil {
+			ids = append(ids, *m.CorrectsDepositID)
+		}
+		if m.SupersededBy != nil {
+			ids = append(ids, *m.SupersededBy)
+		}
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var linked []struct {
+		ID    string
+		Folio string
+	}
+	if err := tx.Model(&depositModel{}).Select("id, folio").Where("id IN ?", ids).Scan(&linked).Error; err != nil {
+		return nil, glerrors.Wrap(glerrors.KindInternal, "reading the corrected deposits' folios", err)
+	}
+	out := make(map[string]string, len(linked))
+	for _, l := range linked {
+		out[l.ID] = l.Folio
 	}
 	return out, nil
 }
@@ -1535,7 +1588,8 @@ func (r *Repository) DepositReceipt(ctx context.Context, id string) (ports.Depos
 				DiscountCents: row.DiscountCents,
 			})
 		}
-		if !d.Voided() {
+		// A voided or superseded deposit's money is gone or moved: no credit.
+		if d.Counts() {
 			out.UnallocatedCents = d.Amount().Int64() - allocated
 		}
 		return nil
@@ -1550,21 +1604,22 @@ func (r *Repository) DepositReceipt(ctx context.Context, id string) (ports.Depos
 //
 // Two sums rather than a join per deposit: the deposits they still have
 // standing, and what those deposits actually landed on. The difference is the
-// credit. A cancelled deposit is excluded from both sides — voiding already
-// deleted its allocations, so counting its amount would invent money.
+// credit. A cancelled or superseded deposit (T9) is excluded from both sides —
+// releasing it already deleted its allocations, so counting its amount would
+// invent money.
 func (r *Repository) UnallocatedCents(ctx context.Context, studentID string) (int64, error) {
 	var credit int64
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
 		var deposited int64
 		if err := tx.Model(&depositModel{}).
-			Where("student_id = ? AND voided_at IS NULL", studentID).
+			Where("student_id = ? AND voided_at IS NULL AND superseded_at IS NULL", studentID).
 			Select("COALESCE(SUM(amount_cents), 0)").Scan(&deposited).Error; err != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "summing deposits", err)
 		}
 		var allocated int64
 		if err := tx.Model(&paymentModel{}).
 			Where("deposit_id IN (?)", tx.Model(&depositModel{}).
-				Select("id").Where("student_id = ? AND voided_at IS NULL", studentID)).
+				Select("id").Where("student_id = ? AND voided_at IS NULL AND superseded_at IS NULL", studentID)).
 			Select("COALESCE(SUM(amount_cents), 0)").Scan(&allocated).Error; err != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "summing allocations", err)
 		}
@@ -1734,67 +1789,311 @@ func (r *Repository) ListLoosePaymentsOn(ctx context.Context, day time.Time) ([]
 // a cashier keyed $67,000 instead of $6,700.
 func (r *Repository) VoidDeposit(ctx context.Context, d domain.Deposit) error {
 	return r.withTenant(ctx, func(tx *gorm.DB) error {
-		var allocations []paymentModel
-		if err := tx.Where("deposit_id = ?", d.ID()).Find(&allocations).Error; err != nil {
-			return glerrors.Wrap(glerrors.KindInternal, "listing allocations", err)
-		}
-		touched := make(map[string]bool, len(allocations))
-		for _, a := range allocations {
-			touched[a.ChargeID] = true
-		}
-		if err := tx.Where("deposit_id = ?", d.ID()).Delete(&paymentModel{}).Error; err != nil {
-			return glerrors.Wrap(glerrors.KindInternal, "releasing allocations", err)
-		}
-
-		for chargeID := range touched {
-			var row chargeModel
-			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-				Where("id = ?", chargeID).First(&row).Error; err != nil {
-				return translateFindErr(err)
-			}
-			remaining, err := paidFor(tx, chargeID)
-			if err != nil {
-				return err
-			}
-			updates := map[string]any{"updated_at": gorm.Expr("now()")}
-			// A price-at-payment-date discount exists only because this deposit
-			// settled the line (task 7): it goes with the deposit, or a voided
-			// deposit would leave the inscription permanently cheaper.
-			if row.DiscountReason == domain.ReasonPriceAtPaymentDate {
-				row.DiscountCents, row.DiscountReason = 0, ""
-				updates["discount_cents"], updates["discount_reason"] = int64(0), ""
-			}
-			charge, err := toDomainCharge(row, remaining)
-			if err != nil {
-				return err
-			}
-			if charge.Status() == domain.StatusCancelled {
-				continue
-			}
-			updates["status"] = charge.DeriveStatus(remaining)
-			if err := tx.Model(&chargeModel{}).Where("id = ?", chargeID).Updates(updates).Error; err != nil {
-				return glerrors.Wrap(glerrors.KindInternal, "restoring charge status", err)
-			}
-		}
-
-		if err := cancelUnpaidSurchargesOf(tx, d.StudentID(), d.ID()); err != nil {
+		if _, err := releaseDeposit(tx, d, false); err != nil {
 			return err
 		}
-
-		res := tx.Model(&depositModel{}).Where("id = ? AND voided_at IS NULL", d.ID()).Updates(map[string]any{
-			"voided_at":   d.VoidedAt(),
-			"void_reason": d.VoidReason(),
-		})
+		res := tx.Model(&depositModel{}).
+			Where("id = ? AND voided_at IS NULL AND superseded_at IS NULL", d.ID()).
+			Updates(map[string]any{
+				"voided_at":   d.VoidedAt(),
+				"void_reason": d.VoidReason(),
+			})
 		if res.Error != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "cancelling deposit", res.Error)
 		}
 		if res.RowsAffected == 0 {
-			// Either it is gone or another cashier cancelled it first. Both are
-			// a conflict, not a silent success.
-			return glerrors.New(glerrors.KindConflict, "this deposit is already cancelled")
+			// Gone, cancelled by another cashier first, or corrected (T9):
+			// each is a conflict, not a silent success.
+			return glerrors.New(glerrors.KindConflict, "this deposit is already cancelled or corrected")
 		}
 		return nil
 	})
+}
+
+// releaseDeposit removes a deposit's allocations and puts every charge they
+// touched back to the status its remaining payments imply — what a void does,
+// and what a correction does to the deposit it supersedes (T9). It returns the
+// charges that were PAID before the release, so a correction announces as
+// settled only what it newly closed.
+//
+// A price-at-payment-date discount always goes with the deposit (it exists
+// only because this deposit settled the line). resetEarned also takes back the
+// early-payment reward the RULE gave this deposit for its date — a correction
+// re-dates the money and the rule decides again; a reward the school granted
+// by hand (ReasonEarlyPaymentGranted) is a person's decision and stays. The
+// reward is this deposit's only when it was the last payment on the charge:
+// a later deposit that settled the month earned it, not this one.
+func releaseDeposit(tx *gorm.DB, d domain.Deposit, resetEarned bool) (map[string]bool, error) {
+	var allocations []paymentModel
+	if err := tx.Where("deposit_id = ?", d.ID()).Find(&allocations).Error; err != nil {
+		return nil, glerrors.Wrap(glerrors.KindInternal, "listing allocations", err)
+	}
+	touched := make(map[string]bool, len(allocations))
+	for _, a := range allocations {
+		touched[a.ChargeID] = true
+	}
+	if err := tx.Where("deposit_id = ?", d.ID()).Delete(&paymentModel{}).Error; err != nil {
+		return nil, glerrors.Wrap(glerrors.KindInternal, "releasing allocations", err)
+	}
+
+	wasPaid := make(map[string]bool, len(touched))
+	for chargeID := range touched {
+		var row chargeModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ?", chargeID).First(&row).Error; err != nil {
+			return nil, translateFindErr(err)
+		}
+		wasPaid[chargeID] = row.Status == domain.StatusPaid
+		remaining, err := paidFor(tx, chargeID)
+		if err != nil {
+			return nil, err
+		}
+		updates := map[string]any{"updated_at": gorm.Expr("now()")}
+		takeBack, err := discountGoesWith(tx, row, d, resetEarned)
+		if err != nil {
+			return nil, err
+		}
+		if takeBack {
+			row.DiscountCents, row.DiscountReason = 0, ""
+			updates["discount_cents"], updates["discount_reason"] = int64(0), ""
+		}
+		charge, err := toDomainCharge(row, remaining)
+		if err != nil {
+			return nil, err
+		}
+		if charge.Status() == domain.StatusCancelled {
+			continue
+		}
+		updates["status"] = charge.DeriveStatus(remaining)
+		if err := tx.Model(&chargeModel{}).Where("id = ?", chargeID).Updates(updates).Error; err != nil {
+			return nil, glerrors.Wrap(glerrors.KindInternal, "restoring charge status", err)
+		}
+	}
+
+	if err := cancelUnpaidSurchargesOf(tx, d.StudentID(), d.ID()); err != nil {
+		return nil, err
+	}
+	return wasPaid, nil
+}
+
+// discountGoesWith reports whether a charge's discount was this deposit's to
+// take back on release (see releaseDeposit).
+func discountGoesWith(tx *gorm.DB, row chargeModel, d domain.Deposit, resetEarned bool) (bool, error) {
+	switch {
+	case row.DiscountReason == domain.ReasonPriceAtPaymentDate:
+		// A price-at-payment-date discount exists only because this deposit
+		// settled the line (task 7): it goes with the deposit, or a released
+		// deposit would leave the inscription permanently cheaper.
+		return true, nil
+	case !resetEarned || row.DiscountReason != domain.ReasonEarlyPayment:
+		return false, nil
+	}
+	var later int64
+	if err := tx.Model(&paymentModel{}).
+		Where("charge_id = ? AND created_at > ?", row.ID, d.CapturedAt()).
+		Count(&later).Error; err != nil {
+		return false, glerrors.Wrap(glerrors.KindInternal, "reading who settled the charge", err)
+	}
+	return later == 0, nil
+}
+
+// --- corrections (T9) ------------------------------------------------------
+
+// CorrectDeposit replaces a deposit with its correction in ONE transaction.
+//
+// Order matters as much as in RegisterDeposit. The original is locked first
+// (two people correcting the same receipt are serialised; the second finds it
+// superseded), then the family's charges in the order every deposit locks
+// them, then the original is released, and only then is the corrected deposit
+// planned and stored — through storeDeposit, the same path as any deposit — so
+// the split, the surcharges and the early-payment reward are worked out on the
+// corrected date by the same arithmetic. The original is then marked
+// superseded (its row, folio and tenders kept) and the history row written.
+func (r *Repository) CorrectDeposit(
+	ctx context.Context,
+	w ports.DepositCorrectionWrite,
+	plan func(open []ports.ChargeWithPaid) (ports.DepositWrite, error),
+	outbox func(record ports.CorrectionRecord) []ports.OutboxEvent,
+) (ports.CorrectionRecord, bool, error) {
+	var (
+		record   ports.CorrectionRecord
+		replayed bool
+	)
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		prior, found, err := depositByIdempotencyKey(tx, w.Corrected.IdempotencyKey())
+		if err != nil {
+			return err
+		}
+		if found {
+			if prior.Corrects() != w.OriginalID {
+				return glerrors.New(glerrors.KindConflict, "this idempotency key belongs to another payment")
+			}
+			record, err = storedCorrection(tx, prior)
+			replayed = err == nil
+			return err
+		}
+
+		original, err := lockedDeposit(tx, w.OriginalID)
+		if err != nil {
+			return err
+		}
+		if original.StudentID() != w.Corrected.StudentID() {
+			return glerrors.New(glerrors.KindInvalid, "a correction pays the same pupil's account")
+		}
+		superseded, err := original.Supersede(w.Corrected.ID(), w.At)
+		if err != nil {
+			return err
+		}
+		if _, err := lockedChargesOf(tx, original.StudentID()); err != nil {
+			return err
+		}
+		before, err := allocationsOf(tx, original.ID())
+		if err != nil {
+			return err
+		}
+		wasPaid, err := releaseDeposit(tx, original, true)
+		if err != nil {
+			return err
+		}
+
+		stored, err := r.storeDeposit(tx, w.Corrected.WithCorrects(original.ID(), original.Folio()), plan)
+		if err != nil {
+			return err
+		}
+		if err := tx.Model(&depositModel{}).Where("id = ?", original.ID()).Updates(map[string]any{
+			"superseded_at": w.At,
+			"superseded_by": stored.Deposit.ID(),
+		}).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "marking the corrected deposit superseded", err)
+		}
+
+		correction, err := domain.NewDepositCorrection(w.CorrectionID, r.tenantID, original.StudentID(),
+			original.ID(), stored.Deposit.ID(), w.Reason,
+			domain.SnapshotOf(original, before), domain.SnapshotOf(stored.Deposit, stored.Allocations), w.By, w.At)
+		if err != nil {
+			return err
+		}
+		model, err := fromDomainCorrection(correction)
+		if err != nil {
+			return err
+		}
+		if err := tx.Create(&model).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "storing the correction", err)
+		}
+
+		stored.Settled = newlySettled(stored.Settled, wasPaid)
+		record = ports.CorrectionRecord{
+			Original:   superseded.RehydrateSupersession(w.At, stored.Deposit.ID(), stored.Deposit.Folio()),
+			Corrected:  stored,
+			Correction: correction,
+		}
+		if outbox != nil {
+			return writeOutbox(tx, r.tenantID, outbox(record))
+		}
+		return nil
+	})
+	if err != nil {
+		return ports.CorrectionRecord{}, false, err
+	}
+	return record, replayed, nil
+}
+
+// lockedDeposit reads one deposit FOR UPDATE.
+func lockedDeposit(tx *gorm.DB, id string) (domain.Deposit, error) {
+	var row depositModel
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", id).First(&row).Error; err != nil {
+		return domain.Deposit{}, translateFindErr(err)
+	}
+	ds, err := toDomainDeposits(tx, []depositModel{row})
+	if err != nil {
+		return domain.Deposit{}, err
+	}
+	return ds[0], nil
+}
+
+// allocationsOf reads the payments a deposit split into, oldest debt first.
+func allocationsOf(tx *gorm.DB, depositID string) ([]domain.Payment, error) {
+	var rows []paymentModel
+	if err := tx.Table("payments p").Select("p.*").
+		Joins("JOIN charges c ON c.id = p.charge_id").
+		Where("p.deposit_id = ?", depositID).
+		Order("c.due_date, p.id").Find(&rows).Error; err != nil {
+		return nil, glerrors.Wrap(glerrors.KindInternal, "reading the deposit's allocations", err)
+	}
+	out := make([]domain.Payment, 0, len(rows))
+	for _, m := range rows {
+		p, err := toDomainPayment(m)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, nil
+}
+
+// newlySettled keeps the charges a correction closed that were not already
+// paid before it: a month the original had settled and the correction settles
+// again was never open, and announcing it again would read as a second
+// settlement.
+func newlySettled(settled []ports.ChargeWithPaid, wasPaid map[string]bool) []ports.ChargeWithPaid {
+	out := make([]ports.ChargeWithPaid, 0, len(settled))
+	for _, c := range settled {
+		if !wasPaid[c.Charge.ID()] {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// storedCorrection rebuilds a correction already stored, for a replay.
+func storedCorrection(tx *gorm.DB, corrected domain.Deposit) (ports.CorrectionRecord, error) {
+	var row depositCorrectionModel
+	if err := tx.Where("corrected_deposit_id = ?", corrected.ID()).First(&row).Error; err != nil {
+		return ports.CorrectionRecord{}, translateFindErr(err)
+	}
+	correction, err := toDomainCorrection(row)
+	if err != nil {
+		return ports.CorrectionRecord{}, err
+	}
+	var originalRow depositModel
+	if err := tx.Where("id = ?", correction.OriginalID()).First(&originalRow).Error; err != nil {
+		return ports.CorrectionRecord{}, translateFindErr(err)
+	}
+	originals, err := toDomainDeposits(tx, []depositModel{originalRow})
+	if err != nil {
+		return ports.CorrectionRecord{}, err
+	}
+	stored, err := rebuildDepositRecord(tx, corrected)
+	if err != nil {
+		return ports.CorrectionRecord{}, err
+	}
+	return ports.CorrectionRecord{Original: originals[0], Corrected: stored, Correction: correction}, nil
+}
+
+// ListDepositCorrections returns every correction of a student's deposits,
+// oldest first (served by idx_deposit_corrections_student).
+func (r *Repository) ListDepositCorrections(ctx context.Context, studentID string) ([]domain.DepositCorrection, error) {
+	var out []domain.DepositCorrection
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		var rows []depositCorrectionModel
+		if err := tx.Where("student_id = ?", studentID).Order("corrected_at, id").
+			Limit(maxListLimit).Find(&rows).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "listing corrections", err)
+		}
+		out = make([]domain.DepositCorrection, 0, len(rows))
+		for _, m := range rows {
+			c, err := toDomainCorrection(m)
+			if err != nil {
+				return err
+			}
+			out = append(out, c)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // --- outbox (M16) ----------------------------------------------------------

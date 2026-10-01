@@ -108,3 +108,30 @@ func TestPublishChargeSettled(t *testing.T) {
 		t.Errorf("event mismatch: %+v", &got)
 	}
 }
+
+// T9: a corrected payment rides payment-events under its own type, carrying
+// the amount the family is told and the one it replaces.
+func TestPublishPaymentCorrected(t *testing.T) {
+	bus := &fakeBus{}
+	p := pubsubadapter.NewEventPublisher(bus)
+
+	paidAt := time.Date(2026, 9, 9, 0, 0, 0, 0, time.UTC)
+	err := p.PublishPaymentCorrected(context.Background(), ports.PaymentCorrectedEvent{
+		PaymentID: "dep-2", OriginalPaymentID: "dep-1", StudentID: "stu-1", TenantID: "t-1",
+		Method: "cash", AmountCents: 100000, PreviousAmountCents: 50000, PaidAt: paidAt, Folio: "P-2026-000002",
+	})
+	if err != nil {
+		t.Fatalf("PublishPaymentCorrected: %v", err)
+	}
+	if len(bus.msgs) != 1 || bus.msgs[0].Topic != "payment-events" || bus.msgs[0].Attributes["type"] != "PaymentCorrected" {
+		t.Fatalf("published %+v", bus.msgs)
+	}
+	var got financev1.PaymentCorrected
+	if err := proto.Unmarshal(bus.msgs[0].Data, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.GetPaymentId() != "dep-2" || got.GetOriginalPaymentId() != "dep-1" || got.GetAmountCents() != 100000 ||
+		got.GetPreviousAmountCents() != 50000 || got.GetFolio() != "P-2026-000002" || !got.GetPaidAt().AsTime().Equal(paidAt) {
+		t.Errorf("event mismatch: %+v", &got)
+	}
+}

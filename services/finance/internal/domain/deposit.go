@@ -46,6 +46,9 @@ type Deposit struct {
 	// cardType above are their summary: the one tender's own, or "mixed" with
 	// neither reference nor card type when there are several.
 	tenders []Tender
+	// link is the deposit's place in a correction (T9): the one it corrects,
+	// and the one that replaced it.
+	link correctionLink
 }
 
 // Tenders are the methods the money came in by, in the order given. A deposit
@@ -200,6 +203,11 @@ func NewDeposit(id, tenantID, studentID string, amountCents int64, method, refer
 func (d Deposit) Void(reason string, at time.Time) (Deposit, error) {
 	if d.Voided() {
 		return Deposit{}, glerrors.New(glerrors.KindConflict, "this deposit is already cancelled")
+	}
+	if d.Superseded() {
+		// Its money already moved to the correction; cancelling it here would
+		// cancel nothing and read as if it had.
+		return Deposit{}, glerrors.New(glerrors.KindConflict, "this deposit was corrected; cancel its correction instead")
 	}
 	if strings.TrimSpace(reason) == "" {
 		return Deposit{}, glerrors.New(glerrors.KindInvalid, "cancelling a deposit needs a reason")

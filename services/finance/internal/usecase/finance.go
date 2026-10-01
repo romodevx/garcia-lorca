@@ -559,6 +559,12 @@ func (s *FinanceService) publishWithin(ctx context.Context, e ports.OutboxEvent)
 			return err
 		}
 		return s.publisher.PublishChargeSettled(ctx, ev)
+	case ports.OutboxPaymentCorrected:
+		var ev ports.PaymentCorrectedEvent
+		if err := json.Unmarshal(e.Payload, &ev); err != nil {
+			return err
+		}
+		return s.publisher.PublishPaymentCorrected(ctx, ev)
 	default:
 		return glerrors.New(glerrors.KindInternal, "unknown outbox event: "+e.Type)
 	}

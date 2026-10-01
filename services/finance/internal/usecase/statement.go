@@ -155,12 +155,15 @@ func chargeMovements(
 // depositMovements is the money as it arrived: one line per tender of each
 // deposit (T8) — a deposit paid one way is one line, as before; a credit note
 // completed with cash is a credit_note line beside a payment line, with the
-// deposit's folio on both. A voided deposit is shown to the office with no
-// effect on the balance; the family is not shown it.
+// deposit's folio on both. A voided deposit, or one superseded by its
+// correction (T9), is shown to the office with no effect on the balance; the
+// family is not shown it.
 func depositMovements(deposits []domain.Deposit, family bool) []domain.Movement {
 	out := make([]domain.Movement, 0, len(deposits))
 	for _, d := range deposits {
-		if d.Voided() && family {
+		// The family reads the money as it stands: neither a cancelled receipt
+		// nor one replaced by its correction (T9).
+		if !d.Counts() && family {
 			continue
 		}
 		for _, t := range d.Tenders() {
@@ -169,6 +172,8 @@ func depositMovements(deposits []domain.Deposit, family bool) []domain.Movement 
 				AmountCents: t.Amount().Int64(), DepositID: d.ID(),
 				Method: t.Method(), CardType: t.CardType(), Reference: t.Reference(), Folio: d.Folio(),
 				Voided: d.Voided(), VoidReason: d.VoidReason(),
+				Superseded: d.Superseded(), SupersededByFolio: d.SupersededByFolio(),
+				CorrectsFolio: d.CorrectsFolio(),
 			})
 		}
 	}
