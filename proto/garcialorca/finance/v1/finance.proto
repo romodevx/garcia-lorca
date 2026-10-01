@@ -136,6 +136,37 @@ service FinanceService {
   // correction in its chain, oldest first.
   rpc ListDepositCorrections(ListDepositCorrectionsRequest) returns (ListDepositCorrectionsResponse);
 
+  // --- expenses and the cash cut (T10, ADR 0027) ---
+  // The categories an expense is filed under. Configurable; deactivated, never
+  // deleted, because recorded expenses keep pointing at them.
+  rpc CreateExpenseCategory(CreateExpenseCategoryRequest) returns (CreateExpenseCategoryResponse);
+  rpc ListExpenseCategories(ListExpenseCategoriesRequest) returns (ListExpenseCategoriesResponse);
+  rpc UpdateExpenseCategory(UpdateExpenseCategoryRequest) returns (UpdateExpenseCategoryResponse);
+  // CreateExpense records money the school paid out. Every change to it is an
+  // event in its history; it is cancelled, never deleted.
+  rpc CreateExpense(CreateExpenseRequest) returns (CreateExpenseResponse);
+  rpc UpdateExpense(UpdateExpenseRequest) returns (UpdateExpenseResponse);
+  rpc CancelExpense(CancelExpenseRequest) returns (CancelExpenseResponse);
+  // ListExpenses lists the expenses dated between two days (both inclusive),
+  // newest first, at most 500.
+  rpc ListExpenses(ListExpensesRequest) returns (ListExpensesResponse);
+  // GetExpense is one expense and its history, oldest event first.
+  rpc GetExpense(GetExpenseRequest) returns (GetExpenseResponse);
+  // The receipt (comprobante) attached to an expense: JPEG, PNG or PDF judged
+  // by its bytes, at most 5 MB, kept in a private bucket.
+  rpc AttachExpenseReceipt(AttachExpenseReceiptRequest) returns (AttachExpenseReceiptResponse);
+  rpc GetExpenseReceipt(GetExpenseReceiptRequest) returns (GetExpenseReceiptResponse);
+  rpc RemoveExpenseReceipt(RemoveExpenseReceiptRequest) returns (RemoveExpenseReceiptResponse);
+  // FinanceSummary is a period's money: income and expenses by method and the
+  // balance between them. Credit notes are not income and come apart.
+  rpc FinanceSummary(FinanceSummaryRequest) returns (FinanceSummaryResponse);
+  // CloseCashCut closes a day's cut with the cash counted in the drawer: a
+  // snapshot of what was expected, what was counted and the difference.
+  rpc CloseCashCut(CloseCashCutRequest) returns (CloseCashCutResponse);
+  // ReopenCashCut reopens a closed day (with a reason) so it can be closed
+  // again. The earlier closure stays in the history.
+  rpc ReopenCashCut(ReopenCashCutRequest) returns (ReopenCashCutResponse);
+
   // --- tuition (M15: what each level costs, and the monthly run) ---
   // UpsertTuitionPlan sets (or replaces) the tuition table for one level of one
   // cycle. Keyed by (cycle, level): a school raises tuition each year, and the
@@ -970,6 +1001,18 @@ message DailyCashUpResponse {
   // Deposits of the day replaced by a correction (T9). They count for nothing;
   // their correction counts on the day it is dated.
   repeated Deposit superseded = 9;
+  // T10: the day's expenses (cancelled ones included, flagged), what they took
+  // out by method, and the cash the drawer should hold: cash in − cash out.
+  repeated Expense expenses = 10;
+  MethodTotals expenses_by_method = 11;
+  int64 expected_cash_cents = 12;
+  // The day's live closure, absent while the day is open.
+  CashCutClosure closure = 13;
+  // A movement of the day changed after it was closed (a correction, a void,
+  // an expense edited or cancelled, a late capture).
+  bool modified_after_close = 14;
+  // Earlier closures of the day that were reopened, newest first.
+  repeated CashCutClosure reopened = 15;
 }
 
 // CashUpPayment is a payment taken outside a deposit, with what it paid for.
@@ -1206,4 +1249,249 @@ message PurgeLevelBatchRequest {
 
 message PurgeLevelBatchResponse {
   int64 purged_rows = 1;
+}
+
+// --- expenses and the cash cut (T10) ----------------------------------------
+
+// MethodTotals is an amount per method of payment, and their sum.
+message MethodTotals {
+  int64 cash_cents = 1;
+  int64 card_cents = 2;
+  int64 transfer_cents = 3;
+  int64 total_cents = 4;
+}
+
+message ExpenseCategory {
+  string id = 1;
+  string name = 2;
+  bool active = 3;
+}
+
+message CreateExpenseCategoryRequest {
+  string name = 1;
+}
+
+message CreateExpenseCategoryResponse {
+  ExpenseCategory category = 1;
+}
+
+message ListExpenseCategoriesRequest {
+  bool include_inactive = 1;
+}
+
+message ListExpenseCategoriesResponse {
+  repeated ExpenseCategory categories = 1;
+}
+
+message UpdateExpenseCategoryRequest {
+  string id = 1;
+  string name = 2;
+  bool active = 3;
+}
+
+message UpdateExpenseCategoryResponse {
+  ExpenseCategory category = 1;
+}
+
+// ExpenseReceipt describes the file attached to an expense (not its bytes).
+message ExpenseReceipt {
+  string content_type = 1;
+  int64 size_bytes = 2;
+}
+
+// Expense is money the school paid out.
+message Expense {
+  string id = 1;
+  // The day it was paid, YYYY-MM-DD.
+  string spent_on = 2;
+  string category_id = 3;
+  string category_name = 4;
+  int64 amount_cents = 5;
+  // cash | card | transfer
+  string method = 6;
+  string description = 7;
+  // active | cancelled
+  string status = 8;
+  string cancel_reason = 9;
+  google.protobuf.Timestamp cancelled_at = 10;
+  // Absent when no receipt is attached.
+  ExpenseReceipt receipt = 11;
+  string created_by_name = 12;
+  google.protobuf.Timestamp created_at = 13;
+  google.protobuf.Timestamp updated_at = 14;
+}
+
+// ExpenseEvent is one entry of an expense's history.
+message ExpenseEvent {
+  string id = 1;
+  // created | edited | cancelled | receipt_attached | receipt_removed
+  string kind = 2;
+  // The expense as it stood before and after, as JSON ({} on create).
+  string before_json = 3;
+  string after_json = 4;
+  string reason = 5;
+  string actor_name = 6;
+  google.protobuf.Timestamp at = 7;
+}
+
+message CreateExpenseRequest {
+  string spent_on = 1;
+  string category_id = 2;
+  int64 amount_cents = 3;
+  string method = 4;
+  string description = 5;
+  // The authenticated caller, set by the gateway — never by a client.
+  string actor_id = 6;
+  string actor_name = 7;
+}
+
+message CreateExpenseResponse {
+  Expense expense = 1;
+}
+
+message UpdateExpenseRequest {
+  string id = 1;
+  string spent_on = 2;
+  string category_id = 3;
+  int64 amount_cents = 4;
+  string method = 5;
+  string description = 6;
+  // Optional: why it was edited.
+  string reason = 7;
+  string actor_id = 8;
+  string actor_name = 9;
+}
+
+message UpdateExpenseResponse {
+  Expense expense = 1;
+}
+
+message CancelExpenseRequest {
+  string id = 1;
+  // Required.
+  string reason = 2;
+  string actor_id = 3;
+  string actor_name = 4;
+}
+
+message CancelExpenseResponse {
+  Expense expense = 1;
+}
+
+message ListExpensesRequest {
+  string from = 1;  // YYYY-MM-DD
+  string to = 2;    // YYYY-MM-DD, inclusive
+  // Optional: only this category.
+  string category_id = 3;
+  bool include_cancelled = 4;
+}
+
+message ListExpensesResponse {
+  repeated Expense expenses = 1;
+}
+
+message GetExpenseRequest {
+  string id = 1;
+}
+
+message GetExpenseResponse {
+  Expense expense = 1;
+  repeated ExpenseEvent events = 2;
+}
+
+message AttachExpenseReceiptRequest {
+  string id = 1;
+  bytes data = 2;
+  string actor_id = 3;
+  string actor_name = 4;
+}
+
+message AttachExpenseReceiptResponse {
+  Expense expense = 1;
+}
+
+message GetExpenseReceiptRequest {
+  string id = 1;
+}
+
+message GetExpenseReceiptResponse {
+  bytes data = 1;
+  string content_type = 2;
+}
+
+message RemoveExpenseReceiptRequest {
+  string id = 1;
+  string actor_id = 2;
+  string actor_name = 3;
+}
+
+message RemoveExpenseReceiptResponse {
+  Expense expense = 1;
+}
+
+message FinanceSummaryRequest {
+  string from = 1;  // YYYY-MM-DD
+  string to = 2;    // YYYY-MM-DD, inclusive
+}
+
+// CategoryTotal is what one expense category took in the period.
+message CategoryTotal {
+  string category_id = 1;
+  string category_name = 2;
+  int64 amount_cents = 3;
+  int32 count = 4;
+}
+
+message FinanceSummaryResponse {
+  // Money received (deposits and counter sales, by the day it changed hands).
+  MethodTotals income = 1;
+  // What credit notes settled. Not income: outside every figure above.
+  int64 credit_note_cents = 2;
+  // Live expenses (cancelled ones count for nothing).
+  MethodTotals expenses = 3;
+  // income − expenses, per method and in total. May be negative.
+  MethodTotals balance = 4;
+  repeated CategoryTotal expenses_by_category = 5;
+}
+
+// CashCutClosure is one closure of a day's cut: the snapshot taken then.
+message CashCutClosure {
+  string id = 1;
+  string day = 2;
+  int64 expected_cash_cents = 3;
+  int64 counted_cash_cents = 4;
+  // counted − expected: negative is money missing from the drawer.
+  int64 difference_cents = 5;
+  MethodTotals income = 6;
+  MethodTotals expenses = 7;
+  int64 credit_note_cents = 8;
+  string note = 9;
+  string closed_by_name = 10;
+  google.protobuf.Timestamp closed_at = 11;
+  google.protobuf.Timestamp reopened_at = 12;
+  string reopened_by_name = 13;
+  string reopen_reason = 14;
+}
+
+message CloseCashCutRequest {
+  string day = 1;  // YYYY-MM-DD; a future day is refused
+  int64 counted_cash_cents = 2;
+  string note = 3;
+  string actor_id = 4;
+  string actor_name = 5;
+}
+
+message CloseCashCutResponse {
+  CashCutClosure closure = 1;
+}
+
+message ReopenCashCutRequest {
+  string day = 1;
+  string reason = 2;
+  string actor_id = 3;
+  string actor_name = 4;
+}
+
+message ReopenCashCutResponse {
+  CashCutClosure closure = 1;
 }

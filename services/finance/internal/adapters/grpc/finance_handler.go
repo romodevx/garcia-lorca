@@ -35,6 +35,8 @@ type FinanceHandler struct {
 	finance *usecase.FinanceService
 	health  *usecase.HealthService
 	levels  *usecase.LevelArchiveService
+	// expenses is T10's (WithExpenses); nil leaves those RPCs Unimplemented.
+	expenses *usecase.ExpenseService
 }
 
 // NewFinanceHandler wires the handler to the finance + health use cases.
@@ -415,21 +417,34 @@ func (h *FinanceHandler) ListDeposits(ctx context.Context, req *connect.Request[
 	return connect.NewResponse(&financev1.ListDepositsResponse{Deposits: out}), nil
 }
 
-// DailyCashUp is the day's takings, split by how the money arrived.
+// DailyCashUp is the day's takings, split by how the money arrived — and,
+// with the expenses wired (T10), what went out, the cash expected in the
+// drawer and the day's closure.
 func (h *FinanceHandler) DailyCashUp(ctx context.Context, req *connect.Request[financev1.DailyCashUpRequest]) (*connect.Response[financev1.DailyCashUpResponse], error) {
-	day := time.Now()
-	if raw := req.Msg.GetDay(); raw != "" {
-		parsed, err := time.Parse("2006-01-02", raw)
+	day, err := parseOptionalDay(req.Msg.GetDay())
+	if err != nil {
+		return nil, connectErr(glerrors.New(glerrors.KindInvalid, "day must be YYYY-MM-DD"))
+	}
+	if h.expenses != nil {
+		cut, err := h.expenses.CashCut(ctx, day)
 		if err != nil {
-			return nil, connectErr(glerrors.New(glerrors.KindInvalid, "day must be YYYY-MM-DD"))
+			return nil, connectErr(err)
 		}
-		day = parsed
+		return connect.NewResponse(cashCutResponse(cut)), nil
+	}
+	if day.IsZero() {
+		day = time.Now()
 	}
 	cut, err := h.finance.DailyCashUp(ctx, day)
 	if err != nil {
 		return nil, connectErr(err)
 	}
-	return connect.NewResponse(&financev1.DailyCashUpResponse{
+	return connect.NewResponse(takingsResponse(cut)), nil
+}
+
+// takingsResponse renders the day's takings: what came in, and in what form.
+func takingsResponse(cut usecase.CashUp) *financev1.DailyCashUpResponse {
+	return &financev1.DailyCashUpResponse{
 		Deposits:      toProtoDeposits(cut.Deposits),
 		Cancelled:     toProtoDeposits(cut.Cancelled),
 		Superseded:    toProtoDeposits(cut.Superseded),
@@ -440,7 +455,7 @@ func (h *FinanceHandler) DailyCashUp(ctx context.Context, req *connect.Request[f
 		Payments:      toProtoCashUpPayments(cut.Payments),
 		// Not money (T8): reported on its own line, outside the totals.
 		CreditNoteCents: cut.CreditNoteCents,
-	}), nil
+	}
 }
 
 func toProtoCashUpPayments(ps []ports.LoosePayment) []*financev1.CashUpPayment {
