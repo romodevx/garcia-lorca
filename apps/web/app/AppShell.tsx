@@ -22,6 +22,7 @@ import { canDeleteLevels } from "./config/permissions";
 import { canDeleteUsers } from "./admin/permissions";
 import { AdminScreen } from "./_screens/admin/AdminScreen";
 import { StudentEditScreen } from "./_screens/students/StudentEditScreen";
+import type { NotesAccess } from "./_design/students/StudentNotesBeside";
 import { StudentsScreen, markStudentsVisit, studentsListPath } from "./_screens/students/StudentsScreen";
 import { GradesScreen } from "./_screens/grades/GradesScreen";
 import { Login } from "./_screens/Login";
@@ -435,6 +436,15 @@ export function AppShell(): ReactElement {
   // UX only: the gateway refuses PUT /students/{id} without students:update.
   const canEditStudents = principal?.permissions?.includes("students:update") === true;
   const editStudent = (studentId: string): void => go({ screen: "studentEdit", studentId });
+  // A pupil's notes beside Registrar pago (T6). UX only: the gateway answers the
+  // notes with students:read (and module_students), writes with notes_write.
+  const perms = principal?.permissions ?? [];
+  const notesAccess: NotesAccess = {
+    userId: principal?.userId ?? "",
+    canRead: studentsEnabled && perms.includes("students:read"),
+    canWrite: studentsEnabled && perms.includes("students:notes_write"),
+    canVoidAny: studentsEnabled && perms.includes("students:notes_void"),
+  };
   const openTeacherLoad = (teacherId: string): void => go({ screen: "teacherLoad", teacherId });
   // Owner-only (levels:delete). UX only: the gateway refuses the delete without it.
   const mayDeleteLevels = canDeleteLevels(principal?.permissions);
@@ -581,7 +591,7 @@ export function AppShell(): ReactElement {
       )}
       {view.screen === "finance" &&
         (financeEnabled ? (
-          <FinanceScreen onBack={home} />
+          <FinanceScreen onBack={home} notes={notesAccess} />
         ) : (
           // Flag OFF: do not render the finance surface; show the friendly stub
           // instead so navigation never dead-ends. (Backend 404 is authoritative.)
@@ -589,7 +599,7 @@ export function AppShell(): ReactElement {
         ))}
       {view.screen === "payments" &&
         (financeEnabled ? (
-          <PaymentsScreen onBack={home} canGrantDiscounts={principal?.permissions?.includes("finance:write") === true} />
+          <PaymentsScreen onBack={home} canGrantDiscounts={principal?.permissions?.includes("finance:write") === true} notes={notesAccess} />
         ) : (
           <ModulePlaceholder m={MODULES.find((m) => m.id === "payments") as ModuleDef} onBack={home} />
         ))}
@@ -629,6 +639,8 @@ export function AppShell(): ReactElement {
             onBack={home}
             onEdit={canEditStudents ? editStudent : undefined}
             canWriteNotes={principal?.permissions?.includes("students:notes_write") === true}
+            canVoidAnyNote={principal?.permissions?.includes("students:notes_void") === true}
+            userId={principal?.userId ?? ""}
             canVerifyCard={cardEnabled}
             canRevokeCard={cardEnabled && canEditStudents}
           />

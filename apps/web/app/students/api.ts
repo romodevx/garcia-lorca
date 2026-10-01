@@ -407,7 +407,7 @@ function studentPath(baseURL: string, studentId: string, rest = ""): string {
   return url(baseURL, `${BASE_PATH}/students/${encodeURIComponent(studentId)}${rest}`);
 }
 
-async function sendJSON<T>(target: string, method: "PUT", body: unknown): Promise<T> {
+async function sendJSON<T>(target: string, method: "PUT" | "PATCH", body: unknown): Promise<T> {
   const res = await authFetch(target, {
     method,
     credentials: "include",
@@ -505,7 +505,10 @@ export function removeContact(baseURL: string, studentId: string, contactId: str
 
 // --- notes (T6) -------------------------------------------------------------
 
-/** One entry in a pupil's history. Never edited: a wrong one is voided. */
+/**
+ * One entry in a pupil's history. A wrong one is voided; an edit replaces the
+ * text and the server keeps the text it replaced (T6).
+ */
 export interface StudentNote {
   id: string;
   studentId: string;
@@ -518,6 +521,10 @@ export interface StudentNote {
   /** Voided notes reach only whoever may void any note (the owner). */
   voided: boolean;
   voidedAt?: string;
+  /** ISO timestamp of the last edit; absent on a note never edited. */
+  updatedAt?: string;
+  /** Who last edited it, as their name read then. */
+  updatedByName?: string;
 }
 
 export function listNotes(baseURL: string, studentId: string): Promise<StudentNote[]> {
@@ -527,6 +534,14 @@ export function listNotes(baseURL: string, studentId: string): Promise<StudentNo
 /** The author is whoever is signed in: the server takes it from the session. */
 export function addNote(baseURL: string, studentId: string, body: string): Promise<StudentNote> {
   return postJSON<StudentNote>(baseURL, `/students/${encodeURIComponent(studentId)}/notes`, { body });
+}
+
+/**
+ * The editor is whoever is signed in. 403 on someone else's note (unless the
+ * caller may void any); 409 if it was voided or changed meanwhile.
+ */
+export function editNote(baseURL: string, studentId: string, noteId: string, body: string): Promise<StudentNote> {
+  return sendJSON<StudentNote>(studentPath(baseURL, studentId, `/notes/${encodeURIComponent(noteId)}`), "PATCH", { body });
 }
 
 /** 403 after the author's 15 minutes (unless the caller may void any); 409 if already voided. */

@@ -13,6 +13,7 @@ import { Page } from "../../_design/Page";
 import type { ColorKey } from "../../_design/colors";
 import { DateField, HelpTip, useFocusFirstInvalid } from "../../_design/form";
 import { paymentDateError } from "./CollectDrawer";
+import { StudentNotesBeside, useNotesBeside, type NotesAccess } from "../../_design/students/StudentNotesBeside";
 import { listCycles, type Cycle } from "../../config/api";
 import { getOverdue, listCharges, registerPayment, type Charge, type PaymentMethod } from "../../finance/api";
 import { localISODate } from "../../_lib/localDate";
@@ -70,7 +71,9 @@ function StatusPill({ status }: { status: VisualStatus }): ReactElement {
 }
 
 // ── payment slide-over: pay a charge in one panel ──
-function PayDrawer({ charge, name, today, onClose, onPaid }: { charge: Charge; name: string; today?: string; onClose: () => void; onPaid: () => void }): ReactElement {
+function PayDrawer({ charge, name, today, notes, onClose, onPaid }: { charge: Charge; name: string; today?: string; notes?: NotesAccess; onClose: () => void; onPaid: () => void }): ReactElement {
+  // The pupil's notes on the left, as at the counter (T6).
+  const beside = useNotesBeside(charge.studentId, notes);
   const [amount, setAmount] = useState(centsToPesosInput(charge.remainingCents));
   const [method, setMethod] = useState<PaymentMethod>("cash");
   const [reference, setReference] = useState("");
@@ -131,6 +134,7 @@ function PayDrawer({ charge, name, today, onClose, onPaid }: { charge: Charge; n
       // las cuatro vías: la protección contra el accidente dejaba a la persona
       // encerrada, que es peor.
       dismissible={!dirty}
+      size={beside.wide ? "lg" : "md"}
       onClose={onClose}
       footer={
         <>
@@ -140,45 +144,45 @@ function PayDrawer({ charge, name, today, onClose, onPaid }: { charge: Charge; n
         </>
       }
     >
-      <>
-          <div style={{ display: "flex", justifyContent: "space-between", padding: "14px 16px", borderRadius: "var(--r-md)", background: "var(--surface-3)", border: "1px solid var(--border)" }}>
-            <span style={{ fontSize: 14, color: "var(--text-muted)" }}>Saldo del cargo</span>
-            <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 18, color: "var(--text)" }}>{money(charge.remainingCents)}</span>
-          </div>
-          <label style={{ display: "block" }}>
-            <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)", marginLeft: 3 }}>Monto (pesos)</span>
-            <div style={{ marginTop: 8 }}><input autoFocus value={amount} onChange={(e) => setAmount(e.target.value)} aria-label="Monto" style={fi} /></div>
-          </label>
-          <div>
-            <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)", marginLeft: 3 }}>Método</span>
-            <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
-              {METHODS.map((m) => {
-                const on = method === m.value;
-                return <button key={m.value} onClick={() => setMethod(m.value)} style={{ height: 44, padding: "0 18px", borderRadius: 99, fontSize: 14.5, fontWeight: 600, fontFamily: "var(--font-display)", cursor: "pointer", border: `1.5px solid ${on ? "var(--lime)" : "var(--border)"}`, background: on ? "color-mix(in oklab, var(--lime) 12%, var(--surface))" : "var(--surface)", color: on ? "var(--forest)" : "var(--text-muted)" }}>{m.label}</button>;
-              })}
+      <StudentNotesBeside beside={beside} studentId={charge.studentId}>
+            <div style={{ display: "flex", justifyContent: "space-between", padding: "14px 16px", borderRadius: "var(--r-md)", background: "var(--surface-3)", border: "1px solid var(--border)" }}>
+              <span style={{ fontSize: 14, color: "var(--text-muted)" }}>Saldo del cargo</span>
+              <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 18, color: "var(--text)" }}>{money(charge.remainingCents)}</span>
             </div>
-          </div>
-          <DateField
-            label="Fecha de pago"
-            value={paidOn}
-            max={day}
-            onChange={(v) => {
-              setPaidOn(v);
-              if (paymentDateError(v, day) === undefined) setDateError(undefined);
-            }}
-            onBlur={() => setDateError(paymentDateError(paidOn, day))}
-            error={dateError}
-            help="El día en que la familia pagó. Si capturas tarde, pon ese día: el recargo y el pronto pago se calculan con él."
-          />
-          <label style={{ display: "block" }}>
-            <span style={{ display: "inline-flex", alignItems: "baseline", gap: 6, marginLeft: 3 }}>
-              <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)" }}>Referencia (opcional)</span>
-              <HelpTip id="pago-ref-help" label="Referencia" text={REFERENCIA_AYUDA} />
-            </span>
-            <div style={{ marginTop: 8 }}><input value={reference} onChange={(e) => setReference(e.target.value)} aria-label="Referencia" aria-describedby="pago-ref-help" style={fi} /></div>
-          </label>
-          {error !== undefined && <p role="alert" style={{ color: "var(--bad-fg)", fontSize: 14, margin: 0 }}>{error}</p>}
-      </>
+            <label style={{ display: "block" }}>
+              <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)", marginLeft: 3 }}>Monto (pesos)</span>
+              <div style={{ marginTop: 8 }}><input autoFocus value={amount} onChange={(e) => setAmount(e.target.value)} aria-label="Monto" style={fi} /></div>
+            </label>
+            <div>
+              <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)", marginLeft: 3 }}>Método</span>
+              <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                {METHODS.map((m) => {
+                  const on = method === m.value;
+                  return <button key={m.value} onClick={() => setMethod(m.value)} style={{ height: 44, padding: "0 18px", borderRadius: 99, fontSize: 14.5, fontWeight: 600, fontFamily: "var(--font-display)", cursor: "pointer", border: `1.5px solid ${on ? "var(--lime)" : "var(--border)"}`, background: on ? "color-mix(in oklab, var(--lime) 12%, var(--surface))" : "var(--surface)", color: on ? "var(--forest)" : "var(--text-muted)" }}>{m.label}</button>;
+                })}
+              </div>
+            </div>
+            <DateField
+              label="Fecha de pago"
+              value={paidOn}
+              max={day}
+              onChange={(v) => {
+                setPaidOn(v);
+                if (paymentDateError(v, day) === undefined) setDateError(undefined);
+              }}
+              onBlur={() => setDateError(paymentDateError(paidOn, day))}
+              error={dateError}
+              help="El día en que la familia pagó. Si capturas tarde, pon ese día: el recargo y el pronto pago se calculan con él."
+            />
+            <label style={{ display: "block" }}>
+              <span style={{ display: "inline-flex", alignItems: "baseline", gap: 6, marginLeft: 3 }}>
+                <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)" }}>Referencia (opcional)</span>
+                <HelpTip id="pago-ref-help" label="Referencia" text={REFERENCIA_AYUDA} />
+              </span>
+              <div style={{ marginTop: 8 }}><input value={reference} onChange={(e) => setReference(e.target.value)} aria-label="Referencia" aria-describedby="pago-ref-help" style={fi} /></div>
+            </label>
+            {error !== undefined && <p role="alert" style={{ color: "var(--bad-fg)", fontSize: 14, margin: 0 }}>{error}</p>}
+      </StudentNotesBeside>
     </DrawerShell>
   );
 }
@@ -223,9 +227,11 @@ export interface FinanceScreenProps {
   onBack: () => void;
   /** The office's day (aaaa-mm-dd); injected by tests. Defaults to today, locally. */
   today?: string;
+  /** What the caller may do with a pupil's notes, shown beside Registrar pago (T6). */
+  notes?: NotesAccess;
 }
 
-export function FinanceScreen({ onBack, today: officeDay }: FinanceScreenProps): ReactElement {
+export function FinanceScreen({ onBack, today: officeDay, notes }: FinanceScreenProps): ReactElement {
   const [charges, setCharges] = useState<Charge[]>([]);
   const [overdueIds, setOverdueIds] = useState<Set<string>>(new Set());
   const [studentMap, setStudentMap] = useState<Map<string, Student>>(new Map());
@@ -452,7 +458,7 @@ export function FinanceScreen({ onBack, today: officeDay }: FinanceScreenProps):
         )}
       </div>
 
-      {pay !== null && <PayDrawer charge={pay.charge} name={pay.name} today={officeDay} onClose={() => setPay(null)} onPaid={onPaid} />}
+      {pay !== null && <PayDrawer charge={pay.charge} name={pay.name} today={officeDay} notes={notes} onClose={() => setPay(null)} onPaid={onPaid} />}
       {cashUp && <CashUpDrawer today={officeDay} onClose={() => setCashUp(false)} />}
       {toast !== null && (
         <div role="status" style={{ position: "fixed", bottom: 28, left: "50%", transform: "translateX(-50%)", zIndex: 80, display: "flex", alignItems: "center", gap: 11, padding: "14px 22px", borderRadius: "var(--r-pill)", background: "var(--forest)", color: "#fff", fontWeight: 600, fontSize: 15, boxShadow: "var(--shadow-pop)", animation: "pop .25s var(--ease) both" }}>

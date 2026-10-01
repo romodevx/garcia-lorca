@@ -11,6 +11,7 @@ import { API_URL } from "../../api-url";
 import { formatCents } from "../../_lib/money";
 import { CashUpDrawer } from "../finance/CashUpDrawer";
 import { CollectDrawer, type CollectStudent } from "../finance/CollectDrawer";
+import type { NotesAccess } from "../../_design/students/StudentNotesBeside";
 import { matchesSearch } from "../../_design/textSearch";
 import { formatStudentName, sortStudents, studentNameSearchKeys } from "../../_design/students/studentName";
 
@@ -27,6 +28,8 @@ export interface PaymentsScreenProps {
   onBack: () => void;
   /** finance:write: the counter may grant the late early-payment reward. */
   canGrantDiscounts?: boolean;
+  /** What the cashier may do with a pupil's notes, shown beside the counter (T6). */
+  notes?: NotesAccess;
 }
 
 /**
@@ -40,7 +43,7 @@ export interface PaymentsScreenProps {
  * The whole flow is one question: which pupil? Everything else happens in the
  * drawer.
  */
-export function PaymentsScreen({ onBack, canGrantDiscounts = false }: PaymentsScreenProps): ReactElement {
+export function PaymentsScreen({ onBack, canGrantDiscounts = false, notes }: PaymentsScreenProps): ReactElement {
   const [students, setStudents] = useState<Student[]>([]);
   // Three states, not two. "Empty" and "we could not ask" look the same on
   // screen and mean opposite things: one says the pupil is not registered, the
@@ -177,6 +180,7 @@ export function PaymentsScreen({ onBack, canGrantDiscounts = false }: PaymentsSc
         <CollectDrawer
           student={collecting}
           canGrantDiscounts={canGrantDiscounts}
+          notes={notes}
           onClose={() => setCollecting(null)}
           onCollected={() => {
             // The figure this screen shows is now stale for that pupil.

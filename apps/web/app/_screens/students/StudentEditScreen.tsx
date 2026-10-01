@@ -46,7 +46,8 @@ import {
 import { resizeToJpeg } from "../../students/photoResize";
 import { birthDateError, MEXICAN_STATES, phoneDigits, phoneError, postalCodeError } from "../../students/profileRules";
 import { ContactsPanel } from "./ContactsPanel";
-import { NotesPanel } from "./NotesPanel";
+import { StudentNotesPanel } from "../../_design/students/StudentNotesPanel";
+import { useStudentNotes } from "../../_design/students/useStudentNotes";
 import { formatStudentName } from "../../_design/students/studentName";
 
 /**
@@ -129,6 +130,8 @@ export function StudentEditScreen({ studentId, userId, permissions, onBack, toda
   const day = today ?? localToday();
   const canReadMedical = permissions?.includes("medical:read") === true;
   const canWriteMedical = canReadMedical && permissions?.includes("medical:write") === true;
+  // The pupil's notes: the same source the list's modal and the payment counter read (T6).
+  const notes = useStudentNotes(studentId);
 
   const [student, setStudent] = useState<Student | undefined>(undefined);
   const [loadFailed, setLoadFailed] = useState(false);
@@ -419,7 +422,8 @@ export function StudentEditScreen({ studentId, userId, permissions, onBack, toda
 
       {/* Each note is its own record with its own save, like the contacts. */}
       <Section id="ficha-notas" title="Notas">
-        <NotesPanel
+        <StudentNotesPanel
+          notes={notes}
           studentId={studentId}
           userId={userId}
           canWrite={permissions?.includes("students:notes_write") === true}

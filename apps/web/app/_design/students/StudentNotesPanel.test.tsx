@@ -3,11 +3,12 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as studentsApi from "../../students/api";
-import { NotesPanel } from "./NotesPanel";
+import { StudentNotesPanel, type StudentNotesPanelProps } from "./StudentNotesPanel";
+import { useStudentNotes } from "./useStudentNotes";
 
 vi.mock("../../students/api", async (importOriginal) => {
   const real = await importOriginal<typeof import("../../students/api")>();
-  return { StudentsError: real.StudentsError, listNotes: vi.fn(), addNote: vi.fn(), voidNote: vi.fn() };
+  return { StudentsError: real.StudentsError, listNotes: vi.fn(), addNote: vi.fn(), voidNote: vi.fn(), editNote: vi.fn() };
 });
 const api = vi.mocked(studentsApi);
 
@@ -15,9 +16,17 @@ const WRITTEN = Date.parse("2026-09-24T16:00:00Z");
 const mine = { id: "n-2", studentId: "st1", body: "Llegó con fiebre", authorUserId: "u-me", authorName: "Gabriela Rojas", createdAt: "2026-09-24T16:00:00Z", voided: false };
 const theirs = { id: "n-1", studentId: "st1", body: "Olvidó la mochila", authorUserId: "u-other", authorName: "Luis Pérez", createdAt: "2026-09-23T15:00:00Z", voided: false };
 
-function renderPanel(props: Partial<Parameters<typeof NotesPanel>[0]> = {}) {
+type PanelProps = Omit<StudentNotesPanelProps, "notes">;
+
+/** The panel as every screen mounts it: fed by the one hook. */
+function Harness(props: PanelProps) {
+  const notes = useStudentNotes(props.studentId);
+  return <StudentNotesPanel notes={notes} {...props} />;
+}
+
+function renderPanel(props: Partial<PanelProps> = {}) {
   return render(
-    <NotesPanel studentId="st1" userId="u-me" canWrite canVoidAny={false} now={() => WRITTEN + 5 * 60_000} {...props} />,
+    <Harness studentId="st1" userId="u-me" canWrite canVoidAny={false} now={() => WRITTEN + 5 * 60_000} {...props} />,
   );
 }
 
@@ -40,7 +49,7 @@ function useRealClock(): void {
   vi.useRealTimers();
 }
 
-describe("NotesPanel", () => {
+describe("StudentNotesPanel", () => {
   it("shows the history newest first, with who wrote each note", async () => {
     renderPanel();
     const items = await screen.findAllByRole("listitem");
@@ -228,5 +237,91 @@ describe("NotesPanel", () => {
     expect(screen.queryByText("Se anuló la nota")).not.toBeInTheDocument();
     expect(screen.getByRole("alert")).toHaveTextContent(/15 minutos/);
     expect(api.voidNote).not.toHaveBeenCalled();
+  });
+
+  // T6: a note can be edited; the server keeps the text it replaced.
+  it("shows who last edited a note, and when", async () => {
+    api.listNotes.mockResolvedValue([{ ...theirs, updatedAt: "2026-09-25T15:00:00Z", updatedByName: "Dirección" }]);
+    renderPanel();
+    const item = await screen.findByRole("listitem");
+    expect(item).toHaveTextContent("Luis Pérez");
+    expect(item).toHaveTextContent(/Editada por Dirección/);
+  });
+
+  it("lets the author edit their own note in place, and nobody else's", async () => {
+    const user = userEvent.setup();
+    api.editNote.mockResolvedValue({ ...mine, body: "Llegó con fiebre de 38", updatedAt: "2026-09-24T16:30:00Z", updatedByName: "Gabriela Rojas" });
+    renderPanel({ now: () => WRITTEN + 3 * 24 * 3_600_000 });
+    const items = await screen.findAllByRole("listitem");
+    expect(within(items[1] as HTMLElement).queryByRole("button", { name: "Editar nota" })).not.toBeInTheDocument();
+
+    await user.click(within(items[0] as HTMLElement).getByRole("button", { name: "Editar nota" }));
+    const field = screen.getByLabelText("Texto de la nota");
+    expect(field).toHaveValue("Llegó con fiebre");
+    expect(field).toHaveFocus();
+    await user.clear(field);
+    await user.type(field, "Llegó con fiebre de 38");
+    await user.click(screen.getByRole("button", { name: "Guardar nota" }));
+
+    await waitFor(() => expect(api.editNote).toHaveBeenCalledWith(expect.any(String), "st1", "n-2", "Llegó con fiebre de 38"));
+    const first = (await screen.findAllByRole("listitem"))[0] as HTMLElement;
+    expect(first).toHaveTextContent("Llegó con fiebre de 38");
+    expect(first).toHaveTextContent(/Editada por Gabriela Rojas/);
+    expect(screen.queryByLabelText("Texto de la nota")).not.toBeInTheDocument();
+  });
+
+  it("lets whoever may void any note edit every one", async () => {
+    renderPanel({ canVoidAny: true });
+    await screen.findByText("Llegó con fiebre");
+    expect(screen.getAllByRole("button", { name: "Editar nota" })).toHaveLength(2);
+  });
+
+  it("offers no editing to whoever may only read", async () => {
+    renderPanel({ canWrite: false });
+    await screen.findByText("Llegó con fiebre");
+    expect(screen.queryByRole("button", { name: "Editar nota" })).not.toBeInTheDocument();
+  });
+
+  it("does not send an edit that changes nothing, and cancels back to the note", async () => {
+    const user = userEvent.setup();
+    renderPanel();
+    await screen.findByText("Llegó con fiebre");
+    await user.click(screen.getAllByRole("button", { name: "Editar nota" })[0] as HTMLElement);
+    await user.click(screen.getByRole("button", { name: "Guardar nota" }));
+    expect(api.editNote).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText("Texto de la nota")).not.toBeInTheDocument();
+
+    await user.click(screen.getAllByRole("button", { name: "Editar nota" })[0] as HTMLElement);
+    await user.type(screen.getByLabelText("Texto de la nota"), " y tos");
+    await user.click(screen.getByRole("button", { name: "Cancelar edición" }));
+    expect(screen.getByText("Llegó con fiebre")).toBeInTheDocument();
+    expect(api.editNote).not.toHaveBeenCalled();
+  });
+
+  it("says why the server refused an edit, and keeps what was typed", async () => {
+    const user = userEvent.setup();
+    api.editNote.mockRejectedValue(new studentsApi.StudentsError(409, "the note was voided or changed"));
+    renderPanel();
+    await screen.findByText("Llegó con fiebre");
+    await user.click(screen.getAllByRole("button", { name: "Editar nota" })[0] as HTMLElement);
+    await user.type(screen.getByLabelText("Texto de la nota"), " y tos");
+    await user.click(screen.getByRole("button", { name: "Guardar nota" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/cambió o fue anulada/);
+    expect(screen.getByLabelText("Texto de la nota")).toHaveValue("Llegó con fiebre y tos");
+  });
+
+  // In a modal or beside a payment, the empty field waits behind a button.
+  it("keeps the new-note field behind a button when asked to", async () => {
+    const user = userEvent.setup();
+    renderPanel({ composer: "onDemand" });
+    await screen.findByText("Llegó con fiebre");
+    expect(screen.queryByLabelText("Nueva nota")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Agregar nota" }));
+    expect(screen.getByLabelText("Nueva nota")).toHaveFocus();
+  });
+
+  it("opens the new-note field at once when told to", async () => {
+    renderPanel({ composer: "onDemand", startComposing: true });
+    expect(await screen.findByLabelText("Nueva nota")).toBeInTheDocument();
   });
 });
