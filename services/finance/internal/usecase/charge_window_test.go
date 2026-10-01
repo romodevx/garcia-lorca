@@ -260,3 +260,20 @@ func mustPlan(t *testing.T, in usecase.TuitionPlanInput) domain.TuitionPlan {
 	}
 	return p
 }
+
+// Saving and re-dating must not split: when what the re-dating needs cannot be
+// read, nothing is saved — never "no se pudo guardar" over a plan that was.
+func TestAPlanIsNotSavedWhenItsInscriptionsCannotBeRedated(t *testing.T) {
+	f := windowFixture(t)
+	f.enrollments.err = glerrors.New(glerrors.KindInternal, "students is down")
+
+	_, err := f.svc.UpsertTuitionPlan(context.Background(),
+		windowPlan(ymdUTC(2026, time.July, 1), ymdUTC(2026, time.August, 31)))
+	if err == nil {
+		t.Fatal("the save reported success without re-dating")
+	}
+	stored := f.repo.plans[f.repo.planKey(testCycle, testLevel)]
+	if dateOf(stored.EnrollmentDueOn()) != "2026-06-30" {
+		t.Errorf("the plan was stored (deadline %s) although the save failed", dateOf(stored.EnrollmentDueOn()))
+	}
+}

@@ -72,10 +72,15 @@ type fakeEnrollments struct {
 	byCycle    map[string][]ports.EnrollmentRef
 	gotCycleID string
 	gotGroupID string
+	// err makes ListByCycle fail, as students does when it is unreachable.
+	err error
 }
 
 func (f *fakeEnrollments) ListByCycle(_ context.Context, cycleID, groupID string) ([]ports.EnrollmentRef, error) {
 	f.gotCycleID, f.gotGroupID = cycleID, groupID
+	if f.err != nil {
+		return nil, f.err
+	}
 	var out []ports.EnrollmentRef
 	for _, e := range f.byCycle[cycleID] {
 		if groupID != "" && e.GroupID != groupID {

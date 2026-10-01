@@ -132,64 +132,74 @@ func (s *FinanceService) UpsertTuitionPlan(ctx context.Context, in TuitionPlanIn
 	if err := plan.SharedLineName(); err != nil {
 		return domain.TuitionPlan{}, err
 	}
+	// Everything the re-dating needs is read BEFORE anything is written: a
+	// failure there (students scaled to zero, an unreadable ledger) refuses the
+	// save whole, instead of answering "no se pudo guardar" over a plan that was.
+	moves, err := s.inscriptionMoves(ctx, plan)
+	if err != nil {
+		return domain.TuitionPlan{}, err
+	}
 	saved, err := s.repo.UpsertTuitionPlan(ctx, plan)
 	if err != nil {
 		return domain.TuitionPlan{}, err
 	}
-	if err := s.redateInscriptions(ctx, saved); err != nil {
+	// The one write left. Should it fail the plan is already stored, the error
+	// says so to the caller, a retry is idempotent, and the next run re-dates
+	// the same charges anyway (RunBilling reschedules every inscription).
+	if _, err := s.repo.RescheduleUnpaid(ctx, moves); err != nil {
 		return domain.TuitionPlan{}, err
 	}
 	return saved, nil
 }
 
-// redateInscriptions carries a saved plan's inscription window to the charges
-// of its level that are still owing (T5), at once rather than at the next run:
-// a director who moves a deadline expects the families to see the new date, not
-// to learn that nothing happens until somebody presses "generar".
+// inscriptionMoves is the window each inscription of the plan's level should
+// carry once the plan is saved (T5), so saving carries the dates to the charges
+// still owing at once rather than at the next run: a director who moves a
+// deadline expects the families to see the new date, not to learn that nothing
+// happens until somebody presses "generar".
 //
-// Only the dates move, and only through RescheduleUnpaid's guards — a settled
+// Only dates move, and only through RescheduleUnpaid's guards — a settled
 // charge is never touched. Nothing is issued here; charges not yet issued are
 // issued by the run, with the dates in force when it runs.
-func (s *FinanceService) redateInscriptions(ctx context.Context, plan domain.TuitionPlan) error {
+func (s *FinanceService) inscriptionMoves(ctx context.Context, plan domain.TuitionPlan) ([]ports.ChargeReschedule, error) {
 	if !plan.Active() {
-		return nil
+		return nil, nil
 	}
 	cycle, err := s.cycles.ByID(ctx, plan.CycleID())
 	if err != nil {
-		return err
+		return nil, err
 	}
 	levelOfGroup, err := s.levelOfGroup(ctx, plan.CycleID())
 	if err != nil {
-		return err
+		return nil, err
 	}
 	enrollments, err := s.enrollments.ListByCycle(ctx, plan.CycleID(), "")
 	if err != nil {
-		return err
+		return nil, err
 	}
 	concept, err := s.repo.EnsureConceptOfKind(ctx, s.newID(), domain.KindEnrollment, enrollmentConceptName)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	asOf, err := resolveAsOf("", s.now)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	wanted, err := s.wantedInscriptions(plan.CycleID(), enrollments,
 		map[string]domain.TuitionPlan{plan.LevelID(): plan}, levelOfGroup,
 		cycle.StartsOn, concept.ID(), asOf, s.closedDays(ctx, plan.CycleID()))
 	if err != nil || len(wanted) == 0 {
-		return err
+		return nil, err
 	}
 	issuedRows, err := s.repo.ListIssuedLines(ctx, plan.CycleID(), "")
 	if err != nil {
-		return err
+		return nil, err
 	}
 	wanted, _, err = newIssuedLines(issuedRows).adoptAll(wanted)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	_, err = s.repo.RescheduleUnpaid(ctx, reschedules(wanted))
-	return err
+	return reschedules(wanted), nil
 }
 
 // reschedules is the window each wanted inscription should have.
