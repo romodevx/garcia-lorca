@@ -136,7 +136,7 @@ describe("expenses api (T10)", () => {
   });
 
   it("downloads an export with the session", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(new Blob(["PK"]), { status: 200, headers: { "Content-Disposition": 'attachment; filename="reporte-finanzas-monthly-2026-10-01.xlsx"' } }));
+    const fetchMock = vi.fn().mockResolvedValue(new Response("PK", { status: 200, headers: { "Content-Disposition": 'attachment; filename="reporte-finanzas-monthly-2026-10-01.xlsx"' } }));
     vi.stubGlobal("fetch", fetchMock);
     const got = await downloadReport(BASE, "monthly", "2026-10-15", "xlsx");
     expect(call(fetchMock)[0]).toBe("http://gw/api/v1/expenses/reports/xlsx?period=monthly&date=2026-10-15");

@@ -11,13 +11,13 @@ import (
 	"github.com/garcia-lorca/services/gateway/internal/report"
 )
 
+// fakeSource is called from the builder's three goroutines at once: only the
+// list call records what it was asked.
 type fakeSource struct {
-	asked []string
 	query client.ExpenseQuery
 }
 
-func (f *fakeSource) FinanceSummary(_ context.Context, from, to string) (client.FinanceSummary, error) {
-	f.asked = append(f.asked, "summary "+from+".."+to)
+func (f *fakeSource) FinanceSummary(context.Context, string, string) (client.FinanceSummary, error) {
 	return client.FinanceSummary{
 		Income:          client.MethodTotals{CashCents: 500000, CardCents: 100000, TotalCents: 600000},
 		CreditNoteCents: 20000,
@@ -27,8 +27,7 @@ func (f *fakeSource) FinanceSummary(_ context.Context, from, to string) (client.
 	}, nil
 }
 
-func (f *fakeSource) IncomeByConcept(_ context.Context, from, to string) (client.Income, error) {
-	f.asked = append(f.asked, "income "+from+".."+to)
+func (f *fakeSource) IncomeByConcept(context.Context, string, string) (client.Income, error) {
 	return client.Income{Lines: []client.IncomeLine{{Concept: "Colegiatura", AmountCents: 580000}}, TotalCents: 580000, CreditNoteCents: 20000}, nil
 }
 
