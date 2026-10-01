@@ -65,6 +65,10 @@ type tuitionPlanModel struct {
 	// when it set none, which is what makes the run fall back to the old rule
 	// instead of billing everything due on the zero date.
 	EnrollmentDueOn *time.Time `gorm:"column:enrollment_due_on"`
+	// EnrollmentStartsOn is the first day the inscription opens to families
+	// (T5). NULL is open from issue; never set without EnrollmentDueOn
+	// (tuition_plans_enrollment_window_ck, migration 0020).
+	EnrollmentStartsOn *time.Time `gorm:"column:enrollment_starts_on"`
 	// MonthlyDiscountCents comes off every month of this level.
 	MonthlyDiscountCents int64     `gorm:"column:monthly_discount_cents"`
 	Active               bool      `gorm:"column:active"`
@@ -94,7 +98,10 @@ type chargeModel struct {
 	// anywhere to record it, which is the truth about them.
 	DiscountReason string    `gorm:"column:discount_reason"`
 	DueDate        time.Time `gorm:"column:due_date"`
-	Status         string    `gorm:"column:status"`
+	// StartsOn is the first day the charge opens to the family (T5, migration
+	// 0020). NULL is open from issue — every charge written before it existed.
+	StartsOn *time.Time `gorm:"column:starts_on"`
+	Status   string     `gorm:"column:status"`
 	// ExternalRef ties the charge to the row that caused it in another module
 	// (a uniforms fulfillment, say). Empty means the school's own charge; the
 	// empty string is what the "one concept per cycle" partial index covers, so

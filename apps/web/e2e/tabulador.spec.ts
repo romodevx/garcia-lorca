@@ -126,6 +126,7 @@ test.describe("el tabulador de un nivel", () => {
         active: true,
         fees: [],
         enrollmentDueOn: "",
+        enrollmentStartsOn: "",
         enrollmentConcepts: [
           { name: "INSCRIPCIÓN", tiers: [{ effectiveFrom: `${añoPrevio}-08-31`, effectiveTo: "", amountCents: 500000 }] },
         ],

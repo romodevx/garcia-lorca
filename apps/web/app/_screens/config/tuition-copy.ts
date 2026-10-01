@@ -26,6 +26,7 @@ export function copyPlanToCycle(previous: TuitionPlan, target: Cycle): TuitionPl
     id: "",
     cycleId: target.id,
     enrollmentDueOn: shiftOneYear(previous.enrollmentDueOn),
+    enrollmentStartsOn: shiftOneYear(previous.enrollmentStartsOn),
     policy: { ...previous.policy },
     schedule: previous.schedule.map((i) => ({ ...i })),
     fees: previous.fees.map((f) => ({ ...f, months: [...f.months] })),

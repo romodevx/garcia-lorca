@@ -182,7 +182,10 @@ type chargeResponse struct {
 	AmountCents   int64  `json:"amountCents"`
 	DiscountCents int64  `json:"discountCents"`
 	DueDate       string `json:"dueDate"`
-	Status        string `json:"status"`
+	// StartsOn is the first day the charge opens to the family (T5); empty
+	// when it is open from issue.
+	StartsOn string `json:"startsOn,omitempty"`
+	Status   string `json:"status"`
 	// PaidCents and RemainingCents are derived server-side, never client input.
 	PaidCents      int64 `json:"paidCents"`
 	RemainingCents int64 `json:"remainingCents"`
@@ -198,6 +201,7 @@ func toChargeResponse(c client.Charge) chargeResponse {
 		AmountCents:    c.AmountCents,
 		DiscountCents:  c.DiscountCents,
 		DueDate:        c.DueDate,
+		StartsOn:       c.StartsOn,
 		Status:         c.Status,
 		PaidCents:      c.PaidCents,
 		RemainingCents: c.RemainingCents,

@@ -61,7 +61,7 @@ beforeEach(() => {
   finance.listTuitionPlans.mockResolvedValue([
     { id: "tp1", cycleId: "c1", levelId: "lv2", enrollmentCents: 500000, monthlyCents: 320000,
       months: 10, firstBilledMonth: 9, dueDay: 10, lateFeeCents: 15000, active: true,
-      policy: { dailyMode: false, lateFeeDailyCents: 0, surchargeCountsAllDays: true, earlyPaymentCents: 0, earlyPaymentDays: 0 }, schedule: [], monthlyDiscountCents: 0, fees: [], enrollmentDueOn: "", enrollmentConcepts: [] },
+      policy: { dailyMode: false, lateFeeDailyCents: 0, surchargeCountsAllDays: true, earlyPaymentCents: 0, earlyPaymentDays: 0 }, schedule: [], monthlyDiscountCents: 0, fees: [], enrollmentDueOn: "", enrollmentStartsOn: "", enrollmentConcepts: [] },
   ]);
 });
 afterEach(() => vi.clearAllMocks());
@@ -109,7 +109,7 @@ describe("the tuition table", () => {
     finance.upsertTuitionPlan.mockResolvedValue({
       id: "tp2", cycleId: "c1", levelId: "lv1", enrollmentCents: 400000, monthlyCents: 250000,
       months: 11, firstBilledMonth: 8, dueDay: 5, lateFeeCents: 10000, active: true,
-      policy: { dailyMode: false, lateFeeDailyCents: 0, surchargeCountsAllDays: true, earlyPaymentCents: 0, earlyPaymentDays: 0 }, schedule: [], monthlyDiscountCents: 0, fees: [], enrollmentDueOn: "", enrollmentConcepts: [],
+      policy: { dailyMode: false, lateFeeDailyCents: 0, surchargeCountsAllDays: true, earlyPaymentCents: 0, earlyPaymentDays: 0 }, schedule: [], monthlyDiscountCents: 0, fees: [], enrollmentDueOn: "", enrollmentStartsOn: "", enrollmentConcepts: [],
     });
     render(<Host />);
     await screen.findByText("Primaria");
@@ -420,7 +420,7 @@ describe("cuotas — the extra a school collects on top of the tuition", () => {
       { id: "tp1", cycleId: "c1", levelId: "lv2", enrollmentCents: 500000, monthlyCents: 320000,
         months: 10, firstBilledMonth: 9, dueDay: 10, lateFeeCents: 0, active: true,
         policy: { dailyMode: false, lateFeeDailyCents: 0, surchargeCountsAllDays: true, earlyPaymentCents: 0, earlyPaymentDays: 0 },
-        schedule: [], monthlyDiscountCents: 0, enrollmentDueOn: "", enrollmentConcepts: [],
+        schedule: [], monthlyDiscountCents: 0, enrollmentDueOn: "", enrollmentStartsOn: "", enrollmentConcepts: [],
         fees: [{ name: "Cuota de Julio", amountCents: 160000, months: [9, 10] }] },
     ]);
     const user = userEvent.setup();
@@ -676,6 +676,7 @@ describe("lo que la tabla dice que cuesta la inscripción", () => {
         monthlyCents: 280000, months: 10, firstBilledMonth: 9, dueDay: 10,
         lateFeeCents: 0, active: true, monthlyDiscountCents: 0, schedule: [], fees: [],
         enrollmentDueOn: "",
+        enrollmentStartsOn: "",
         enrollmentConcepts: [
           { name: "INSCRIPCIÓN", tiers: [{ effectiveFrom: "2026-08-01", effectiveTo: "", amountCents: 450000 }] },
           { name: "SEGURO", tiers: [{ effectiveFrom: "2026-08-01", effectiveTo: "", amountCents: 50000 }] },
@@ -712,6 +713,7 @@ describe("la inscripción de un plan sin conceptos", () => {
         monthlyCents: 280000, months: 10, firstBilledMonth: 9, dueDay: 10,
         lateFeeCents: 0, active: true, monthlyDiscountCents: 0, schedule: [], fees: [],
         enrollmentDueOn: "",
+        enrollmentStartsOn: "",
         policy: { dailyMode: false, lateFeeDailyCents: 0, surchargeCountsAllDays: true, earlyPaymentCents: 0, earlyPaymentDays: 0 },
       },
     ]);

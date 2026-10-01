@@ -72,10 +72,15 @@ type fakeEnrollments struct {
 	byCycle    map[string][]ports.EnrollmentRef
 	gotCycleID string
 	gotGroupID string
+	// err makes ListByCycle fail, as students does when it is unreachable.
+	err error
 }
 
 func (f *fakeEnrollments) ListByCycle(_ context.Context, cycleID, groupID string) ([]ports.EnrollmentRef, error) {
 	f.gotCycleID, f.gotGroupID = cycleID, groupID
+	if f.err != nil {
+		return nil, f.err
+	}
 	var out []ports.EnrollmentRef
 	for _, e := range f.byCycle[cycleID] {
 		if groupID != "" && e.GroupID != groupID {
@@ -299,10 +304,19 @@ func (f *fakeRepo) RescheduleUnpaid(_ context.Context, items []ports.ChargeResch
 	moved := 0
 	for _, item := range items {
 		for id, c := range f.charges {
-			if c.ExternalRef() != item.ExternalRef || c.DueDate().Equal(item.DueOn) || f.paidFor(id) > 0 {
+			// The real guards (SQL): a charge still owing — untouched or part
+			// paid — whose window actually differs. Settled and cancelled ones
+			// are history.
+			if c.ExternalRef() != item.ExternalRef || c.Status() == domain.StatusCancelled ||
+				f.paidFor(id) >= c.Effective().Int64() ||
+				(c.DueDate().Equal(item.DueOn) && c.StartsOn().Equal(item.StartsOn)) {
 				continue
 			}
-			f.charges[id] = c.WithDueDate(item.DueOn)
+			moved2, err := c.WithDueDate(item.DueOn).WithStartsOn(item.StartsOn)
+			if err != nil {
+				return 0, err
+			}
+			f.charges[id] = moved2
 			moved++
 		}
 	}

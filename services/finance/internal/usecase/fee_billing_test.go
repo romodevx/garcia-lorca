@@ -287,12 +287,8 @@ func TestChangingTheInscriptionDeadlineMovesChargesAlreadyIssued(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("re-price: %v", err)
 	}
-	got := runOn(t, f, "2026-09-15")
-
-	if got.EnrollmentMoved != 1 {
-		t.Errorf("the run moved %d inscriptions, want 1 — a silent date change is worse than a reported one",
-			got.EnrollmentMoved)
-	}
+	// Saving the plan moves them at once (T5); the run after it finds nothing
+	// left to move. The run's own move is TestTheRunMovesAChangedStartAlone.
 	charges, err := f.svc.ListCharges(context.Background(), testStudent, testCycle)
 	if err != nil {
 		t.Fatalf("ListCharges: %v", err)

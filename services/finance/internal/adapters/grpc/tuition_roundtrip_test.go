@@ -31,7 +31,8 @@ func TestATuitionPlanSurvivesTheWireWhole(t *testing.T) {
 			{Name: "Cuota de Julio", AmountCents: 160000, Months: []int32{9, 10}},
 			{Name: "Seguro escolar", AmountCents: 45000, Months: []int32{9}},
 		},
-		EnrollmentDueOn: "2026-06-30",
+		EnrollmentDueOn:    "2026-06-30",
+		EnrollmentStartsOn: "2026-06-01",
 	}
 
 	res, err := f.h.UpsertTuitionPlan(context.Background(), connect.NewRequest(sent))
@@ -42,6 +43,9 @@ func TestATuitionPlanSurvivesTheWireWhole(t *testing.T) {
 
 	if got.GetEnrollmentDueOn() != "2026-06-30" {
 		t.Errorf("enrollment_due_on came back %q, sent 2026-06-30", got.GetEnrollmentDueOn())
+	}
+	if got.GetEnrollmentStartsOn() != "2026-06-01" {
+		t.Errorf("enrollment_starts_on came back %q, sent 2026-06-01", got.GetEnrollmentStartsOn())
 	}
 	if len(got.GetFees()) != 2 {
 		t.Fatalf("fees came back as %d, sent 2", len(got.GetFees()))
@@ -64,9 +68,10 @@ func TestATuitionPlanSurvivesTheWireWhole(t *testing.T) {
 		t.Fatalf("listed %d plans, want 1", len(listed.Msg.GetPlans()))
 	}
 	stored := listed.Msg.GetPlans()[0]
-	if len(stored.GetFees()) != 2 || stored.GetEnrollmentDueOn() != "2026-06-30" {
-		t.Errorf("the listed plan lost fields: %d fees, deadline %q",
-			len(stored.GetFees()), stored.GetEnrollmentDueOn())
+	if len(stored.GetFees()) != 2 || stored.GetEnrollmentDueOn() != "2026-06-30" ||
+		stored.GetEnrollmentStartsOn() != "2026-06-01" {
+		t.Errorf("the listed plan lost fields: %d fees, window %q..%q",
+			len(stored.GetFees()), stored.GetEnrollmentStartsOn(), stored.GetEnrollmentDueOn())
 	}
 }
 
@@ -143,5 +148,26 @@ func TestAPriceLadderSurvivesTheWireWhole(t *testing.T) {
 					gotTier.GetAmountCents(), wantTier.GetAmountCents())
 			}
 		}
+	}
+}
+
+// T5: an inscription that opens after its deadline, or a malformed opening day,
+// is refused as invalid — never stored as "no start".
+func TestABadInscriptionWindowIsRefused(t *testing.T) {
+	for name, starts := range map[string]string{
+		"after the deadline": "2026-07-01",
+		"malformed":          "01/06/2026",
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t)
+			_, err := f.h.UpsertTuitionPlan(context.Background(), connect.NewRequest(&financev1.UpsertTuitionPlanRequest{
+				CycleId: testCycle, LevelId: "lv-1",
+				MonthlyCents: 320000, Months: 10, FirstBilledMonth: 9, DueDay: 10, Active: true,
+				EnrollmentDueOn: "2026-06-30", EnrollmentStartsOn: starts,
+			}))
+			if connect.CodeOf(err) != connect.CodeInvalidArgument {
+				t.Errorf("got %v, want invalid argument", err)
+			}
+		})
 	}
 }

@@ -181,7 +181,11 @@ func (h *FinanceHandler) RegisterPayment(ctx context.Context, req *connect.Reque
 
 // GetAccount returns a student's account statement.
 func (h *FinanceHandler) GetAccount(ctx context.Context, req *connect.Request[financev1.GetAccountRequest]) (*connect.Response[financev1.GetAccountResponse], error) {
-	statement, err := h.finance.GetAccount(ctx, req.Msg.GetStudentId())
+	read := h.finance.GetAccount
+	if req.Msg.GetFamilyView() {
+		read = h.finance.GetFamilyAccount
+	}
+	statement, err := read(ctx, req.Msg.GetStudentId())
 	if err != nil {
 		return nil, connectErr(err)
 	}
@@ -524,6 +528,7 @@ func toProtoCharge(cwp ports.ChargeWithPaid) *financev1.Charge {
 		AmountCents:    c.Amount().Int64(),
 		DiscountCents:  c.Discount().Int64(),
 		DueDate:        c.DueDate().Format(dueDateLayout),
+		StartsOn:       formatPlanDate(c.StartsOn()),
 		ExternalRef:    c.ExternalRef(),
 		Status:         c.Status(),
 		PaidCents:      cwp.PaidCents,
@@ -592,6 +597,10 @@ func (h *FinanceHandler) UpsertTuitionPlan(ctx context.Context, req *connect.Req
 	if err != nil {
 		return nil, connectErr(err)
 	}
+	enrollmentStarts, err := parsePlanDate(m.GetEnrollmentStartsOn())
+	if err != nil {
+		return nil, connectErr(err)
+	}
 	concepts, err := toDomainEnrollmentConcepts(m.GetEnrollmentConcepts())
 	if err != nil {
 		return nil, connectErr(err)
@@ -611,6 +620,7 @@ func (h *FinanceHandler) UpsertTuitionPlan(ctx context.Context, req *connect.Req
 		MonthlyDiscountCents: m.GetMonthlyDiscountCents(),
 		Fees:                 toDomainFees(m.GetFees()),
 		EnrollmentDueOn:      enrollmentDue,
+		EnrollmentStartsOn:   enrollmentStarts,
 		EnrollmentConcepts:   concepts,
 	})
 	if err != nil {
@@ -670,6 +680,7 @@ func toProtoPlan(p domain.TuitionPlan) *financev1.TuitionPlan {
 		MonthlyDiscountCents: p.MonthlyDiscountCents(),
 		Fees:                 toProtoFees(p.Fees()),
 		EnrollmentDueOn:      formatPlanDate(p.EnrollmentDueOn()),
+		EnrollmentStartsOn:   formatPlanDate(p.EnrollmentStartsOn()),
 		EnrollmentConcepts:   toProtoEnrollmentConcepts(p.EnrollmentConcepts()),
 	}
 }

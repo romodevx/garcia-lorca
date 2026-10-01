@@ -34,6 +34,7 @@ const PREVIOUS: TuitionPlan = {
   monthlyDiscountCents: 0,
   fees: [{ name: "CUOTA DE JULIO", amountCents: 160000, months: [9, 10, 11] }],
   enrollmentDueOn: "2025-06-30",
+  enrollmentStartsOn: "2025-06-01",
   enrollmentConcepts: [
     {
       name: "INSCRIPCIÓN",
@@ -96,6 +97,7 @@ describe("copyPlanToCycle", () => {
 
     expect(copy.enrollmentConcepts[0]?.tiers[0]?.effectiveFrom).toBe("2026-08-31");
     expect(copy.enrollmentDueOn).toBe("2026-06-30");
+    expect(copy.enrollmentStartsOn).toBe("2026-06-01");
   });
 
   // El identificador del plan viejo no puede viajar: sería pedirle al servidor
