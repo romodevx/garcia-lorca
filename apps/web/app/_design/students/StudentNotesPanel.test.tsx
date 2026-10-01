@@ -324,4 +324,34 @@ describe("StudentNotesPanel", () => {
     renderPanel({ composer: "onDemand", startComposing: true });
     expect(await screen.findByLabelText("Nueva nota")).toBeInTheDocument();
   });
+
+  // A refused edit (the note changed or was voided meanwhile) re-reads the
+  // history, so the next try starts from what the note says now.
+  it("re-reads the notes when an edit is refused as stale", async () => {
+    const user = userEvent.setup();
+    api.editNote.mockRejectedValue(new studentsApi.StudentsError(409, "changed"));
+    renderPanel();
+    await screen.findByText("Llegó con fiebre");
+    api.listNotes.mockResolvedValue([{ ...mine, body: "Llegó con fiebre (corregida)" }, theirs]);
+    await user.click(screen.getAllByRole("button", { name: "Editar nota" })[0] as HTMLElement);
+    await user.type(screen.getByLabelText("Texto de la nota"), " y tos");
+    await user.click(screen.getByRole("button", { name: "Guardar nota" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/cambió o fue anulada/);
+    await user.click(screen.getByRole("button", { name: "Cancelar edición" }));
+    expect(await screen.findByText("Llegó con fiebre (corregida)")).toBeInTheDocument();
+  });
+
+  it("says a note no longer exists when the edit answers 404", async () => {
+    const user = userEvent.setup();
+    api.editNote.mockRejectedValue(new studentsApi.StudentsError(404, "not found"));
+    renderPanel();
+    await screen.findByText("Llegó con fiebre");
+    api.listNotes.mockResolvedValue([theirs]);
+    await user.click(screen.getAllByRole("button", { name: "Editar nota" })[0] as HTMLElement);
+    await user.type(screen.getByLabelText("Texto de la nota"), " y tos");
+    await user.click(screen.getByRole("button", { name: "Guardar nota" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/ya no existe/);
+    await user.click(screen.getByRole("button", { name: "Cancelar edición" }));
+    await waitFor(() => expect(screen.queryByText("Llegó con fiebre")).not.toBeInTheDocument());
+  });
 });

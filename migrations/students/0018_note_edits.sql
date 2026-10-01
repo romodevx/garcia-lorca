@@ -12,8 +12,10 @@
 -- anyone else's note only a holder of students:notes_void (the owner).
 --
 -- Revisions are append-only, and the database says so: RLS has a SELECT and an
--- INSERT policy only, so under FORCE an UPDATE or DELETE from the app role
--- matches no row; UPDATE and DELETE are also revoked from PUBLIC. Rows leave
+-- INSERT policy only, and UPDATE and DELETE are revoked from the app role (the
+-- default privileges grant them at CREATE TABLE), so a rewrite is a loud
+-- privilege error rather than a silent no-op — the uniforms ledger's pattern
+-- (uniforms 0001). Rows leave
 -- only with their note (ON DELETE CASCADE: referential actions are not subject
 -- to RLS). Nothing reads them yet — they are the audit trail for the owner.
 -- RLS: ENABLE + FORCE from this first migration, tenant_id on every row.
@@ -53,6 +55,14 @@ CREATE POLICY tenant_read ON student_note_revisions FOR SELECT
 DROP POLICY IF EXISTS tenant_append ON student_note_revisions;
 CREATE POLICY tenant_append ON student_note_revisions FOR INSERT
     WITH CHECK (tenant_id = current_setting('app.current_tenant', true)::uuid);
-REVOKE UPDATE, DELETE ON student_note_revisions FROM PUBLIC;
+-- Guarded on the role existing: a local database or a CI run may apply the
+-- migrations before (or without) the role from setup_app_role.sql.
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app') THEN
+        REVOKE UPDATE, DELETE ON student_note_revisions FROM app;
+    END IF;
+END
+$$;
 
 COMMIT;

@@ -129,12 +129,12 @@ func TestANoteEditKeepsItsRevisionAndIsTenantIsolated(t *testing.T) {
 		t.Errorf("tenant B read tenant A's revisions (RLS read breach): %v %v", revs, err)
 	}
 
-	// Append-only: the app role can neither rewrite nor erase the trail.
-	if err := repo.ExecAsTenant(ctx, `UPDATE student_note_revisions SET previous_body = 'x'`); err != nil {
-		t.Logf("UPDATE refused: %v", err)
-	}
-	if err := repo.ExecAsTenant(ctx, `DELETE FROM student_note_revisions`); err != nil {
-		t.Logf("DELETE refused: %v", err)
+	// Append-only: the app role can neither rewrite nor erase the trail, and is
+	// told so loudly (a privilege error), not by an UPDATE that matches no row.
+	for _, stmt := range []string{`UPDATE student_note_revisions SET previous_body = 'x'`, `DELETE FROM student_note_revisions`} {
+		if err := repo.ExecAsTenant(ctx, stmt); err == nil {
+			t.Errorf("%s: want a privilege error, got none", stmt)
+		}
 	}
 	if revs, _ := repo.RevisionsOf(ctx, note.ID()); len(revs) != 1 || revs[0].PreviousBody != "Fiebre" {
 		t.Errorf("the revision trail was rewritten or erased: %+v", revs)

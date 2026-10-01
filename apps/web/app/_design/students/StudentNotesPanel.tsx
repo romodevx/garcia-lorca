@@ -97,6 +97,7 @@ export function StudentNotesPanel({
   const form = useRequired(NOTE_REQUIRED);
   const [tooLong, setTooLong] = useState<string | undefined>(undefined);
   const [editing, setEditing] = useState<string | undefined>(undefined);
+  const staleList = useRef(false);
   const composeRef = useRef<HTMLDivElement | null>(null);
   // Re-renders an open page at the exact moment the next of the author's own
   // voids stops being offered — not at a periodic re-check, which would leave
@@ -231,8 +232,20 @@ export function StudentNotesPanel({
               {editing === note.id ? (
                 <NoteEditor
                   note={note}
-                  onSave={(body) => state.edit(note, body)}
-                  onDone={() => setEditing(undefined)}
+                  onSave={async (body) => {
+                    const result = await state.edit(note, body);
+                    if (!result.ok && result.stale === true) staleList.current = true;
+                    return result;
+                  }}
+                  onDone={() => {
+                    setEditing(undefined);
+                    // A refused edit said the list is out of date: re-read it, so
+                    // the next edit starts from what the note says now.
+                    if (staleList.current) {
+                      staleList.current = false;
+                      state.reload();
+                    }
+                  }}
                 />
               ) : (
                 <>

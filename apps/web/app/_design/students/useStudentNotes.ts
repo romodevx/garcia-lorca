@@ -5,8 +5,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { API_URL } from "../../api-url";
 import { addNote, editNote, listNotes, StudentsError, type StudentNote } from "../../students/api";
 
-/** Why a write was refused, in the words the school reads. */
-export type NoteWriteResult = { ok: true } | { ok: false; reason: string };
+/**
+ * Why a write was refused, in the words the school reads. `stale`: the note
+ * changed, was voided or is gone since the list was read — re-read before retrying.
+ */
+export type NoteWriteResult = { ok: true } | { ok: false; reason: string; stale?: boolean };
 
 /**
  * A pupil's notes, read once and kept here: the ONE source the three places
@@ -48,7 +51,8 @@ function addRefusal(cause: unknown): string {
 function editRefusal(cause: unknown): string {
   if (!(cause instanceof StudentsError)) return "No se pudo guardar la nota. Intenta de nuevo.";
   if (cause.status === 403) return "Solo quien escribió la nota, o la dirección, puede editarla.";
-  if (cause.isConflict) return "La nota cambió o fue anulada mientras la editabas. Cancela y vuelve a abrirla para ver la versión actual.";
+  if (cause.status === 404) return "Esta nota ya no existe: la anularon. Cancela para ver la lista actual.";
+  if (cause.isConflict) return "La nota cambió o fue anulada mientras la editabas. Cancela para ver la versión actual.";
   if (cause.isInvalid) return "La nota no es válida: escribe de 1 a 2000 caracteres.";
   return "No se pudo guardar la nota. Intenta de nuevo.";
 }
@@ -108,7 +112,8 @@ export function useStudentNotes(studentId: string, enabled = true): StudentNotes
       setNotes((prev) => prev.map((n) => (n.id === note.id ? note : n)));
       return { ok: true };
     } catch (cause) {
-      return { ok: false, reason: editRefusal(cause) };
+      const stale = cause instanceof StudentsError && (cause.isConflict || cause.status === 404);
+      return { ok: false, reason: editRefusal(cause), stale };
     }
   }, [studentId]);
 
