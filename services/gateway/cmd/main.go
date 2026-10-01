@@ -646,6 +646,12 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("GET /api/v1/finance/income", financeRead(financeH.IncomeByConcept))
 	mux.Handle("POST /api/v1/finance/deposits/{id}/void", financeWrite(financeH.VoidDeposit))
 	mux.Handle("GET /api/v1/finance/accounts/{studentId}", collectionsRead(http.HandlerFunc(financeH.GetAccount)))
+	// T7: the student's ledger (one computation, finance's) and its PDF, behind
+	// the same permissions as the account it details.
+	statements := receipt.NewStatementBuilder(financeClient, studentsClient, configClient)
+	statementH := handler.NewStatementHandler(statements)
+	mux.Handle("GET /api/v1/finance/accounts/{studentId}/statement", collectionsRead(http.HandlerFunc(statementH.JSON)))
+	mux.Handle("GET /api/v1/finance/accounts/{studentId}/statement/pdf", collectionsRead(http.HandlerFunc(statementH.PDF)))
 	// The overdue list is school-wide on purpose: it is the counter's own report
 	// (who to call), which the owner approved for this role (ADR 0015).
 	mux.Handle("GET /api/v1/finance/overdue", collectionsRead(http.HandlerFunc(financeH.ListOverdue)))
@@ -789,7 +795,8 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	// are safe to grant to a parent.
 	// configClient (the same one backing the /config/* routes) is reused here only
 	// to resolve grade subject/term ids to names for the family grades screen.
-	familyH := handler.NewFamilyHandler(studentsClient, commsClient, financeClient, gradesClient, attendanceClient, configClient)
+	familyH := handler.NewFamilyHandler(studentsClient, commsClient, financeClient, gradesClient, attendanceClient, configClient,
+		handler.WithFamilyStatements(statements))
 	// familyReadModules composes family:read behind the given module guards, in
 	// addition to module_students which every family route needs for the ownership
 	// check. The guards nest right-to-left, so the outermost listed module is
@@ -823,6 +830,12 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	// that owns the data.
 	mux.Handle("GET /api/v1/family/students/{studentId}/account",
 		familyReadModules([]string{"finance", "students"}, familyH.Account))
+	// T7: the child's ledger — the same computation the office reads, in the
+	// family's view — and its PDF. Ownership is checked by the handler.
+	mux.Handle("GET /api/v1/family/students/{studentId}/statement",
+		familyReadModules([]string{"finance", "students"}, familyH.Statement))
+	mux.Handle("GET /api/v1/family/students/{studentId}/statement/pdf",
+		familyReadModules([]string{"finance", "students"}, familyH.StatementPDF))
 	mux.Handle("GET /api/v1/family/students/{studentId}/profile",
 		familyReadModules([]string{"students"}, familyH.Profile))
 	mux.Handle("GET /api/v1/family/students/{studentId}/grades",

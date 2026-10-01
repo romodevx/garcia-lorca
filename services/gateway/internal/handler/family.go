@@ -125,6 +125,7 @@ type FamilyHandler struct {
 	grades     GradeEntriesReader
 	attendance AttendanceRangeReader
 	catalog    FamilyCatalogReader
+	statements StatementSource
 	now        func() time.Time
 }
 
@@ -135,6 +136,11 @@ type FamilyOption func(*FamilyHandler)
 // default month come from (tests pin it).
 func WithFamilyClock(now func() time.Time) FamilyOption {
 	return func(h *FamilyHandler) { h.now = now }
+}
+
+// WithFamilyStatements wires the ledger the family's statement routes read (T7).
+func WithFamilyStatements(src StatementSource) FamilyOption {
+	return func(h *FamilyHandler) { h.statements = src }
 }
 
 // NewFamilyHandler wires the handler to the students (guardian links + profile),
