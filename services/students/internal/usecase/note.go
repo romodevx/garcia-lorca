@@ -14,7 +14,7 @@ type studentFinder interface {
 	FindByID(ctx context.Context, id string) (*domain.Student, error)
 }
 
-// NoteService writes, lists and voids the notes staff keep about a pupil.
+// NoteService writes, lists, edits and voids the notes staff keep about a pupil.
 // Who wrote a note is always the caller the gateway authenticated, never
 // something a request body says.
 type NoteService struct {
@@ -85,4 +85,26 @@ func (s *NoteService) VoidNote(ctx context.Context, studentID, noteID, by string
 		return domain.Note{}, err
 	}
 	return voided, nil
+}
+
+// EditNote replaces the text of a note of `studentID`, by `editor`, now. The
+// rules (its author at any time, anyone else only with editsAny) are the
+// domain's; the replaced text is kept as a revision in the same write. A note
+// of another pupil is KindNotFound, which never confirms it exists.
+func (s *NoteService) EditNote(ctx context.Context, studentID, noteID, body string, editor domain.NoteAuthor, editsAny bool) (domain.Note, error) {
+	note, err := s.notes.NoteByID(ctx, noteID)
+	if err != nil {
+		return domain.Note{}, err
+	}
+	if note.StudentID() != studentID {
+		return domain.Note{}, glerrors.ErrNotFound
+	}
+	edited, rev, err := note.Edit(body, editor, s.now(), editsAny)
+	if err != nil {
+		return domain.Note{}, err
+	}
+	if err := s.notes.EditNote(ctx, edited, rev); err != nil {
+		return domain.Note{}, err
+	}
+	return edited, nil
 }

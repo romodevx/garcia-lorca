@@ -34,6 +34,10 @@ func (m *memNotes) NoteByID(_ context.Context, id string) (domain.Note, error) {
 	return n, nil
 }
 func (m *memNotes) VoidNote(_ context.Context, n domain.Note) error { m.byID[n.ID()] = n; return nil }
+func (m *memNotes) EditNote(_ context.Context, n domain.Note, _ domain.NoteRevision) error {
+	m.byID[n.ID()] = n
+	return nil
+}
 
 func newNotesHandler(t *testing.T) *grpcadapter.StudentsHandler {
 	t.Helper()
@@ -86,5 +90,38 @@ func TestStudentNotesAreAddedListedAndVoided(t *testing.T) {
 func TestStudentNotesWithoutAServiceAreUnimplemented(t *testing.T) {
 	h, _ := newHandler(t)
 	_, err := h.ListStudentNotes(context.Background(), connect.NewRequest(&studentsv1.ListStudentNotesRequest{StudentId: "stu-1"}))
+	assertCode(t, err, connect.CodeUnimplemented)
+}
+
+// An edit carries its editor and time to the edge; someone else's note is
+// refused unless the gateway says the caller edits any.
+func TestStudentNotesAreEdited(t *testing.T) {
+	h := newNotesHandler(t)
+	ctx := context.Background()
+	if _, err := h.AddStudentNote(ctx, connect.NewRequest(&studentsv1.AddStudentNoteRequest{
+		StudentId: "stu-1", Body: "Fiebre", AuthorUserId: "u-1", AuthorName: "Gabriela Rojas",
+	})); err != nil {
+		t.Fatalf("AddStudentNote: %v", err)
+	}
+
+	_, err := h.EditStudentNote(ctx, connect.NewRequest(&studentsv1.EditStudentNoteRequest{
+		StudentId: "stu-1", NoteId: "note-1", Body: "Fiebre de 38", EditorUserId: "u-other", EditorName: "Otro",
+	}))
+	assertCode(t, err, connect.CodePermissionDenied)
+
+	res, err := h.EditStudentNote(ctx, connect.NewRequest(&studentsv1.EditStudentNoteRequest{
+		StudentId: "stu-1", NoteId: "note-1", Body: "Fiebre de 38", EditorUserId: "u-owner", EditorName: "Dirección", EditsAny: true,
+	}))
+	if err != nil {
+		t.Fatalf("EditStudentNote: %v", err)
+	}
+	n := res.Msg.GetNote()
+	if n.GetBody() != "Fiebre de 38" || n.GetUpdatedAt() == nil || n.GetUpdatedBy() != "u-owner" ||
+		n.GetUpdatedByName() != "Dirección" || n.GetAuthorName() != "Gabriela Rojas" {
+		t.Errorf("edited = %+v", n)
+	}
+
+	h2, _ := newHandler(t)
+	_, err = h2.EditStudentNote(ctx, connect.NewRequest(&studentsv1.EditStudentNoteRequest{StudentId: "stu-1"}))
 	assertCode(t, err, connect.CodeUnimplemented)
 }

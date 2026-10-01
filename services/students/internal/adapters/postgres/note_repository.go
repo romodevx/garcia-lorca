@@ -105,6 +105,72 @@ func (r *Repository) VoidNote(ctx context.Context, n domain.Note) error {
 	})
 }
 
+// EditNote stores an edit and the revision that keeps the replaced text, in one
+// transaction. The note's previous body and `voided_at IS NULL` ride in the
+// WHERE: two edits at once, a stale page, or a note voided meanwhile change
+// nothing and are told (KindConflict) instead of losing the other's text. A
+// note this tenant cannot see is KindNotFound.
+func (r *Repository) EditNote(ctx context.Context, n domain.Note, rev domain.NoteRevision) error {
+	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		editor := n.UpdatedBy().UserID
+		res := tx.Model(&noteModel{}).
+			Where("id = ? AND voided_at IS NULL AND body = ?", n.ID(), rev.PreviousBody).
+			Updates(map[string]any{
+				"body": n.Body(), "updated_at": n.UpdatedAt(),
+				"updated_by": editor, "updated_by_name": n.UpdatedBy().Name,
+			})
+		if res.Error != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "editing the note", res.Error)
+		}
+		if res.RowsAffected != 1 {
+			return whyNotEdited(tx, n.ID())
+		}
+		row := noteRevisionModel{
+			ID: uuid.NewString(), TenantID: r.tenantID, NoteID: rev.NoteID, PreviousBody: rev.PreviousBody,
+			EditedBy: rev.EditedBy.UserID, EditedByName: rev.EditedBy.Name, EditedAt: rev.EditedAt,
+		}
+		if err := tx.Create(&row).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "keeping the note's previous text", err)
+		}
+		return nil
+	})
+}
+
+// whyNotEdited tells a note that is not there (or not this tenant's) from one
+// that changed or was voided since it was read.
+func whyNotEdited(tx *gorm.DB, id string) error {
+	var exists int64
+	if err := tx.Model(&noteModel{}).Where("id = ?", id).Count(&exists).Error; err != nil {
+		return glerrors.Wrap(glerrors.KindInternal, "reading the note", err)
+	}
+	if exists == 0 {
+		return glerrors.ErrNotFound
+	}
+	return glerrors.New(glerrors.KindConflict, "the note was voided or changed since it was read")
+}
+
+// RevisionsOf returns the texts a note's edits replaced, newest first: the
+// audit trail of a note, bounded like every list read here.
+func (r *Repository) RevisionsOf(ctx context.Context, noteID string) ([]domain.NoteRevision, error) {
+	var out []domain.NoteRevision
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		var rows []noteRevisionModel
+		if err := tx.Where("note_id = ?", noteID).
+			Order("edited_at DESC, id DESC").Limit(maxNotesListed).Find(&rows).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "listing the note's revisions", err)
+		}
+		out = make([]domain.NoteRevision, 0, len(rows))
+		for _, m := range rows {
+			out = append(out, domain.NoteRevision{
+				NoteID: m.NoteID, PreviousBody: m.PreviousBody,
+				EditedBy: domain.NoteAuthor{UserID: m.EditedBy, Name: m.EditedByName}, EditedAt: m.EditedAt,
+			})
+		}
+		return nil
+	})
+	return out, err
+}
+
 func noteToDomain(m noteModel) domain.Note {
 	var voidedAt time.Time
 	if m.VoidedAt != nil {
@@ -114,6 +180,10 @@ func noteToDomain(m noteModel) domain.Note {
 	if m.VoidedBy != nil {
 		voidedBy = *m.VoidedBy
 	}
-	return domain.RestoreNote(m.ID, m.TenantID, m.StudentID, m.Body,
+	n := domain.RestoreNote(m.ID, m.TenantID, m.StudentID, m.Body,
 		domain.NoteAuthor{UserID: m.AuthorUserID, Name: m.AuthorName}, m.CreatedAt, voidedAt, voidedBy)
+	if m.UpdatedAt != nil && m.UpdatedBy != nil {
+		n = n.WithStoredEdit(*m.UpdatedAt, domain.NoteAuthor{UserID: *m.UpdatedBy, Name: m.UpdatedByName})
+	}
+	return n
 }

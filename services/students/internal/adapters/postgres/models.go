@@ -136,6 +136,25 @@ type noteModel struct {
 	CreatedAt    time.Time  `gorm:"column:created_at"`
 	VoidedAt     *time.Time `gorm:"column:voided_at"`
 	VoidedBy     *string    `gorm:"column:voided_by"`
+	// The last edit; NULL / "" until the note is edited (0018). Not GORM's
+	// automatic UpdatedAt: only an edit sets it, never a create or a void.
+	UpdatedAt     *time.Time `gorm:"column:updated_at;autoUpdateTime:false"`
+	UpdatedBy     *string    `gorm:"column:updated_by"`
+	UpdatedByName string     `gorm:"column:updated_by_name"`
 }
 
 func (noteModel) TableName() string { return "student_notes" }
+
+// noteRevisionModel is the GORM row for `student_note_revisions`: the text one
+// edit replaced. Inserted with the edit, never updated.
+type noteRevisionModel struct {
+	ID           string    `gorm:"column:id;primaryKey"`
+	TenantID     string    `gorm:"column:tenant_id"`
+	NoteID       string    `gorm:"column:note_id"`
+	PreviousBody string    `gorm:"column:previous_body"`
+	EditedBy     string    `gorm:"column:edited_by"`
+	EditedByName string    `gorm:"column:edited_by_name"`
+	EditedAt     time.Time `gorm:"column:edited_at"`
+}
+
+func (noteRevisionModel) TableName() string { return "student_note_revisions" }

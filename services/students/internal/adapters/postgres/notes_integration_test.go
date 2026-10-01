@@ -75,3 +75,65 @@ func TestANoteIdThatIsNotAUUIDIsNotFound(t *testing.T) {
 		}
 	}
 }
+
+// An edit replaces the text and records who and when; the replaced text is
+// kept as a revision; a stale edit (the note changed meanwhile) or an edit of a
+// voided note is KindConflict; another tenant cannot edit nor read revisions.
+func TestANoteEditKeepsItsRevisionAndIsTenantIsolated(t *testing.T) {
+	ctx := context.Background()
+	repo := appRepo(t, tenantA)
+	const studentID = "aaaaaaaa-0000-0000-0000-0000000006b1"
+	if err := repo.Create(ctx, applicant(t, studentID, tenantA, "NOTB050312MDFRNN01", "1° A")); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	at := time.Date(2026, 9, 24, 10, 0, 0, 0, time.UTC)
+	who := domain.NoteAuthor{UserID: "60000000-0000-0000-0000-0000000006b1", Name: "Gabriela Rojas"}
+	note, _ := domain.NewNote("b6000000-0000-0000-0000-0000000000b1", tenantA, studentID, "Fiebre", who, at)
+	if err := repo.AddNote(ctx, note); err != nil {
+		t.Fatalf("AddNote: %v", err)
+	}
+
+	edited, rev, err := note.Edit("Fiebre de 38", who, at.Add(time.Hour), false)
+	if err != nil {
+		t.Fatalf("Edit: %v", err)
+	}
+	if err := repo.EditNote(ctx, edited, rev); err != nil {
+		t.Fatalf("EditNote: %v", err)
+	}
+	stored, err := repo.NoteByID(ctx, note.ID())
+	if err != nil || stored.Body() != "Fiebre de 38" || !stored.UpdatedAt().Equal(at.Add(time.Hour)) || stored.UpdatedBy() != who {
+		t.Fatalf("NoteByID = %+v, %v: want the edit recorded", stored, err)
+	}
+	listed, err := repo.NotesOf(ctx, studentID)
+	if err != nil || len(listed) != 1 || !listed[0].IsEdited() {
+		t.Errorf("NotesOf = %+v, %v: want the edited note", listed, err)
+	}
+	revs, err := repo.RevisionsOf(ctx, note.ID())
+	if err != nil || len(revs) != 1 || revs[0].PreviousBody != "Fiebre" || revs[0].EditedBy != who {
+		t.Errorf("RevisionsOf = %+v, %v: want the replaced text", revs, err)
+	}
+
+	// The same edit again: the note no longer says "Fiebre" — a stale page.
+	if err := repo.EditNote(ctx, edited, rev); glerrors.KindOf(err) != glerrors.KindConflict {
+		t.Errorf("stale EditNote: want KindConflict, got %v", err)
+	}
+	if revs, _ := repo.RevisionsOf(ctx, note.ID()); len(revs) != 1 {
+		t.Errorf("a refused edit kept a revision: %+v", revs)
+	}
+
+	again, rev2, _ := stored.Edit("Fiebre de 39", who, at.Add(2*time.Hour), false)
+	if err := appRepo(t, tenantB).EditNote(ctx, again, rev2); glerrors.KindOf(err) != glerrors.KindNotFound {
+		t.Errorf("tenant B edited tenant A's note (RLS write breach): %v", err)
+	}
+	if revs, err := appRepo(t, tenantB).RevisionsOf(ctx, note.ID()); err != nil || len(revs) != 0 {
+		t.Errorf("tenant B read tenant A's revisions (RLS read breach): %v %v", revs, err)
+	}
+
+	voided, _ := stored.Void(who.UserID, at.Add(3*time.Hour), true)
+	if err := repo.VoidNote(ctx, voided); err != nil {
+		t.Fatalf("VoidNote: %v", err)
+	}
+	if err := repo.EditNote(ctx, again, rev2); glerrors.KindOf(err) != glerrors.KindConflict {
+		t.Errorf("edit of a voided note: want KindConflict, got %v", err)
+	}
+}

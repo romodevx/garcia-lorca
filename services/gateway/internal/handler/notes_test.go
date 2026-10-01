@@ -13,9 +13,14 @@ import (
 )
 
 type fakeNotes struct {
-	gotStudent, gotBody, gotNote, gotVoidedBy string
-	gotAuthor                                 client.NoteAuthor
-	gotIncludeVoided, gotVoidsAny             bool
+	gotStudent, gotBody, gotNote, gotVoidedBy  string
+	gotAuthor, gotEditor                       client.NoteAuthor
+	gotIncludeVoided, gotVoidsAny, gotEditsAny bool
+}
+
+func (f *fakeNotes) EditStudentNote(_ context.Context, studentID, noteID, body string, editor client.NoteAuthor, editsAny bool) (client.StudentNote, error) {
+	f.gotStudent, f.gotNote, f.gotBody, f.gotEditor, f.gotEditsAny = studentID, noteID, body, editor, editsAny
+	return client.StudentNote{ID: noteID, Body: body, UpdatedByName: editor.Name}, nil
 }
 
 func (f *fakeNotes) AddStudentNote(_ context.Context, studentID, body string, author client.NoteAuthor) (client.StudentNote, error) {
@@ -99,5 +104,42 @@ func TestVoidingCarriesTheCallerAndWhetherTheyVoidAny(t *testing.T) {
 	h.Void(httptest.NewRecorder(), notesRequest(http.MethodPost, "/", "", "students:notes_void"))
 	if !svc.gotVoidsAny {
 		t.Error("students:notes_void did not void any")
+	}
+}
+
+// The editor is the signed-in caller, named from iam; a body claiming another
+// editor is ignored. Editing anyone's note follows students:notes_void.
+func TestANoteEditIsSignedByTheCaller(t *testing.T) {
+	cases := map[string]struct {
+		perms        []string
+		wantEditsAny bool
+	}{
+		"a writer":          {[]string{"students:notes_write"}, false},
+		"whoever voids any": {[]string{"students:notes_write", "students:notes_void"}, true},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			svc := &fakeNotes{}
+			h := handler.NewNotesHandler(svc, fakeNamer{user: client.User{DisplayName: "Gabriela Rojas"}})
+			rec := httptest.NewRecorder()
+			h.Edit(rec, notesRequest(http.MethodPatch, "/api/v1/students/stu-1/notes/n-1",
+				`{"body":"Fiebre de 38","editorUserId":"u-owner"}`, tc.perms...))
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
+			}
+			if svc.gotEditor != (client.NoteAuthor{UserID: "u-me", Name: "Gabriela Rojas"}) ||
+				svc.gotStudent != "stu-1" || svc.gotNote != "n-1" || svc.gotBody != "Fiebre de 38" || svc.gotEditsAny != tc.wantEditsAny {
+				t.Errorf("forwarded = %+v", svc)
+			}
+		})
+	}
+}
+
+func TestANoteEditWithABrokenBodyIsBadRequest(t *testing.T) {
+	h := handler.NewNotesHandler(&fakeNotes{}, fakeNamer{})
+	rec := httptest.NewRecorder()
+	h.Edit(rec, notesRequest(http.MethodPatch, "/", `{"body":`, "students:notes_write"))
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rec.Code)
 	}
 }

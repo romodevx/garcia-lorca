@@ -1108,7 +1108,8 @@ paths:
       description: >
         Needs students:notes_write. The author is the signed-in caller (named
         from iam, or by email when the account has no name); any author field
-        in the body is ignored. A note is never edited.
+        in the body is ignored. A note can be edited later (PATCH); every edit
+        keeps the text it replaced.
       operationId: addStudentNote
       security: [{ sessionCookie: [] }]
       parameters:
@@ -1133,6 +1134,52 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/students/{id}/notes/{noteId}:
+    patch:
+      tags: [students]
+      summary: Edit a note
+      description: >
+        Replaces the note's text. The text it replaced is kept as a revision
+        (who replaced it, and when), so the history is never lost. Its author
+        may edit it at any time (students:notes_write); anyone else's note only
+        a holder of students:notes_void (the owner). A voided note is not
+        edited. The editor is the signed-in caller; any editor field in the
+        body is ignored.
+      operationId: editStudentNote
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+        - $ref: '#/components/parameters/StudentIdPath'
+        - { name: noteId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties:
+                body: { type: string, minLength: 1, maxLength: 2000, example: "Llegó con fiebre; se avisó a la mamá a las 9:10." }
+      responses:
+        '200':
+          description: The edited note.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StudentNote' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: Not the author, and no students:notes_void.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: The note was voided, or changed since it was read.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /api/v1/students/{id}/notes/{noteId}/void:
     post:
@@ -4330,6 +4377,8 @@ components:
         createdAt: { type: string, format: date-time }
         voided: { type: boolean }
         voidedAt: { type: string, format: date-time, description: "Present only on a voided note." }
+        updatedAt: { type: string, format: date-time, description: "Present only on an edited note: when it was last edited." }
+        updatedByName: { type: string, example: "Gabriela Rojas", description: "Present only on an edited note: who last edited it, as their name read then." }
 
     Invitation:
       type: object

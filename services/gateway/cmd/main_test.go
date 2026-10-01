@@ -216,6 +216,10 @@ func (stubStudents) ListStudentNotes(_ context.Context, _ *connect.Request[stude
 	return connect.NewResponse(&studentsv1.ListStudentNotesResponse{}), nil
 }
 
+func (stubStudents) EditStudentNote(_ context.Context, _ *connect.Request[studentsv1.EditStudentNoteRequest]) (*connect.Response[studentsv1.EditStudentNoteResponse], error) {
+	return connect.NewResponse(&studentsv1.EditStudentNoteResponse{Note: &studentsv1.StudentNote{Id: "n-1"}}), nil
+}
+
 func (stubStudents) VoidStudentNote(_ context.Context, _ *connect.Request[studentsv1.VoidStudentNoteRequest]) (*connect.Response[studentsv1.VoidStudentNoteResponse], error) {
 	return connect.NewResponse(&studentsv1.VoidStudentNoteResponse{Note: &studentsv1.StudentNote{Id: "n-1"}}), nil
 }
@@ -2891,7 +2895,7 @@ func TestMedicalRecordAnswersToItsOwnPermission(t *testing.T) {
 }
 
 // Notes on a pupil (task 6): reading them is reading the pupil; writing and
-// voiding need students:notes_write.
+// voiding and editing need students:notes_write.
 func TestStudentNotesAnswerToTheirPermissions(t *testing.T) {
 	gw := newTestGateway(t, map[string]bool{"module_students": true})
 	cases := []struct {
@@ -2903,6 +2907,8 @@ func TestStudentNotesAnswerToTheirPermissions(t *testing.T) {
 		{http.MethodPost, "/api/v1/students/stu-1/notes", "notes-writer", `{"body":"x"}`, http.StatusCreated},
 		{http.MethodPost, "/api/v1/students/stu-1/notes/n-1/void", "student-reader", "", http.StatusForbidden},
 		{http.MethodPost, "/api/v1/students/stu-1/notes/n-1/void", "notes-writer", "", http.StatusOK},
+		{http.MethodPatch, "/api/v1/students/stu-1/notes/n-1", "student-reader", `{"body":"y"}`, http.StatusForbidden},
+		{http.MethodPatch, "/api/v1/students/stu-1/notes/n-1", "notes-writer", `{"body":"y"}`, http.StatusOK},
 	}
 	for _, tc := range cases {
 		if res := doGateway(t, gw, tc.method, tc.path, tc.token, tc.body); res.StatusCode != tc.want {

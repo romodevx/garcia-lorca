@@ -242,6 +242,10 @@ type NoteRepository interface {
 	NotesOf(ctx context.Context, studentID string) ([]domain.Note, error)
 	NoteByID(ctx context.Context, id string) (domain.Note, error)
 	VoidNote(ctx context.Context, n domain.Note) error
+	// EditNote stores an edit and its revision in one transaction. It applies
+	// only while the note is not voided and still says rev.PreviousBody;
+	// otherwise KindConflict (two edits at once, or a stale page).
+	EditNote(ctx context.Context, n domain.Note, rev domain.NoteRevision) error
 }
 
 // CardRepository keeps the codes of the pupils' virtual cards (task 13).

@@ -10,7 +10,8 @@ import (
 	"github.com/garcia-lorca/services/gateway/internal/middleware"
 )
 
-// permVoidAnyNote lets a caller void any note, at any time (the owner, task 6).
+// permVoidAnyNote lets a caller void any note, at any time — and edit any note
+// (the owner, task 6). Without it a writer edits only their own notes.
 const permVoidAnyNote = "students:notes_void"
 
 // NotesService is the notes surface of the students service.
@@ -18,6 +19,7 @@ type NotesService interface {
 	AddStudentNote(ctx context.Context, studentID, body string, author client.NoteAuthor) (client.StudentNote, error)
 	ListStudentNotes(ctx context.Context, studentID string, includeVoided bool) ([]client.StudentNote, error)
 	VoidStudentNote(ctx context.Context, studentID, noteID, voidedBy string, voidsAny bool) (client.StudentNote, error)
+	EditStudentNote(ctx context.Context, studentID, noteID, body string, editor client.NoteAuthor, editsAny bool) (client.StudentNote, error)
 }
 
 // UserNamer names the caller for the note's byline.
@@ -76,6 +78,29 @@ func (h *NotesHandler) Void(w http.ResponseWriter, r *http.Request) {
 	p, _ := middleware.PrincipalFrom(r.Context())
 	note, err := h.svc.VoidStudentNote(r.Context(), r.PathValue("id"), r.PathValue("noteId"),
 		p.UserID, callerHolds(r, permVoidAnyNote))
+	if err != nil {
+		writeConnectError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, note)
+}
+
+type editNoteRequest struct {
+	Body string `json:"body"`
+}
+
+// Edit handles PATCH /api/v1/students/{id}/notes/{noteId}. The editor is the
+// signed-in caller; the replaced text is kept by the students service.
+func (h *NotesHandler) Edit(w http.ResponseWriter, r *http.Request) {
+	var req editNoteRequest
+	if err := decodeJSONBody(w, r, &req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	p, _ := middleware.PrincipalFrom(r.Context())
+	editor := client.NoteAuthor{UserID: p.UserID, Name: callerName(r.Context(), h.names, p)}
+	note, err := h.svc.EditStudentNote(r.Context(), r.PathValue("id"), r.PathValue("noteId"), req.Body,
+		editor, callerHolds(r, permVoidAnyNote))
 	if err != nil {
 		writeConnectError(w, err)
 		return

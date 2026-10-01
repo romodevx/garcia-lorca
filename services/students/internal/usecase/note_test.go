@@ -15,8 +15,9 @@ import (
 // memNotes behaves as the repository does: a note on a pupil it does not know
 // is KindNotFound (that check is the repository's, not the use case's).
 type memNotes struct {
-	byID     map[string]domain.Note
-	students map[string]bool
+	byID      map[string]domain.Note
+	students  map[string]bool
+	revisions []domain.NoteRevision
 }
 
 func (m *memNotes) AddNote(_ context.Context, n domain.Note) error {
@@ -48,6 +49,13 @@ func (m *memNotes) NoteByID(_ context.Context, id string) (domain.Note, error) {
 
 func (m *memNotes) VoidNote(_ context.Context, n domain.Note) error {
 	m.byID[n.ID()] = n
+	return nil
+}
+
+// EditNote keeps the revision, as the repository does in the same transaction.
+func (m *memNotes) EditNote(_ context.Context, n domain.Note, rev domain.NoteRevision) error {
+	m.byID[n.ID()] = n
+	m.revisions = append(m.revisions, rev)
 	return nil
 }
 
@@ -149,5 +157,55 @@ func TestANoteIdThatIsNotAnIdIsNotFound(t *testing.T) {
 	ctx := context.Background()
 	if _, err := f.svc.VoidNote(ctx, f.student, "abc", gabriela.UserID, true); glerrors.KindOf(err) != glerrors.KindNotFound {
 		t.Errorf("VoidNote(abc): want KindNotFound, got %v", err)
+	}
+}
+
+func TestAnEditReplacesTheTextAndKeepsTheOldOne(t *testing.T) {
+	f := newNoteFixture(t)
+	ctx := context.Background()
+	n, _ := f.svc.AddNote(ctx, f.student, "Llegó con fiebre", gabriela)
+	f.clock = f.clock.Add(48 * time.Hour)
+
+	edited, err := f.svc.EditNote(ctx, f.student, n.ID(), "Llegó con fiebre de 38", gabriela, false)
+	if err != nil {
+		t.Fatalf("EditNote: %v", err)
+	}
+	if edited.Body() != "Llegó con fiebre de 38" || !edited.UpdatedAt().Equal(f.clock) || edited.UpdatedBy() != gabriela {
+		t.Errorf("edited = %+v", edited)
+	}
+	if len(f.notes.revisions) != 1 || f.notes.revisions[0].PreviousBody != "Llegó con fiebre" {
+		t.Errorf("revisions = %+v", f.notes.revisions)
+	}
+	listed, _ := f.svc.ListNotes(ctx, f.student, false)
+	if len(listed) != 1 || listed[0].Body() != "Llegó con fiebre de 38" {
+		t.Errorf("listed = %+v", listed)
+	}
+}
+
+func TestOnlyTheAuthorOrWhoeverEditsAnyEditsANote(t *testing.T) {
+	f := newNoteFixture(t)
+	ctx := context.Background()
+	n, _ := f.svc.AddNote(ctx, f.student, "x", gabriela)
+	other := domain.NoteAuthor{UserID: "u-other", Name: "Otro"}
+	if _, err := f.svc.EditNote(ctx, f.student, n.ID(), "y", other, false); glerrors.KindOf(err) != glerrors.KindForbidden {
+		t.Errorf("someone else: want KindForbidden, got %v", err)
+	}
+	if _, err := f.svc.EditNote(ctx, f.student, n.ID(), "y", domain.NoteAuthor{UserID: "u-owner"}, true); err != nil {
+		t.Errorf("whoever edits any: %v", err)
+	}
+}
+
+func TestEditingANoteOfAnotherPupilOrNoNoteIsNotFound(t *testing.T) {
+	f := newNoteFixture(t)
+	ctx := context.Background()
+	n, _ := f.svc.AddNote(ctx, f.student, "x", gabriela)
+	if _, err := f.svc.EditNote(ctx, "another-pupil", n.ID(), "y", gabriela, true); glerrors.KindOf(err) != glerrors.KindNotFound {
+		t.Errorf("another pupil: want KindNotFound, got %v", err)
+	}
+	if _, err := f.svc.EditNote(ctx, f.student, "abc", "y", gabriela, true); glerrors.KindOf(err) != glerrors.KindNotFound {
+		t.Errorf("no such note: want KindNotFound, got %v", err)
+	}
+	if len(f.notes.revisions) != 0 {
+		t.Errorf("a refused edit kept a revision: %+v", f.notes.revisions)
 	}
 }
