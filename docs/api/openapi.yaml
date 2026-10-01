@@ -207,6 +207,47 @@ paths:
         '403': { $ref: '#/components/responses/PlainForbidden' }
         '404': { $ref: '#/components/responses/PlainNotFound' }
 
+  /api/v1/family/students/{studentId}/statement:
+    get:
+      tags: [family]
+      summary: A child's account statement (ledger)
+      description: >
+        T7. The same ledger the school reads (see `getStudentStatement`), in
+        the family's view: charges that have not opened are left out and
+        voided deposits are not shown. The balance is the same number.
+        A child that is not the caller's is 404. Behind `module_finance` AND
+        `module_students`. Requires `family:read`.
+      operationId: getFamilyStatement
+      security: [{ familyBearer: [] }]
+      parameters: [{ $ref: '#/components/parameters/FamilyStudentIdPath' }]
+      responses:
+        '200':
+          description: The ledger.
+          headers:
+            Cache-Control: { $ref: '#/components/headers/NoStore' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Statement' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
+  /api/v1/family/students/{studentId}/statement/pdf:
+    get:
+      tags: [family]
+      summary: A child's account statement as a PDF
+      description: >
+        The family's ledger as a PDF, same rules as the JSON. Behind
+        `module_finance` AND `module_students`. Requires `family:read`.
+      operationId: getFamilyStatementPdf
+      security: [{ familyBearer: [] }]
+      parameters: [{ $ref: '#/components/parameters/FamilyStudentIdPath' }]
+      responses:
+        '200': { $ref: '#/components/responses/StatementPDF' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
   /api/v1/uniforms/items:
     get:
       tags: [uniforms-catalogue]
@@ -2864,6 +2905,73 @@ paths:
         '409':
           description: The deposit was already cancelled.
 
+  /api/v1/finance/accounts/{studentId}/statement:
+    get:
+      tags: [finance-payments]
+      summary: A student's account statement (ledger)
+      description: >
+        T7. The student's ledger, worked out ONCE in finance (`GetStatement`)
+        and read unchanged by this drawer, the parents' app and the PDF: every
+        movement in date order with the running balance after it, the totals,
+        and the counter's figures for today.
+
+
+        Movements: `charge`, `surcharge` (written down, or `accrued` — earned
+        by the daily rule up to today and not yet written; it counts, it is
+        what the counter would collect), `discount`, `scholarship` (reserved
+        for T18), `payment` (one line per deposit — money as it arrived, with
+        its folio and method — plus payments made straight against a charge),
+        `credit_note` (reserved for T8). Cancelled charges, and surcharges of a
+        cancelled month, are not movements.
+
+
+        A charge that has not opened yet (T5, `startsOn` in the future, no
+        money on it) is listed with `notYetDue: true` and is NOT counted: the
+        balance is the same number the family reads. A voided deposit is
+        listed with `voided: true` and its reason, struck through, and is NOT
+        counted.
+
+
+        `totals.balanceCents` = charged − discounts − paid; negative is credit
+        the school holds for the family. `dueTodayCents` is exactly what
+        Registrar pago asks for today (same function), already carrying the
+        accrued surcharge and net of the early-payment reward.
+        Requires `finance:read` or `collections:read`.
+      operationId: getStudentStatement
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/FamilyStudentIdPath'
+      responses:
+        '200':
+          description: The ledger.
+          headers:
+            Cache-Control: { $ref: '#/components/headers/NoStore' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Statement' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+
+  /api/v1/finance/accounts/{studentId}/statement/pdf:
+    get:
+      tags: [finance-payments]
+      summary: A student's account statement as a PDF
+      description: >
+        The same ledger on letter pages (the receipts' engine): the school,
+        the pupil, every movement with its running balance, the totals and
+        today's figure. Runs onto as many pages as it needs. Requires
+        `finance:read` or `collections:read`.
+      operationId: getStudentStatementPdf
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/FamilyStudentIdPath'
+      responses:
+        '200': { $ref: '#/components/responses/StatementPDF' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+
   /api/v1/finance/cash-up:
     get:
       tags: [finance-payments]
@@ -3747,6 +3855,16 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/ReportCard' }
+    StatementPDF:
+      description: The account statement as a letter-size PDF, downloaded as an attachment.
+      headers:
+        Cache-Control: { $ref: '#/components/headers/NoStore' }
+        Content-Disposition:
+          description: attachment; filename="estado-de-cuenta-<asOf>.pdf"
+          schema: { type: string, example: 'attachment; filename="estado-de-cuenta-2026-10-01.pdf"' }
+      content:
+        application/pdf:
+          schema: { type: string, format: binary }
     ReportCardPDF:
       description: The report card as a letter-size PDF, downloaded as an attachment.
       headers:
@@ -4663,6 +4781,106 @@ components:
               amountCents: { type: integer, format: int64, minimum: 0 }
         totalCents: { type: integer, format: int64, minimum: 0 }
 
+    Statement:
+      type: object
+      description: >
+        A student's ledger (T7): movements in date order — on a day, each
+        charge with its own adjustments right after it, then the money — with
+        the running balance after each line.
+      required: [movements, totals, dueTodayCents, surchargeCents, earlyDiscountCents, unallocatedCents, asOf]
+      properties:
+        movements:
+          type: array
+          items: { $ref: '#/components/schemas/StatementMovement' }
+        totals: { $ref: '#/components/schemas/StatementTotals' }
+        dueTodayCents:
+          type: integer
+          format: int64
+          description: What the counter asks for today (Registrar pago's figure).
+          example: 350000
+        surchargeCents:
+          type: integer
+          format: int64
+          description: The surcharge inside dueTodayCents.
+          example: 30000
+        earlyDiscountCents:
+          type: integer
+          format: int64
+          description: The early-payment reward already taken off dueTodayCents.
+          example: 0
+        unallocatedCents:
+          type: integer
+          format: int64
+          description: Money handed over that no charge has claimed (the family's credit).
+          example: 0
+        asOf: { type: string, format: date, example: '2026-10-01' }
+    StatementMovement:
+      type: object
+      required: [kind, date, description, amountCents, balanceCents, accrued, notYetDue, voided]
+      properties:
+        kind:
+          type: string
+          enum: [charge, surcharge, discount, scholarship, payment, credit_note]
+          description: >
+            charge and surcharge raise the balance; discount, scholarship,
+            payment and credit_note lower it. scholarship (T18) and
+            credit_note (T8) are reserved: no line carries them yet.
+        date:
+          type: string
+          format: date
+          description: >
+            A charge's due date; the day money arrived; today for an accrued
+            surcharge. The school's day is the UTC day.
+          example: '2026-09-10'
+        description: { type: string, example: 'Colegiatura septiembre 2026' }
+        amountCents:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Always positive; `kind` says the direction.
+          example: 320000
+        balanceCents:
+          type: integer
+          format: int64
+          description: The running balance after this line. Negative is credit.
+          example: 320000
+        chargeId: { type: string, format: uuid }
+        depositId: { type: string, format: uuid }
+        method: { type: string, enum: [cash, card, transfer], description: On money lines. }
+        cardType: { type: string, enum: [debit, credit] }
+        reference: { type: string, example: 'SPEI 123456' }
+        folio: { type: string, example: 'P-2026-000042' }
+        accrued:
+          type: boolean
+          description: A surcharge earned by the daily rule up to today, not yet written down. Counted.
+        notYetDue:
+          type: boolean
+          description: A charge that has not opened (T5). Listed for the office, not counted.
+        voided:
+          type: boolean
+          description: A cancelled deposit. Listed for the office struck through, not counted.
+        voidReason: { type: string, example: 'importe capturado mal' }
+    StatementTotals:
+      type: object
+      required: [chargedCents, discountCents, paidCents, balanceCents, notYetDueCents]
+      properties:
+        chargedCents: { type: integer, format: int64, example: 3650000 }
+        discountCents:
+          type: integer
+          format: int64
+          description: Discounts and scholarships.
+          example: 20000
+        paidCents: { type: integer, format: int64, example: 2000000 }
+        balanceCents:
+          type: integer
+          format: int64
+          description: charged − discount − paid. Negative is credit in the family's favour.
+          example: 1630000
+        notYetDueCents:
+          type: integer
+          format: int64
+          description: What the charges not yet opened will ask for, net. Not in the balance.
+          example: 50000
     CashUp:
       type: object
       description: One day's takings, split by how the money arrived.
