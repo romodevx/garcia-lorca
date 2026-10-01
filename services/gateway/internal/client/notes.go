@@ -69,10 +69,11 @@ func (c *StudentsClient) VoidStudentNote(ctx context.Context, studentID, noteID,
 }
 
 // EditStudentNote replaces a note's text, as `editor`; editsAny lets the
-// caller edit a note they did not write.
-func (c *StudentsClient) EditStudentNote(ctx context.Context, studentID, noteID, body string, editor NoteAuthor, editsAny bool) (StudentNote, error) {
+// caller edit a note they did not write; expectedBody (when set) refuses an
+// edit over a note that changed meanwhile.
+func (c *StudentsClient) EditStudentNote(ctx context.Context, studentID, noteID, body, expectedBody string, editor NoteAuthor, editsAny bool) (StudentNote, error) {
 	res, err := c.rpc.EditStudentNote(ctx, connect.NewRequest(&studentsv1.EditStudentNoteRequest{
-		StudentId: studentID, NoteId: noteID, Body: body,
+		StudentId: studentID, NoteId: noteID, Body: body, ExpectedBody: expectedBody,
 		EditorUserId: editor.UserID, EditorName: editor.Name, EditsAny: editsAny,
 	}))
 	if err != nil {

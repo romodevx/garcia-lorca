@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactElement } from "react";
+import { useState, type ReactElement } from "react";
 
 import { DrawerShell } from "../DrawerShell";
 import { StudentNotesPanel } from "./StudentNotesPanel";
@@ -24,9 +24,19 @@ export interface StudentNotesDialogProps {
  */
 export function StudentNotesDialog({ studentId, name, subtitle, userId, canWrite, canVoidAny, onClose }: StudentNotesDialogProps): ReactElement {
   const notes = useStudentNotes(studentId);
+  // A note half written or half edited: Esc and the backdrop stop closing. The
+  // ✕ still closes — a control that does not answer is worse.
+  const [dirty, setDirty] = useState(false);
   return (
-    <DrawerShell title={`Notas · ${name}`} subtitle={subtitle} icon="message" size="md" onClose={onClose}>
-      <StudentNotesPanel notes={notes} studentId={studentId} userId={userId} canWrite={canWrite} canVoidAny={canVoidAny} />
+    <DrawerShell title={`Notas · ${name}`} subtitle={subtitle} icon="message" size="md" onClose={onClose} dismissible={!dirty}>
+      <StudentNotesPanel
+        notes={notes}
+        studentId={studentId}
+        userId={userId}
+        canWrite={canWrite}
+        canVoidAny={canVoidAny}
+        onDirtyChange={setDirty}
+      />
     </DrawerShell>
   );
 }

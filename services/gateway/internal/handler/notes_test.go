@@ -13,13 +13,14 @@ import (
 )
 
 type fakeNotes struct {
-	gotStudent, gotBody, gotNote, gotVoidedBy  string
-	gotAuthor, gotEditor                       client.NoteAuthor
-	gotIncludeVoided, gotVoidsAny, gotEditsAny bool
+	gotStudent, gotBody, gotNote, gotVoidedBy, gotExpected string
+	gotAuthor, gotEditor                                   client.NoteAuthor
+	gotIncludeVoided, gotVoidsAny, gotEditsAny             bool
 }
 
-func (f *fakeNotes) EditStudentNote(_ context.Context, studentID, noteID, body string, editor client.NoteAuthor, editsAny bool) (client.StudentNote, error) {
+func (f *fakeNotes) EditStudentNote(_ context.Context, studentID, noteID, body, expectedBody string, editor client.NoteAuthor, editsAny bool) (client.StudentNote, error) {
 	f.gotStudent, f.gotNote, f.gotBody, f.gotEditor, f.gotEditsAny = studentID, noteID, body, editor, editsAny
+	f.gotExpected = expectedBody
 	return client.StudentNote{ID: noteID, Body: body, UpdatedByName: editor.Name}, nil
 }
 
@@ -123,12 +124,12 @@ func TestANoteEditIsSignedByTheCaller(t *testing.T) {
 			h := handler.NewNotesHandler(svc, fakeNamer{user: client.User{DisplayName: "Gabriela Rojas"}})
 			rec := httptest.NewRecorder()
 			h.Edit(rec, notesRequest(http.MethodPatch, "/api/v1/students/stu-1/notes/n-1",
-				`{"body":"Fiebre de 38","editorUserId":"u-owner"}`, tc.perms...))
+				`{"body":"Fiebre de 38","previousBody":"Fiebre","editorUserId":"u-owner"}`, tc.perms...))
 			if rec.Code != http.StatusOK {
 				t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
 			}
 			if svc.gotEditor != (client.NoteAuthor{UserID: "u-me", Name: "Gabriela Rojas"}) ||
-				svc.gotStudent != "stu-1" || svc.gotNote != "n-1" || svc.gotBody != "Fiebre de 38" || svc.gotEditsAny != tc.wantEditsAny {
+				svc.gotStudent != "stu-1" || svc.gotNote != "n-1" || svc.gotBody != "Fiebre de 38" || svc.gotExpected != "Fiebre" || svc.gotEditsAny != tc.wantEditsAny {
 				t.Errorf("forwarded = %+v", svc)
 			}
 		})

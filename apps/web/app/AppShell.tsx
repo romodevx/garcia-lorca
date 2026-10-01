@@ -438,13 +438,15 @@ export function AppShell(): ReactElement {
   const editStudent = (studentId: string): void => go({ screen: "studentEdit", studentId });
   // A pupil's notes beside Registrar pago (T6). UX only: the gateway answers the
   // notes with students:read (and module_students), writes with notes_write.
-  const perms = principal?.permissions ?? [];
-  const notesAccess: NotesAccess = {
-    userId: principal?.userId ?? "",
-    canRead: studentsEnabled && perms.includes("students:read"),
-    canWrite: studentsEnabled && perms.includes("students:notes_write"),
-    canVoidAny: studentsEnabled && perms.includes("students:notes_void"),
-  };
+  const notesAccess = useMemo<NotesAccess>(() => {
+    const perms = principal?.permissions ?? [];
+    return {
+      userId: principal?.userId ?? "",
+      canRead: studentsEnabled && perms.includes("students:read"),
+      canWrite: studentsEnabled && perms.includes("students:notes_write"),
+      canVoidAny: studentsEnabled && perms.includes("students:notes_void"),
+    };
+  }, [principal, studentsEnabled]);
   const openTeacherLoad = (teacherId: string): void => go({ screen: "teacherLoad", teacherId });
   // Owner-only (levels:delete). UX only: the gateway refuses the delete without it.
   const mayDeleteLevels = canDeleteLevels(principal?.permissions);

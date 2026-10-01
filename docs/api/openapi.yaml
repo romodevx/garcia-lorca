@@ -1144,7 +1144,7 @@ paths:
         (who replaced it, and when), so the history is never lost. Its author
         may edit it at any time (students:notes_write); anyone else's note only
         a holder of students:notes_void (the owner). A voided note is not
-        edited. The editor is the signed-in caller; any editor field in the
+        edited (404 to whoever cannot see voided notes, 409 to the owner). The editor is the signed-in caller; any editor field in the
         body is ignored.
       operationId: editStudentNote
       security: [{ sessionCookie: [] }]
@@ -1161,6 +1161,14 @@ paths:
               required: [body]
               properties:
                 body: { type: string, minLength: 1, maxLength: 2000, example: "Llegó con fiebre; se avisó a la mamá a las 9:10." }
+                previousBody:
+                  type: string
+                  maxLength: 2000
+                  example: "Llegó con fiebre; se avisó a la mamá."
+                  description: >
+                    The text the editor started from. When given, a note that no
+                    longer says it (edited by someone else meanwhile) is refused
+                    with 409 instead of being overwritten.
       responses:
         '200':
           description: The edited note.
@@ -1176,7 +1184,7 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409':
-          description: The note was voided, or changed since it was read.
+          description: The note changed since it was read (previousBody no longer matches).
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }

@@ -129,6 +129,17 @@ func TestANoteEditKeepsItsRevisionAndIsTenantIsolated(t *testing.T) {
 		t.Errorf("tenant B read tenant A's revisions (RLS read breach): %v %v", revs, err)
 	}
 
+	// Append-only: the app role can neither rewrite nor erase the trail.
+	if err := repo.ExecAsTenant(ctx, `UPDATE student_note_revisions SET previous_body = 'x'`); err != nil {
+		t.Logf("UPDATE refused: %v", err)
+	}
+	if err := repo.ExecAsTenant(ctx, `DELETE FROM student_note_revisions`); err != nil {
+		t.Logf("DELETE refused: %v", err)
+	}
+	if revs, _ := repo.RevisionsOf(ctx, note.ID()); len(revs) != 1 || revs[0].PreviousBody != "Fiebre" {
+		t.Errorf("the revision trail was rewritten or erased: %+v", revs)
+	}
+
 	voided, _ := stored.Void(who.UserID, at.Add(3*time.Hour), true)
 	if err := repo.VoidNote(ctx, voided); err != nil {
 		t.Fatalf("VoidNote: %v", err)

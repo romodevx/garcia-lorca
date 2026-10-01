@@ -133,7 +133,7 @@ function PayDrawer({ charge, name, today, notes, onClose, onPaid }: { charge: Ch
       // el ✕ y el botón Cancelar, porque DrawerShell usa esa misma función para
       // las cuatro vías: la protección contra el accidente dejaba a la persona
       // encerrada, que es peor.
-      dismissible={!dirty}
+      dismissible={!dirty && !beside.dirty}
       size={beside.wide ? "lg" : "md"}
       onClose={onClose}
       footer={

@@ -537,11 +537,12 @@ export function addNote(baseURL: string, studentId: string, body: string): Promi
 }
 
 /**
- * The editor is whoever is signed in. 403 on someone else's note (unless the
- * caller may void any); 409 if it was voided or changed meanwhile.
+ * The editor is whoever is signed in. `previousBody` is the text the editor
+ * started from: 409 if the note no longer says it (edited meanwhile). 403 on
+ * someone else's note (unless the caller may void any).
  */
-export function editNote(baseURL: string, studentId: string, noteId: string, body: string): Promise<StudentNote> {
-  return sendJSON<StudentNote>(studentPath(baseURL, studentId, `/notes/${encodeURIComponent(noteId)}`), "PATCH", { body });
+export function editNote(baseURL: string, studentId: string, noteId: string, body: string, previousBody: string): Promise<StudentNote> {
+  return sendJSON<StudentNote>(studentPath(baseURL, studentId, `/notes/${encodeURIComponent(noteId)}`), "PATCH", { body, previousBody });
 }
 
 /** 403 after the author's 15 minutes (unless the caller may void any); 409 if already voided. */

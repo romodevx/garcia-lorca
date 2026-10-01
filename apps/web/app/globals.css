@@ -331,6 +331,8 @@ input { font-family: var(--font-ui); }
   flex: 1;
   min-height: 0;
 }
+/* Sin panel, la forma sigue ocupando todo el cuerpo (el cobro desplaza adentro). */
+.notes-beside-solo > .notes-beside-main { flex: 1; }
 /* En el cajón de cobro el cuerpo no trae relleno: el panel guarda su distancia. */
 .notes-beside-bare { gap: 0; }
 .notes-beside-bare > .notes-beside-aside { margin: 22px 0 22px 26px; }

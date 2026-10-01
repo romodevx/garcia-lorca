@@ -61,6 +61,11 @@ export interface StudentNotesPanelProps {
   composer?: "always" | "onDemand";
   /** With composer "onDemand": open the field at once. */
   startComposing?: boolean;
+  /**
+   * Told whenever a note is being written or edited and not yet saved, so the
+   * dialog around the panel stops closing on Esc or a stray click.
+   */
+  onDirtyChange?: (dirty: boolean) => void;
   /** The clock; injected by tests. */
   now?: () => number;
 }
@@ -82,6 +87,7 @@ export function StudentNotesPanel({
   canVoidAny,
   composer = "always",
   startComposing = false,
+  onDirtyChange,
   now = Date.now,
 }: StudentNotesPanelProps): ReactElement {
   const { notes, problem, setProblem } = state;
@@ -106,6 +112,13 @@ export function StudentNotesPanel({
   }, [nextCutoff, now, tick]);
   const removal = useUndoableRemoval<StudentNote>();
   const focusFirstInvalid = useFocusFirstInvalid();
+
+  const dirty = draft.trim() !== "" || editing !== undefined;
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
+  // Unmounting with a draft open must not leave the dialog believing it is dirty.
+  useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
 
   // Opening the field on demand puts the cursor in it: the click said "write".
   const [openedOnDemand, setOpenedOnDemand] = useState(composer === "onDemand" && startComposing);
@@ -218,7 +231,7 @@ export function StudentNotesPanel({
               {editing === note.id ? (
                 <NoteEditor
                   note={note}
-                  onSave={(body) => state.edit(note.id, body)}
+                  onSave={(body) => state.edit(note, body)}
                   onDone={() => setEditing(undefined)}
                 />
               ) : (

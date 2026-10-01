@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
@@ -89,15 +90,22 @@ func (s *NoteService) VoidNote(ctx context.Context, studentID, noteID, by string
 
 // EditNote replaces the text of a note of `studentID`, by `editor`, now. The
 // rules (its author at any time, anyone else only with editsAny) are the
-// domain's; the replaced text is kept as a revision in the same write. A note
-// of another pupil is KindNotFound, which never confirms it exists.
-func (s *NoteService) EditNote(ctx context.Context, studentID, noteID, body string, editor domain.NoteAuthor, editsAny bool) (domain.Note, error) {
+// domain's; the replaced text is kept as a revision in the same write.
+//
+// expectedBody is the text the editor started from: when given and the note no
+// longer says it, the edit is KindConflict rather than overwriting someone
+// else's. A note of another pupil — or a voided note, to whoever cannot see
+// voided notes — is KindNotFound, which never confirms it exists.
+func (s *NoteService) EditNote(ctx context.Context, studentID, noteID, body, expectedBody string, editor domain.NoteAuthor, editsAny bool) (domain.Note, error) {
 	note, err := s.notes.NoteByID(ctx, noteID)
 	if err != nil {
 		return domain.Note{}, err
 	}
-	if note.StudentID() != studentID {
+	if note.StudentID() != studentID || (note.IsVoided() && !editsAny) {
 		return domain.Note{}, glerrors.ErrNotFound
+	}
+	if expectedBody != "" && strings.TrimSpace(expectedBody) != note.Body() {
+		return domain.Note{}, glerrors.New(glerrors.KindConflict, "the note changed since it was read")
 	}
 	edited, rev, err := note.Edit(body, editor, s.now(), editsAny)
 	if err != nil {

@@ -263,7 +263,7 @@ describe("StudentNotesPanel", () => {
     await user.type(field, "Llegó con fiebre de 38");
     await user.click(screen.getByRole("button", { name: "Guardar nota" }));
 
-    await waitFor(() => expect(api.editNote).toHaveBeenCalledWith(expect.any(String), "st1", "n-2", "Llegó con fiebre de 38"));
+    await waitFor(() => expect(api.editNote).toHaveBeenCalledWith(expect.any(String), "st1", "n-2", "Llegó con fiebre de 38", "Llegó con fiebre"));
     const first = (await screen.findAllByRole("listitem"))[0] as HTMLElement;
     expect(first).toHaveTextContent("Llegó con fiebre de 38");
     expect(first).toHaveTextContent(/Editada por Gabriela Rojas/);

@@ -48,16 +48,16 @@ describe("notes", () => {
   it("edits a note with only its new body: the editor is whoever is signed in", async () => {
     const edited = { ...note, body: "Fiebre de 38", updatedAt: "2026-09-25T16:00:00Z", updatedByName: "Dirección" };
     const mock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(edited));
-    expect(await editNote(BASE, "st1", "n-1", "Fiebre de 38")).toEqual(edited);
+    expect(await editNote(BASE, "st1", "n-1", "Fiebre de 38", "Llegó con fiebre")).toEqual(edited);
     const [url, init] = mock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("http://gw/api/v1/students/st1/notes/n-1");
     expect(init.method).toBe("PATCH");
-    expect(JSON.parse(init.body as string)).toEqual({ body: "Fiebre de 38" });
+    expect(JSON.parse(init.body as string)).toEqual({ body: "Fiebre de 38", previousBody: "Llegó con fiebre" });
   });
 
   it("reports an edit of someone else's note as forbidden", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("only its author", { status: 403 }));
-    const err = await editNote(BASE, "st1", "n-1", "x").catch((e: unknown) => e);
+    const err = await editNote(BASE, "st1", "n-1", "x", "y").catch((e: unknown) => e);
     expect((err as StudentsError).status).toBe(403);
   });
 });

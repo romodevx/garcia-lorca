@@ -386,6 +386,10 @@ message EditStudentNoteRequest {
   string editor_name = 5;
   // Whether the caller may edit any note (students:notes_void), set by the gateway.
   bool edits_any = 6;
+  // The text the editor started from. When set, a note that no longer says it
+  // (someone else edited it meanwhile) is refused with FailedPrecondition/Conflict
+  // instead of being overwritten.
+  string expected_body = 7;
 }
 
 message EditStudentNoteResponse {

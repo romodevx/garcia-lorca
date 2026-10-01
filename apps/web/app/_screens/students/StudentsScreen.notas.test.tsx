@@ -89,4 +89,19 @@ describe("StudentsScreen · notas", () => {
     expect(within(dialog).queryByLabelText("Nueva nota")).not.toBeInTheDocument();
     expect(within(dialog).queryByRole("button", { name: "Editar nota" })).not.toBeInTheDocument();
   });
+
+  // Esc closes the dialog — but not over a note half written (ui-forms rule).
+  it("does not close on Esc while a note is being written", async () => {
+    const user = userEvent.setup();
+    render(<StudentsScreen onBack={() => {}} userId="u-me" canWriteNotes />);
+    await user.click(await screen.findByRole("button", { name: "Notas de Cruz Valentina" }));
+    const dialog = await screen.findByRole("dialog", { name: "Notas · Cruz Valentina" });
+    await within(dialog).findByText("Alérgica a la nuez");
+    await user.type(within(dialog).getByLabelText("Nueva nota"), "a medias");
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    await user.clear(within(dialog).getByLabelText("Nueva nota"));
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
 });

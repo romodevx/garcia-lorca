@@ -19,7 +19,7 @@ type NotesService interface {
 	AddStudentNote(ctx context.Context, studentID, body string, author client.NoteAuthor) (client.StudentNote, error)
 	ListStudentNotes(ctx context.Context, studentID string, includeVoided bool) ([]client.StudentNote, error)
 	VoidStudentNote(ctx context.Context, studentID, noteID, voidedBy string, voidsAny bool) (client.StudentNote, error)
-	EditStudentNote(ctx context.Context, studentID, noteID, body string, editor client.NoteAuthor, editsAny bool) (client.StudentNote, error)
+	EditStudentNote(ctx context.Context, studentID, noteID, body, expectedBody string, editor client.NoteAuthor, editsAny bool) (client.StudentNote, error)
 }
 
 // UserNamer names the caller for the note's byline.
@@ -87,6 +87,8 @@ func (h *NotesHandler) Void(w http.ResponseWriter, r *http.Request) {
 
 type editNoteRequest struct {
 	Body string `json:"body"`
+	// The text the editor started from: a note changed meanwhile is a 409.
+	PreviousBody string `json:"previousBody"`
 }
 
 // Edit handles PATCH /api/v1/students/{id}/notes/{noteId}. The editor is the
@@ -99,7 +101,7 @@ func (h *NotesHandler) Edit(w http.ResponseWriter, r *http.Request) {
 	}
 	p, _ := middleware.PrincipalFrom(r.Context())
 	editor := client.NoteAuthor{UserID: p.UserID, Name: callerName(r.Context(), h.names, p)}
-	note, err := h.svc.EditStudentNote(r.Context(), r.PathValue("id"), r.PathValue("noteId"), req.Body,
+	note, err := h.svc.EditStudentNote(r.Context(), r.PathValue("id"), r.PathValue("noteId"), req.Body, req.PreviousBody,
 		editor, callerHolds(r, permVoidAnyNote))
 	if err != nil {
 		writeConnectError(w, err)

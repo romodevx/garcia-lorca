@@ -64,7 +64,7 @@ func (h *StudentsHandler) EditStudentNote(ctx context.Context, req *connect.Requ
 		return nil, errNotesNotServed
 	}
 	m := req.Msg
-	note, err := h.notes.EditNote(ctx, m.GetStudentId(), m.GetNoteId(), m.GetBody(),
+	note, err := h.notes.EditNote(ctx, m.GetStudentId(), m.GetNoteId(), m.GetBody(), m.GetExpectedBody(),
 		domain.NoteAuthor{UserID: m.GetEditorUserId(), Name: m.GetEditorName()}, m.GetEditsAny())
 	if err != nil {
 		return nil, connectErr(err)

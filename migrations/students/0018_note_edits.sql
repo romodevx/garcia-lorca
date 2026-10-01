@@ -11,9 +11,12 @@
 -- like author_name. Who may edit is the domain's rule: the author at any time,
 -- anyone else's note only a holder of students:notes_void (the owner).
 --
--- Revisions are append-only from the app: rows are inserted with the edit in
--- one transaction and never updated or deleted by it. RLS: ENABLE + FORCE from
--- this first migration, tenant_id on every row.
+-- Revisions are append-only, and the database says so: RLS has a SELECT and an
+-- INSERT policy only, so under FORCE an UPDATE or DELETE from the app role
+-- matches no row; UPDATE and DELETE are also revoked from PUBLIC. Rows leave
+-- only with their note (ON DELETE CASCADE: referential actions are not subject
+-- to RLS). Nothing reads them yet — they are the audit trail for the owner.
+-- RLS: ENABLE + FORCE from this first migration, tenant_id on every row.
 --
 -- Additive only: existing notes are untouched (they read as never edited).
 BEGIN;
@@ -44,9 +47,12 @@ CREATE INDEX IF NOT EXISTS idx_student_note_revisions_note
 
 ALTER TABLE student_note_revisions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE student_note_revisions FORCE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS tenant_isolation ON student_note_revisions;
-CREATE POLICY tenant_isolation ON student_note_revisions
-    USING (tenant_id = current_setting('app.current_tenant', true)::uuid)
+DROP POLICY IF EXISTS tenant_read ON student_note_revisions;
+CREATE POLICY tenant_read ON student_note_revisions FOR SELECT
+    USING (tenant_id = current_setting('app.current_tenant', true)::uuid);
+DROP POLICY IF EXISTS tenant_append ON student_note_revisions;
+CREATE POLICY tenant_append ON student_note_revisions FOR INSERT
     WITH CHECK (tenant_id = current_setting('app.current_tenant', true)::uuid);
+REVOKE UPDATE, DELETE ON student_note_revisions FROM PUBLIC;
 
 COMMIT;

@@ -1,9 +1,10 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, renderHook, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import * as studentsApi from "../../students/api";
 import { StudentNotesBeside, useNotesBeside, type NotesAccess } from "./StudentNotesBeside";
+import { useStudentNotes } from "./useStudentNotes";
 
 vi.mock("../../students/api", async (importOriginal) => {
   const real = await importOriginal<typeof import("../../students/api")>();
@@ -23,6 +24,7 @@ function Harness({ access }: { access?: NotesAccess }) {
     <div data-testid="drawer" data-wide={String(beside.wide)}>
       <StudentNotesBeside beside={beside} studentId="st1">
         <p>forma de cobro</p>
+        <input aria-label="Monto" />
       </StudentNotesBeside>
     </div>
   );
@@ -72,5 +74,40 @@ describe("StudentNotesBeside", () => {
     render(<Harness />);
     expect(api.listNotes).not.toHaveBeenCalled();
     expect(screen.getByText("forma de cobro")).toBeInTheDocument();
+  });
+
+  // The payment form is the same element before and after the notes arrive:
+  // remounting it would drop the focus the drawer put on its first field.
+  it("keeps the payment form mounted, and focused, when the notes arrive", async () => {
+    let answer: (notes: studentsApi.StudentNote[]) => void = () => {};
+    api.listNotes.mockReturnValue(new Promise((resolve) => { answer = resolve; }));
+    render(<Harness access={cashier} />);
+    const amount = screen.getByLabelText("Monto");
+    amount.focus();
+    await act(async () => answer([note]));
+    expect(await screen.findByRole("complementary", { name: "Notas del alumno" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Monto")).toBe(amount);
+    expect(amount).toHaveFocus();
+  });
+
+  // A failed read is not "this family has no notes".
+  it("says the notes could not be read, instead of looking empty", async () => {
+    api.listNotes.mockRejectedValue(new Error("boom"));
+    render(<Harness access={{ ...cashier, canWrite: false }} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("No pudimos leer las notas");
+  });
+});
+
+describe("useStudentNotes", () => {
+  // A slow answer for the previous pupil never lands under the next one.
+  it("drops an answer that arrives after the pupil changed", async () => {
+    let answerA: (notes: studentsApi.StudentNote[]) => void = () => {};
+    api.listNotes.mockImplementation((_base, id) =>
+      id === "a" ? new Promise((resolve) => { answerA = resolve; }) : Promise.resolve([{ ...note, studentId: "b", body: "de B" }]));
+    const { result, rerender } = renderHook(({ id }) => useStudentNotes(id), { initialProps: { id: "a" } });
+    rerender({ id: "b" });
+    await waitFor(() => expect(result.current.notes[0]?.body).toBe("de B"));
+    await act(async () => answerA([{ ...note, studentId: "a", body: "de A" }]));
+    expect(result.current.notes.map((n) => n.body)).toEqual(["de B"]);
   });
 });

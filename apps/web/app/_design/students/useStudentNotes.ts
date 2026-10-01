@@ -22,7 +22,8 @@ export interface StudentNotes {
   readonly problem: string | undefined;
   setProblem: (problem: string | undefined) => void;
   add: (body: string) => Promise<NoteWriteResult>;
-  edit: (noteId: string, body: string) => Promise<NoteWriteResult>;
+  /** Replaces `note`'s text; refused if the note changed since it was read. */
+  edit: (note: StudentNote, body: string) => Promise<NoteWriteResult>;
   /**
    * Takes notes out of the list while their void waits out its undo. A reload
    * in that time must not bring them back.
@@ -47,7 +48,7 @@ function addRefusal(cause: unknown): string {
 function editRefusal(cause: unknown): string {
   if (!(cause instanceof StudentsError)) return "No se pudo guardar la nota. Intenta de nuevo.";
   if (cause.status === 403) return "Solo quien escribió la nota, o la dirección, puede editarla.";
-  if (cause.isConflict) return "La nota cambió o fue anulada mientras la editabas. Cancela para ver la versión actual.";
+  if (cause.isConflict) return "La nota cambió o fue anulada mientras la editabas. Cancela y vuelve a abrirla para ver la versión actual.";
   if (cause.isInvalid) return "La nota no es válida: escribe de 1 a 2000 caracteres.";
   return "No se pudo guardar la nota. Intenta de nuevo.";
 }
@@ -61,16 +62,35 @@ export function useStudentNotes(studentId: string, enabled = true): StudentNotes
   const [loaded, setLoaded] = useState(false);
   const [problem, setProblem] = useState<string | undefined>(undefined);
   const hidden = useRef<Set<string>>(new Set());
+  // Only the latest read may land: a slow answer for the previous pupil (or an
+  // older reload) must not overwrite what the current one says.
+  const latest = useRef(0);
 
   const reload = useCallback(() => {
     if (!enabled) return;
+    const mine = ++latest.current;
     listNotes(API_URL, studentId)
-      .then((rows) => setNotes(rows.filter((n) => !hidden.current.has(n.id))))
-      .catch(() => setProblem("No pudimos leer las notas."))
-      .finally(() => setLoaded(true));
+      .then((rows) => {
+        if (mine !== latest.current) return;
+        setNotes(rows.filter((n) => !hidden.current.has(n.id)));
+        setProblem(undefined);
+      })
+      .catch(() => {
+        if (mine === latest.current) setProblem("No pudimos leer las notas.");
+      })
+      .finally(() => {
+        if (mine === latest.current) setLoaded(true);
+      });
   }, [studentId, enabled]);
 
-  useEffect(reload, [reload]);
+  // Another pupil: nothing of the previous one stays on screen meanwhile.
+  useEffect(() => {
+    setNotes([]);
+    setLoaded(false);
+    setProblem(undefined);
+    hidden.current = new Set();
+    reload();
+  }, [reload]);
 
   const add = useCallback(async (body: string): Promise<NoteWriteResult> => {
     try {
@@ -82,9 +102,9 @@ export function useStudentNotes(studentId: string, enabled = true): StudentNotes
     }
   }, [studentId]);
 
-  const edit = useCallback(async (noteId: string, body: string): Promise<NoteWriteResult> => {
+  const edit = useCallback(async (original: StudentNote, body: string): Promise<NoteWriteResult> => {
     try {
-      const note = await editNote(API_URL, studentId, noteId, body);
+      const note = await editNote(API_URL, studentId, original.id, body, original.body);
       setNotes((prev) => prev.map((n) => (n.id === note.id ? note : n)));
       return { ok: true };
     } catch (cause) {

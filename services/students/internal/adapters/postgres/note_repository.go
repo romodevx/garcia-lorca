@@ -94,14 +94,7 @@ func (r *Repository) VoidNote(ctx context.Context, n domain.Note) error {
 		if res.RowsAffected == 1 {
 			return nil
 		}
-		var exists int64
-		if err := tx.Model(&noteModel{}).Where("id = ?", n.ID()).Count(&exists).Error; err != nil {
-			return glerrors.Wrap(glerrors.KindInternal, "reading the note", err)
-		}
-		if exists == 0 {
-			return glerrors.ErrNotFound
-		}
-		return glerrors.New(glerrors.KindConflict, "this note was already voided")
+		return whyNotWritten(tx, n.ID(), "this note was already voided")
 	})
 }
 
@@ -123,7 +116,7 @@ func (r *Repository) EditNote(ctx context.Context, n domain.Note, rev domain.Not
 			return glerrors.Wrap(glerrors.KindInternal, "editing the note", res.Error)
 		}
 		if res.RowsAffected != 1 {
-			return whyNotEdited(tx, n.ID())
+			return whyNotWritten(tx, n.ID(), "the note was voided or changed since it was read")
 		}
 		row := noteRevisionModel{
 			ID: uuid.NewString(), TenantID: r.tenantID, NoteID: rev.NoteID, PreviousBody: rev.PreviousBody,
@@ -136,9 +129,10 @@ func (r *Repository) EditNote(ctx context.Context, n domain.Note, rev domain.Not
 	})
 }
 
-// whyNotEdited tells a note that is not there (or not this tenant's) from one
-// that changed or was voided since it was read.
-func whyNotEdited(tx *gorm.DB, id string) error {
+// whyNotWritten tells a note that is not there (or not this tenant's:
+// KindNotFound) from one whose guarded write matched no row because it changed
+// meanwhile (KindConflict, saying `conflict`).
+func whyNotWritten(tx *gorm.DB, id, conflict string) error {
 	var exists int64
 	if err := tx.Model(&noteModel{}).Where("id = ?", id).Count(&exists).Error; err != nil {
 		return glerrors.Wrap(glerrors.KindInternal, "reading the note", err)
@@ -146,29 +140,7 @@ func whyNotEdited(tx *gorm.DB, id string) error {
 	if exists == 0 {
 		return glerrors.ErrNotFound
 	}
-	return glerrors.New(glerrors.KindConflict, "the note was voided or changed since it was read")
-}
-
-// RevisionsOf returns the texts a note's edits replaced, newest first: the
-// audit trail of a note, bounded like every list read here.
-func (r *Repository) RevisionsOf(ctx context.Context, noteID string) ([]domain.NoteRevision, error) {
-	var out []domain.NoteRevision
-	err := r.withTenant(ctx, func(tx *gorm.DB) error {
-		var rows []noteRevisionModel
-		if err := tx.Where("note_id = ?", noteID).
-			Order("edited_at DESC, id DESC").Limit(maxNotesListed).Find(&rows).Error; err != nil {
-			return glerrors.Wrap(glerrors.KindInternal, "listing the note's revisions", err)
-		}
-		out = make([]domain.NoteRevision, 0, len(rows))
-		for _, m := range rows {
-			out = append(out, domain.NoteRevision{
-				NoteID: m.NoteID, PreviousBody: m.PreviousBody,
-				EditedBy: domain.NoteAuthor{UserID: m.EditedBy, Name: m.EditedByName}, EditedAt: m.EditedAt,
-			})
-		}
-		return nil
-	})
-	return out, err
+	return glerrors.New(glerrors.KindConflict, conflict)
 }
 
 func noteToDomain(m noteModel) domain.Note {

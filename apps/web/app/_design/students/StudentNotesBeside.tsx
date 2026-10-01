@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactElement, type ReactNode } from "react";
+import { useCallback, useState, type ReactElement, type ReactNode } from "react";
 
 import { Btn } from "../Controls";
 import { StudentNotesPanel } from "./StudentNotesPanel";
@@ -25,6 +25,9 @@ export interface NotesBeside {
   /** The field was opened from "Agregar nota" before there were notes. */
   readonly composing: boolean;
   readonly startComposing: () => void;
+  /** A note is being written or edited and not saved: the drawer should not close on Esc. */
+  readonly dirty: boolean;
+  readonly setDirty: (dirty: boolean) => void;
 }
 
 /**
@@ -36,9 +39,11 @@ export function useNotesBeside(studentId: string, access: NotesAccess | undefine
   const notes = useStudentNotes(studentId, access?.canRead === true);
   const [composing, setComposing] = useState(false);
   const [shown, setShown] = useState(false);
+  const [dirty, setDirty] = useState(false);
   const wanted = access?.canRead === true && (composing || notes.notes.length > 0);
   if (wanted && !shown) setShown(true);
-  return { notes, access, wide: wanted || shown, composing, startComposing: () => setComposing(true) };
+  const startComposing = useCallback(() => setComposing(true), []);
+  return { notes, access, wide: wanted || shown, composing, startComposing, dirty, setDirty };
 }
 
 export interface StudentNotesBesideProps {
@@ -58,42 +63,51 @@ export interface StudentNotesBesideProps {
  * panel to write one. The same panel and the same source as the pupil's sheet
  * and the list's notes modal.
  *
+ * The tree is the SAME in every state — the panel, the button and the warning
+ * are slots that are empty or not, and the form always sits in the last one.
+ * Wrapping the form differently once the notes arrive would remount it, and
+ * the focus the drawer put on its first field would fall to <body>.
+ *
  * The panel's field waits behind its button, so the counter's first field —
  * where the focus lands when the drawer opens — is still the payment's.
  * Narrower than a tablet, the panel stacks above the form (globals.css).
  */
 export function StudentNotesBeside({ beside, studentId, bare = false, children }: StudentNotesBesideProps): ReactElement {
   const { access, notes } = beside;
-  if (access === undefined || !access.canRead || !notes.loaded) return <>{children}</>;
+  const ready = access !== undefined && access.canRead && notes.loaded;
+  const wide = ready && beside.wide;
+  const offerAdd = ready && !wide && access.canWrite;
+  // A failed read is not "no notes": the cashier is told, not shown an empty side.
+  const failed = ready && !wide && notes.problem !== undefined;
+  const layout = wide ? "notes-beside" : "notes-beside-solo";
 
-  if (!beside.wide) {
-    if (!access.canWrite) return <>{children}</>;
-    return (
-      <div className={bare ? "notes-beside-solo notes-beside-bare" : "notes-beside-solo"}>
+  return (
+    <div className={bare ? `${layout} notes-beside-bare` : layout}>
+      {wide ? (
+        <aside aria-label="Notas del alumno" className="notes-beside-aside">
+          <h3 style={{ fontSize: 15, fontWeight: 700, color: "var(--text)", marginBottom: 12 }}>Notas del alumno</h3>
+          <StudentNotesPanel
+            notes={notes}
+            studentId={studentId}
+            userId={access.userId}
+            canWrite={access.canWrite}
+            canVoidAny={access.canVoidAny}
+            composer="onDemand"
+            startComposing={beside.composing}
+            onDirtyChange={beside.setDirty}
+          />
+        </aside>
+      ) : null}
+      {offerAdd ? (
         <div className="notes-beside-add">
           <Btn kind="ghost" type="button" icon="plus" style={{ height: 44, fontSize: 14 }} onClick={beside.startComposing}>
             Agregar nota
           </Btn>
         </div>
-        {children}
-      </div>
-    );
-  }
-
-  return (
-    <div className={bare ? "notes-beside notes-beside-bare" : "notes-beside"}>
-      <aside aria-label="Notas del alumno" className="notes-beside-aside">
-        <h3 style={{ fontSize: 15, fontWeight: 700, color: "var(--text)", marginBottom: 12 }}>Notas del alumno</h3>
-        <StudentNotesPanel
-          notes={notes}
-          studentId={studentId}
-          userId={access.userId}
-          canWrite={access.canWrite}
-          canVoidAny={access.canVoidAny}
-          composer="onDemand"
-          startComposing={beside.composing}
-        />
-      </aside>
+      ) : null}
+      {failed ? (
+        <p role="alert" className="notes-beside-add" style={{ color: "var(--bad-fg)", fontSize: 13.5 }}>{notes.problem}</p>
+      ) : null}
       <div className="notes-beside-main">{children}</div>
     </div>
   );
