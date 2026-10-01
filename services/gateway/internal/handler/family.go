@@ -63,7 +63,9 @@ type NotificationMarker interface {
 
 // AccountReader reads one student's finance account statement.
 type AccountReader interface {
-	GetAccount(ctx context.Context, studentID string) (client.AccountStatement, error)
+	// GetFamilyAccount is the family's view of the statement: no charge before
+	// the day it opens (T5).
+	GetFamilyAccount(ctx context.Context, studentID string) (client.AccountStatement, error)
 }
 
 // GradeEntriesReader reads the grade entries of one enrollment.
@@ -352,7 +354,7 @@ func (h *FamilyHandler) Account(w http.ResponseWriter, r *http.Request) {
 	if !h.guardOwnsChild(w, r, p.UserID, studentID) {
 		return
 	}
-	res, err := h.finance.GetAccount(r.Context(), studentID)
+	res, err := h.finance.GetFamilyAccount(r.Context(), studentID)
 	if err != nil {
 		writeConnectError(w, err)
 		return

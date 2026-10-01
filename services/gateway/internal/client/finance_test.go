@@ -17,6 +17,7 @@ func TestTuitionPlanRequestCarriesEveryField(t *testing.T) {
 		Schedule:             []Installment{{Month: 9, AmountCents: 320000}},
 		Fees:                 []Fee{{Name: "Cuota de Julio", AmountCents: 160000, Months: []int{9, 10}}},
 		EnrollmentDueOn:      "2026-06-30",
+		EnrollmentStartsOn:   "2026-06-01",
 		Policy: CollectionPolicy{
 			DailyMode: true, LateFeeDailyCents: 1000, SurchargeCountsAllDays: true,
 			EarlyPaymentCents: 10000, EarlyPaymentDays: 5,
@@ -51,6 +52,9 @@ func TestTuitionPlanRequestCarriesEveryField(t *testing.T) {
 	if sent.GetEnrollmentDueOn() != "2026-06-30" {
 		t.Errorf("the inscription deadline was not sent: %q", sent.GetEnrollmentDueOn())
 	}
+	if sent.GetEnrollmentStartsOn() != "2026-06-01" {
+		t.Errorf("the inscription start was not sent (T5): %q", sent.GetEnrollmentStartsOn())
+	}
 }
 
 // And back: the same fields have to survive the answer, or the screen reopens
@@ -64,7 +68,8 @@ func TestTuitionPlanReadsEveryFieldBack(t *testing.T) {
 		Fees: []*financev1.Fee{
 			{Name: "Cuota de Julio", AmountCents: 160000, Months: []int32{9, 10}},
 		},
-		EnrollmentDueOn: "2026-06-30",
+		EnrollmentDueOn:    "2026-06-30",
+		EnrollmentStartsOn: "2026-06-01",
 	})
 
 	if got.MonthlyDiscountCents != 50000 {
@@ -81,6 +86,21 @@ func TestTuitionPlanReadsEveryFieldBack(t *testing.T) {
 	}
 	if got.EnrollmentDueOn != "2026-06-30" {
 		t.Errorf("the inscription deadline was not read back: %q", got.EnrollmentDueOn)
+	}
+	if got.EnrollmentStartsOn != "2026-06-01" {
+		t.Errorf("the inscription start was not read back (T5): %q", got.EnrollmentStartsOn)
+	}
+}
+
+// T5: a charge says the day it opens, and the family read asks finance for the
+// family's view rather than filtering at the edge.
+func TestAChargeCarriesTheDayItOpens(t *testing.T) {
+	got := toCharge(&financev1.Charge{Id: "ch-1", DueDate: "2026-06-30", StartsOn: "2026-06-01"})
+	if got.StartsOn != "2026-06-01" {
+		t.Errorf("starts_on was not read: %q", got.StartsOn)
+	}
+	if !accountRequest("stu-1", true).GetFamilyView() || accountRequest("stu-1", false).GetFamilyView() {
+		t.Error("family_view must be set for the family read and only for it")
 	}
 }
 

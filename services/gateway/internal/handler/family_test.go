@@ -107,7 +107,10 @@ type fakeFamilyFinance struct {
 	err          error
 }
 
-func (f *fakeFamilyFinance) GetAccount(_ context.Context, studentID string) (client.AccountStatement, error) {
+// GetFamilyAccount is the ONLY read the double offers: the family route must
+// ask finance for the family's view (T5 — no charge before it opens), and a
+// handler reaching for the school's statement would not compile against it.
+func (f *fakeFamilyFinance) GetFamilyAccount(_ context.Context, studentID string) (client.AccountStatement, error) {
 	f.gotStudentID = studentID
 	return f.account, f.err
 }

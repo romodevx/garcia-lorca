@@ -38,15 +38,18 @@ type ChargeConcept struct {
 // client-supplied. Status is pending | partially_paid | paid | cancelled;
 // DueDate is an ISO date, "YYYY-MM-DD".
 type Charge struct {
-	ID             string
-	TenantID       string
-	StudentID      string
-	CycleID        string
-	ConceptID      string
-	Description    string
-	AmountCents    int64
-	DiscountCents  int64
-	DueDate        string
+	ID            string
+	TenantID      string
+	StudentID     string
+	CycleID       string
+	ConceptID     string
+	Description   string
+	AmountCents   int64
+	DiscountCents int64
+	DueDate       string
+	// StartsOn is the first day the charge opens to the family (YYYY-MM-DD,
+	// T5); empty when it is open from issue.
+	StartsOn       string
 	Status         string
 	PaidCents      int64
 	RemainingCents int64
@@ -247,9 +250,24 @@ func (c *FinanceClient) RegisterPaymentAt(ctx context.Context, chargeID string, 
 // GetAccount returns a student's account statement: every charge, every
 // payment, and the total outstanding balance.
 func (c *FinanceClient) GetAccount(ctx context.Context, studentID string) (AccountStatement, error) {
-	res, err := c.rpc.GetAccount(ctx, connect.NewRequest(&financev1.GetAccountRequest{
-		StudentId: studentID,
-	}))
+	return c.account(ctx, accountRequest(studentID, false))
+}
+
+// GetFamilyAccount is the statement a family is shown (T5): finance leaves out
+// the charges that have not opened yet and works the totals out over the rest.
+// Filtering here instead would leave the balance counting what it hid.
+func (c *FinanceClient) GetFamilyAccount(ctx context.Context, studentID string) (AccountStatement, error) {
+	return c.account(ctx, accountRequest(studentID, true))
+}
+
+// accountRequest is the statement read for one pupil, as the school or as the
+// family sees it.
+func accountRequest(studentID string, familyView bool) *financev1.GetAccountRequest {
+	return &financev1.GetAccountRequest{StudentId: studentID, FamilyView: familyView}
+}
+
+func (c *FinanceClient) account(ctx context.Context, req *financev1.GetAccountRequest) (AccountStatement, error) {
+	res, err := c.rpc.GetAccount(ctx, connect.NewRequest(req))
 	if err != nil {
 		return AccountStatement{}, err
 	}
@@ -621,6 +639,7 @@ func toCharge(c *financev1.Charge) Charge {
 		AmountCents:    c.GetAmountCents(),
 		DiscountCents:  c.GetDiscountCents(),
 		DueDate:        c.GetDueDate(),
+		StartsOn:       c.GetStartsOn(),
 		Status:         c.GetStatus(),
 		PaidCents:      c.GetPaidCents(),
 		RemainingCents: c.GetRemainingCents(),
@@ -677,6 +696,9 @@ type TuitionPlan struct {
 	// EnrollmentDueOn is the deadline the school set for the inscription
 	// (YYYY-MM-DD), empty when it set none.
 	EnrollmentDueOn string `json:"enrollmentDueOn"`
+	// EnrollmentStartsOn is the first day the inscription opens to families
+	// (YYYY-MM-DD, T5), empty when it is open from issue.
+	EnrollmentStartsOn string `json:"enrollmentStartsOn"`
 	// EnrollmentConcepts are the lines the inscription is broken into, each with
 	// its price ladder. Empty when the plan carries the single EnrollmentCents.
 	EnrollmentConcepts []EnrollmentConcept `json:"enrollmentConcepts"`
@@ -746,6 +768,7 @@ type TuitionPlanInput struct {
 	MonthlyDiscountCents int64            `json:"monthlyDiscountCents"`
 	Fees                 []Fee            `json:"fees"`
 	EnrollmentDueOn      string           `json:"enrollmentDueOn"`
+	EnrollmentStartsOn   string           `json:"enrollmentStartsOn"`
 	// EnrollmentConcepts breaks the inscription into priced lines. Empty keeps
 	// EnrollmentCents; the two are mutually exclusive (ADR 0011).
 	EnrollmentConcepts []EnrollmentConcept `json:"enrollmentConcepts"`
@@ -795,6 +818,7 @@ func tuitionPlanRequest(in TuitionPlanInput) *financev1.UpsertTuitionPlanRequest
 		MonthlyDiscountCents: in.MonthlyDiscountCents,
 		Fees:                 feesToProto(in.Fees),
 		EnrollmentDueOn:      in.EnrollmentDueOn,
+		EnrollmentStartsOn:   in.EnrollmentStartsOn,
 		EnrollmentConcepts:   enrollmentConceptsToProto(in.EnrollmentConcepts),
 		Policy: &financev1.CollectionPolicy{
 			DailyMode:              in.Policy.DailyMode,
@@ -910,6 +934,7 @@ func toTuitionPlan(p *financev1.TuitionPlan) TuitionPlan {
 		MonthlyDiscountCents: p.GetMonthlyDiscountCents(),
 		Fees:                 feesFromProto(p.GetFees()),
 		EnrollmentDueOn:      p.GetEnrollmentDueOn(),
+		EnrollmentStartsOn:   p.GetEnrollmentStartsOn(),
 		EnrollmentConcepts:   enrollmentConceptsFromProto(p.GetEnrollmentConcepts()),
 		Policy: CollectionPolicy{
 			DailyMode:              p.GetPolicy().GetDailyMode(),
