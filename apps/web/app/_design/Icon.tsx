@@ -212,6 +212,13 @@ const ICON_PATHS = {
       <path d="M4 12h16" />
     </g>
   ),
+  // A pencil: correcting what was recorded (T9).
+  edit: (
+    <g>
+      <path d="M4 20h4L19 9l-4-4L4 16v4Z" />
+      <path d="M13.5 6.5l4 4" />
+    </g>
+  ),
   eye: (
     <g>
       <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z" />

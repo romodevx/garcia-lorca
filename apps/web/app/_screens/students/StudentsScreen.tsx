@@ -712,6 +712,8 @@ export interface StudentsScreenProps {
   canRevokeCard?: boolean;
   /** module_finance and finance:read or collections:read: the row opens the pupil's account statement (T7). */
   canReadStatement?: boolean;
+  /** payments:edit: may correct a payment from the statement (T9). */
+  canCorrectPayments?: boolean;
 }
 
 /** What the school reads in Excel, in the order the table shows it. */
@@ -726,7 +728,7 @@ const EXPORT_COLUMNS: readonly CsvColumn<Row>[] = [
   { label: "Estado", value: (r) => statusOf(r.student.admissionStatus).label },
 ];
 
-export function StudentsScreen({ onBack, onEdit, canWriteNotes = false, canVoidAnyNote = false, userId = "", canVerifyCard = false, canRevokeCard = false, canReadStatement = false }: StudentsScreenProps): ReactElement {
+export function StudentsScreen({ onBack, onEdit, canWriteNotes = false, canVoidAnyNote = false, userId = "", canVerifyCard = false, canRevokeCard = false, canReadStatement = false, canCorrectPayments = false }: StudentsScreenProps): ReactElement {
   const [verifying, setVerifying] = useState(false);
   const [students, setStudents] = useState<Student[]>([]);
   const [cycles, setCycles] = useState<Cycle[]>([]);
@@ -1121,6 +1123,7 @@ export function StudentsScreen({ onBack, onEdit, canWriteNotes = false, canVoidA
           studentId={statementOf.id}
           name={formatStudentName(statementOf)}
           subtitle={statementOf.gradeGroup}
+          canCorrect={canCorrectPayments}
           onClose={() => setStatementOf(null)}
         />
       )}

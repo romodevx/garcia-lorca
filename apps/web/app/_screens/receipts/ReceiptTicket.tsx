@@ -48,6 +48,13 @@ export function ReceiptTicket({ receipt: r }: { receipt: Receipt }): ReactElemen
           {r.voidReason !== undefined && r.voidReason !== "" && <p style={center}>Motivo: {r.voidReason}</p>}
         </>
       )}
+      {r.superseded === true && (
+        <>
+          <p style={{ ...center, fontWeight: 800, fontSize: "14px" }}>SUSTITUIDO</p>
+          {r.supersededByFolio !== undefined && r.supersededByFolio !== "" && <p style={center}>Sustituido por {r.supersededByFolio}</p>}
+        </>
+      )}
+      {r.correctsFolio !== undefined && r.correctsFolio !== "" && <p style={{ ...center, fontWeight: 700 }}>Corrige a {r.correctsFolio}</p>}
       <hr style={rule} />
       <p>Fecha de pago: {r.paidOn}</p>
       <p>Alumno: {[r.buyer, r.buyerDetail].filter((x) => x !== undefined && x !== "").join(" · ")}</p>

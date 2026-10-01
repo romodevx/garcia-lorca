@@ -55,6 +55,11 @@ export interface Receipt {
   receivedBy?: string;
   voided?: boolean;
   voidReason?: string;
+  /** T9: replaced by a correction — kept, printed with the folio that replaced it. */
+  superseded?: boolean;
+  supersededByFolio?: string;
+  /** T9: on a correction's receipt, the folio it replaces. */
+  correctsFolio?: string;
 }
 
 /** A receipt the gateway would not give, with its status. */

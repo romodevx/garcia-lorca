@@ -235,9 +235,11 @@ export interface FinanceScreenProps {
   today?: string;
   /** What the caller may do with a pupil's notes, shown beside Registrar pago (T6). */
   notes?: NotesAccess;
+  /** payments:edit: may correct a registered payment from the day's cut (T9). */
+  canCorrectPayments?: boolean;
 }
 
-export function FinanceScreen({ onBack, today: officeDay, notes }: FinanceScreenProps): ReactElement {
+export function FinanceScreen({ onBack, today: officeDay, notes, canCorrectPayments = false }: FinanceScreenProps): ReactElement {
   const [charges, setCharges] = useState<Charge[]>([]);
   const [overdueIds, setOverdueIds] = useState<Set<string>>(new Set());
   const [studentMap, setStudentMap] = useState<Map<string, Student>>(new Map());
@@ -467,7 +469,7 @@ export function FinanceScreen({ onBack, today: officeDay, notes }: FinanceScreen
       </div>
 
       {pay !== null && <PayDrawer charge={pay.charge} name={pay.name} today={officeDay} notes={notes} onClose={() => setPay(null)} onPaid={onPaid} />}
-      {cashUp && <CashUpDrawer today={officeDay} onClose={() => setCashUp(false)} />}
+      {cashUp && <CashUpDrawer today={officeDay} canCorrect={canCorrectPayments} onClose={() => setCashUp(false)} />}
       {toast !== null && (
         <div role="status" style={{ position: "fixed", bottom: 28, left: "50%", transform: "translateX(-50%)", zIndex: 80, display: "flex", alignItems: "center", gap: 11, padding: "14px 22px", borderRadius: "var(--r-pill)", background: "var(--forest)", color: "#fff", fontWeight: 600, fontSize: 15, boxShadow: "var(--shadow-pop)", animation: "pop .25s var(--ease) both" }}>
           <Icon name="check" size={20} stroke={2.6} />{toast}

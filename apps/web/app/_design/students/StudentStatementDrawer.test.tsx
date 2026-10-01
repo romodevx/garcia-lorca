@@ -5,6 +5,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as statementApi from "../../finance/statement";
 import { StudentStatementDrawer } from "./StudentStatementDrawer";
 
+vi.mock("../payments/CorrectPaymentDrawer", () => ({
+  CorrectPaymentDrawer: ({ depositId, onClose }: { depositId: string; onClose: () => void }) => (
+    <div role="dialog" aria-label={`Corregir ${depositId}`}><button type="button" onClick={onClose}>Cerrar corrección</button></div>
+  ),
+}));
+
 vi.mock("../../finance/statement", async (importOriginal) => ({
   ...(await importOriginal<typeof statementApi>()),
   getStatement: vi.fn(),
@@ -119,5 +125,52 @@ describe("StudentStatementDrawer (T7)", () => {
     const detail = await within(dialog).findByText(/P-2026-000050/);
     expect(detail).toHaveTextContent("P-2026-000050 · Nota de crédito · ref. NC-7");
     expect(detail).not.toHaveTextContent("credit_note");
+  });
+
+  // T9: the original of a correction stays, struck through and named by its
+  // replacement; the correction names what it corrects.
+  it("shows a corrected payment and its replacement", async () => {
+    api.getStatement.mockResolvedValue({
+      ...ledger,
+      movements: [
+        { kind: "payment", date: "2026-10-10", description: "Pago", amountCents: 50000, balanceCents: 0, depositId: "d1", folio: "P-2026-000001", accrued: false, notYetDue: false, voided: false, superseded: true, supersededByFolio: "P-2026-000002" },
+        { kind: "payment", date: "2026-10-10", description: "Pago", amountCents: 100000, balanceCents: 0, depositId: "d2", folio: "P-2026-000002", correctsFolio: "P-2026-000001", accrued: false, notYetDue: false, voided: false },
+      ],
+    });
+    render(<StudentStatementDrawer studentId="st-1" name="Cruz Valentina" onClose={() => {}} />);
+    const dialog = await screen.findByRole("dialog", { name: "Estado de cuenta · Cruz Valentina" });
+    await within(dialog).findByText(/Sustituido por P-2026-000002/);
+    const rows = within(dialog).getAllByRole("row");
+
+    expect(row(rows, 1)).toHaveStyle({ textDecoration: "line-through" });
+    expect(within(row(rows, 2)).getByText(/Corrige a P-2026-000001/)).toBeInTheDocument();
+    // Nobody here may correct: no button.
+    expect(within(dialog).queryByRole("button", { name: /Corregir pago/ })).toBeNull();
+  });
+
+  it("offers to correct each live payment once, and comes back to the statement", async () => {
+    const user = userEvent.setup();
+    api.getStatement.mockResolvedValue({
+      ...ledger,
+      movements: [
+        { kind: "credit_note", date: "2026-10-10", description: "Nota de crédito", amountCents: 20000, balanceCents: 0, depositId: "d1", folio: "P-2026-000001", accrued: false, notYetDue: false, voided: false },
+        { kind: "payment", date: "2026-10-10", description: "Pago", amountCents: 30000, balanceCents: 0, depositId: "d1", folio: "P-2026-000001", accrued: false, notYetDue: false, voided: false },
+        { kind: "payment", date: "2026-10-09", description: "Pago", amountCents: 30000, balanceCents: 0, depositId: "d0", folio: "P-2026-000000", accrued: false, notYetDue: false, voided: false, superseded: true, supersededByFolio: "P-2026-000001" },
+      ],
+    });
+    render(<StudentStatementDrawer studentId="st-1" name="Cruz Valentina" canCorrect onClose={() => {}} />);
+    const dialog = await screen.findByRole("dialog", { name: "Estado de cuenta · Cruz Valentina" });
+    await within(dialog).findAllByText(/P-2026-000001/);
+
+    const buttons = within(dialog).getAllByRole("button", { name: /Corregir pago/ });
+    expect(buttons).toHaveLength(1);
+    await user.click(buttons[0] as HTMLElement);
+
+    // One dialog at a time: the statement gives way to the correction.
+    expect(await screen.findByRole("dialog", { name: "Corregir d1" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Estado de cuenta · Cruz Valentina" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Cerrar corrección" }));
+    expect(await screen.findByRole("dialog", { name: "Estado de cuenta · Cruz Valentina" })).toBeInTheDocument();
+    expect(api.getStatement).toHaveBeenCalledTimes(2);
   });
 });

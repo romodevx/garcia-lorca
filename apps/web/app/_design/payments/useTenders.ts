@@ -48,11 +48,13 @@ function followed(totalCents: number): string {
  * FOLLOWS the total — the cashier changes "Monto a pagar" and the row keeps up.
  * Typing another amount, or adding a row, stops it.
  */
-export function useTenders(totalCents: number): TendersState {
-  const nextKey = useRef(1);
+export function useTenders(totalCents: number, initial?: readonly Tender[]): TendersState {
+  const nextKey = useRef(Math.max(1, initial?.length ?? 0));
   const mint = useCallback((): string => `t${nextKey.current++}`, []);
-  const [stored, setStored] = useState<TenderRow[]>(() => [blank("t0", "cash")]);
-  const [following, setFollowing] = useState(true);
+  // A payment being corrected (T9) opens with the methods it was recorded with.
+  const [stored, setStored] = useState<TenderRow[]>(() => (initial !== undefined && initial.length > 0 ? initial.map(fromTender) : [blank("t0", "cash")]));
+  // One row keeps following the amount, whatever its method; several were typed.
+  const [following, setFollowing] = useState(() => initial === undefined || initial.length <= 1);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   // The rows as they are now, with a following row carrying the total.
@@ -139,6 +141,10 @@ export function useTenders(totalCents: number): TendersState {
     toTenders: () => toTenders(rows),
     reset,
   };
+}
+
+function fromTender(t: Tender, i: number): TenderRow {
+  return { key: `t${i}`, method: t.method, cardType: t.cardType ?? "debit", amount: centsToPesosInput(t.amountCents), reference: t.reference ?? "" };
 }
 
 function blank(key: string, method: PaymentMethod): TenderRow {

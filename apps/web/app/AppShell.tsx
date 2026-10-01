@@ -448,6 +448,9 @@ export function AppShell(): ReactElement {
     };
   }, [principal, studentsEnabled]);
   const openTeacherLoad = (teacherId: string): void => go({ screen: "teacherLoad", teacherId });
+  // T9: correcting a registered payment (payments:edit — the owner's by default,
+  // delegable). UX only: the gateway refuses the correction without it.
+  const canCorrectPayments = financeEnabled && principal?.permissions?.includes("payments:edit") === true;
   // Owner-only (levels:delete). UX only: the gateway refuses the delete without it.
   const mayDeleteLevels = canDeleteLevels(principal?.permissions);
   const openLevelDelete = (levelId: string): void => go({ screen: "levelDelete", levelId });
@@ -593,7 +596,7 @@ export function AppShell(): ReactElement {
       )}
       {view.screen === "finance" &&
         (financeEnabled ? (
-          <FinanceScreen onBack={home} notes={notesAccess} />
+          <FinanceScreen onBack={home} notes={notesAccess} canCorrectPayments={canCorrectPayments} />
         ) : (
           // Flag OFF: do not render the finance surface; show the friendly stub
           // instead so navigation never dead-ends. (Backend 404 is authoritative.)
@@ -601,7 +604,7 @@ export function AppShell(): ReactElement {
         ))}
       {view.screen === "payments" &&
         (financeEnabled ? (
-          <PaymentsScreen onBack={home} canGrantDiscounts={principal?.permissions?.includes("finance:write") === true} notes={notesAccess} />
+          <PaymentsScreen onBack={home} canGrantDiscounts={principal?.permissions?.includes("finance:write") === true} notes={notesAccess} canCorrectPayments={canCorrectPayments} />
         ) : (
           <ModulePlaceholder m={MODULES.find((m) => m.id === "payments") as ModuleDef} onBack={home} />
         ))}
@@ -646,6 +649,7 @@ export function AppShell(): ReactElement {
             canVerifyCard={cardEnabled}
             canRevokeCard={cardEnabled && canEditStudents}
             canReadStatement={financeEnabled && (principal?.permissions?.some((p) => p === "finance:read" || p === "collections:read") === true)}
+            canCorrectPayments={canCorrectPayments}
           />
         ) : (
           // Flag OFF: never render the enrollment surface; show the friendly stub
