@@ -77,4 +77,12 @@ describe("MoneyField", () => {
     await userEvent.type(screen.getByLabelText("Monto"), "1");
     expect(onClearError).toHaveBeenCalled();
   });
+
+  // T8: a screen accuses a wrong amount when the field is left, after the format.
+  it("avisa a la pantalla al salir del campo", async () => {
+    const onBlur = vi.fn();
+    render(<MoneyField label="Monto" value="0" onChange={vi.fn()} onBlur={onBlur} />);
+    await salirDelCampo("Monto");
+    expect(onBlur).toHaveBeenCalledTimes(1);
+  });
 });

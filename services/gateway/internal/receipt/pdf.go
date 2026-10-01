@@ -134,7 +134,15 @@ func (w *writer) header(r Receipt) {
 func (w *writer) parties(r Receipt) {
 	w.text(familyRegular, 10, "Fecha de pago: "+r.PaidOn)
 	w.text(familyRegular, 10, prefixed("Alumno: ", joinNonEmpty(" · ", r.Buyer, r.BuyerDetail)))
-	w.text(familyRegular, 10, prefixed("Forma de pago: ", joinNonEmpty(" · ", r.Method, prefixed("ref. ", r.Reference))))
+	if len(r.Tenders) > 1 {
+		// A combined payment (T8): one line per method, with its amount.
+		w.text(familyRegular, 10, "Forma de pago:")
+		for _, t := range r.Tenders {
+			w.text(familyRegular, 10, "   "+joinNonEmpty(" · ", t.Method, prefixed("ref. ", t.Reference), Money(t.AmountCents)))
+		}
+	} else {
+		w.text(familyRegular, 10, prefixed("Forma de pago: ", joinNonEmpty(" · ", r.Method, prefixed("ref. ", r.Reference))))
+	}
 	w.text(familyRegular, 10, prefixed("Recibió: ", r.ReceivedBy))
 	w.rule()
 }

@@ -491,6 +491,11 @@ func (r *Repository) CounterSale(ctx context.Context, cmd ports.CounterSaleComma
 				return nil
 			}
 		}
+		if cmd.Admit != nil {
+			if err := cmd.Admit(); err != nil {
+				return err
+			}
+		}
 
 		folio, err := r.nextFolio(tx, cmd.SoldAt.Year())
 		if err != nil {

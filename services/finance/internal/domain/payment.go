@@ -16,12 +16,18 @@ const (
 	MethodCard = "card"
 	// MethodTransfer is a bank transfer (SPEI and friends).
 	MethodTransfer = "transfer"
+	// MethodCreditNote is a credit note the school issued by hand (T8). It
+	// settles a debt but brings no money in, so it is never counted as income.
+	MethodCreditNote = "credit_note"
+	// MethodMixed is not a method anyone pays with: it is what a deposit paid
+	// by several tenders reports as its summary method (T8).
+	MethodMixed = "mixed"
 )
 
 // validateMethod enforces the closed payment-method vocabulary.
 func validateMethod(method string) error {
 	switch method {
-	case MethodCash, MethodCard, MethodTransfer:
+	case MethodCash, MethodCard, MethodTransfer, MethodCreditNote:
 		return nil
 	default:
 		return glerrors.New(glerrors.KindInvalid, "invalid payment method")
@@ -52,7 +58,22 @@ type Payment struct {
 	idempotencyKey string
 	receivedBy     string
 	depositID      string
+	// cardType is debit or credit on a card payment (T8), empty otherwise.
+	cardType string
 }
+
+// WithCardType returns the card payment marked debit or credit. The office
+// reconciles each card payment against the terminal, so the row keeps it.
+func (p Payment) WithCardType(cardType string) (Payment, error) {
+	if err := validateCardType(p.method, cardType); err != nil {
+		return Payment{}, err
+	}
+	p.cardType = cardType
+	return p, nil
+}
+
+// CardType is debit or credit on a card payment, empty otherwise.
+func (p Payment) CardType() string { return p.cardType }
 
 // WithDepositID returns the payment as a slice of the deposit it came from.
 // Read-side only: the repository writes the column from the deposit itself

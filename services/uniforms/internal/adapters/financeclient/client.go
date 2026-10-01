@@ -150,14 +150,25 @@ func (c *Client) CreateCharge(ctx context.Context, in ports.CreateChargeInput) (
 // RegisterPayment records money taken at the counter. The idempotency key is the
 // delivery's, so a retried call returns the original payment rather than
 // collecting from the family a second time.
-func (c *Client) RegisterPayment(ctx context.Context, chargeID string, amountCents int64, method, reference, idempotencyKey string) error {
-	_, err := c.rpc.RegisterPayment(ctx, connect.NewRequest(&financev1.RegisterPaymentRequest{
+//
+// The tenders travel as given (T8); a single one also fills method and
+// reference, which a finance from before T8 understands.
+func (c *Client) RegisterPayment(ctx context.Context, chargeID string, amountCents int64, tenders []ports.Tender, idempotencyKey string) error {
+	req := &financev1.RegisterPaymentRequest{
 		ChargeId:       chargeID,
 		AmountCents:    amountCents,
-		Method:         method,
-		Reference:      reference,
 		IdempotencyKey: idempotencyKey,
-	}))
+		Tenders:        make([]*financev1.Tender, 0, len(tenders)),
+	}
+	for _, t := range tenders {
+		req.Tenders = append(req.Tenders, &financev1.Tender{
+			Method: t.Method, AmountCents: t.AmountCents, Reference: t.Reference, CardType: t.CardType,
+		})
+	}
+	if len(tenders) == 1 {
+		req.Method, req.Reference = tenders[0].Method, tenders[0].Reference
+	}
+	_, err := c.rpc.RegisterPayment(ctx, connect.NewRequest(req))
 	if err != nil {
 		return mapErr(err, "recording the payment")
 	}

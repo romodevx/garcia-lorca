@@ -54,8 +54,15 @@ export interface Charge {
   remainingCents: number;
 }
 
-/** How the money came in at the window. */
-export type PaymentMethod = "cash" | "card" | "transfer";
+/**
+ * How the money came in at the window. A credit note (T8) is not money — the
+ * school honouring a balance it owes the family — but it settles debt the same
+ * way, so it is taken as one more method and kept apart in every money total.
+ */
+export type PaymentMethod = "cash" | "card" | "transfer" | "credit_note";
+
+/** What a deposit records as its method: one of the above, or `mixed` when it was split. */
+export type DepositMethod = PaymentMethod | "mixed";
 
 /**
  * Which kind of card. Not a payment method — the money still arrives by card —
@@ -63,6 +70,19 @@ export type PaymentMethod = "cash" | "card" | "transfer";
  * difference, so the ledger records it.
  */
 export type CardType = "debit" | "credit";
+
+/**
+ * One part of a payment (T8): what one method covered. A payment split across
+ * a credit note and cash travels as two tenders whose amounts add up to it.
+ */
+export interface Tender {
+  method: PaymentMethod;
+  amountCents: number;
+  /** The credit note's folio, the voucher, the transfer id. Optional. */
+  reference?: string;
+  /** Only on a card. */
+  cardType?: CardType;
+}
 
 export interface Payment {
   id: string;
@@ -103,9 +123,12 @@ export interface Deposit {
   id: string;
   studentId: string;
   amountCents: number;
-  method: PaymentMethod;
+  /** `mixed` when it was paid with several methods: read `tenders`, not this. */
+  method: DepositMethod;
   reference: string;
   paidAt: string;
+  /** How it was paid, method by method (T8). Always at least one. */
+  tenders: Tender[];
   /**
    * The school calendar the split was worked out against. "unavailable" means
    * the calendar could not be read and the deadline was computed without the
@@ -162,6 +185,8 @@ export interface RegisterDepositInput {
   cardType?: CardType;
   /** The charges the money may pay, chosen at the counter (task 8); absent means all. */
   chargeIds?: string[];
+  /** The payment split by method (T8); when present the server ignores method/reference/cardType. */
+  tenders?: Tender[];
 }
 
 /** What a family must hand over today to be current. */
@@ -202,6 +227,8 @@ export interface PreviewDepositInput {
 /** The payment plus the charge with its recomputed paid/remaining/status. */
 export interface PaymentResult {
   payment: Payment;
+  /** One per tender (T8); the single payment when it was not split. */
+  payments: Payment[];
   charge: Charge;
 }
 
@@ -263,6 +290,8 @@ export interface RegisterPaymentInput {
    * reads this date.
    */
   paidAt?: string;
+  /** The payment split by method (T8): their sum is `amountCents`. */
+  tenders?: Tender[];
 }
 
 /**
@@ -287,7 +316,9 @@ type Wire<T, K extends keyof T> = Omit<T, K> & { [P in K]: string };
 
 const RECURRENCES: readonly Recurrence[] = ["once", "monthly"];
 const CHARGE_STATUSES: readonly ChargeStatus[] = ["pending", "partial", "paid", "cancelled"];
-const PAYMENT_METHODS: readonly PaymentMethod[] = ["cash", "card", "transfer"];
+const PAYMENT_METHODS: readonly PaymentMethod[] = ["cash", "card", "transfer", "credit_note"];
+const DEPOSIT_METHODS: readonly DepositMethod[] = [...PAYMENT_METHODS, "mixed"];
+const CARD_TYPES: readonly CardType[] = ["debit", "credit"];
 
 /** Narrow a wire string to its union; an unrecognized value degrades to `fallback`. */
 function oneOf<T extends string>(allowed: readonly T[], value: string, fallback: T): T {
@@ -496,14 +527,20 @@ export async function registerPayment(baseURL: string, input: RegisterPaymentInp
     // same day it was received. The gateway reads an absent paidAt as "now", so
     // leaving it out keeps the old behaviour exactly.
     ...(input.paidAt !== undefined && input.paidAt !== "" ? { paidAt: input.paidAt } : {}),
+    ...(input.tenders !== undefined && input.tenders.length > 0 ? { tenders: input.tenders } : {}),
   };
-  const res = await sendJSON<{ payment: Wire<Payment, "method">; charge: Wire<Charge, "status"> }>(
-    baseURL,
-    "/payments",
-    "POST",
-    body,
-  );
-  return { payment: toPayment(res.payment), charge: toCharge(res.charge) };
+  const res = await sendJSON<{
+    payment: Wire<Payment, "method">;
+    payments?: Wire<Payment, "method">[];
+    charge: Wire<Charge, "status">;
+  }>(baseURL, "/payments", "POST", body);
+  const payment = toPayment(res.payment);
+  return {
+    payment,
+    // A gateway older than T8 sends only the one payment.
+    payments: res.payments !== undefined && res.payments.length > 0 ? res.payments.map(toPayment) : [payment],
+    charge: toCharge(res.charge),
+  };
 }
 
 /** A student's statement: charges, payments and the outstanding balance. */
@@ -545,7 +582,7 @@ export async function getAccount(baseURL: string, studentId: string): Promise<Ac
  */
 export async function registerDeposit(baseURL: string, input: RegisterDepositInput): Promise<DepositResult> {
   const res = await sendJSON<{
-    deposit: Wire<Deposit, "method">;
+    deposit: WireDeposit;
     allocations?: Wire<Payment, "method">[];
     surcharges?: Wire<Charge, "status">[];
     unallocatedCents?: number;
@@ -601,7 +638,7 @@ export async function getExpected(baseURL: string, studentId: string, on = ""): 
 
 /** A family's deposits, newest first. */
 export async function listDeposits(baseURL: string, studentId: string): Promise<Deposit[]> {
-  const rows = await getList<Wire<Deposit, "method">>(baseURL, `/deposits?studentId=${encodeURIComponent(studentId)}`, "deposits");
+  const rows = await getList<WireDeposit>(baseURL, `/deposits?studentId=${encodeURIComponent(studentId)}`, "deposits");
   return rows.map(toDeposit);
 }
 
@@ -631,7 +668,10 @@ export interface CashUp {
   cashCents: number;
   cardCents: number;
   transferCents: number;
+  /** Money only: cash + card + transfer. Credit notes are not in it. */
   totalCents: number;
+  /** Credit notes taken that day (T8). NOT money: in no other figure here. */
+  creditNoteCents: number;
 }
 
 /** A payment taken outside a deposit, with what it paid for. */
@@ -651,13 +691,14 @@ export interface CashUpPayment {
  */
 export async function getCashUp(baseURL: string, day: string): Promise<CashUp> {
   const res = await getJSON<{
-    deposits?: Wire<Deposit, "method">[];
-    cancelled?: Wire<Deposit, "method">[];
+    deposits?: WireDeposit[];
+    cancelled?: WireDeposit[];
     payments?: Wire<CashUpPayment, "method">[];
     cashCents?: number;
     cardCents?: number;
     transferCents?: number;
     totalCents?: number;
+    creditNoteCents?: number;
   }>(baseURL, day === "" ? "/cash-up" : `/cash-up?day=${encodeURIComponent(day)}`);
   return {
     deposits: (res.deposits ?? []).map(toDeposit),
@@ -667,6 +708,7 @@ export async function getCashUp(baseURL: string, day: string): Promise<CashUp> {
     cardCents: res.cardCents ?? 0,
     transferCents: res.transferCents ?? 0,
     totalCents: res.totalCents ?? 0,
+    creditNoteCents: res.creditNoteCents ?? 0,
   };
 }
 
@@ -680,7 +722,10 @@ export interface IncomeLine {
 /** A period's income, biggest line first. */
 export interface Income {
   lines: IncomeLine[];
+  /** Money only: the lines exclude credit notes. */
   totalCents: number;
+  /** Credit notes applied in the period (T8), apart from the money. */
+  creditNoteCents: number;
 }
 
 /**
@@ -691,11 +736,11 @@ export interface Income {
  * charge date credits October with September's arrears.
  */
 export async function getIncome(baseURL: string, from: string, to: string): Promise<Income> {
-  const res = await getJSON<{ lines?: IncomeLine[]; totalCents?: number }>(
+  const res = await getJSON<{ lines?: IncomeLine[]; totalCents?: number; creditNoteCents?: number }>(
     baseURL,
     `/income?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
   );
-  return { lines: res.lines ?? [], totalCents: res.totalCents ?? 0 };
+  return { lines: res.lines ?? [], totalCents: res.totalCents ?? 0, creditNoteCents: res.creditNoteCents ?? 0 };
 }
 
 function depositBody(input: RegisterDepositInput): Record<string, unknown> {
@@ -715,17 +760,41 @@ function depositBody(input: RegisterDepositInput): Record<string, unknown> {
     ...(input.method === "card" && input.cardType !== undefined ? { cardType: input.cardType } : {}),
     // Sent only when the cashier chose: absent keeps "oldest debt first".
     ...(input.chargeIds !== undefined && input.chargeIds.length > 0 ? { chargeIds: input.chargeIds } : {}),
+    ...(input.tenders !== undefined && input.tenders.length > 0 ? { tenders: input.tenders } : {}),
   };
 }
 
-function toDeposit(d: Wire<Deposit, "method">): Deposit {
+type WireTender = Omit<Tender, "method" | "cardType"> & { method: string; cardType?: string };
+type WireDeposit = Omit<Wire<Deposit, "method">, "tenders"> & { tenders?: WireTender[] };
+
+const toTender = (t: WireTender): Tender => {
+  const method = oneOf(PAYMENT_METHODS, t.method, "cash");
+  return {
+    method,
+    amountCents: t.amountCents,
+    ...(t.reference !== undefined && t.reference !== "" ? { reference: t.reference } : {}),
+    ...(method === "card" && t.cardType !== undefined && t.cardType !== "" ? { cardType: oneOf(CARD_TYPES, t.cardType, "debit") } : {}),
+  };
+};
+
+/**
+ * The deposit's tenders. A gateway older than T8 sends none; the deposit was
+ * then paid with its one method, which is exactly one tender.
+ */
+function tendersOf(d: WireDeposit): Tender[] {
+  if (d.tenders !== undefined && d.tenders.length > 0) return d.tenders.map(toTender);
+  return [toTender({ method: d.method, amountCents: d.amountCents, reference: d.reference, cardType: d.cardType })];
+}
+
+function toDeposit(d: WireDeposit): Deposit {
   return {
     id: d.id,
     studentId: d.studentId,
     amountCents: d.amountCents,
-    method: d.method as PaymentMethod,
+    method: oneOf(DEPOSIT_METHODS, d.method, "cash"),
     reference: d.reference ?? "",
     paidAt: d.paidAt,
+    tenders: tendersOf(d),
     calendarVersion: d.calendarVersion ?? "",
     // The wire sends "" for cash and transfers; the type says "absent".
     ...(d.cardType !== undefined && String(d.cardType) !== "" ? { cardType: d.cardType } : {}),

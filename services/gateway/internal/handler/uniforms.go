@@ -247,6 +247,8 @@ type counterSaleRequest struct {
 	Method    string                   `json:"method"`
 	Reference string                   `json:"reference"`
 	Note      string                   `json:"note"`
+	// Tenders combine methods (T8); empty means the single method above.
+	Tenders []client.Tender `json:"tenders"`
 }
 
 // CounterSale: POST /api/v1/uniforms/counter-sale
@@ -267,9 +269,13 @@ func (h *UniformsHandler) CounterSale(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &body) {
 		return
 	}
+	if msg := invalidTenders(body.Tenders); msg != "" {
+		middleware.WriteError(w, http.StatusBadRequest, "invalid", msg, map[string]string{"field": "tenders"})
+		return
+	}
 	order, err := h.svc.CounterSale(r.Context(), client.CounterSaleInput{
 		StudentID: body.StudentID, Lines: body.Lines, Method: body.Method,
-		Reference: body.Reference, Note: body.Note,
+		Reference: body.Reference, Note: body.Note, Tenders: body.Tenders,
 		ActorUserID: actorOf(r), IdempotencyKey: key,
 	})
 	if err != nil {

@@ -559,7 +559,7 @@ paths:
           application/json:
             schema:
               type: object
-              required: [lines, method]
+              required: [lines]
               properties:
                 studentId: { type: [string, 'null'], format: uuid }
                 cycleId:
@@ -570,11 +570,23 @@ paths:
                   type: array
                   minItems: 1
                   items: { $ref: '#/components/schemas/SaleLine' }
-                method: { type: string, enum: [cash, card, transfer] }
+                method:
+                  type: string
+                  enum: [cash, card, transfer, credit_note]
+                  description: The single method. Required unless `tenders` is sent, which replaces it.
                 reference:
                   type: string
                   maxLength: 120
                   description: Voucher or transfer id. Only meaningful when method is not cash.
+                tenders:
+                  type: array
+                  minItems: 1
+                  maxItems: 4
+                  items: { $ref: '#/components/schemas/Tender' }
+                  description: >
+                    A combined payment (T8): a credit note completed with cash,
+                    say. Must add up exactly to the sale's total as the server
+                    prices it, or the sale is refused (400) before anything moves.
                 note: { type: string, maxLength: 500 }
             examples:
               toAStudent:
@@ -586,6 +598,16 @@ paths:
                   lines:
                     - { itemId: 6f1c9a2e-1111-4e2b-9a11-000000000001, sizeLabel: "8", qty: 1 }
                     - { itemId: 6f1c9a2e-1111-4e2b-9a11-000000000002, sizeLabel: "8", qty: 1 }
+              creditNoteAndCash:
+                summary: A credit note completed with cash (T8)
+                value:
+                  studentId: 3d5f8a10-0000-4000-8000-000000000042
+                  cycleId: 70000000-0000-0000-0000-000000000001
+                  tenders:
+                    - { method: credit_note, amountCents: 30000, reference: NC-0012 }
+                    - { method: cash, amountCents: 55000 }
+                  lines:
+                    - { itemId: 6f1c9a2e-1111-4e2b-9a11-000000000001, sizeLabel: "8", qty: 1 }
               toSomeoneElse:
                 summary: A sale to an uncle
                 value:
@@ -2665,6 +2687,85 @@ paths:
         '404': { $ref: '#/components/responses/ModuleDisabled' }
         '409': { $ref: '#/components/responses/PlainLevelBeingDeleted' }
 
+  /api/v1/finance/payments:
+    post:
+      tags: [finance-payments]
+      summary: Pay one charge, possibly combining methods
+      description: >
+        Money straight against one named charge (Finanzas' "Registrar pago").
+        With `tenders` (T8) the payment combines methods — a credit note the
+        school issued by hand completed with cash, say — and is stored as one
+        payment row per tender in a single transaction. The tenders must add up
+        exactly to amountCents, and amountCents may not exceed what the charge
+        still owes; otherwise 400 and nothing is written.
+
+
+        Send an idempotencyKey: a retry returns every row stored the first time
+        and collects nothing. Requires `finance:write`.
+      operationId: registerPayment
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [chargeId, amountCents]
+              properties:
+                chargeId: { type: string, format: uuid }
+                amountCents:
+                  type: integer
+                  format: int64
+                  minimum: 1
+                  description: The amount to pay ("Monto a pagar").
+                method:
+                  type: string
+                  enum: [cash, card, transfer, credit_note]
+                  description: The single method. Required unless `tenders` is sent.
+                reference: { type: string }
+                tenders:
+                  type: array
+                  minItems: 1
+                  maxItems: 4
+                  items: { $ref: '#/components/schemas/Tender' }
+                idempotencyKey: { type: string }
+                paidAt:
+                  type: string
+                  format: date
+                  description: The day the money changed hands. Empty means today; a future date is refused.
+            examples:
+              creditNoteAndTransfer:
+                summary: A credit note completed with a transfer (T8)
+                value:
+                  chargeId: 61000000-0000-4000-8000-000000000011
+                  amountCents: 100000
+                  tenders:
+                    - { method: credit_note, amountCents: 40000, reference: NC-0003 }
+                    - { method: transfer, amountCents: 60000, reference: SPEI 8841 }
+      responses:
+        '201':
+          description: The payment rows and the charge as they left it.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [payment, payments, charge]
+                properties:
+                  payment:
+                    type: object
+                    description: The first row (the only one for a single method).
+                  payments:
+                    type: array
+                    description: One row per tender, in order.
+                    items: { type: object }
+                  charge:
+                    type: object
+                    description: The charge with its recomputed paid, remaining and status.
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
   /api/v1/finance/deposits:
     post:
       tags: [finance-payments]
@@ -2688,11 +2789,26 @@ paths:
           application/json:
             schema:
               type: object
-              required: [studentId, amountCents, method]
+              required: [studentId, amountCents]
               properties:
                 studentId: { type: string, format: uuid }
-                amountCents: { type: integer, format: int64, minimum: 1 }
-                method: { type: string, enum: [cash, card, transfer] }
+                amountCents:
+                  type: integer
+                  format: int64
+                  minimum: 1
+                  description: The amount to pay ("Monto a pagar").
+                method:
+                  type: string
+                  enum: [cash, card, transfer, credit_note]
+                  description: The single method. Required unless `tenders` is sent, which replaces method, cardType and reference.
+                tenders:
+                  type: array
+                  minItems: 1
+                  maxItems: 4
+                  items: { $ref: '#/components/schemas/Tender' }
+                  description: >
+                    A combined payment (T8). The tenders must add up exactly to
+                    amountCents — otherwise 400 and nothing is registered.
                 cardType:
                   type: string
                   enum: [debit, credit]
@@ -2723,6 +2839,15 @@ paths:
                     oldest first, each month with its surcharge; what is left is
                     the family's credit. Empty or absent means every charge,
                     oldest first. A charge that is not the student's is refused.
+            examples:
+              creditNoteAndCash:
+                summary: A credit note completed with cash (T8)
+                value:
+                  studentId: 3d5f8a10-0000-4000-8000-000000000042
+                  amountCents: 350000
+                  tenders:
+                    - { method: credit_note, amountCents: 200000, reference: NC-0007 }
+                    - { method: cash, amountCents: 150000 }
       responses:
         '201':
           description: The deposit and what it covered.
@@ -4674,22 +4799,55 @@ components:
         enrollmentDueOn: { type: string, format: date, example: "2026-06-30" }
         enrollmentStartsOn: { type: string, format: date, example: "2026-06-01" }
 
+    Tender:
+      type: object
+      description: >
+        One method a payment came in by, and how much of it (T8). A credit note
+        is a credit the school issued by hand and the cashier types: it settles
+        debt but is not money, so cash-ups and income reports keep it apart.
+      required: [method, amountCents]
+      properties:
+        method: { type: string, enum: [cash, card, transfer, credit_note] }
+        amountCents: { type: integer, format: int64, minimum: 1, example: 200000 }
+        reference:
+          type: string
+          maxLength: 120
+          description: Free text — a credit note's folio, a voucher, a transfer id.
+          example: NC-0007
+        cardType:
+          type: string
+          enum: [debit, credit]
+          description: Only on a card.
+
     Deposit:
       type: object
       description: Money as it arrived, before it was decided what it pays.
-      required: [id, studentId, amountCents, method, paidAt]
+      required: [id, studentId, amountCents, method, tenders, paidAt]
       properties:
         id: { type: string, format: uuid }
         studentId: { type: string, format: uuid }
         amountCents: { type: integer, format: int64, minimum: 1, example: 670000 }
-        method: { type: string, enum: [cash, card, transfer] }
+        method:
+          type: string
+          enum: [cash, card, transfer, credit_note, mixed]
+          description: >
+            A summary of the tenders: the one tender's method, or `mixed` when
+            the deposit combined several (T8). Read `tenders` for the breakdown.
+        tenders:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/Tender' }
+          description: >
+            The methods the money came in by, in order. Always at least one: a
+            deposit from before T8 is one tender with its own method.
         cardType:
           type: string
           enum: ['', debit, credit]
           description: >
             Which kind of card. Not a payment method — the money still arrives
             by card — but the terminal the office reconciles against at month
-            end knows the difference. Empty for cash and transfers.
+            end knows the difference. Empty for cash and transfers, and on a
+            mixed deposit (each card tender carries its own).
         reference:
           type: string
           description: What identifies the money itself — a folio, a transfer id, a card slip.
@@ -4767,7 +4925,7 @@ components:
     Income:
       type: object
       description: A period's takings, by what the school charged for.
-      required: [lines, totalCents]
+      required: [lines, totalCents, creditNoteCents]
       properties:
         lines:
           type: array
@@ -4780,6 +4938,13 @@ components:
               concept: { type: string, example: Colegiatura }
               amountCents: { type: integer, format: int64, minimum: 0 }
         totalCents: { type: integer, format: int64, minimum: 0 }
+        creditNoteCents:
+          type: integer
+          format: int64
+          minimum: 0
+          description: >
+            What credit notes settled in the period (T8). Not income: in neither
+            the lines nor totalCents.
 
     Statement:
       type: object
@@ -4884,7 +5049,7 @@ components:
     CashUp:
       type: object
       description: One day's takings, split by how the money arrived.
-      required: [deposits, cancelled, cashCents, cardCents, transferCents, totalCents, payments]
+      required: [deposits, cancelled, cashCents, cardCents, transferCents, totalCents, creditNoteCents, payments]
       properties:
         deposits:
           type: array
@@ -4902,7 +5067,18 @@ components:
         cashCents: { type: integer, format: int64, minimum: 0 }
         cardCents: { type: integer, format: int64, minimum: 0 }
         transferCents: { type: integer, format: int64, minimum: 0 }
-        totalCents: { type: integer, format: int64, minimum: 0 }
+        totalCents:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Money only — cash, card and transfer. Credit notes are not in it.
+        creditNoteCents:
+          type: integer
+          format: int64
+          minimum: 0
+          description: >
+            What credit notes settled that day (T8), on its own line: not money,
+            so in none of the per-method figures nor in totalCents.
 
     CashUpPayment:
       type: object
@@ -4912,10 +5088,14 @@ components:
         id: { type: string, format: uuid }
         chargeId: { type: string, format: uuid }
         amountCents: { type: integer, format: int64, minimum: 1, example: 135000 }
-        method: { type: string, enum: [cash, card, transfer] }
+        method: { type: string, enum: [cash, card, transfer, credit_note] }
         reference: { type: string }
         paidAt: { type: string, format: date-time }
         description: { type: string, example: "Uniformes · U-2026-000001" }
+        cardType:
+          type: string
+          enum: [debit, credit]
+          description: Only on a card payment (T8).
 
     BillingRun:
       type: object

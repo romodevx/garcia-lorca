@@ -251,6 +251,7 @@ describe("Finance — ventanilla", () => {
     const user = userEvent.setup();
     finance.registerPayment.mockResolvedValue({
       payment: { id: "p1", chargeId: "ch1", amountCents: 185000, method: "cash", reference: "", paidAt: "2026-09-01T10:00:00Z" },
+      payments: [],
       charge: { ...overdueCharge, paidCents: 185000, remainingCents: 0, status: "paid" as const },
     });
 
@@ -280,6 +281,7 @@ describe("Finance — ventanilla", () => {
     const user = userEvent.setup();
     finance.registerPayment.mockResolvedValue({
       payment: { id: "p1", chargeId: "ch1", amountCents: 50025, method: "transfer" as const, reference: "SPEI-77", paidAt: "2026-09-01T10:00:00Z" },
+      payments: [],
       charge: { ...overdueCharge, paidCents: 50025, remainingCents: 134975, status: "partial" as const },
     });
 
@@ -324,6 +326,7 @@ describe("Finance — ventanilla", () => {
     // submit is possible.
     finance.registerPayment.mockRejectedValueOnce(new Error("gateway unreachable")).mockResolvedValue({
       payment: { id: "p1", chargeId: "ch1", amountCents: 50000, method: "cash", reference: "", paidAt: "2026-09-01T10:00:00Z" },
+      payments: [],
       charge: { ...overdueCharge, paidCents: 50000, remainingCents: 135000, status: "partial" as const },
     });
 

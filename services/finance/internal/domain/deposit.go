@@ -42,6 +42,40 @@ type Deposit struct {
 	// folio is the number the receipt prints (task 12): P-<year>-<six digits>,
 	// one run per school and year, allocated when the deposit is stored.
 	folio string
+	// tenders are the methods the money came in by (T8). method, reference and
+	// cardType above are their summary: the one tender's own, or "mixed" with
+	// neither reference nor card type when there are several.
+	tenders []Tender
+}
+
+// Tenders are the methods the money came in by, in the order given. A deposit
+// built the old way is one tender with the deposit's own method.
+func (d Deposit) Tenders() []Tender {
+	if len(d.tenders) == 0 {
+		return []Tender{{method: d.method, amount: d.amount, reference: d.reference, cardType: d.cardType}}
+	}
+	out := make([]Tender, len(d.tenders))
+	copy(out, d.tenders)
+	return out
+}
+
+// WithTenders returns the deposit paid by these tenders (T8). They must add up
+// exactly to the deposit's amount — the rule the school approved: a payment
+// whose methods do not cover the amount to pay is not registered. The summary
+// fields follow: one tender lends the deposit its method, reference and card
+// type; several make it "mixed", with those details on each tender.
+func (d Deposit) WithTenders(tenders []Tender) (Deposit, error) {
+	if err := ValidateTenders(tenders, d.amount.Int64()); err != nil {
+		return Deposit{}, err
+	}
+	d.tenders = make([]Tender, len(tenders))
+	copy(d.tenders, tenders)
+	if len(tenders) == 1 {
+		d.method, d.reference, d.cardType = tenders[0].method, tenders[0].reference, tenders[0].cardType
+		return d, nil
+	}
+	d.method, d.reference, d.cardType = MethodMixed, "", ""
+	return d, nil
 }
 
 // FormatDepositFolio renders a deposit's receipt number.
@@ -100,17 +134,14 @@ const (
 // clears it, which is the ordinary state of cash, a transfer, and every card
 // payment taken before the school asked for this.
 func (d Deposit) WithCardType(cardType string) (Deposit, error) {
-	if cardType == "" {
-		d.cardType = ""
-		return d, nil
-	}
-	if cardType != CardDebit && cardType != CardCredit {
-		return Deposit{}, glerrors.New(glerrors.KindInvalid, "card type must be debit or credit")
-	}
-	if d.method != MethodCard {
-		return Deposit{}, glerrors.New(glerrors.KindInvalid, "only a card payment has a card type")
+	if err := validateCardType(d.method, cardType); err != nil {
+		return Deposit{}, err
 	}
 	d.cardType = cardType
+	if len(d.tenders) == 1 {
+		d.tenders = []Tender{d.tenders[0]}
+		d.tenders[0].cardType = cardType
+	}
 	return d, nil
 }
 

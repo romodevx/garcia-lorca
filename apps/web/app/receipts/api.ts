@@ -26,6 +26,15 @@ export interface ReceiptLine {
   discountCents?: number;
 }
 
+/** One method of a split payment (T8), already in words: "Nota de crédito", "Tarjeta de débito". */
+export interface ReceiptTender {
+  /** The method as the ledger names it: cash | card | transfer | credit_note. */
+  code?: string;
+  method: string;
+  amountCents: number;
+  reference?: string;
+}
+
 export interface Receipt {
   kind: ReceiptKind;
   folio: string;
@@ -38,8 +47,11 @@ export interface Receipt {
   discountCents: number;
   creditCents: number;
   totalCents: number;
+  /** The single method, or the methods joined with " + " when it was split. */
   method: string;
   reference?: string;
+  /** How it was paid, method by method (T8). Absent from a gateway older than that. */
+  tenders?: ReceiptTender[];
   receivedBy?: string;
   voided?: boolean;
   voidReason?: string;

@@ -66,6 +66,8 @@ type Payment struct {
 	Method      string
 	Reference   string
 	PaidAt      string
+	// CardType is debit or credit on a card payment (T8), empty otherwise.
+	CardType string
 }
 
 // AccountStatement is a student's full financial picture: every charge, every
@@ -225,26 +227,89 @@ func (c *FinanceClient) RegisterPayment(ctx context.Context, chargeID string, am
 	return c.RegisterPaymentAt(ctx, chargeID, amountCents, method, reference, idempotencyKey, time.Time{}, Receiver{})
 }
 
-// RegisterPaymentAt carries the date the money changed hands. A zero paidAt is
-// omitted from the request, so the service stamps its own clock exactly as
-// before.
+// Tender is one method a payment came in by (T8). The same shape travels in
+// requests and answers: a credit note completed with cash is two of them.
+type Tender struct {
+	Method      string `json:"method"`
+	AmountCents int64  `json:"amountCents"`
+	Reference   string `json:"reference,omitempty"`
+	CardType    string `json:"cardType,omitempty"`
+}
+
+// TenderedPayment is a payment against one charge, possibly combining methods.
+type TenderedPayment struct {
+	ChargeID    string
+	AmountCents int64
+	// Tenders must add up to AmountCents; finance refuses them otherwise.
+	Tenders        []Tender
+	IdempotencyKey string
+	// PaidAt zero is omitted, so the service stamps its own clock.
+	PaidAt   time.Time
+	Receiver Receiver
+}
+
+// RegisterPaymentAt carries the date the money changed hands, in one method.
 func (c *FinanceClient) RegisterPaymentAt(ctx context.Context, chargeID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time, receiver Receiver) (Payment, Charge, error) {
-	req := &financev1.RegisterPaymentRequest{
-		ChargeId:       chargeID,
-		AmountCents:    amountCents,
-		Method:         method,
-		Reference:      reference,
-		IdempotencyKey: idempotencyKey,
-		ReceivedBy:     receiver.UserID,
-	}
-	if !paidAt.IsZero() {
-		req.PaidAt = timestamppb.New(paidAt)
-	}
-	res, err := c.rpc.RegisterPayment(ctx, connect.NewRequest(req))
+	payments, charge, err := c.RegisterTenderedPayment(ctx, TenderedPayment{
+		ChargeID: chargeID, AmountCents: amountCents, IdempotencyKey: idempotencyKey, PaidAt: paidAt, Receiver: receiver,
+		Tenders: []Tender{{Method: method, AmountCents: amountCents, Reference: reference}},
+	})
 	if err != nil {
 		return Payment{}, Charge{}, err
 	}
-	return toPayment(res.Msg.GetPayment()), toCharge(res.Msg.GetCharge()), nil
+	return payments[0], charge, nil
+}
+
+// RegisterTenderedPayment posts one payment row per tender against a charge,
+// atomically (T8), and returns every row with the recomputed charge.
+func (c *FinanceClient) RegisterTenderedPayment(ctx context.Context, in TenderedPayment) ([]Payment, Charge, error) {
+	req := &financev1.RegisterPaymentRequest{
+		ChargeId:       in.ChargeID,
+		AmountCents:    in.AmountCents,
+		IdempotencyKey: in.IdempotencyKey,
+		ReceivedBy:     in.Receiver.UserID,
+		Tenders:        toProtoTenders(in.Tenders),
+	}
+	if len(in.Tenders) == 1 {
+		// Understood by a finance from before T8 too.
+		req.Method, req.Reference = in.Tenders[0].Method, in.Tenders[0].Reference
+	}
+	if !in.PaidAt.IsZero() {
+		req.PaidAt = timestamppb.New(in.PaidAt)
+	}
+	res, err := c.rpc.RegisterPayment(ctx, connect.NewRequest(req))
+	if err != nil {
+		return nil, Charge{}, err
+	}
+	rows := res.Msg.GetPayments()
+	if len(rows) == 0 {
+		rows = []*financev1.Payment{res.Msg.GetPayment()}
+	}
+	payments := make([]Payment, 0, len(rows))
+	for _, p := range rows {
+		payments = append(payments, toPayment(p))
+	}
+	return payments, toCharge(res.Msg.GetCharge()), nil
+}
+
+func toProtoTenders(ts []Tender) []*financev1.Tender {
+	out := make([]*financev1.Tender, 0, len(ts))
+	for _, t := range ts {
+		out = append(out, &financev1.Tender{
+			Method: t.Method, AmountCents: t.AmountCents, Reference: t.Reference, CardType: t.CardType,
+		})
+	}
+	return out
+}
+
+func fromProtoTenders(ts []*financev1.Tender) []Tender {
+	out := make([]Tender, 0, len(ts))
+	for _, t := range ts {
+		out = append(out, Tender{
+			Method: t.GetMethod(), AmountCents: t.GetAmountCents(), Reference: t.GetReference(), CardType: t.GetCardType(),
+		})
+	}
+	return out
 }
 
 // GetAccount returns a student's account statement: every charge, every
@@ -327,6 +392,9 @@ type Deposit struct {
 	CapturedAt     string `json:"capturedAt,omitempty"`
 	// Folio is the receipt number, P-<year>-<six digits> (task 12).
 	Folio string `json:"folio,omitempty"`
+	// Tenders are the methods the money came in by (T8); Method is their
+	// summary ("mixed" when several).
+	Tenders []Tender `json:"tenders"`
 }
 
 // ReceiptLine is one concept a deposit paid (task 12).
@@ -372,7 +440,7 @@ type DepositResult struct {
 
 // RegisterDeposit takes money without being told what it pays for and splits it
 // across what the family owes, oldest first.
-func (c *FinanceClient) RegisterDeposit(ctx context.Context, studentID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time, grantEarlyPayment bool, cardType string, receiver Receiver, chargeIDs []string) (DepositResult, error) {
+func (c *FinanceClient) RegisterDeposit(ctx context.Context, studentID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time, grantEarlyPayment bool, cardType string, receiver Receiver, chargeIDs []string, tenders []Tender) (DepositResult, error) {
 	req := &financev1.RegisterDepositRequest{
 		StudentId:         studentID,
 		AmountCents:       amountCents,
@@ -384,6 +452,7 @@ func (c *FinanceClient) RegisterDeposit(ctx context.Context, studentID string, a
 		ReceivedBy:        receiver.UserID,
 		ReceivedByName:    receiver.Name,
 		ChargeIds:         chargeIDs,
+		Tenders:           toProtoTenders(tenders),
 	}
 	if !paidAt.IsZero() {
 		req.PaidAt = timestamppb.New(paidAt)
@@ -501,6 +570,9 @@ type CashUp struct {
 	CardCents     int64     `json:"cardCents"`
 	TransferCents int64     `json:"transferCents"`
 	TotalCents    int64     `json:"totalCents"`
+	// CreditNoteCents is what credit notes settled that day (T8): not money,
+	// so in neither the per-method figures nor TotalCents.
+	CreditNoteCents int64 `json:"creditNoteCents"`
 	// Payments taken outside a deposit (a counter sale's). The totals count
 	// them: the money is in the drawer.
 	Payments []CashUpPayment `json:"payments"`
@@ -515,6 +587,7 @@ type CashUpPayment struct {
 	Reference   string `json:"reference"`
 	PaidAt      string `json:"paidAt"`
 	Description string `json:"description"`
+	CardType    string `json:"cardType,omitempty"`
 }
 
 // DailyCashUp returns what came in on one day, and in what form.
@@ -532,17 +605,18 @@ func toCashUp(m *financev1.DailyCashUpResponse) CashUp {
 		paid := toPayment(p.GetPayment())
 		payments = append(payments, CashUpPayment{
 			ID: paid.ID, ChargeID: paid.ChargeID, AmountCents: paid.AmountCents, Method: paid.Method,
-			Reference: paid.Reference, PaidAt: paid.PaidAt, Description: p.GetDescription(),
+			Reference: paid.Reference, PaidAt: paid.PaidAt, Description: p.GetDescription(), CardType: paid.CardType,
 		})
 	}
 	return CashUp{
-		Deposits:      toDeposits(m.GetDeposits()),
-		Cancelled:     toDeposits(m.GetCancelled()),
-		CashCents:     m.GetCashCents(),
-		CardCents:     m.GetCardCents(),
-		TransferCents: m.GetTransferCents(),
-		TotalCents:    m.GetTotalCents(),
-		Payments:      payments,
+		Deposits:        toDeposits(m.GetDeposits()),
+		Cancelled:       toDeposits(m.GetCancelled()),
+		CashCents:       m.GetCashCents(),
+		CardCents:       m.GetCardCents(),
+		TransferCents:   m.GetTransferCents(),
+		TotalCents:      m.GetTotalCents(),
+		Payments:        payments,
+		CreditNoteCents: m.GetCreditNoteCents(),
 	}
 }
 
@@ -565,6 +639,9 @@ type IncomeLine struct {
 type Income struct {
 	Lines      []IncomeLine `json:"lines"`
 	TotalCents int64        `json:"totalCents"`
+	// CreditNoteCents is what credit notes settled in the period (T8): not
+	// income, so in neither the lines nor TotalCents.
+	CreditNoteCents int64 `json:"creditNoteCents"`
 }
 
 // IncomeByConcept returns what came in between two days, biggest line first.
@@ -581,7 +658,7 @@ func (c *FinanceClient) IncomeByConcept(ctx context.Context, from, to string) (I
 			ConceptID: l.GetConceptId(), Concept: l.GetConcept(), AmountCents: l.GetAmountCents(),
 		})
 	}
-	return Income{Lines: lines, TotalCents: res.Msg.GetTotalCents()}, nil
+	return Income{Lines: lines, TotalCents: res.Msg.GetTotalCents(), CreditNoteCents: res.Msg.GetCreditNoteCents()}, nil
 }
 
 // VoidDeposit cancels a deposit and releases what it settled.
@@ -604,6 +681,7 @@ func toDeposit(d *financev1.Deposit) Deposit {
 		VoidReason:      d.GetVoidReason(),
 		ReceivedByName:  d.GetReceivedByName(),
 		Folio:           d.GetFolio(),
+		Tenders:         fromProtoTenders(d.GetTenders()),
 	}
 	if d.GetCapturedAt() != nil {
 		out.CapturedAt = d.GetCapturedAt().AsTime().Format(time.RFC3339)
@@ -669,6 +747,7 @@ func toPayment(p *financev1.Payment) Payment {
 		Method:      p.GetMethod(),
 		Reference:   p.GetReference(),
 		PaidAt:      paidAt,
+		CardType:    p.GetCardType(),
 	}
 }
 

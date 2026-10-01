@@ -22,7 +22,7 @@ export interface StudentStatementDrawerProps {
   onClose: () => void;
 }
 
-const METHOD_LABEL: Record<string, string> = { cash: "Efectivo", transfer: "Transferencia", card: "Tarjeta" };
+const METHOD_LABEL: Record<string, string> = { cash: "Efectivo", transfer: "Transferencia", card: "Tarjeta", credit_note: "Nota de crédito" };
 const CARD_LABEL: Record<string, string> = { debit: "Tarjeta de débito", credit: "Tarjeta de crédito" };
 
 function methodLabel(m: StatementMovement): string {

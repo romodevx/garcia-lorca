@@ -1,13 +1,12 @@
 "use client";
 
-/** Lo que el (?) de Referencia explica, en los dos lugares donde se cobra. */
-const REFERENCIA_AYUDA =
-  "El folio del voucher o el número de la transferencia: lo que te permita reconocer este pago después. En efectivo puede quedar vacío.";
-
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
 import { DrawerShell } from "../../_design/DrawerShell";
-import { DateField, HelpTip, MoneyField, useFocusFirstInvalid } from "../../_design/form";
+import { DateField, MoneyField, useFocusFirstInvalid } from "../../_design/form";
+import { TenderEditor } from "../../_design/payments/TenderEditor";
+import { AMOUNT_ERROR, tenderLabel } from "../../_design/payments/tenders";
+import { useTenders } from "../../_design/payments/useTenders";
 import {
   getAccount,
   getExpected,
@@ -17,10 +16,10 @@ import {
   type DepositResult,
   type Expected,
   type ExpectedLine,
-  type CardType,
   type Payment,
-  type PaymentMethod,
+  type Tender,
 } from "../../finance/api";
+import { groupByCharge } from "../../finance/allocations";
 import { API_URL } from "../../api-url";
 import { localISODate, shortDayLabel } from "../../_lib/localDate";
 import { DebtList } from "./DebtList";
@@ -48,17 +47,7 @@ function newAttemptKey(): string {
 /** How long the typing has to stop before we ask the server what it covers. */
 const PREVIEW_DEBOUNCE_MS = 350;
 
-const METHODS: { value: PaymentMethod; label: string }[] = [
-  { value: "cash", label: "Efectivo" },
-  { value: "card", label: "Tarjeta" },
-  { value: "transfer", label: "Transferencia" },
-];
-
-const field: CSSProperties = {
-  width: "100%", height: 64, padding: "0 18px", borderRadius: "var(--r-md)",
-  border: "1.5px solid var(--border)", background: "var(--surface)", color: "var(--text)",
-  fontSize: 30, fontFamily: "var(--font-display)", fontWeight: 700, outline: "none",
-};
+const lineRow: CSSProperties = { display: "flex", justifyContent: "space-between", padding: "12px 16px", borderTop: "1px solid var(--border)" };
 
 /** The pupil the counter is collecting for. Only what the header needs. */
 export interface CollectStudent {
@@ -108,6 +97,15 @@ function choiceOf(lines: readonly ExpectedLine[], chosen: ReadonlySet<string>): 
   return same ? undefined : lines.filter((l) => chosen.has(l.chargeId)).map((l) => l.chargeId);
 }
 
+/**
+ * What is wrong with the amount to pay, if anything. It may not exceed what the
+ * family owes (T8) — `capCents`, unknown (Infinity) until the account is read.
+ */
+export function amountToPayError(cents: number, capCents: number): string | undefined {
+  if (!Number.isFinite(cents) || cents <= 0) return AMOUNT_ERROR;
+  return cents > capCents ? `No puede ser mayor que el adeudo (${formatCents(capCents)}).` : undefined;
+}
+
 /** What is wrong with a payment date, if anything. */
 export function paymentDateError(paidOn: string, day: string): string | undefined {
   if (paidOn === "") return MISSING_PAYMENT_DATE;
@@ -116,7 +114,8 @@ export function paymentDateError(paidOn: string, day: string): string | undefine
 
 /**
  * The counter, as the school actually works it: ONE number (what the family
- * owes) and ONE field (what they handed over).
+ * owes) and ONE field (what they pay now) — paid in cash unless the cashier
+ * says otherwise, a credit note and a split included (T8).
  *
  * The cashier is not asked which months the money covers. That question is the
  * reason the old screen went unused — it made a person do, per parent, the
@@ -158,11 +157,7 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
   // The school honouring the early-payment reward after the window closed. A
   // decision somebody makes, which is why it is a switch and not a default.
   const [grantEarly, setGrantEarly] = useState(false);
-  const [method, setMethod] = useState<PaymentMethod>("cash");
-  // Debit or credit, asked for only once the money is on a card. The office
-  // reconciles against the terminal at month end.
-  const [cardType, setCardType] = useState<CardType>("debit");
-  const [reference, setReference] = useState("");
+  const [amountError, setAmountError] = useState<string | undefined>(undefined);
   const [preview, setPreview] = useState<{ allocations: Payment[]; surcharges: Charge[]; unallocatedCents: number } | null>(null);
   const [receipt, setReceipt] = useState<DepositResult | null>(null);
   const [saving, setSaving] = useState(false);
@@ -179,6 +174,11 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
   // The difference is measured against what was chosen — which, by default, is
   // exactly what is due.
   const target = lines.length > 0 ? selectedCents : (expected?.amountCents ?? 0);
+  // What the family owes: the year's balance, or what is asked today when the
+  // quote carries a surcharge the balance does not have yet.
+  const capCents = owed === null ? Number.POSITIVE_INFINITY : Math.max(owed, expected?.amountCents ?? 0, selectedCents);
+  // How the amount is paid, method by method (T8): it must add up to it.
+  const tenders = useTenders(cents);
   const toggle = (chargeId: string): void => {
     const next = new Set(chosen);
     if (next.has(chargeId)) next.delete(chargeId);
@@ -191,7 +191,6 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
       setAmount(centsToPesosInput(cents));
     }
   };
-  const ready = Number.isFinite(cents) && cents > 0 && !saving;
 
   useEffect(() => {
     let live = true;
@@ -268,27 +267,37 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
   }, [onClose]);
 
   const submit = useCallback(async (): Promise<void> => {
-    if (!dateOk) {
-      setDateError(paymentDateError(paidOn, day));
+    if (saving) {
+      return;
+    }
+    // Every problem is marked at once, then the view goes to the first of them.
+    const wrongDate = paymentDateError(paidOn, day);
+    const wrongAmount = amountToPayError(cents, capCents);
+    setDateError(wrongDate);
+    setAmountError(wrongAmount);
+    const tendersOk = wrongAmount === undefined && tenders.validate();
+    if (wrongDate !== undefined || !tendersOk) {
       focusFirstInvalid();
       return;
     }
-    if (!ready) {
-      return;
-    }
+    const split = tenders.toTenders();
+    const [first] = split;
     setSaving(true);
     setError(undefined);
     try {
       const result = await registerDeposit(API_URL, {
         studentId: student.id,
         amountCents: cents,
-        method,
-        reference: reference.trim(),
+        // The first tender, for a gateway that reads only one method; with
+        // `tenders` present the server ignores these.
+        method: first?.method ?? "cash",
+        reference: first?.reference ?? "",
+        ...(first?.cardType !== undefined ? { cardType: first.cardType } : {}),
+        tenders: split,
         idempotencyKey: attemptKey,
         ...(sentDate !== "" ? { paidAt: sentDate } : {}),
         ...(choice !== undefined ? { chargeIds: choice } : {}),
         ...(grantEarly ? { grantEarlyPayment: true } : {}),
-        ...(method === "card" ? { cardType } : {}),
       });
       setReceipt(result);
       onCollected();
@@ -297,7 +306,7 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
     } finally {
       setSaving(false);
     }
-  }, [dateOk, ready, student.id, cents, method, cardType, reference, attemptKey, grantEarly, sentDate, paidOn, day, choice, focusFirstInvalid, onCollected]);
+  }, [saving, student.id, cents, capCents, tenders, attemptKey, grantEarly, sentDate, paidOn, day, choice, focusFirstInvalid, onCollected]);
 
   return (
     <DrawerShell
@@ -306,10 +315,10 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
       icon="card"
       size={receipt === null && beside.wide ? "xl" : "lg"}
       onClose={onClose}
-      // El velo original de este cajón NO tenía onClick ni Esc, a propósito: es
-      // la ventanilla, y el monto, la forma de pago y la referencia ya tecleados
-      // no pueden irse con un clic fuera de lugar. La cáscara común cierra por
-      // omisión, así que aquí hay que decirlo. El ✕ y Cancelar siguen cerrando.
+      // This drawer's backdrop never closed it, on purpose: it is the counter,
+      // and an amount, payment methods and references already typed must not be
+      // lost to a stray click. The shared shell closes by default, so it has to
+      // be said here. The ✕ and Cancelar still close it.
       dismissible={false}
       padded={false}
     >
@@ -342,12 +351,16 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
                   <DebtList lines={lines} chosen={chosen} selectedCents={selectedCents} onToggle={toggle} />
 
                   <MoneyField
-                    label="Monto recibido"
+                    label="Monto a pagar"
                     value={amount}
                     onChange={(v) => {
                       if (pesosToCents(v) !== prefilledCents.current) amountEdited.current = true;
                       setAmount(v);
+                      if (amountToPayError(pesosToCents(v), capCents) === undefined) setAmountError(undefined);
                     }}
+                    onBlur={() => setAmountError(amountToPayError(cents, capCents))}
+                    error={amountError}
+                    help="Lo que la familia paga ahora: puede ser un abono, nunca más de lo que debe."
                     required
                   />
 
@@ -376,8 +389,8 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
                       <div style={{ padding: "10px 16px", background: "var(--surface-2)", fontSize: 13, fontWeight: 700, color: "var(--text-muted)", fontFamily: "var(--font-display)" }}>
                         Cubre
                       </div>
-                      {preview.allocations.map((a) => (
-                        <div key={a.id} style={{ display: "flex", justifyContent: "space-between", padding: "12px 16px", borderTop: "1px solid var(--border)" }}>
+                      {groupByCharge(preview.allocations).map((a) => (
+                        <div key={a.chargeId} style={lineRow}>
                           <span style={{ fontSize: 14.5, color: "var(--text)" }}>{label(a.chargeId, preview.surcharges, describe.current)}</span>
                           <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 15, color: "var(--text)" }}>{formatCents(a.amountCents)}</span>
                         </div>
@@ -398,44 +411,7 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
                     </div>
                   )}
 
-                  <div>
-                    <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)", marginLeft: 3 }}>Método</span>
-                    <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
-                      {METHODS.map((m) => {
-                        const on = method === m.value;
-                        return (
-                          <button
-                            key={m.value}
-                            type="button"
-                            onClick={() => setMethod(m.value)}
-                            style={{ height: 44, padding: "0 18px", borderRadius: 99, fontSize: 14.5, fontWeight: 600, fontFamily: "var(--font-display)", cursor: "pointer", border: `1.5px solid ${on ? "var(--lime)" : "var(--border)"}`, background: on ? "color-mix(in oklab, var(--lime) 12%, var(--surface))" : "var(--surface)", color: on ? "var(--forest)" : "var(--text-muted)" }}>
-                            {m.label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {method === "card" && (
-                    <div>
-                      <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)", marginLeft: 3 }}>Tipo de tarjeta</span>
-                      <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                        {([["debit", "Débito"], ["credit", "Crédito"]] as [CardType, string][]).map(([value, label]) => {
-                          const on = cardType === value;
-                          return (
-                            <button
-                              key={value}
-                              type="button"
-                              onClick={() => setCardType(value)}
-                              aria-label={label}
-                              style={{ height: 44, padding: "0 18px", borderRadius: 99, fontSize: 14.5, fontWeight: 600, fontFamily: "var(--font-display)", cursor: "pointer", border: `1.5px solid ${on ? "var(--lime)" : "var(--border)"}`, background: on ? "color-mix(in oklab, var(--lime) 12%, var(--surface))" : "var(--surface)", color: on ? "var(--forest)" : "var(--text-muted)" }}>
-                              {label}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
+                  <TenderEditor tenders={tenders} />
 
                   <DateField
                     label="Fecha de pago"
@@ -450,23 +426,13 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
                     help="El día en que la familia pagó. Si capturas tarde, pon ese día: los recargos, el pronto pago y el precio de la inscripción se calculan con él."
                   />
 
-                  <label style={{ display: "block" }}>
-                    <span style={{ display: "inline-flex", alignItems: "baseline", gap: 6, marginLeft: 3 }}>
-                      <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)" }}>Referencia (opcional)</span>
-                      <HelpTip id="cobro-ref-help" label="Referencia" text={REFERENCIA_AYUDA} />
-                    </span>
-                    <div style={{ marginTop: 8 }}>
-                      <input value={reference} onChange={(e) => setReference(e.target.value)} aria-label="Referencia" aria-describedby="cobro-ref-help" style={{ ...field, height: 50, fontSize: 15.5, fontWeight: 400 }} />
-                    </div>
-                  </label>
-
                   {error !== undefined && <p role="alert" style={{ color: "var(--bad-fg)", fontSize: 14, margin: 0 }}>{error}</p>}
                 </div>
 
                 <div style={{ display: "flex", gap: 12, alignItems: "center", padding: "18px 26px", borderTop: "1px solid var(--border)", background: "var(--surface-2)" }}>
                   <Btn kind="ghost" type="button" onClick={onClose}>Cancelar</Btn>
                   <div style={{ flex: 1 }} />
-                  <Btn icon="check" type="submit" style={{ opacity: ready ? 1 : 0.45, height: 52, fontSize: 16 }}>Cobrar</Btn>
+                  <Btn icon="check" type="submit" style={{ height: 52, fontSize: 16 }}>Cobrar</Btn>
                 </div>
               </form>
             </StudentNotesBeside>
@@ -508,13 +474,30 @@ function Receipt({ result, describe, onClose }: { result: DepositResult; describ
           </p>
         </div>
         <div style={{ borderRadius: "var(--r-md)", border: "1px solid var(--border)", overflow: "hidden" }}>
-          {result.allocations.map((a) => (
-            <div key={a.id} style={{ display: "flex", justifyContent: "space-between", padding: "12px 16px", borderTop: "1px solid var(--border)" }}>
+          {groupByCharge(result.allocations).map((a) => (
+            <div key={a.chargeId} style={lineRow}>
               <span style={{ fontSize: 14.5, color: "var(--text)" }}>{label(a.chargeId, result.surcharges, describe)}</span>
               <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 15 }}>{formatCents(a.amountCents)}</span>
             </div>
           ))}
         </div>
+        {showsTenders(result.deposit.tenders) && (
+          // Split across methods, or settled with a credit note (T8): the
+          // receipt says how much each covered — the ticket does the same.
+          <div data-testid="receipt-tenders" style={{ borderRadius: "var(--r-md)", border: "1px solid var(--border)", overflow: "hidden" }}>
+            <div style={{ padding: "10px 16px", background: "var(--surface-2)", fontSize: 13, fontWeight: 700, color: "var(--text-muted)", fontFamily: "var(--font-display)" }}>
+              Formas de pago
+            </div>
+            {result.deposit.tenders.map((t, i) => (
+              <div key={i} style={lineRow}>
+                <span style={{ fontSize: 14.5, color: "var(--text)" }}>
+                  {tenderLabel(t.method, t.cardType)}{t.reference !== undefined && ` · ref. ${t.reference}`}
+                </span>
+                <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 15 }}>{formatCents(t.amountCents)}</span>
+              </div>
+            ))}
+          </div>
+        )}
         {result.unallocatedCents > 0 && (
           <p style={{ fontSize: 14, color: "var(--text-muted)", margin: 0 }}>
             Quedan {formatCents(result.unallocatedCents)} a favor de la familia.
@@ -528,6 +511,11 @@ function Receipt({ result, describe, onClose }: { result: DepositResult; describ
       </div>
     </div>
   );
+}
+
+/** A breakdown is worth showing when there is more than one method, or a credit note that is not money. */
+function showsTenders(tenders: readonly Tender[]): boolean {
+  return tenders.length > 1 || tenders.some((t) => t.method === "credit_note");
 }
 
 /**

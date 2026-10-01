@@ -66,6 +66,8 @@ type fakeFinance struct {
 	payKey      string
 	payPaidAt   time.Time
 	payment     client.Payment
+	payTenders  []client.Tender
+	payments    []client.Payment
 
 	accountStudent string
 	account        client.AccountStatement
@@ -85,6 +87,7 @@ type fakeFinance struct {
 	expected        client.Expected
 	depositGranted  bool
 	depositCardType string
+	depositTenders  []client.Tender
 	incomeFrom      string
 	incomeTo        string
 	income          client.Income
@@ -102,8 +105,9 @@ func (f *fakeFinance) ExpectedToday(_ context.Context, studentID, on string) (cl
 	return f.expected, f.err
 }
 
-func (f *fakeFinance) RegisterDeposit(_ context.Context, studentID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time, grantEarlyPayment bool, cardType string, receiver client.Receiver, chargeIDs []string) (client.DepositResult, error) {
+func (f *fakeFinance) RegisterDeposit(_ context.Context, studentID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time, grantEarlyPayment bool, cardType string, receiver client.Receiver, chargeIDs []string, tenders []client.Tender) (client.DepositResult, error) {
 	f.depositCardType = cardType
+	f.depositTenders = tenders
 	f.depositChargeIDs = chargeIDs
 	f.depositReceiver = receiver
 	f.depositStudent, f.depositAmount, f.depositMethod = studentID, amountCents, method
@@ -201,14 +205,21 @@ func (f *fakeFinance) CancelCharge(_ context.Context, chargeID string) (client.C
 	return f.charge, nil
 }
 
-func (f *fakeFinance) RegisterPaymentAt(_ context.Context, chargeID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time, receiver client.Receiver) (client.Payment, client.Charge, error) {
-	f.payChargeID, f.payAmount, f.payMethod, f.payRef = chargeID, amountCents, method, reference
-	f.payReceiver = receiver
-	f.payKey, f.payPaidAt = idempotencyKey, paidAt
-	if f.err != nil {
-		return client.Payment{}, client.Charge{}, f.err
+func (f *fakeFinance) RegisterTenderedPayment(_ context.Context, in client.TenderedPayment) ([]client.Payment, client.Charge, error) {
+	f.payChargeID, f.payAmount = in.ChargeID, in.AmountCents
+	f.payTenders = in.Tenders
+	if len(in.Tenders) > 0 {
+		f.payMethod, f.payRef = in.Tenders[0].Method, in.Tenders[0].Reference
 	}
-	return f.payment, f.charge, nil
+	f.payReceiver = in.Receiver
+	f.payKey, f.payPaidAt = in.IdempotencyKey, in.PaidAt
+	if f.err != nil {
+		return nil, client.Charge{}, f.err
+	}
+	if len(f.payments) > 0 {
+		return f.payments, f.charge, nil
+	}
+	return []client.Payment{f.payment}, f.charge, nil
 }
 
 func (f *fakeFinance) GetAccount(_ context.Context, studentID string) (client.AccountStatement, error) {

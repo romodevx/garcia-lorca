@@ -159,3 +159,53 @@ describe("the counter's choice of charges (tarea 8)", () => {
     }
   });
 });
+
+// T8: a credit note is a tender, and a payment may be split across several.
+describe("tenders (tarea 8 · nota de crédito + pago combinado)", () => {
+  const tenders = [
+    { method: "credit_note" as const, amountCents: 50000, reference: "NC-12" },
+    { method: "card" as const, amountCents: 100000, cardType: "debit" as const },
+  ];
+
+  it("sends the breakdown on the deposit", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ deposit, allocations: [], surcharges: [], unallocatedCents: 0 }, 201));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await registerDeposit(BASE, { studentId: "s1", amountCents: 150000, method: "credit_note", reference: "", tenders });
+
+    const body = JSON.parse(lastCall(fetchMock)[1].body as string) as Record<string, unknown>;
+    expect(body.tenders).toEqual(tenders);
+    expect(body.amountCents).toBe(150000);
+  });
+
+  it("reads a deposit's tenders, and backfills one for a gateway that sends none", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({
+      deposits: [
+        { ...deposit, id: "d-mixed", amountCents: 150000, method: "mixed", tenders },
+        { ...deposit, id: "d-old", method: "card", cardType: "credit", reference: "V-9" },
+      ],
+    })));
+
+    const [mixed, old] = await listDeposits(BASE, "s1");
+
+    expect(mixed?.method).toBe("mixed");
+    expect(mixed?.tenders).toEqual(tenders);
+    expect(old?.tenders).toEqual([{ method: "card", amountCents: 670000, reference: "V-9", cardType: "credit" }]);
+  });
+
+  it("keeps the credit notes of the day apart from the money", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({
+      deposits: [], cancelled: [], payments: [], cashCents: 100000, cardCents: 0, transferCents: 0, totalCents: 100000, creditNoteCents: 50000,
+    })));
+
+    const cut = await getCashUp(BASE, "");
+
+    expect(cut.creditNoteCents).toBe(50000);
+    expect(cut.totalCents).toBe(100000);
+  });
+
+  it("reads a missing creditNoteCents as zero", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ deposits: [] })));
+    expect((await getCashUp(BASE, "")).creditNoteCents).toBe(0);
+  });
+});

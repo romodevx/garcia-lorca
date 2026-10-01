@@ -193,7 +193,7 @@ func repriceFixture(t *testing.T, tenant, hex string) (unpaidID, partPaidID, unp
 		t.Fatalf("create charges: %v", err)
 	}
 	if _, _, _, err := repo.RegisterPayment(ctx,
-		newPayment(t, id("b01"), tenant, partPaidID, 100000, ymd(2027, time.January, 20)), derive, nil); err != nil {
+		one(newPayment(t, id("b01"), tenant, partPaidID, 100000, ymd(2027, time.January, 20))), derive, nil); err != nil {
 		t.Fatalf("register payment: %v", err)
 	}
 	return unpaidID, partPaidID, unpaidRef, partPaidRef

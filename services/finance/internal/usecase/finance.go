@@ -364,29 +364,61 @@ func (s *FinanceService) RegisterPayment(ctx context.Context, chargeID string, a
 // receivedBy is the account that took the money (task 7), set by the gateway
 // from the authenticated caller; empty when unknown.
 func (s *FinanceService) RegisterPaymentAt(ctx context.Context, chargeID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time, receivedBy string) (domain.Payment, ports.ChargeWithPaid, error) {
-	when := paidAt
+	payments, charge, err := s.RegisterTenderedPayment(ctx, TenderedPaymentInput{
+		ChargeID: chargeID, AmountCents: amountCents, IdempotencyKey: idempotencyKey,
+		PaidAt: paidAt, ReceivedBy: receivedBy,
+		Tenders: []TenderInput{{Method: method, AmountCents: amountCents, Reference: reference}},
+	})
+	if err != nil {
+		return domain.Payment{}, ports.ChargeWithPaid{}, err
+	}
+	return payments[0], charge, nil
+}
+
+// TenderedPaymentInput is a payment against one charge that may combine
+// methods (T8): a credit note completed with cash, say.
+type TenderedPaymentInput struct {
+	ChargeID    string
+	AmountCents int64
+	// Tenders must add up exactly to AmountCents — the school's rule: a payment
+	// whose methods do not cover the amount to pay is not registered.
+	Tenders        []TenderInput
+	IdempotencyKey string
+	// PaidAt is when the money changed hands; zero means now.
+	PaidAt time.Time
+	// ReceivedBy is the account that took the money (task 7).
+	ReceivedBy string
+}
+
+// RegisterTenderedPayment posts one payment row per tender against a charge,
+// all in ONE transaction under the charge's lock: the overpay veto sees their
+// sum, and either every row lands or none does.
+//
+// Idempotency holds for the whole set. The first row carries the caller's key
+// and each further row the key with "#2", "#3"… appended, so a retry finds the
+// set already stored and returns it without collecting again.
+func (s *FinanceService) RegisterTenderedPayment(ctx context.Context, in TenderedPaymentInput) ([]domain.Payment, ports.ChargeWithPaid, error) {
+	when := in.PaidAt
 	if when.IsZero() {
 		when = s.now()
 	} else if when.After(s.now()) {
-		return domain.Payment{}, ports.ChargeWithPaid{}, glerrors.New(glerrors.KindInvalid,
+		return nil, ports.ChargeWithPaid{}, glerrors.New(glerrors.KindInvalid,
 			"la fecha del pago no puede estar en el futuro")
 	}
-
-	payment, err := domain.NewPayment(s.newID(), s.tenantID, chargeID, amountCents, method, reference, when, idempotencyKey)
+	payments, err := s.tenderedPayments(in, when)
 	if err != nil {
-		return domain.Payment{}, ports.ChargeWithPaid{}, err
+		return nil, ports.ChargeWithPaid{}, err
 	}
-	payment = payment.WithReceivedBy(receivedBy)
 
-	stored, charge, replayed, err := s.repo.RegisterPayment(ctx, payment, derivePaidStatus,
+	stored, charge, replayed, err := s.repo.RegisterPayment(ctx, payments, derivePaidStatus,
 		func(charge ports.ChargeWithPaid) []ports.OutboxEvent {
-			return s.paymentEvents(payment, charge)
+			return s.paymentEvents(payments, charge)
 		})
 	if err != nil {
 		if glerrors.KindOf(err) == glerrors.KindNotFound {
-			return domain.Payment{}, ports.ChargeWithPaid{}, glerrors.New(glerrors.KindInvalid, "charge not found")
+			return nil, ports.ChargeWithPaid{}, glerrors.New(glerrors.KindInvalid, "charge not found")
 		}
-		return domain.Payment{}, ports.ChargeWithPaid{}, err
+		return nil, ports.ChargeWithPaid{}, err
 	}
 
 	if !replayed {
@@ -396,6 +428,34 @@ func (s *FinanceService) RegisterPaymentAt(ctx context.Context, chargeID string,
 		s.drainQuietly(ctx)
 	}
 	return stored, charge, nil
+}
+
+// tenderedPayments builds one validated payment per tender, after checking
+// that the tenders add up to the amount being paid.
+func (s *FinanceService) tenderedPayments(in TenderedPaymentInput, when time.Time) ([]domain.Payment, error) {
+	if in.AmountCents <= 0 {
+		return nil, glerrors.New(glerrors.KindInvalid, "payment amount must be positive")
+	}
+	tenders, err := toTenders(in.Tenders)
+	if err != nil {
+		return nil, err
+	}
+	if err := domain.ValidateTenders(tenders, in.AmountCents); err != nil {
+		return nil, err
+	}
+	out := make([]domain.Payment, 0, len(tenders))
+	for i, t := range tenders {
+		payment, err := domain.NewPayment(s.newID(), s.tenantID, in.ChargeID, t.Amount().Int64(),
+			t.Method(), t.Reference(), when, domain.TenderKey(in.IdempotencyKey, i))
+		if err != nil {
+			return nil, err
+		}
+		if payment, err = payment.WithCardType(t.CardType()); err != nil {
+			return nil, err
+		}
+		out = append(out, payment.WithReceivedBy(in.ReceivedBy))
+	}
+	return out, nil
 }
 
 // derivePaidStatus is the rule the repository runs inside the payment
@@ -418,26 +478,37 @@ func derivePaidStatus(charge domain.Charge, newPaidCents int64) (string, error) 
 // a consumer acting on a partial payment would enrol a pupil whose inscription
 // is half paid. The test is the charge's derived status, not the amount
 // collected, which says nothing about what was owed.
-func (s *FinanceService) paymentEvents(p domain.Payment, charge ports.ChargeWithPaid) []ports.OutboxEvent {
+func (s *FinanceService) paymentEvents(payments []domain.Payment, charge ports.ChargeWithPaid) []ports.OutboxEvent {
+	first := payments[0]
+	var total int64
+	method := first.Method()
+	for _, p := range payments {
+		total += p.Amount().Int64()
+		if p.Method() != method {
+			method = domain.MethodMixed
+		}
+	}
+	// One announcement per payment the family made, whatever the methods it
+	// combined: a parent is told once that $1,000 arrived, not once per tender.
 	events := []ports.OutboxEvent{
 		outboxEvent(ports.OutboxPaymentRegistered, ports.PaymentRegisteredEvent{
-			PaymentID:   p.ID(),
+			PaymentID:   first.ID(),
 			StudentID:   charge.Charge.StudentID(),
-			ChargeID:    p.ChargeID(),
+			ChargeID:    first.ChargeID(),
 			TenantID:    s.tenantID,
-			Method:      p.Method(),
-			AmountCents: p.Amount().Int64(),
-			PaidAt:      p.PaidAt(),
+			Method:      method,
+			AmountCents: total,
+			PaidAt:      first.PaidAt(),
 		}),
 	}
 	if charge.Charge.Status() == domain.StatusPaid {
 		events = append(events, outboxEvent(ports.OutboxChargeSettled, ports.ChargeSettledEvent{
-			ChargeID:    p.ChargeID(),
+			ChargeID:    first.ChargeID(),
 			StudentID:   charge.Charge.StudentID(),
 			TenantID:    s.tenantID,
 			ExternalRef: charge.Charge.ExternalRef(),
 			AmountCents: charge.Charge.Effective().Int64(),
-			SettledAt:   p.PaidAt(),
+			SettledAt:   first.PaidAt(),
 		}))
 	}
 	return events

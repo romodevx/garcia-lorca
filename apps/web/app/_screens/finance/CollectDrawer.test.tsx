@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -66,8 +66,8 @@ describe("CollectDrawer", () => {
     // Pre-filled with the expected figure, so it starts at zero.
     expect(screen.getByTestId("difference")).toHaveTextContent("0.00");
 
-    await user.clear(screen.getByLabelText("Monto recibido"));
-    await user.type(screen.getByLabelText("Monto recibido"), "6000");
+    await user.clear(screen.getByLabelText("Monto a pagar"));
+    await user.type(screen.getByLabelText("Monto a pagar"), "6000");
 
     expect(await screen.findByTestId("difference")).toHaveTextContent("700");
   });
@@ -79,7 +79,7 @@ describe("CollectDrawer", () => {
     finance.registerDeposit.mockResolvedValue({
       deposit: {
         id: "dep-1", studentId: "s1", amountCents: 310000, method: "cash", reference: "",
-        paidAt: "2026-09-20T00:00:00Z", calendarVersion: "abc",
+        paidAt: "2026-09-20T00:00:00Z", calendarVersion: "abc", tenders: [],
       },
       allocations: [], surcharges: [], unallocatedCents: 0, replayed: false,
     });
@@ -109,7 +109,7 @@ describe("CollectDrawer", () => {
     finance.registerDeposit.mockResolvedValue({
       deposit: {
         id: "0c4a4943-0000-0000-0000-000000000001", studentId: "s1", amountCents: 310000, method: "cash", reference: "",
-        paidAt: "2026-09-20T00:00:00Z", calendarVersion: "abc", folio: "P-2026-000042",
+        paidAt: "2026-09-20T00:00:00Z", calendarVersion: "abc", tenders: [], folio: "P-2026-000042",
       },
       allocations: [], surcharges: [], unallocatedCents: 0, replayed: false,
     });
@@ -134,8 +134,8 @@ describe("CollectDrawer", () => {
     render(<CollectDrawer student={student} onClose={() => {}} onCollected={() => {}} />);
     await screen.findByTestId("amount-expected");
 
-    await user.clear(screen.getByLabelText("Monto recibido"));
-    await user.type(screen.getByLabelText("Monto recibido"), "6700");
+    await user.clear(screen.getByLabelText("Monto a pagar"));
+    await user.type(screen.getByLabelText("Monto a pagar"), "6700");
 
     await waitFor(() => expect(finance.previewDeposit).toHaveBeenCalled());
     expect(await screen.findByText(/Colegiatura septiembre/)).toBeInTheDocument();
@@ -150,7 +150,7 @@ describe("CollectDrawer", () => {
     finance.registerDeposit.mockResolvedValue({
       deposit: {
         id: "dep-1", studentId: "s1", amountCents: 670000, method: "cash", reference: "",
-        paidAt: "2026-10-10T00:00:00Z", calendarVersion: "abc",
+        paidAt: "2026-10-10T00:00:00Z", calendarVersion: "abc", tenders: [],
       },
       allocations: [payment("p1", "ch-sep", 320000)],
       surcharges: [],
@@ -161,8 +161,8 @@ describe("CollectDrawer", () => {
     render(<CollectDrawer student={student} onClose={() => {}} onCollected={onCollected} />);
     await screen.findByTestId("amount-expected");
 
-    await user.clear(screen.getByLabelText("Monto recibido"));
-    await user.type(screen.getByLabelText("Monto recibido"), "6700");
+    await user.clear(screen.getByLabelText("Monto a pagar"));
+    await user.type(screen.getByLabelText("Monto a pagar"), "6700");
     await user.click(screen.getByRole("button", { name: /Cobrar/ }));
 
     await waitFor(() => expect(finance.registerDeposit).toHaveBeenCalled());
@@ -182,15 +182,15 @@ describe("CollectDrawer", () => {
     finance.registerDeposit.mockResolvedValue({
       deposit: {
         id: "dep-1", studentId: "s1", amountCents: 320000, method: "cash", reference: "",
-        paidAt: "2026-10-10T00:00:00Z", calendarVersion: "abc",
+        paidAt: "2026-10-10T00:00:00Z", calendarVersion: "abc", tenders: [],
       },
       allocations: [], surcharges: [], unallocatedCents: 0, replayed: false,
     });
     render(<CollectDrawer student={student} onClose={() => {}} onCollected={() => {}} />);
     await screen.findByTestId("amount-expected");
 
-    await user.clear(screen.getByLabelText("Monto recibido"));
-    await user.type(screen.getByLabelText("Monto recibido"), "3200{Enter}");
+    await user.clear(screen.getByLabelText("Monto a pagar"));
+    await user.type(screen.getByLabelText("Monto a pagar"), "3200{Enter}");
 
     await waitFor(() => expect(finance.registerDeposit).toHaveBeenCalled());
   });
@@ -215,8 +215,8 @@ describe("CollectDrawer", () => {
     render(<CollectDrawer student={student} onClose={() => {}} onCollected={() => {}} />);
     await screen.findByTestId("amount-expected");
 
-    await user.clear(screen.getByLabelText("Monto recibido"));
-    await user.type(screen.getByLabelText("Monto recibido"), "6700");
+    await user.clear(screen.getByLabelText("Monto a pagar"));
+    await user.type(screen.getByLabelText("Monto a pagar"), "6700");
     await user.click(screen.getByRole("button", { name: /Cobrar/ }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("la fecha del pago no puede estar en el futuro");
@@ -227,8 +227,8 @@ describe("CollectDrawer", () => {
     render(<CollectDrawer student={student} onClose={() => {}} onCollected={() => {}} />);
     await screen.findByTestId("amount-expected");
 
-    await user.clear(screen.getByLabelText("Monto recibido"));
-    await user.type(screen.getByLabelText("Monto recibido"), "0");
+    await user.clear(screen.getByLabelText("Monto a pagar"));
+    await user.type(screen.getByLabelText("Monto a pagar"), "0");
     await user.click(screen.getByRole("button", { name: /Cobrar/ }));
 
     expect(finance.registerDeposit).not.toHaveBeenCalled();
@@ -241,7 +241,7 @@ describe("CollectDrawer", () => {
     finance.registerDeposit.mockResolvedValue({
       deposit: {
         id: "dep-1", studentId: "s1", amountCents: 670000, method: "card", reference: "",
-        paidAt: "2026-10-10T00:00:00Z", calendarVersion: "abc", cardType: "credit",
+        paidAt: "2026-10-10T00:00:00Z", calendarVersion: "abc", tenders: [], cardType: "credit",
       },
       allocations: [], surcharges: [], unallocatedCents: 0, replayed: false,
     });
@@ -249,14 +249,15 @@ describe("CollectDrawer", () => {
     await screen.findByTestId("amount-expected");
 
     // Cash: nothing to ask.
-    expect(screen.queryByLabelText("Débito")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Débito" })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Tarjeta" }));
-    await user.click(screen.getByLabelText("Crédito"));
+    await user.click(screen.getByRole("button", { name: "Crédito" }));
     await user.click(screen.getByRole("button", { name: /Cobrar/ }));
 
     await waitFor(() => expect(finance.registerDeposit).toHaveBeenCalled());
     expect(finance.registerDeposit.mock.calls[0]?.[1]?.cardType).toBe("credit");
+    expect(finance.registerDeposit.mock.calls[0]?.[1]?.tenders).toEqual([{ method: "card", amountCents: 670000, cardType: "credit" }]);
   });
 
 describe("CollectDrawer · fecha de pago (tarea 7)", () => {
@@ -286,7 +287,7 @@ describe("CollectDrawer · fecha de pago (tarea 7)", () => {
   it("takes the money with the day the family paid", async () => {
     const user = userEvent.setup();
     finance.registerDeposit.mockResolvedValue({
-      deposit: { id: "d1", studentId: "s1", amountCents: 670000, method: "cash", reference: "", paidAt: "2026-10-03T00:00:00Z", calendarVersion: "" },
+      deposit: { id: "d1", studentId: "s1", amountCents: 670000, method: "cash", reference: "", paidAt: "2026-10-03T00:00:00Z", calendarVersion: "", tenders: [] },
       allocations: [], surcharges: [], unallocatedCents: 0, replayed: false,
     } as unknown as financeApi.DepositResult);
     open();
@@ -304,7 +305,7 @@ describe("CollectDrawer · fecha de pago (tarea 7)", () => {
   it("sends no date for a payment made today", async () => {
     const user = userEvent.setup();
     finance.registerDeposit.mockResolvedValue({
-      deposit: { id: "d1", studentId: "s1", amountCents: 670000, method: "cash", reference: "", paidAt: "", calendarVersion: "" },
+      deposit: { id: "d1", studentId: "s1", amountCents: 670000, method: "cash", reference: "", paidAt: "", calendarVersion: "", tenders: [] },
       allocations: [], surcharges: [], unallocatedCents: 0, replayed: false,
     } as unknown as financeApi.DepositResult);
     open();
@@ -324,7 +325,7 @@ describe("CollectDrawer · fecha de pago (tarea 7)", () => {
     }));
     open();
     await screen.findByTestId("amount-expected");
-    const amount = screen.getByLabelText(/Monto recibido/, { selector: "input" });
+    const amount = screen.getByLabelText(/Monto a pagar/, { selector: "input" });
     fireEvent.blur(amount);
     fireEvent.change(screen.getByLabelText("Fecha de pago"), { target: { value: "2026-10-03" } });
     await waitFor(() => expect(amount).toHaveValue("6400.00"));
@@ -405,7 +406,7 @@ describe("CollectDrawer · el adeudo, concepto por concepto (tarea 8)", () => {
   it("follows the choice: paying ahead, and back", async () => {
     const user = userEvent.setup();
     open();
-    const amount = () => screen.getByLabelText(/Monto recibido/, { selector: "input" });
+    const amount = () => screen.getByLabelText(/Monto a pagar/, { selector: "input" });
     await user.click(await screen.findByRole("checkbox", { name: "Colegiatura noviembre" }));
 
     expect(screen.getByTestId("debt-selected")).toHaveTextContent("9,900");
@@ -424,12 +425,12 @@ describe("CollectDrawer · el adeudo, concepto por concepto (tarea 8)", () => {
   it("takes the money against the chosen charges only", async () => {
     const user = userEvent.setup();
     finance.registerDeposit.mockResolvedValue({
-      deposit: { id: "d1", studentId: "s1", amountCents: 320000, method: "cash", reference: "", paidAt: "", calendarVersion: "" },
+      deposit: { id: "d1", studentId: "s1", amountCents: 320000, method: "cash", reference: "", paidAt: "", calendarVersion: "", tenders: [] },
       allocations: [], surcharges: [], unallocatedCents: 0, replayed: false,
     } as unknown as financeApi.DepositResult);
     open();
     await user.click(await screen.findByRole("checkbox", { name: "Colegiatura septiembre" }));
-    expect(screen.getByLabelText(/Monto recibido/, { selector: "input" })).toHaveValue("3200.00");
+    expect(screen.getByLabelText(/Monto a pagar/, { selector: "input" })).toHaveValue("3200.00");
     await user.click(screen.getByRole("button", { name: "Cobrar" }));
 
     await waitFor(() => expect(finance.registerDeposit).toHaveBeenCalled());
@@ -449,7 +450,7 @@ describe("CollectDrawer · el adeudo, concepto por concepto (tarea 8)", () => {
   it("sends no choice when what is due is what is chosen: the oldest debt first, as always", async () => {
     const user = userEvent.setup();
     finance.registerDeposit.mockResolvedValue({
-      deposit: { id: "d1", studentId: "s1", amountCents: 670000, method: "cash", reference: "", paidAt: "", calendarVersion: "" },
+      deposit: { id: "d1", studentId: "s1", amountCents: 670000, method: "cash", reference: "", paidAt: "", calendarVersion: "", tenders: [] },
       allocations: [], surcharges: [], unallocatedCents: 0, replayed: false,
     } as unknown as financeApi.DepositResult);
     open();
@@ -457,5 +458,118 @@ describe("CollectDrawer · el adeudo, concepto por concepto (tarea 8)", () => {
     await user.click(screen.getByRole("button", { name: "Cobrar" }));
     await waitFor(() => expect(finance.registerDeposit).toHaveBeenCalled());
     expect(finance.registerDeposit.mock.calls[0]?.[1]).not.toHaveProperty("chargeIds");
+  });
+});
+
+// T8: a credit note is a way to pay, typed by hand, and any method can be
+// completed with another.
+describe("CollectDrawer · nota de crédito + pago combinado (tarea 8)", () => {
+  const open = () => render(<CollectDrawer student={student} onClose={() => {}} onCollected={() => {}} today="2026-10-12" />);
+  const tenderRow = (n: number): HTMLElement => screen.getByRole("group", { name: `Forma de pago ${n}` });
+  const result = (tenders: financeApi.Tender[], allocations: financeApi.Payment[] = []): financeApi.DepositResult => ({
+    deposit: {
+      id: "d1", studentId: "s1", amountCents: 670000, method: tenders.length > 1 ? "mixed" : "credit_note",
+      reference: "", paidAt: "", calendarVersion: "", tenders, folio: "P-2026-000050",
+    },
+    allocations, surcharges: [], unallocatedCents: 0, replayed: false,
+  });
+
+  it("asks for the amount to pay, prefilled with what is expected", async () => {
+    open();
+    await screen.findByTestId("amount-expected");
+    expect(screen.getByLabelText("Monto a pagar", { selector: "input" })).toHaveValue("6700.00");
+    expect(screen.queryByLabelText("Monto recibido")).toBeNull();
+    expect(screen.getByTestId("tender-total")).toHaveTextContent("$6,700.00");
+  });
+
+  it("takes a credit note that covers the whole amount", async () => {
+    const user = userEvent.setup();
+    finance.registerDeposit.mockResolvedValue(result([{ method: "credit_note", amountCents: 670000 }]));
+    open();
+    await screen.findByTestId("amount-expected");
+
+    await user.click(within(tenderRow(1)).getByRole("button", { name: "Nota de crédito" }));
+    await user.type(within(tenderRow(1)).getByLabelText("Referencia"), "NC-7");
+    await user.click(screen.getByRole("button", { name: "Cobrar" }));
+
+    await waitFor(() => expect(finance.registerDeposit).toHaveBeenCalled());
+    expect(finance.registerDeposit.mock.calls[0]?.[1]).toMatchObject({
+      amountCents: 670000,
+      method: "credit_note",
+      tenders: [{ method: "credit_note", amountCents: 670000, reference: "NC-7" }],
+    });
+  });
+
+  it("completes a credit note with cash, and shows both on the receipt", async () => {
+    const user = userEvent.setup();
+    const tenders: financeApi.Tender[] = [
+      { method: "credit_note", amountCents: 50000, reference: "NC-7" },
+      { method: "cash", amountCents: 620000 },
+    ];
+    finance.registerDeposit.mockResolvedValue(result(tenders, [
+      payment("p1", "ch-sep", 50000),
+      payment("p2", "ch-sep", 270000),
+      payment("p3", "ch-oct", 350000),
+    ]));
+    open();
+    await screen.findByTestId("amount-expected");
+
+    await user.click(within(tenderRow(1)).getByRole("button", { name: "Nota de crédito" }));
+    await user.clear(within(tenderRow(1)).getByLabelText("Monto"));
+    await user.type(within(tenderRow(1)).getByLabelText("Monto"), "500");
+    await user.type(within(tenderRow(1)).getByLabelText("Referencia"), "NC-7");
+    await user.click(screen.getByRole("button", { name: "Agregar método" }));
+    expect(within(tenderRow(2)).getByLabelText("Monto")).toHaveValue("6200.00");
+    await user.click(screen.getByRole("button", { name: "Cobrar" }));
+
+    await waitFor(() => expect(finance.registerDeposit).toHaveBeenCalled());
+    expect(finance.registerDeposit.mock.calls[0]?.[1]?.tenders).toEqual(tenders);
+
+    const receipt = await screen.findByTestId("receipt");
+    expect(within(receipt).getByTestId("receipt-tenders")).toHaveTextContent(/Nota de crédito.*NC-7.*\$500\.00/);
+    expect(within(receipt).getByTestId("receipt-tenders")).toHaveTextContent(/Efectivo.*\$6,200\.00/);
+    // The same month paid by two methods is read once, with its total.
+    expect(within(receipt).getAllByText("Colegiatura septiembre")).toHaveLength(1);
+    expect(within(receipt).getByText("$3,200.00")).toBeInTheDocument();
+  });
+
+  it("refuses a split that does not add up to the amount to pay, and goes to it", async () => {
+    const user = userEvent.setup();
+    open();
+    await screen.findByTestId("amount-expected");
+
+    await user.clear(within(tenderRow(1)).getByLabelText("Monto"));
+    await user.type(within(tenderRow(1)).getByLabelText("Monto"), "500");
+    await user.click(screen.getByRole("button", { name: "Cobrar" }));
+
+    expect(await screen.findByText("La suma de las formas de pago debe ser igual al monto a pagar.")).toBeInTheDocument();
+    await waitFor(() => expect(document.activeElement).toBe(within(tenderRow(1)).getByLabelText("Monto")));
+    expect(finance.registerDeposit).not.toHaveBeenCalled();
+  });
+
+  it("refuses an amount to pay above what the family owes, and goes to it", async () => {
+    const user = userEvent.setup();
+    open();
+    await screen.findByTestId("amount-expected");
+    const amount = screen.getByLabelText("Monto a pagar", { selector: "input" });
+
+    await user.clear(amount);
+    await user.type(amount, "9000");
+    await user.click(screen.getByRole("button", { name: "Cobrar" }));
+
+    expect(await screen.findByText(/No puede ser mayor que el adeudo/)).toBeInTheDocument();
+    await waitFor(() => expect(document.activeElement).toBe(amount));
+    expect(finance.registerDeposit).not.toHaveBeenCalled();
+  });
+
+  it("lists a charge once in the preview when the planner splits it", async () => {
+    finance.previewDeposit.mockResolvedValue({
+      allocations: [payment("p1", "ch-sep", 50000), payment("p2", "ch-sep", 270000)],
+      surcharges: [], unallocatedCents: 0,
+    });
+    open();
+    const preview = await screen.findByTestId("preview");
+    await waitFor(() => expect(within(preview).getAllByText("Colegiatura septiembre")).toHaveLength(1));
+    expect(within(preview).getByText("$3,200.00")).toBeInTheDocument();
   });
 });

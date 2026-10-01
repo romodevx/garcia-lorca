@@ -152,23 +152,43 @@ func chargeMovements(
 	return out, nil
 }
 
-// depositMovements is the money as it arrived: one line per deposit, whatever
-// it paid. A voided deposit is shown to the office with no effect on the
-// balance; the family is not shown it.
+// depositMovements is the money as it arrived: one line per tender of each
+// deposit (T8) — a deposit paid one way is one line, as before; a credit note
+// completed with cash is a credit_note line beside a payment line, with the
+// deposit's folio on both. A voided deposit is shown to the office with no
+// effect on the balance; the family is not shown it.
 func depositMovements(deposits []domain.Deposit, family bool) []domain.Movement {
 	out := make([]domain.Movement, 0, len(deposits))
 	for _, d := range deposits {
 		if d.Voided() && family {
 			continue
 		}
-		out = append(out, domain.Movement{
-			Kind: domain.MovementPayment, Date: d.PaidAt(), Description: "Pago",
-			AmountCents: d.Amount().Int64(), DepositID: d.ID(),
-			Method: d.Method(), CardType: d.CardType(), Reference: d.Reference(), Folio: d.Folio(),
-			Voided: d.Voided(), VoidReason: d.VoidReason(),
-		})
+		for _, t := range d.Tenders() {
+			out = append(out, domain.Movement{
+				Kind: tenderKind(t.Method()), Date: d.PaidAt(), Description: tenderDescription(t.Method()),
+				AmountCents: t.Amount().Int64(), DepositID: d.ID(),
+				Method: t.Method(), CardType: t.CardType(), Reference: t.Reference(), Folio: d.Folio(),
+				Voided: d.Voided(), VoidReason: d.VoidReason(),
+			})
+		}
 	}
 	return out
+}
+
+// tenderKind: a credit note lowers the balance like money does, but it is its
+// own kind of line — the family and the office read it as what it was.
+func tenderKind(method string) domain.MovementKind {
+	if method == domain.MethodCreditNote {
+		return domain.MovementCreditNote
+	}
+	return domain.MovementPayment
+}
+
+func tenderDescription(method string) string {
+	if method == domain.MethodCreditNote {
+		return "Nota de crédito"
+	}
+	return "Pago"
 }
 
 // loosePaymentMovements is the money paid straight against a charge, outside
@@ -184,14 +204,14 @@ func loosePaymentMovements(payments []domain.Payment, charges []ports.ChargeWith
 		if p.DepositID() != "" {
 			continue
 		}
-		description := "Pago"
+		description := tenderDescription(p.Method())
 		if d := descriptions[p.ChargeID()]; d != "" {
 			description += " · " + d
 		}
 		out = append(out, domain.Movement{
-			Kind: domain.MovementPayment, Date: p.PaidAt(), Description: description,
+			Kind: tenderKind(p.Method()), Date: p.PaidAt(), Description: description,
 			AmountCents: p.Amount().Int64(), ChargeID: p.ChargeID(),
-			Method: p.Method(), Reference: p.Reference(),
+			Method: p.Method(), CardType: p.CardType(), Reference: p.Reference(),
 		})
 	}
 	return out

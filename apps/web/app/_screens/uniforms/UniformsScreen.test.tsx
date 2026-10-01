@@ -612,3 +612,69 @@ describe("UniformsScreen — una prenda para todos", () => {
     expect(screen.queryByText(/nivel sin nombre/)).not.toBeInTheDocument();
   });
 });
+
+// T8: the till takes a credit note too, and any method completed with another.
+describe("the till · nota de crédito + pago combinado (tarea 8)", () => {
+  const SOLD = { id: "ord-1", folio: "U-2026-000007", totalCents: 65000, lines: [], fulfillments: [] };
+  const tenderRow = (n: number): HTMLElement => screen.getByRole("group", { name: `Forma de pago ${n}` });
+  const saleBody = (fetchMock: ReturnType<typeof vi.fn>): Record<string, unknown> => {
+    const call = fetchMock.mock.calls.find((c) => String(c[0]).includes("/counter-sale")) as [string, RequestInit];
+    return JSON.parse(call[1].body as string) as Record<string, unknown>;
+  };
+  async function fillCart(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+    await waitFor(() => expect(screen.getByText("Suéter verde")).toBeInTheDocument());
+    await user.click(screen.getByText("Suéter verde"));
+    await user.click(screen.getByRole("button", { name: /Talla M, 6 libres/ }));
+    await user.click(screen.getByRole("button", { name: "Agregar al carrito" }));
+    await chooseZoe(user);
+  }
+
+  it("charges the cart total in cash by default, sent as one tender", async () => {
+    const fetchMock = stubTill([jumper], jsonResponse(SOLD, 201));
+    const user = userEvent.setup();
+    render(<UniformsScreen onBack={() => {}} permissions={ALL} />);
+    await fillCart(user);
+
+    expect(screen.getByTestId("tender-total")).toHaveTextContent("$650.00");
+    await user.click(screen.getByRole("button", { name: /Cobrar y entregar/ }));
+
+    await waitFor(() => expect(screen.getByText("U-2026-000007")).toBeInTheDocument());
+    expect(saleBody(fetchMock)).toMatchObject({ method: "cash", tenders: [{ method: "cash", amountCents: 65000 }] });
+  });
+
+  it("completes a credit note with cash, and still counts the change of the cash", async () => {
+    const fetchMock = stubTill([jumper], jsonResponse(SOLD, 201));
+    const user = userEvent.setup();
+    render(<UniformsScreen onBack={() => {}} permissions={ALL} />);
+    await fillCart(user);
+
+    await user.click(within(tenderRow(1)).getByRole("button", { name: "Nota de crédito" }));
+    await user.clear(within(tenderRow(1)).getByLabelText("Monto", CAMPO));
+    await user.type(within(tenderRow(1)).getByLabelText("Monto", CAMPO), "300");
+    await user.type(within(tenderRow(1)).getByLabelText("Referencia", CAMPO), "NC-3");
+    await user.click(screen.getByRole("button", { name: "Agregar método" }));
+    await user.type(screen.getByLabelText("Efectivo recibido", CAMPO), "500");
+    expect(screen.getByText(/Cambio: \$150\.00/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Cobrar y entregar/ }));
+
+    await waitFor(() => expect(screen.getByText("U-2026-000007")).toBeInTheDocument());
+    expect(saleBody(fetchMock).tenders).toEqual([
+      { method: "credit_note", amountCents: 30000, reference: "NC-3" },
+      { method: "cash", amountCents: 35000 },
+    ]);
+  });
+
+  it("does not sell when the tenders do not add up to the total", async () => {
+    const fetchMock = stubTill([jumper], jsonResponse(SOLD, 201));
+    const user = userEvent.setup();
+    render(<UniformsScreen onBack={() => {}} permissions={ALL} />);
+    await fillCart(user);
+
+    await user.clear(within(tenderRow(1)).getByLabelText("Monto", CAMPO));
+    await user.type(within(tenderRow(1)).getByLabelText("Monto", CAMPO), "100");
+    await user.click(screen.getByRole("button", { name: /Cobrar y entregar/ }));
+
+    expect(await screen.findByText("La suma de las formas de pago debe ser igual al monto a pagar.")).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).includes("/counter-sale"))).toBe(false);
+  });
+});

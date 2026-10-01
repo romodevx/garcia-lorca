@@ -187,6 +187,11 @@ func (r *fakeRepo) CounterSale(_ context.Context, cmd ports.CounterSaleCommand) 
 	if prior, ok := r.byKey[cmd.IdempotencyKey]; ok && cmd.IdempotencyKey != "" {
 		return prior, true, nil
 	}
+	if cmd.Admit != nil {
+		if err := cmd.Admit(); err != nil {
+			return ports.OrderAggregate{}, false, err
+		}
+	}
 	// The order is built BEFORE anything moves, in the same order as the real
 	// transaction. It matters: Postgres rolls the whole thing back when the order
 	// is refused, and a fake that had already emptied the shelf by then would let
@@ -274,6 +279,8 @@ type fakeFinance struct {
 	conceptID string
 	charges   []ports.CreateChargeInput
 	payments  []string
+	// tenders are the methods of each recorded payment, in order (T8).
+	tenders [][]ports.Tender
 	// Injected failures, one per step, so a test can kill the call exactly where
 	// it wants to see what the system is left holding.
 	failConcept error
@@ -307,11 +314,12 @@ func (f *fakeFinance) CreateCharge(_ context.Context, in ports.CreateChargeInput
 	return ports.ChargeRef{ID: fmt.Sprintf("chg-%d", f.nextID)}, nil
 }
 
-func (f *fakeFinance) RegisterPayment(_ context.Context, chargeID string, _ int64, _, _, _ string) error {
+func (f *fakeFinance) RegisterPayment(_ context.Context, chargeID string, _ int64, tenders []ports.Tender, _ string) error {
 	if f.failPayment != nil {
 		return f.failPayment
 	}
 	f.payments = append(f.payments, chargeID)
+	f.tenders = append(f.tenders, tenders)
 	return nil
 }
 

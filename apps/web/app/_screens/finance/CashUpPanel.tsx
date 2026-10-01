@@ -7,6 +7,7 @@ import { API_URL } from "../../api-url";
 import { localISODate, shortDayLabel } from "../../_lib/localDate";
 import { ticketPath } from "../../receipts/api";
 import { formatCents } from "../../_lib/money";
+import { tenderLabel, tenderSummary } from "../../_design/payments/tenders";
 
 export interface CashUpPanelProps {
   /** The day the money changed hands, "2026-10-10". Empty means today. */
@@ -65,6 +66,14 @@ export function CashUpPanel({ day }: CashUpPanelProps): ReactElement {
             </div>
           ))}
         </div>
+        {cut.creditNoteCents > 0 && (
+          // A credit note settles debt but brings nothing into the drawer (T8):
+          // it is shown apart, and the total above does not count it.
+          <div data-testid="cash-up-credit-note" style={{ display: "flex", justifyContent: "space-between", gap: 12, marginTop: 16, paddingTop: 12, borderTop: "1px dashed var(--border)" }}>
+            <span style={{ fontSize: 14, color: "var(--text-muted)" }}>Notas de crédito — no es ingreso</span>
+            <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 16, color: "var(--text-muted)" }}>{formatCents(cut.creditNoteCents)}</span>
+          </div>
+        )}
       </div>
 
       {cut.deposits.length === 0 && cut.cancelled.length === 0 && cut.payments.length === 0 && (
@@ -78,7 +87,7 @@ export function CashUpPanel({ day }: CashUpPanelProps): ReactElement {
               <span style={{ fontSize: 14, color: "var(--text-muted)" }}>
                 {/* A back-dated payment carries a day, not an hour: none is shown. */}
                 {capturedLate(d) ? "" : `${hourOf(d.paidAt)} · `}
-                {methodLabel(d.method)}
+                {tenderSummary(d.tenders)}
                 {d.receivedByName !== undefined && d.receivedByName !== "" && ` · ${d.receivedByName}`}
                 {d.folio !== undefined && d.folio !== "" && ` · ${d.folio}`}
                 {capturedLate(d) && (
@@ -114,7 +123,7 @@ export function CashUpPanel({ day }: CashUpPanelProps): ReactElement {
           {cut.payments.map((p) => (
             <div key={p.id} data-testid="cash-up-row" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "13px 20px", borderTop: "1px solid var(--border)" }}>
               <span style={{ fontSize: 14, color: "var(--text-muted)" }}>
-                {`${hourOf(p.paidAt)} · ${methodLabel(p.method)} · ${p.description}`}
+                {`${hourOf(p.paidAt)} · ${tenderLabel(p.method)} · ${p.description}`}
               </span>
               <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 15.5, color: "var(--text)" }}>{formatCents(p.amountCents)}</span>
             </div>
@@ -163,9 +172,4 @@ function dayLabel(iso: string): string {
 function hourOf(iso: string): string {
   const at = new Date(iso);
   return Number.isNaN(at.getTime()) ? "—" : at.toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" });
-}
-
-/** How the money arrived, as the office says it. */
-function methodLabel(method: string): string {
-  return method === "cash" ? "Efectivo" : method === "card" ? "Tarjeta" : "Transferencia";
 }

@@ -46,3 +46,37 @@ describe("ReceiptTicket (tarea 12)", () => {
     expect(screen.getByText("Comprobante de venta")).toBeInTheDocument();
   });
 });
+
+describe("ReceiptTicket · formas de pago (tarea 8)", () => {
+  it("prints one row per tender when the payment was split", () => {
+    render(
+      <ReceiptTicket
+        receipt={{
+          ...receipt,
+          method: "Nota de crédito + Efectivo",
+          reference: undefined,
+          tenders: [
+            { method: "Nota de crédito", amountCents: 50000, reference: "NC-12" },
+            { method: "Efectivo", amountCents: 300000 },
+          ],
+        }}
+      />,
+    );
+
+    const rows = screen.getAllByTestId("ticket-tender");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toHaveTextContent(/Nota de crédito.*ref\. NC-12.*\$500\.00/);
+    expect(rows[1]).toHaveTextContent(/Efectivo.*\$3,000\.00/);
+  });
+
+  it("prints a lone credit note as its own row too, known by its code and not its wording", () => {
+    render(<ReceiptTicket receipt={{ ...receipt, method: "NC", tenders: [{ code: "credit_note", method: "NC", amountCents: 350000 }] }} />);
+    expect(screen.getAllByTestId("ticket-tender")).toHaveLength(1);
+  });
+
+  it("keeps the single line for one ordinary method", () => {
+    render(<ReceiptTicket receipt={{ ...receipt, tenders: [{ method: "Tarjeta de débito", amountCents: 350000, reference: "1234" }] }} />);
+    expect(screen.queryByTestId("ticket-tender")).toBeNull();
+    expect(screen.getByText(/Forma de pago: Tarjeta de débito · ref\. 1234/)).toBeInTheDocument();
+  });
+});

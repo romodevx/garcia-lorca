@@ -41,6 +41,33 @@ type DepositInput struct {
 	// gateway (task 7). Recorded on the deposit and on every payment it splits
 	// into.
 	Receiver domain.Receiver
+	// Tenders, when given, are the methods the money came in by (T8): a credit
+	// note completed with cash, say. They must add up to AmountCents, and they
+	// replace Method, Reference and CardType. Empty keeps the single method.
+	Tenders []TenderInput
+}
+
+// TenderInput is one method of a combined payment as the counter reports it.
+type TenderInput struct {
+	Method      string
+	AmountCents int64
+	Reference   string
+	// CardType is debit or credit, only on a card.
+	CardType string
+}
+
+// toTenders validates the counter's tenders one by one; whether they add up
+// is the payment's rule (Deposit.WithTenders, tenderedPayments).
+func toTenders(in []TenderInput) ([]domain.Tender, error) {
+	out := make([]domain.Tender, 0, len(in))
+	for _, t := range in {
+		tender, err := domain.NewTender(t.Method, t.AmountCents, t.Reference, t.CardType)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, tender)
+	}
+	return out, nil
 }
 
 // DepositResult is what the money did, in the shape a receipt needs.
@@ -164,12 +191,7 @@ func (s *FinanceService) prepareDeposit(ctx context.Context, in DepositInput) (d
 		return domain.Deposit{}, nil, err
 	}
 
-	deposit, err := domain.NewDeposit(s.newID(), s.tenantID, in.StudentID, in.AmountCents,
-		in.Method, in.Reference, when, in.IdempotencyKey, calendarVersion)
-	if err != nil {
-		return domain.Deposit{}, nil, err
-	}
-	deposit, err = deposit.WithCardType(in.CardType)
+	deposit, err := s.newDeposit(in, when, calendarVersion)
 	if err != nil {
 		return domain.Deposit{}, nil, err
 	}
@@ -188,6 +210,29 @@ func (s *FinanceService) prepareDeposit(ctx context.Context, in DepositInput) (d
 		grantEarly:  in.GrantEarlyPayment,
 		chosen:      chosenSet(in.ChargeIDs),
 	}, nil
+}
+
+// newDeposit builds the deposit the counter described: by its tenders when it
+// sent them (T8), by its single method otherwise.
+func (s *FinanceService) newDeposit(in DepositInput, when time.Time, calendarVersion string) (domain.Deposit, error) {
+	if len(in.Tenders) == 0 {
+		deposit, err := domain.NewDeposit(s.newID(), s.tenantID, in.StudentID, in.AmountCents,
+			in.Method, in.Reference, when, in.IdempotencyKey, calendarVersion)
+		if err != nil {
+			return domain.Deposit{}, err
+		}
+		return deposit.WithCardType(in.CardType)
+	}
+	tenders, err := toTenders(in.Tenders)
+	if err != nil {
+		return domain.Deposit{}, err
+	}
+	deposit, err := domain.NewDeposit(s.newID(), s.tenantID, in.StudentID, in.AmountCents,
+		tenders[0].Method(), "", when, in.IdempotencyKey, calendarVersion)
+	if err != nil {
+		return domain.Deposit{}, err
+	}
+	return deposit.WithTenders(tenders)
 }
 
 // VoidDeposit cancels a deposit and releases what it settled. The row survives
@@ -211,6 +256,9 @@ type Income struct {
 	From, To   time.Time
 	Lines      []ports.IncomeLine
 	TotalCents int64
+	// CreditNoteCents is what credit notes settled in the period (T8). It is
+	// not income — no money came in — so it is in neither Lines nor TotalCents.
+	CreditNoteCents int64
 }
 
 // IncomeByConcept answers the question a director actually asks: how much came
@@ -227,11 +275,16 @@ func (s *FinanceService) IncomeByConcept(ctx context.Context, from, to time.Time
 	if err != nil {
 		return Income{}, err
 	}
-	sort.Slice(lines, func(i, j int) bool { return lines[i].AmountCents > lines[j].AmountCents })
-	income := Income{From: from, To: to, Lines: lines}
+	income := Income{From: from, To: to, Lines: make([]ports.IncomeLine, 0, len(lines))}
 	for _, l := range lines {
+		if l.CreditNote {
+			income.CreditNoteCents += l.AmountCents
+			continue
+		}
+		income.Lines = append(income.Lines, l)
 		income.TotalCents += l.AmountCents
 	}
+	sort.Slice(income.Lines, func(i, j int) bool { return income.Lines[i].AmountCents > income.Lines[j].AmountCents })
 	return income, nil
 }
 
@@ -535,6 +588,20 @@ type CashUp struct {
 	// listed anyway: a cash-up that hid them could not explain why the drawer
 	// holds less than the receipts say.
 	Cancelled []domain.Deposit
+	// CreditNoteCents is what credit notes settled that day (T8). Not money:
+	// it is in neither ByMethod nor TotalCents, and is reported on its own line.
+	CreditNoteCents int64
+}
+
+// count adds one tender of the day to the cut: money by its method, a credit
+// note on its own line.
+func (c *CashUp) count(method string, cents int64) {
+	if method == domain.MethodCreditNote {
+		c.CreditNoteCents += cents
+		return
+	}
+	c.ByMethod[method] += cents
+	c.TotalCents += cents
 }
 
 // DailyCashUp adds up what came in on one day, and in what form.
@@ -558,8 +625,9 @@ func (s *FinanceService) DailyCashUp(ctx context.Context, day time.Time) (CashUp
 			continue
 		}
 		cut.Deposits = append(cut.Deposits, d)
-		cut.ByMethod[d.Method()] += d.Amount().Int64()
-		cut.TotalCents += d.Amount().Int64()
+		for _, t := range d.Tenders() {
+			cut.count(t.Method(), t.Amount().Int64())
+		}
 	}
 	loose, err := s.repo.ListLoosePaymentsOn(ctx, day)
 	if err != nil {
@@ -567,8 +635,7 @@ func (s *FinanceService) DailyCashUp(ctx context.Context, day time.Time) (CashUp
 	}
 	for _, p := range loose {
 		cut.Payments = append(cut.Payments, p)
-		cut.ByMethod[p.Payment.Method()] += p.Payment.Amount().Int64()
-		cut.TotalCents += p.Payment.Amount().Int64()
+		cut.count(p.Payment.Method(), p.Payment.Amount().Int64())
 	}
 	return cut, nil
 }
@@ -887,7 +954,6 @@ func (p *depositPlanner) plan(open []ports.ChargeWithPaid) (ports.DepositWrite, 
 	allocations, unallocated := domain.Allocate(p.deposit.Amount().Int64(), items)
 	fresh = append(fresh, settledWithoutFee(feeOwedBy, allocations)...)
 
-	payments := make([]domain.Payment, 0, len(allocations))
 	for _, a := range allocations {
 		if fee, isNew := newFees[a.ChargeID]; isNew && !written(fresh, fee.ID()) {
 			// A surcharge row exists where money reached it, or where its month
@@ -895,9 +961,18 @@ func (p *depositPlanner) plan(open []ports.ChargeWithPaid) (ports.DepositWrite, 
 			// again next time, so the ledger never fills with fees nobody asked for.
 			fresh = append(fresh, fee)
 		}
+	}
+	// Each allocation is cut where one tender ends and the next begins (T8), so
+	// every payment row carries exactly one method.
+	tendered := domain.SplitByTender(allocations, p.deposit.Tenders())
+	payments := make([]domain.Payment, 0, len(tendered))
+	for _, a := range tendered {
 		payment, err := domain.NewPayment(p.svc.newID(), p.svc.tenantID, a.ChargeID,
-			a.AmountCents, p.deposit.Method(), p.deposit.Reference(), p.paidOn, "")
+			a.AmountCents, a.Tender.Method(), a.Tender.Reference(), p.paidOn, "")
 		if err != nil {
+			return ports.DepositWrite{}, err
+		}
+		if payment, err = payment.WithCardType(a.Tender.CardType()); err != nil {
 			return ports.DepositWrite{}, err
 		}
 		payments = append(payments, payment.WithReceivedBy(p.deposit.ReceivedBy().UserID))

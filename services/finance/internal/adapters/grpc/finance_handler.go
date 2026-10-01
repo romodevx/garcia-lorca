@@ -169,13 +169,26 @@ func (h *FinanceHandler) RegisterPayment(ctx context.Context, req *connect.Reque
 	if ts := m.GetPaidAt(); ts != nil {
 		paidAt = ts.AsTime()
 	}
-	payment, charge, err := h.finance.RegisterPaymentAt(ctx, m.GetChargeId(), m.GetAmountCents(), m.GetMethod(), m.GetReference(), m.GetIdempotencyKey(), paidAt, m.GetReceivedBy())
+	tenders := fromProtoTenders(m.GetTenders())
+	if len(tenders) == 0 {
+		// The single method of a client from before T8.
+		tenders = []usecase.TenderInput{{Method: m.GetMethod(), AmountCents: m.GetAmountCents(), Reference: m.GetReference()}}
+	}
+	payments, charge, err := h.finance.RegisterTenderedPayment(ctx, usecase.TenderedPaymentInput{
+		ChargeID: m.GetChargeId(), AmountCents: m.GetAmountCents(), Tenders: tenders,
+		IdempotencyKey: m.GetIdempotencyKey(), PaidAt: paidAt, ReceivedBy: m.GetReceivedBy(),
+	})
 	if err != nil {
 		return nil, connectErr(err)
 	}
+	rows := make([]*financev1.Payment, 0, len(payments))
+	for _, p := range payments {
+		rows = append(rows, toProtoPayment(p))
+	}
 	return connect.NewResponse(&financev1.RegisterPaymentResponse{
-		Payment: toProtoPayment(payment),
-		Charge:  toProtoCharge(charge),
+		Payment:  rows[0],
+		Charge:   toProtoCharge(charge),
+		Payments: rows,
 	}), nil
 }
 
@@ -292,6 +305,7 @@ func (h *FinanceHandler) RegisterDeposit(ctx context.Context, req *connect.Reque
 		CardType:          m.GetCardType(),
 		Receiver:          domain.Receiver{UserID: m.GetReceivedBy(), Name: m.GetReceivedByName()},
 		ChargeIDs:         m.GetChargeIds(),
+		Tenders:           fromProtoTenders(m.GetTenders()),
 	})
 	if err != nil {
 		return nil, connectErr(err)
@@ -419,6 +433,8 @@ func (h *FinanceHandler) DailyCashUp(ctx context.Context, req *connect.Request[f
 		TransferCents: cut.ByMethod[domain.MethodTransfer],
 		TotalCents:    cut.TotalCents,
 		Payments:      toProtoCashUpPayments(cut.Payments),
+		// Not money (T8): reported on its own line, outside the totals.
+		CreditNoteCents: cut.CreditNoteCents,
 	}), nil
 }
 
@@ -459,7 +475,7 @@ func (h *FinanceHandler) IncomeByConcept(ctx context.Context, req *connect.Reque
 		})
 	}
 	return connect.NewResponse(&financev1.IncomeByConceptResponse{
-		Lines: lines, TotalCents: income.TotalCents,
+		Lines: lines, TotalCents: income.TotalCents, CreditNoteCents: income.CreditNoteCents,
 	}), nil
 }
 
@@ -517,12 +533,35 @@ func toProtoDeposit(d domain.Deposit) *financev1.Deposit {
 		ReceivedBy:      d.ReceivedBy().UserID,
 		ReceivedByName:  d.ReceivedBy().Name,
 		Folio:           d.Folio(),
+		Tenders:         toProtoTenders(d.Tenders()),
 	}
 	if d.Voided() {
 		out.VoidedAt = timestamppb.New(d.VoidedAt())
 	}
 	if !d.CapturedAt().IsZero() {
 		out.CapturedAt = timestamppb.New(d.CapturedAt())
+	}
+	return out
+}
+
+// toProtoTenders is a deposit's tenders on the wire (T8).
+func toProtoTenders(ts []domain.Tender) []*financev1.Tender {
+	out := make([]*financev1.Tender, 0, len(ts))
+	for _, t := range ts {
+		out = append(out, &financev1.Tender{
+			Method: t.Method(), AmountCents: t.Amount().Int64(), Reference: t.Reference(), CardType: t.CardType(),
+		})
+	}
+	return out
+}
+
+// fromProtoTenders is the counter's tenders, for the use case to validate.
+func fromProtoTenders(ts []*financev1.Tender) []usecase.TenderInput {
+	out := make([]usecase.TenderInput, 0, len(ts))
+	for _, t := range ts {
+		out = append(out, usecase.TenderInput{
+			Method: t.GetMethod(), AmountCents: t.GetAmountCents(), Reference: t.GetReference(), CardType: t.GetCardType(),
+		})
 	}
 	return out
 }
@@ -601,6 +640,7 @@ func toProtoPayment(p domain.Payment) *financev1.Payment {
 		Method:      p.Method(),
 		Reference:   p.Reference(),
 		PaidAt:      timestamppb.New(p.PaidAt()),
+		CardType:    p.CardType(),
 	}
 }
 

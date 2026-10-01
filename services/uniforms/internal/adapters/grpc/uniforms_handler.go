@@ -161,7 +161,7 @@ func (h *UniformsHandler) CounterSale(ctx context.Context, req *connect.Request[
 		})
 	}
 	sale, err := h.shop.CounterSale(ctx, usecase.CounterSaleInput{
-		StudentID: m.GetStudentId(), Lines: lines, Method: m.GetMethod(),
+		StudentID: m.GetStudentId(), Lines: lines, Method: m.GetMethod(), Tenders: saleTenders(m.GetTenders()),
 		Reference: m.GetReference(), Note: m.GetNote(), ActorUserID: m.GetActorUserId(),
 		IdempotencyKey: m.GetIdempotencyKey(),
 	})
@@ -492,4 +492,15 @@ func connectErr(err error) *connect.Error {
 		// An unrecognised kind is not ours, so it says nothing at all.
 		return connect.NewError(connect.CodeInternal, errors.New("internal error"))
 	}
+}
+
+// saleTenders is the counter's tenders, for the use case to validate (T8).
+func saleTenders(ts []*uniformsv1.SaleTender) []usecase.Tender {
+	out := make([]usecase.Tender, 0, len(ts))
+	for _, t := range ts {
+		out = append(out, usecase.Tender{
+			Method: t.GetMethod(), AmountCents: t.GetAmountCents(), Reference: t.GetReference(), CardType: t.GetCardType(),
+		})
+	}
+	return out
 }
