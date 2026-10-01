@@ -26,7 +26,13 @@ ledger operations run in a single transaction (Unit of Work).
   placed in a group (task 10, ADR 0016): `NewSaleCharge`, ref required, and a
   CHECK in finance/0017.
 - `Payment` — an append-only movement against a charge: amount (Cents), method
-  (`cash|card|transfer`), reference ("con qué se pagó"), `paidAt`.
+  (`cash|card|transfer|credit_note`), reference ("con qué se pagó"), `paidAt`.
+- `Tender` (T8, ADR 0025) — one method of a combined payment. A deposit or a
+  payment combines 1–4 tenders that add up EXACTLY to the amount to pay.
+  `deposit_tenders` (0021) is the source of truth; `deposits.method` is a
+  derived summary (`mixed` when several). Allocations are cut per tender, so
+  every payment row has one method. A credit note is NOT money: cash-up and
+  income report it apart (`credit_note_cents`).
 - An account statement is DERIVED (charges + payments + balance), not a stored row.
 
 ## Domain invariants
