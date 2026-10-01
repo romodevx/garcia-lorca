@@ -153,6 +153,10 @@ func movementText(m client.StatementMovement) string {
 	switch {
 	case m.Voided:
 		text += " — Cancelado" + prefixed(": ", m.VoidReason)
+	case m.Superseded:
+		text += " — Sustituido" + prefixed(" por ", m.SupersededByFolio)
+	case m.CorrectsFolio != "":
+		text += " — Corrige a " + m.CorrectsFolio
 	case m.NotYetDue:
 		text += " — Aún no exigible"
 	case m.Accrued:

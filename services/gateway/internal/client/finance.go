@@ -68,6 +68,9 @@ type Payment struct {
 	PaidAt      string
 	// CardType is debit or credit on a card payment (T8), empty otherwise.
 	CardType string
+	// DepositID is the deposit this payment is a slice of (T9), empty for a
+	// payment made straight against its charge.
+	DepositID string
 }
 
 // AccountStatement is a student's full financial picture: every charge, every
@@ -395,6 +398,13 @@ type Deposit struct {
 	// Tenders are the methods the money came in by (T8); Method is their
 	// summary ("mixed" when several).
 	Tenders []Tender `json:"tenders"`
+	// T9: a deposit replaced by its correction, and the deposit a correction
+	// replaces, each with the other's folio for the receipt.
+	SupersededAt      string `json:"supersededAt,omitempty"`
+	SupersededBy      string `json:"supersededBy,omitempty"`
+	SupersededByFolio string `json:"supersededByFolio,omitempty"`
+	CorrectsDepositID string `json:"correctsDepositId,omitempty"`
+	CorrectsFolio     string `json:"correctsFolio,omitempty"`
 }
 
 // ReceiptLine is one concept a deposit paid (task 12).
@@ -564,8 +574,11 @@ func (c *FinanceClient) ListDeposits(ctx context.Context, studentID string) ([]D
 // CashUp is a day's takings: one number per method, the total, and the list
 // behind them.
 type CashUp struct {
-	Deposits      []Deposit `json:"deposits"`
-	Cancelled     []Deposit `json:"cancelled"`
+	Deposits  []Deposit `json:"deposits"`
+	Cancelled []Deposit `json:"cancelled"`
+	// Superseded are the day's deposits replaced by a correction (T9): they
+	// count for nothing and are listed.
+	Superseded    []Deposit `json:"superseded"`
 	CashCents     int64     `json:"cashCents"`
 	CardCents     int64     `json:"cardCents"`
 	TransferCents int64     `json:"transferCents"`
@@ -611,6 +624,7 @@ func toCashUp(m *financev1.DailyCashUpResponse) CashUp {
 	return CashUp{
 		Deposits:        toDeposits(m.GetDeposits()),
 		Cancelled:       toDeposits(m.GetCancelled()),
+		Superseded:      toDeposits(m.GetSuperseded()),
 		CashCents:       m.GetCashCents(),
 		CardCents:       m.GetCardCents(),
 		TransferCents:   m.GetTransferCents(),
@@ -671,17 +685,24 @@ func (c *FinanceClient) VoidDeposit(ctx context.Context, id, reason string) erro
 
 func toDeposit(d *financev1.Deposit) Deposit {
 	out := Deposit{
-		ID:              d.GetId(),
-		StudentID:       d.GetStudentId(),
-		AmountCents:     d.GetAmountCents(),
-		Method:          d.GetMethod(),
-		Reference:       d.GetReference(),
-		CalendarVersion: d.GetCalendarVersion(),
-		CardType:        d.GetCardType(),
-		VoidReason:      d.GetVoidReason(),
-		ReceivedByName:  d.GetReceivedByName(),
-		Folio:           d.GetFolio(),
-		Tenders:         fromProtoTenders(d.GetTenders()),
+		ID:                d.GetId(),
+		StudentID:         d.GetStudentId(),
+		AmountCents:       d.GetAmountCents(),
+		Method:            d.GetMethod(),
+		Reference:         d.GetReference(),
+		CalendarVersion:   d.GetCalendarVersion(),
+		CardType:          d.GetCardType(),
+		VoidReason:        d.GetVoidReason(),
+		ReceivedByName:    d.GetReceivedByName(),
+		Folio:             d.GetFolio(),
+		Tenders:           fromProtoTenders(d.GetTenders()),
+		SupersededBy:      d.GetSupersededBy(),
+		SupersededByFolio: d.GetSupersededByFolio(),
+		CorrectsDepositID: d.GetCorrectsDepositId(),
+		CorrectsFolio:     d.GetCorrectsFolio(),
+	}
+	if ts := d.GetSupersededAt(); ts != nil {
+		out.SupersededAt = ts.AsTime().Format(time.RFC3339)
 	}
 	if d.GetCapturedAt() != nil {
 		out.CapturedAt = d.GetCapturedAt().AsTime().Format(time.RFC3339)
@@ -748,6 +769,7 @@ func toPayment(p *financev1.Payment) Payment {
 		Reference:   p.GetReference(),
 		PaidAt:      paidAt,
 		CardType:    p.GetCardType(),
+		DepositID:   p.GetDepositId(),
 	}
 }
 

@@ -28,6 +28,8 @@ const (
 	kindAttendance eventKind = iota + 1
 	kindPayment
 	kindReportCard
+	// kindPaymentCorrected is a payment the office corrected (T9).
+	kindPaymentCorrected
 )
 
 // decodedEvent is what the copy of one consumed event is made of. class is the
@@ -60,6 +62,12 @@ func (e decodedEvent) render(name string) Notification {
 	if e.kind == kindPayment {
 		n.Type, n.Title = typePayment, "Pago recibido"
 		n.Body = fmt.Sprintf("Recibimos tu pago de %s MXN.", pesos(e.amountCents))
+		return n
+	}
+	if e.kind == kindPaymentCorrected {
+		// Same icon as any payment: it is one, with the right amount now.
+		n.Type, n.Title = typePayment, "Pago actualizado"
+		n.Body = fmt.Sprintf("Tu pago fue actualizado: %s MXN.", pesos(e.amountCents))
 		return n
 	}
 	if e.kind == kindReportCard {
@@ -135,7 +143,7 @@ func reportCardCopy(termName, name string, version int32) (title, body string) {
 
 // pushData is the routing payload of this event's push: ids only.
 func (e decodedEvent) pushData() map[string]string {
-	if e.kind == kindPayment {
+	if e.kind == kindPayment || e.kind == kindPaymentCorrected {
 		return map[string]string{dataType: typePayment, dataStudentID: e.studentID}
 	}
 	if e.kind == kindReportCard {
