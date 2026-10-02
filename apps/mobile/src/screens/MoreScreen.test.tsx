@@ -15,6 +15,16 @@ describe("MoreScreen module grid (flag-gated)", () => {
     expect(screen.queryByText("Becas")).toBeNull();
   });
 
+  it("never shows the mock Becas tile, even with module_scholarships ON (T18)", async () => {
+    // Becas are real since T18, but the family sees them on the account
+    // statement (a "Beca" line per charge); the tile's content is a mock.
+    await renderWithProviders(<MoreScreen onLogout={() => undefined} />, {
+      flags: { module_scholarships: true },
+    });
+
+    expect(screen.queryByText("Becas")).toBeNull();
+  });
+
   it("renders a module tile when its flag is turned ON", async () => {
     await renderWithProviders(<MoreScreen onLogout={() => undefined} />, {
       flags: { module_uniforms: true },
