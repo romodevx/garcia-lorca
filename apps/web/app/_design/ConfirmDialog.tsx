@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, type ReactElement, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, type ReactElement, type ReactNode } from "react";
 
 import { Btn } from "./Controls";
 import { DrawerShell } from "./DrawerShell";
@@ -22,13 +22,19 @@ export interface ConfirmDialogProps {
  * takes the first focus so Enter confirms, as the person just asked for it.
  */
 export function ConfirmDialog({ title, confirmLabel, icon = "warning", onConfirm, onCancel, children }: ConfirmDialogProps): ReactElement {
-  const footerRef = useRef<HTMLDivElement>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
 
-  // After DrawerShell's own first focus (it lands on its first control), which
-  // runs in the same commit, after this effect: hence the next task.
-  useEffect(() => {
-    const t = setTimeout(() => footerRef.current?.querySelector<HTMLButtonElement>('button[type="submit"]')?.focus(), 0);
-    return () => clearTimeout(t);
+  // The footer exists only once DrawerShell's portal has mounted (a render
+  // AFTER this component's first commit), and DrawerShell then focuses its
+  // first control (the close button) in that same commit. So the confirm
+  // button is focused from the footer's own ref, on the next task — after
+  // DrawerShell's focus — never from a mount effect, which ran before the
+  // footer existed and left Enter on "Cerrar" (QA T17).
+  const footerRef = useCallback((node: HTMLDivElement | null) => {
+    if (node === null) return;
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => node.querySelector<HTMLButtonElement>('button[type="submit"]')?.focus(), 0);
   }, []);
 
   return (
