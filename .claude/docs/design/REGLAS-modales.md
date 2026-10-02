@@ -12,8 +12,7 @@
 
 | Campos | Envase | Componente |
 |---|---|---|
-| 1 | Chip que se vuelve campo | `_design/InlineCreateChip` |
-| 2–4 | Renglón al pie de la lista | `_design/InlineCreateRow` |
+| 1–4 | Renglón al pie de la lista (o forma en el lugar) | `_design/InlineCreateRow` |
 | 5–8 | Cajón compacto | `_design/SlideOver` |
 | > 8, o con pasos, o que necesita scroll | Página | `_design/CreatePage` |
 
@@ -30,6 +29,10 @@ cajón de 100 vh, y de ahí salía todo lo que el colegio llamó "amontonado".
   edición de grados ni de grupos, así que eso habría eliminado la capacidad de intercalar un
   grado y la de abrir un salón más chico. Van en renglón con el valor **propuesto**, no
   desaparecido. Lo mismo con Feriado/Vacaciones.
+
+El chip que se volvía campo (`InlineCreateChip`) se retiró en T13: su único usuario,
+Materias, pasó a pedir nombre **y** grados (crea una por grado) y es una forma de dos
+campos en el lugar (`_screens/config/SubjectsPanel.tsx`).
 
 ## 2. El contrato de teclado
 

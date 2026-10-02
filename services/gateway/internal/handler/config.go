@@ -27,6 +27,8 @@ type ConfigService interface {
 	ListGradeLevels(ctx context.Context, levelID string) ([]client.GradeLevelResult, error)
 	CreateSubject(ctx context.Context, in client.CreateSubjectInput) (client.SubjectResult, error)
 	ListSubjects(ctx context.Context, gradeLevelID string) ([]client.SubjectResult, error)
+	RenameSubject(ctx context.Context, id, name string) (client.SubjectResult, error)
+	DeleteSubject(ctx context.Context, id string) error
 	CreateTerm(ctx context.Context, in client.CreateTermInput) (client.TermResult, error)
 	ListTerms(ctx context.Context, cycleID, levelID string) ([]client.TermResult, error)
 	SetTermMonths(ctx context.Context, termID string, months []string) (client.TermResult, error)
@@ -526,6 +528,51 @@ func (h *ConfigHandler) ListSubjects(w http.ResponseWriter, r *http.Request) {
 		out = append(out, toSubjectResponse(s))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"subjects": out})
+}
+
+type renameSubjectRequest struct {
+	Name string `json:"name"`
+}
+
+// RenameSubject handles PATCH /api/v1/config/subjects/{id} with {name}: the
+// same subject (id and grade) under a new name. A blank name never reaches
+// config; config judges the rest (unknown → 404, a name the grade has → 409).
+func (h *ConfigHandler) RenameSubject(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !uuidShape.MatchString(id) {
+		http.Error(w, "id must be a subject id", http.StatusBadRequest)
+		return
+	}
+	var req renameSubjectRequest
+	if err := decodeJSONBody(w, r, &req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(req.Name) == "" {
+		http.Error(w, "name is required", http.StatusBadRequest)
+		return
+	}
+	res, err := h.svc.RenameSubject(r.Context(), id, req.Name)
+	if err != nil {
+		writeConnectError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toSubjectResponse(res))
+}
+
+// DeleteSubject handles DELETE /api/v1/config/subjects/{id}. A subject that
+// was ever in a teacher's load is refused (409): it can only be renamed.
+func (h *ConfigHandler) DeleteSubject(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !uuidShape.MatchString(id) {
+		http.Error(w, "id must be a subject id", http.StatusBadRequest)
+		return
+	}
+	if err := h.svc.DeleteSubject(r.Context(), id); err != nil {
+		writeConnectError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // --- terms ----------------------------------------------------------------

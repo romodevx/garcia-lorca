@@ -8,6 +8,9 @@ import {
   createGroup,
   createLevel,
   createSubject,
+  createSubjectInGrades,
+  deleteSubject,
+  renameSubject,
   createTerm,
   copyTermMonths,
   setTermMonths,
@@ -185,6 +188,48 @@ describe("subjects", () => {
 
     await expect(listSubjects(BASE, "g1")).resolves.toEqual(subjects);
     expect(lastCall(fetchMock)[0]).toBe("http://gw/api/v1/config/subjects?gradeLevelId=g1");
+  });
+
+  it("renameSubject PATCHes the name and returns the subject", async () => {
+    const renamed = { id: "s1", gradeLevelId: "g1", name: "LENGUA" };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(renamed));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(renameSubject(BASE, "s1", "LENGUA")).resolves.toEqual(renamed);
+    const [url, init] = lastCall(fetchMock);
+    expect(url).toBe("http://gw/api/v1/config/subjects/s1");
+    expect(init.method).toBe("PATCH");
+    expect(JSON.parse(init.body as string)).toEqual({ name: "LENGUA" });
+  });
+
+  it("deleteSubject DELETEs and surfaces a 409 as a conflict", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(deleteSubject(BASE, "s1")).resolves.toBeUndefined();
+    expect(lastCall(fetchMock)[0]).toBe("http://gw/api/v1/config/subjects/s1");
+    expect(lastCall(fetchMock)[1].method).toBe("DELETE");
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("assigned", { status: 409 })));
+    await expect(deleteSubject(BASE, "s1")).rejects.toMatchObject({ isConflict: true });
+  });
+});
+
+describe("createSubjectInGrades", () => {
+  it("creates one row per grade and reports the grades that already had it apart", async () => {
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(init.body as string) as { gradeLevelId: string; name: string };
+      if (body.gradeLevelId === "g2") return new Response("exists", { status: 409 });
+      if (body.gradeLevelId === "g3") return new Response("", { status: 500 });
+      return jsonResponse({ id: `s-${body.gradeLevelId}`, ...body }, 201);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await createSubjectInGrades(BASE, "ARTES", ["g1", "g2", "g3"]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(res.created).toEqual([{ id: "s-g1", gradeLevelId: "g1", name: "ARTES" }]);
+    expect(res.existing).toEqual(["g2"]);
+    expect(res.failed).toEqual(["g3"]);
   });
 });
 

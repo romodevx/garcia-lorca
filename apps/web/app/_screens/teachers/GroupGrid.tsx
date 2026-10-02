@@ -13,8 +13,8 @@ export interface GroupGridProps {
 /**
  * The groups of the cycle, level → grade → group, for ONE subject name. Each
  * level has a tri-state "Todos los de <Nivel>" that reaches only the groups
- * that can be picked; a group already this teacher's shows checked and locked,
- * and a grade without the subject says why its groups are locked.
+ * that can be picked; a group already this teacher's shows checked and locked.
+ * Grades without the subject are not in the tree at all (teachers/load.ts).
  */
 export function GroupGrid({ tree, selected, onChange }: GroupGridProps): ReactElement {
   const toggle = (ids: readonly string[], on: boolean): void => {
@@ -74,38 +74,29 @@ function LevelBlock({ level, selected, onToggle }: { level: LevelChoices; select
 }
 
 function GradeRow({ grade, selected, onToggle }: { grade: GradeChoices; selected: ReadonlySet<string>; onToggle: Toggle }): ReactElement {
-  const reasonId = useId();
-  const missing = grade.groups.find((c) => c.availability.kind === "missing")?.availability;
-  const reason = missing?.kind === "missing" ? missing.reason : undefined;
-
   return (
     <div style={{ marginTop: 10 }}>
       <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text-muted)" }}>{grade.grade.name}</div>
-      {reason !== undefined && (
-        <p id={reasonId} style={{ fontSize: 13, color: "var(--text-faint)", marginTop: 2 }}>
-          {reason}
-        </p>
-      )}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 6 }}>
         {grade.groups.map((choice) => (
-          <GroupBox key={choice.group.id} choice={choice} selected={selected} onToggle={onToggle} reasonId={reasonId} />
+          <GroupBox key={choice.group.id} choice={choice} selected={selected} onToggle={onToggle} />
         ))}
       </div>
     </div>
   );
 }
 
-function GroupBox({ choice, selected, onToggle, reasonId }: { choice: GroupChoice; selected: ReadonlySet<string>; onToggle: Toggle; reasonId: string }): ReactElement {
+function GroupBox({ choice, selected, onToggle }: { choice: GroupChoice; selected: ReadonlySet<string>; onToggle: Toggle }): ReactElement {
   const noteId = useId();
   const { group, availability } = choice;
   const note = availability.kind === "mine" ? "ya asignado" : availability.kind === "held" ? `La imparte ${availability.teacherName}` : undefined;
-  const describedBy = availability.kind === "missing" ? reasonId : note !== undefined ? noteId : undefined;
+  const describedBy = note !== undefined ? noteId : undefined;
   const locked = !isSelectable(availability);
   const checked = availability.kind === "mine" || selected.has(group.id);
 
   return (
     <label
-      style={{ ...rowStyle, padding: "4px 14px 4px 10px", borderRadius: "var(--r-md)", border: `1.5px solid ${checked && !locked ? "var(--forest)" : "var(--border)"}`, background: "var(--surface)", opacity: availability.kind === "missing" ? 0.55 : 1, cursor: locked ? "not-allowed" : "pointer" }}
+      style={{ ...rowStyle, padding: "4px 14px 4px 10px", borderRadius: "var(--r-md)", border: `1.5px solid ${checked && !locked ? "var(--forest)" : "var(--border)"}`, background: "var(--surface)", cursor: locked ? "not-allowed" : "pointer" }}
     >
       <input
         type="checkbox"

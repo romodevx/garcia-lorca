@@ -2297,6 +2297,147 @@ paths:
               schema: { type: string }
               example: 'La restauración quedó a medias; vuelve a intentarlo: lo ya restaurado no se duplica'
 
+  /api/v1/config/subjects:
+    get:
+      tags: [config]
+      summary: The subjects of a grade
+      description: >
+        Subjects are per grade (T13): "Matemáticas" of 1° and of 2° are two
+        rows. Without gradeLevelId the whole school's subjects come back.
+        Requires `config:read`.
+      operationId: listSubjects
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: gradeLevelId
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The grade's subjects, by name.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [subjects]
+                properties:
+                  subjects:
+                    type: array
+                    items: { $ref: '#/components/schemas/Subject' }
+              example:
+                subjects:
+                  - id: 5b7a1c2e-0000-4000-8000-00000000000a
+                    gradeLevelId: 2c8e4f10-0000-4000-8000-000000000001
+                    name: Matemáticas
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+    post:
+      tags: [config]
+      summary: Add a subject to a grade
+      description: >
+        One row per grade; the name is trimmed and unique within the grade
+        whatever its case. The web's "several grades at once" sends one request
+        per grade, so a grade that already has the name answers 409 alone and
+        the others are created. Requires `config:write`.
+      operationId: createSubject
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [gradeLevelId, name]
+              properties:
+                gradeLevelId: { type: string, format: uuid }
+                name: { type: string, minLength: 1 }
+            example:
+              gradeLevelId: 2c8e4f10-0000-4000-8000-000000000001
+              name: Matemáticas
+      responses:
+        '201':
+          description: The stored subject.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Subject' }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409':
+          description: The grade already has a subject with this name.
+          content:
+            text/plain:
+              schema: { type: string }
+              example: a subject with this name already exists in the grade level
+
+  /api/v1/config/subjects/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    patch:
+      tags: [config]
+      summary: Rename a subject
+      description: >
+        Same id, same grade: grades, attendance and teaching assignments point
+        at the id, so they follow the new name. Requires `config:write`.
+      operationId: renameSubject
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, minLength: 1 }
+            example:
+              name: Matemáticas I
+      responses:
+        '200':
+          description: The subject under its new name.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Subject' }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409':
+          description: The grade already has a subject with this name.
+          content:
+            text/plain:
+              schema: { type: string }
+              example: a subject with this name already exists in the grade level
+    delete:
+      tags: [config]
+      summary: Delete a subject that was never taught
+      description: >
+        A subject that is, or ever was, in a teacher's load (any cycle) is
+        refused with 409 — grades and attendance keep its id — and can only be
+        renamed. Requires `config:write`.
+      operationId: deleteSubject
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      responses:
+        '204': { description: Removed. }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409':
+          description: The subject has been in a teaching load; nothing was deleted.
+          content:
+            text/plain:
+              schema: { type: string }
+              example: the subject has been in a teaching load; it can be renamed but not deleted
+
   /api/v1/config/terms:
     get:
       tags: [config-terms]
@@ -6239,6 +6380,14 @@ components:
         email: { type: string, example: gabriela.rojas@garcialorca.edu.mx }
         userId: { type: string, description: 'The iam account, or empty when none is linked.' }
 
+    Subject:
+      type: object
+      description: A subject of ONE grade (T13). Assignments pair it only with groups of that grade.
+      required: [id, gradeLevelId, name]
+      properties:
+        id: { type: string, format: uuid }
+        gradeLevelId: { type: string, format: uuid }
+        name: { type: string, example: Matemáticas }
     TeachingAssignment:
       type: object
       description: One teacher holding one (group, subject) slot in a cycle. cycleId is derived from the group.

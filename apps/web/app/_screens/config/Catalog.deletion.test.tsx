@@ -29,6 +29,7 @@ beforeEach(() => {
   mocked.listCycles.mockResolvedValue([]);
   mocked.listLevels.mockResolvedValue([PRIMARIA]);
   mocked.listGradeLevels.mockResolvedValue([]);
+  mocked.listSubjects.mockResolvedValue([]);
   mocked.getSchoolProfile.mockResolvedValue({ profile: { name: "", legalName: "", rfc: "", cct: "", address: "", phone: "", legend: "" }, found: false });
   mocked.listLevelTrash.mockResolvedValue([]);
   vi.mocked(financeApi).listTuitionPlans.mockResolvedValue([]);

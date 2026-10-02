@@ -66,6 +66,12 @@ service ConfigService {
   rpc GetSubject(GetSubjectRequest) returns (GetSubjectResponse);
   // ListSubjects lists the subjects of a grade (scoped by grade_level_id).
   rpc ListSubjects(ListSubjectsRequest) returns (ListSubjectsResponse);
+  // RenameSubject changes a subject's name; its id and grade stay, so grades,
+  // attendance and assignments follow it.
+  rpc RenameSubject(RenameSubjectRequest) returns (RenameSubjectResponse);
+  // DeleteSubject removes a subject that was never in a teacher's load
+  // (AlreadyExists-coded conflict otherwise; it can only be renamed).
+  rpc DeleteSubject(DeleteSubjectRequest) returns (DeleteSubjectResponse);
 
   // --- terms (per cycle, level) ---
   // CreateTerm adds a period within a cycle for a level.
@@ -537,6 +543,25 @@ message ListSubjectsRequest {
 message ListSubjectsResponse {
   repeated Subject subjects = 1;
 }
+
+// RenameSubjectRequest renames one subject.
+message RenameSubjectRequest {
+  string id = 1;
+  string name = 2;
+}
+
+// RenameSubjectResponse returns the subject under its new name.
+message RenameSubjectResponse {
+  Subject subject = 1;
+}
+
+// DeleteSubjectRequest removes one subject.
+message DeleteSubjectRequest {
+  string id = 1;
+}
+
+// DeleteSubjectResponse is empty: the subject is gone.
+message DeleteSubjectResponse {}
 
 // --- Term RPC messages ----------------------------------------------------
 

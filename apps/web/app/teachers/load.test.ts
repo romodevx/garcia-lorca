@@ -85,6 +85,33 @@ describe("subjectNames", () => {
   });
 });
 
+describe("names are compared without case (legacy 'Matemáticas' beside a new 'MATEMÁTICAS')", () => {
+  const mixed: Subject[] = [
+    { id: "mat-s1", gradeLevelId: "s1", name: "Matemáticas" },
+    { id: "mat-s2", gradeLevelId: "s2", name: "MATEMÁTICAS" },
+  ];
+  const cat = (): LoadCatalogue => ({ ...catalogue([]), subjects: mixed });
+
+  it("lists the subject once", () => {
+    expect(subjectNames(mixed)).toHaveLength(1);
+  });
+
+  it("offers both grades under that one name, each with its own row", () => {
+    const [name] = subjectNames(mixed);
+    const grades = groupChoices("ada", name ?? "", cat()).flatMap((l) => l.grades);
+    expect(grades.map((g) => [g.grade.id, g.groups[0]?.availability])).toEqual([
+      ["s1", { kind: "free", subjectId: "mat-s1" }],
+      ["s2", { kind: "free", subjectId: "mat-s2" }],
+    ]);
+  });
+
+  it("groups the teacher's load under one subject", () => {
+    const load = currentLoad("ada", { ...cat(), assignments: [ta("a1", "s1A", "mat-s1", "ada"), ta("a2", "s2A", "mat-s2", "ada")] });
+    expect(load).toHaveLength(1);
+    expect(load[0]?.slots).toHaveLength(2);
+  });
+});
+
 describe("groupChoices", () => {
   it("resolves, per group, the subject row of THAT group's grade with the chosen name", () => {
     const tree = groupChoices("ada", "Matemáticas", catalogue([]));
@@ -99,14 +126,27 @@ describe("groupChoices", () => {
     expect(sec?.grades[1]?.groups[0]?.availability).toEqual({ kind: "free", subjectId: "mat-s2" });
   });
 
-  it("marks a grade that lacks the subject as missing, with the reason — never invents a row", () => {
+  it("offers only the grades that carry the subject — a group of another grade is never a choice (T13)", () => {
     const tree = groupChoices("ada", "Física", catalogue([]));
-    const s2A = tree[1]?.grades[1]?.groups[0];
-    const p1A = tree[0]?.grades[0]?.groups[0];
 
-    expect(s2A?.availability).toEqual({ kind: "missing", reason: "2° Secundaria no tiene Física" });
-    expect(p1A?.availability).toEqual({ kind: "missing", reason: "1° Primaria no tiene Física" });
-    expect(tree[1]?.grades[0]?.groups[0]?.availability).toEqual({ kind: "free", subjectId: "fis-s1" });
+    expect(tree.map((l) => l.level.name)).toEqual(["Secundaria"]);
+    expect(tree[0]?.grades.map((g) => g.grade.name)).toEqual(["1° Secundaria"]);
+    expect(tree[0]?.grades[0]?.groups.map((g) => [g.group.id, g.availability])).toEqual([
+      ["s1A", { kind: "free", subjectId: "fis-s1" }],
+      ["s1B", { kind: "free", subjectId: "fis-s1" }],
+    ]);
+  });
+
+  it("every offered group resolves to the subject row of its OWN grade", () => {
+    const tree = groupChoices("ada", "Matemáticas", catalogue([]));
+    const bySubject = new Map(subjects.map((s) => [s.id, s.gradeLevelId]));
+    for (const level of tree) {
+      for (const grade of level.grades) {
+        for (const { group, availability } of grade.groups) {
+          if (isSelectable(availability)) expect(bySubject.get(availability.subjectId)).toBe(group.gradeLevelId);
+        }
+      }
+    }
   });
 
   it("tells mine from held by another teacher", () => {
@@ -125,6 +165,5 @@ describe("groupChoices", () => {
     expect(isSelectable({ kind: "free", subjectId: "x" })).toBe(true);
     expect(isSelectable({ kind: "held", subjectId: "x", teacherName: "Ana" })).toBe(true);
     expect(isSelectable({ kind: "mine", subjectId: "x" })).toBe(false);
-    expect(isSelectable({ kind: "missing", reason: "r" })).toBe(false);
   });
 });

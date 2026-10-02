@@ -40,6 +40,9 @@ const (
 	// termMonthPerLevelKey is migration 0010's UNIQUE: a month belongs to at
 	// most one term of a cycle and level.
 	termMonthPerLevelKey = "term_months_one_term_per_month"
+	// subjectOfGroupGrade is migration 0014's trigger guard: an assignment's
+	// subject belongs to its group's grade level.
+	subjectOfGroupGrade = "teaching_assignments_subject_of_group_grade"
 )
 
 // Repository is the GORM-backed config CatalogRepository. Every operation runs
@@ -407,6 +410,68 @@ func (r *Repository) ListSubjects(ctx context.Context, gradeLevelID string) ([]d
 	}
 	return out, nil
 }
+
+// RenameSubject changes a subject's name in place and returns the stored row.
+// A malformed or unknown id is KindNotFound; a name the grade already has is
+// KindConflict (the (tenant, grade_level_id, name) UNIQUE).
+func (r *Repository) RenameSubject(ctx context.Context, id, name string) (domain.Subject, error) {
+	if !isUUID(id) {
+		return domain.Subject{}, glerrors.ErrNotFound
+	}
+	var out domain.Subject
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		var rows []subjectModel
+		res := tx.Model(&rows).Clauses(clause.Returning{}).
+			Where("id = ?", id).
+			Updates(map[string]any{"name": name, "updated_at": gorm.Expr("now()")})
+		if res.Error != nil {
+			return translateCreateErr(res.Error, "renaming subject", "a subject with this name already exists in the grade level")
+		}
+		if len(rows) == 0 {
+			return glerrors.ErrNotFound
+		}
+		var derr error
+		out, derr = toDomainSubject(rows[0])
+		return derr
+	})
+	if err != nil {
+		return domain.Subject{}, err
+	}
+	return out, nil
+}
+
+// DeleteSubject removes a subject that never entered a teacher's load. A
+// malformed or unknown id is KindNotFound; a subject a teaching assignment
+// points at now (ON DELETE RESTRICT) or ever did (first_assigned_at, 0015) is
+// KindConflict — grades and attendance in other services keep its id.
+func (r *Repository) DeleteSubject(ctx context.Context, id string) error {
+	if !isUUID(id) {
+		return glerrors.ErrNotFound
+	}
+	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		res := tx.Where("id = ? AND first_assigned_at IS NULL", id).Delete(&subjectModel{})
+		if pgCode(res.Error) == foreignKeyViolation {
+			return glerrors.Wrap(glerrors.KindConflict, subjectInUse, res.Error)
+		}
+		if res.Error != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "deleting subject", res.Error)
+		}
+		if res.RowsAffected == 1 {
+			return nil
+		}
+		var n int64
+		if err := tx.Model(&subjectModel{}).Where("id = ?", id).Count(&n).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "deleting subject", err)
+		}
+		if n == 0 {
+			return glerrors.ErrNotFound
+		}
+		return glerrors.New(glerrors.KindConflict, subjectInUse)
+	})
+}
+
+// subjectInUse is the refusal for deleting a subject that was ever assigned.
+const subjectInUse = "the subject has been in a teaching load; it can be renamed but not deleted"
 
 // --- terms ----------------------------------------------------------------
 
@@ -808,6 +873,9 @@ func translateCreateErr(err error, internalMsg, conflictMsg string) error {
 	case checkViolation:
 		if isEmailCheck(err) {
 			return glerrors.Wrap(glerrors.KindInvalid, "email is not in its normalized form", err)
+		}
+		if isConstraint(err, subjectOfGroupGrade) {
+			return glerrors.Wrap(glerrors.KindInvalid, "subject does not belong to the group's grade level", err)
 		}
 		return glerrors.Wrap(glerrors.KindInternal, internalMsg, err)
 	default:
