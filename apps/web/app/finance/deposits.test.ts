@@ -146,7 +146,8 @@ describe("the counter's choice of charges (tarea 8)", () => {
     };
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ amountCents: 350000, lines: [line] })));
     const expected = await getExpected(BASE, "s1");
-    expect(expected.lines).toEqual([line]);
+    // A gateway older than T18 sends no scholarship: it reads as 0.
+    expect(expected.lines).toEqual([{ ...line, scholarshipCents: 0 }]);
   });
 
   it("sends the chosen charges on the deposit and on its preview", async () => {

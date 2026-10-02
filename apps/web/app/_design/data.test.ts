@@ -158,10 +158,12 @@ describe("every live module's permission is one somebody can hold", () => {
     "schedule:read", "schedule:write",
     // T17: Actividades.
     "activities:read", "activities:write",
+    // T18: Becas.
+    "scholarships:read", "scholarships:write",
   ]);
   // These carry a permission nobody is granted ON PURPOSE, so the tile hides
   // itself until the module exists.
-  const NOT_BUILT_YET = new Set(["scholarships", "documents", "billing", "reports"]);
+  const NOT_BUILT_YET = new Set(["documents", "billing", "reports"]);
 
   for (const m of MODULES) {
     if (NOT_BUILT_YET.has(m.id)) continue;
@@ -234,5 +236,16 @@ describe("Actividades (T17)", () => {
     expect(actividades.flag).toBe("module_activities");
     expect(isModuleVisible(actividades, ["activities:read"])).toBe(true);
     expect(isModuleVisible(actividades, ["finance:read", "students:read"])).toBe(false);
+  });
+});
+
+describe("Becas (T18)", () => {
+  const becas = MODULES.find((m) => m.id === "scholarships") as ModuleDef;
+
+  it("is gated by its own flag and permission", () => {
+    expect(becas.label).toBe("Becas");
+    expect(becas.flag).toBe("module_scholarships");
+    expect(isModuleVisible(becas, ["scholarships:read"])).toBe(true);
+    expect(isModuleVisible(becas, ["finance:read", "students:read"])).toBe(false);
   });
 });

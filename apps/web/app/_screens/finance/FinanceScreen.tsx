@@ -225,6 +225,8 @@ const EXPORT_COLUMNS: readonly CsvColumn<Row>[] = [
   // column is summed in Excel.
   { label: "Importe", value: (r) => (r.charge.amountCents / 100).toFixed(2) },
   { label: "Descuento", value: (r) => (r.charge.discountCents / 100).toFixed(2) },
+  // T18: Saldo is net of it, so without this column the file would not add up.
+  { label: "Beca", value: (r) => ((r.charge.scholarshipCents ?? 0) / 100).toFixed(2) },
   { label: "Pagado", value: (r) => (r.charge.paidCents / 100).toFixed(2) },
   { label: "Saldo", value: (r) => (r.charge.remainingCents / 100).toFixed(2) },
   { label: "Estado", value: (r) => STATUS[r.visual].label },

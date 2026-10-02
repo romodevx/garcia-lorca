@@ -11,8 +11,8 @@ vi.mock("../config/api", () => ({ listCycles: vi.fn().mockResolvedValue([]) }));
 vi.mock("../finance/api", () => ({ listCharges: vi.fn().mockResolvedValue([]) }));
 
 // The full owner permission set: READ on every backend-backed module. The
-// no-backend modules (scholarships/uniforms/billing/reports) carry a permission
-// nobody is granted, so they never appear even for the owner.
+// modules outside this set (scholarships/uniforms/billing/reports) carry a permission
+// the owner does not hold here, so they never appear.
 const OWNER_PERMS = [
   "students:read",
   "finance:read",

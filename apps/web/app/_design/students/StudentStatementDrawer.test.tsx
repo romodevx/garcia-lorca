@@ -174,3 +174,25 @@ describe("StudentStatementDrawer (T7)", () => {
     expect(api.getStatement).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("StudentStatementDrawer · scholarships (T18)", () => {
+  it("shows a scholarship as a credit line labelled with its description", async () => {
+    api.getStatement.mockResolvedValue({
+      ...ledger,
+      movements: [
+        { kind: "charge", date: "2026-09-10", description: "Colegiatura septiembre", amountCents: 320000, balanceCents: 320000, accrued: false, notYetDue: false, voided: false },
+        { kind: "scholarship", date: "2026-09-10", description: "Beca Hermanos · Colegiatura septiembre", amountCents: 160000, balanceCents: 160000, chargeId: "ch1", accrued: false, notYetDue: false, voided: false },
+      ],
+      totals: { chargedCents: 320000, discountCents: 160000, paidCents: 0, balanceCents: 160000, notYetDueCents: 0 },
+    });
+    render(<StudentStatementDrawer studentId="st-1" name="Cruz Valentina" onClose={() => {}} />);
+    const dialog = await screen.findByRole("dialog", { name: "Estado de cuenta · Cruz Valentina" });
+
+    const line = (await within(dialog).findByText("Beca Hermanos · Colegiatura septiembre")).closest("tr") as HTMLElement;
+    const cells = within(line).getAllByRole("cell");
+    // Fecha · Concepto · Cargo · Abono · Saldo: the scholarship lowers the balance.
+    expect(cells[2]?.textContent).toBe("");
+    expect(cells[3]).toHaveTextContent(money("$1,600.00"));
+    expect(within(dialog).getByText("Descuentos y becas").nextSibling).toHaveTextContent(money("$1,600.00"));
+  });
+});

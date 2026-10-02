@@ -103,6 +103,14 @@ export const PERMISSION_CATALOG: readonly PermissionGroup[] = [
     ],
   },
   {
+    // T18: Becas. Assigning one changes the family's pending charges at once.
+    resource: "Becas",
+    permissions: [
+      { value: "scholarships:read", label: "Ver becas" },
+      { value: "scholarships:write", label: "Crear, editar y asignar becas" },
+    ],
+  },
+  {
     // T16: Horarios. A teacher sees their own week through teaching:read.
     resource: "Horarios",
     permissions: [

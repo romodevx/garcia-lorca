@@ -2,6 +2,7 @@ import type { CSSProperties, ReactElement } from "react";
 
 import { formatCents } from "../../_lib/money";
 import type { Receipt } from "../../receipts/api";
+import { scholarshipTitle } from "../../scholarships/format";
 
 /*
  * Black on white whatever the theme: this is what a thermal printer burns onto
@@ -66,11 +67,15 @@ export function ReceiptTicket({ receipt: r }: { receipt: Receipt }): ReactElemen
             <span style={{ whiteSpace: "nowrap" }}>{formatCents(l.amountCents)}</span>
           </div>
           {l.discountCents !== undefined && l.discountCents > 0 && <p style={{ fontSize: "10px" }}>incluye descuento de {formatCents(l.discountCents)}</p>}
+          {l.scholarshipCents !== undefined && l.scholarshipCents > 0 && (
+            <p style={{ fontSize: "10px" }}>{`${scholarshipTitle(l.scholarshipName ?? "")} −${formatCents(l.scholarshipCents)}`}</p>
+          )}
         </div>
       ))}
       <hr style={rule} />
       {r.surchargeCents > 0 && <Total label="Recargos incluidos" cents={r.surchargeCents} />}
       {r.discountCents > 0 && <Total label="Descuentos aplicados" cents={r.discountCents} />}
+      {(r.scholarshipCents ?? 0) > 0 && <Total label="Becas aplicadas" cents={r.scholarshipCents ?? 0} />}
       {r.creditCents > 0 && <Total label="Saldo a favor" cents={r.creditCents} />}
       <div style={{ ...row, fontWeight: 800, fontSize: "14px", marginTop: 4 }}>
         <span>Total</span>

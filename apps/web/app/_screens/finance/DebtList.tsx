@@ -49,6 +49,7 @@ export function DebtList({ lines, chosen, selectedCents, onToggle }: DebtListPro
             <span style={{ display: "block", fontSize: 14.5, fontWeight: 600, color: "var(--text)" }}>{l.description}</span>
             <span style={{ display: "block", fontSize: 12.5, color: "var(--text-muted)" }}>
               {l.due ? "vence" : "por vencer"} {shortDayLabel(l.dueDate)} · {formatCents(l.owedCents)}
+              {l.scholarshipCents > 0 && ` ya con beca −${formatCents(l.scholarshipCents)}`}
               {l.surchargeCents > 0 && ` + recargo ${formatCents(l.surchargeCents)}`}
               {l.discountCents > 0 && ` − pronto pago ${formatCents(l.discountCents)}`}
             </span>

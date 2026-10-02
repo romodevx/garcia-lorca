@@ -377,9 +377,9 @@ describe("CollectDrawer · fecha de pago (tarea 7)", () => {
 
 describe("CollectDrawer · el adeudo, concepto por concepto (tarea 8)", () => {
   const lines: financeApi.ExpectedLine[] = [
-    { chargeId: "ch-sep", description: "Colegiatura septiembre", dueDate: "2026-09-10", owedCents: 320000, surchargeCents: 30000, discountCents: 0, totalCents: 350000, due: true },
-    { chargeId: "ch-oct", description: "Colegiatura octubre", dueDate: "2026-10-10", owedCents: 320000, surchargeCents: 0, discountCents: 0, totalCents: 320000, due: true },
-    { chargeId: "ch-nov", description: "Colegiatura noviembre", dueDate: "2026-11-10", owedCents: 320000, surchargeCents: 0, discountCents: 0, totalCents: 320000, due: false },
+    { chargeId: "ch-sep", description: "Colegiatura septiembre", dueDate: "2026-09-10", owedCents: 320000, surchargeCents: 30000, discountCents: 0, scholarshipCents: 0, totalCents: 350000, due: true },
+    { chargeId: "ch-oct", description: "Colegiatura octubre", dueDate: "2026-10-10", owedCents: 320000, surchargeCents: 0, discountCents: 0, scholarshipCents: 0, totalCents: 320000, due: true },
+    { chargeId: "ch-nov", description: "Colegiatura noviembre", dueDate: "2026-11-10", owedCents: 320000, surchargeCents: 0, discountCents: 0, scholarshipCents: 0, totalCents: 320000, due: false },
   ];
   beforeEach(() => {
     finance.getExpected.mockResolvedValue({

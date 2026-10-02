@@ -94,4 +94,26 @@ describe("ReceiptTicket · formas de pago (tarea 8)", () => {
     expect(screen.queryByTestId("ticket-tender")).toBeNull();
     expect(screen.getByText(/Forma de pago: Tarjeta de débito · ref\. 1234/)).toBeInTheDocument();
   });
+
+  // T18: the scholarship each line was settled with, and their total.
+  it("prints each line's scholarship and the scholarships applied", () => {
+    render(
+      <ReceiptTicket
+        receipt={{
+          ...receipt,
+          lines: [{ description: "Colegiatura septiembre 2026", amountCents: 160000, scholarshipCents: 160000, scholarshipName: "Hermanos" }],
+          scholarshipCents: 160000,
+        }}
+      />,
+    );
+
+    expect(screen.getByText("Beca Hermanos −$1,600.00")).toBeInTheDocument();
+    expect(screen.getByText("Becas aplicadas")).toBeInTheDocument();
+  });
+
+  it("says nothing of scholarships on a receipt without one", () => {
+    render(<ReceiptTicket receipt={receipt} />);
+
+    expect(screen.queryByText(/Beca/)).toBeNull();
+  });
 });

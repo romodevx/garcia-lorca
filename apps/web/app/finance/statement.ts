@@ -8,7 +8,7 @@ import { authFetch } from "../auth/authFetch";
  * server as they are.
  */
 
-/** What a line records. scholarship (T18) and credit_note (T8) are reserved. */
+/** What a line records. scholarship (T18): what a scholarship takes off a charge, a credit. */
 export type MovementKind = "charge" | "surcharge" | "discount" | "scholarship" | "payment" | "credit_note";
 
 export interface StatementMovement {

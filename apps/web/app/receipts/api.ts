@@ -24,6 +24,9 @@ export interface ReceiptLine {
   amountCents: number;
   surcharge?: boolean;
   discountCents?: number;
+  /** T18: what the scholarship took off this line, and its name. */
+  scholarshipCents?: number;
+  scholarshipName?: string;
 }
 
 /** One method of a split payment (T8), already in words: "Nota de crédito", "Tarjeta de débito". */
@@ -45,6 +48,8 @@ export interface Receipt {
   lines: ReceiptLine[];
   surchargeCents: number;
   discountCents: number;
+  /** T18: the scholarships the paid lines were settled with. Absent before T18. */
+  scholarshipCents?: number;
   creditCents: number;
   totalCents: number;
   /** The single method, or the methods joined with " + " when it was split. */

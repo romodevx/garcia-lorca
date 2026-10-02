@@ -17,6 +17,7 @@ import { UniformsScreen } from "./_screens/uniforms/UniformsScreen";
 import { ExpensesScreen } from "./_screens/expenses/ExpensesScreen";
 import { ScheduleEntry } from "./_screens/schedule/ScheduleEntry";
 import { ActivitiesScreen } from "./_screens/activities/ActivitiesScreen";
+import { ScholarshipsScreen } from "./_screens/scholarships/ScholarshipsScreen";
 import type { CutAccess } from "./_screens/finance/CashCutClosing";
 import { FinanceScreen } from "./_screens/finance/FinanceScreen";
 import { Catalog } from "./_screens/config/Catalog";
@@ -235,6 +236,8 @@ export function AppShell(): ReactElement {
   const scheduleEnabled = useFlag("module_schedule") && configEnabled;
   // T17: Actividades. Its charges live in finance, so both flags must be on.
   const activitiesEnabled = useFlag("module_activities") && financeEnabled;
+  // T18: Becas. Finance computes them on every charge, so both flags must be on.
+  const scholarshipsEnabled = useFlag("module_scholarships") && financeEnabled;
 
   /**
    * Arranque: las cookies de sesión son HttpOnly (el JavaScript no las ve), así
@@ -534,6 +537,10 @@ export function AppShell(): ReactElement {
       go({ screen: "activities" });
       return;
     }
+    if (id === "scholarships") {
+      go({ screen: "scholarships" });
+      return;
+    }
     if (id === "payments") {
       go({ screen: "payments" });
       return;
@@ -758,6 +765,13 @@ export function AppShell(): ReactElement {
         ) : (
           // Flag OFF: the friendly stub. Backend 404 is authoritative.
           <ModulePlaceholder m={MODULES.find((m) => m.id === "activities") as ModuleDef} onBack={home} />
+        ))}
+      {view.screen === "scholarships" &&
+        (scholarshipsEnabled ? (
+          <ScholarshipsScreen onBack={home} permissions={principal?.permissions} />
+        ) : (
+          // Flag OFF: the friendly stub. Backend 404 is authoritative.
+          <ModulePlaceholder m={MODULES.find((m) => m.id === "scholarships") as ModuleDef} onBack={home} />
         ))}
       {view.screen === "admin" &&
         (adminEnabled ? (

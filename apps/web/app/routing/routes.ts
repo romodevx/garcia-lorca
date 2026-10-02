@@ -16,6 +16,7 @@ export type View =
   | { screen: "expenses" }
   | { screen: "schedule" }
   | { screen: "activities" }
+  | { screen: "scholarships" }
   | { screen: "announcements" }
   | { screen: "payments" }
   | { screen: "config" }
@@ -54,6 +55,7 @@ const BY_SCREEN = {
   expenses: "/egresos",
   schedule: "/horarios",
   activities: "/actividades",
+  scholarships: "/becas",
   announcements: "/avisos",
   payments: "/pagos",
   config: "/configuracion",

@@ -290,6 +290,38 @@ describe("FinanceScreen — exportar", () => {
   });
 });
 
+describe("FinanceScreen — exportar · becas (T18)", () => {
+  // remainingCents is net of the scholarship: without its own column the file's
+  // Importe − Descuento − Pagado would not add up to its Saldo.
+  it("exports what the scholarship took off each charge", async () => {
+    const user = userEvent.setup();
+    finance.listCharges.mockResolvedValue([{ ...charge("ch1", "s1", 75000), paidCents: 0, scholarshipCents: 75000 }]);
+    render(<FinanceScreen onBack={() => {}} />);
+    await screen.findByText("Cruz Valentina");
+
+    const anchor = { click: vi.fn(), href: "", download: "", style: {} } as unknown as HTMLAnchorElement;
+    const realCreate = document.createElement.bind(document);
+    vi.spyOn(document, "createElement").mockImplementation((tag: string) =>
+      (tag === "a" ? anchor : realCreate(tag)) as HTMLElement);
+    vi.spyOn(document.body, "appendChild").mockImplementation((n) => n);
+    vi.spyOn(document.body, "removeChild").mockImplementation((n) => n);
+    const createObjectURL = vi.fn().mockReturnValue("blob:x");
+    vi.stubGlobal("URL", { createObjectURL, revokeObjectURL: vi.fn() });
+
+    await user.click(screen.getByRole("button", { name: /Exportar/ }));
+
+    const csv = await (createObjectURL.mock.calls[0]?.[0] as Blob).text();
+    const [head, row] = csv.replace(/^\uFEFF/, "").split(/\r?\n/);
+    const cells = (line: string | undefined): string[] => (line ?? "").split(",");
+    const at = cells(head).indexOf("Beca");
+    expect(at).toBeGreaterThan(-1);
+    expect(cells(row)[at]).toBe("750.00");
+
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+});
+
 describe("FinanceScreen — filtro por mes", () => {
   // "¿Quién debe septiembre?" is how a school reads its debt. A year of rows on
   // one screen is not an answer to that question.

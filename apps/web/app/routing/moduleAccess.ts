@@ -9,6 +9,7 @@ const MODULE_OF_SCREEN: Partial<Record<View["screen"], string>> = {
   expenses: "expenses",
   schedule: "schedule",
   activities: "activities",
+  scholarships: "scholarships",
   payments: "payments",
   announcements: "announcements",
   config: "settings",
