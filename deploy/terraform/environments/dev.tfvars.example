@@ -98,6 +98,11 @@ seed_owner_secret = true
 # OFF for a demo: a job that bills the wrong school cycle is worse than no job.
 billing_schedule_enabled = false
 
+# ---- Daily birthday greeting (T11) ----------------------------------------
+# 07:00 America/Mexico_City → comms RunBirthdays. Idempotent per pupil/year.
+# Not stopped by module_comms: stopping it is setting this false and applying.
+birthday_schedule_enabled = false
+
 # ---- Identity Platform ----------------------------------------------------
 # F1 of .claude/docs/PLAN-identity-platform.md. Provisioning ONLY: nothing
 # authenticates through it until the gateway is cut over (F6), so turning this

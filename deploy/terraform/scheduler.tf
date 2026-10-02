@@ -12,7 +12,7 @@
 # billing_schedule_enabled = false here and applying — see FLAGS.md.
 
 resource "google_project_service" "scheduler" {
-  count   = var.billing_schedule_enabled ? 1 : 0
+  count   = var.billing_schedule_enabled || var.birthday_schedule_enabled ? 1 : 0
   project = var.project_id
   service = "cloudscheduler.googleapis.com"
 
@@ -73,6 +73,79 @@ resource "google_cloud_scheduler_job" "monthly_billing" {
     oidc_token {
       service_account_email = google_service_account.billing_scheduler[0].email
       audience              = module.finance.uri
+    }
+  }
+
+  depends_on = [google_project_service.scheduler]
+}
+
+# Cloud Scheduler: the daily birthday greeting (T11).
+#
+# Every morning at 07:00 school time comms greets, in the parents' app, each
+# enrolled pupil whose birthday it is (February 29 pupils on February 28 of a
+# non-leap year). The job posts CommsService/RunBirthdays with NO date, so comms
+# reads "today" in America/Mexico_City (SCHOOL_TIMEZONE) — never the UTC day,
+# which after 18:00 local is already tomorrow.
+#
+# Safe to retry and to run twice: each greeting is claimed in comms'
+# processed_events as birthday:<student>:<year> in the same transaction as its
+# notification, so a retry greets nobody twice.
+#
+# IMPORTANT, as with billing: turning module_comms off does NOT stop this.
+# Flags live in the gateway's ENABLED_MODULES and only gate gateway routes; the
+# scheduler calls comms directly with its own OIDC identity. Stopping the
+# greetings means birthday_schedule_enabled = false here and an apply (or
+# pausing the job in the console).
+#
+# Repo config only as of T11: NOT applied. Turn it on per environment with
+# birthday_schedule_enabled = true.
+
+resource "google_service_account" "birthday_scheduler" {
+  count        = var.birthday_schedule_enabled ? 1 : 0
+  project      = var.project_id
+  account_id   = "birthday-scheduler"
+  display_name = "Cloud Scheduler — daily birthday greeting"
+}
+
+# Invoker on comms and nothing else; its own identity so revoking it never
+# touches the billing job or the Pub/Sub push.
+resource "google_cloud_run_v2_service_iam_member" "birthday_scheduler_invoker" {
+  count    = var.birthday_schedule_enabled ? 1 : 0
+  project  = var.project_id
+  location = var.region
+  name     = module.comms.service_name
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.birthday_scheduler[0].email}"
+}
+
+resource "google_cloud_scheduler_job" "daily_birthdays" {
+  count       = var.birthday_schedule_enabled ? 1 : 0
+  project     = var.project_id
+  region      = var.region
+  name        = "daily-birthday-greetings"
+  description = "Greets the families of the pupils whose birthday is today"
+  schedule    = var.birthday_schedule_cron
+  time_zone   = var.birthday_schedule_timezone
+
+  # A couple of spaced retries: the run is idempotent, so a retry after a
+  # partial failure (students blinked for one pupil) greets only who was missed.
+  retry_config {
+    retry_count          = 2
+    min_backoff_duration = "120s"
+  }
+
+  http_target {
+    http_method = "POST"
+    uri         = "${module.comms.uri}/garcialorca.comms.v1.CommsService/RunBirthdays"
+    headers = {
+      "Content-Type" = "application/json"
+    }
+    # No date on purpose: comms reads today in the school's zone.
+    body = base64encode(jsonencode({}))
+
+    oidc_token {
+      service_account_email = google_service_account.birthday_scheduler[0].email
+      audience              = module.comms.uri
     }
   }
 
