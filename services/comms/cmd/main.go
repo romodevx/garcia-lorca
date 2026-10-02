@@ -30,6 +30,9 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	// The school's zone must resolve inside a distroless image too: the
+	// birthday greeting reads "today" in America/Mexico_City, not in UTC.
+	_ "time/tzdata"
 
 	connect "connectrpc.com/connect"
 	"github.com/google/uuid"
@@ -62,6 +65,9 @@ const (
 	// defaultStudentsBaseURL is the students service on its local port; compose
 	// overrides it with the in-network http://students:8080.
 	defaultStudentsBaseURL = "http://localhost:8092"
+	// defaultSchoolTimezone is where the school is: what "today" means for the
+	// birthday greeting (T11).
+	defaultSchoolTimezone = "America/Mexico_City"
 
 	readHeaderTimeout = 10 * time.Second
 	readTimeout       = 30 * time.Second
@@ -136,9 +142,16 @@ func run(ctx context.Context, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	// The same students client names the pupil in the copy ("Ana faltó…").
+	school, err := schoolLocation()
+	if err != nil {
+		return err
+	}
+	// The same students client names the pupil in the copy ("Ana faltó…") and
+	// answers who was born on a given day (the daily birthday greeting, which
+	// Cloud Scheduler triggers through RunBirthdays).
 	svc := service.NewCommsService(repo, guardians, sender, tenantID, uuid.NewString, time.Now, log,
-		service.WithStudentNames(guardians))
+		service.WithStudentNames(guardians),
+		service.WithBirthdays(guardians, repo, school))
 
 	mux := http.NewServeMux()
 	path, connectHandler := commsv1connect.NewCommsServiceHandler(handler.NewCommsHandler(svc, tenantID), connect.WithRecover(recoverFn))
@@ -332,6 +345,18 @@ func selectSender(provider, expoAccessToken string, log *slog.Logger) (service.S
 	default:
 		return nil, fmt.Errorf("PUSH_PROVIDER %q is not one of log, expo", provider)
 	}
+}
+
+// schoolLocation is the school's time zone (SCHOOL_TIMEZONE, default
+// America/Mexico_City). An unknown zone fails startup: falling back to UTC
+// would greet every pupil a day early after 18:00 local time.
+func schoolLocation() (*time.Location, error) {
+	name := envOr("SCHOOL_TIMEZONE", defaultSchoolTimezone)
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		return nil, fmt.Errorf("SCHOOL_TIMEZONE %q: %w", name, err)
+	}
+	return loc, nil
 }
 
 func envOr(key, fallback string) string {

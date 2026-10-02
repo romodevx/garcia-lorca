@@ -101,3 +101,41 @@ func (c *Client) FirstName(ctx context.Context, studentID string) (string, error
 	}
 	return res.Msg.GetStudent().GetFirstName(), nil
 }
+
+// Compile-time proof the adapter also satisfies the birthday seam.
+var _ service.BirthdayDirectory = (*Client)(nil)
+
+// birthdayPageSize is the largest page students serves.
+const birthdayPageSize = 200
+
+// maxBirthdayPages bounds the walk: 100 pages of 200 is 20,000 pupils born on
+// one day — far past any school. A directory that keeps answering a next page
+// beyond that is broken, and looping on it forever would hang the run.
+const maxBirthdayPages = 100
+
+// BirthdaysOn lists the ENROLLED pupils born on month/day (and on February 29
+// when includeFeb29), walking every page. Each is projected to its id and first
+// name — the surname never leaves students for a greeting that does not use it.
+func (c *Client) BirthdaysOn(ctx context.Context, month, day int, includeFeb29 bool) ([]service.Pupil, error) {
+	req := &studentsv1.ListStudentsRequest{
+		Status:   studentsv1.AdmissionStatus_ADMISSION_STATUS_ENROLLED,
+		PageSize: birthdayPageSize,
+		Birthday: &studentsv1.BirthdayFilter{Month: int32(month), Day: int32(day), IncludeFeb_29: includeFeb29},
+	}
+	var out []service.Pupil
+	for range maxBirthdayPages {
+		res, err := c.rpc.ListStudents(ctx, connect.NewRequest(req))
+		if err != nil {
+			return nil, glerrors.Wrap(glerrors.KindInternal, "students birthday lookup failed", err)
+		}
+		for _, s := range res.Msg.GetStudents() {
+			out = append(out, service.Pupil{ID: s.GetId(), FirstName: s.GetFirstName()})
+		}
+		next := res.Msg.GetNextPageToken()
+		if next == "" {
+			return out, nil
+		}
+		req.PageToken = next
+	}
+	return nil, glerrors.New(glerrors.KindInternal, "students kept paging past any school's size")
+}
