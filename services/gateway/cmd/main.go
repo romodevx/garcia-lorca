@@ -749,6 +749,15 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	// deliberately does not know what a group is.
 	announcementsH := handler.NewAnnouncementHandler(commsClient, studentsClient, configClient)
 	mux.Handle("POST /api/v1/comms/announcements", commsWrite(announcementsH.Announce))
+	// T11: the school's birthday greeting. Editing it answers to comms:write —
+	// the permission that already sends announcements, held by the owner and
+	// delegable to whoever writes to families. Reading it does too: the screen
+	// that shows it is the screen that edits it. The daily RUN is deliberately
+	// not here: Cloud Scheduler calls comms directly (deploy/terraform/
+	// scheduler.tf), so no session can trigger a send.
+	birthdayH := handler.NewBirthdayTemplateHandler(commsClient)
+	mux.Handle("GET /api/v1/comms/birthday-template", commsWrite(birthdayH.Get))
+	mux.Handle("PUT /api/v1/comms/birthday-template", commsWrite(birthdayH.Update))
 
 	// M12 uniforms (the school's uniform shop). Stage one: the catalogue, the
 	// storeroom and the counter sale. Every route sits behind

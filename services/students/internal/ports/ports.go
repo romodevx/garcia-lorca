@@ -21,6 +21,16 @@ type ListFilter struct {
 	IDs       []string
 	PageSize  int
 	PageToken string
+	// Birthday narrows the list to pupils born on a calendar day (nil = any).
+	Birthday *BirthdayFilter
+}
+
+// BirthdayFilter is a calendar day without a year. IncludeFeb29 also matches
+// pupils born on February 29 — asked for on February 28 of a year without one.
+type BirthdayFilter struct {
+	Month        int
+	Day          int
+	IncludeFeb29 bool
 }
 
 // StudentRepository loads and persists students. All access is tenant-scoped for

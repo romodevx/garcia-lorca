@@ -54,6 +54,23 @@ service CommsService {
   // else, or not registered at all, is left untouched and answers the same
   // empty success, so the call is idempotent and reveals nothing.
   rpc UnregisterDevice(UnregisterDeviceRequest) returns (UnregisterDeviceResponse);
+
+  // RunBirthdays greets, in the family app, every enrolled pupil whose birthday
+  // is `date` (T11). It is what Cloud Scheduler calls every morning (07:00
+  // America/Mexico_City); the gateway does NOT expose it. Idempotent per pupil
+  // and year: a second run the same day — a scheduler retry, a manual curl —
+  // greets nobody twice. A pupil whose family has no account yet is skipped and
+  // counted, not greeted into a feed nobody reads.
+  rpc RunBirthdays(RunBirthdaysRequest) returns (RunBirthdaysResponse);
+
+  // GetBirthdayTemplate returns the greeting the school sends, or the default
+  // text while the school has not written its own.
+  rpc GetBirthdayTemplate(GetBirthdayTemplateRequest) returns (GetBirthdayTemplateResponse);
+
+  // UpdateBirthdayTemplate replaces the greeting. `{nombre}` is replaced by the
+  // pupil's first name when it is sent. An empty or oversized text is
+  // InvalidArgument.
+  rpc UpdateBirthdayTemplate(UpdateBirthdayTemplateRequest) returns (UpdateBirthdayTemplateResponse);
 }
 
 // --- Health ---------------------------------------------------------------
@@ -68,7 +85,7 @@ message HealthResponse {
 
 // Notification is one message materialised for a student from a consumed
 // domain event. `type` is the stable client-facing KIND — one of
-// "absence"|"attendance"|"payment"|"report_card" (T7) — which a client
+// "absence"|"attendance"|"payment"|"report_card" (T7)|"announcement"|"birthday" (T11) — which a client
 // switches on for its icon;
 // it is deliberately NOT the producing event's name, so an upstream contract
 // change never reaches the client. `title` / `body` are the rendered push
@@ -148,4 +165,46 @@ message AnnounceRequest {
 // reports zero, because it delivered nothing new.
 message AnnounceResponse {
   int32 created = 1;
+}
+
+// RunBirthdaysRequest names the day to greet. Empty date = TODAY in the school's
+// time zone (America/Mexico_City), which is what a schedule means; a date
+// ("2026-10-01") lets QA and a manual recovery replay a given day.
+message RunBirthdaysRequest {
+  string date = 1;
+}
+
+// RunBirthdaysResponse reports what the run did. A re-run of the same day
+// reports everybody as already_greeted.
+message RunBirthdaysResponse {
+  string date = 1;              // the day that was greeted, YYYY-MM-DD
+  int32 greeted = 2;            // pupils greeted by THIS run
+  int32 already_greeted = 3;    // greeted earlier this year (idempotent skip)
+  int32 without_guardians = 4;  // no family account linked: nobody to greet
+}
+
+// BirthdayTemplate is the greeting the school sends. is_default is true while
+// the school has not saved its own text.
+message BirthdayTemplate {
+  string title = 1;
+  string body = 2;
+  bool is_default = 3;
+  google.protobuf.Timestamp updated_at = 4;  // unset while is_default
+  string updated_by = 5;                     // iam user id; empty while is_default
+}
+
+message GetBirthdayTemplateRequest {}
+
+message GetBirthdayTemplateResponse {
+  BirthdayTemplate template = 1;
+}
+
+message UpdateBirthdayTemplateRequest {
+  string title = 1;
+  string body = 2;
+  string updated_by = 3;  // the caller (gateway principal)
+}
+
+message UpdateBirthdayTemplateResponse {
+  BirthdayTemplate template = 1;
 }

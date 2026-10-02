@@ -14,7 +14,11 @@ beforeEach(() => {
 });
 
 
-vi.mock("../../comms/api", () => ({ announce: vi.fn() }));
+vi.mock("../../comms/api", () => ({
+  announce: vi.fn(),
+  getBirthdayTemplate: vi.fn().mockResolvedValue({ title: "¡Feliz cumpleaños, {nombre}!", body: "Hola {nombre}", isDefault: true, updatedAt: "" }),
+  updateBirthdayTemplate: vi.fn(),
+}));
 vi.mock("../../config/api", () => ({ listCycles: vi.fn(), listLevels: vi.fn(), listGroups: vi.fn(), listLabelledGroups: vi.fn() }));
 vi.mock("../../students/api", () => ({ listStudents: vi.fn() }));
 
@@ -34,6 +38,13 @@ beforeEach(() => {
 afterEach(() => vi.clearAllMocks());
 
 describe("AnnouncementsScreen", () => {
+  // T11: the school writes its birthday greeting where it writes to families.
+  it("offers the birthday greeting below the announcement", async () => {
+    render(<AnnouncementsScreen onBack={() => {}} />);
+    expect(await screen.findByDisplayValue("¡Feliz cumpleaños, {nombre}!")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Felicitación de cumpleaños" })).toBeInTheDocument();
+  });
+
   it("sends one message to a chosen group", async () => {
     const user = userEvent.setup();
     render(<AnnouncementsScreen onBack={() => {}} />);

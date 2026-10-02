@@ -46,6 +46,7 @@ const (
 // non-owner role gets privileges on every table.
 var migrationFiles = []string{
 	"../../../../migrations/comms/0001_init.sql",
+	"../../../../migrations/comms/0002_birthday_template.sql",
 }
 
 var (

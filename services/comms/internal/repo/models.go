@@ -48,3 +48,16 @@ type processedEventModel struct {
 }
 
 func (processedEventModel) TableName() string { return "processed_events" }
+
+// birthdayTemplateModel is the GORM row for `birthday_templates`: the school's
+// greeting, one row per tenant (tenant_id is the primary key). UpdatedBy is a
+// cross-service iam user id — a plain column, never a FK.
+type birthdayTemplateModel struct {
+	TenantID  string    `gorm:"column:tenant_id;primaryKey"`
+	Title     string    `gorm:"column:title"`
+	Body      string    `gorm:"column:body"`
+	UpdatedAt time.Time `gorm:"column:updated_at"`
+	UpdatedBy string    `gorm:"column:updated_by"`
+}
+
+func (birthdayTemplateModel) TableName() string { return "birthday_templates" }

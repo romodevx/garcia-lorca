@@ -215,6 +215,24 @@ variable "billing_schedule_timezone" {
   default     = "America/Mexico_City"
 }
 
+variable "birthday_schedule_enabled" {
+  description = "Create the Cloud Scheduler job that greets pupils on their birthday (T11). Turning module_comms off does NOT stop it — the scheduler calls comms directly, so stopping it is an apply."
+  type        = bool
+  default     = false
+}
+
+variable "birthday_schedule_cron" {
+  description = "When the birthday greeting fires. Default: 07:00 every day."
+  type        = string
+  default     = "0 7 * * *"
+}
+
+variable "birthday_schedule_timezone" {
+  description = "IANA timezone the cron is read in. comms itself reads 'today' in SCHOOL_TIMEZONE (default America/Mexico_City); keep them equal."
+  type        = string
+  default     = "America/Mexico_City"
+}
+
 # ---- Invitations and outgoing mail -----------------------------------------
 
 variable "public_web_url" {

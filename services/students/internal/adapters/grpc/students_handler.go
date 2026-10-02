@@ -80,6 +80,7 @@ func (h *StudentsHandler) CreateApplicant(ctx context.Context, req *connect.Requ
 		LevelID:          m.GetLevelId(),
 		GradeGroup:       m.GetGradeGroup(),
 		GuardianName:     m.GetGuardianName(),
+		BirthDate:        m.GetBirthDate(),
 	})
 	if err != nil {
 		return nil, connectErr(err)
@@ -170,6 +171,7 @@ func (h *StudentsHandler) ListStudents(ctx context.Context, req *connect.Request
 		IDs:        m.GetIds(),
 		PageSize:   int(m.GetPageSize()),
 		PageToken:  m.GetPageToken(),
+		Birthday:   toBirthdayFilter(m.GetBirthday()),
 	})
 	if err != nil {
 		return nil, connectErr(err)
@@ -548,4 +550,13 @@ func connectErrForKind(err error) *connect.Error {
 	default:
 		return connect.NewError(connect.CodeInternal, glerrors.New(glerrors.KindInternal, "internal error"))
 	}
+}
+
+// toBirthdayFilter maps the wire's optional birthday filter; unset stays nil
+// (any day).
+func toBirthdayFilter(b *studentsv1.BirthdayFilter) *ports.BirthdayFilter {
+	if b == nil {
+		return nil
+	}
+	return &ports.BirthdayFilter{Month: int(b.GetMonth()), Day: int(b.GetDay()), IncludeFeb29: b.GetIncludeFeb_29()}
 }

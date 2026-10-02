@@ -23,6 +23,8 @@ const KIND_META: Record<string, NotificationKindMeta> = {
   absence: { label: "Asistencia", icon: "calendar", tint: "orange", chip: "warn" },
   attendance: { label: "Asistencia", icon: "calendar", tint: "forest", chip: "ok" },
   payment: { label: "Pagos", icon: "wallet", tint: "lime", chip: "ok" },
+  // T11: the school's morning greeting on the pupil's birthday.
+  birthday: { label: "Cumpleaños", icon: "sparkles", tint: "yellow", chip: "lime" },
 };
 
 const DEFAULT_META: NotificationKindMeta = {

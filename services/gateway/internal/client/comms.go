@@ -161,3 +161,44 @@ func (c *CommsClient) Announce(ctx context.Context, studentIDs []string, title, 
 	}
 	return int(res.Msg.GetCreated()), nil
 }
+
+// BirthdayTemplate is the edge's view of the school's birthday greeting (T11).
+// UpdatedAt is RFC3339, empty while IsDefault.
+type BirthdayTemplate struct {
+	Title     string
+	Body      string
+	IsDefault bool
+	UpdatedAt string
+}
+
+// GetBirthdayTemplate returns the school's greeting, or the default text.
+func (c *CommsClient) GetBirthdayTemplate(ctx context.Context) (BirthdayTemplate, error) {
+	res, err := c.rpc.GetBirthdayTemplate(ctx, connect.NewRequest(&commsv1.GetBirthdayTemplateRequest{}))
+	if err != nil {
+		return BirthdayTemplate{}, err
+	}
+	return toBirthdayTemplate(res.Msg.GetTemplate()), nil
+}
+
+// UpdateBirthdayTemplate replaces the school's greeting, stamped with who saved
+// it.
+func (c *CommsClient) UpdateBirthdayTemplate(ctx context.Context, title, body, updatedBy string) (BirthdayTemplate, error) {
+	res, err := c.rpc.UpdateBirthdayTemplate(ctx, connect.NewRequest(&commsv1.UpdateBirthdayTemplateRequest{
+		Title:     title,
+		Body:      body,
+		UpdatedBy: updatedBy,
+	}))
+	if err != nil {
+		return BirthdayTemplate{}, err
+	}
+	return toBirthdayTemplate(res.Msg.GetTemplate()), nil
+}
+
+func toBirthdayTemplate(t *commsv1.BirthdayTemplate) BirthdayTemplate {
+	return BirthdayTemplate{
+		Title:     t.GetTitle(),
+		Body:      t.GetBody(),
+		IsDefault: t.GetIsDefault(),
+		UpdatedAt: rfc3339OrEmpty(t.GetUpdatedAt()),
+	}
+}

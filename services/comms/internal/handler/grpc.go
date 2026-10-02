@@ -171,3 +171,50 @@ func connectErr(err error) *connect.Error {
 		return connect.NewError(connect.CodeInternal, glerrors.New(glerrors.KindInternal, "internal error"))
 	}
 }
+
+// RunBirthdays greets the families of the pupils born on the request's date
+// (empty = today in the school's zone). Cloud Scheduler calls it; the gateway
+// does not expose it.
+func (h *CommsHandler) RunBirthdays(ctx context.Context, req *connect.Request[commsv1.RunBirthdaysRequest]) (*connect.Response[commsv1.RunBirthdaysResponse], error) {
+	run, err := h.svc.RunBirthdays(ctx, req.Msg.GetDate())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&commsv1.RunBirthdaysResponse{
+		Date:             run.Date,
+		Greeted:          int32(run.Greeted),
+		AlreadyGreeted:   int32(run.AlreadyGreeted),
+		WithoutGuardians: int32(run.WithoutGuardians),
+	}), nil
+}
+
+// GetBirthdayTemplate returns the school's greeting, or the default text.
+func (h *CommsHandler) GetBirthdayTemplate(ctx context.Context, _ *connect.Request[commsv1.GetBirthdayTemplateRequest]) (*connect.Response[commsv1.GetBirthdayTemplateResponse], error) {
+	t, err := h.svc.BirthdayTemplate(ctx)
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&commsv1.GetBirthdayTemplateResponse{Template: birthdayTemplate(t)}), nil
+}
+
+// UpdateBirthdayTemplate replaces the school's greeting.
+func (h *CommsHandler) UpdateBirthdayTemplate(ctx context.Context, req *connect.Request[commsv1.UpdateBirthdayTemplateRequest]) (*connect.Response[commsv1.UpdateBirthdayTemplateResponse], error) {
+	m := req.Msg
+	t, err := h.svc.UpdateBirthdayTemplate(ctx, m.GetTitle(), m.GetBody(), m.GetUpdatedBy())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&commsv1.UpdateBirthdayTemplateResponse{Template: birthdayTemplate(t)}), nil
+}
+
+// birthdayTemplate maps the greeting onto the wire; the default has no
+// updated_at.
+func birthdayTemplate(t service.BirthdayTemplate) *commsv1.BirthdayTemplate {
+	return &commsv1.BirthdayTemplate{
+		Title:     t.Title,
+		Body:      t.Body,
+		IsDefault: t.IsDefault,
+		UpdatedAt: timestamp(t.UpdatedAt),
+		UpdatedBy: t.UpdatedBy,
+	}
+}

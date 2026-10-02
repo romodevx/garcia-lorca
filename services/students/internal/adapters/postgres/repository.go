@@ -251,6 +251,9 @@ func (r *Repository) List(ctx context.Context, f ports.ListFilter) ([]*domain.St
 		if len(f.IDs) > 0 {
 			q = q.Where("id IN ?", f.IDs)
 		}
+		if f.Birthday != nil {
+			q = whereBornOn(q, *f.Birthday)
+		}
 		if f.PageToken != "" {
 			var err error
 			if q, err = afterToken(q, f.PageToken); err != nil {
@@ -282,6 +285,27 @@ func (r *Repository) List(ctx context.Context, f ports.ListFilter) ([]*domain.St
 	}
 	return students, next, nil
 }
+
+// whereBornOn narrows q to pupils born on the filter's calendar day, of any
+// year — plus February 29 when asked (the greeting of a leap-day pupil in a year
+// without one). A pupil with no birth date matches nothing: NULL compares false.
+//
+// No index: it runs once a day over one school's pupils, already narrowed by
+// tenant and status. An expression index on (month, day) is the move if a
+// school ever grows big enough for this scan to show.
+func whereBornOn(q *gorm.DB, b ports.BirthdayFilter) *gorm.DB {
+	const sameDay = "(EXTRACT(MONTH FROM birth_date) = ? AND EXTRACT(DAY FROM birth_date) = ?)"
+	if b.IncludeFeb29 {
+		return q.Where("("+sameDay+" OR "+sameDay+")", b.Month, b.Day, february, leapDay)
+	}
+	return q.Where(sameDay, b.Month, b.Day)
+}
+
+// february and leapDay are the leap day, February 29.
+const (
+	february = 2
+	leapDay  = 29
+)
 
 // enrollmentNumberUniqueConstraint is students' UNIQUE (tenant_id,
 // enrollment_number) (migration 0013).

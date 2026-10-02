@@ -914,6 +914,51 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
+  /api/v1/students:
+    post:
+      tags: [students]
+      summary: Register a new pupil (quick add)
+      description: >
+        Creates an applicant in admission "pending". The level is a config
+        level id; the group is assigned later by capacity (enrollment by
+        grade). birthDate is optional (T11): captured here, the pupil is
+        greeted on their birthday without a second visit to the file. It must
+        be YYYY-MM-DD and not after today.
+      operationId: createStudent
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [curp, firstName, lastName, levelId, guardianName]
+              properties:
+                curp: { type: string, minLength: 18, maxLength: 18, example: "LOAA190312MDFVDA01" }
+                firstName: { type: string, minLength: 1, example: "ADA" }
+                lastName: { type: string, minLength: 1, example: "LOVELACE", description: "Paternal surname." }
+                maternalLastName: { type: string, example: "BYRON", description: "Maternal surname; optional." }
+                levelId: { type: string, format: uuid }
+                gradeGroup: { type: string, example: "", description: "Left empty: capacity assigns the group." }
+                guardianName: { type: string, minLength: 1, example: "AUGUSTA BYRON" }
+                birthDate: { type: string, format: date, example: "2019-03-12", description: "Optional." }
+      responses:
+        '201':
+          description: The new applicant.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StudentWithProfile' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+        '409':
+          description: Another pupil already has that CURP.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
   /api/v1/students/{id}:
     put:
       tags: [students]
@@ -1361,6 +1406,58 @@ paths:
             A malformed body, an unknown scope, or an audience of nobody. An
             empty audience is refused rather than reported as sent — otherwise
             the office believes a message went out that never did.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+
+  /api/v1/comms/birthday-template:
+    get:
+      tags: [comms]
+      summary: The school's birthday greeting
+      description: >
+        The text comms sends every morning (07:00 America/Mexico_City) to the
+        families of the pupils whose birthday it is (T11). `{nombre}` is
+        replaced by the pupil's first name. While the school has not written
+        its own, the default text comes back with isDefault=true. Needs
+        comms:write — the same permission that sends announcements.
+      operationId: getBirthdayTemplate
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200':
+          description: The greeting.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BirthdayTemplate' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+    put:
+      tags: [comms]
+      summary: Change the school's birthday greeting
+      description: >
+        Replaces the greeting. Title up to 80 characters, message up to 500;
+        both required. `{nombre}` is optional and may appear several times.
+        Applies from the next run; greetings already sent are not rewritten.
+      operationId: updateBirthdayTemplate
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, body]
+              properties:
+                title: { type: string, minLength: 1, maxLength: 80, example: "¡Feliz cumpleaños, {nombre}!" }
+                body: { type: string, minLength: 1, maxLength: 500, example: "Toda la comunidad le desea a {nombre} un feliz día." }
+      responses:
+        '200':
+          description: The saved greeting.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BirthdayTemplate' }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/ModuleDisabled' }
@@ -5230,6 +5327,19 @@ components:
             municipality: { type: string, maxLength: 120, example: "Guadalajara" }
             state: { type: string, example: "Jalisco", description: "One of the 32 federal entities, or empty." }
 
+    BirthdayTemplate:
+      type: object
+      required: [title, body, isDefault, updatedAt]
+      properties:
+        title: { type: string, example: "¡Feliz cumpleaños, {nombre}!" }
+        body: { type: string, example: "Toda la comunidad del Colegio García Lorca le desea a {nombre} un muy feliz cumpleaños." }
+        isDefault:
+          type: boolean
+          description: True while the school has not saved its own text.
+        updatedAt:
+          type: string
+          description: RFC3339 instant of the last save; empty while isDefault.
+          example: "2026-10-01T13:00:00Z"
     StudentWithProfile:
       type: object
       required: [id, curp, firstName, lastName, level, levelId, gradeGroup, guardianName, admissionStatus, profile]

@@ -407,6 +407,11 @@ message CreateApplicantRequest {
   string guardian_name = 6;
   string level_id = 7;  // a config.v1.Level id; required
   string maternal_last_name = 8;  // optional; see Student.maternal_last_name
+  // birth_date is optional at intake (T11): ISO "2019-03-12", or empty. It is
+  // the same field the profile carries, judged by the same rule (not after
+  // today), so a pupil registered with it is greeted on their birthday without
+  // a second visit to the file.
+  string birth_date = 9;
 }
 
 message CreateApplicantResponse {
@@ -431,6 +436,19 @@ message ListStudentsRequest {
   // ids narrows the list to these students (empty = any). At most 200 ids —
   // one page — so a caller naming a class list never drains the whole school.
   repeated string ids = 7;
+  // birthday narrows the list to pupils born on a calendar day (T11): the daily
+  // birthday greeting asks "who turns a year older today". Unset = any day.
+  BirthdayFilter birthday = 8;
+}
+
+// BirthdayFilter is a calendar day, without a year. include_feb_29 also matches
+// pupils born on February 29: the caller asks for it on February 28 of a year
+// that has no 29th, so a leap-day pupil is still greeted in their own month.
+// WHEN to ask is the caller's rule; students only answers the question.
+message BirthdayFilter {
+  int32 month = 1;  // 1..12
+  int32 day = 2;    // 1..31, a day that month can have
+  bool include_feb_29 = 3;
 }
 
 message ListStudentsResponse {

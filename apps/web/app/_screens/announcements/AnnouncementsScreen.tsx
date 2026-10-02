@@ -10,6 +10,7 @@ import { listCycles, listLabelledGroups, listLevels, type Cycle, type LabelledGr
 import { listStudents, type Student } from "../../students/api";
 import { API_URL } from "../../api-url";
 import { formatStudentName, sortStudents } from "../../_design/students/studentName";
+import { BirthdayGreeting } from "./BirthdayGreeting";
 
 /** One key per attempt: a retry must not buzz four hundred phones twice. */
 function newAttemptKey(): string {
@@ -228,6 +229,9 @@ export function AnnouncementsScreen({ onBack }: AnnouncementsScreenProps): React
           <Btn icon="check" type="submit" style={{ opacity: sending ? 0.5 : 1, height: 50 }}>Enviar aviso</Btn>
         </div>
       </form>
+
+      {/* T11: the automatic message, written where the school writes to families. */}
+      <BirthdayGreeting />
     </Page>
   );
 }

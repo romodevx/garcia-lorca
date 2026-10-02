@@ -178,6 +178,16 @@ psql: ## Abre psql en la base local (rol app)
 migrate: ## Aplica migrations/**/*.sql en la base local (orden léxico)
 	$(COMPOSE) run --rm migrate
 
+# T11: lo que Cloud Scheduler hace cada mañana a las 7:00, a mano y en LOCAL.
+# Sin DATE felicita a quien cumple HOY (hora de México); con DATE=2026-10-01
+# repite ese día. Es idempotente: correrlo dos veces no felicita dos veces.
+COMMS_LOCAL_URL ?= http://localhost:8096
+.PHONY: birthdays
+birthdays: ## Corre la felicitación de cumpleaños en local — make birthdays [DATE=aaaa-mm-dd]
+	curl -sS -X POST -H 'Content-Type: application/json' \
+	  -d '{"date":"$(DATE)"}' \
+	  $(COMMS_LOCAL_URL)/garcialorca.comms.v1.CommsService/RunBirthdays; echo
+
 .PHONY: clean
 clean: ## down -v + borra imágenes locales del proyecto
 	$(COMPOSE) down -v --remove-orphans --rmi local

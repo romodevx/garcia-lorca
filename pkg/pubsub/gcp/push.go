@@ -118,6 +118,13 @@ func NewPushHandler(h pubsub.Handler, expectedSA string, log *slog.Logger) http.
 	})
 }
 
+// VerifyCaller is verifyCaller for other Cloud Run entry points that a single
+// identity must own (comms pins its scheduled birthday run to the scheduler's
+// service account the same way /pubsub is pinned to the push SA).
+func VerifyCaller(authHeader, expectedSA string) error {
+	return verifyCaller(authHeader, expectedSA)
+}
+
 // verifyCaller confirms the Authorization header carries an OIDC token whose
 // email claim is expectedSA. It does NOT validate the signature: on Cloud Run
 // the frontend already did, so this only reads the identity to pin the caller to

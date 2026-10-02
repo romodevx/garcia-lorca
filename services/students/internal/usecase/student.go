@@ -203,6 +203,8 @@ type CreateApplicantInput struct {
 	LevelID          string
 	GradeGroup       string
 	GuardianName     string
+	// BirthDate is optional at intake (T11): ISO "2019-03-12", or empty.
+	BirthDate string
 }
 
 // CreateApplicant validates the input, builds a pending applicant, and persists
@@ -216,6 +218,12 @@ func (s *StudentService) CreateApplicant(ctx context.Context, in CreateApplicant
 	if err != nil {
 		return nil, err
 	}
+	// Only the birth date is captured at intake; the rest of the profile is
+	// filled from the file. Same rule as an edit: a date after today is a typo.
+	profile, err := domain.NewProfile(domain.ProfileInput{BirthDate: in.BirthDate}, s.now())
+	if err != nil {
+		return nil, err
+	}
 	student, err := domain.NewApplicant(domain.NewApplicantParams{
 		ID:               s.newID(),
 		TenantID:         s.tenant,
@@ -226,6 +234,7 @@ func (s *StudentService) CreateApplicant(ctx context.Context, in CreateApplicant
 		Level:            level,
 		GradeGroup:       in.GradeGroup,
 		GuardianName:     in.GuardianName,
+		Profile:          profile,
 	})
 	if err != nil {
 		return nil, err
@@ -330,7 +339,24 @@ func (s *StudentService) ListStudents(ctx context.Context, f ports.ListFilter) (
 	if err := validateStudentIDs(f.IDs); err != nil {
 		return nil, "", err
 	}
+	if f.Birthday != nil && !isCalendarDay(f.Birthday.Month, f.Birthday.Day) {
+		return nil, "", glerrors.New(glerrors.KindInvalid, "birthday is not a day of the year")
+	}
 	return s.repo.List(ctx, f)
+}
+
+// leapYear is any leap year: a calendar day is valid when it exists in one, so
+// February 29 is a day somebody can be born on.
+const leapYear = 2024
+
+// isCalendarDay reports whether month/day is a real day of some year. time.Date
+// normalizes an impossible day (April 31 → May 1), so a round trip is the check.
+func isCalendarDay(month, day int) bool {
+	if month < 1 || month > 12 || day < 1 {
+		return false
+	}
+	d := time.Date(leapYear, time.Month(month), day, 0, 0, 0, 0, time.UTC)
+	return int(d.Month()) == month && d.Day() == day
 }
 
 // MaxListIDs is how many students one ids-filtered list may name: one page.

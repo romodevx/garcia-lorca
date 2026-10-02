@@ -228,6 +228,9 @@ type CommsService struct {
 	guardians GuardianReader
 	sender    Sender
 	names     StudentNameReader
+	birthdays BirthdayDirectory
+	templates TemplateStore
+	school    *time.Location
 	tenantID  string
 	newID     func() string
 	now       func() time.Time
@@ -429,6 +432,16 @@ func (s *CommsService) push(ctx context.Context, n Notification, data map[string
 			slog.String("notification_id", n.ID),
 			slog.String("student_id", n.StudentID),
 			slog.Any("error", err))
+		return
+	}
+	s.pushTo(ctx, n, guardianIDs, data)
+}
+
+// pushTo delivers n to the devices of guardianIDs, best-effort like push. It is
+// split out for a caller that has already resolved the guardians (the birthday
+// run reads them first to decide whether there is anybody to greet).
+func (s *CommsService) pushTo(ctx context.Context, n Notification, guardianIDs []string, data map[string]string) {
+	if s.sender == nil {
 		return
 	}
 	if len(guardianIDs) == 0 {
