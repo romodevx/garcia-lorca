@@ -3,12 +3,12 @@
 import { useId, useState, type KeyboardEvent, type ReactElement, type Ref } from "react";
 
 import { Icon } from "../../_design/Icon";
-import { parseGradeInput, validateGrade, type GradeScale, type MonthlyGradeRow } from "../../grades/monthly";
+import { parseGradeInput, validateGrade, type GradeScale, type PeriodGradeRow } from "../../grades/periodSheet";
 import type { CellStatus } from "./gradeSaveStore";
 
 export interface GradeSheetRowProps {
-  row: MonthlyGradeRow;
-  /** An unsaved value kept from before a month/assignment switch; else the loaded grade. */
+  row: PeriodGradeRow;
+  /** An unsaved value kept from before a period/assignment switch; else the loaded grade. */
   initialText: string | undefined;
   scale: GradeScale;
   status: CellStatus;
@@ -87,7 +87,7 @@ export function GradeSheetRow({ row, initialText, scale, status, failing, inputR
         <input
           ref={inputRef}
           type="text"
-          inputMode="decimal"
+          inputMode="numeric"
           lang="es"
           autoComplete="off"
           aria-label={`Calificación de ${row.name}`}

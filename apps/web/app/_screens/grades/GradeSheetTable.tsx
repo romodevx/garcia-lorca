@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, type ReactElement } from "react";
 
-import { sheetStats, type GradeSheet, type MonthlyGradeKey, type MonthlyGradeRow } from "../../grades/monthly";
+import { sheetStats, type PeriodGradeKey, type PeriodGradeRow, type PeriodSheet } from "../../grades/periodSheet";
 import { EmptyHint } from "../config/parts";
 import type { CellStatus, GradeSaveStore } from "./gradeSaveStore";
 import { GradeSheetRow } from "./GradeSheetRow";
@@ -11,7 +11,7 @@ import { SheetCounters } from "./SheetCounters";
 import { useSaveStoreVersion } from "./useGradeSaves";
 
 export interface GradeSheetTableProps {
-  sheet: GradeSheet;
+  sheet: PeriodSheet;
   saves: GradeSaveStore;
 }
 
@@ -29,15 +29,17 @@ const TH: React.CSSProperties = {
 };
 
 /**
- * One month of one class: the counters and the capture table. Mounted per
- * month; every cell's save state lives in the screen's store, so a switch
+ * One evaluation period of one class: the counters and the capture table.
+ * Mounted per period; every cell's save state lives in the screen's store, so a switch
  * forgets nothing — an unsaved value comes back in its field.
  */
 export function GradeSheetTable({ sheet, saves }: GradeSheetTableProps): ReactElement {
   useSaveStoreVersion(saves);
   const inputs = useRef<(HTMLInputElement | null)[]>([]);
   const { passing } = sheet.scale;
-  const keyOf = useCallback((enrollmentId: string): MonthlyGradeKey => ({ assignmentId: sheet.assignmentId, month: sheet.month, enrollmentId }), [sheet.assignmentId, sheet.month]);
+  // A sheet without a period has no rows to key: the parent shows why instead.
+  const periodId = sheet.periodId ?? "";
+  const keyOf = useCallback((enrollmentId: string): PeriodGradeKey => ({ assignmentId: sheet.assignmentId, periodId, enrollmentId }), [sheet.assignmentId, periodId]);
   // Read fresh on every store change (a class is a few dozen rows).
   const confirmed = sheet.rows.map((r) => saves.confirmedOf(keyOf(r.enrollmentId), r.value));
   const stats = sheetStats(confirmed, passing);
@@ -53,10 +55,10 @@ export function GradeSheetTable({ sheet, saves }: GradeSheetTableProps): ReactEl
     }
     return false;
   }, []);
-  const notice = saves.sheetNotice({ assignmentId: sheet.assignmentId, month: sheet.month });
+  const notice = saves.sheetNotice({ assignmentId: sheet.assignmentId, periodId });
 
   // No grades at all: counters, a "(0–0)" scale and a column of dashes would say nothing.
-  if (sheet.gradingEnabled === false) return <EmptyHint>{sheet.readOnlyReason ?? NOT_GRADED_FALLBACK}</EmptyHint>;
+  if (!sheet.gradingEnabled) return <EmptyHint>{sheet.readOnlyReason ?? NOT_GRADED_FALLBACK}</EmptyHint>;
   if (sheet.rows.length === 0) return <EmptyHint>Este grupo aún no tiene alumnos inscritos.</EmptyHint>;
 
   return (
@@ -64,7 +66,7 @@ export function GradeSheetTable({ sheet, saves }: GradeSheetTableProps): ReactEl
       <SheetCounters stats={stats} pending={saves.pendingCount()} unsaved={saves.unsavedCount()} retryable={saves.retryableCount()} onRetryAll={() => saves.retryAll()} />
       {!sheet.editable && (
         <p role="note" style={{ margin: "0 0 12px", padding: "12px 16px", borderRadius: "var(--r-md)", background: "var(--warn-bg)", color: "var(--warn-fg)", fontSize: 15, fontWeight: 600 }}>
-          {sheet.readOnlyReason ?? "Este mes ya no se puede modificar."}
+          {sheet.readOnlyReason ?? "Este periodo ya no se puede modificar."}
         </p>
       )}
       {notice !== undefined && (
@@ -73,7 +75,7 @@ export function GradeSheetTable({ sheet, saves }: GradeSheetTableProps): ReactEl
         </p>
       )}
       <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--r-xl)", boxShadow: "var(--shadow-card)", padding: "4px 8px" }}>
-        <table aria-label="Calificaciones del mes" style={{ width: "100%", borderCollapse: "collapse" }}>
+        <table aria-label="Calificaciones del periodo" style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
             <tr>
               <th scope="col" style={{ ...TH, textAlign: "left" }}>Alumno</th>
@@ -116,10 +118,10 @@ export function GradeSheetTable({ sheet, saves }: GradeSheetTableProps): ReactEl
 }
 
 const NOT_GRADED_FALLBACK = "Este nivel no lleva calificación numérica";
-const PREVIOUS_GROUP_FALLBACK = "Este mes no se puede modificar para este alumno.";
+const PREVIOUS_GROUP_FALLBACK = "Este periodo no se puede modificar para este alumno.";
 
-/** Why a row of an open month cannot change: the loaded sheet says so, or a save was just refused for it. */
-function rowLockReason(row: MonthlyGradeRow, status: CellStatus): string | undefined {
+/** Why a row of an open period cannot change: the loaded sheet says so, or a save was just refused for it. */
+function rowLockReason(row: PeriodGradeRow, status: CellStatus): string | undefined {
   if (!row.rowEditable) return row.rowReadOnlyReason ?? PREVIOUS_GROUP_FALLBACK;
   return status.kind === "locked" ? status.reason || PREVIOUS_GROUP_FALLBACK : undefined;
 }

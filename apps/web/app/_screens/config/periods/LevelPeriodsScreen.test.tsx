@@ -162,6 +162,49 @@ describe("LevelPeriodsScreen — a level's grades with their evaluation periods 
     expect(await within(gradeBlock("1° PRIMARIA")).findByRole("alert")).toHaveTextContent("Los periodos de un grado no pueden encimarse");
   });
 
+  it("says which period already holds grades when a save would remove it (T15)", async () => {
+    const text = "«1.ER TRIMESTRE» ya tiene calificaciones; no se puede quitar";
+    mocked.saveGradeEvaluationPeriods.mockRejectedValue(new api.ConfigError(409, text, "PERIOD_HAS_GRADES"));
+    renderScreen();
+    await waitFor(() => expect(field("1° PRIMARIA", 1, "Nombre").value).toBe("1.ER TRIMESTRE"));
+
+    await userEvent.click(within(row("1° PRIMARIA", 1)).getByRole("button", { name: "Quitar periodo 1" }));
+    await userEvent.click(within(gradeBlock("1° PRIMARIA")).getByRole("button", { name: "Guardar periodos" }));
+
+    expect(await within(gradeBlock("1° PRIMARIA")).findByRole("alert")).toHaveTextContent(text);
+  });
+
+  it("says which target period already holds grades when a copy would remove it (T15)", async () => {
+    const text = "«BIMESTRE 1» ya tiene calificaciones; no se puede quitar";
+    mocked.copyEvaluationPeriods.mockRejectedValue(new api.ConfigError(409, text, "PERIOD_HAS_GRADES"));
+    renderScreen();
+    await waitFor(() => expect(field("1° PRIMARIA", 1, "Nombre").value).toBe("1.ER TRIMESTRE"));
+
+    const block = gradeBlock("1° PRIMARIA");
+    await userEvent.click(within(block).getByRole("button", { name: "Copiar a…" }));
+    await userEvent.click(within(within(block).getByRole("group", { name: "Grados destino" })).getByRole("button", { name: "2° PRIMARIA" }));
+    await userEvent.click(within(block).getByRole("button", { name: "Copiar periodos" }));
+
+    expect(await within(gradeBlock("1° PRIMARIA")).findByRole("alert")).toHaveTextContent(text);
+  });
+
+  it("Deshacer says which period already holds grades when it cannot put the old ones back (T15)", async () => {
+    const text = "«1.ER TRIMESTRE» ya tiene calificaciones; no se puede quitar";
+    mocked.copyEvaluationPeriods.mockResolvedValue([period("r1", "g3", 1, "1.ER TRIMESTRE", "2026-08-24", "2026-11-30")]);
+    renderScreen();
+    await waitFor(() => expect(field("1° PRIMARIA", 1, "Nombre").value).toBe("1.ER TRIMESTRE"));
+    const block = gradeBlock("1° PRIMARIA");
+    await userEvent.click(within(block).getByRole("button", { name: "Copiar a…" }));
+    await userEvent.click(within(within(block).getByRole("group", { name: "Grados destino" })).getByRole("button", { name: "3° PRIMARIA" }));
+    await userEvent.click(within(block).getByRole("button", { name: "Copiar periodos" }));
+    await waitFor(() => expect(field("3° PRIMARIA", 1, "Nombre").value).toBe("1.ER TRIMESTRE"));
+
+    mocked.saveGradeEvaluationPeriods.mockRejectedValue(new api.ConfigError(409, text, "PERIOD_HAS_GRADES"));
+    await userEvent.click(await screen.findByRole("button", { name: "Deshacer" }));
+
+    expect(await within(gradeBlock("3° PRIMARIA")).findByRole("alert")).toHaveTextContent(text);
+  });
+
   it("copies a grade's periods to the chosen grades, and Deshacer puts their previous periods back", async () => {
     mocked.copyEvaluationPeriods.mockResolvedValue([
       period("r1", "g3", 1, "1.ER TRIMESTRE", "2026-08-24", "2026-11-30"),

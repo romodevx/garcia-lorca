@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 
-import type { GradeSheetClient } from "../../grades/monthly";
+import type { GradeSheetClient } from "../../grades/periodSheet";
 import { GradeSaveStore } from "./gradeSaveStore";
 
 /** Re-renders the caller whenever any cell's save changes. */
@@ -9,7 +9,7 @@ export function useSaveStoreVersion(store: GradeSaveStore): number {
 }
 
 /**
- * The capture screen's save store, owned ABOVE the keyed month/assignment
+ * The capture screen's save store, owned ABOVE the keyed period/assignment
  * sheet so switching never drops a save in flight or an unsaved value, plus
  * the browser's "leave page?" prompt while anything is in flight or unsaved.
  */

@@ -72,52 +72,57 @@ describe("listAssignments", () => {
   });
 });
 
-describe("teacher grade sheet", () => {
+describe("teacher period grade sheet (T15)", () => {
   const gradeSheet = {
     assignmentId: "a1",
-    month: "2026-09",
-    months: ["2026-09"],
-    scale: { min: 5, max: 10, decimals: 1, passing: 6 },
+    periodId: "p1",
+    periods: [{ id: "p1", ordinal: 1, name: "1.er trimestre", startsOn: "2026-08-24", endsOn: "2026-11-30" }],
+    currentPeriodId: "p1",
+    today: "2026-10-01",
+    closedPeriodIds: [],
+    scale: { min: 5, max: 10, decimals: 0, passing: 6 },
+    gradingEnabled: true,
     editable: true,
     rows: [],
   };
 
-  it("getTeachingGradeSheet GETs /teaching/grades/sheet with credentials", async () => {
+  it("loads with a GET to /teaching/grades/period-sheet with credentials", async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(gradeSheet));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(teachingGradeSheet.load({ assignmentId: "a1", month: "2026-09" })).resolves.toEqual(gradeSheet);
+    await expect(teachingGradeSheet.load({ assignmentId: "a1", periodId: "p1" })).resolves.toEqual(gradeSheet);
     const [url, init] = lastCall(fetchMock);
-    expect(url).toBe("http://gw/api/v1/teaching/grades/sheet?assignmentId=a1&month=2026-09");
+    expect(url).toBe("http://gw/api/v1/teaching/grades/period-sheet?assignmentId=a1&periodId=p1");
     expect(init.credentials).toBe("include");
   });
 
-  it("saves with a PUT to /teaching/grades/monthly", async () => {
-    const saved = { enrollmentId: "en1", month: "2026-09", value: 9.5, updatedAt: "2026-09-11T10:00:00Z" };
+  it("saves with a PUT to /teaching/grades/period-grades", async () => {
+    const saved = { enrollmentId: "en1", periodId: "p1", value: 9, updatedAt: "2026-09-11T10:00:00Z" };
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(saved));
     vi.stubGlobal("fetch", fetchMock);
 
-    await teachingGradeSheet.save({ assignmentId: "a1", month: "2026-09", enrollmentId: "en1", value: 9.5 });
+    await teachingGradeSheet.save({ assignmentId: "a1", periodId: "p1", enrollmentId: "en1", value: 9 });
     const [url, init] = lastCall(fetchMock);
-    expect(url).toBe("http://gw/api/v1/teaching/grades/monthly");
+    expect(url).toBe("http://gw/api/v1/teaching/grades/period-grades");
     expect(init.method).toBe("PUT");
+    expect(JSON.parse(init.body as string)).toEqual({ assignmentId: "a1", periodId: "p1", enrollmentId: "en1", value: 9 });
   });
 
-  it("clears with a DELETE to /teaching/grades/monthly", async () => {
+  it("clears with a DELETE to /teaching/grades/period-grades", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await teachingGradeSheet.remove({ assignmentId: "a1", month: "2026-09", enrollmentId: "en1" });
+    await teachingGradeSheet.remove({ assignmentId: "a1", periodId: "p1", enrollmentId: "en1" });
     const [url, init] = lastCall(fetchMock);
-    expect(url).toBe("http://gw/api/v1/teaching/grades/monthly?assignmentId=a1&month=2026-09&enrollmentId=en1");
+    expect(url).toBe("http://gw/api/v1/teaching/grades/period-grades?assignmentId=a1&periodId=p1&enrollmentId=en1");
     expect(init.method).toBe("DELETE");
   });
 
   it("rejects with the server's own words", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("Solo se permite 1 decimal", { status: 400 })));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("Solo se permiten calificaciones enteras", { status: 400 })));
     await expect(
-      teachingGradeSheet.save({ assignmentId: "a1", month: "2026-09", enrollmentId: "en1", value: 9.55 }),
-    ).rejects.toThrow("Solo se permite 1 decimal");
+      teachingGradeSheet.save({ assignmentId: "a1", periodId: "p1", enrollmentId: "en1", value: 9.5 }),
+    ).rejects.toThrow("Solo se permiten calificaciones enteras");
   });
 });
 

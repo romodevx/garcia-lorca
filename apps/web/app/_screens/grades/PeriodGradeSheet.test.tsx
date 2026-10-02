@@ -2,22 +2,34 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { GradeRequestError, type GradeSheet, type GradeSheetClient, type SavedMonthlyGrade } from "../../grades/monthly";
-import { MonthlyGradeSheet } from "./MonthlyGradeSheet";
+import type { EvaluationPeriodRef, GradeSheetClient, PeriodSheet, SavedPeriodGrade } from "../../grades/periodSheet";
+import { GradeRequestError } from "../../grades/requestError";
+import { PeriodGradeSheet } from "./PeriodGradeSheet";
 import { useGradeSaves } from "./useGradeSaves";
 
-const SHEET: GradeSheet = {
+const P1: EvaluationPeriodRef = { id: "p1", ordinal: 1, name: "1.er trimestre", startsOn: "2026-08-24", endsOn: "2026-11-30" };
+const P2: EvaluationPeriodRef = { id: "p2", ordinal: 2, name: "2.º trimestre", startsOn: "2026-12-07", endsOn: "2027-03-26" };
+const P3: EvaluationPeriodRef = { id: "p3", ordinal: 3, name: "3.er trimestre", startsOn: "2027-04-12", endsOn: "2027-07-09" };
+
+/** Mid-January: the 1st period is over, the 2nd is current, the 3rd has not started. */
+const SHEET: PeriodSheet = {
   assignmentId: "a1",
-  month: "2026-09",
-  months: ["2026-08", "2026-09", "2026-10"],
-  scale: { min: 5, max: 10, decimals: 1, passing: 6 },
+  periodId: "p2",
+  periods: [P1, P2, P3],
+  currentPeriodId: "p2",
+  today: "2027-01-15",
+  closedPeriodIds: [],
+  scale: { min: 5, max: 10, decimals: 0, passing: 6 },
+  gradingEnabled: true,
   editable: true,
   rows: [
-    { enrollmentId: "en1", studentId: "st1", name: "Ada Lovelace", value: 9, updatedAt: "2026-09-10T10:00:00Z", rowEditable: true },
+    { enrollmentId: "en1", studentId: "st1", name: "Ada Lovelace", value: 9, updatedAt: "2026-12-10T10:00:00Z", rowEditable: true },
     { enrollmentId: "en2", studentId: "st2", name: "Alan Turing", value: null, updatedAt: null, rowEditable: true },
     { enrollmentId: "en3", studentId: "st3", name: "Grace Hopper", value: null, updatedAt: null, rowEditable: true },
   ],
 };
+
+const FIRST: PeriodSheet = { ...SHEET, periodId: "p1" };
 
 interface Deferred<T> {
   promise: Promise<T>;
@@ -37,11 +49,11 @@ function deferred<T>(): Deferred<T> {
 
 type MockClient = { [K in keyof GradeSheetClient]: ReturnType<typeof vi.fn> & GradeSheetClient[K] };
 
-function fakeClient(sheet: GradeSheet = SHEET): MockClient {
+function fakeClient(sheet: PeriodSheet = SHEET): MockClient {
   return {
     load: vi.fn().mockResolvedValue(sheet),
     save: vi.fn().mockImplementation(
-      async (i: { enrollmentId: string; month: string; value: number }): Promise<SavedMonthlyGrade> => ({ ...i, updatedAt: "2026-09-12T10:00:00Z" }),
+      async (i: { enrollmentId: string; periodId: string; value: number }): Promise<SavedPeriodGrade> => ({ ...i, updatedAt: "2027-01-12T10:00:00Z" }),
     ),
     remove: vi.fn().mockResolvedValue(undefined),
   } as MockClient;
@@ -52,12 +64,12 @@ const input = (name: string): HTMLInputElement => screen.getByRole("textbox", { 
 /** The capture screens own the save store, above the sheet — as here. */
 function Screen({ client }: { client: GradeSheetClient }) {
   const saves = useGradeSaves(client);
-  return <MonthlyGradeSheet assignmentId="a1" client={client} saves={saves} />;
+  return <PeriodGradeSheet assignmentId="a1" client={client} saves={saves} />;
 }
 
 async function renderSheet(client: MockClient = fakeClient()): Promise<MockClient> {
   render(<Screen client={client} />);
-  await screen.findByRole("table", { name: "Calificaciones del mes" });
+  await screen.findByRole("table", { name: "Calificaciones del periodo" });
   return client;
 }
 
@@ -66,24 +78,47 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("MonthlyGradeSheet — loading", () => {
-  it("asks the server for the current month and shows one field per student", async () => {
+const chip = (name: RegExp): HTMLElement => screen.getByRole("button", { name });
+const FIRST_CHIP = /^1\.er trimestre/;
+const SECOND_CHIP = /^2\.º trimestre/;
+const THIRD_CHIP = /^3\.er trimestre/;
+
+describe("PeriodGradeSheet — loading", () => {
+  it("asks the server for the current period and shows one whole-number field per student", async () => {
     const client = await renderSheet();
 
     expect(client.load).toHaveBeenCalledWith({ assignmentId: "a1" });
     expect(input("Ada Lovelace")).toHaveValue("9");
     expect(input("Alan Turing")).toHaveValue("");
-    expect(input("Ada Lovelace")).toHaveAttribute("inputmode", "decimal");
-    expect(screen.getByRole("button", { name: "Sep" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: "Ago" })).toHaveAttribute("aria-pressed", "false");
+    expect(input("Ada Lovelace")).toHaveAttribute("inputmode", "numeric");
+    expect(chip(SECOND_CHIP)).toHaveAttribute("aria-pressed", "true");
+    expect(chip(FIRST_CHIP)).toHaveAttribute("aria-pressed", "false");
   });
 
-  it("counts captured, averages them and counts the failing", async () => {
-    await renderSheet(fakeClient({ ...SHEET, rows: [...SHEET.rows.slice(0, 2), { ...SHEET.rows[2]!, value: 5.5 }] }));
+  it("names each period with its dates and marks the current one", async () => {
+    await renderSheet();
 
-    const counters = screen.getByRole("group", { name: "Resumen del mes" });
+    expect(chip(FIRST_CHIP)).toHaveTextContent("24 ago – 30 nov");
+    expect(chip(SECOND_CHIP)).toHaveAttribute("data-current", "true");
+    expect(chip(SECOND_CHIP)).toHaveTextContent("En curso");
+    expect(chip(FIRST_CHIP)).not.toHaveAttribute("data-current");
+  });
+
+  it("counts captured and failing, and averages the exact mean truncated to 2 decimals", async () => {
+    await renderSheet(fakeClient({ ...SHEET, rows: [SHEET.rows[0]!, { ...SHEET.rows[1]!, value: 9 }, { ...SHEET.rows[2]!, value: 8 }] }));
+
+    const counters = screen.getByRole("group", { name: "Resumen del periodo" });
+    expect(counters).toHaveTextContent("Capturadas3 de 3");
+    expect(counters).toHaveTextContent("Promedio8.66");
+    expect(counters).toHaveTextContent("Reprobados0");
+  });
+
+  it("counts a failing grade and prints an average without trailing zeros", async () => {
+    await renderSheet(fakeClient({ ...SHEET, rows: [...SHEET.rows.slice(0, 2), { ...SHEET.rows[2]!, value: 5 }] }));
+
+    const counters = screen.getByRole("group", { name: "Resumen del periodo" });
     expect(counters).toHaveTextContent("Capturadas2 de 3");
-    expect(counters).toHaveTextContent("Promedio7.3");
+    expect(counters).toHaveTextContent(/Promedio7Reprobados/);
     expect(counters).toHaveTextContent("Reprobados1");
   });
 
@@ -96,22 +131,23 @@ describe("MonthlyGradeSheet — loading", () => {
     expect(screen.queryByRole("table")).toBeNull();
   });
 
-  it("locks the months after the current one, and still lets you look at them read-only", async () => {
-    const user = userEvent.setup();
-    const client = fakeClient({ ...SHEET, currentMonth: "2026-09" });
-    const future: GradeSheet = { ...SHEET, month: "2026-10", currentMonth: "2026-09", editable: false, readOnlyReason: "Aún no llega ese mes",
-      rows: SHEET.rows.map((r) => ({ ...r, value: null, updatedAt: null, rowEditable: false, rowReadOnlyReason: "Aún no llega ese mes" })) };
-    client.load.mockImplementation(async (q: { month?: string }) => (q.month === "2026-10" ? future : { ...SHEET, currentMonth: "2026-09" }));
-    await renderSheet(client);
+  it("a period that has not started cannot be chosen, and says so", async () => {
+    await renderSheet();
 
-    const october = screen.getByRole("button", { name: "Oct" });
-    expect(october).toHaveAttribute("title", "octubre de 2026 · Aún no llega ese mes");
-    expect(october).toHaveAttribute("data-future", "true");
-    expect(screen.getByRole("button", { name: "Sep" })).not.toHaveAttribute("data-future");
-    expect(october).not.toBeDisabled();
+    const third = chip(THIRD_CHIP);
+    expect(third).toBeDisabled();
+    expect(third).toHaveAttribute("data-not-started", "true");
+    expect(third).toHaveTextContent("Aún no empieza");
+    expect(chip(FIRST_CHIP)).not.toBeDisabled();
+  });
 
-    await user.click(october);
-    expect(await screen.findByText("Aún no llega ese mes")).toBeInTheDocument();
+  it("a grade without evaluation periods points to where they are configured", async () => {
+    const none: PeriodSheet = { ...SHEET, periodId: null, periods: [], currentPeriodId: null, editable: false, readOnlyReason: "Este grado no tiene periodos de evaluación" };
+    render(<Screen client={fakeClient(none)} />);
+
+    expect(await screen.findByText("Este grado no tiene periodos de evaluación configurados")).toBeInTheDocument();
+    expect(screen.getByText(/Configuración › Periodos por grado/)).toBeInTheDocument();
+    expect(screen.queryByRole("table")).toBeNull();
     expect(screen.queryByRole("textbox")).toBeNull();
   });
 
@@ -122,27 +158,27 @@ describe("MonthlyGradeSheet — loading", () => {
     render(<Screen client={client} />);
 
     await user.click(await screen.findByRole("button", { name: "Reintentar" }));
-    expect(await screen.findByRole("table", { name: "Calificaciones del mes" })).toBeInTheDocument();
+    expect(await screen.findByRole("table", { name: "Calificaciones del periodo" })).toBeInTheDocument();
   });
 
-  it("is read-only when the month is closed, and says why", async () => {
-    await renderSheet(fakeClient({ ...SHEET, editable: false, readOnlyReason: "El mes ya se cerró." }));
+  it("is read-only when the server says so, and says why", async () => {
+    await renderSheet(fakeClient({ ...SHEET, editable: false, readOnlyReason: "Aún no empieza ese periodo" }));
 
-    expect(screen.getByText("El mes ya se cerró.")).toBeInTheDocument();
+    expect(screen.getByText("Aún no empieza ese periodo")).toBeInTheDocument();
     expect(screen.queryByRole("textbox")).toBeNull();
     expect(within(screen.getByRole("table")).getByText("9")).toBeInTheDocument();
   });
 });
 
-describe("MonthlyGradeSheet — keyboard capture", () => {
-  it("Enter saves the cell (a decimal comma reads as a point) and moves to the next student", async () => {
+describe("PeriodGradeSheet — keyboard capture", () => {
+  it("Enter saves the cell and moves to the next student", async () => {
     const user = userEvent.setup();
     const client = await renderSheet();
 
     await user.click(input("Alan Turing"));
-    await user.keyboard("9,5{Enter}");
+    await user.keyboard("9{Enter}");
 
-    expect(client.save).toHaveBeenCalledWith({ assignmentId: "a1", month: "2026-09", enrollmentId: "en2", value: 9.5 });
+    expect(client.save).toHaveBeenCalledWith({ assignmentId: "a1", periodId: "p2", enrollmentId: "en2", value: 9 });
     expect(input("Grace Hopper")).toHaveFocus();
     expect(await screen.findByText("Guardado")).toBeInTheDocument();
     expect(client.save).toHaveBeenCalledTimes(1);
@@ -159,7 +195,7 @@ describe("MonthlyGradeSheet — keyboard capture", () => {
 
     await user.keyboard("8{Tab}");
     expect(input("Grace Hopper")).toHaveFocus();
-    expect(client.save).toHaveBeenCalledWith({ assignmentId: "a1", month: "2026-09", enrollmentId: "en2", value: 8 });
+    expect(client.save).toHaveBeenCalledWith({ assignmentId: "a1", periodId: "p2", enrollmentId: "en2", value: 8 });
 
     await user.keyboard("{Shift>}{Tab}{/Shift}");
     expect(input("Alan Turing")).toHaveFocus();
@@ -172,12 +208,12 @@ describe("MonthlyGradeSheet — keyboard capture", () => {
     await user.clear(input("Ada Lovelace"));
     await user.keyboard("{Tab}");
 
-    expect(client.remove).toHaveBeenCalledWith({ assignmentId: "a1", month: "2026-09", enrollmentId: "en1" });
+    expect(client.remove).toHaveBeenCalledWith({ assignmentId: "a1", periodId: "p2", enrollmentId: "en1" });
     expect(client.save).not.toHaveBeenCalled();
   });
 });
 
-describe("MonthlyGradeSheet — validation", () => {
+describe("PeriodGradeSheet — validation", () => {
   it("checks the range on leaving, never while typing, and clears on a valid keystroke", async () => {
     const user = userEvent.setup();
     const client = await renderSheet();
@@ -195,14 +231,16 @@ describe("MonthlyGradeSheet — validation", () => {
     expect(screen.queryByText("La calificación debe estar entre 5 y 10")).toBeNull();
   });
 
-  it("checks the decimals the level allows", async () => {
+  it("refuses any decimal on leaving — a comma too — and never rounds it", async () => {
     const user = userEvent.setup();
     const client = await renderSheet();
 
-    await user.type(input("Alan Turing"), "9.55");
+    await user.type(input("Alan Turing"), "9,5");
+    expect(screen.queryByText("Solo se permiten calificaciones enteras")).toBeNull();
     await user.tab();
 
-    expect(await screen.findByText("Solo se permite 1 decimal")).toBeInTheDocument();
+    expect(await screen.findByText("Solo se permiten calificaciones enteras")).toBeInTheDocument();
+    expect(input("Alan Turing")).toHaveValue("9,5");
     expect(client.save).not.toHaveBeenCalled();
   });
 
@@ -219,22 +257,22 @@ describe("MonthlyGradeSheet — validation", () => {
   it("shows the server's rejection on its row, without a retry", async () => {
     const user = userEvent.setup();
     const client = fakeClient();
-    client.save.mockRejectedValue(new GradeRequestError(400, "Solo se permite 1 decimal"));
+    client.save.mockRejectedValue(new GradeRequestError(400, "Solo se permiten calificaciones enteras", "GRADE_NOT_INTEGER"));
     await renderSheet(client);
 
     await user.type(input("Alan Turing"), "9{Enter}");
 
     const row = screen.getByRole("row", { name: /Alan Turing/ });
-    expect(await within(row).findByText("Solo se permite 1 decimal")).toBeInTheDocument();
+    expect(await within(row).findByText("Solo se permiten calificaciones enteras")).toBeInTheDocument();
     expect(within(row).queryByRole("button", { name: "Error — reintentar" })).toBeNull();
   });
 });
 
-describe("MonthlyGradeSheet — saving status", () => {
+describe("PeriodGradeSheet — saving status", () => {
   it("shows Guardando… and guards leaving the page while a save is in flight", async () => {
     const user = userEvent.setup();
     const client = fakeClient();
-    const pending = deferred<SavedMonthlyGrade>();
+    const pending = deferred<SavedPeriodGrade>();
     client.save.mockReturnValue(pending.promise);
     await renderSheet(client);
 
@@ -247,7 +285,7 @@ describe("MonthlyGradeSheet — saving status", () => {
     window.dispatchEvent(leaving);
     expect(leaving.defaultPrevented).toBe(true);
 
-    await act(async () => pending.resolve({ enrollmentId: "en2", month: "2026-09", value: 8, updatedAt: "x" }));
+    await act(async () => pending.resolve({ enrollmentId: "en2", periodId: "p2", value: 8, updatedAt: "x" }));
 
     expect(within(row).getByText("Guardado")).toBeInTheDocument();
     expect(screen.getByText("Todo guardado")).toBeInTheDocument();
@@ -266,7 +304,7 @@ describe("MonthlyGradeSheet — saving status", () => {
     await user.click(await screen.findByRole("button", { name: "Error — reintentar" }));
 
     await waitFor(() => expect(client.save).toHaveBeenCalledTimes(2));
-    expect(client.save).toHaveBeenLastCalledWith({ assignmentId: "a1", month: "2026-09", enrollmentId: "en2", value: 8 });
+    expect(client.save).toHaveBeenLastCalledWith({ assignmentId: "a1", periodId: "p2", enrollmentId: "en2", value: 8 });
     expect(await screen.findByText("Guardado")).toBeInTheDocument();
   });
 
@@ -276,41 +314,41 @@ describe("MonthlyGradeSheet — saving status", () => {
 
     await user.type(input("Alan Turing"), "5{Enter}");
 
-    const counters = screen.getByRole("group", { name: "Resumen del mes" });
+    const counters = screen.getByRole("group", { name: "Resumen del periodo" });
     await waitFor(() => expect(counters).toHaveTextContent("Capturadas2 de 3"));
-    expect(counters).toHaveTextContent("Promedio7.0");
+    expect(counters).toHaveTextContent(/Promedio7Reprobados/);
     expect(counters).toHaveTextContent("Reprobados1");
   });
 });
 
-describe("MonthlyGradeSheet — months", () => {
-  it("switching month refetches, and a late answer for the old month is dropped", async () => {
+describe("PeriodGradeSheet — periods", () => {
+  it("switching period refetches, and a late answer for the period already left is dropped", async () => {
     const user = userEvent.setup();
     const client = fakeClient();
-    const august = deferred<GradeSheet>();
-    const october = deferred<GradeSheet>();
-    client.load.mockResolvedValueOnce(SHEET).mockReturnValueOnce(august.promise).mockReturnValueOnce(october.promise);
+    const first = deferred<PeriodSheet>();
+    const backToSecond = deferred<PeriodSheet>();
+    client.load.mockResolvedValueOnce(SHEET).mockReturnValueOnce(first.promise).mockReturnValueOnce(backToSecond.promise);
     await renderSheet(client);
 
-    await user.click(screen.getByRole("button", { name: "Ago" }));
-    await user.click(screen.getByRole("button", { name: "Oct" }));
-    expect(client.load).toHaveBeenLastCalledWith({ assignmentId: "a1", month: "2026-10" });
+    await user.click(chip(FIRST_CHIP));
+    expect(client.load).toHaveBeenLastCalledWith({ assignmentId: "a1", periodId: "p1" });
+    await user.click(chip(SECOND_CHIP));
+    expect(client.load).toHaveBeenLastCalledWith({ assignmentId: "a1", periodId: "p2" });
 
-    const octRows = [{ ...SHEET.rows[0]!, value: 7 }];
-    await act(async () => october.resolve({ ...SHEET, month: "2026-10", rows: octRows }));
-    await act(async () => august.resolve({ ...SHEET, month: "2026-08", rows: [{ ...SHEET.rows[0]!, value: 10 }] }));
+    await act(async () => backToSecond.resolve({ ...SHEET, rows: [{ ...SHEET.rows[0]!, value: 7 }] }));
+    await act(async () => first.resolve({ ...FIRST, rows: [{ ...SHEET.rows[0]!, value: 10 }] }));
 
     expect(input("Ada Lovelace")).toHaveValue("7");
-    expect(screen.getByRole("button", { name: "Oct" })).toHaveAttribute("aria-pressed", "true");
+    expect(chip(SECOND_CHIP)).toHaveAttribute("aria-pressed", "true");
   });
 });
 
-describe("MonthlyGradeSheet — one save per cell at a time", () => {
+describe("PeriodGradeSheet — one save per cell at a time", () => {
   it("8 then 9: the 9 waits for the 8, and Guardado only once the 9 is confirmed", async () => {
     const user = userEvent.setup();
     const client = fakeClient();
-    const first = deferred<SavedMonthlyGrade>();
-    const second = deferred<SavedMonthlyGrade>();
+    const first = deferred<SavedPeriodGrade>();
+    const second = deferred<SavedPeriodGrade>();
     client.save.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
     await renderSheet(client);
     const row = screen.getByRole("row", { name: /Alan Turing/ });
@@ -320,21 +358,21 @@ describe("MonthlyGradeSheet — one save per cell at a time", () => {
     await user.type(input("Alan Turing"), "9{Enter}");
     expect(client.save).toHaveBeenCalledTimes(1);
 
-    await act(async () => first.resolve({ enrollmentId: "en2", month: "2026-09", value: 8, updatedAt: "x" }));
+    await act(async () => first.resolve({ enrollmentId: "en2", periodId: "p2", value: 8, updatedAt: "x" }));
     expect(client.save).toHaveBeenCalledTimes(2);
-    expect(client.save).toHaveBeenLastCalledWith({ assignmentId: "a1", month: "2026-09", enrollmentId: "en2", value: 9 });
+    expect(client.save).toHaveBeenLastCalledWith({ assignmentId: "a1", periodId: "p2", enrollmentId: "en2", value: 9 });
     expect(within(row).getByText("Guardando…")).toBeInTheDocument();
     expect(within(row).queryByText("Guardado")).toBeNull();
 
-    await act(async () => second.resolve({ enrollmentId: "en2", month: "2026-09", value: 9, updatedAt: "x" }));
+    await act(async () => second.resolve({ enrollmentId: "en2", periodId: "p2", value: 9, updatedAt: "x" }));
     expect(within(row).getByText("Guardado")).toBeInTheDocument();
-    expect(screen.getByRole("group", { name: "Resumen del mes" })).toHaveTextContent("Promedio9.0");
+    expect(screen.getByRole("group", { name: "Resumen del periodo" })).toHaveTextContent(/Promedio9Reprobados/);
   });
 
   it("8 then clear: the delete waits for the save and the cell ends empty", async () => {
     const user = userEvent.setup();
     const client = fakeClient();
-    const first = deferred<SavedMonthlyGrade>();
+    const first = deferred<SavedPeriodGrade>();
     client.save.mockReturnValueOnce(first.promise);
     await renderSheet(client);
 
@@ -343,15 +381,15 @@ describe("MonthlyGradeSheet — one save per cell at a time", () => {
     await user.keyboard("{Enter}");
     expect(client.remove).not.toHaveBeenCalled();
 
-    await act(async () => first.resolve({ enrollmentId: "en2", month: "2026-09", value: 8, updatedAt: "x" }));
-    await waitFor(() => expect(client.remove).toHaveBeenCalledWith({ assignmentId: "a1", month: "2026-09", enrollmentId: "en2" }));
-    const counters = screen.getByRole("group", { name: "Resumen del mes" });
+    await act(async () => first.resolve({ enrollmentId: "en2", periodId: "p2", value: 8, updatedAt: "x" }));
+    await waitFor(() => expect(client.remove).toHaveBeenCalledWith({ assignmentId: "a1", periodId: "p2", enrollmentId: "en2" }));
+    const counters = screen.getByRole("group", { name: "Resumen del periodo" });
     await waitFor(() => expect(counters).toHaveTextContent("Capturadas1 de 3"));
     expect(within(screen.getByRole("row", { name: /Alan Turing/ })).getByText("Guardado")).toBeInTheDocument();
   });
 });
 
-describe("MonthlyGradeSheet — nothing unsaved passes for saved", () => {
+describe("PeriodGradeSheet — nothing unsaved passes for saved", () => {
   async function failOne(): Promise<{ user: ReturnType<typeof userEvent.setup>; client: MockClient }> {
     const user = userEvent.setup();
     const client = fakeClient();
@@ -394,62 +432,62 @@ describe("MonthlyGradeSheet — nothing unsaved passes for saved", () => {
     expect(screen.getByRole("button", { name: "Error — reintentar" })).toHaveFocus();
   });
 
-  it("switching month with a failed cell asks first; declined, the month stays", async () => {
+  it("switching period with a failed cell asks first; declined, the period stays", async () => {
     const { user, client } = await failOne();
     const ask = vi.spyOn(window, "confirm").mockReturnValue(false);
 
-    await user.click(screen.getByRole("button", { name: "Oct" }));
+    await user.click(chip(FIRST_CHIP));
 
     expect(ask).toHaveBeenCalledTimes(1);
     expect(client.load).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole("button", { name: "Sep" })).toHaveAttribute("aria-pressed", "true");
+    expect(chip(SECOND_CHIP)).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("accepted, the unsaved value is kept and comes back with the month", async () => {
+  it("accepted, the unsaved value is kept and comes back with the period", async () => {
     const { user, client } = await failOne();
     vi.spyOn(window, "confirm").mockReturnValue(true);
 
-    await user.click(screen.getByRole("button", { name: "Oct" }));
-    await waitFor(() => expect(client.load).toHaveBeenLastCalledWith({ assignmentId: "a1", month: "2026-10" }));
-    await user.click(await screen.findByRole("button", { name: "Sep" }));
+    await user.click(chip(FIRST_CHIP));
+    await waitFor(() => expect(client.load).toHaveBeenLastCalledWith({ assignmentId: "a1", periodId: "p1" }));
+    await user.click(await screen.findByRole("button", { name: SECOND_CHIP }));
 
     await waitFor(() => expect(input("Alan Turing")).toHaveValue("8"));
     expect(screen.getByRole("button", { name: "Error — reintentar" })).toBeInTheDocument();
   });
 
-  it("switching month with everything saved asks nothing", async () => {
+  it("switching period with everything saved asks nothing", async () => {
     const user = userEvent.setup();
     const ask = vi.spyOn(window, "confirm");
     const client = await renderSheet();
-    await user.click(screen.getByRole("button", { name: "Oct" }));
+    await user.click(chip(FIRST_CHIP));
     await waitFor(() => expect(client.load).toHaveBeenCalledTimes(2));
     expect(ask).not.toHaveBeenCalled();
   });
 
-  it("coming back to a month waits for its saves in flight before loading it", async () => {
+  it("coming back to a period waits for its saves in flight before loading it", async () => {
     const user = userEvent.setup();
     const client = fakeClient();
-    const slow = deferred<SavedMonthlyGrade>();
+    const slow = deferred<SavedPeriodGrade>();
     client.save.mockReturnValueOnce(slow.promise);
     await renderSheet(client);
 
     await user.type(input("Alan Turing"), "8{Enter}");
-    await user.click(screen.getByRole("button", { name: "Oct" }));
+    await user.click(chip(FIRST_CHIP));
     await waitFor(() => expect(client.load).toHaveBeenCalledTimes(2));
-    await user.click(await screen.findByRole("button", { name: "Sep" }));
+    await user.click(await screen.findByRole("button", { name: SECOND_CHIP }));
     expect(client.load).toHaveBeenCalledTimes(2);
 
     client.load.mockResolvedValueOnce({ ...SHEET, rows: [SHEET.rows[0]!, { ...SHEET.rows[1]!, value: 8 }, SHEET.rows[2]!] });
-    await act(async () => slow.resolve({ enrollmentId: "en2", month: "2026-09", value: 8, updatedAt: "x" }));
+    await act(async () => slow.resolve({ enrollmentId: "en2", periodId: "p2", value: 8, updatedAt: "x" }));
 
     await waitFor(() => expect(client.load).toHaveBeenCalledTimes(3));
     expect(await screen.findByRole("textbox", { name: "Calificación de Alan Turing" })).toHaveValue("8");
   });
 });
 
-describe("MonthlyGradeSheet — rows of the previous group", () => {
-  const PREVIOUS = "Ese mes corresponde al grupo anterior del alumno";
-  const WITH_TRANSFER: GradeSheet = {
+describe("PeriodGradeSheet — rows of the previous group", () => {
+  const PREVIOUS = "Ese periodo corresponde al grupo anterior del alumno";
+  const WITH_TRANSFER: PeriodSheet = {
     ...SHEET,
     rows: SHEET.rows.map((r) => (r.enrollmentId === "en2" ? { ...r, value: 7, rowEditable: false, rowReadOnlyReason: PREVIOUS } : r)),
   };
@@ -479,15 +517,15 @@ describe("MonthlyGradeSheet — rows of the previous group", () => {
     expect(input("Grace Hopper")).toHaveFocus();
   });
 
-  it("is not counted in the grades of the month it cannot change", async () => {
+  it("is not counted in the grades of the period it cannot change", async () => {
     await renderSheet(fakeClient(WITH_TRANSFER));
     expect(screen.queryByText(/sin guardar/)).toBeNull();
   });
 
-  it("a save refused with MONTH_PREVIOUS_GROUP turns the row read-only, not unsaved", async () => {
+  it("a save refused with PERIOD_PREVIOUS_GROUP turns the row read-only, not unsaved", async () => {
     const user = userEvent.setup();
     const client = fakeClient();
-    client.save.mockRejectedValue(new GradeRequestError(400, PREVIOUS, "MONTH_PREVIOUS_GROUP"));
+    client.save.mockRejectedValue(new GradeRequestError(400, PREVIOUS, "PERIOD_PREVIOUS_GROUP"));
     await renderSheet(client);
 
     await user.type(input("Alan Turing"), "9{Enter}");
@@ -500,7 +538,7 @@ describe("MonthlyGradeSheet — rows of the previous group", () => {
   });
 });
 
-describe("MonthlyGradeSheet — refusals by code", () => {
+describe("PeriodGradeSheet — refusals by code", () => {
   it("a LEVEL_* refusal is a notice for the whole sheet", async () => {
     const user = userEvent.setup();
     const client = fakeClient();
@@ -527,11 +565,11 @@ describe("MonthlyGradeSheet — refusals by code", () => {
   });
 });
 
-describe("MonthlyGradeSheet — closed period (T7)", () => {
-  it("a MONTH_LOCKED refusal is a notice for the whole sheet, and is not retried", async () => {
+describe("PeriodGradeSheet — closed period", () => {
+  it("a PERIOD_LOCKED refusal is a notice for the whole sheet, and is not retried", async () => {
     const user = userEvent.setup();
     const client = fakeClient();
-    client.save.mockRejectedValue(new GradeRequestError(409, "El periodo está cerrado", "MONTH_LOCKED"));
+    client.save.mockRejectedValue(new GradeRequestError(409, "El periodo está cerrado", "PERIOD_LOCKED"));
     await renderSheet(client);
 
     await user.type(input("Alan Turing"), "9{Enter}");
@@ -541,25 +579,15 @@ describe("MonthlyGradeSheet — closed period (T7)", () => {
     expect(client.save).toHaveBeenCalledTimes(1);
   });
 
-  it("hints \"Sin periodo\" on the months no period grades; they stay capturable", async () => {
-    const unmapped: GradeSheet = { ...SHEET, unmappedMonths: ["2026-08"] };
-    await renderSheet(fakeClient(unmapped));
-
-    const august = screen.getByRole("button", { name: /Ago/ });
-    expect(august).toHaveAttribute("data-unmapped", "true");
-    expect(august).toHaveTextContent("Sin periodo");
-    expect(august).toHaveAttribute("title", "agosto de 2026 · Sin periodo");
-    expect(screen.getByRole("button", { name: "Sep" })).not.toHaveAttribute("data-unmapped");
-  });
-
-  it("puts a lock on the months of a closed period and shows the read-only reason", async () => {
-    const closed: GradeSheet = { ...SHEET, closedMonths: ["2026-08", "2026-09"], editable: false, readOnlyReason: "El periodo está cerrado" };
+  it("puts a lock on a closed period (still selectable) and shows the read-only reason", async () => {
+    const closed: PeriodSheet = { ...SHEET, closedPeriodIds: ["p1", "p2"], editable: false, readOnlyReason: "El periodo está cerrado" };
     await renderSheet(fakeClient(closed));
 
-    const september = screen.getByRole("button", { name: "Sep" });
-    expect(september).toHaveAttribute("data-closed", "true");
-    expect(september).toHaveAttribute("title", "septiembre de 2026 · Periodo cerrado");
-    expect(screen.getByRole("button", { name: "Oct" })).not.toHaveAttribute("data-closed");
+    const second = chip(SECOND_CHIP);
+    expect(second).toHaveAttribute("data-closed", "true");
+    expect(second).toHaveTextContent("Cerrado");
+    expect(chip(FIRST_CHIP)).not.toBeDisabled();
+    expect(chip(THIRD_CHIP)).not.toHaveAttribute("data-closed");
     expect(screen.getByRole("note")).toHaveTextContent("El periodo está cerrado");
     expect(screen.queryByRole("textbox")).toBeNull();
   });

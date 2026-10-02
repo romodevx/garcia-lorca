@@ -31,8 +31,8 @@ import {
 
 import { postCardScan, type CardScanResult, type ScanCardInput } from "../attendance/scan";
 import { API_URL } from "../api-url";
-import type { GradeSheetClient } from "../grades/monthly";
-import { createGradeSheetClient } from "../grades/monthlyHttp";
+import type { GradeSheetClient } from "../grades/periodSheet";
+import { createGradeSheetClient } from "../grades/periodSheetHttp";
 
 // --- entity types (match the gateway JSON contract) -----------------------
 
@@ -76,8 +76,8 @@ export function listAssignments(): Promise<TeachingAssignment[]> {
 }
 
 /**
- * The caller's monthly grade sheet (`/teaching/grades/*`): one sheet per
- * assignment·month, saved cell by cell. Same contract as the director's.
+ * The caller's period grade sheet (`/teaching/grades/*`, T15): one sheet per
+ * assignment·evaluation period, saved cell by cell. Same contract as the director's.
  */
 export const teachingGradeSheet: GradeSheetClient = createGradeSheetClient(url("/teaching/grades"));
 

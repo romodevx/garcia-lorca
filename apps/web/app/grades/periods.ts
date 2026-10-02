@@ -6,8 +6,10 @@
  * UX only — the gateway is the security boundary.
  */
 
+import { formatAverage } from "@garcia-lorca/domain/grade-average";
+
 import { authFetch } from "../auth/authFetch";
-import { gradeFailure } from "./monthly";
+import { gradeFailure } from "./requestError";
 
 export type PeriodStatus = "open" | "closed";
 
@@ -22,7 +24,10 @@ export interface GradingPeriod {
   ordinal: number;
   levelId: string;
   levelName: string;
-  months: string[];
+  /** The earliest start of the term's evaluation periods across the level's grades; null when no grade has one. */
+  startsOn: string | null;
+  /** The latest end of those periods; null when no grade has one. */
+  endsOn: string | null;
   status: PeriodStatus;
   closedAt?: string;
   closedByName?: string;
@@ -42,12 +47,15 @@ export interface MissingCapture {
 
 export interface PeriodCaptureProgress {
   termId: string;
-  months: string[];
+  /** A grade's period of this term has not ended yet: its grades cannot be complete. */
+  unfinished: boolean;
+  /** The latest end of the term's periods across the level's grades; null when none. */
+  endsOn: string | null;
+  /** Groups whose grade has no evaluation period of this ordinal: closing is refused while any is listed. */
+  groupsWithoutPeriod: string[];
   expected: number;
   captured: number;
   missing: MissingCapture[];
-  /** The term's months after the server's current month: their grades cannot be complete yet. */
-  unfinishedMonths?: string[];
 }
 
 export interface CloseResult {
@@ -88,11 +96,17 @@ export interface ReportCardFile {
 
 /** Codes a close can be refused with. */
 export const MISSING_GRADES = "MISSING_GRADES";
-export const TERM_WITHOUT_MONTHS = "TERM_WITHOUT_MONTHS";
+/** A group's grade has no evaluation period of the term's ordinal (T15). */
+export const PERIOD_NOT_CONFIGURED = "PERIOD_NOT_CONFIGURED";
 export const ALREADY_CLOSED = "ALREADY_CLOSED";
 export const LEVEL_NOT_GRADED = "LEVEL_NOT_GRADED";
 /** The code a reopen of an open period is refused with. */
 export const ALREADY_OPEN = "ALREADY_OPEN";
+
+/** The general average as people read it: "8.66", "8.5", "9" (T15 rule; older boletas keep their one decimal). */
+export function generalAverageLabel(average: number | null): string {
+  return average === null ? "—" : formatAverage(average);
+}
 
 export interface PeriodsClient {
   list: (cycleId: string) => Promise<GradingPeriod[]>;

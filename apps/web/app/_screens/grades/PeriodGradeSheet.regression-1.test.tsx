@@ -5,15 +5,19 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-import type { GradeSheet, GradeSheetClient, SavedMonthlyGrade } from "../../grades/monthly";
-import { MonthlyGradeSheet } from "./MonthlyGradeSheet";
+import type { GradeSheetClient, PeriodSheet, SavedPeriodGrade } from "../../grades/periodSheet";
+import { PeriodGradeSheet } from "./PeriodGradeSheet";
 import { useGradeSaves } from "./useGradeSaves";
 
-const SHEET: GradeSheet = {
+const SHEET: PeriodSheet = {
   assignmentId: "a1",
-  month: "2026-09",
-  months: ["2026-09"],
-  scale: { min: 5, max: 10, decimals: 1, passing: 6 },
+  periodId: "p1",
+  periods: [{ id: "p1", ordinal: 1, name: "1.er trimestre", startsOn: "2026-08-24", endsOn: "2026-11-30" }],
+  currentPeriodId: "p1",
+  today: "2026-10-01",
+  closedPeriodIds: [],
+  scale: { min: 5, max: 10, decimals: 0, passing: 6 },
+  gradingEnabled: true,
   editable: true,
   rows: [{ enrollmentId: "en1", studentId: "st1", name: "Ada Lovelace", value: null, updatedAt: null, rowEditable: true }],
 };
@@ -22,7 +26,7 @@ function fakeClient(): GradeSheetClient {
   return {
     load: vi.fn().mockResolvedValue(SHEET),
     save: vi.fn().mockImplementation(
-      async (i: { enrollmentId: string; month: string; value: number }): Promise<SavedMonthlyGrade> => ({ ...i, updatedAt: "2026-09-12T10:00:00Z" }),
+      async (i: { enrollmentId: string; periodId: string; value: number }): Promise<SavedPeriodGrade> => ({ ...i, updatedAt: "2026-09-12T10:00:00Z" }),
     ),
     remove: vi.fn().mockResolvedValue(undefined),
   };
@@ -30,10 +34,10 @@ function fakeClient(): GradeSheetClient {
 
 function Screen({ client }: { client: GradeSheetClient }) {
   const saves = useGradeSaves(client);
-  return <MonthlyGradeSheet assignmentId="a1" client={client} saves={saves} />;
+  return <PeriodGradeSheet assignmentId="a1" client={client} saves={saves} />;
 }
 
-describe("MonthlyGradeSheet — an invalid value over a saved one", () => {
+describe("PeriodGradeSheet — an invalid value over a saved one", () => {
   it("does not say Guardado while the field holds a value that was never saved", async () => {
     const user = userEvent.setup();
     render(<Screen client={fakeClient()} />);

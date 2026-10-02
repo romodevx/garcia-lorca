@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { dayLabel, monthsList, unfinishedMonths } from "./format";
+import { dateRangeLabel, dayLabel } from "./format";
 
 describe("dayLabel", () => {
   it("reads a date on the school's calendar", () => {
@@ -12,25 +12,13 @@ describe("dayLabel", () => {
   });
 });
 
-describe("unfinishedMonths", () => {
-  const months = ["2027-04", "2027-05", "2027-06"];
-
-  it("prefers the server's list", () => {
-    expect(unfinishedMonths(months, ["2027-06"], "2027-04")).toEqual(["2027-06"]);
+describe("dateRangeLabel", () => {
+  it("names both days of the period, as calendar days", () => {
+    expect(dateRangeLabel("2026-08-24", "2026-11-30")).toBe("24 ago 2026 – 30 nov 2026");
   });
 
-  it("without it, the term months after the current month", () => {
-    expect(unfinishedMonths(months, undefined, "2027-04")).toEqual(["2027-05", "2027-06"]);
-    expect(unfinishedMonths(months, [], "2027-04")).toEqual(["2027-05", "2027-06"]);
-  });
-
-  it("nothing once the last month has come", () => {
-    expect(unfinishedMonths(months, undefined, "2027-06")).toEqual([]);
-  });
-});
-
-describe("monthsList", () => {
-  it("is short names separated by commas", () => {
-    expect(monthsList(["2027-04", "2027-05", "2027-06"])).toBe("Abr, May, Jun");
+  it("is undefined when the period has no dates", () => {
+    expect(dateRangeLabel(null, null)).toBeUndefined();
+    expect(dateRangeLabel("2026-08-24", null)).toBeUndefined();
   });
 });

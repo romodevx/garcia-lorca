@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { GradeRequestError } from "./monthly";
-import { boletaFileName, fileNameFromDisposition, periodsClient, type MissingCapture, type ReportCard } from "./periods";
+import { GradeRequestError } from "./requestError";
+import { boletaFileName, fileNameFromDisposition, generalAverageLabel, periodsClient, type MissingCapture, type ReportCard } from "./periods";
 
 const BASE = "http://gw";
 
@@ -18,7 +18,7 @@ function call(mock: ReturnType<typeof vi.fn>, index = 0): [string, RequestInit] 
 
 const period = {
   termId: "t1", termName: "1.er trimestre", ordinal: 1, levelId: "l1", levelName: "PRIMARIA",
-  months: ["2026-09", "2026-10", "2026-11"], status: "open", version: 0, progress: { captured: 412, expected: 450 },
+  startsOn: "2026-08-24", endsOn: "2026-11-30", status: "open", version: 0, progress: { captured: 412, expected: 450 },
 };
 
 describe("periodsClient", () => {
@@ -34,7 +34,7 @@ describe("periodsClient", () => {
   });
 
   it("reads a period's capture progress", async () => {
-    const progress = { termId: "t1", months: ["2026-09"], expected: 10, captured: 8, missing: [] };
+    const progress = { termId: "t1", unfinished: false, endsOn: "2026-11-30", groupsWithoutPeriod: [], expected: 10, captured: 8, missing: [] };
     const fetchMock = vi.fn().mockResolvedValue(json(progress));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -129,5 +129,14 @@ describe("contract types (openapi GradePeriodProgress / ReportCardSummary)", () 
     const card: ReportCard = { id: "rc", studentId: "st", studentName: "Ana", groupLabel: "1° A", version: 1, issuedAt: null, generalAverage: null };
     expect(missing.subjectId).toBe("s");
     expect(card.issuedAt).toBeNull();
+  });
+});
+
+describe("generalAverageLabel", () => {
+  it("prints the truncated average without trailing zeros, and a dash for none", () => {
+    expect(generalAverageLabel(8.66)).toBe("8.66");
+    expect(generalAverageLabel(8.5)).toBe("8.5");
+    expect(generalAverageLabel(9)).toBe("9");
+    expect(generalAverageLabel(null)).toBe("—");
   });
 });

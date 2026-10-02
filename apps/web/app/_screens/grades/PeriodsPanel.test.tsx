@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as configApi from "../../config/api";
-import { GradeRequestError } from "../../grades/monthly";
+import { GradeRequestError } from "../../grades/requestError";
 import * as periodsApi from "../../grades/periods";
 import type { GradingPeriod, PeriodCaptureProgress, PeriodsClient } from "../../grades/periods";
 import { downloadBlob } from "../../_lib/downloadBlob";
@@ -22,17 +22,17 @@ const periods = vi.mocked(periodsApi);
 
 const OPEN: GradingPeriod = {
   termId: "t1", termName: "1.er trimestre", ordinal: 1, levelId: "l1", levelName: "PRIMARIA",
-  months: ["2026-09", "2026-10", "2026-11"], status: "open", version: 0, progress: { captured: 412, expected: 450 },
+  startsOn: "2026-08-24", endsOn: "2026-11-30", status: "open", version: 0, progress: { captured: 412, expected: 450 },
 };
 const CLOSED: GradingPeriod = {
   termId: "t2", termName: "2.º trimestre", ordinal: 2, levelId: "l1", levelName: "PRIMARIA",
-  months: ["2026-12", "2027-01", "2027-02"], status: "closed", closedAt: "2026-12-01T18:00:00Z", closedByName: "Luis Beltrán",
+  startsOn: "2026-12-07", endsOn: "2027-03-26", status: "closed", closedAt: "2026-12-01T18:00:00Z", closedByName: "Luis Beltrán",
   version: 2, progress: { captured: 450, expected: 450 },
 };
 const SECUNDARIA: GradingPeriod = { ...OPEN, termId: "t4", levelId: "l2", levelName: "SECUNDARIA", progress: { captured: 0, expected: 90 } };
 
 const MISSING: PeriodCaptureProgress = {
-  termId: "t1", months: OPEN.months, expected: 450, captured: 412,
+  termId: "t1", unfinished: false, endsOn: "2026-11-30", groupsWithoutPeriod: [], expected: 450, captured: 412,
   missing: [
     { groupId: "g1", groupLabel: "1° PRIMARIA · A", subjectId: "s1", subjectName: "Matemáticas", teacherName: "Ada Lovelace", missingCount: 30 },
     { groupId: "g1", groupLabel: "1° PRIMARIA · A", subjectId: "s2", subjectName: "Historia", teacherName: "Alan Turing", missingCount: 5 },
@@ -53,9 +53,6 @@ beforeEach(() => {
     reportCards: vi.fn().mockResolvedValue([]),
     reportCardPdf: vi.fn().mockResolvedValue({ blob: new Blob(["%PDF"], { type: "application/pdf" }) }),
   };
-  // Only the clock: the capture review compares the term's months with today's (December 2026 at the school).
-  vi.useFakeTimers({ toFake: ["Date"] });
-  vi.setSystemTime(new Date("2026-12-15T18:00:00Z"));
   periods.periodsClient.mockReturnValue(client as unknown as PeriodsClient);
   config.listCycles.mockResolvedValue([
     { id: "c0", name: "2025-2026", status: "closed", startsOn: "2025-08-01", endsOn: "2026-07-31" },
@@ -69,7 +66,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  vi.useRealTimers();
   vi.restoreAllMocks();
   vi.clearAllMocks();
   vi.unstubAllGlobals();
@@ -78,13 +74,13 @@ afterEach(() => {
 const card = async (name: string): Promise<HTMLElement> => screen.findByRole("article", { name });
 
 describe("PeriodsPanel — cards", () => {
-  it("shows the active cycle's periods per level, with status, months and capture progress", async () => {
+  it("shows the active cycle's periods per level, with status, dates and capture progress", async () => {
     render(<PeriodsPanel canClose />);
 
     const open = await card("PRIMARIA · 1.er trimestre");
     expect(client.list).toHaveBeenCalledWith("c1");
     expect(within(open).getByText("Abierto")).toBeInTheDocument();
-    expect(within(open).getByText("Sep · Oct · Nov")).toBeInTheDocument();
+    expect(within(open).getByText("24 ago 2026 – 30 nov 2026")).toBeInTheDocument();
     expect(within(open).getByText("412 de 450 capturadas")).toBeInTheDocument();
     expect(within(open).getByRole("progressbar")).toHaveAttribute("aria-valuenow", "412");
     expect(screen.getByRole("heading", { name: "SECUNDARIA" })).toBeInTheDocument();
@@ -216,7 +212,12 @@ describe("PeriodsPanel — Ver boletas", () => {
     const user = userEvent.setup();
     const blob = new Blob(["%PDF"], { type: "application/pdf" });
     client.reportCardPdf.mockResolvedValue({ blob, fileName: "boleta-2026-00042-2-o-trimestre-v2.pdf" });
-    client.reportCards.mockResolvedValue([BOLETA, { ...BOLETA, id: "rc2", studentName: "Ana Ruiz", version: 1, generalAverage: null }]);
+    client.reportCards.mockResolvedValue([
+      BOLETA,
+      { ...BOLETA, id: "rc2", studentName: "Ana Ruiz", version: 1, generalAverage: null },
+      { ...BOLETA, id: "rc3", studentName: "Luz Paz", generalAverage: 8.66 },
+      { ...BOLETA, id: "rc4", studentName: "Iker Sol", generalAverage: 9 },
+    ]);
     render(<PeriodsPanel canClose />);
     const dialog = await openGroup(user);
 
@@ -224,6 +225,8 @@ describe("PeriodsPanel — Ver boletas", () => {
     const row = await within(dialog).findByRole("row", { name: /José Núñez/ });
     expect(within(row).getByText("v2")).toBeInTheDocument();
     expect(within(row).getByText("8.7")).toBeInTheDocument();
+    expect(within(within(dialog).getByRole("row", { name: /Luz Paz/ })).getByText("8.66")).toBeInTheDocument();
+    expect(within(within(dialog).getByRole("row", { name: /Iker Sol/ })).getByText("9")).toBeInTheDocument();
     expect(within(within(dialog).getByRole("row", { name: /Ana Ruiz/ })).getByText("—")).toBeInTheDocument();
 
     await user.click(within(row).getByRole("button", { name: "Descargar PDF de José Núñez" }));
@@ -272,36 +275,42 @@ const openClose = async (user: ReturnType<typeof userEvent.setup>, name = "PRIMA
   return screen.findByRole("dialog");
 };
 
-describe("PeriodsPanel — a period whose months have not finished", () => {
+describe("PeriodsPanel — a period that has not finished", () => {
   const SPRING: GradingPeriod = {
-    ...OPEN, termId: "t3", termName: "3.er trimestre", ordinal: 3, months: ["2027-04", "2027-05", "2027-06"], progress: { captured: 0, expected: 450 },
+    ...OPEN, termId: "t3", termName: "3.er trimestre", ordinal: 3, startsOn: "2027-04-12", endsOn: "2027-07-09", progress: { captured: 0, expected: 450 },
   };
 
-  it("warns which months have not finished instead of calling the capture complete, and only offers closing anyway", async () => {
+  it("warns it has not finished instead of calling the capture complete, and only offers closing anyway", async () => {
     const user = userEvent.setup();
     client.list.mockResolvedValue([SPRING]);
-    client.progress.mockResolvedValue({ termId: "t3", months: SPRING.months, expected: 450, captured: 450, missing: [], unfinishedMonths: ["2027-04", "2027-05", "2027-06"] });
+    client.progress.mockResolvedValue({ ...COMPLETE, termId: "t3", unfinished: true, endsOn: "2027-07-09" });
     render(<PeriodsPanel canClose />);
     const dialog = await openClose(user, "PRIMARIA · 3.er trimestre");
 
-    expect(await within(dialog).findByText("Aún no terminan sus meses: Abr, May, Jun")).toBeInTheDocument();
+    expect(await within(dialog).findByText("Aún no termina el periodo (termina el 9 jul 2027)")).toBeInTheDocument();
     expect(within(dialog).queryByText("Todas las calificaciones están capturadas.")).toBeNull();
     expect(within(dialog).queryByRole("button", { name: "Cerrar periodo" })).toBeNull();
     await user.click(within(dialog).getByRole("button", { name: "Cerrar de todos modos" }));
     expect(client.close).toHaveBeenCalledWith("t3", true);
   });
+});
 
-  it("works it out from today's month when the server does not list them", async () => {
+describe("PeriodsPanel — groups whose grade lacks the period", () => {
+  it("names them, explains where to configure it, and offers no close the server would refuse", async () => {
     const user = userEvent.setup();
-    client.list.mockResolvedValue([SPRING]);
-    client.progress.mockResolvedValue({ termId: "t3", months: SPRING.months, expected: 450, captured: 450, missing: [] });
+    client.progress.mockResolvedValue({ ...COMPLETE, groupsWithoutPeriod: ["2° PRIMARIA · A", "3° PRIMARIA · B"] });
     render(<PeriodsPanel canClose />);
-    const dialog = await openClose(user, "PRIMARIA · 3.er trimestre");
+    const dialog = await openClose(user);
 
-    expect(await within(dialog).findByText("Aún no terminan sus meses: Abr, May, Jun")).toBeInTheDocument();
+    expect(await within(dialog).findByText("Sin periodo 1 configurado: 2° PRIMARIA · A, 3° PRIMARIA · B")).toBeInTheDocument();
+    expect(within(dialog).getByText(/no se puede cerrar hasta que Configuración › Periodos por grado/)).toBeInTheDocument();
     expect(within(dialog).queryByText("Todas las calificaciones están capturadas.")).toBeNull();
+    expect(within(dialog).queryByRole("button", { name: "Cerrar periodo" })).toBeNull();
+    expect(within(dialog).queryByRole("button", { name: "Cerrar de todos modos" })).toBeNull();
   });
+});
 
+describe("PeriodsPanel — closing honestly", () => {
   it("with nothing expected it never says the capture is complete", async () => {
     const user = userEvent.setup();
     client.progress.mockResolvedValue({ ...COMPLETE, expected: 0, captured: 0 });
@@ -358,15 +367,17 @@ describe("PeriodsPanel — refusals that mean something", () => {
     expect(client.list).toHaveBeenCalledTimes(2);
   });
 
-  it("TERM_WITHOUT_MONTHS says where to assign them", async () => {
+  it("PERIOD_NOT_CONFIGURED says which group lacks the period and where to give it one", async () => {
     const user = userEvent.setup();
     client.progress.mockResolvedValue(COMPLETE);
-    client.close.mockRejectedValueOnce(new GradeRequestError(409, "El periodo no tiene meses asignados", "TERM_WITHOUT_MONTHS"));
+    client.close.mockRejectedValueOnce(new GradeRequestError(409, "El grupo 2° PRIMARIA · A no tiene el periodo 1 configurado", "PERIOD_NOT_CONFIGURED"));
     render(<PeriodsPanel canClose />);
     const dialog = await openClose(user);
     await user.click(await within(dialog).findByRole("button", { name: "Cerrar periodo" }));
 
-    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Configuración → Periodos");
+    const alert = await within(dialog).findByRole("alert");
+    expect(alert).toHaveTextContent("El grupo 2° PRIMARIA · A no tiene el periodo 1 configurado");
+    expect(alert).toHaveTextContent("Configuración › Periodos por grado");
   });
 
   it("LEVEL_NOT_GRADED says the level has no numeric grades", async () => {
@@ -438,13 +449,14 @@ describe("PeriodsPanel — focus and double submits", () => {
   });
 });
 
-describe("PeriodsPanel — a period without months", () => {
-  it("offers no close; it says where to assign its months", async () => {
-    client.list.mockResolvedValue([{ ...OPEN, months: [], progress: { captured: 0, expected: 0 } }]);
+describe("PeriodsPanel — a period no grade has configured", () => {
+  it("offers no close; it says where to configure it", async () => {
+    client.list.mockResolvedValue([{ ...OPEN, startsOn: null, endsOn: null, progress: { captured: 0, expected: 0 } }]);
     render(<PeriodsPanel canClose />);
 
     const open = await card("PRIMARIA · 1.er trimestre");
     expect(within(open).queryByRole("button", { name: "Revisar y cerrar" })).toBeNull();
-    expect(within(open).getByText("Asigna meses a este periodo en Configuración → Periodos")).toBeInTheDocument();
+    expect(within(open).getByText("Sin fechas: ningún grado tiene este periodo")).toBeInTheDocument();
+    expect(within(open).getByText("Dale fechas en Configuración › Periodos por grado")).toBeInTheDocument();
   });
 });

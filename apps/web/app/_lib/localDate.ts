@@ -8,10 +8,17 @@ export function localISODate(at: Date = new Date()): string {
   return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`;
 }
 
+function calendarDay(isoDate: string): Date {
+  const [y, m, d] = isoDate.split("-").map(Number);
+  return new Date(y ?? 0, (m ?? 1) - 1, d ?? 1);
+}
+
 /** "3 oct" for an aaaa-mm-dd date, read as the calendar day it names. */
 export function shortDayLabel(isoDate: string): string {
-  const [y, m, d] = isoDate.split("-").map(Number);
-  return new Date(y ?? 0, (m ?? 1) - 1, d ?? 1)
-    .toLocaleDateString("es-MX", { day: "numeric", month: "short" })
-    .replace(".", "");
+  return calendarDay(isoDate).toLocaleDateString("es-MX", { day: "numeric", month: "short" }).replace(".", "");
+}
+
+/** "3 oct 2026" for an aaaa-mm-dd date, read as the calendar day it names. */
+export function dayWithYearLabel(isoDate: string): string {
+  return calendarDay(isoDate).toLocaleDateString("es-MX", { day: "numeric", month: "short", year: "numeric" }).replace(".", "");
 }

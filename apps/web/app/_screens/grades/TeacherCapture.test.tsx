@@ -28,9 +28,13 @@ const assignment = {
 
 const sheetFor = (assignmentId: string) => ({
   assignmentId,
-  month: "2026-09",
-  months: ["2026-09"],
-  scale: { min: 5, max: 10, decimals: 1, passing: 6 },
+  periodId: "p1",
+  periods: [{ id: "p1", ordinal: 1, name: "1.er trimestre", startsOn: "2026-08-24", endsOn: "2026-11-30" }],
+  currentPeriodId: "p1",
+  today: "2026-10-01",
+  closedPeriodIds: [],
+  scale: { min: 5, max: 10, decimals: 0, passing: 6 },
+  gradingEnabled: true,
   editable: true,
   rows: [{ enrollmentId: "en1", studentId: "st1", name: "Ada Lovelace", value: 8, updatedAt: null, rowEditable: true }],
 });
@@ -40,19 +44,18 @@ beforeEach(() => {
   window.history.replaceState(null, "", "/calificaciones");
   teaching.listAssignments.mockResolvedValue([assignment]);
   sheetClient.load.mockImplementation(async (q) => sheetFor(q.assignmentId));
-  sheetClient.save.mockImplementation(async (i) => ({ enrollmentId: i.enrollmentId, month: i.month, value: i.value, updatedAt: "x" }));
+  sheetClient.save.mockImplementation(async (i) => ({ enrollmentId: i.enrollmentId, periodId: i.periodId, value: i.value, updatedAt: "x" }));
 });
 
 afterEach(() => vi.clearAllMocks());
 
-describe("TeacherCapture — the monthly sheet", () => {
+describe("TeacherCapture — the period sheet", () => {
   it("with a single class opens its sheet directly, names from the sheet itself", async () => {
     render(<TeacherCapture onBack={() => {}} />);
 
     expect(await screen.findByRole("textbox", { name: "Calificación de Ada Lovelace" })).toHaveValue("8");
     expect(sheetClient.load).toHaveBeenCalledWith({ assignmentId: "a1" });
-    // Monthly now: there is no term to pick.
-    expect(screen.queryByLabelText("Periodo")).toBeNull();
+    expect(screen.getByRole("group", { name: "Periodo" })).toBeInTheDocument();
   });
 
   it("saves a cell through the teacher's own client", async () => {
@@ -61,9 +64,9 @@ describe("TeacherCapture — the monthly sheet", () => {
 
     const cell = await screen.findByRole("textbox", { name: "Calificación de Ada Lovelace" });
     await user.clear(cell);
-    await user.type(cell, "9.5{Enter}");
+    await user.type(cell, "9{Enter}");
 
-    await waitFor(() => expect(sheetClient.save).toHaveBeenCalledWith({ assignmentId: "a1", month: "2026-09", enrollmentId: "en1", value: 9.5 }));
+    await waitFor(() => expect(sheetClient.save).toHaveBeenCalledWith({ assignmentId: "a1", periodId: "p1", enrollmentId: "en1", value: 9 }));
   });
 });
 

@@ -5,7 +5,7 @@ import { useEffect, useRef, type ReactElement } from "react";
 import { Btn } from "../../../_design/Controls";
 import { Icon } from "../../../_design/Icon";
 import type { GradingPeriod } from "../../../grades/periods";
-import { dayLabel, monthsLabel, periodTitle } from "./format";
+import { dateRangeLabel, dayLabel, periodTitle } from "./format";
 import { ProgressBar } from "./ProgressBar";
 
 export type PeriodAction = "close" | "reopen" | "cards";
@@ -22,7 +22,8 @@ export interface PeriodCardProps {
   focusToken?: number;
 }
 
-export const NO_MONTHS_HINT = "Asigna meses a este periodo en Configuración → Periodos";
+export const NO_DATES_TEXT = "Sin fechas: ningún grado tiene este periodo";
+export const NO_DATES_HINT = "Dale fechas en Configuración › Periodos por grado";
 
 function StatusPill({ period }: { period: GradingPeriod }): ReactElement {
   const closed = period.status === "closed";
@@ -45,7 +46,8 @@ export function PeriodCard({ period, canClose, onAction, focusToken }: PeriodCar
   }, [focusToken]);
 
   const closed = period.status === "closed";
-  const hasMonths = period.months.length > 0;
+  // No grade of the level has this period yet: there is nothing to close.
+  const dates = dateRangeLabel(period.startsOn, period.endsOn);
   const closedLine = closed && period.closedAt !== undefined
     ? `${dayLabel(period.closedAt)}${period.closedByName !== undefined ? ` · por ${period.closedByName}` : ""}`
     : undefined;
@@ -60,12 +62,12 @@ export function PeriodCard({ period, canClose, onAction, focusToken }: PeriodCar
       </header>
       {closedLine !== undefined && <p style={{ fontSize: 13, color: "var(--text-faint)" }}>{closedLine}</p>}
       <p style={{ fontSize: 14, color: "var(--text-muted)" }}>
-        {hasMonths ? monthsLabel(period.months) : "Sin meses asignados"}
+        {dates ?? NO_DATES_TEXT}
       </p>
       <ProgressBar captured={period.progress.captured} expected={period.progress.expected} />
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        {canClose && !closed && !hasMonths && <p style={{ fontSize: 14, color: "var(--warn-fg)", fontWeight: 600 }}>{NO_MONTHS_HINT}</p>}
-        {canClose && !closed && hasMonths && <Btn kind="forest" icon="lock" onClick={() => onAction("close", period)} style={{ height: 44, fontSize: 15 }}>Revisar y cerrar</Btn>}
+        {canClose && !closed && dates === undefined && <p style={{ fontSize: 14, color: "var(--warn-fg)", fontWeight: 600 }}>{NO_DATES_HINT}</p>}
+        {canClose && !closed && dates !== undefined && <Btn kind="forest" icon="lock" onClick={() => onAction("close", period)} style={{ height: 44, fontSize: 15 }}>Revisar y cerrar</Btn>}
         {canClose && closed && <Btn kind="ghost" onClick={() => onAction("reopen", period)} style={{ height: 44, fontSize: 15 }}>Reabrir</Btn>}
         {(closed || period.version > 0) && <Btn kind="outline" icon="documents" onClick={() => onAction("cards", period)} style={{ height: 44, fontSize: 15 }}>Ver boletas</Btn>}
       </div>

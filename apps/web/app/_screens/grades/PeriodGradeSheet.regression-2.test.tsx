@@ -4,17 +4,20 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import type { GradeSheet, GradeSheetClient } from "../../grades/monthly";
-import { MonthlyGradeSheet } from "./MonthlyGradeSheet";
+import type { GradeSheetClient, PeriodSheet } from "../../grades/periodSheet";
+import { PeriodGradeSheet } from "./PeriodGradeSheet";
 import { useGradeSaves } from "./useGradeSaves";
 
 const NOT_GRADED = "Este nivel no lleva calificación numérica";
 
 /** What the gateway really answers for Kínder: 200, grading off, a zero scale, read-only rows. */
-const KINDER_SHEET: GradeSheet = {
+const KINDER_SHEET: PeriodSheet = {
   assignmentId: "a1",
-  month: "2026-09",
-  months: ["2026-08", "2026-09"],
+  periodId: "p1",
+  periods: [{ id: "p1", ordinal: 1, name: "1.er trimestre", startsOn: "2026-08-24", endsOn: "2026-11-30" }],
+  currentPeriodId: "p1",
+  today: "2026-10-01",
+  closedPeriodIds: [],
   scale: { min: 0, max: 0, decimals: 0, passing: 0 },
   gradingEnabled: false,
   editable: false,
@@ -24,10 +27,10 @@ const KINDER_SHEET: GradeSheet = {
 
 function Screen({ client }: { client: GradeSheetClient }) {
   const saves = useGradeSaves(client);
-  return <MonthlyGradeSheet assignmentId="a1" client={client} saves={saves} />;
+  return <PeriodGradeSheet assignmentId="a1" client={client} saves={saves} />;
 }
 
-describe("MonthlyGradeSheet — a level that does not grade", () => {
+describe("PeriodGradeSheet — a level that does not grade", () => {
   it("shows only why, without counters, scale or table", async () => {
     const client: GradeSheetClient = { load: vi.fn().mockResolvedValue(KINDER_SHEET), save: vi.fn(), remove: vi.fn() };
     render(<Screen client={client} />);

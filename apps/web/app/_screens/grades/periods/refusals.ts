@@ -1,5 +1,5 @@
-import { GradeRequestError } from "../../../grades/monthly";
-import { ALREADY_CLOSED, ALREADY_OPEN, LEVEL_NOT_GRADED, TERM_WITHOUT_MONTHS } from "../../../grades/periods";
+import { ALREADY_CLOSED, ALREADY_OPEN, LEVEL_NOT_GRADED, PERIOD_NOT_CONFIGURED } from "../../../grades/periods";
+import { GradeRequestError } from "../../../grades/requestError";
 
 /**
  * What a refused close or reopen means for the screen: either the period is
@@ -10,7 +10,9 @@ export type Refusal = { kind: "stale"; toast: string } | { kind: "message"; text
 
 const CLOSE_FAILED = "No se pudo cerrar el periodo. Intenta de nuevo.";
 const REOPEN_FAILED = "No se pudo reabrir el periodo. Intenta de nuevo.";
-export const WITHOUT_MONTHS_TEXT = "Este periodo no tiene meses asignados. Asígnalos en Configuración → Periodos y vuelve a cerrarlo.";
+/** Where a missing evaluation period is given, said after the server's sentence naming the group. */
+export const CONFIGURE_PERIOD_POINTER = "Dale ese periodo en Configuración › Periodos por grado y vuelve a cerrarlo.";
+const NOT_CONFIGURED_FALLBACK = "A un grupo le falta este periodo de evaluación.";
 export const NOT_GRADED_TEXT = "Este nivel no se califica con números: sus periodos no emiten boleta.";
 
 function serverText(err: unknown, fallback: string): string {
@@ -23,8 +25,8 @@ export function closeRefusal(err: unknown): Refusal {
   switch (codeOf(err)) {
     case ALREADY_CLOSED:
       return { kind: "stale", toast: "El periodo ya estaba cerrado" };
-    case TERM_WITHOUT_MONTHS:
-      return { kind: "message", text: WITHOUT_MONTHS_TEXT };
+    case PERIOD_NOT_CONFIGURED:
+      return { kind: "message", text: `${serverText(err, NOT_CONFIGURED_FALLBACK)}. ${CONFIGURE_PERIOD_POINTER}` };
     case LEVEL_NOT_GRADED:
       return { kind: "message", text: NOT_GRADED_TEXT };
     default:
