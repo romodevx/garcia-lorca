@@ -197,12 +197,13 @@ describe("buildCommandRegistry", () => {
     });
   });
 
-  it("a teacher (maestro role) gets only Asistencia and Calificaciones commands, every flag ON", () => {
+  // T16: Horarios joins them — a teacher reads their own week through teaching:read.
+  it("a teacher (maestro role) gets only Asistencia, Calificaciones and Horarios commands, every flag ON", () => {
     const allOn = Object.fromEntries(MODULES.map((m) => [m.flag, true]));
     const maestro = ["teaching:read", "teaching:write", "attendance_own:read", "attendance_own:write"];
 
     const modules = new Set(buildCommandRegistry(allOn, t, maestro).map((c) => c.moduleId));
 
-    expect([...modules].sort()).toEqual(["attendance", "grades"]);
+    expect([...modules].sort()).toEqual(["attendance", "grades", "schedule"]);
   });
 });

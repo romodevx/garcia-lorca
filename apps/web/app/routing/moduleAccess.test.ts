@@ -20,6 +20,7 @@ describe("moduleIdOfView", () => {
     [{ screen: "levelDelete", levelId: "l1" }, "settings"],
     [{ screen: "levelPeriods", levelId: "l1" }, "settings"],
     [{ screen: "uniforms" }, "uniforms"],
+    [{ screen: "schedule" }, "schedule"],
     [{ screen: "admin" }, "admin"],
     [{ screen: "module", moduleId: "reports" }, "reports"],
     [{ screen: "dashboard" }, undefined],
@@ -42,7 +43,7 @@ describe("canReachView", () => {
     expect(canReachView(view, MAESTRO)).toBe(false);
   });
 
-  it.each<View>([{ screen: "grades" }, { screen: "attendance" }, { screen: "dashboard" }])(
+  it.each<View>([{ screen: "grades" }, { screen: "attendance" }, { screen: "schedule" }, { screen: "dashboard" }])(
     "a teacher reaches %j",
     (view) => {
       expect(canReachView(view, MAESTRO)).toBe(true);

@@ -63,6 +63,9 @@ export const MODULES: readonly ModuleDef[] = [
   // Any-of: directors capture via grades:read; teachers use their self-scoped
   // teaching:read surface. Either permission reveals the tile.
   { id: "grades", label: "Calificaciones", icon: "grades", color: "yellow", desc: "Boletas y captura", badge: null, flag: "module_grades", perm: ["grades:read", "teaching:read"] },
+  // T16: the weekly timetable and the day's changes. Any-of: the director reads
+  // it all (schedule:read); a teacher reads their own week (teaching:read).
+  { id: "schedule", label: "Horarios", icon: "clock", color: "forest", desc: "Horario semanal y suplencias", badge: null, flag: "module_schedule", perm: ["schedule:read", "teaching:read"] },
   { id: "announcements", label: "Avisos", icon: "announcements", color: "orange", desc: "Comunicados y agenda", badge: null, flag: "module_comms", perm: "comms:read" },
   { id: "scholarships", label: "Becas", icon: "scholarship", color: "purple", desc: "Becas y descuentos", badge: null, flag: "module_scholarships", perm: "scholarships:read" },
   // Deactivated from the panel per the school (kept future-ready; nothing deleted). See [[module-docs-deactivated]].

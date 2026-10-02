@@ -60,13 +60,14 @@ describe("Dashboard", () => {
 
   // The maestro role (iam 0022) holds exactly these four: Calificaciones and
   // Asistencia for the teacher's own classes, and nothing else.
-  it("a teacher (maestro role) sees exactly Asistencia and Calificaciones", () => {
+  // T16: plus Horarios — a teacher reads their own week through teaching:read.
+  it("a teacher (maestro role) sees exactly Asistencia, Calificaciones and Horarios", () => {
     const maestro = ["teaching:read", "teaching:write", "attendance_own:read", "attendance_own:write"];
     render(<Dashboard user={USERS.teacher} onOpen={() => {}} permissions={maestro} now={NOW} />);
 
-    expect(visibleFor(maestro).map((m) => m.label).sort()).toEqual(["Asistencia", "Calificaciones"]);
+    expect(visibleFor(maestro).map((m) => m.label).sort()).toEqual(["Asistencia", "Calificaciones", "Horarios"]);
     for (const m of MODULES) {
-      if (m.id === "grades" || m.id === "attendance") expect(screen.getByText(m.label)).toBeInTheDocument();
+      if (m.id === "grades" || m.id === "attendance" || m.id === "schedule") expect(screen.getByText(m.label)).toBeInTheDocument();
       else expect(screen.queryByText(m.label)).not.toBeInTheDocument();
     }
   });

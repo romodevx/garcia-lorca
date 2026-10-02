@@ -154,6 +154,8 @@ describe("every live module's permission is one somebody can hold", () => {
     "collections:read", "payments:write",
     // T10: the Egresos module (iam 0027).
     "expenses:read", "expenses:write",
+    // T16: Horarios.
+    "schedule:read", "schedule:write",
   ]);
   // These carry a permission nobody is granted ON PURPOSE, so the tile hides
   // itself until the module exists.
@@ -202,5 +204,22 @@ describe("Egresos (T10)", () => {
   it("does not ride on finance:read", () => {
     expect(isModuleVisible(egresos, ["finance:read", "finance:write"])).toBe(false);
     expect(isModuleVisible(MODULES.find((m) => m.id === "finance") as ModuleDef, ["expenses:read"])).toBe(false);
+  });
+});
+
+describe("Horarios (T16)", () => {
+  const horarios = MODULES.find((m) => m.id === "schedule") as ModuleDef;
+
+  it("is gated by its own flag", () => {
+    expect(horarios.label).toBe("Horarios");
+    expect(horarios.flag).toBe("module_schedule");
+  });
+
+  // The director reads the whole timetable; a teacher reads their own week
+  // through teaching:read. Either one reveals the tile.
+  it("shows to whoever reads the timetable, and to a teacher for their own", () => {
+    expect(isModuleVisible(horarios, ["schedule:read"])).toBe(true);
+    expect(isModuleVisible(horarios, ["teaching:read"])).toBe(true);
+    expect(isModuleVisible(horarios, ["students:read"])).toBe(false);
   });
 });

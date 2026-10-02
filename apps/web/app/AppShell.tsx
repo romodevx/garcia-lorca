@@ -15,6 +15,7 @@ import { TeachersScreen } from "./_screens/teachers/TeachersScreen";
 import { canEditTeachingLoad, canGrantTeacherAccess, canListUsers } from "./teachers/permissions";
 import { UniformsScreen } from "./_screens/uniforms/UniformsScreen";
 import { ExpensesScreen } from "./_screens/expenses/ExpensesScreen";
+import { ScheduleEntry } from "./_screens/schedule/ScheduleEntry";
 import type { CutAccess } from "./_screens/finance/CashCutClosing";
 import { FinanceScreen } from "./_screens/finance/FinanceScreen";
 import { Catalog } from "./_screens/config/Catalog";
@@ -229,6 +230,8 @@ export function AppShell(): ReactElement {
   const uniformsEnabled = useFlag("module_uniforms");
   // T10: Egresos. Its data lives in finance, so both flags must be on.
   const expensesEnabled = useFlag("module_expenses") && financeEnabled;
+  // T16: Horarios. Its timetable lives in config, so both flags must be on.
+  const scheduleEnabled = useFlag("module_schedule") && configEnabled;
 
   /**
    * Arranque: las cookies de sesión son HttpOnly (el JavaScript no las ve), así
@@ -520,6 +523,10 @@ export function AppShell(): ReactElement {
       go({ screen: "expenses" });
       return;
     }
+    if (id === "schedule") {
+      go({ screen: "schedule" });
+      return;
+    }
     if (id === "payments") {
       go({ screen: "payments" });
       return;
@@ -734,6 +741,10 @@ export function AppShell(): ReactElement {
           // navigation from dead-ending. (Backend 404 is authoritative.)
           <ModulePlaceholder m={MODULES.find((m) => m.id === "expenses") as ModuleDef} onBack={home} />
         ))}
+      {view.screen === "schedule" && (
+        // Flag OFF renders the friendly stub (inside ScheduleEntry). Backend 404 is authoritative.
+        <ScheduleEntry enabled={scheduleEnabled} permissions={principal?.permissions} onBack={home} />
+      )}
       {view.screen === "admin" &&
         (adminEnabled ? (
           <AdminScreen onBack={home} canDeleteUsers={canDeleteUsers(principal?.permissions)} currentUserId={principal?.userId} />

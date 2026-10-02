@@ -1,0 +1,273 @@
+import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import * as api from "../../schedule/api";
+import { ANA, G3A, LUIS, MATE, sampleBoard } from "../../schedule/__fixtures__/board";
+import { ScheduleEntry } from "./ScheduleEntry";
+import { ScheduleScreen } from "./ScheduleScreen";
+
+vi.mock("../../schedule/api", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../../schedule/api")>();
+  return {
+    ...real,
+    getBoard: vi.fn(),
+    getOwnBoard: vi.fn(),
+    getDay: vi.fn(),
+    getOwnDay: vi.fn(),
+    createBlock: vi.fn(),
+    updateBlock: vi.fn(),
+    deleteBlock: vi.fn(),
+    createOverride: vi.fn(),
+    deleteOverride: vi.fn(),
+    listAvailableTeachers: vi.fn(),
+    putSettings: vi.fn(),
+    listEvents: vi.fn(),
+  };
+});
+const m = vi.mocked(api);
+
+/** Monday 2026-10-05, 08:10 at the school (UTC−6). */
+const MONDAY_0810 = new Date("2026-10-05T14:10:00Z");
+const BLOCK_MATE = "70000000-0000-4000-8000-000000000001";
+
+beforeEach(() => {
+  m.getBoard.mockResolvedValue(sampleBoard());
+  m.getOwnBoard.mockResolvedValue(sampleBoard());
+  m.listEvents.mockResolvedValue([]);
+  m.getDay.mockResolvedValue({ date: "2026-10-05", weekday: 1, classes: [] });
+  m.getOwnDay.mockResolvedValue({ date: "2026-10-05", weekday: 1, classes: [] });
+  m.listAvailableTeachers.mockResolvedValue([]);
+});
+afterEach(() => vi.clearAllMocks());
+
+function renderManager(canWrite = true): ReturnType<typeof userEvent.setup> {
+  const user = userEvent.setup();
+  render(<ScheduleScreen onBack={() => undefined} mode="manage" canWrite={canWrite} now={MONDAY_0810} />);
+  return user;
+}
+
+const blocks = (): HTMLElement[] => screen.queryAllByTestId("schedule-block");
+
+async function chooseGroup3A(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+  await user.click(await screen.findByRole("button", { name: "3.º" }));
+  await user.click(screen.getByRole("button", { name: "A" }));
+}
+
+describe("Horarios — la semana (T16)", () => {
+  it("shows the chosen group's week, Monday to Friday", async () => {
+    const user = renderManager();
+    await chooseGroup3A(user);
+    expect(blocks()).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "Matemáticas, 3.º A, Ana Ruiz, lunes 08:00 a 08:50" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Español, 3.º A, Luis Pérez, lunes 08:50 a 09:40" })).toBeInTheDocument();
+    for (const day of ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"]) expect(screen.getByText(day)).toBeInTheDocument();
+  });
+
+  it("shows a teacher's week across groups", async () => {
+    const user = renderManager();
+    await screen.findByRole("button", { name: "3.º" });
+    await user.selectOptions(screen.getByLabelText("Docente"), ANA);
+    expect(blocks()).toHaveLength(2);
+    expect(blocks().every((b) => /Ana Ruiz/.test(b.getAttribute("aria-label") ?? ""))).toBe(true);
+  });
+
+  it("says what to do when a group has no classes yet", async () => {
+    m.getBoard.mockResolvedValue(sampleBoard({ blocks: [] }));
+    const user = renderManager();
+    await chooseGroup3A(user);
+    expect(screen.getByText(/Este grupo aún no tiene clases — haz clic en un hueco para agregar una/)).toBeInTheDocument();
+  });
+
+  it("sends people to Docentes when the cycle has no teaching assignments", async () => {
+    m.getBoard.mockResolvedValue(sampleBoard({ assignments: [], blocks: [] }));
+    renderManager();
+    expect(await screen.findByText(/asignaciones/i)).toHaveTextContent(/Docentes/);
+  });
+
+  it("creates a class from an empty slot with the group's assignment", async () => {
+    m.createBlock.mockResolvedValue(sampleBoard().blocks[0]!);
+    const user = renderManager();
+    await chooseGroup3A(user);
+    await user.click(screen.getByRole("button", { name: "Agregar clase el martes a las 09:00" }));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByLabelText("Inicio")).toHaveValue("09:00");
+    expect(within(dialog).getByLabelText("Fin")).toHaveValue("09:50");
+    // Only 3.º A's own assignments are offered.
+    const options = within(within(dialog).getByLabelText("Asignatura — Docente")).getAllByRole("option").map((o) => o.textContent);
+    expect(options).toEqual(["", "Español — Luis Pérez", "Matemáticas — Ana Ruiz"]);
+    await user.selectOptions(within(dialog).getByLabelText("Asignatura — Docente"), "Matemáticas — Ana Ruiz");
+    await user.click(within(dialog).getByRole("button", { name: "Guardar clase" }));
+    await waitFor(() =>
+      expect(m.createBlock).toHaveBeenCalledWith(expect.any(String), {
+        assignmentId: "60000000-0000-4000-8000-000000000001", weekday: 2, startsAt: "09:00", endsAt: "09:50",
+      }),
+    );
+  });
+
+  it("keeps the drawer open and shows the server's sentence on a conflict", async () => {
+    m.createBlock.mockRejectedValue(new api.ScheduleError(409, "Ana Ruiz ya da Matemáticas a 3.º B el martes de 09:00 a 09:50", "SCHEDULE_TEACHER_BUSY"));
+    const user = renderManager();
+    await chooseGroup3A(user);
+    await user.click(screen.getByRole("button", { name: "Agregar clase el martes a las 09:00" }));
+    const dialog = screen.getByRole("dialog");
+    await user.selectOptions(within(dialog).getByLabelText("Asignatura — Docente"), "Matemáticas — Ana Ruiz");
+    await user.click(within(dialog).getByRole("button", { name: "Guardar clase" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Ana Ruiz ya da Matemáticas a 3.º B el martes de 09:00 a 09:50");
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("asks for a reason once the cycle has started", async () => {
+    m.getBoard.mockResolvedValue(sampleBoard({ started: true }));
+    const user = renderManager();
+    await chooseGroup3A(user);
+    await user.click(screen.getByRole("button", { name: "Agregar clase el martes a las 09:00" }));
+    const dialog = screen.getByRole("dialog");
+    await user.selectOptions(within(dialog).getByLabelText("Asignatura — Docente"), "Matemáticas — Ana Ruiz");
+    await user.click(within(dialog).getByRole("button", { name: "Guardar clase" }));
+    expect(within(dialog).getByLabelText("Motivo del cambio")).toHaveAttribute("aria-invalid", "true");
+    expect(m.createBlock).not.toHaveBeenCalled();
+  });
+
+  it("opens a class to edit it and to change it for one date", async () => {
+    m.listAvailableTeachers.mockResolvedValue([{ teacherId: LUIS, firstName: "Luis", lastName: "Pérez", match: "grade" }]);
+    m.createOverride.mockResolvedValue(undefined);
+    const user = renderManager();
+    await chooseGroup3A(user);
+    await user.click(screen.getByRole("button", { name: /^Matemáticas, 3.º A/ }));
+    const dialog = screen.getByRole("dialog");
+    await user.click(within(dialog).getByRole("tab", { name: "Cambio solo para una fecha" }));
+    // Monday: today is that weekday, so the date defaults to today.
+    expect(within(dialog).getByLabelText("Fecha")).toHaveValue("2026-10-05");
+    await waitFor(() => expect(m.listAvailableTeachers).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({
+      groupId: G3A, subjectId: MATE, date: "2026-10-05", startsAt: "08:00", endsAt: "08:50", excludeBlockId: BLOCK_MATE,
+    })));
+    await user.selectOptions(await within(dialog).findByLabelText("Suplente"), LUIS);
+    await user.type(within(dialog).getByLabelText(/Motivo/), "Consulta médica");
+    await user.click(within(dialog).getByRole("button", { name: "Registrar cambio" }));
+    await waitFor(() =>
+      expect(m.createOverride).toHaveBeenCalledWith(expect.any(String), {
+        blockId: BLOCK_MATE, date: "2026-10-05", kind: "substitute", teacherId: LUIS, reason: "Consulta médica",
+      }),
+    );
+  });
+});
+
+describe("Horarios — ¿Qué está pasando ahora? (T16)", () => {
+  it("shows the classes under way at that minute as cards, a substitute named as such", async () => {
+    m.getDay.mockResolvedValue({
+      date: "2026-10-05", weekday: 1, classes: [
+        { blockId: BLOCK_MATE, groupId: G3A, subjectId: MATE, teacherId: LUIS, startsAt: "08:00", endsAt: "08:50", status: "substitute", baseTeacherId: ANA, baseStartsAt: "08:00", baseEndsAt: "08:50", overrideId: "80000000-0000-4000-8000-000000000001", reason: "Consulta" },
+        { blockId: "x", groupId: G3A, subjectId: MATE, teacherId: ANA, startsAt: "09:00", endsAt: "09:50", status: "regular", baseTeacherId: ANA, baseStartsAt: "09:00", baseEndsAt: "09:50", overrideId: null, reason: null },
+      ],
+    });
+    const user = renderManager();
+    await user.click(await screen.findByRole("tab", { name: "¿Qué está pasando ahora?" }));
+    const cards = await screen.findAllByTestId("now-card");
+    expect(cards).toHaveLength(1);
+    expect(cards[0]).toHaveTextContent("Suplente: Luis Pérez (en lugar de Ana Ruiz)");
+    expect(cards[0]).toHaveTextContent("Suplencia");
+    expect(m.getDay).toHaveBeenCalledWith(expect.any(String), sampleBoard().cycle.id, "2026-10-05");
+  });
+
+  it("says so when nothing is happening", async () => {
+    const user = renderManager();
+    await user.click(await screen.findByRole("tab", { name: "¿Qué está pasando ahora?" }));
+    expect(await screen.findByText("No hay clases a esta hora")).toBeInTheDocument();
+  });
+});
+
+describe("Horarios — el docente (T16)", () => {
+  it("reads only the teacher's own timetable, without editing", async () => {
+    render(<ScheduleScreen onBack={() => undefined} mode="teacher" canWrite={false} now={MONDAY_0810} />);
+    expect(await screen.findByLabelText(/^Matemáticas, 3.º A, Ana Ruiz/)).toBeInTheDocument();
+    expect(m.getOwnBoard).toHaveBeenCalled();
+    expect(m.getBoard).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: /Agregar clase/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Matemáticas, 3.º A/ })).not.toBeInTheDocument();
+  });
+});
+
+describe("Horarios — la entrada (T16)", () => {
+  it("shows the placeholder when module_schedule is off", () => {
+    render(<ScheduleEntry enabled={false} permissions={["schedule:read"]} onBack={() => undefined} />);
+    expect(screen.getByRole("heading", { name: /Módulo «Horarios»/ })).toBeInTheDocument();
+    expect(m.getBoard).not.toHaveBeenCalled();
+  });
+
+  it("gives a teacher without schedule:read their own timetable", async () => {
+    render(<ScheduleEntry enabled permissions={["teaching:read"]} onBack={() => undefined} />);
+    await waitFor(() => expect(m.getOwnBoard).toHaveBeenCalled());
+    expect(m.getBoard).not.toHaveBeenCalled();
+  });
+});
+
+describe("Horarios — cambios reversibles (T16)", () => {
+  it("removes a class with an undo before anything reaches the server", async () => {
+    const user = renderManager();
+    await chooseGroup3A(user);
+    await user.click(screen.getByRole("button", { name: /^Matemáticas, 3.º A/ }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Quitar clase" }));
+    expect(screen.queryByRole("button", { name: /^Matemáticas, 3.º A/ })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Deshacer" }));
+    expect(screen.getByRole("button", { name: /^Matemáticas, 3.º A/ })).toBeInTheDocument();
+    expect(m.deleteBlock).not.toHaveBeenCalled();
+  });
+
+  it("undoes a date's change from the day list", async () => {
+    m.deleteOverride.mockResolvedValue(undefined);
+    m.getDay.mockResolvedValue({
+      date: "2026-10-05", weekday: 1, classes: [
+        { blockId: BLOCK_MATE, groupId: G3A, subjectId: MATE, teacherId: LUIS, startsAt: "08:00", endsAt: "08:50", status: "substitute", baseTeacherId: ANA, baseStartsAt: "08:00", baseEndsAt: "08:50", overrideId: "80000000-0000-4000-8000-000000000001", reason: "Consulta" },
+      ],
+    });
+    const user = renderManager();
+    await user.click(await screen.findByRole("tab", { name: "¿Qué está pasando ahora?" }));
+    await user.click(await screen.findByRole("button", { name: "Deshacer el cambio de Matemáticas, 3.º A, 08:00" }));
+    await waitFor(() => expect(m.deleteOverride).toHaveBeenCalledWith(expect.any(String), "80000000-0000-4000-8000-000000000001"));
+  });
+
+  it("a reader sees the day's changes but cannot undo them", async () => {
+    m.getDay.mockResolvedValue({
+      date: "2026-10-05", weekday: 1, classes: [
+        { blockId: BLOCK_MATE, groupId: G3A, subjectId: MATE, teacherId: ANA, startsAt: "08:00", endsAt: "08:50", status: "cancelled", baseTeacherId: ANA, baseStartsAt: "08:00", baseEndsAt: "08:50", overrideId: "80000000-0000-4000-8000-000000000001", reason: "Junta" },
+      ],
+    });
+    const user = renderManager(false);
+    await user.click(await screen.findByRole("tab", { name: "¿Qué está pasando ahora?" }));
+    expect((await screen.findAllByText("Cancelada")).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: /Deshacer el cambio/ })).not.toBeInTheDocument();
+  });
+});
+
+describe("Horarios — historial y horas del nivel (T16)", () => {
+  it("lists who changed what, when and why", async () => {
+    m.listEvents.mockResolvedValue([
+      { id: "e1", at: "2026-10-01T15:00:00Z", actorId: "u", actorName: "Dirección", action: "override_created", blockId: BLOCK_MATE, overrideId: null, date: "2026-10-05", reason: "Gripe", summary: "Suplencia el 2026-10-05: Matemáticas, 3.º A" },
+    ]);
+    const user = renderManager();
+    await user.click(await screen.findByRole("tab", { name: "Historial" }));
+    const history = await screen.findByRole("list", { name: "Historial de cambios" });
+    expect(history).toHaveTextContent("Suplencia el 2026-10-05: Matemáticas, 3.º A");
+    expect(history).toHaveTextContent("Dirección");
+    expect(history).toHaveTextContent("Motivo: Gripe");
+  });
+
+  it("refuses a level day shorter than an hour without asking the server", async () => {
+    const user = renderManager();
+    await screen.findByRole("button", { name: "3.º" });
+    await user.selectOptions(screen.getByLabelText("Termina"), "07:30");
+    expect(screen.getByLabelText("Termina")).toHaveAttribute("aria-invalid", "true");
+    await user.click(screen.getByRole("button", { name: "Guardar horas" }));
+    expect(m.putSettings).not.toHaveBeenCalled();
+  });
+
+  it("saves the level's hours", async () => {
+    m.putSettings.mockResolvedValue({ levelId: "x", gridStart: "07:00", gridEnd: "15:00" });
+    const user = renderManager();
+    await screen.findByRole("button", { name: "3.º" });
+    await user.selectOptions(screen.getByLabelText("Termina"), "15:00");
+    await user.click(screen.getByRole("button", { name: "Guardar horas" }));
+    await waitFor(() => expect(m.putSettings).toHaveBeenCalledWith(expect.any(String), sampleBoard().levels[0]!.id, { gridStart: "07:00", gridEnd: "15:00" }));
+  });
+});
