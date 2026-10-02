@@ -142,6 +142,9 @@ func TestIsOwnerOnly(t *testing.T) {
 		// T17: the Actividades module is delegable (owner by default).
 		{"activities:read", false},
 		{"activities:write", false},
+		// T18: the Becas module is delegable (owner by default).
+		{"scholarships:read", false},
+		{"scholarships:write", false},
 		{"users:write", false},
 		{"config:write", false},
 		// Task 9: the counter's permissions are the Cobranza role's, so they
