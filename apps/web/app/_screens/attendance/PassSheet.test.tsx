@@ -106,12 +106,12 @@ describe("PassSheet — marking", () => {
     expect(counter("Presentes")).toHaveTextContent("2");
   });
 
-  it("Más opens Retardo, Justificada and a note of at most 500 characters with a counter", async () => {
+  it("Retardo is one tap on the row; Más opens Justificada and a note of at most 500 characters with a counter", async () => {
     const user = userEvent.setup();
     renderSheet();
 
-    await user.click(await screen.findByRole("button", { name: "Más opciones de Alan Turing" }));
-    await user.click(screen.getByRole("button", { name: "Retardo" }));
+    await user.click(await screen.findByRole("button", { name: "Retardo de Alan Turing" }));
+    await user.click(screen.getByRole("button", { name: "Más opciones de Alan Turing" }));
     expect(screen.getByRole("button", { name: "Alan Turing: Retardo" })).toBeInTheDocument();
     expect(counter("Retardos")).toHaveTextContent("1");
 
