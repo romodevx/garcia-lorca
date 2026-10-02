@@ -136,6 +136,9 @@ func TestIsOwnerOnly(t *testing.T) {
 		// T10 (owner answer 7): the Egresos module is delegable.
 		{"expenses:read", false},
 		{"expenses:write", false},
+		// T16: the Horarios module is delegable (owner by default).
+		{"schedule:read", false},
+		{"schedule:write", false},
 		{"users:write", false},
 		{"config:write", false},
 		// Task 9: the counter's permissions are the Cobranza role's, so they
