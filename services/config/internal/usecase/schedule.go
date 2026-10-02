@@ -280,6 +280,14 @@ func (s *ScheduleService) CreateOverride(ctx context.Context, in OverrideInput, 
 	}
 	names := newScheduleNames(cat)
 	err = s.repo.RunScheduleTx(ctx, b.CycleID(), func(tx ports.ScheduleTx) error {
+		// The class was read before the lock: it must still be the same one.
+		current, err := tx.GetBlock(b.ID())
+		if err != nil {
+			return err
+		}
+		if current != b {
+			return domain.ScheduleChangedMeanwhile()
+		}
 		partner, err := s.swapPartner(tx, b, o)
 		if err != nil {
 			return err

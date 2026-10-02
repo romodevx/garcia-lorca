@@ -612,3 +612,27 @@ func TestEventsAreBounded(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, ev)
 }
+
+// staleRead hands the use case a class as it was before another editor moved
+// it: the read outside the lock is stale.
+type staleRead struct {
+	*fakeSchedule
+	stale domain.ScheduleBlock
+}
+
+func (s staleRead) GetScheduleBlock(context.Context, string) (domain.ScheduleBlock, error) {
+	return s.stale, nil
+}
+
+func TestCreateOverrideRefusesAClassMovedMeanwhile(t *testing.T) {
+	f := newFakeSchedule(t)
+	pre := newScheduleService(f, beforeCycle())
+	music := addBlock(t, pre, aMus3A, 1, at(8, 50), at(9, 40))
+	_, err := pre.UpdateBlock(context.Background(), music.ID(), usecase.BlockInput{AssignmentID: aMus3A, Weekday: 1, Start: at(10, 0), End: at(10, 50)}, director)
+	require.NoError(t, err)
+
+	loc, _ := time.LoadLocation("America/Mexico_City")
+	s := usecase.NewScheduleService(staleRead{fakeSchedule: f, stale: music}, "ten", func() string { return "id-x" }, duringCycle, loc)
+	_, err = s.CreateOverride(context.Background(), usecase.OverrideInput{BlockID: music.ID(), Date: mon5, Kind: domain.OverrideCancel, Reason: "x"}, director)
+	assert.Equal(t, domain.CodeScheduleChanged, codeOf(err))
+}
