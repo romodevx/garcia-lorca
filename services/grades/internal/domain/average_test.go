@@ -1,82 +1,99 @@
 package domain_test
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/garcia-lorca/services/grades/internal/domain"
 )
 
-func values(hundredths ...int) []domain.GradeValue {
-	out := make([]domain.GradeValue, 0, len(hundredths))
-	for _, h := range hundredths {
-		out = append(out, domain.GradeValueFromHundredths(h))
+// averageVectors is the ONE table of cases the web, the parents' app and this
+// service run (T15): packages/domain/src/gradeAverage.vectors.json.
+type averageVectors struct {
+	Subject []struct {
+		Values []string `json:"values"`
+		Want   string   `json:"want"`
+	} `json:"subject"`
+	General []struct {
+		Subjects [][]string `json:"subjects"`
+		Want     string     `json:"want"`
+	} `json:"general"`
+}
+
+func loadAverageVectors(t *testing.T) averageVectors {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "packages", "domain", "src", "gradeAverage.vectors.json"))
+	require.NoError(t, err)
+	var v averageVectors
+	require.NoError(t, json.Unmarshal(raw, &v))
+	require.NotEmpty(t, v.Subject)
+	require.NotEmpty(t, v.General)
+	return v
+}
+
+// parseValues reads decimal text as exact grade values (at most 2 decimals).
+func parseValues(t *testing.T, texts []string) []domain.GradeValue {
+	t.Helper()
+	scale, err := domain.NewGradingScale(0, 10000, 100, 2)
+	require.NoError(t, err)
+	out := make([]domain.GradeValue, 0, len(texts))
+	for _, s := range texts {
+		v, err := scale.ParseValue(s)
+		require.NoError(t, err, s)
+		out = append(out, v)
 	}
 	return out
 }
 
-// T7: a subject's trimester grade is the arithmetic mean of its captured
-// monthly grades, one decimal, rounded half-up with exact arithmetic (a
-// float64 would read 8.45 as 8.4499… and round it down).
-func TestSubjectAverage(t *testing.T) {
-	tests := []struct {
-		name   string
-		grades []domain.GradeValue
-		want   string
-	}{
-		{"8.45 rounds up to 8.5", values(840, 850), "8.5"},
-		{"8.25 rounds up to 8.3", values(800, 850), "8.3"},
-		{"8.24 rounds down to 8.2", values(824), "8.2"},
-		{"a single grade keeps one decimal", values(900), "9.0"},
-		{"three months", values(1000, 900, 850), "9.2"},               // 9.1666…
-		{"exact half on two-decimal grades", values(995, 900), "9.5"}, // 9.475 → 9.5
-		{"just under a half", values(994, 900), "9.5"},                // 9.47 → 9.5
-		{"ten", values(1000, 1000), "10.0"},
-		{"lowest", values(500), "5.0"},
-		{"9.95 exactly halfway rounds up", values(995), "10.0"},
-		{"9.94 rounds down", values(994), "9.9"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := domain.SubjectAverage(tt.grades)
-			assert.True(t, got.Present())
-			assert.Equal(t, tt.want, got.String())
+// T15: a subject's average is the EXACT mean of its grades, truncated (never
+// rounded) to 2 decimals, printed without trailing zeros.
+func TestSubjectAverage_SharedVectors(t *testing.T) {
+	for _, tc := range loadAverageVectors(t).Subject {
+		t.Run(tc.Want, func(t *testing.T) {
+			got := domain.SubjectAverage(parseValues(t, tc.Values))
+			assert.Equal(t, tc.Want, got.String(), "values %v", tc.Values)
+			assert.Equal(t, tc.Want != "", got.Present())
 		})
 	}
 }
 
-// A subject with no grade in the term has no trimester grade at all — never a
-// zero that would drag the general average down.
-func TestSubjectAverageWithoutGrades(t *testing.T) {
-	got := domain.SubjectAverage(nil)
-	assert.False(t, got.Present())
-	assert.Equal(t, "", got.String())
-}
-
-// The general average is the mean of the subjects' trimester grades (only
-// subjects with at least one grade), one decimal half-up.
-func TestGeneralAverage(t *testing.T) {
-	tests := []struct {
-		name     string
-		subjects []domain.Average
-		want     string
-	}{
-		{"mean of two", []domain.Average{domain.AverageFromTenths(85), domain.AverageFromTenths(90)}, "8.8"}, // 8.75
-		{"absent subjects are ignored", []domain.Average{domain.AverageFromTenths(80), {}, domain.AverageFromTenths(90)}, "8.5"},
-		{"thirds", []domain.Average{domain.AverageFromTenths(80), domain.AverageFromTenths(80), domain.AverageFromTenths(81)}, "8.0"},     // 8.0333
-		{"two thirds", []domain.Average{domain.AverageFromTenths(80), domain.AverageFromTenths(81), domain.AverageFromTenths(81)}, "8.1"}, // 8.0666
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, domain.GeneralAverage(tt.subjects).String())
+// The general average is the exact mean of the subjects' EXACT averages,
+// truncated once at the end (subjects without grades are ignored).
+func TestGeneralAverage_SharedVectors(t *testing.T) {
+	for _, tc := range loadAverageVectors(t).General {
+		t.Run(tc.Want, func(t *testing.T) {
+			subjects := make([]domain.Average, 0, len(tc.Subjects))
+			for _, s := range tc.Subjects {
+				subjects = append(subjects, domain.SubjectAverage(parseValues(t, s)))
+			}
+			assert.Equal(t, tc.Want, domain.GeneralAverage(subjects).String(), "subjects %v", tc.Subjects)
 		})
 	}
-	assert.False(t, domain.GeneralAverage([]domain.Average{{}, {}}).Present(), "no subject graded ⇒ no general average")
 }
 
-func TestAverageTenths(t *testing.T) {
-	a := domain.AverageFromTenths(85)
-	assert.Equal(t, 85, a.Tenths())
-	assert.Equal(t, "8.5", a.String())
+// A stored average (report_cards / report_card_lines keep 2 decimals) reads
+// back exactly as it was frozen.
+func TestAverageFromHundredths(t *testing.T) {
+	a := domain.AverageFromHundredths(866)
+	assert.True(t, a.Present())
+	assert.Equal(t, 866, a.Hundredths())
+	assert.Equal(t, "8.66", a.String())
+	assert.Equal(t, "8.5", domain.AverageFromHundredths(850).String())
+	assert.Equal(t, "10", domain.AverageFromHundredths(1000).String())
+}
+
+// Two averages are the same when they print the same: a re-close comparing a
+// fresh exact average (26/3) with the stored, truncated one (8.66) must not
+// see a change.
+func TestAverageSameAs(t *testing.T) {
+	fresh := domain.SubjectAverage(parseValues(t, []string{"9", "8", "9"}))
+	assert.True(t, fresh.SameAs(domain.AverageFromHundredths(866)))
+	assert.False(t, fresh.SameAs(domain.AverageFromHundredths(867)))
+	assert.True(t, domain.Average{}.SameAs(domain.Average{}))
+	assert.False(t, fresh.SameAs(domain.Average{}))
 }

@@ -52,7 +52,7 @@ func (r *Repository) UpsertGradeEntry(ctx context.Context, e domain.GradeEntry) 
 	model := fromDomain(e)
 	var out domain.GradeEntry
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
-		if err := r.guardPeriod(tx, ports.PeriodLock{TermID: model.TermID}); err != nil {
+		if err := r.guardPeriod(tx, ports.PeriodLock{TermID: model.TermID}, domain.CodeMonthLocked); err != nil {
 			return err
 		}
 		res := tx.Clauses(clause.OnConflict{

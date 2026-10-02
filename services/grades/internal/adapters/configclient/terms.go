@@ -109,7 +109,7 @@ func (c *Client) levelGroups(ctx context.Context, cycleID, levelID string) ([]po
 		if !ok {
 			continue
 		}
-		out = append(out, ports.GroupRef{ID: g.GetId(), Label: groupLabel(grade, g.GetName())})
+		out = append(out, ports.GroupRef{ID: g.GetId(), Label: groupLabel(grade, g.GetName()), GradeLevelID: g.GetGradeLevelId()})
 	}
 	return out, nil
 }

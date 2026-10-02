@@ -116,7 +116,9 @@ type GradeEntryRepository interface {
 // LevelRef is the grades-owned view of the level a group belongs to: whether it
 // captures numeric grades at all and on which scale (config, T6).
 type LevelRef struct {
-	ID             string
+	ID string
+	// GradeLevelID is the group's grade (whose evaluation periods it uses).
+	GradeLevelID   string
 	GradingEnabled bool
 	Scale          domain.GradingScale
 	// Deleting is true while the level's deletion runs (ADR 0021): writes
@@ -163,10 +165,19 @@ type CatalogReader interface {
 	LevelCatalog(ctx context.Context, cycleID, levelID string) (LevelCatalog, error)
 }
 
-// GroupRef is a group of a level with the label a report card prints ("1° A").
+// GroupRef is a group of a level with the label a report card prints ("1° A")
+// and its grade (whose evaluation periods its pupils are graded in).
 type GroupRef struct {
-	ID    string
-	Label string
+	ID           string
+	Label        string
+	GradeLevelID string
+}
+
+// EvaluationPeriodReader reads evaluation periods from config (T14, ADR 0029)
+// by RPC: a cycle's periods, narrowed to one level's grades and/or one grade
+// when those ids are set, ordered by grade then ordinal.
+type EvaluationPeriodReader interface {
+	EvaluationPeriods(ctx context.Context, cycleID, levelID, gradeLevelID string) ([]domain.EvaluationPeriod, error)
 }
 
 // LevelCatalog is one level's academic catalog in one cycle, as a period's
@@ -198,31 +209,34 @@ type StudentDirectory interface {
 	StudentsByIDs(ctx context.Context, ids []string) (map[string]StudentRef, error)
 }
 
-// MonthlyGradeRepository loads and persists monthly grades. All access is
+// PeriodGradeRepository loads and persists period grades (T15). All access is
 // tenant-scoped for RLS (the adapter binds app.current_tenant per transaction).
-type MonthlyGradeRepository interface {
-	// UpsertMonthlyGrade inserts the grade or updates value/teacher/captured_by
-	// of the existing row on the (tenant, enrollment, subject, month) key, and
-	// returns the stored row (with its id and updated_at). When lock names a
-	// term, the write re-checks that term's closure INSIDE its transaction,
-	// serialised against a close, and refuses a closed one with MONTH_LOCKED.
-	UpsertMonthlyGrade(ctx context.Context, g domain.MonthlyGrade, lock PeriodLock) (domain.MonthlyGrade, error)
-	// DeleteMonthlyGrade removes the grade on the key; no row is not an error.
-	// lock works as for UpsertMonthlyGrade.
-	DeleteMonthlyGrade(ctx context.Context, enrollmentID, subjectID string, month domain.Month, lock PeriodLock) error
+type PeriodGradeRepository interface {
+	// UpsertPeriodGrade inserts the grade or updates value/captured_by(_name)
+	// of the existing row on the (tenant, enrollment, subject, period) key,
+	// and returns the stored row. When lock names a term, the write re-checks
+	// that term's closure INSIDE its transaction, serialised against a close,
+	// and refuses a closed one with PERIOD_LOCKED.
+	UpsertPeriodGrade(ctx context.Context, g domain.PeriodGrade, lock PeriodLock) (domain.PeriodGrade, error)
+	// DeletePeriodGrade removes the grade on the key; no row is not an error.
+	// lock works as for UpsertPeriodGrade.
+	DeletePeriodGrade(ctx context.Context, enrollmentID, subjectID, periodID string, lock PeriodLock) error
 	// PeriodClosures reads the stored closures of these terms in ONE query,
 	// keyed by term id; a term never closed is absent (open, version 0).
 	PeriodClosures(ctx context.Context, termIDs []string) (map[string]domain.PeriodClosure, error)
-	// MonthlyGradesForEnrollments lists, in ONE query, every grade of these
-	// enrollments in these months. Empty ids or months returns nothing.
-	MonthlyGradesForEnrollments(ctx context.Context, enrollmentIDs []string, months []domain.Month) ([]domain.MonthlyGrade, error)
-	// MonthlyGradesForSheet batch-loads, in ONE query, the grades of many
-	// enrollments for one subject and month, keyed by enrollment id (absent =
-	// not captured). Empty enrollmentIDs returns an empty map without querying.
-	MonthlyGradesForSheet(ctx context.Context, enrollmentIDs []string, subjectID string, month domain.Month) (map[string]domain.MonthlyGrade, error)
-	// MonthlyGradesForEnrollment lists every monthly grade of one enrollment.
-	MonthlyGradesForEnrollment(ctx context.Context, enrollmentID string) ([]domain.MonthlyGrade, error)
-	// CountScaleViolations counts, in ONE query, the grades of these
+	// PeriodGradesForSheet batch-loads, in ONE query, the grades of many
+	// enrollments for one subject and period, keyed by enrollment id (absent
+	// = not captured). Empty enrollmentIDs returns an empty map.
+	PeriodGradesForSheet(ctx context.Context, enrollmentIDs []string, subjectID, periodID string) (map[string]domain.PeriodGrade, error)
+	// PeriodGradesForEnrollment lists every period grade of one enrollment.
+	PeriodGradesForEnrollment(ctx context.Context, enrollmentID string) ([]domain.PeriodGrade, error)
+	// PeriodGradesForEnrollments lists, in ONE query, every grade of these
+	// enrollments in these periods. Empty ids or periods returns nothing.
+	PeriodGradesForEnrollments(ctx context.Context, enrollmentIDs, periodIDs []string) ([]domain.PeriodGrade, error)
+	// PeriodsWithGrades answers which of periodIDs hold at least one grade,
+	// in ONE query. Empty periodIDs returns nothing.
+	PeriodsWithGrades(ctx context.Context, periodIDs []string) ([]string, error)
+	// CountScaleViolations counts, in ONE query, the period grades of these
 	// enrollments that check refuses. Empty enrollmentIDs counts 0.
 	CountScaleViolations(ctx context.Context, enrollmentIDs []string, check ScaleCheck) (int, error)
 }
@@ -234,8 +248,8 @@ type ScaleCheck struct {
 	Scale          domain.GradingScale
 }
 
-// PeriodLock names the term whose closure guards a monthly write; the zero
-// value (no term covers the month) guards nothing.
+// PeriodLock names the term whose closure guards a grade write; the zero
+// value (no term of the level has the period's ordinal) guards nothing.
 type PeriodLock struct {
 	TermID string
 }
@@ -247,8 +261,8 @@ type PeriodTx interface {
 	// Closure is the locked term's stored closure; found is false when the term
 	// was never closed.
 	Closure(ctx context.Context) (closure domain.PeriodClosure, found bool, err error)
-	// MonthlyGrades reads the enrollments' grades in these months, under the lock.
-	MonthlyGrades(ctx context.Context, enrollmentIDs []string, months []domain.Month) ([]domain.MonthlyGrade, error)
+	// PeriodGrades reads the enrollments' grades in these periods, under the lock.
+	PeriodGrades(ctx context.Context, enrollmentIDs, periodIDs []string) ([]domain.PeriodGrade, error)
 	// SaveClosure stores the closure (insert or update every column).
 	SaveClosure(ctx context.Context, c domain.PeriodClosure) error
 	// QueueEvents writes events to the outbox in THIS transaction: they are

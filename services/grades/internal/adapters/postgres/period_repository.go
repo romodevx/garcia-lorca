@@ -16,7 +16,7 @@ import (
 // Compile-time proof the adapter satisfies the period port.
 var _ ports.PeriodRepository = (*Repository)(nil)
 
-// msgPeriodClosed is what a write into a closed period's month reads.
+// msgPeriodClosed is what a write into a closed period reads.
 const msgPeriodClosed = "El periodo está cerrado"
 
 // Period locks. A term's closer and its grade writers serialise on ONE
@@ -35,9 +35,11 @@ func (r *Repository) periodLockKey(termID string) string {
 	return "grades.period:" + r.tenantID + ":" + termID
 }
 
-// guardPeriod runs inside a monthly write's transaction: with a term named, it
-// takes the term's shared lock and refuses the write when the term is closed.
-func (r *Repository) guardPeriod(tx *gorm.DB, lock ports.PeriodLock) error {
+// guardPeriod runs inside a grade write's transaction: with a term named, it
+// takes the term's shared lock and refuses the write with code when the term
+// is closed (PERIOD_LOCKED for a period grade, MONTH_LOCKED for the legacy
+// per-term capture).
+func (r *Repository) guardPeriod(tx *gorm.DB, lock ports.PeriodLock, code domain.RefusalCode) error {
 	if lock.TermID == "" {
 		return nil
 	}
@@ -52,7 +54,7 @@ func (r *Repository) guardPeriod(tx *gorm.DB, lock ports.PeriodLock) error {
 	case err != nil:
 		return glerrors.Wrap(glerrors.KindInternal, "reading the period closure", err)
 	case status == string(domain.PeriodClosed):
-		return domain.Conflict(domain.CodeMonthLocked, msgPeriodClosed)
+		return domain.Conflict(code, msgPeriodClosed)
 	default:
 		return nil
 	}
@@ -87,42 +89,6 @@ func (r *Repository) PeriodClosures(ctx context.Context, termIDs []string) (map[
 			return nil, err
 		}
 		out[m.TermID] = c
-	}
-	return out, nil
-}
-
-// MonthlyGradesForEnrollments lists the grades of these enrollments in these
-// months in ONE query.
-func (r *Repository) MonthlyGradesForEnrollments(ctx context.Context, enrollmentIDs []string, months []domain.Month) ([]domain.MonthlyGrade, error) {
-	var out []domain.MonthlyGrade
-	err := r.withTenant(ctx, func(tx *gorm.DB) error {
-		var err error
-		out, err = monthlyGradesIn(tx, enrollmentIDs, months)
-		return err
-	})
-	return out, err
-}
-
-func monthlyGradesIn(tx *gorm.DB, enrollmentIDs []string, months []domain.Month) ([]domain.MonthlyGrade, error) {
-	if len(enrollmentIDs) == 0 || len(months) == 0 {
-		return []domain.MonthlyGrade{}, nil
-	}
-	days := make([]time.Time, 0, len(months))
-	for _, m := range months {
-		days = append(days, m.FirstDay())
-	}
-	var rows []monthlyGradeModel
-	if err := tx.Where("enrollment_id IN ? AND month IN ?", enrollmentIDs, days).
-		Order("enrollment_id, subject_id, month").Find(&rows).Error; err != nil {
-		return nil, glerrors.Wrap(glerrors.KindInternal, "reading monthly grades", err)
-	}
-	out := make([]domain.MonthlyGrade, 0, len(rows))
-	for _, m := range rows {
-		g, err := toDomainMonthly(m)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, g)
 	}
 	return out, nil
 }
@@ -197,8 +163,8 @@ func (p *periodTx) Closure(context.Context) (domain.PeriodClosure, bool, error) 
 	return c, err == nil, err
 }
 
-func (p *periodTx) MonthlyGrades(_ context.Context, enrollmentIDs []string, months []domain.Month) ([]domain.MonthlyGrade, error) {
-	return monthlyGradesIn(p.tx, enrollmentIDs, months)
+func (p *periodTx) PeriodGrades(_ context.Context, enrollmentIDs, periodIDs []string) ([]domain.PeriodGrade, error) {
+	return periodGradesIn(p.tx, enrollmentIDs, periodIDs)
 }
 
 // SaveClosure inserts the closure or, on (tenant, term), updates EVERY column

@@ -48,12 +48,13 @@ var laScope = levelarchive.Scope{
 
 var wantGradesCounts = levelarchive.Counts{
 	"monthlyGrades": 1, "gradeEntries": 1, "periodClosures": 1,
-	"reportCards": 1, "reportCardLines": 1, "gradesOutbox": 1,
+	"reportCards": 1, "reportCardLines": 1, "gradesOutbox": 1, "periodGrades": 1,
 }
 
 // gradesTables are the tables the level trash reaches, with the tenant filter.
 var gradesTables = []string{
 	"report_card_lines", "report_cards", "period_closures", "monthly_grades", "grade_entries", "grades_outbox",
+	"period_grades",
 }
 
 // seedGradesLevel wipes tenant G and builds one row of every kind for the
@@ -75,6 +76,8 @@ func seedGradesLevel(t *testing.T) {
 			  VALUES (?, ?, ?, ?, '2026-09-01', 8.5, ?)`, []any{tenantG, s.enr, s.subj, laPerson, laPerson}},
 			{`INSERT INTO grade_entries (tenant_id, enrollment_id, subject_id, term_id, teacher_id, value)
 			  VALUES (?, ?, ?, ?, ?, 9)`, []any{tenantG, s.enr, s.subj, s.term, laPerson}},
+			{`INSERT INTO period_grades (tenant_id, enrollment_id, subject_id, period_id, value, captured_by)
+			  VALUES (?, ?, ?, ?, 9, ?)`, []any{tenantG, s.enr, s.subj, laCycle, laPerson}},
 			{`INSERT INTO period_closures (tenant_id, term_id, cycle_id, level_id, status, version, closed_at)
 			  VALUES (?, ?, ?, ?, 'closed', 1, now())`, []any{tenantG, s.term, laCycle, s.level}},
 			{`INSERT INTO report_cards (id, tenant_id, term_id, cycle_id, level_id, group_id, enrollment_id, student_id,
@@ -295,9 +298,9 @@ func TestGradesLevelRestoreKeepsUnrestoredEnrollmentsArchived(t *testing.T) {
 		assert.NotEmpty(t, sk.Reason)
 	}
 	assert.Equal(t, map[string]int64{
-		"monthlyGrades": 1, "gradeEntries": 1, "reportCards": 1, "reportCardLines": 1, "gradesOutbox": 1,
+		"monthlyGrades": 1, "gradeEntries": 1, "reportCards": 1, "reportCardLines": 1, "gradesOutbox": 1, "periodGrades": 1,
 	}, skipped)
-	for _, table := range []string{"monthly_grades", "grade_entries", "report_cards", "report_card_lines", "grades_outbox"} {
+	for _, table := range []string{"monthly_grades", "grade_entries", "report_cards", "report_card_lines", "grades_outbox", "period_grades"} {
 		assert.Equal(t, int64(1), archivedG(t, batch, table), "%s of the unrestored enrollment stays archived", table)
 	}
 	var live int64
@@ -319,7 +322,7 @@ func TestGradesLevelPurgeBatchTouchesOnlyThatBatch(t *testing.T) {
 
 	n, err := repo.PurgeLevelBatch(ctx, doomed)
 	require.NoError(t, err)
-	assert.Equal(t, int64(7), n, "six data rows and the marker")
+	assert.Equal(t, int64(8), n, "seven data rows and the marker")
 	var left, keptRows int64
 	require.NoError(t, superDB.Raw("SELECT count(*) FROM grades_deletion_archive WHERE batch_id = ?", doomed).Scan(&left).Error)
 	require.NoError(t, superDB.Raw("SELECT count(*) FROM grades_deletion_archive WHERE batch_id = ?", kept).Scan(&keptRows).Error)

@@ -2,6 +2,7 @@ package configclient
 
 import (
 	"context"
+	"sort"
 	"time"
 
 	connect "connectrpc.com/connect"
@@ -27,11 +28,13 @@ const msgScaleNotConfigured = "La escala de calificación del nivel no está con
 // zero scale would silently refuse every grade. A level that takes no numeric
 // grades needs no usable scale.
 func (c *Client) LevelOfGroup(ctx context.Context, groupID string) (ports.LevelRef, error) {
-	l, err := c.levelOfGroup(ctx, groupID)
+	l, gradeID, err := c.levelOfGroup(ctx, groupID)
 	if err != nil {
 		return ports.LevelRef{}, err
 	}
-	return toLevelRef(l)
+	ref, err := toLevelRef(l)
+	ref.GradeLevelID = gradeID
+	return ref, err
 }
 
 // toLevelRef projects a level, its grading scale and whether it is being
@@ -61,27 +64,68 @@ func isDeleting(l *configv1.Level) bool {
 // LevelIDOfGroup resolves group → grade level → level id and deletion state,
 // whatever the level's scale says.
 func (c *Client) LevelIDOfGroup(ctx context.Context, groupID string) (ports.LevelKey, error) {
-	l, err := c.levelOfGroup(ctx, groupID)
+	l, _, err := c.levelOfGroup(ctx, groupID)
 	if err != nil {
 		return ports.LevelKey{}, err
 	}
 	return ports.LevelKey{ID: l.GetId(), Deleting: isDeleting(l)}, nil
 }
 
-func (c *Client) levelOfGroup(ctx context.Context, groupID string) (*configv1.Level, error) {
+// levelOfGroup walks group → grade level → level and answers the level and
+// the group's grade id.
+func (c *Client) levelOfGroup(ctx context.Context, groupID string) (*configv1.Level, string, error) {
 	group, err := c.rpc.GetGroup(ctx, connect.NewRequest(&configv1.GetGroupRequest{Id: groupID}))
 	if err != nil {
-		return nil, mapConfigErr(err, "group")
+		return nil, "", mapConfigErr(err, "group")
 	}
-	grade, err := c.rpc.GetGradeLevel(ctx, connect.NewRequest(&configv1.GetGradeLevelRequest{Id: group.Msg.GetGroup().GetGradeLevelId()}))
+	gradeID := group.Msg.GetGroup().GetGradeLevelId()
+	grade, err := c.rpc.GetGradeLevel(ctx, connect.NewRequest(&configv1.GetGradeLevelRequest{Id: gradeID}))
 	if err != nil {
-		return nil, mapConfigErr(err, "grade level")
+		return nil, "", mapConfigErr(err, "grade level")
 	}
 	level, err := c.rpc.GetLevel(ctx, connect.NewRequest(&configv1.GetLevelRequest{Id: grade.Msg.GetGradeLevel().GetLevelId()}))
 	if err != nil {
-		return nil, mapConfigErr(err, "level")
+		return nil, "", mapConfigErr(err, "level")
 	}
-	return level.Msg.GetLevel(), nil
+	return level.Msg.GetLevel(), gradeID, nil
+}
+
+// Compile-time proof the adapter satisfies the evaluation-period port too.
+var _ ports.EvaluationPeriodReader = (*Client)(nil)
+
+// EvaluationPeriods reads a cycle's evaluation periods (T14, ADR 0029) in ONE
+// call, narrowed to a level's grades and/or one grade when set, ordered by
+// grade then ordinal. Dates are calendar days at midnight UTC.
+func (c *Client) EvaluationPeriods(ctx context.Context, cycleID, levelID, gradeLevelID string) ([]domain.EvaluationPeriod, error) {
+	res, err := c.rpc.ListEvaluationPeriods(ctx, connect.NewRequest(&configv1.ListEvaluationPeriodsRequest{
+		CycleId: cycleID, LevelId: levelID, GradeLevelId: gradeLevelID,
+	}))
+	if err != nil {
+		return nil, mapConfigErr(err, "evaluation periods")
+	}
+	out := make([]domain.EvaluationPeriod, 0, len(res.Msg.GetPeriods()))
+	for _, p := range res.Msg.GetPeriods() {
+		out = append(out, domain.EvaluationPeriod{
+			ID: p.GetId(), GradeLevelID: p.GetGradeLevelId(), Ordinal: int(p.GetOrdinal()), Name: p.GetName(),
+			StartsOn: calendarDay(p.GetStartsOn()), EndsOn: calendarDay(p.GetEndsOn()),
+		})
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].GradeLevelID != out[j].GradeLevelID {
+			return out[i].GradeLevelID < out[j].GradeLevelID
+		}
+		return out[i].Ordinal < out[j].Ordinal
+	})
+	return out, nil
+}
+
+// calendarDay reads a config date (a timestamp at midnight UTC) as the day.
+func calendarDay(ts *timestamppb.Timestamp) time.Time {
+	if ts == nil {
+		return time.Time{}
+	}
+	y, m, d := ts.AsTime().UTC().Date()
+	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
 }
 
 // ActiveCycle is the school's active cycle; false when none is active.

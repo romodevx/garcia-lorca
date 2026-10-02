@@ -75,21 +75,29 @@ var issuedAt = time.Date(2026, 12, 1, 10, 0, 0, 0, time.UTC)
 
 func sampleCard(t *testing.T) domain.ReportCard {
 	t.Helper()
-	sep, err := domain.ParseMonth("2026-09")
-	require.NoError(t, err)
-	oct, err := domain.ParseMonth("2026-10")
-	require.NoError(t, err)
 	scale, err := domain.NewGradingScale(500, 1000, 600, 1)
 	require.NoError(t, err)
-	g, err := domain.NewMonthlyGrade(domain.MonthlyGradeFields{ID: "g1", TenantID: testTenant, EnrollmentID: enrollmentID, SubjectID: subjectID,
-		TeacherID: teacherID, CapturedBy: "u", Month: sep, Value: domain.GradeValueFromHundredths(950)})
-	require.NoError(t, err)
+	var grades []domain.PeriodGrade
+	for _, c := range []struct {
+		period string
+		whole  int
+	}{{"p1", 9}, {"p2", 8}, {"p3", 9}} {
+		g, err := domain.NewPeriodGrade(domain.PeriodGradeFields{ID: "g-" + c.period, TenantID: testTenant, EnrollmentID: enrollmentID,
+			SubjectID: subjectID, PeriodID: c.period, CapturedBy: "u", Value: domain.GradeValueFromHundredths(c.whole * 100)})
+		require.NoError(t, err)
+		grades = append(grades, g)
+	}
 	rc, err := domain.BuildReportCard(domain.ReportCardHeader{
 		ID: "rc-1", TenantID: testTenant, TermID: termID, CycleID: cycleID, LevelID: levelID, GroupID: groupID,
 		EnrollmentID: enrollmentID, StudentID: "stu-1", Version: 2, IssuedAt: issuedAt, IssuedBy: "dir",
 		StudentName: "Ana López", EnrollmentNumber: "2026-00001", GroupLabel: "1° · A", LevelName: "Primaria",
-		CycleName: "2026-2027", TermName: "1.er trimestre", TermOrdinal: 1, Months: []domain.Month{sep, oct}, Scale: scale,
-	}, []domain.ReportCardSubject{{ID: subjectID, Name: "Matemáticas"}, {ID: "subj-2", Name: "Español"}}, []domain.MonthlyGrade{g})
+		CycleName: "2026-2027", TermName: "3.er trimestre", TermOrdinal: 3, Scale: scale,
+		Periods: []domain.ReportCardPeriod{
+			{ID: "p1", Ordinal: 1, Name: "1.er trimestre", StartsOn: issuedAt},
+			{ID: "p2", Ordinal: 2, Name: "2.º trimestre", StartsOn: issuedAt},
+			{ID: "p3", Ordinal: 3, Name: "3.er trimestre", StartsOn: issuedAt},
+		},
+	}, []domain.ReportCardSubject{{ID: subjectID, Name: "Matemáticas"}, {ID: "subj-2", Name: "Español"}}, grades)
 	require.NoError(t, err)
 	return rc
 }
@@ -97,11 +105,10 @@ func sampleCard(t *testing.T) domain.ReportCard {
 func TestListPeriodsRPC(t *testing.T) {
 	closed, err := domain.NewOpenPeriod(termID, cycleID, levelID).Close(domain.Actor{ID: "dir", Name: "Directora"}, issuedAt, nil)
 	require.NoError(t, err)
-	sep, err := domain.ParseMonth("2026-09")
-	require.NoError(t, err)
 	p := &stubPeriods{periods: []usecase.Period{{
-		Term:      ports.TermRef{ID: termID, CycleID: cycleID, LevelID: levelID, Name: "1.er trimestre", Ordinal: 1, Months: []domain.Month{sep}},
+		Term:      ports.TermRef{ID: termID, CycleID: cycleID, LevelID: levelID, Name: "1.er trimestre", Ordinal: 1},
 		LevelName: "Primaria", Closure: closed, Expected: 10, Captured: 7,
+		StartsOn: time.Date(2026, 8, 24, 0, 0, 0, 0, time.UTC), EndsOn: time.Date(2026, 11, 30, 0, 0, 0, 0, time.UTC),
 	}, {
 		Term: ports.TermRef{ID: "term-2", Name: "2.º trimestre", Ordinal: 2}, Closure: domain.NewOpenPeriod("term-2", cycleID, levelID),
 	}}}
@@ -113,7 +120,9 @@ func TestListPeriodsRPC(t *testing.T) {
 	assert.Equal(t, "1.er trimestre", first.GetTermName())
 	assert.Equal(t, int32(1), first.GetOrdinal())
 	assert.Equal(t, "Primaria", first.GetLevelName())
-	assert.Equal(t, []string{"2026-09"}, first.GetMonths())
+	assert.Empty(t, first.GetMonths(), "a term has no months since T15")
+	assert.Equal(t, "2026-08-24", first.GetStartsOn())
+	assert.Equal(t, "2026-11-30", first.GetEndsOn())
 	assert.Equal(t, "closed", first.GetStatus())
 	assert.Equal(t, int32(1), first.GetVersion())
 	assert.Equal(t, "Directora", first.GetClosedByName())
@@ -122,20 +131,22 @@ func TestListPeriodsRPC(t *testing.T) {
 	second := res.Msg.GetPeriods()[1]
 	assert.Equal(t, "open", second.GetStatus())
 	assert.Nil(t, second.GetClosedAt(), "an open, never-closed period has no closed_at")
+	assert.Empty(t, second.GetStartsOn(), "no grade has the period")
 }
 
 func TestGetPeriodProgressRPC(t *testing.T) {
-	sep, err := domain.ParseMonth("2026-09")
-	require.NoError(t, err)
-	p := &stubPeriods{progress: usecase.PeriodProgress{TermID: termID, Months: []domain.Month{sep}, UnfinishedMonths: []domain.Month{sep}, Expected: 4, Captured: 1,
+	p := &stubPeriods{progress: usecase.PeriodProgress{TermID: termID, Unfinished: true, EndsOn: time.Date(2026, 11, 30, 0, 0, 0, 0, time.UTC),
+		GroupsWithoutPeriod: []string{"2° · A"}, Expected: 4, Captured: 1,
 		Missing: []usecase.MissingGrades{{GroupID: groupID, GroupLabel: "1° · A", SubjectID: subjectID, SubjectName: "Matemáticas", TeacherName: "Gabriela", Missing: 3}}}}
 	res, err := periodsHandler(p).GetPeriodProgress(context.Background(), connect.NewRequest(&gradesv1.GetPeriodProgressRequest{TermId: termID}))
 	require.NoError(t, err)
 	m := res.Msg
 	assert.Equal(t, int32(4), m.GetExpected())
 	assert.Equal(t, int32(1), m.GetCaptured())
-	assert.Equal(t, []string{"2026-09"}, m.GetMonths())
-	assert.Equal(t, []string{"2026-09"}, m.GetUnfinishedMonths())
+	assert.True(t, m.GetUnfinished())
+	assert.Equal(t, "2026-11-30", m.GetEndsOn())
+	assert.Equal(t, []string{"2° · A"}, m.GetGroupsWithoutPeriod())
+	assert.Empty(t, m.GetMonths())
 	require.Len(t, m.GetMissing(), 1)
 	assert.Equal(t, &gradesv1.MissingGrades{GroupId: groupID, GroupLabel: "1° · A", SubjectId: subjectID, SubjectName: "Matemáticas", TeacherName: "Gabriela", MissingCount: 3}, m.GetMissing()[0])
 }
@@ -184,12 +195,12 @@ func TestReportCardRPCs(t *testing.T) {
 	assert.Equal(t, "rc-1", sum.GetId())
 	assert.Equal(t, "Ana López", sum.GetStudentName())
 	assert.Equal(t, "1° · A", sum.GetGroupLabel())
-	assert.Equal(t, "1.er trimestre", sum.GetTermName())
+	assert.Equal(t, "3.er trimestre", sum.GetTermName())
 	assert.Equal(t, int32(2), sum.GetVersion())
-	assert.Equal(t, "9.5", sum.GetGeneralAverage())
+	assert.Equal(t, "8.66", sum.GetGeneralAverage(), "exact mean truncated to 2 decimals")
 	assert.Equal(t, enrollmentID, sum.GetEnrollmentId())
 	assert.Equal(t, issuedAt, sum.GetIssuedAt().AsTime())
-	assert.Equal(t, int32(1), sum.GetTermOrdinal())
+	assert.Equal(t, int32(3), sum.GetTermOrdinal())
 	assert.Equal(t, cycleID, sum.GetCycleId())
 	assert.Equal(t, "2026-2027", sum.GetCycleName())
 
@@ -200,51 +211,21 @@ func TestReportCardRPCs(t *testing.T) {
 	assert.Equal(t, "2026-00001", card.GetEnrollmentNumber())
 	assert.Equal(t, "Primaria", card.GetLevelName())
 	assert.Equal(t, "2026-2027", card.GetCycleName())
-	assert.Equal(t, int32(1), card.GetTermOrdinal())
-	assert.Equal(t, []string{"2026-09", "2026-10"}, card.GetMonths())
+	assert.Equal(t, int32(3), card.GetTermOrdinal())
+	assert.Empty(t, card.GetMonths())
+	require.Len(t, card.GetPeriods(), 3)
+	assert.Equal(t, &gradesv1.ReportCardPeriod{Id: "p2", Ordinal: 2, Name: "2.º trimestre"}, card.GetPeriods()[1])
 	assert.Equal(t, &gradesv1.GradingScale{MinHundredths: 500, MaxHundredths: 1000, Decimals: 1, PassingHundredths: 600}, card.GetScale())
 	require.Len(t, card.GetLines(), 2)
-	assert.Equal(t, map[string]string{"2026-09": "9.5"}, card.GetLines()[0].GetMonthValues())
-	assert.Equal(t, "9.5", card.GetLines()[0].GetTermAverage())
+	assert.Equal(t, map[string]string{"p1": "9", "p2": "8", "p3": "9"}, card.GetLines()[0].GetPeriodValues())
+	assert.Empty(t, card.GetLines()[0].GetMonthValues())
+	assert.Equal(t, "8.66", card.GetLines()[0].GetTermAverage())
 	assert.Equal(t, "", card.GetLines()[1].GetTermAverage(), "no grade ⇒ empty, never 0")
 	assert.Equal(t, int32(2), card.GetLines()[1].GetPosition())
 
 	p.err = glerrors.ErrNotFound
 	_, err = periodsHandler(p).GetReportCard(context.Background(), connect.NewRequest(&gradesv1.GetReportCardRequest{Id: "nope"}))
 	assert.Equal(t, connect.CodeNotFound, connect.CodeOf(err))
-}
-
-// The sheet carries the months a closed period locks.
-func TestMonthlySheetCarriesClosedMonths(t *testing.T) {
-	sep, err := domain.ParseMonth("2026-09")
-	require.NoError(t, err)
-	asg := baseAssignments()
-	asg.terms["term-t1"] = ports.TermRef{ID: "term-t1", CycleID: cycleID, LevelID: levelID, Months: []domain.Month{sep}}
-	repo := newFakeMonthly()
-	closed, err := domain.NewOpenPeriod("term-t1", cycleID, levelID).Close(domain.Actor{ID: "dir"}, issuedAt, nil)
-	require.NoError(t, err)
-	repo.closures["term-t1"] = closed
-	enr := &fakeEnrollments{byID: map[string]ports.EnrollmentRef{enrollmentID: activeEnrollment(enrollmentID, "stu-1")}}
-	monthly := usecase.NewMonthlyGradesService(repo, asg, newFakeCatalog(), enr, testTenant, func() string { return "id" }, monthlyNow)
-	h := grpcadapter.NewGradesHandler(nil, monthly, &stubPeriods{}, usecase.NewHealthService("grades"))
-
-	res, err := h.GetMonthlySheet(context.Background(), connect.NewRequest(&gradesv1.GetMonthlySheetRequest{AssignmentId: assignmentID, Month: "2026-09"}))
-	require.NoError(t, err)
-	assert.Equal(t, []string{"2026-09"}, res.Msg.GetClosedMonths())
-	assert.Contains(t, res.Msg.GetMonths(), "2026-09")
-	assert.Greater(t, len(res.Msg.GetMonths()), 1, "every month of the cycle, mapped or not")
-	assert.NotContains(t, res.Msg.GetUnmappedMonths(), "2026-09")
-	assert.Len(t, res.Msg.GetUnmappedMonths(), len(res.Msg.GetMonths())-1, "the rest belong to no term")
-	assert.False(t, res.Msg.GetEditable())
-	assert.Equal(t, "El periodo está cerrado", res.Msg.GetReadOnlyReason())
-
-	_, err = h.UpsertMonthlyGrade(context.Background(), connect.NewRequest(&gradesv1.UpsertMonthlyGradeRequest{
-		AssignmentId: assignmentID, Month: "2026-09", EnrollmentId: enrollmentID, Value: "9", CapturedBy: "u", SchoolWide: true,
-	}))
-	assert.Equal(t, connect.CodeAlreadyExists, connect.CodeOf(err))
-	var ce *connect.Error
-	require.ErrorAs(t, err, &ce)
-	assert.Equal(t, "MONTH_LOCKED", ce.Meta().Get(grpcadapter.ErrorCodeMeta))
 }
 
 // ClosedTerms answers which requested terms are closed, in one call.

@@ -32,23 +32,23 @@ type gradeEntryModel struct {
 
 func (gradeEntryModel) TableName() string { return "grade_entries" }
 
-// monthlyGradeModel is the GORM row for `monthly_grades` (T6). Month is the
-// first day of the month (date column); Value is numeric(5,2), read through a
-// float64 and rounded back to exact hundredths by the mapper.
-type monthlyGradeModel struct {
-	ID           string    `gorm:"column:id;primaryKey"`
-	TenantID     string    `gorm:"column:tenant_id"`
-	EnrollmentID string    `gorm:"column:enrollment_id"`
-	SubjectID    string    `gorm:"column:subject_id"`
-	TeacherID    string    `gorm:"column:teacher_id"`
-	Month        time.Time `gorm:"column:month;type:date"`
-	Value        float64   `gorm:"column:value"`
-	CapturedBy   string    `gorm:"column:captured_by"`
-	CreatedAt    time.Time `gorm:"column:created_at;->"`
-	UpdatedAt    time.Time `gorm:"column:updated_at;->"`
+// periodGradeModel is the GORM row for `period_grades` (T15). Value is the
+// numeric(5,2) column read and written as exact decimal TEXT ("9", "9.00"),
+// never through a float.
+type periodGradeModel struct {
+	ID             string    `gorm:"column:id;primaryKey"`
+	TenantID       string    `gorm:"column:tenant_id"`
+	EnrollmentID   string    `gorm:"column:enrollment_id"`
+	SubjectID      string    `gorm:"column:subject_id"`
+	PeriodID       string    `gorm:"column:period_id"`
+	Value          string    `gorm:"column:value;type:numeric"`
+	CapturedBy     string    `gorm:"column:captured_by"`
+	CapturedByName string    `gorm:"column:captured_by_name"`
+	CreatedAt      time.Time `gorm:"column:created_at;->"`
+	UpdatedAt      time.Time `gorm:"column:updated_at;->"`
 }
 
-func (monthlyGradeModel) TableName() string { return "monthly_grades" }
+func (periodGradeModel) TableName() string { return "period_grades" }
 
 // periodClosureModel is the GORM row for `period_closures` (T7). Nullable
 // columns map to pointers so a never-set instant stays NULL, never 0001-01-01.
@@ -70,8 +70,9 @@ type periodClosureModel struct {
 func (periodClosureModel) TableName() string { return "period_closures" }
 
 // reportCardModel is the GORM row for `report_cards` (T7). Averages are
-// numeric(5,2) read through *float64 (NULL = no average) and rounded back to
-// exact tenths by the mapper; months is a text[] of "YYYY-MM".
+// numeric(5,2) read and written as exact decimal text (NULL = no average);
+// months is a text[] of "YYYY-MM" (cards issued before T15) and periods the
+// jsonb array of the card's period columns (T15).
 type reportCardModel struct {
 	ID                     string         `gorm:"column:id;primaryKey"`
 	TenantID               string         `gorm:"column:tenant_id"`
@@ -93,7 +94,8 @@ type reportCardModel struct {
 	TermName               string         `gorm:"column:term_name"`
 	TermOrdinal            int            `gorm:"column:term_ordinal"`
 	Months                 pq.StringArray `gorm:"column:months;type:text[]"`
-	GeneralAverage         *float64       `gorm:"column:general_average"`
+	Periods                string         `gorm:"column:periods;type:jsonb"`
+	GeneralAverage         *string        `gorm:"column:general_average;type:numeric"`
 	ScaleMinHundredths     int            `gorm:"column:scale_min_hundredths"`
 	ScaleMaxHundredths     int            `gorm:"column:scale_max_hundredths"`
 	ScaleDecimals          int            `gorm:"column:scale_decimals"`
@@ -103,15 +105,17 @@ type reportCardModel struct {
 func (reportCardModel) TableName() string { return "report_cards" }
 
 // reportCardLineModel is the GORM row for `report_card_lines` (T7).
-// MonthValues is the jsonb object of exact decimal strings, kept as raw JSON.
+// MonthValues (before T15) and PeriodValues (T15) are jsonb objects of exact
+// decimal strings, kept as raw JSON; TermAverage is exact decimal text.
 type reportCardLineModel struct {
-	ReportCardID string   `gorm:"column:report_card_id;primaryKey"`
-	TenantID     string   `gorm:"column:tenant_id"`
-	SubjectID    string   `gorm:"column:subject_id;primaryKey"`
-	SubjectName  string   `gorm:"column:subject_name"`
-	Position     int      `gorm:"column:position"`
-	MonthValues  string   `gorm:"column:month_values;type:jsonb"`
-	TermAverage  *float64 `gorm:"column:term_average"`
+	ReportCardID string  `gorm:"column:report_card_id;primaryKey"`
+	TenantID     string  `gorm:"column:tenant_id"`
+	SubjectID    string  `gorm:"column:subject_id;primaryKey"`
+	SubjectName  string  `gorm:"column:subject_name"`
+	Position     int     `gorm:"column:position"`
+	MonthValues  string  `gorm:"column:month_values;type:jsonb"`
+	PeriodValues string  `gorm:"column:period_values;type:jsonb"`
+	TermAverage  *string `gorm:"column:term_average;type:numeric"`
 }
 
 func (reportCardLineModel) TableName() string { return "report_card_lines" }

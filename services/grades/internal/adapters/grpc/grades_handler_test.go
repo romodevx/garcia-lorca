@@ -152,18 +152,13 @@ func activeEnrollment(id, studentID string) ports.EnrollmentRef {
 	return ports.EnrollmentRef{ID: id, StudentID: studentID, GroupID: groupID, CycleID: cycleID, Status: "active"}
 }
 
-// monthlyNow is the monthly surface's clock: mid-October, so September and
-// October are gradable and November is still in the future.
-func monthlyNow() time.Time { return time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC) }
-
 func newHandler(a ports.AssignmentReader, e ports.EnrollmentReader, r ports.GradeEntryRepository) *grpcadapter.GradesHandler {
 	now := func() time.Time { return time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC) }
 	seq := 0
 	newID := func() string { seq++; return "ge-" + string(rune('0'+seq)) }
 	catalog := newFakeCatalog()
 	svc := usecase.NewGradesService(r, a, catalog, e, testTenant, newID, now)
-	monthly := usecase.NewMonthlyGradesService(newFakeMonthly(), a, catalog, e, testTenant, newID, monthlyNow)
-	return grpcadapter.NewGradesHandler(svc, monthly, &stubPeriods{}, usecase.NewHealthService("grades"))
+	return grpcadapter.NewGradesHandler(svc, newPeriodGradesService(a, e, newFakePeriodGrades()), &stubPeriods{}, usecase.NewHealthService("grades"))
 }
 
 // --- tests ------------------------------------------------------------------

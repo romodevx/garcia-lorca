@@ -24,6 +24,7 @@ const (
 	kindReportCards     = "reportCards"
 	kindPeriodClosures  = "periodClosures"
 	kindMonthlyGrades   = "monthlyGrades"
+	kindPeriodGrades    = "periodGrades"
 	kindGradeEntries    = "gradeEntries"
 	kindGradesOutbox    = "gradesOutbox"
 )
@@ -51,6 +52,10 @@ func levelSteps(s levelarchive.Scope) []gormarchive.Step {
 		{Kind: kindGradesOutbox, Table: "grades_outbox",
 			Where: "payload->>'enrollmentId' IN ? OR payload->>'termId' IN ?",
 			Args:  []any{s.EnrollmentIDs, s.TermIDs}},
+		// T15. Appended LAST so the positions of the steps above stay what
+		// batches archived before T15 recorded.
+		{Kind: kindPeriodGrades, Table: "period_grades", Where: "enrollment_id IN ? OR subject_id IN ?",
+			Args: []any{s.EnrollmentIDs, s.SubjectIDs}},
 	}
 }
 
@@ -63,6 +68,7 @@ var levelRestore = []restoreStep{
 	{kindReportCards, "report_cards", nil, gormarchive.Exclude{Column: "enrollment_id"}},
 	{kindReportCardLines, "report_card_lines", []gormarchive.Parent{{Column: "report_card_id", Table: "report_cards"}}, gormarchive.Exclude{}},
 	{kindMonthlyGrades, "monthly_grades", nil, gormarchive.Exclude{Column: "enrollment_id"}},
+	{kindPeriodGrades, "period_grades", nil, gormarchive.Exclude{Column: "enrollment_id"}},
 	{kindGradeEntries, "grade_entries", nil, gormarchive.Exclude{Column: "enrollment_id"}},
 	{kindGradesOutbox, "grades_outbox", nil, gormarchive.Exclude{Column: "payload", JSONKey: "enrollmentId"}},
 }

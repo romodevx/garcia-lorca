@@ -30,6 +30,13 @@ const (
 
 var pClock = time.Date(2026, 12, 1, 10, 0, 0, 0, time.UTC)
 
+func month(t *testing.T, raw string) domain.Month {
+	t.Helper()
+	m, err := domain.ParseMonth(raw)
+	require.NoError(t, err)
+	return m
+}
+
 func termMonths(t *testing.T) []domain.Month {
 	return []domain.Month{month(t, "2026-09"), month(t, "2026-10"), month(t, "2026-11")}
 }
@@ -41,12 +48,18 @@ func closedPeriod(t *testing.T, termID string) domain.PeriodClosure {
 	return c
 }
 
-func reportCard(t *testing.T, id, tenant, termID, enrollment, student string, version int, grades []domain.MonthlyGrade) domain.ReportCard {
-	t.Helper()
-	return reportCardOfTerm(t, id, tenant, termID, 1, enrollment, student, version, grades)
+// cardColumns are a 2.º trimestre card's columns: periods 1 and 2.
+var cardColumns = []domain.ReportCardPeriod{
+	{ID: mPeriodOne, Ordinal: 1, Name: "1.er trimestre", StartsOn: time.Date(2026, 8, 24, 0, 0, 0, 0, time.UTC)},
+	{ID: mPeriodTwo, Ordinal: 2, Name: "2.º trimestre", StartsOn: time.Date(2026, 12, 7, 0, 0, 0, 0, time.UTC)},
 }
 
-func reportCardOfTerm(t *testing.T, id, tenant, termID string, ordinal int, enrollment, student string, version int, grades []domain.MonthlyGrade) domain.ReportCard {
+func reportCard(t *testing.T, id, tenant, termID, enrollment, student string, version int, grades []domain.PeriodGrade) domain.ReportCard {
+	t.Helper()
+	return reportCardOfTerm(t, id, tenant, termID, 2, enrollment, student, version, grades)
+}
+
+func reportCardOfTerm(t *testing.T, id, tenant, termID string, ordinal int, enrollment, student string, version int, grades []domain.PeriodGrade) domain.ReportCard {
 	t.Helper()
 	scale, err := domain.NewGradingScale(500, 1000, 600, 1)
 	require.NoError(t, err)
@@ -54,7 +67,7 @@ func reportCardOfTerm(t *testing.T, id, tenant, termID string, ordinal int, enro
 		ID: id, TenantID: tenant, TermID: termID, CycleID: pCycle, LevelID: pLevel, GroupID: pGroup,
 		EnrollmentID: enrollment, StudentID: student, Version: version, IssuedAt: pClock, IssuedBy: pDirector,
 		StudentName: "Ana López Ñúñez", EnrollmentNumber: "2026-00042", GroupLabel: "1° A", LevelName: "Primaria",
-		CycleName: "2026-2027", TermName: "1.er trimestre", TermOrdinal: ordinal, Months: termMonths(t), Scale: scale,
+		CycleName: "2026-2027", TermName: "2.º trimestre", TermOrdinal: ordinal, Periods: cardColumns, Scale: scale,
 	}, []domain.ReportCardSubject{{ID: pSubjectA, Name: "Matemáticas"}, {ID: pSubjectB, Name: "Español"}}, grades)
 	require.NoError(t, err)
 	return rc
@@ -160,9 +173,9 @@ func TestIssueReportCardsSupersedes(t *testing.T) {
 	)
 	repo := appRepo(t, tenantA)
 	ctx := context.Background()
-	grades := []domain.MonthlyGrade{
-		monthlyGrade(t, "a7000000-0000-0000-0000-0000000000a1", tenantA, enr, pSubjectA, mTeacher, mUser, "2026-09", "8.4"),
-		monthlyGrade(t, "a7000000-0000-0000-0000-0000000000a2", tenantA, enr, pSubjectA, mTeacher, mUser, "2026-10", "8.5"),
+	grades := []domain.PeriodGrade{
+		periodGrade(t, "a7000000-0000-0000-0000-0000000000a1", tenantA, enr, pSubjectA, mPeriodOne, mUser, "9"),
+		periodGrade(t, "a7000000-0000-0000-0000-0000000000a2", tenantA, enr, pSubjectA, mPeriodTwo, mUser, "8"),
 	}
 	require.NoError(t, repo.WithPeriodLock(ctx, term, func(ctx context.Context, tx ports.PeriodTx) error {
 		return tx.IssueReportCards(ctx, []domain.ReportCard{
@@ -186,7 +199,7 @@ func TestIssueReportCardsSupersedes(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, byStudent, 1)
 	assert.Equal(t, 2, byStudent[0].Version())
-	assert.Equal(t, "8.4", byStudent[0].GeneralAverage().String())
+	assert.Equal(t, "9", byStudent[0].GeneralAverage().String())
 
 	byGroup, err := repo.LatestReportCards(ctx, ports.ReportCardFilter{TermID: term, GroupID: pGroup})
 	require.NoError(t, err)
@@ -201,9 +214,10 @@ func TestIssueReportCardsSupersedes(t *testing.T) {
 	assert.Equal(t, "1° A", h.GroupLabel)
 	assert.Equal(t, "Primaria", h.LevelName)
 	assert.Equal(t, "2026-2027", h.CycleName)
-	assert.Equal(t, "1.er trimestre", h.TermName)
-	assert.Equal(t, 1, h.TermOrdinal, "the term's order is part of the snapshot")
-	assert.Equal(t, []string{"2026-09", "2026-10", "2026-11"}, monthsText(h.Months))
+	assert.Equal(t, "2.º trimestre", h.TermName)
+	assert.Equal(t, 2, h.TermOrdinal, "the term's order is part of the snapshot")
+	assert.Empty(t, h.Months, "a T15 card has no month columns")
+	assert.Equal(t, cardColumns, h.Periods, "the period columns are part of the snapshot")
 	assert.Equal(t, 500, h.Scale.MinHundredths())
 	assert.Equal(t, 600, h.Scale.PassingHundredths())
 	assert.Equal(t, 1, h.Scale.Decimals())
@@ -212,10 +226,10 @@ func TestIssueReportCardsSupersedes(t *testing.T) {
 	require.Len(t, v1.Lines(), 2)
 	assert.Equal(t, "Matemáticas", v1.Lines()[0].SubjectName)
 	assert.Equal(t, 1, v1.Lines()[0].Position)
-	assert.Equal(t, map[string]string{"2026-09": "8.4", "2026-10": "8.5"}, v1.Lines()[0].MonthValueStrings())
-	assert.Equal(t, "8.5", v1.Lines()[0].TermAverage.String())
-	assert.False(t, v1.Lines()[1].TermAverage.Present(), "NULL stays no average, never 0")
-	assert.Empty(t, v1.Lines()[1].MonthValues)
+	assert.Equal(t, map[string]string{mPeriodOne: "9", mPeriodTwo: "8"}, v1.Lines()[0].PeriodValueStrings())
+	assert.Equal(t, "8.5", v1.Lines()[0].Average.String())
+	assert.False(t, v1.Lines()[1].Average.Present(), "NULL stays no average, never 0")
+	assert.Empty(t, v1.Lines()[1].PeriodValues)
 
 	v2, err := repo.ReportCard(ctx, v2ID)
 	require.NoError(t, err)
@@ -233,9 +247,9 @@ func monthsText(ms []domain.Month) []string {
 	return out
 }
 
-// A monthly write guarded by a CLOSED term is refused with MONTH_LOCKED inside
-// its own transaction; an open term, or no term, lets it through.
-func TestMonthlyWriteRespectsTheClosure(t *testing.T) {
+// A period-grade write guarded by a CLOSED term is refused with PERIOD_LOCKED
+// inside its own transaction; an open term, or no term, lets it through.
+func TestPeriodGradeWriteRespectsTheClosure(t *testing.T) {
 	const (
 		term = "70700000-0000-0000-0000-000000000005"
 		enr  = "e7000000-0000-0000-0000-000000000005"
@@ -244,31 +258,31 @@ func TestMonthlyWriteRespectsTheClosure(t *testing.T) {
 	ctx := context.Background()
 	lock := ports.PeriodLock{TermID: term}
 
-	_, err := repo.UpsertMonthlyGrade(ctx, monthlyGrade(t, "a7000000-0000-0000-0000-000000000051", tenantA, enr, mSubject, mTeacher, mUser, "2026-09", "9"), lock)
+	_, err := repo.UpsertPeriodGrade(ctx, periodGrade(t, "a7000000-0000-0000-0000-000000000051", tenantA, enr, mSubject, mPeriodOne, mUser, "9"), lock)
 	require.NoError(t, err, "a term never closed is open")
 
 	require.NoError(t, repo.WithPeriodLock(ctx, term, func(ctx context.Context, tx ports.PeriodTx) error {
 		return tx.SaveClosure(ctx, closedPeriod(t, term))
 	}))
-	_, err = repo.UpsertMonthlyGrade(ctx, monthlyGrade(t, "a7000000-0000-0000-0000-000000000052", tenantA, enr, mSubject, mTeacher, mUser, "2026-09", "5"), lock)
+	_, err = repo.UpsertPeriodGrade(ctx, periodGrade(t, "a7000000-0000-0000-0000-000000000052", tenantA, enr, mSubject, mPeriodOne, mUser, "5"), lock)
 	assert.Equal(t, glerrors.KindConflict, glerrors.KindOf(err))
-	assert.Equal(t, domain.CodeMonthLocked, domain.RefusalCodeOf(err))
-	err = repo.DeleteMonthlyGrade(ctx, enr, mSubject, month(t, "2026-09"), lock)
-	assert.Equal(t, domain.CodeMonthLocked, domain.RefusalCodeOf(err))
+	assert.Equal(t, domain.CodePeriodLocked, domain.RefusalCodeOf(err))
+	err = repo.DeletePeriodGrade(ctx, enr, mSubject, mPeriodOne, lock)
+	assert.Equal(t, domain.CodePeriodLocked, domain.RefusalCodeOf(err))
 
-	stored, err := repo.MonthlyGradesForEnrollment(ctx, enr)
+	stored, err := repo.PeriodGradesForEnrollment(ctx, enr)
 	require.NoError(t, err)
 	require.Len(t, stored, 1)
 	assert.Equal(t, 900, stored[0].Value().Hundredths(), "the locked write and delete changed nothing")
 
-	_, err = repo.UpsertMonthlyGrade(ctx, monthlyGrade(t, "a7000000-0000-0000-0000-000000000053", tenantA, enr, mSubject, mTeacher, mUser, "2026-12", "7"), ports.PeriodLock{})
-	require.NoError(t, err, "a month no term covers is not guarded")
+	_, err = repo.UpsertPeriodGrade(ctx, periodGrade(t, "a7000000-0000-0000-0000-000000000053", tenantA, enr, mSubject, mPeriodThree, mUser, "7"), ports.PeriodLock{})
+	require.NoError(t, err, "a period no term maps is not guarded")
 }
 
 // A grade write that arrives while a close holds the term waits for it, then
 // sees the closure and is refused: nothing slips between the snapshot and the
 // closure.
-func TestMonthlyWriteWaitsForAClose(t *testing.T) {
+func TestPeriodGradeWriteWaitsForAClose(t *testing.T) {
 	const (
 		term = "70700000-0000-0000-0000-000000000006"
 		enr  = "e7000000-0000-0000-0000-000000000006"
@@ -285,8 +299,8 @@ func TestMonthlyWriteWaitsForAClose(t *testing.T) {
 		}
 		go func() {
 			close(started)
-			_, err := writer.UpsertMonthlyGrade(context.Background(),
-				monthlyGrade(t, "a7000000-0000-0000-0000-000000000061", tenantA, enr, mSubject, mTeacher, mUser, "2026-10", "8"),
+			_, err := writer.UpsertPeriodGrade(context.Background(),
+				periodGrade(t, "a7000000-0000-0000-0000-000000000061", tenantA, enr, mSubject, mPeriodTwo, mUser, "8"),
 				ports.PeriodLock{TermID: term})
 			writeErr <- err
 		}()
@@ -296,38 +310,39 @@ func TestMonthlyWriteWaitsForAClose(t *testing.T) {
 	}))
 	select {
 	case err := <-writeErr:
-		assert.Equal(t, domain.CodeMonthLocked, domain.RefusalCodeOf(err), "err = %v", err)
+		assert.Equal(t, domain.CodePeriodLocked, domain.RefusalCodeOf(err), "err = %v", err)
 	case <-time.After(10 * time.Second):
 		t.Fatal("the write never finished")
 	}
-	assert.Equal(t, int64(0), countMonthly(t, tenantA, enr))
+	assert.Equal(t, int64(0), countPeriodGrades(t, tenantA, enr))
 }
 
-// MonthlyGradesForEnrollments reads many enrollments' grades in the named
-// months in one query.
-func TestMonthlyGradesForEnrollments(t *testing.T) {
+// A report card issued BEFORE T15 (month columns, one-decimal averages) reads
+// back exactly as it was issued: its months, month values and averages.
+func TestLegacyMonthlyReportCardReadsBackAsIssued(t *testing.T) {
 	const (
-		e1 = "e7000000-0000-0000-0000-000000000071"
-		e2 = "e7000000-0000-0000-0000-000000000072"
-		e3 = "e7000000-0000-0000-0000-000000000073"
+		cardID = "a7000000-0000-0000-0000-0000000000c1"
+		term   = "70700000-0000-0000-0000-0000000000c1"
+		enr    = "e7000000-0000-0000-0000-0000000000c1"
+		stu    = "57700000-0000-0000-0000-0000000000c1"
 	)
-	repo := appRepo(t, tenantA)
-	ctx := context.Background()
-	for i, c := range []struct{ enr, month string }{{e1, "2026-09"}, {e1, "2026-12"}, {e2, "2026-10"}, {e3, "2026-09"}} {
-		id := "a7000000-0000-0000-0000-00000000007" + string(rune('0'+i))
-		_, err := repo.UpsertMonthlyGrade(ctx, monthlyGrade(t, id, tenantA, c.enr, mSubject, mTeacher, mUser, c.month, "9"), ports.PeriodLock{})
-		require.NoError(t, err)
-	}
-	got, err := repo.MonthlyGradesForEnrollments(ctx, []string{e1, e2}, termMonths(t))
-	require.NoError(t, err)
-	assert.Len(t, got, 2, "e1's December and e3 are outside the read")
+	require.NoError(t, superDB.Exec(`INSERT INTO report_cards (id, tenant_id, term_id, cycle_id, level_id, group_id, enrollment_id, student_id,
+		version, status, issued_at, issued_by, student_name, term_name, months, general_average,
+		scale_min_hundredths, scale_max_hundredths, scale_decimals, scale_passing_hundredths)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 'published', now(), ?, 'Ana', '1.er trimestre', '{2026-09,2026-10}', 8.50, 500, 1000, 1, 600)`,
+		cardID, tenantA, term, pCycle, pLevel, pGroup, enr, stu, pDirector).Error)
+	require.NoError(t, superDB.Exec(`INSERT INTO report_card_lines (report_card_id, tenant_id, subject_id, subject_name, position, month_values, term_average)
+		VALUES (?, ?, ?, 'Matemáticas', 1, '{"2026-09":"8.4","2026-10":"8.5"}', 8.50)`, cardID, tenantA, pSubjectA).Error)
 
-	none, err := repo.MonthlyGradesForEnrollments(ctx, nil, termMonths(t))
+	rc, err := appRepo(t, tenantA).ReportCard(context.Background(), cardID)
 	require.NoError(t, err)
-	assert.Empty(t, none)
-	none, err = repo.MonthlyGradesForEnrollments(ctx, []string{e1}, nil)
-	require.NoError(t, err)
-	assert.Empty(t, none)
+	assert.Equal(t, []string{"2026-09", "2026-10"}, monthsText(rc.Header().Months))
+	assert.Empty(t, rc.Header().Periods)
+	assert.Equal(t, "8.5", rc.GeneralAverage().String())
+	require.Len(t, rc.Lines(), 1)
+	assert.Equal(t, map[string]string{"2026-09": "8.4", "2026-10": "8.5"}, rc.Lines()[0].MonthValueStrings())
+	assert.Empty(t, rc.Lines()[0].PeriodValues)
+	assert.Equal(t, "8.5", rc.Lines()[0].Average.String())
 }
 
 // RLS isolation for the non-owner app role on all three T7 tables: tenant A
@@ -348,7 +363,7 @@ func TestRLSIsolatesPeriodTables(t *testing.T) {
 			return err
 		}
 		return tx.IssueReportCards(ctx, []domain.ReportCard{reportCard(t, bID, tenantB, term, enr, stu, 1,
-			[]domain.MonthlyGrade{monthlyGrade(t, "b7000000-0000-0000-0000-0000000000b1", tenantB, enr, pSubjectA, mTeacher, mUser, "2026-09", "9")})})
+			[]domain.PeriodGrade{periodGrade(t, "b7000000-0000-0000-0000-0000000000b1", tenantB, enr, pSubjectA, mPeriodOne, mUser, "9")})})
 	}))
 
 	a := appRepo(t, tenantA)
@@ -397,7 +412,7 @@ func TestRLSIsolatesPeriodTables(t *testing.T) {
 
 // The legacy per-term capture (CaptureGrade → UpsertGradeEntry) honours the
 // period lock too: its term closed, the upsert is refused with MONTH_LOCKED
-// under the same shared advisory lock a monthly write takes.
+// under the same shared advisory lock a period-grade write takes.
 func TestGradeEntryWriteRespectsTheClosure(t *testing.T) {
 	const (
 		term = "70700000-0000-0000-0000-000000000009"
@@ -442,9 +457,10 @@ func TestPublishedReportCardsReadsTheTermsCardsWithLines(t *testing.T) {
 	)
 	repo := appRepo(t, tenantA)
 	ctx := context.Background()
-	grades := []domain.MonthlyGrade{
-		monthlyGrade(t, "a7000000-0000-0000-0000-0000000000b1", tenantA, enr, pSubjectA, mTeacher, mUser, "2026-09", "8.4"),
-		monthlyGrade(t, "a7000000-0000-0000-0000-0000000000b2", tenantA, enr, pSubjectB, mTeacher, mUser, "2026-11", "9.5"),
+	grades := []domain.PeriodGrade{
+		periodGrade(t, "a7000000-0000-0000-0000-0000000000b1", tenantA, enr, pSubjectA, mPeriodOne, mUser, "9"),
+		periodGrade(t, "a7000000-0000-0000-0000-0000000000b2", tenantA, enr, pSubjectB, mPeriodTwo, mUser, "8"),
+		periodGrade(t, "a7000000-0000-0000-0000-0000000000b3", tenantA, enr, pSubjectB, mPeriodOne, mUser, "9"),
 	}
 	issue := func(termID string, cards ...domain.ReportCard) {
 		require.NoError(t, repo.WithPeriodLock(ctx, termID, func(ctx context.Context, tx ports.PeriodTx) error {
