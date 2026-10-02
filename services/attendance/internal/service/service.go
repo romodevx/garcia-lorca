@@ -364,6 +364,18 @@ type AttendanceService struct {
 	tenantID    string
 	newID       func() string
 	log         *slog.Logger
+	// school is the school's time zone: an enrollment's instants are read as
+	// days on its calendar, the one the lists are taken on (default UTC).
+	school *time.Location
+}
+
+// Option configures an AttendanceService (functional options).
+type Option func(*AttendanceService)
+
+// WithSchoolLocation sets the school's time zone, so a pupil enrolled at 18:00
+// in Mexico City is in the group for that day's list, not the next one (T12).
+func WithSchoolLocation(loc *time.Location) Option {
+	return func(s *AttendanceService) { s.school = loc }
 }
 
 // NewAttendanceService wires the service. tenantID is the single-tenant scope for
@@ -379,11 +391,12 @@ func NewAttendanceService(
 	tenantID string,
 	newID func() string,
 	log *slog.Logger,
+	opts ...Option,
 ) *AttendanceService {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &AttendanceService{
+	s := &AttendanceService{
 		repo:        repo,
 		enrollments: enrollments,
 		groups:      groups,
@@ -391,7 +404,12 @@ func NewAttendanceService(
 		tenantID:    tenantID,
 		newID:       newID,
 		log:         log,
+		school:      time.UTC,
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // GetDailyRoster returns one row per ACTIVE enrollment in the group for one list
@@ -656,7 +674,7 @@ func (s *AttendanceService) pupilsDuring(ctx context.Context, groupID string, fr
 	}
 	joined := make(map[string]time.Time, len(moves))
 	for _, m := range moves {
-		if day := schoolDay(m.MovedAt); day.After(joined[m.EnrollmentID]) {
+		if day := s.schoolDay(m.MovedAt); day.After(joined[m.EnrollmentID]) {
 			joined[m.EnrollmentID] = day
 		}
 	}
@@ -666,9 +684,9 @@ func (s *AttendanceService) pupilsDuring(ctx context.Context, groupID string, fr
 		if !active && enr.EndedAt.IsZero() {
 			continue
 		}
-		w := window{from: latest(from, schoolDay(enr.EnrolledAt), joined[enr.ID]), to: to}
+		w := window{from: latest(from, s.schoolDay(enr.EnrolledAt), joined[enr.ID]), to: to}
 		if !active {
-			w.to = earliest(to, schoolDay(enr.EndedAt))
+			w.to = earliest(to, s.schoolDay(enr.EndedAt))
 		}
 		if w.from.After(w.to) {
 			continue
@@ -716,14 +734,14 @@ func (c ExceptionCounts) add(status string) ExceptionCounts {
 	return c
 }
 
-// schoolDay is an instant's school day (the UTC day, see school-day-is-utc-day);
-// the zero time stays zero.
-func schoolDay(t time.Time) time.Time {
+// schoolDay is an instant's day on the school's calendar, as the midnight-UTC
+// date the lists are keyed by; the zero time stays zero.
+func (s *AttendanceService) schoolDay(t time.Time) time.Time {
 	if t.IsZero() {
 		return t
 	}
-	u := t.UTC()
-	return time.Date(u.Year(), u.Month(), u.Day(), 0, 0, 0, 0, time.UTC)
+	local := t.In(s.school)
+	return time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, time.UTC)
 }
 
 func latest(first time.Time, rest ...time.Time) time.Time {

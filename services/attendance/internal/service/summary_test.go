@@ -109,3 +109,22 @@ func TestSummarizeAttendancePropagatesFailures(t *testing.T) {
 	_, err := reportService(t, repo).SummarizeAttendance(context.Background(), reportGroup, "2026-09-01", "2026-09-30")
 	require.Error(t, err)
 }
+
+// A pupil enrolled at 18:12 in Mexico City (00:12 UTC the next day) is in the
+// group for that day's list: the window is read on the school's own calendar.
+func TestSummarizeAttendanceReadsTheWindowInTheSchoolsZone(t *testing.T) {
+	mexico, err := time.LoadLocation("America/Mexico_City")
+	require.NoError(t, err)
+	repo := newFakeRepo()
+	repo.history = service.GroupHistory{Lists: []time.Time{day(t, "2026-09-27")}}
+	enrollments := &fakeEnrollments{byGroup: map[string][]service.EnrollmentRef{reportGroup: {
+		{ID: enrAna, StudentID: "stu-1", Status: "active", EnrolledAt: time.Date(2026, 9, 28, 0, 12, 0, 0, time.UTC)},
+	}}}
+	groups := &fakeGroups{existing: map[string]bool{reportGroup: true}}
+	svc := service.NewAttendanceService(repo, enrollments, groups, nil, testTenant, fixedIDs(), nil, service.WithSchoolLocation(mexico))
+
+	got, err := svc.SummarizeAttendance(context.Background(), reportGroup, "2026-09-01", "2026-09-30")
+	require.NoError(t, err)
+	require.Len(t, got.Students, 1)
+	assert.Equal(t, 1, got.Students[0].Lists)
+}

@@ -17,10 +17,14 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"time"
+	// The school's zone must resolve inside a distroless image too: the
+	// attendance report reads enrollment instants as Mexico City days.
+	_ "time/tzdata"
 
 	connect "connectrpc.com/connect"
 	"github.com/google/uuid"
@@ -48,6 +52,8 @@ import (
 const (
 	defaultAddr   = ":8080"
 	defaultTenant = "00000000-0000-0000-0000-000000000001"
+	// defaultSchoolTimezone is the school's calendar (SCHOOL_TIMEZONE), as in comms.
+	defaultSchoolTimezone = "America/Mexico_City"
 	// The reader clients target the config/students services on their local dev
 	// ports; compose overrides them to the in-network addresses
 	// http://config:8080 / http://students:8080.
@@ -132,8 +138,12 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 	}
 	publisher := pubsubadapter.NewEventPublisher(events)
 
+	school, err := schoolLocation()
+	if err != nil {
+		return nil, nil, err
+	}
 	newID := func() string { return uuid.NewString() }
-	svc := service.NewAttendanceService(repo, enrollments, groups, publisher, tenantID, newID, log)
+	svc := service.NewAttendanceService(repo, enrollments, groups, publisher, tenantID, newID, log, service.WithSchoolLocation(school))
 	// The level-deletion trash (ADR 0021): the gateway's saga archives and
 	// restores through it, and the gateway's hourly sweep (always warm, unlike
 	// this scale-to-zero service) purges each batch past config's
@@ -175,6 +185,18 @@ func openDB() (*gorm.DB, error) {
 
 func recoverFn(_ context.Context, _ connect.Spec, _ http.Header, _ any) error {
 	return connect.NewError(connect.CodeInternal, errors.New("internal error"))
+}
+
+// schoolLocation is the school's time zone (SCHOOL_TIMEZONE, default
+// America/Mexico_City). An unknown zone fails startup: falling back to UTC
+// would leave a pupil enrolled after 18:00 out of that day's list (T12).
+func schoolLocation() (*time.Location, error) {
+	name := envOr("SCHOOL_TIMEZONE", defaultSchoolTimezone)
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		return nil, fmt.Errorf("SCHOOL_TIMEZONE %q: %w", name, err)
+	}
+	return loc, nil
 }
 
 func envOr(key, fallback string) string {
