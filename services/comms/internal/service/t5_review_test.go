@@ -46,14 +46,14 @@ func TestExceptionToExceptionChangeRendersAsCorrection(t *testing.T) {
 		wantTitle string
 		wantBody  string
 	}{
-		{"absent → late", correctedMark(t, rec, "late", "absent", "", 2), "Corrección de asistencia", "Corrección: Ana llegó tarde el 15 de septiembre (antes: falta)."},
+		{"absent → late", correctedMark(t, rec, "late", "absent", "", 2), "Corrección de asistencia", "Corrección: Ana llegó con retardo el 15 de septiembre (antes: falta)."},
 		{"absent → excused", correctedMark(t, rec, "excused", "absent", "", 2), "Corrección de asistencia", "Corrección: Ana tiene falta justificada el 15 de septiembre (antes: falta)."},
 		{"late → excused", correctedMark(t, rec, "excused", "late", "", 3), "Corrección de asistencia", "Corrección: Ana tiene falta justificada el 15 de septiembre (antes: retardo)."},
-		{"per-class absent → late", correctedMark(t, rec, "late", "absent", "Matemáticas", 2), "Corrección de asistencia", "Corrección: Ana llegó tarde a Matemáticas el 15 de septiembre (antes: falta)."},
+		{"per-class absent → late", correctedMark(t, rec, "late", "absent", "Matemáticas", 2), "Corrección de asistencia", "Corrección: Ana llegó con retardo a Matemáticas el 15 de septiembre (antes: falta)."},
 		{"late → absent", correctedAbsence(t, rec, "late", 2), "Corrección de asistencia", "Corrección: Ana faltó el 15 de septiembre (antes: retardo)."},
 		{"excused → absent", correctedAbsence(t, rec, "excused", 2), "Corrección de asistencia", "Corrección: Ana faltó el 15 de septiembre (antes: falta justificada)."},
-		{"a new exception is not a correction", correctedMark(t, rec, "late", "", "", 1), "Llegada tarde", "Ana llegó tarde el 15 de septiembre."},
-		{"an unknown previous status is not a correction", correctedMark(t, rec, "late", "weird", "", 2), "Llegada tarde", "Ana llegó tarde el 15 de septiembre."},
+		{"a new exception is not a correction", correctedMark(t, rec, "late", "", "", 1), "Retardo registrado", "Ana llegó con retardo el 15 de septiembre."},
+		{"an unknown previous status is not a correction", correctedMark(t, rec, "late", "weird", "", 2), "Retardo registrado", "Ana llegó con retardo el 15 de septiembre."},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

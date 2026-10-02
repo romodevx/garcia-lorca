@@ -457,7 +457,7 @@ func TestHandleEventCorrectionsOfOneMarkAreNewNotifications(t *testing.T) {
 				versionedMarked(t, recordID, "late", 1),
 				versionedMarked(t, recordID, "excused", 2),
 			},
-			want: []string{"Llegada tarde", "Ausencia justificada"},
+			want: []string{"Retardo registrado", "Ausencia justificada"},
 		},
 		{
 			name: "absent, excused, absent again",
@@ -476,7 +476,7 @@ func TestHandleEventCorrectionsOfOneMarkAreNewNotifications(t *testing.T) {
 				versionedMarked(t, recordID, "excused", 2),
 				versionedMarked(t, recordID, "excused", 2),
 			},
-			want: []string{"Llegada tarde", "Ausencia justificada"},
+			want: []string{"Retardo registrado", "Ausencia justificada"},
 		},
 		{
 			name: "an unversioned (pre-versioning) event still dedupes on its id",
@@ -484,7 +484,7 @@ func TestHandleEventCorrectionsOfOneMarkAreNewNotifications(t *testing.T) {
 				markedMessage(t, recordID, studentID, tenantID, "2026-08-06", "late"),
 				markedMessage(t, recordID, studentID, tenantID, "2026-08-06", "late"),
 			},
-			want: []string{"Llegada tarde"},
+			want: []string{"Retardo registrado"},
 		},
 	}
 	for _, tt := range tests {
@@ -834,8 +834,8 @@ func TestHandleEventRendersEveryNotifiableEvent(t *testing.T) {
 			name:      "late arrival",
 			msg:       markedMessage(t, "eeeeeeee-1000-0000-0000-000000000002", studentID, tenantID, "2026-08-06", "late"),
 			wantType:  "attendance",
-			wantTitle: "Llegada tarde",
-			wantBody:  "Tu hijo(a) llegó tarde el 6 de agosto.",
+			wantTitle: "Retardo registrado",
+			wantBody:  "Tu hijo(a) llegó con retardo el 6 de agosto.",
 		},
 		{
 			name:      "excused absence",

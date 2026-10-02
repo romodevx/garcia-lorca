@@ -72,8 +72,8 @@ func TestHandleEventRendersNamedClassAwareCopy(t *testing.T) {
 		{"daily absence", classAbsence(t, rec, "", "", 1), "absence", "Ausencia registrada", "Ana faltó el 15 de septiembre."},
 		{"per-class absence", classAbsence(t, rec, subjectMathID, "Matemáticas", 1), "absence", "Ausencia registrada", "Ana faltó a Matemáticas el 15 de septiembre."},
 		{"per-class absence without a label reads as daily", classAbsence(t, rec, subjectMathID, "", 1), "absence", "Ausencia registrada", "Ana faltó el 15 de septiembre."},
-		{"daily late", classMarked(t, rec, "late", "", "", 1), "attendance", "Llegada tarde", "Ana llegó tarde el 15 de septiembre."},
-		{"per-class late", classMarked(t, rec, "late", subjectMathID, "Matemáticas", 1), "attendance", "Llegada tarde", "Ana llegó tarde a Matemáticas el 15 de septiembre."},
+		{"daily late", classMarked(t, rec, "late", "", "", 1), "attendance", "Retardo registrado", "Ana llegó con retardo el 15 de septiembre."},
+		{"per-class late", classMarked(t, rec, "late", subjectMathID, "Matemáticas", 1), "attendance", "Retardo registrado", "Ana llegó con retardo a Matemáticas el 15 de septiembre."},
 		{"daily excused", classMarked(t, rec, "excused", "", "", 2), "attendance", "Ausencia justificada", "Ana tiene falta justificada el 15 de septiembre."},
 		{"per-class excused", classMarked(t, rec, "excused", subjectMathID, "Matemáticas", 2), "attendance", "Ausencia justificada", "Ana tiene falta justificada en Matemáticas el 15 de septiembre."},
 		{"daily correction", classMarked(t, rec, "present", "", "", 2), "attendance", "Corrección de asistencia", "Corrección: Ana sí asistió el 15 de septiembre."},
@@ -162,7 +162,7 @@ func TestAttendancePushCarriesRoutingData(t *testing.T) {
 	require.NoError(t, svc.HandleEvent(context.Background(), classMarked(t, "eeeeeeee-5000-0000-0000-000000000008", "late", "", "", 1)))
 	require.Equal(t, 1, sender.calls)
 	assert.Equal(t, map[string]string{"type": "attendance", "studentId": studentID, "date": "2026-09-15"}, sender.data)
-	assert.Equal(t, "Ana llegó tarde el 15 de septiembre.", sender.body)
+	assert.Equal(t, "Ana llegó con retardo el 15 de septiembre.", sender.body)
 }
 
 // DeviceNotRegistered: the provider's dead tokens are removed, the others kept,
