@@ -637,6 +637,8 @@ func TestSeededRolesHoldTheirPermissions(t *testing.T) {
 			"payments:edit",
 			// T10: the Egresos module (0027), delegable.
 			"expenses:read", "expenses:write",
+			// T16: the Horarios module (0028), delegable.
+			"schedule:read", "schedule:write",
 		}},
 		// Task 9: the cashier. Reads the counter, takes money, finds pupils.
 		{"cobranza", []string{"students:read", "students:list", "collections:read", "payments:write"}},

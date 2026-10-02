@@ -177,6 +177,12 @@ func setAssignmentTeacher(tx *gorm.DB, id, teacherID string) error {
 		Where("id = ?", id).
 		Updates(map[string]any{"teacher_id": teacherID, "updated_at": gorm.Expr("now()")})
 	if res.Error != nil {
+		if pgCode(res.Error) == exclusionViolation {
+			// 0017: the assignment's classes move to the new teacher (FK ON
+			// UPDATE CASCADE) and the timetable refuses a double-booking.
+			return domain.ScheduleRefusal(glerrors.KindConflict, domain.CodeScheduleTeacherBusy,
+				"El docente nuevo ya tiene clase a la hora de las clases de esta asignación en el horario; muévelas antes de reasignar")
+		}
 		return translateCreateErr(res.Error, "reassigning teaching assignment", "a teacher is already assigned to this group and subject in the cycle")
 	}
 	if res.RowsAffected == 0 {

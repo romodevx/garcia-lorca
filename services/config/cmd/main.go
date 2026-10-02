@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"time"
+	_ "time/tzdata" // the school's zone even on a distroless image
 
 	connect "connectrpc.com/connect"
 	"github.com/google/uuid"
@@ -36,6 +37,9 @@ const (
 	serviceName   = "config"
 	defaultAddr   = ":8080"
 	defaultTenant = "00000000-0000-0000-0000-000000000001"
+	// defaultSchoolTimezone is the school's calendar (SCHOOL_TIMEZONE), as in
+	// comms, attendance and grades.
+	defaultSchoolTimezone = "America/Mexico_City"
 
 	readHeaderTimeout = 10 * time.Second
 	readTimeout       = 30 * time.Second
@@ -91,7 +95,14 @@ func buildMux(log *slog.Logger) (*http.ServeMux, error) {
 	// service keeps no ticker of its own.
 	trash := usecase.NewLevelDeletionService(repo, time.Now)
 	periods := usecase.NewEvaluationPeriodService(repo, tenantID, func() string { return uuid.NewString() })
-	handler := grpcadapter.NewConfigHandler(catalog, health).WithLevelDeletion(trash).WithEvaluationPeriods(periods)
+	// The timetable (T16) reads "today" in the school's zone.
+	loc, err := schoolLocation()
+	if err != nil {
+		return nil, err
+	}
+	schedule := usecase.NewScheduleService(repo, tenantID, func() string { return uuid.NewString() }, time.Now, loc)
+	handler := grpcadapter.NewConfigHandler(catalog, health).WithLevelDeletion(trash).WithEvaluationPeriods(periods).
+		WithSchedule(schedule)
 
 	mux := http.NewServeMux()
 	path, h := configv1connect.NewConfigServiceHandler(handler, connect.WithRecover(recoverFn))
@@ -134,4 +145,16 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// schoolLocation is the school's time zone (SCHOOL_TIMEZONE, default
+// America/Mexico_City). An unknown zone fails startup: falling back to UTC
+// would start a cycle — and require reasons for base edits — six hours early.
+func schoolLocation() (*time.Location, error) {
+	name := envOr("SCHOOL_TIMEZONE", defaultSchoolTimezone)
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		return nil, fmt.Errorf("SCHOOL_TIMEZONE %q: %w", name, err)
+	}
+	return loc, nil
 }

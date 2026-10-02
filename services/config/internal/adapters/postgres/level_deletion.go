@@ -35,6 +35,9 @@ const (
 	kindTeachingAssignments = "teachingAssignments"
 	kindSchoolEvents        = "schoolEvents"
 	kindEvaluationPeriods   = "evaluationPeriods"
+	kindScheduleOverrides   = "scheduleOverrides"
+	kindScheduleBlocks      = "scheduleBlocks"
+	kindScheduleSettings    = "scheduleSettings"
 )
 
 // Sub-selects that resolve the level's structure. They are evaluated per
@@ -53,6 +56,11 @@ func levelSteps(levelID string) []gormarchive.Step {
 		return gormarchive.Step{Kind: kind, Table: table, Where: where, Args: levelArgs(where, levelID)}
 	}
 	return []gormarchive.Step{
+		// The timetable (0017) before the assignments its classes cascade from.
+		step(kindScheduleOverrides, "schedule_overrides",
+			"block_id IN (SELECT id FROM schedule_blocks WHERE group_id IN ("+groupsOfLevel+"))"),
+		step(kindScheduleBlocks, "schedule_blocks", "group_id IN ("+groupsOfLevel+")"),
+		step(kindScheduleSettings, "schedule_settings", "level_id = ?"),
 		step(kindEvaluationPeriods, "evaluation_periods", "grade_level_id IN ("+gradesOfLevel+")"),
 		step(kindTermMonths, "term_months", "level_id = ?"),
 		step(kindTeachingAssignments, "teaching_assignments",
@@ -103,6 +111,14 @@ var levelRestore = []restoreStep{
 		{Column: "subject_id", Table: "subjects"}, {Column: "teacher_id", Table: "teachers"},
 	}},
 	{kindSchoolEvents, "school_events", []gormarchive.Parent{{Column: "cycle_id", Table: "cycles"}}},
+	{kindScheduleSettings, "schedule_settings", []gormarchive.Parent{{Column: "level_id", Table: "levels"}}},
+	{kindScheduleBlocks, "schedule_blocks", []gormarchive.Parent{
+		{Column: "cycle_id", Table: "cycles"}, {Column: "assignment_id", Table: "teaching_assignments"},
+	}},
+	{kindScheduleOverrides, "schedule_overrides", []gormarchive.Parent{
+		{Column: "cycle_id", Table: "cycles"}, {Column: "block_id", Table: "schedule_blocks"},
+		{Column: "swap_block_id", Table: "schedule_blocks", Nullable: true}, {Column: "teacher_id", Table: "teachers", Nullable: true},
+	}},
 }
 
 // skipReason is the one sentence a skipped structure row gets.

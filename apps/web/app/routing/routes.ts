@@ -14,6 +14,7 @@ export type View =
   | { screen: "dashboard" }
   | { screen: "finance" }
   | { screen: "expenses" }
+  | { screen: "schedule" }
   | { screen: "announcements" }
   | { screen: "payments" }
   | { screen: "config" }
@@ -50,6 +51,7 @@ const BY_SCREEN = {
   dashboard: "/",
   finance: "/finanzas",
   expenses: "/egresos",
+  schedule: "/horarios",
   announcements: "/avisos",
   payments: "/pagos",
   config: "/configuracion",

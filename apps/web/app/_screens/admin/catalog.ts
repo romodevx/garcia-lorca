@@ -95,6 +95,14 @@ export const PERMISSION_CATALOG: readonly PermissionGroup[] = [
     ],
   },
   {
+    // T16: Horarios. A teacher sees their own week through teaching:read.
+    resource: "Horarios",
+    permissions: [
+      { value: "schedule:read", label: "Ver horarios" },
+      { value: "schedule:write", label: "Editar horarios y registrar cambios del día" },
+    ],
+  },
+  {
     // The Maestro (teacher) role: self-scoped capture over ONLY the teacher's own
     // assigned groups, distinct from the school-wide grades:* above.
     resource: "Docencia",

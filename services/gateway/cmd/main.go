@@ -679,6 +679,32 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	// (who to call), which the owner approved for this role (ADR 0015).
 	mux.Handle("GET /api/v1/finance/overdue", collectionsRead(http.HandlerFunc(financeH.ListOverdue)))
 
+	// T16 — Horarios: the school timetable. It lives in config, so every route
+	// needs module_config AND module_schedule (default OFF). Reads answer to
+	// schedule:read, writes to schedule:write (iam 0028: the owner's by
+	// default, delegable). The board carries the catalog the calendar needs,
+	// so schedule:read alone (no config:read) draws the whole screen. A
+	// teacher's own timetable is self-scoped under /teaching (teaching:read):
+	// the teacher comes from the principal, never from the request.
+	scheduleH := handler.NewScheduleHandler(configClient, authClient)
+	scheduleModule := func(perm string, h http.HandlerFunc) http.Handler {
+		return guard.Protect("config", guard.Protect("schedule", requireAuthChanged(middleware.RequirePermission(perm)(h))))
+	}
+	scheduleRead := func(h http.HandlerFunc) http.Handler { return scheduleModule("schedule:read", h) }
+	scheduleWrite := func(h http.HandlerFunc) http.Handler { return scheduleModule("schedule:write", h) }
+	mux.Handle("GET /api/v1/schedule", scheduleRead(scheduleH.Board))
+	mux.Handle("GET /api/v1/schedule/day", scheduleRead(scheduleH.Day))
+	mux.Handle("GET /api/v1/schedule/available-teachers", scheduleRead(scheduleH.AvailableTeachers))
+	mux.Handle("GET /api/v1/schedule/events", scheduleRead(scheduleH.Events))
+	mux.Handle("POST /api/v1/schedule/blocks", scheduleWrite(scheduleH.CreateBlock))
+	mux.Handle("PUT /api/v1/schedule/blocks/{id}", scheduleWrite(scheduleH.UpdateBlock))
+	mux.Handle("DELETE /api/v1/schedule/blocks/{id}", scheduleWrite(scheduleH.DeleteBlock))
+	mux.Handle("POST /api/v1/schedule/overrides", scheduleWrite(scheduleH.CreateOverride))
+	mux.Handle("DELETE /api/v1/schedule/overrides/{id}", scheduleWrite(scheduleH.DeleteOverride))
+	mux.Handle("PUT /api/v1/schedule/settings/{levelId}", scheduleWrite(scheduleH.PutSettings))
+	mux.Handle("GET /api/v1/teaching/schedule", scheduleModule("teaching:read", scheduleH.OwnBoard))
+	mux.Handle("GET /api/v1/teaching/schedule/day", scheduleModule("teaching:read", scheduleH.OwnDay))
+
 	// T10 — Egresos: expenses, their categories and receipts, the period's
 	// income/expenses/balance and its reports (JSON, PDF, Excel), and closing
 	// the day's cash cut. The data lives in finance, so every route needs

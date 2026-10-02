@@ -179,6 +179,35 @@ service ConfigService {
   // InvalidArgument if the teacher does not.
   rpc ReassignTeachingAssignment(ReassignTeachingAssignmentRequest) returns (ReassignTeachingAssignmentResponse);
 
+  // --- school timetable (T16, ADR 0023) ---
+  // GetScheduleBoard is the base timetable of a cycle (the active cycle when
+  // cycle_id is empty; NotFound when there is none) with the catalog it is
+  // drawn with and each level's grid; teacher_id narrows the classes to one
+  // teacher's.
+  rpc GetScheduleBoard(GetScheduleBoardRequest) returns (GetScheduleBoardResponse);
+  // GetScheduleDay is the effective timetable of a date (base + changes);
+  // teacher_id narrows it to the classes that teacher gives or was replaced in.
+  rpc GetScheduleDay(GetScheduleDayRequest) returns (GetScheduleDayResponse);
+  // CreateScheduleBlock places a teaching assignment on a weekday and time.
+  // A double-booked teacher or group is AlreadyExists (X-Error-Code
+  // SCHEDULE_TEACHER_BUSY / SCHEDULE_GROUP_BUSY) naming the class.
+  rpc CreateScheduleBlock(CreateScheduleBlockRequest) returns (CreateScheduleBlockResponse);
+  // UpdateScheduleBlock moves or changes a class of the base timetable.
+  rpc UpdateScheduleBlock(UpdateScheduleBlockRequest) returns (UpdateScheduleBlockResponse);
+  // DeleteScheduleBlock removes a class (and its date-specific changes).
+  rpc DeleteScheduleBlock(DeleteScheduleBlockRequest) returns (DeleteScheduleBlockResponse);
+  // CreateScheduleOverride changes one class on one date (substitute, swap,
+  // cancel), judged on that date's effective timetable.
+  rpc CreateScheduleOverride(CreateScheduleOverrideRequest) returns (CreateScheduleOverrideResponse);
+  // DeleteScheduleOverride undoes a date-specific change.
+  rpc DeleteScheduleOverride(DeleteScheduleOverrideRequest) returns (DeleteScheduleOverrideResponse);
+  // ListAvailableTeachers lists the teachers free in a slot, best fits first.
+  rpc ListAvailableTeachers(ListAvailableTeachersRequest) returns (ListAvailableTeachersResponse);
+  // SetScheduleGrid saves the hours the calendar shows for a level.
+  rpc SetScheduleGrid(SetScheduleGridRequest) returns (SetScheduleGridResponse);
+  // ListScheduleEvents is the timetable's history, newest first.
+  rpc ListScheduleEvents(ListScheduleEventsRequest) returns (ListScheduleEventsResponse);
+
   // --- level deletion (ADR 0021) ---
   // PreviewLevelDeletion resolves a level's structure across ALL cycles (the
   // ids the other services need) and counts what config would archive.
@@ -1216,4 +1245,208 @@ message AbandonLevelRestoreRequest {
 
 message AbandonLevelRestoreResponse {
   LevelDeletion deletion = 1;
+}
+
+// --- school timetable (T16, ADR 0023) -----------------------------------------
+// Times are minutes since midnight (5-minute steps); a class is [starts_at,
+// ends_at). Weekdays are ISO: 1 = Monday … 5 = Friday. Dates are midnight UTC.
+
+// ScheduleActor is who makes a change, as the gateway names them.
+message ScheduleActor {
+  string user_id = 1;
+  string name = 2;
+}
+
+// ScheduleGrid is the hours the calendar shows for a level.
+message ScheduleGrid {
+  string level_id = 1;
+  int32 grid_start = 2;
+  int32 grid_end = 3;
+}
+
+// ScheduleBlock is one class of the base timetable: a teaching assignment on
+// a weekday at a time.
+message ScheduleBlock {
+  string id = 1;
+  string cycle_id = 2;
+  string assignment_id = 3;
+  string group_id = 4;
+  string subject_id = 5;
+  string teacher_id = 6;
+  int32 weekday = 7;
+  int32 starts_at = 8;
+  int32 ends_at = 9;
+}
+
+// ScheduleOverride changes one class on one date.
+message ScheduleOverride {
+  string id = 1;
+  string cycle_id = 2;
+  string block_id = 3;
+  google.protobuf.Timestamp date = 4;
+  // kind: "substitute" | "swap" | "cancel".
+  string kind = 5;
+  string teacher_id = 6;
+  string swap_block_id = 7;
+  string reason = 8;
+  ScheduleActor created_by = 9;
+  google.protobuf.Timestamp created_at = 10;
+}
+
+// ScheduledClass is a class as it happens on a date.
+message ScheduledClass {
+  ScheduleBlock block = 1;
+  string teacher_id = 2;
+  int32 starts_at = 3;
+  int32 ends_at = 4;
+  // status: "regular" | "substitute" | "swapped" | "cancelled".
+  string status = 5;
+  ScheduleOverride override = 6;
+}
+
+// ScheduleEvent is one entry of the timetable's history.
+message ScheduleEvent {
+  string id = 1;
+  string cycle_id = 2;
+  google.protobuf.Timestamp at = 3;
+  ScheduleActor by = 4;
+  string action = 5;
+  string block_id = 6;
+  string override_id = 7;
+  // date is set for entries about a date-specific change.
+  google.protobuf.Timestamp date = 8;
+  string reason = 9;
+  string summary = 10;
+}
+
+// AvailableTeacher is a teacher free in a slot; match: "subject" | "grade" | "other".
+message AvailableTeacher {
+  Teacher teacher = 1;
+  string match = 2;
+}
+
+message GetScheduleBoardRequest {
+  string cycle_id = 1;
+  string teacher_id = 2;
+}
+
+message GetScheduleBoardResponse {
+  Cycle cycle = 1;
+  repeated Cycle cycles = 2;
+  bool started = 3;
+  repeated ScheduleGrid grids = 4;
+  repeated Level levels = 5;
+  repeated GradeLevel grade_levels = 6;
+  repeated Group groups = 7;
+  repeated Subject subjects = 8;
+  repeated Teacher teachers = 9;
+  repeated TeachingAssignment assignments = 10;
+  repeated ScheduleBlock blocks = 11;
+}
+
+message GetScheduleDayRequest {
+  string cycle_id = 1;
+  google.protobuf.Timestamp date = 2;
+  string teacher_id = 3;
+}
+
+message GetScheduleDayResponse {
+  google.protobuf.Timestamp date = 1;
+  int32 weekday = 2;
+  repeated ScheduledClass classes = 3;
+}
+
+// ScheduleBlockInput places a teaching assignment; reason is required once
+// the cycle has started.
+message ScheduleBlockInput {
+  string assignment_id = 1;
+  int32 weekday = 2;
+  int32 starts_at = 3;
+  int32 ends_at = 4;
+  string reason = 5;
+}
+
+message CreateScheduleBlockRequest {
+  ScheduleBlockInput block = 1;
+  ScheduleActor actor = 2;
+}
+
+message CreateScheduleBlockResponse {
+  ScheduleBlock block = 1;
+}
+
+message UpdateScheduleBlockRequest {
+  string id = 1;
+  ScheduleBlockInput block = 2;
+  ScheduleActor actor = 3;
+}
+
+message UpdateScheduleBlockResponse {
+  ScheduleBlock block = 1;
+}
+
+message DeleteScheduleBlockRequest {
+  string id = 1;
+  string reason = 2;
+  ScheduleActor actor = 3;
+}
+
+message DeleteScheduleBlockResponse {}
+
+message CreateScheduleOverrideRequest {
+  string block_id = 1;
+  google.protobuf.Timestamp date = 2;
+  string kind = 3;
+  string teacher_id = 4;
+  string swap_block_id = 5;
+  string reason = 6;
+  ScheduleActor actor = 7;
+}
+
+message CreateScheduleOverrideResponse {
+  ScheduleOverride override = 1;
+}
+
+message DeleteScheduleOverrideRequest {
+  string id = 1;
+  string reason = 2;
+  ScheduleActor actor = 3;
+}
+
+message DeleteScheduleOverrideResponse {}
+
+// ListAvailableTeachersRequest: date (effective timetable) when set,
+// otherwise the base timetable of weekday.
+message ListAvailableTeachersRequest {
+  string cycle_id = 1;
+  string group_id = 2;
+  string subject_id = 3;
+  int32 weekday = 4;
+  google.protobuf.Timestamp date = 5;
+  int32 starts_at = 6;
+  int32 ends_at = 7;
+  string exclude_block_id = 8;
+}
+
+message ListAvailableTeachersResponse {
+  repeated AvailableTeacher teachers = 1;
+}
+
+message SetScheduleGridRequest {
+  string level_id = 1;
+  int32 grid_start = 2;
+  int32 grid_end = 3;
+}
+
+message SetScheduleGridResponse {
+  ScheduleGrid grid = 1;
+}
+
+message ListScheduleEventsRequest {
+  string cycle_id = 1;
+  int32 limit = 2;
+}
+
+message ListScheduleEventsResponse {
+  repeated ScheduleEvent events = 1;
 }

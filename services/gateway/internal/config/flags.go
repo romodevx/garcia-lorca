@@ -30,6 +30,8 @@ var AllModuleFlags = []string{
 	featureflag.Key("student_card"),
 	// T10: Egresos (expenses, cash-cut closing, finance reports).
 	featureflag.Key("expenses"),
+	// T16: Horarios (the school timetable, in config).
+	featureflag.Key("schedule"),
 }
 
 // ParseEnabledModules turns a comma-separated list of module names (or full

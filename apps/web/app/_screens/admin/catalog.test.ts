@@ -67,3 +67,14 @@ describe("PERMISSION_CATALOG — eliminar usuarios (T2)", () => {
     expect(GRANTABLE_PERMISSIONS).toContain("users:write");
   });
 });
+
+describe("PERMISSION_CATALOG — Horarios (T16)", () => {
+  it("groups reading and editing the timetable under Horarios", () => {
+    const group = PERMISSION_CATALOG.find((g) => g.resource === "Horarios");
+    expect(group?.permissions.map((p) => [p.value, p.label])).toEqual([
+      ["schedule:read", "Ver horarios"],
+      ["schedule:write", "Editar horarios y registrar cambios del día"],
+    ]);
+    expect(GRANTABLE_PERMISSIONS).toContain("schedule:write");
+  });
+});

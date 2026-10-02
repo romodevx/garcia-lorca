@@ -15,6 +15,7 @@ describe("el mapa de rutas", () => {
     ["/docentes", { screen: "teachers" }],
     ["/uniformes", { screen: "uniforms" }],
     ["/egresos", { screen: "expenses" }],
+    ["/horarios", { screen: "schedule" }],
     ["/avisos", { screen: "announcements" }],
     ["/configuracion", { screen: "config" }],
     ["/administracion", { screen: "admin" }],
