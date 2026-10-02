@@ -66,6 +66,8 @@ export const MODULES: readonly ModuleDef[] = [
   // T16: the weekly timetable and the day's changes. Any-of: the director reads
   // it all (schedule:read); a teacher reads their own week (teaching:read).
   { id: "schedule", label: "Horarios", icon: "clock", color: "forest", desc: "Horario semanal y suplencias", badge: null, flag: "module_schedule", perm: ["schedule:read", "teaching:read"] },
+  // T17: extracurriculars and their own charge. Its money lives in finance.
+  { id: "activities", label: "Actividades", icon: "star", color: "yellow", desc: "Extracurriculares y su cobro", badge: null, flag: "module_activities", perm: "activities:read" },
   { id: "announcements", label: "Avisos", icon: "announcements", color: "orange", desc: "Comunicados y agenda", badge: null, flag: "module_comms", perm: "comms:read" },
   { id: "scholarships", label: "Becas", icon: "scholarship", color: "purple", desc: "Becas y descuentos", badge: null, flag: "module_scholarships", perm: "scholarships:read" },
   // Deactivated from the panel per the school (kept future-ready; nothing deleted). See [[module-docs-deactivated]].

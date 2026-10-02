@@ -95,6 +95,14 @@ export const PERMISSION_CATALOG: readonly PermissionGroup[] = [
     ],
   },
   {
+    // T17: Actividades. Enrolling a pupil issues the activity's charges.
+    resource: "Actividades",
+    permissions: [
+      { value: "activities:read", label: "Ver actividades" },
+      { value: "activities:write", label: "Crear actividades e inscribir alumnos" },
+    ],
+  },
+  {
     // T16: Horarios. A teacher sees their own week through teaching:read.
     resource: "Horarios",
     permissions: [

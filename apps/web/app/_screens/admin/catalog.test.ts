@@ -78,3 +78,14 @@ describe("PERMISSION_CATALOG — Horarios (T16)", () => {
     expect(GRANTABLE_PERMISSIONS).toContain("schedule:write");
   });
 });
+
+describe("PERMISSION_CATALOG — Actividades (T17)", () => {
+  it("groups reading and enrolling under Actividades", () => {
+    const group = PERMISSION_CATALOG.find((g) => g.resource === "Actividades");
+    expect(group?.permissions.map((p) => [p.value, p.label])).toEqual([
+      ["activities:read", "Ver actividades"],
+      ["activities:write", "Crear actividades e inscribir alumnos"],
+    ]);
+    expect(GRANTABLE_PERMISSIONS).toContain("activities:write");
+  });
+});

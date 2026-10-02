@@ -1138,6 +1138,8 @@ export interface BillingRun {
   lateFeesCreated: number;
   /** Charges issued for the extras collected on top of the tuition. */
   feesCreated: number;
+  /** Activity charges issued (T17). Absent from gateways older than T17. */
+  activitiesCreated?: number;
   /**
    * Inscriptions whose deadline the run corrected to match the tuition table.
    * The run never re-issues a charge it has written, so this is how a deadline

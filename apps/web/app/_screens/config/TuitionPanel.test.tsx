@@ -178,6 +178,21 @@ describe("running the month", () => {
     expect(screen.getByText(/6 ya existían/)).toBeInTheDocument();
   });
 
+  // T17: the same run issues the activities' charges.
+  it("says how many activity charges it issued", async () => {
+    const user = userEvent.setup();
+    finance.runBilling.mockResolvedValue({
+      tuitionCreated: 0, enrollmentCreated: 0, lateFeesCreated: 0, feesCreated: 0, enrollmentMoved: 0, skipped: 0, levelsWithoutPlan: [],
+      activitiesCreated: 5,
+    });
+    render(<Host />);
+    await screen.findByText("Primaria");
+
+    await user.click(screen.getByRole("button", { name: /Generar cargos/ }));
+
+    expect(await screen.findByText(/5 cargos de actividades/)).toBeInTheDocument();
+  });
+
   it("names the levels nobody priced, because a level billed at zero is silent", async () => {
     const user = userEvent.setup();
     finance.runBilling.mockResolvedValue({

@@ -16,6 +16,7 @@ import { canEditTeachingLoad, canGrantTeacherAccess, canListUsers } from "./teac
 import { UniformsScreen } from "./_screens/uniforms/UniformsScreen";
 import { ExpensesScreen } from "./_screens/expenses/ExpensesScreen";
 import { ScheduleEntry } from "./_screens/schedule/ScheduleEntry";
+import { ActivitiesScreen } from "./_screens/activities/ActivitiesScreen";
 import type { CutAccess } from "./_screens/finance/CashCutClosing";
 import { FinanceScreen } from "./_screens/finance/FinanceScreen";
 import { Catalog } from "./_screens/config/Catalog";
@@ -232,6 +233,8 @@ export function AppShell(): ReactElement {
   const expensesEnabled = useFlag("module_expenses") && financeEnabled;
   // T16: Horarios. Its timetable lives in config, so both flags must be on.
   const scheduleEnabled = useFlag("module_schedule") && configEnabled;
+  // T17: Actividades. Its charges live in finance, so both flags must be on.
+  const activitiesEnabled = useFlag("module_activities") && financeEnabled;
 
   /**
    * Arranque: las cookies de sesión son HttpOnly (el JavaScript no las ve), así
@@ -527,6 +530,10 @@ export function AppShell(): ReactElement {
       go({ screen: "schedule" });
       return;
     }
+    if (id === "activities") {
+      go({ screen: "activities" });
+      return;
+    }
     if (id === "payments") {
       go({ screen: "payments" });
       return;
@@ -745,6 +752,13 @@ export function AppShell(): ReactElement {
         // Flag OFF renders the friendly stub (inside ScheduleEntry). Backend 404 is authoritative.
         <ScheduleEntry enabled={scheduleEnabled} permissions={principal?.permissions} onBack={home} />
       )}
+      {view.screen === "activities" &&
+        (activitiesEnabled ? (
+          <ActivitiesScreen onBack={home} permissions={principal?.permissions} />
+        ) : (
+          // Flag OFF: the friendly stub. Backend 404 is authoritative.
+          <ModulePlaceholder m={MODULES.find((m) => m.id === "activities") as ModuleDef} onBack={home} />
+        ))}
       {view.screen === "admin" &&
         (adminEnabled ? (
           <AdminScreen onBack={home} canDeleteUsers={canDeleteUsers(principal?.permissions)} currentUserId={principal?.userId} />
