@@ -21,7 +21,7 @@ const GONE_GROUP = "Grupo sin registro";
 export interface ScheduleIndex {
   subjectName: (id: string) => string;
   teacherName: (id: string) => string;
-  /** "3.º A": the grade's name and the group's letter. */
+  /** "3.º A": the grade's name and the group's letter ("1.º A · Secundaria" when another level has a "1.º A"). */
   groupLabel: (id: string) => string;
   levelOfGroup: (id: string) => string;
   gradeOfGroup: (id: string) => string;
@@ -34,14 +34,24 @@ export function indexBoard(board: ScheduleBoard): ScheduleIndex {
   const grades = new Map(board.grades.map((g) => [g.id, g]));
   const groups = new Map(board.groups.map((g) => [g.id, g]));
   const gradeOf = (id: string): string => groups.get(id)?.gradeLevelId ?? "";
+  const levels = new Map(board.levels.map((l) => [l.id, l.name]));
+  const baseLabel = (groupId: string): string => {
+    const group = groups.get(groupId);
+    if (group === undefined) return GONE_GROUP;
+    const grade = grades.get(group.gradeLevelId);
+    return grade === undefined ? group.name : `${grade.name} ${group.name}`;
+  };
+  // "1.º A" may exist in Primaria and in Secundaria: those labels carry the level.
+  const seen = new Map<string, number>();
+  for (const g of board.groups) seen.set(baseLabel(g.id), (seen.get(baseLabel(g.id)) ?? 0) + 1);
   return {
     subjectName: (id) => subjects.get(id) ?? GONE_SUBJECT,
     teacherName: (id) => teachers.get(id) ?? GONE_TEACHER,
     groupLabel: (id) => {
-      const group = groups.get(id);
-      if (group === undefined) return GONE_GROUP;
-      const grade = grades.get(group.gradeLevelId);
-      return grade === undefined ? group.name : `${grade.name} ${group.name}`;
+      const label = baseLabel(id);
+      if ((seen.get(label) ?? 0) < 2) return label;
+      const level = levels.get(grades.get(gradeOf(id))?.levelId ?? "");
+      return level === undefined ? label : `${label} · ${level}`;
     },
     gradeOfGroup: gradeOf,
     levelOfGroup: (id) => grades.get(gradeOf(id))?.levelId ?? "",

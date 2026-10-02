@@ -10,6 +10,24 @@ describe("indexBoard", () => {
     expect(index.groupLabel(G3A)).toBe("3.º A");
   });
 
+  it("adds the level when another level has a group with the same name", () => {
+    const board = sampleBoard();
+    const twin = board.grades.find((g) => g.id === G1S);
+    const primaria1 = { id: "g-p1", levelId: PRIMARIA, name: twin?.name ?? "1.º", ordinal: 1 };
+    const sameName = board.groups.find((g) => g.id === G1SA);
+    const clash = {
+      ...board,
+      grades: [...board.grades, primaria1],
+      groups: [...board.groups, { id: "grp-p1a", gradeLevelId: "g-p1", name: sameName?.name ?? "A" }],
+    };
+    const idx = indexBoard(clash);
+    const primariaName = board.levels.find((l) => l.id === PRIMARIA)?.name;
+    const secundariaName = board.levels.find((l) => l.id === SECUNDARIA)?.name;
+    expect(idx.groupLabel("grp-p1a")).toBe(`${primaria1.name} ${sameName?.name} · ${primariaName}`);
+    expect(idx.groupLabel(G1SA)).toBe(`${twin?.name} ${sameName?.name} · ${secundariaName}`);
+    expect(idx.groupLabel(G3A)).toBe("3.º A");
+  });
+
   it("names subjects and teachers, and says so when one is gone", () => {
     expect(index.subjectName(MATE)).toBe("Matemáticas");
     expect(index.teacherName(ANA)).toBe("Ana Ruiz");
