@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppShell } from "./AppShell";
@@ -52,6 +52,7 @@ vi.mock("./config/api", async (importOriginal) => ({
   listLabelledGroups: vi.fn().mockResolvedValue([]),
   listLevels: vi.fn().mockResolvedValue([]),
   listGradeLevels: vi.fn().mockResolvedValue([]),
+  listEvaluationPeriods: vi.fn().mockResolvedValue([]),
   getSchoolProfile: vi.fn().mockResolvedValue({ profile: { name: "", legalName: "", rfc: "", cct: "", address: "", phone: "", legend: "" }, found: false }),
   listLevelTrash: vi.fn().mockResolvedValue([]),
   getLevelDeletionPreview: vi.fn().mockResolvedValue({
@@ -789,5 +790,36 @@ describe("eliminar un nivel", () => {
     expect(await screen.findByRole("heading", { name: "Configuración académica" })).toBeInTheDocument();
     expect(fakePath()).toBe("/configuracion");
     expect(screen.getByText("Nivel eliminado. Puedes restaurarlo desde la Papelera hasta el 5 de octubre de 2026.")).toBeInTheDocument();
+  });
+});
+
+describe("los periodos de un nivel (T14)", () => {
+  it("tienen su propia dirección dentro de Configuración, de sólo lectura sin config:write", async () => {
+    resetFakeRouter("/configuracion/niveles/l1/periodos");
+    mockMe.mockResolvedValue(OWNER_ME);
+    const user = userEvent.setup();
+    render(
+      <Providers flags={{ module_config: true }}>
+        <AppShell />
+      </Providers>
+    );
+
+    expect(await screen.findByRole("heading", { name: /^Periodos de evaluación/ })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /volver a configuración/i }));
+    expect(await screen.findByRole("heading", { name: "Configuración académica" })).toBeInTheDocument();
+    expect(fakePath()).toBe("/configuracion");
+  });
+
+  it("con el módulo apagado no se pintan", async () => {
+    resetFakeRouter("/configuracion/niveles/l1/periodos");
+    mockMe.mockResolvedValue(OWNER_ME);
+    render(
+      <Providers flags={{}}>
+        <AppShell />
+      </Providers>
+    );
+
+    await waitFor(() => expect(mockMe).toHaveBeenCalled());
+    expect(screen.queryByRole("heading", { name: /^Periodos de evaluación/ })).toBeNull();
   });
 });

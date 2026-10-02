@@ -18,6 +18,7 @@ describe("moduleIdOfView", () => {
     [{ screen: "teachers" }, "teachers"],
     [{ screen: "teacherLoad", teacherId: "t1" }, "teachers"],
     [{ screen: "levelDelete", levelId: "l1" }, "settings"],
+    [{ screen: "levelPeriods", levelId: "l1" }, "settings"],
     [{ screen: "uniforms" }, "uniforms"],
     [{ screen: "admin" }, "admin"],
     [{ screen: "module", moduleId: "reports" }, "reports"],

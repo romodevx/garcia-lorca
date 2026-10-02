@@ -1,0 +1,263 @@
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import * as api from "../../../config/api";
+import type { Cycle, EvaluationPeriod, GradeLevel, Level } from "../../../config/api";
+import { LevelPeriodsScreen } from "./LevelPeriodsScreen";
+
+vi.mock("../../../config/api", () => {
+  class ConfigError extends Error {
+    readonly status: number;
+    readonly detail: string;
+    readonly code: string | undefined;
+    constructor(status: number, detail = "", code?: string) {
+      super(detail);
+      this.status = status;
+      this.detail = detail;
+      this.code = code;
+    }
+  }
+  return {
+    ConfigError,
+    listCycles: vi.fn(),
+    listLevels: vi.fn(),
+    listGradeLevels: vi.fn(),
+    listEvaluationPeriods: vi.fn(),
+    saveGradeEvaluationPeriods: vi.fn(),
+    copyEvaluationPeriods: vi.fn(),
+  };
+});
+
+const mocked = vi.mocked(api);
+
+const CYCLE: Cycle = { id: "c1", name: "2026-2027", status: "active", startsOn: "2026-08-24", endsOn: "2027-07-09" };
+const OLD: Cycle = { id: "c0", name: "2025-2026", status: "closed", startsOn: "2025-08-25", endsOn: "2026-07-10" };
+const LEVEL = { id: "l1", name: "PRIMARIA" } as Level;
+const G1: GradeLevel = { id: "g1", levelId: "l1", name: "1° PRIMARIA", ordinal: 1 };
+const G2: GradeLevel = { id: "g2", levelId: "l1", name: "2° PRIMARIA", ordinal: 2 };
+const G3: GradeLevel = { id: "g3", levelId: "l1", name: "3° PRIMARIA", ordinal: 3 };
+
+const period = (id: string, grade: string, ordinal: number, name: string, startsOn: string, endsOn: string): EvaluationPeriod => ({
+  id, cycleId: "c1", gradeLevelId: grade, ordinal, name, startsOn, endsOn, termId: null,
+});
+
+let store: EvaluationPeriod[];
+
+beforeEach(() => {
+  store = [
+    period("p1", "g1", 1, "1.ER TRIMESTRE", "2026-08-24", "2026-11-30"),
+    period("p2", "g1", 2, "2.º TRIMESTRE", "2026-12-01", "2027-03-31"),
+    period("q1", "g2", 1, "BIMESTRE 1", "2026-08-24", "2026-10-31"),
+  ];
+  mocked.listCycles.mockResolvedValue([OLD, CYCLE]);
+  mocked.listLevels.mockResolvedValue([LEVEL]);
+  mocked.listGradeLevels.mockResolvedValue([G3, G1, G2]);
+  mocked.listEvaluationPeriods.mockImplementation(async (_b, scope) => store.filter((p) => p.cycleId === scope.cycleId));
+  mocked.saveGradeEvaluationPeriods.mockImplementation(async (_b, grade, cycleId, inputs) =>
+    inputs.map((p, i) => period(`s${i}`, grade, p.ordinal, p.name, p.startsOn, p.endsOn)).map((p) => ({ ...p, cycleId })),
+  );
+});
+
+afterEach(() => {
+  vi.clearAllMocks();
+  vi.useRealTimers();
+});
+
+function renderScreen(canWrite = true): { onBack: ReturnType<typeof vi.fn> } {
+  const onBack = vi.fn();
+  render(<LevelPeriodsScreen levelId="l1" canWrite={canWrite} onBack={onBack} />);
+  return { onBack };
+}
+
+const gradeBlock = (name: string): HTMLElement => screen.getByRole("region", { name: `Periodos de ${name}` });
+const row = (grade: string, n: number): HTMLElement => within(gradeBlock(grade)).getByRole("group", { name: `Periodo ${n}` });
+const field = (grade: string, n: number, label: "Nombre" | "Inicio" | "Fin"): HTMLInputElement =>
+  within(row(grade, n)).getByLabelText(label) as HTMLInputElement;
+
+describe("LevelPeriodsScreen — a level's grades with their evaluation periods (T14)", () => {
+  it("shows every grade of the level in school order with its own periods, for the active cycle", async () => {
+    renderScreen();
+
+    expect(await screen.findByRole("heading", { name: "Periodos de evaluación · PRIMARIA" })).toBeInTheDocument();
+    await waitFor(() => expect(field("1° PRIMARIA", 1, "Nombre").value).toBe("1.ER TRIMESTRE"));
+    expect(field("1° PRIMARIA", 2, "Fin").value).toBe("2027-03-31");
+    expect(field("2° PRIMARIA", 1, "Inicio").value).toBe("2026-08-24");
+    expect(within(gradeBlock("3° PRIMARIA")).getByText(/aún no tiene periodos/i)).toBeInTheDocument();
+    expect(screen.getAllByRole("region").map((r) => r.getAttribute("aria-label"))).toEqual([
+      "Periodos de 1° PRIMARIA", "Periodos de 2° PRIMARIA", "Periodos de 3° PRIMARIA",
+    ]);
+    expect(mocked.listEvaluationPeriods).toHaveBeenCalledWith(expect.anything(), { cycleId: "c1", levelId: "l1" });
+  });
+
+  it("checks a date when the field is left and clears the error once it is valid", async () => {
+    renderScreen();
+    await waitFor(() => expect(field("1° PRIMARIA", 1, "Fin").value).toBe("2026-11-30"));
+
+    fireEvent.change(field("1° PRIMARIA", 1, "Fin"), { target: { value: "2026-08-01" } });
+    expect(within(row("1° PRIMARIA", 1)).queryByText("El fin es antes que el inicio.")).toBeNull();
+    fireEvent.blur(field("1° PRIMARIA", 1, "Fin"));
+    expect(within(row("1° PRIMARIA", 1)).getByText("El fin es antes que el inicio.")).toBeInTheDocument();
+
+    fireEvent.change(field("1° PRIMARIA", 1, "Fin"), { target: { value: "2026-11-30" } });
+    expect(within(row("1° PRIMARIA", 1)).queryByText("El fin es antes que el inicio.")).toBeNull();
+  });
+
+  it("on save refuses an overlap without calling the server and focuses the offending field; the button stays enabled", async () => {
+    renderScreen();
+    await waitFor(() => expect(field("1° PRIMARIA", 2, "Inicio").value).toBe("2026-12-01"));
+
+    fireEvent.change(field("1° PRIMARIA", 2, "Inicio"), { target: { value: "2026-11-15" } });
+    const save = within(gradeBlock("1° PRIMARIA")).getByRole("button", { name: "Guardar periodos" });
+    expect(save).toBeEnabled();
+    await userEvent.click(save);
+
+    expect(mocked.saveGradeEvaluationPeriods).not.toHaveBeenCalled();
+    expect(within(row("1° PRIMARIA", 2)).getByText("Se encima con «1.ER TRIMESTRE» (termina el 30/11/2026).")).toBeInTheDocument();
+    expect(field("1° PRIMARIA", 2, "Inicio")).toHaveFocus();
+  });
+
+  it("saves the grade's whole set, numbered in date order, with a new row prefilled after the last period", async () => {
+    renderScreen();
+    await waitFor(() => expect(field("1° PRIMARIA", 2, "Fin").value).toBe("2027-03-31"));
+
+    await userEvent.click(within(gradeBlock("1° PRIMARIA")).getByRole("button", { name: "Agregar periodo" }));
+    expect(field("1° PRIMARIA", 3, "Nombre").value).toBe("PERIODO 3");
+    expect(field("1° PRIMARIA", 3, "Inicio").value).toBe("2027-04-01");
+    expect(field("1° PRIMARIA", 3, "Fin").value).toBe("2027-06-30");
+    expect(field("1° PRIMARIA", 3, "Nombre")).toHaveFocus();
+
+    await userEvent.click(within(gradeBlock("1° PRIMARIA")).getByRole("button", { name: "Guardar periodos" }));
+
+    await waitFor(() => expect(mocked.saveGradeEvaluationPeriods).toHaveBeenCalledTimes(1));
+    expect(mocked.saveGradeEvaluationPeriods).toHaveBeenCalledWith(expect.anything(), "g1", "c1", [
+      { ordinal: 1, name: "1.ER TRIMESTRE", startsOn: "2026-08-24", endsOn: "2026-11-30" },
+      { ordinal: 2, name: "2.º TRIMESTRE", startsOn: "2026-12-01", endsOn: "2027-03-31" },
+      { ordinal: 3, name: "PERIODO 3", startsOn: "2027-04-01", endsOn: "2027-06-30" },
+    ]);
+    expect(await screen.findByText("Periodos de 1° PRIMARIA guardados.")).toBeInTheDocument();
+  });
+
+  it("removes a period from the set before saving", async () => {
+    renderScreen();
+    await waitFor(() => expect(field("1° PRIMARIA", 2, "Fin").value).toBe("2027-03-31"));
+
+    await userEvent.click(within(row("1° PRIMARIA", 2)).getByRole("button", { name: "Quitar periodo 2" }));
+    await userEvent.click(within(gradeBlock("1° PRIMARIA")).getByRole("button", { name: "Guardar periodos" }));
+
+    await waitFor(() => expect(mocked.saveGradeEvaluationPeriods).toHaveBeenCalledWith(expect.anything(), "g1", "c1", [
+      { ordinal: 1, name: "1.ER TRIMESTRE", startsOn: "2026-08-24", endsOn: "2026-11-30" },
+    ]));
+  });
+
+  it("shows the server's refusal when a concurrent change wins", async () => {
+    mocked.saveGradeEvaluationPeriods.mockRejectedValue(new api.ConfigError(409, "Los periodos de un grado no pueden encimarse", "PERIOD_OVERLAP"));
+    renderScreen();
+    await waitFor(() => expect(field("1° PRIMARIA", 1, "Nombre").value).toBe("1.ER TRIMESTRE"));
+
+    await userEvent.click(within(gradeBlock("1° PRIMARIA")).getByRole("button", { name: "Guardar periodos" }));
+
+    expect(await within(gradeBlock("1° PRIMARIA")).findByRole("alert")).toHaveTextContent("Los periodos de un grado no pueden encimarse");
+  });
+
+  it("copies a grade's periods to the chosen grades, and Deshacer puts their previous periods back", async () => {
+    mocked.copyEvaluationPeriods.mockResolvedValue([
+      period("r1", "g3", 1, "1.ER TRIMESTRE", "2026-08-24", "2026-11-30"),
+      period("r2", "g3", 2, "2.º TRIMESTRE", "2026-12-01", "2027-03-31"),
+    ]);
+    renderScreen();
+    await waitFor(() => expect(field("1° PRIMARIA", 1, "Nombre").value).toBe("1.ER TRIMESTRE"));
+
+    const block = gradeBlock("1° PRIMARIA");
+    await userEvent.click(within(block).getByRole("button", { name: "Copiar a…" }));
+    const targets = within(block).getByRole("group", { name: "Grados destino" });
+    expect(within(targets).queryByRole("button", { name: "1° PRIMARIA" })).toBeNull();
+    await userEvent.click(within(targets).getByRole("button", { name: "3° PRIMARIA" }));
+    await userEvent.click(within(block).getByRole("button", { name: "Copiar periodos" }));
+
+    await waitFor(() => expect(mocked.copyEvaluationPeriods).toHaveBeenCalledWith(expect.anything(), {
+      cycleId: "c1", fromGradeLevelId: "g1", toGradeLevelIds: ["g3"],
+    }));
+    await waitFor(() => expect(field("3° PRIMARIA", 2, "Nombre").value).toBe("2.º TRIMESTRE"));
+
+    await userEvent.click(await screen.findByRole("button", { name: "Deshacer" }));
+    await waitFor(() => expect(mocked.saveGradeEvaluationPeriods).toHaveBeenCalledWith(expect.anything(), "g3", "c1", []));
+    await waitFor(() => expect(within(gradeBlock("3° PRIMARIA")).getByText(/aún no tiene periodos/i)).toBeInTheDocument());
+  });
+
+  it("applies a grade's periods to the whole level in one call", async () => {
+    mocked.copyEvaluationPeriods.mockResolvedValue([]);
+    renderScreen();
+    await waitFor(() => expect(field("1° PRIMARIA", 1, "Nombre").value).toBe("1.ER TRIMESTRE"));
+
+    await userEvent.click(within(gradeBlock("1° PRIMARIA")).getByRole("button", { name: "Aplicar a todo el nivel" }));
+
+    await waitFor(() => expect(mocked.copyEvaluationPeriods).toHaveBeenCalledWith(expect.anything(), {
+      cycleId: "c1", fromGradeLevelId: "g1", toGradeLevelIds: ["g2", "g3"],
+    }));
+  });
+
+  it("copying with no grade chosen says so instead of doing nothing", async () => {
+    renderScreen();
+    await waitFor(() => expect(field("1° PRIMARIA", 1, "Nombre").value).toBe("1.ER TRIMESTRE"));
+    const block = gradeBlock("1° PRIMARIA");
+
+    await userEvent.click(within(block).getByRole("button", { name: "Copiar a…" }));
+    await userEvent.click(within(block).getByRole("button", { name: "Copiar periodos" }));
+
+    expect(within(block).getByText("Elige al menos un grado.")).toBeInTheDocument();
+    expect(mocked.copyEvaluationPeriods).not.toHaveBeenCalled();
+  });
+
+  it("asks before copying over unsaved changes of the source", async () => {
+    renderScreen();
+    await waitFor(() => expect(field("1° PRIMARIA", 1, "Nombre").value).toBe("1.ER TRIMESTRE"));
+    fireEvent.change(field("1° PRIMARIA", 1, "Fin"), { target: { value: "2026-11-27" } });
+
+    await userEvent.click(within(gradeBlock("1° PRIMARIA")).getByRole("button", { name: "Aplicar a todo el nivel" }));
+
+    expect(within(gradeBlock("1° PRIMARIA")).getByRole("alert")).toHaveTextContent("Guarda primero los cambios de este grado para copiarlos.");
+    expect(mocked.copyEvaluationPeriods).not.toHaveBeenCalled();
+  });
+
+  it("switching the cycle shows that cycle's periods", async () => {
+    renderScreen();
+    await waitFor(() => expect(field("1° PRIMARIA", 1, "Nombre").value).toBe("1.ER TRIMESTRE"));
+
+    await userEvent.click(screen.getByRole("button", { name: "2025-2026" }));
+
+    await waitFor(() => expect(mocked.listEvaluationPeriods).toHaveBeenLastCalledWith(expect.anything(), { cycleId: "c0", levelId: "l1" }));
+    await waitFor(() => expect(within(gradeBlock("1° PRIMARIA")).getByText(/aún no tiene periodos/i)).toBeInTheDocument());
+  });
+
+  it("without config:write the periods are read-only", async () => {
+    renderScreen(false);
+    await waitFor(() => expect(field("1° PRIMARIA", 1, "Nombre").value).toBe("1.ER TRIMESTRE"));
+
+    expect(field("1° PRIMARIA", 1, "Nombre")).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Guardar periodos" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Copiar a…" })).toBeNull();
+  });
+
+  it("goes back to Configuración", async () => {
+    const { onBack } = renderScreen();
+    await userEvent.click(await screen.findByRole("button", { name: /volver a configuración/i }));
+    expect(onBack).toHaveBeenCalled();
+  });
+
+  it("the undo offer leaves on its own after eight seconds", async () => {
+    mocked.copyEvaluationPeriods.mockResolvedValue([]);
+    renderScreen();
+    await waitFor(() => expect(field("1° PRIMARIA", 1, "Nombre").value).toBe("1.ER TRIMESTRE"));
+    // Only the undo's own clock is faked: the load above ran on real time.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+
+    fireEvent.click(within(gradeBlock("1° PRIMARIA")).getByRole("button", { name: "Aplicar a todo el nivel" }));
+    expect(await screen.findByRole("button", { name: "Deshacer" })).toBeInTheDocument();
+    await act(async () => {}); // the effect that starts the clock has run
+    await act(async () => {
+      vi.advanceTimersByTime(8_100);
+    });
+    expect(screen.queryByRole("button", { name: "Deshacer" })).toBeNull();
+  });
+});
