@@ -53,6 +53,9 @@ type Charge struct {
 	Status         string
 	PaidCents      int64
 	RemainingCents int64
+	// ScholarshipCents is the scholarship's part (T18); RemainingCents is
+	// already net of it.
+	ScholarshipCents int64
 }
 
 // Payment is the edge's view of one amount applied to a charge. Method is
@@ -414,6 +417,9 @@ type ReceiptLine struct {
 	AmountCents   int64
 	Surcharge     bool
 	DiscountCents int64
+	// The scholarship's part and its name (T18).
+	ScholarshipCents int64
+	ScholarshipName  string
 }
 
 // DepositReceipt is a deposit and what it paid, concept by concept.
@@ -434,6 +440,7 @@ func (c *FinanceClient) DepositReceipt(ctx context.Context, depositID string) (D
 		lines = append(lines, ReceiptLine{
 			ChargeID: l.GetChargeId(), Description: l.GetDescription(), AmountCents: l.GetAmountCents(),
 			Surcharge: l.GetSurcharge(), DiscountCents: l.GetDiscountCents(),
+			ScholarshipCents: l.GetScholarshipCents(), ScholarshipName: l.GetScholarshipName(),
 		})
 	}
 	return DepositReceipt{Deposit: toDeposit(res.Msg.GetDeposit()), Lines: lines, UnallocatedCents: res.Msg.GetUnallocatedCents()}, nil
@@ -511,6 +518,8 @@ type Expected struct {
 	SurchargeCents     int64 `json:"surchargeCents"`
 	DiscountCents      int64 `json:"discountCents"`
 	AnnualBalanceCents int64 `json:"annualBalanceCents"`
+	// ScholarshipCents is what scholarships take off the lines asked for (T18).
+	ScholarshipCents int64 `json:"scholarshipCents"`
 	// Lines is the debt concept by concept, oldest due date first (task 8).
 	Lines []ExpectedLine `json:"lines"`
 }
@@ -523,8 +532,11 @@ type ExpectedLine struct {
 	OwedCents      int64  `json:"owedCents"`
 	SurchargeCents int64  `json:"surchargeCents"`
 	DiscountCents  int64  `json:"discountCents"`
-	TotalCents     int64  `json:"totalCents"`
-	Due            bool   `json:"due"`
+	// ScholarshipCents is the scholarship's part that day (T18), already out
+	// of OwedCents.
+	ScholarshipCents int64 `json:"scholarshipCents"`
+	TotalCents       int64 `json:"totalCents"`
+	Due              bool  `json:"due"`
 }
 
 // ExpectedToday asks what is due as of a date ("" = today).
@@ -540,6 +552,7 @@ func (c *FinanceClient) ExpectedToday(ctx context.Context, studentID, on string)
 		SurchargeCents:     res.Msg.GetSurchargeCents(),
 		DiscountCents:      res.Msg.GetDiscountCents(),
 		AnnualBalanceCents: res.Msg.GetAnnualBalanceCents(),
+		ScholarshipCents:   res.Msg.GetScholarshipCents(),
 		Lines:              toExpectedLines(res.Msg.GetLines()),
 	}, nil
 }
@@ -550,7 +563,7 @@ func toExpectedLines(lines []*financev1.ExpectedLine) []ExpectedLine {
 		out = append(out, ExpectedLine{
 			ChargeID: l.GetChargeId(), Description: l.GetDescription(), DueDate: l.GetDueDate(),
 			OwedCents: l.GetOwedCents(), SurchargeCents: l.GetSurchargeCents(), DiscountCents: l.GetDiscountCents(),
-			TotalCents: l.GetTotalCents(), Due: l.GetDue(),
+			TotalCents: l.GetTotalCents(), Due: l.GetDue(), ScholarshipCents: l.GetScholarshipCents(),
 		})
 	}
 	return out
@@ -767,19 +780,20 @@ func toChargeConcept(c *financev1.ChargeConcept) ChargeConcept {
 
 func toCharge(c *financev1.Charge) Charge {
 	return Charge{
-		ID:             c.GetId(),
-		TenantID:       c.GetTenantId(),
-		StudentID:      c.GetStudentId(),
-		CycleID:        c.GetCycleId(),
-		ConceptID:      c.GetConceptId(),
-		Description:    c.GetDescription(),
-		AmountCents:    c.GetAmountCents(),
-		DiscountCents:  c.GetDiscountCents(),
-		DueDate:        c.GetDueDate(),
-		StartsOn:       c.GetStartsOn(),
-		Status:         c.GetStatus(),
-		PaidCents:      c.GetPaidCents(),
-		RemainingCents: c.GetRemainingCents(),
+		ID:               c.GetId(),
+		TenantID:         c.GetTenantId(),
+		StudentID:        c.GetStudentId(),
+		CycleID:          c.GetCycleId(),
+		ConceptID:        c.GetConceptId(),
+		Description:      c.GetDescription(),
+		AmountCents:      c.GetAmountCents(),
+		DiscountCents:    c.GetDiscountCents(),
+		DueDate:          c.GetDueDate(),
+		StartsOn:         c.GetStartsOn(),
+		Status:           c.GetStatus(),
+		PaidCents:        c.GetPaidCents(),
+		RemainingCents:   c.GetRemainingCents(),
+		ScholarshipCents: c.GetScholarshipCents(),
 	}
 }
 

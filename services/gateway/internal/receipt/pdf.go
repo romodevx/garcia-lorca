@@ -164,6 +164,9 @@ func (w *writer) lines(r Receipt) {
 		if l.DiscountCents > 0 {
 			description += " (descuento " + Money(l.DiscountCents) + ")"
 		}
+		if l.ScholarshipCents > 0 {
+			description += " (" + ScholarshipLabel(l.ScholarshipName) + " " + Money(l.ScholarshipCents) + ")"
+		}
 		w.textAt(familyRegular, 10, Money(l.AmountCents), pageMargin+contentWidth-amountWidth, amountWidth, gopdf.Right)
 		// The description wraps inside its column, never into the amount's.
 		taken := w.wrapped(familyRegular, 10, description, pageMargin, contentWidth-amountWidth-12)
@@ -184,6 +187,9 @@ func (w *writer) totals(r Receipt) {
 	if r.DiscountCents > 0 {
 		row(familyRegular, 10, "Descuentos aplicados", r.DiscountCents)
 	}
+	if r.ScholarshipCents > 0 {
+		row(familyRegular, 10, "Becas aplicadas", r.ScholarshipCents)
+	}
 	if r.CreditCents > 0 {
 		row(familyRegular, 10, "Saldo a favor", r.CreditCents)
 	}
@@ -193,6 +199,19 @@ func (w *writer) totals(r Receipt) {
 func (w *writer) foot(r Receipt) {
 	w.y += 18
 	w.text(familyRegular, 9, r.School.Legend)
+}
+
+// ScholarshipLabel is how a scholarship reads on paper: "Beca <name>", or
+// the name alone when it already says so.
+func ScholarshipLabel(name string) string {
+	switch {
+	case name == "":
+		return "Beca"
+	case strings.HasPrefix(strings.ToLower(name), "beca"):
+		return name
+	default:
+		return "Beca " + name
+	}
 }
 
 // Money renders cents as the office writes pesos: $3,500.00.

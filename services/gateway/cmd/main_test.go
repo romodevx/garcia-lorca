@@ -113,6 +113,9 @@ func (stubIAM) ValidateToken(_ context.Context, req *connect.Request[iamv1.Valid
 		"schedule-reader":   {"schedule:read"},
 		"activities-writer": {"activities:write", "activities:read"},
 		"activities-reader": {"activities:read"},
+		// T18: the Becas module's two permissions (iam 0030, delegable).
+		"scholarships-writer": {"scholarships:write", "scholarships:read"},
+		"scholarships-reader": {"scholarships:read"},
 		// T2: the maestro role, exactly as migrations/iam/0022 seeds it.
 		"maestro": {"teaching:read", "teaching:write", "attendance_own:read", "attendance_own:write"},
 		// "Dar acceso al sistema" needs teachers:write AND users:write, and the
