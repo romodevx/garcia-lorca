@@ -161,6 +161,28 @@ func (h *AttendanceHandler) ListSessions(ctx context.Context, req *connect.Reque
 	return connect.NewResponse(&attendancev1.ListSessionsResponse{Lists: out}), nil
 }
 
+// SummarizeAttendance counts one group's attendance over a range (T12 report).
+func (h *AttendanceHandler) SummarizeAttendance(ctx context.Context, req *connect.Request[attendancev1.SummarizeAttendanceRequest]) (*connect.Response[attendancev1.SummarizeAttendanceResponse], error) {
+	m := req.Msg
+	sum, err := h.svc.SummarizeAttendance(ctx, m.GetGroupId(), m.GetFromDate(), m.GetToDate())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	out := make([]*attendancev1.StudentAttendanceCount, 0, len(sum.Students))
+	for _, s := range sum.Students {
+		out = append(out, &attendancev1.StudentAttendanceCount{
+			EnrollmentId: s.EnrollmentID,
+			StudentId:    s.StudentID,
+			Absent:       int32(s.Absent),
+			Late:         int32(s.Late),
+			Excused:      int32(s.Excused),
+			Lists:        int32(s.Lists),
+			Active:       s.Active,
+		})
+	}
+	return connect.NewResponse(&attendancev1.SummarizeAttendanceResponse{ListsTaken: int32(sum.ListsTaken), Counts: out}), nil
+}
+
 // ErrorCodeMeta is the error-metadata key a refusal's machine code rides in;
 // the gateway forwards it as the X-Error-Code response header.
 const ErrorCodeMeta = "X-Error-Code"

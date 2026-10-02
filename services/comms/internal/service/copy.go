@@ -98,9 +98,9 @@ func attendanceCopy(status, name, class, date string) (kind, title, body string)
 		return typeAbsence, "Ausencia registrada", fmt.Sprintf("%s faltó el %s.", name, date)
 	case statusLate:
 		if perClass {
-			return typeAttendance, "Llegada tarde", fmt.Sprintf("%s llegó tarde a %s el %s.", name, class, date)
+			return typeAttendance, "Retardo registrado", fmt.Sprintf("%s llegó con retardo a %s el %s.", name, class, date)
 		}
-		return typeAttendance, "Llegada tarde", fmt.Sprintf("%s llegó tarde el %s.", name, date)
+		return typeAttendance, "Retardo registrado", fmt.Sprintf("%s llegó con retardo el %s.", name, date)
 	case statusExcused:
 		if perClass {
 			return typeAttendance, "Ausencia justificada", fmt.Sprintf("%s tiene falta justificada en %s el %s.", name, class, date)

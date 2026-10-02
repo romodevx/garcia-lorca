@@ -26,12 +26,14 @@ const rowLabel: CSSProperties = {
   fontSize: 12.5, fontWeight: 700, color: "var(--text-faint)", textTransform: "uppercase", letterSpacing: ".04em", minWidth: 52,
 };
 
-function ChipRow({ label, options, chosen, onChoose, trailing }: {
+/** One row of chips (Nivel, Grado or Grupo); `showCounts` adds each chip's pupil count. */
+export function ChipRow({ label, options, chosen, onChoose, trailing, showCounts = true }: {
   label: string;
   options: readonly FacetOption[];
   chosen: string;
   onChoose: (id: string) => void;
   trailing?: ReactNode;
+  showCounts?: boolean;
 }): ReactElement {
   return (
     <div role="group" aria-label={label} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -41,7 +43,7 @@ function ChipRow({ label, options, chosen, onChoose, trailing }: {
         return (
           <button key={o.id} type="button" aria-pressed={on} onClick={() => onChoose(o.id)} style={chip(on)}>
             {o.label}
-            <span style={badge}>{o.count}</span>
+            {showCounts && <span style={badge}>{o.count}</span>}
           </button>
         );
       })}

@@ -10,12 +10,15 @@ export interface ChipProps {
   children: string;
 }
 
-function chipColors(colors: ThemeColors, kind: ChipKind): { bg: string; fg: string } {
+/** Background/foreground pair of a status kind — the one palette every chip and tint uses. */
+export function chipColors(colors: ThemeColors, kind: ChipKind): { bg: string; fg: string } {
   switch (kind) {
     case "ok":
       return { bg: colors.okBg, fg: colors.ok };
     case "warn":
       return { bg: colors.warnBg, fg: colors.warn };
+    case "late":
+      return { bg: colors.lateBg, fg: colors.late };
     case "bad":
       return { bg: colors.badBg, fg: colors.bad };
     case "lime":

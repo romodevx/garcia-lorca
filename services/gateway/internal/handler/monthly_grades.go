@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -321,16 +322,24 @@ func sortBySurname[T any](d studentDirectory, rows []T, studentID func(T) string
 // school, never one read per row). It is best-effort: a failed read leaves
 // names empty, never fails the sheet.
 func studentsByID(ctx context.Context, students StudentNamesReader, rows []client.MonthlySheetRow) studentDirectory {
-	out := studentDirectory{}
-	if len(rows) == 0 || students == nil {
-		return out
-	}
 	ids := make([]string, 0, len(rows))
 	for _, r := range rows {
 		ids = append(ids, r.StudentID)
 	}
+	return studentsByIDs(ctx, students, ids)
+}
+
+// studentsByIDs names the given pupils in ONE read, best-effort: a failed read
+// is logged (a count, never names) and leaves the directory empty, so a screen
+// or a report shows unnamed rows rather than failing.
+func studentsByIDs(ctx context.Context, students StudentNamesReader, ids []string) studentDirectory {
+	out := studentDirectory{}
+	if len(ids) == 0 || students == nil {
+		return out
+	}
 	list, err := students.StudentsByIDs(ctx, ids)
 	if err != nil {
+		slog.WarnContext(ctx, "naming pupils failed; rows go unnamed", "pupils", len(ids), "error", err)
 		return out
 	}
 	for _, s := range list {

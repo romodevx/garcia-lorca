@@ -100,8 +100,7 @@ describe("PassSheet — a scan keeps a late or excused row", () => {
     const user = userEvent.setup();
     scan.mockResolvedValue(ok("en2", "Alan Turing"));
     renderSheet();
-    await user.click(await screen.findByRole("button", { name: "Más opciones de Alan Turing" }));
-    await user.click(screen.getByRole("button", { name: "Retardo" }));
+    await user.click(await screen.findByRole("button", { name: "Retardo de Alan Turing" }));
     await openScanner(user);
 
     await read("GLCARD:alan");

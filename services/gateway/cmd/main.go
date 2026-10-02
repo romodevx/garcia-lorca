@@ -719,6 +719,13 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("GET /api/v1/attendance/roster", attendanceRead(attendanceH.GetRoster))
 	mux.Handle("POST /api/v1/attendance", attendanceWrite(attendanceH.SaveDaily))
 	mux.Handle("GET /api/v1/attendance", attendanceRead(attendanceH.ListAttendance))
+	// T12: the attendance report of a group over a date range (JSON, PDF,
+	// Excel) — a read of the whole group, so attendance:read (the director's).
+	// A teacher's own-group report is deferred (attendance_own:* does not open it).
+	attendanceReportH := handler.NewAttendanceReportHandler(attendanceClient, configClient, studentsClient, configClient)
+	mux.Handle("GET /api/v1/attendance/reports", attendanceRead(attendanceReportH.Report))
+	mux.Handle("GET /api/v1/attendance/reports/pdf", attendanceRead(attendanceReportH.ReportPDF))
+	mux.Handle("GET /api/v1/attendance/reports/xlsx", attendanceRead(attendanceReportH.ReportXLSX))
 	// T4: resolve a scanned card to a row of any list (a read, like the roster),
 	// behind module_student_card as well.
 	mux.Handle("POST /api/v1/attendance/scan", guard.Protect("student_card", attendanceRead(attendanceH.Scan)))

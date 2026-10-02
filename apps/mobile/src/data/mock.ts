@@ -11,7 +11,7 @@
 import type { IconName } from "../icons";
 import type { TintName } from "../theme";
 
-export type ChipKind = "ok" | "warn" | "bad" | "neutral" | "lime" | "purple";
+export type ChipKind = "ok" | "warn" | "late" | "bad" | "neutral" | "lime" | "purple";
 
 export interface SchoolEvent {
   day: string;

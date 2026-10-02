@@ -56,7 +56,24 @@ type fakeRepo struct {
 	// and is reported in ListChanges.HeldElsewhere.
 	held map[string]bool
 
+	historyCalls     int
+	lastHistoryGroup string
+	lastHistoryIDs   []string
+	lastHistoryFrom  time.Time
+	lastHistoryTo    time.Time
+	history          service.GroupHistory
+
 	err error // forced failure, returned by every method when set
+}
+
+func (f *fakeRepo) GroupHistory(_ context.Context, groupID string, enrollmentIDs []string, from, to time.Time) (service.GroupHistory, error) {
+	f.historyCalls++
+	f.lastHistoryGroup, f.lastHistoryIDs = groupID, append([]string(nil), enrollmentIDs...)
+	f.lastHistoryFrom, f.lastHistoryTo = from, to
+	if f.err != nil {
+		return service.GroupHistory{}, f.err
+	}
+	return f.history, nil
 }
 
 func (f *fakeRepo) ListSessions(_ context.Context, groupIDs []string, from, to time.Time) ([]service.TakenList, error) {
@@ -179,8 +196,16 @@ func (f *fakeRepo) ListByEnrollment(_ context.Context, enrollmentID string, from
 // fakeEnrollments stands in for the students service: the enrollments of a
 // group, in the arbitrary order an RPC would return them.
 type fakeEnrollments struct {
-	byGroup map[string][]service.EnrollmentRef
-	err     error
+	byGroup   map[string][]service.EnrollmentRef
+	transfers map[string][]service.TransferIn
+	err       error
+}
+
+func (f *fakeEnrollments) TransfersInto(_ context.Context, groupID string) ([]service.TransferIn, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.transfers[groupID], nil
 }
 
 func (f *fakeEnrollments) ByGroup(_ context.Context, groupID string) ([]service.EnrollmentRef, error) {

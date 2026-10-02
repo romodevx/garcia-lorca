@@ -100,7 +100,7 @@ func (b *Builder) Document(ctx context.Context, rep Report) (report.Document, er
 	}
 	header := []string{"Reporte de finanzas"}
 	if found {
-		header = nonEmpty(school.Name, school.LegalName, prefixed("RFC ", school.RFC))
+		header = report.SchoolHeading(school.Name, school.LegalName, school.RFC)
 	}
 	return report.Document{
 		Title:    "Ingresos y egresos",
@@ -196,21 +196,4 @@ func expensesTable(rep Report) report.Table {
 		})
 	}
 	return t
-}
-
-func prefixed(prefix, value string) string {
-	if value == "" {
-		return ""
-	}
-	return prefix + value
-}
-
-func nonEmpty(parts ...string) []string {
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		if p != "" {
-			out = append(out, p)
-		}
-	}
-	return out
 }

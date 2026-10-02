@@ -48,6 +48,9 @@ export interface ThemeColors {
   okBg: string;
   warn: string;
   warnBg: string;
+  /** A tardy (retardo): burnt orange, apart from the amber of a warning. */
+  late: string;
+  lateBg: string;
   bad: string;
   badBg: string;
   // misc
@@ -92,6 +95,8 @@ export const lightColors: ThemeColors = {
   okBg: "#DDEFE2",
   warn: "#C97A00",
   warnBg: "#FBEFD3",
+  late: "#B45309",
+  lateBg: "#FCE6CB",
   bad: "#C40000",
   badBg: "#FBDADA",
 
@@ -136,6 +141,8 @@ export const darkColors: ThemeColors = {
   okBg: "rgba(122,196,0,0.16)",
   warn: "#F2D600",
   warnBg: "rgba(242,214,0,0.15)",
+  late: "#FFB454",
+  lateBg: "rgba(243,146,0,0.18)",
   bad: "#FF6B6B",
   badBg: "rgba(224,0,0,0.20)",
 

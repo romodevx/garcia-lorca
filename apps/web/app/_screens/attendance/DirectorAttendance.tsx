@@ -1,14 +1,16 @@
 "use client";
 
-import type { CSSProperties, ReactElement } from "react";
+import { useMemo, useState, type CSSProperties, type ReactElement } from "react";
 
 import { API_URL } from "../../api-url";
 import { Page } from "../../_design/Page";
 import { getAttendanceSheet, saveAttendanceSheet, scanAttendanceCard } from "../../attendance/api";
+import { downloadAttendanceReport, getAttendanceReport, type AttendanceReportQuery, type ReportFormat } from "../../attendance/report";
 import type { ScanCardInput } from "../../attendance/scan";
 import type { AttendanceSheetQuery, SaveSheetInput } from "../../attendance/sheet";
 import { EmptyHint, ErrorAlert, SelectChip } from "../config/parts";
 import { AttendanceHeader } from "./AttendanceHeader";
+import { AttendanceReportPanel } from "./AttendanceReportPanel";
 import { PassSheet } from "./PassSheet";
 import { todayISO } from "./sheetModel";
 import { useDirectorClasses, type DirectorClasses } from "./useDirectorClasses";
@@ -27,6 +29,31 @@ const SELECT: CSSProperties = { minHeight: 48, maxWidth: "100%", padding: "0 16p
 const loadSheet = (q: AttendanceSheetQuery) => getAttendanceSheet(API_URL, q);
 const saveSheet = (input: SaveSheetInput) => saveAttendanceSheet(API_URL, input);
 const scanCard = (input: ScanCardInput) => scanAttendanceCard(API_URL, input);
+const loadReport = (q: AttendanceReportQuery) => getAttendanceReport(API_URL, q);
+const downloadReport = (q: AttendanceReportQuery, format: ReportFormat) => downloadAttendanceReport(API_URL, q, format);
+
+type View = "list" | "report";
+const VIEWS: readonly { value: View; label: string }[] = [
+  { value: "list", label: "Pase de lista" },
+  { value: "report", label: "Reporte" },
+];
+
+/** Pase de lista ↔ Reporte: a segmented control, one tap each. */
+function ViewSwitch({ view, onChange }: { view: View; onChange: (v: View) => void }): ReactElement {
+  return (
+    <div role="radiogroup" aria-label="Vista" style={{ display: "inline-flex", gap: 6, padding: 5, marginBottom: 16, background: "var(--surface-3)", borderRadius: 99, border: "1px solid var(--border)" }}>
+      {VIEWS.map((v) => {
+        const on = v.value === view;
+        return (
+          <button key={v.value} type="button" role="radio" aria-checked={on} onClick={() => onChange(v.value)}
+            style={{ minHeight: 44, padding: "0 18px", borderRadius: 99, background: on ? "var(--surface)" : "transparent", color: on ? "var(--text)" : "var(--text-muted)", fontWeight: 600, boxShadow: on ? "var(--shadow-card)" : "none", cursor: "pointer" }}>
+            {v.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 function SubjectStep({ classes, canLeave }: { classes: DirectorClasses; canLeave: () => boolean }): ReactElement {
   if (classes.subjectsLoading) return <EmptyHint>Cargando asignaturas…</EmptyHint>;
@@ -56,6 +83,8 @@ export function DirectorAttendance({ onBack, today, canScanCards = false }: Dire
   const { group, mode, subjectId } = classes;
   const subjectName = classes.subjects.find((s) => s.id === subjectId)?.name;
   const ready = group !== undefined && (mode === "daily" || subjectId !== "");
+  const [view, setView] = useState<View>("list");
+  const catalog = useMemo(() => ({ levels: classes.levels, grades: classes.grades, groups: classes.groups }), [classes.levels, classes.grades, classes.groups]);
 
   return (
     <Page>
@@ -64,6 +93,11 @@ export function DirectorAttendance({ onBack, today, canScanCards = false }: Dire
         <ErrorAlert message={classes.loadError} />
       ) : (
         <div className="fade-up">
+          <ViewSwitch view={view} onChange={(v) => v !== view && guard.canLeave() && setView(v)} />
+          {view === "report" ? (
+            <AttendanceReportPanel catalog={catalog} today={today ?? todayISO()} load={loadReport} download={downloadReport} />
+          ) : (
+          <>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginBottom: 16 }}>
             <select aria-label="Ciclo" value={classes.cycleId} onChange={(e) => guard.canLeave() && classes.setCycleId(e.target.value)} style={SELECT}>
               {classes.cycles.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -88,6 +122,8 @@ export function DirectorAttendance({ onBack, today, canScanCards = false }: Dire
               scan={canScanCards ? scanCard : undefined}
               onDirtyChange={guard.setDirty}
             />
+          )}
+          </>
           )}
         </div>
       )}

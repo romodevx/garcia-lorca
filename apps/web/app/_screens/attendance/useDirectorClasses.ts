@@ -19,6 +19,9 @@ import { listTeachingAssignments } from "../../teachers/api";
 
 export interface DirectorClasses {
   cycles: readonly Cycle[];
+  /** The school's levels and grades (the report's level → grade → group chips). */
+  levels: readonly Level[];
+  grades: readonly GradeLevel[];
   /** In school order: level → grade → letter. */
   groups: readonly LabelledGroup[];
   cycleId: string;
@@ -117,5 +120,5 @@ export function useDirectorClasses(): DirectorClasses {
     setSubjectId("");
   };
 
-  return { cycles, groups: orderedGroups, cycleId, setCycleId, groupId, setGroupId, group, mode, subjects, subjectsLoading, subjectId, setSubjectId, loadError };
+  return { cycles, levels, grades, groups: orderedGroups, cycleId, setCycleId, groupId, setGroupId, group, mode, subjects, subjectsLoading, subjectId, setSubjectId, loadError };
 }

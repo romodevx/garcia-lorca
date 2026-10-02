@@ -449,3 +449,54 @@ func (r *Repo) ListSessions(ctx context.Context, groupIDs []string, from, to tim
 	}
 	return out, nil
 }
+
+// historyMark is one exception as GroupHistory scans it.
+type historyMark struct {
+	EnrollmentID string    `gorm:"column:enrollment_id"`
+	Date         time.Time `gorm:"column:date"`
+	Status       string    `gorm:"column:status"`
+}
+
+// GroupHistory reads, in ONE tenant-bound transaction, the day of every list
+// the group took between two inclusive days, and the exceptions of the given
+// enrollments in that span on the group's lists: marks stamped with this group
+// plus legacy marks (group_id NULL, stored before 0004). A mark another group's
+// list holds is not this group's. The service decides which of them fall in
+// each pupil's time in the group. The lists are read through the sessions'
+// list key (tenant_id, group_id, date, subject_id); the marks through
+// idx_attendance_enrollment (tenant_id, enrollment_id), one roster's worth.
+func (r *Repo) GroupHistory(ctx context.Context, groupID string, enrollmentIDs []string, from, to time.Time) (service.GroupHistory, error) {
+	var out service.GroupHistory
+	fromDay, toDay := from.Format(dateLayout), to.Format(dateLayout)
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		var days []time.Time
+		if err := tx.Model(&sessionModel{}).
+			Where("group_id = ? AND date BETWEEN ?::date AND ?::date", groupID, fromDay, toDay).
+			Order("date").
+			Pluck("date", &days).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "reading attendance lists", err)
+		}
+		out.Lists = days
+		if len(enrollmentIDs) == 0 {
+			return nil
+		}
+		var rows []historyMark
+		if err := tx.Model(&attendanceModel{}).
+			Select("enrollment_id", "date", "status").
+			Where("enrollment_id IN ? AND date BETWEEN ?::date AND ?::date", enrollmentIDs, fromDay, toDay).
+			Where("(group_id = ? OR group_id IS NULL)", groupID).
+			Order("enrollment_id, date").
+			Scan(&rows).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "reading attendance marks", err)
+		}
+		out.Marks = make([]service.DayMark, 0, len(rows))
+		for _, m := range rows {
+			out.Marks = append(out.Marks, service.DayMark{EnrollmentID: m.EnrollmentID, Date: m.Date.UTC(), Status: m.Status})
+		}
+		return nil
+	})
+	if err != nil {
+		return service.GroupHistory{}, err
+	}
+	return out, nil
+}

@@ -20,7 +20,8 @@ export const STATUS_META: Record<AttendanceStatus, { label: string; icon: IconNa
 /** While the scanner is open: not scanned yet — a transient state, never saved. */
 const PENDING_META = { label: "Sin registrar", icon: "qrScan" as IconName, tone: "var(--text-muted)" };
 
-const SECONDARY: readonly AttendanceStatus[] = ["late", "excused"];
+/** Behind "Más": the rare choice. Retardo is daily, so it sits on the row itself (T12). */
+const SECONDARY: readonly AttendanceStatus[] = ["excused"];
 const LOCKED_OPACITY = 0.6;
 
 export interface PassSheetRowProps {
@@ -45,10 +46,22 @@ function StatusPill({ meta, dashed = false }: { meta: { label: string; icon: Ico
   );
 }
 
+/** One tap: late ↔ present. Its word stays visible — never an icon alone. */
+function LateToggle({ name, on, locked, onToggle }: { name: string; on: boolean; locked: boolean; onToggle: () => void }): ReactElement {
+  const tone = STATUS_META.late.tone;
+  return (
+    <button type="button" aria-label={`Retardo de ${name}`} aria-pressed={on} aria-disabled={locked || undefined} onClick={onToggle} style={{ minHeight: 44, minWidth: 44, flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 4, padding: "0 10px", borderRadius: "var(--r-pill)", fontWeight: 700, fontSize: 13, cursor: locked ? "progress" : "pointer", border: `1.5px solid ${on ? tone : "var(--border)"}`, background: on ? `color-mix(in oklab, ${tone} 14%, var(--surface))` : "var(--surface)", color: on ? tone : "var(--text-muted)" }}>
+      <Icon name={STATUS_META.late.icon} size={16} stroke={2.4} />
+      Retardo
+    </button>
+  );
+}
+
 /**
  * One student: the whole row is the tap (Presente ↔ Ausente), because in a
- * classroom the teacher aims a thumb at a name, not at a small segment. The
- * rarer choices — Retardo, Justificada, a note — sit behind "Más".
+ * classroom the teacher aims a thumb at a name, not at a small segment.
+ * Retardo is one tap beside it (T12) — after a QR scan too; the rarer choices
+ * — Justificada, a note — sit behind "Más".
  */
 export function PassSheetRow({ row, editable, locked = false, showStatus = true, pending = false, onStatus, onNote }: PassSheetRowProps): ReactElement {
   const [open, setOpen] = useState(false);
@@ -75,6 +88,7 @@ export function PassSheetRow({ row, editable, locked = false, showStatus = true,
         ) : (
           <div style={{ flex: "1 1 auto", minWidth: 0, minHeight: 56, display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, padding: "8px 12px" }}>{face}</div>
         )}
+        {editable && <LateToggle name={row.name} on={row.status === "late"} locked={locked} onToggle={() => setStatus(row.status === "late" ? "present" : "late")} />}
         {editable && (
           <button type="button" aria-label={`Más opciones de ${row.name}`} aria-expanded={open} aria-controls={panelId} onClick={() => setOpen((v) => !v)} style={{ width: 48, height: 48, flexShrink: 0, display: "grid", placeItems: "center", borderRadius: 99, color: "var(--text-muted)", cursor: "pointer" }}>
             <Icon name="more" size={22} />

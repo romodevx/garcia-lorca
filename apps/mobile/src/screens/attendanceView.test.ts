@@ -145,9 +145,16 @@ describe("attendance view helpers", () => {
     });
   });
 
+  it("gives a tardy its own color, apart from a partial or excused day (T12)", () => {
+    expect(statusPill("late").kind).toBe("late");
+    expect(todayHeadline(day({ status: "late" })).kind).toBe("late");
+    expect(statusPill("partial").kind).not.toBe("late");
+    expect(statusPill("excused").kind).not.toBe("late");
+  });
+
   it("gives every status a text pill, never color alone", () => {
     expect(statusPill("absent")).toEqual({ label: "Faltó", kind: "bad" });
-    expect(statusPill("late")).toEqual({ label: "Retardo", kind: "warn" });
+    expect(statusPill("late")).toEqual({ label: "Retardo", kind: "late" });
     expect(statusPill("partial").label).toBe("Parcial");
     expect(statusPill("not_taken").label).toBe("Sin lista");
   });
