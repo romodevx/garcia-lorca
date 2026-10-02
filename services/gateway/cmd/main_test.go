@@ -315,6 +315,14 @@ func (stubConfig) CopyTermMonths(_ context.Context, req *connect.Request[configv
 	return connect.NewResponse(&configv1.CopyTermMonthsResponse{}), nil
 }
 
+func (stubConfig) RenameSubject(_ context.Context, req *connect.Request[configv1.RenameSubjectRequest]) (*connect.Response[configv1.RenameSubjectResponse], error) {
+	return connect.NewResponse(&configv1.RenameSubjectResponse{Subject: &configv1.Subject{Id: req.Msg.GetId(), Name: req.Msg.GetName()}}), nil
+}
+
+func (stubConfig) DeleteSubject(_ context.Context, _ *connect.Request[configv1.DeleteSubjectRequest]) (*connect.Response[configv1.DeleteSubjectResponse], error) {
+	return connect.NewResponse(&configv1.DeleteSubjectResponse{}), nil
+}
+
 func (stubConfig) ListCycles(_ context.Context, _ *connect.Request[configv1.ListCyclesRequest]) (*connect.Response[configv1.ListCyclesResponse], error) {
 	return connect.NewResponse(&configv1.ListCyclesResponse{Cycles: []*configv1.Cycle{
 		// Active: the teacher surfaces answer only for the live cycle, and the
@@ -947,6 +955,40 @@ func TestTermMonthsRoutesGuardChain(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			gw := newTestGateway(t, tt.flags)
 			res := doGateway(t, gw, tt.method, tt.path, tt.token, tt.body)
+			if res.StatusCode != tt.want {
+				t.Errorf("status = %d, want %d", res.StatusCode, tt.want)
+			}
+		})
+	}
+}
+
+// T13: renaming and deleting a subject ride the config chain — module_config
+// OFF ⇒ 404, no token ⇒ 401, config:read alone ⇒ 403, config:write ⇒ done.
+func TestSubjectEditRoutesGuardChain(t *testing.T) {
+	const path = "/api/v1/config/subjects/00000000-0000-4000-8000-000000000020"
+	const body = `{"name":"Lengua"}`
+	on := map[string]bool{"module_config": true}
+	tests := []struct {
+		name   string
+		flags  map[string]bool
+		method string
+		body   string
+		token  string
+		want   int
+	}{
+		{"rename: module off hides it", map[string]bool{}, http.MethodPatch, body, "config-writer", http.StatusNotFound},
+		{"rename: no token", on, http.MethodPatch, body, "", http.StatusUnauthorized},
+		{"rename: read-only", on, http.MethodPatch, body, "config-reader", http.StatusForbidden},
+		{"rename: writer", on, http.MethodPatch, body, "config-writer", http.StatusOK},
+		{"delete: module off hides it", map[string]bool{}, http.MethodDelete, "", "config-writer", http.StatusNotFound},
+		{"delete: no token", on, http.MethodDelete, "", "", http.StatusUnauthorized},
+		{"delete: read-only", on, http.MethodDelete, "", "config-reader", http.StatusForbidden},
+		{"delete: writer", on, http.MethodDelete, "", "config-writer", http.StatusNoContent},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gw := newTestGateway(t, tt.flags)
+			res := doGateway(t, gw, tt.method, path, tt.token, tt.body)
 			if res.StatusCode != tt.want {
 				t.Errorf("status = %d, want %d", res.StatusCode, tt.want)
 			}

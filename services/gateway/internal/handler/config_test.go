@@ -55,6 +55,10 @@ type fakeConfig struct {
 	subjectIn   client.CreateSubjectInput
 	subjects    []client.SubjectResult
 	subjectsFor string // captured grade_level_id filter on list
+	// T13 rename/delete.
+	renamedSubject string
+	renamedTo      string
+	deletedSubject string
 
 	termIn     client.CreateTermInput
 	terms      []client.TermResult

@@ -383,6 +383,21 @@ func (c *ConfigClient) ListSubjects(ctx context.Context, gradeLevelID string) ([
 	return out, nil
 }
 
+// RenameSubject renames a subject in place (same id, same grade).
+func (c *ConfigClient) RenameSubject(ctx context.Context, id, name string) (SubjectResult, error) {
+	res, err := c.rpc.RenameSubject(ctx, connect.NewRequest(&configv1.RenameSubjectRequest{Id: id, Name: name}))
+	if err != nil {
+		return SubjectResult{}, err
+	}
+	return toSubjectResult(res.Msg.GetSubject()), nil
+}
+
+// DeleteSubject removes a subject no teacher is assigned to.
+func (c *ConfigClient) DeleteSubject(ctx context.Context, id string) error {
+	_, err := c.rpc.DeleteSubject(ctx, connect.NewRequest(&configv1.DeleteSubjectRequest{Id: id}))
+	return err
+}
+
 // --- terms ----------------------------------------------------------------
 
 // CreateTerm adds a period within a cycle for a level.
