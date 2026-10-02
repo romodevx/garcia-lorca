@@ -258,7 +258,12 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 		return nil, nil, nil, nil, err
 	}
 	expenses := usecase.NewExpenseService(repo, svc, receipts, newID, time.Now)
-	handler := grpcadapter.NewFinanceHandler(svc, health).WithLevelArchive(levels).WithExpenses(expenses)
+	// T17: activities. Their periods are issued by the same billing run, so the
+	// run learns of them here and enrolling charges what is already due.
+	svc.WithActivities(repo)
+	activities := usecase.NewActivityService(repo, studentsClient, svc, newID, time.Now)
+	handler := grpcadapter.NewFinanceHandler(svc, health).WithLevelArchive(levels).WithExpenses(expenses).
+		WithActivities(activities)
 	consumer := pubsubadapter.NewConsumer(svc, log)
 
 	mux := http.NewServeMux()

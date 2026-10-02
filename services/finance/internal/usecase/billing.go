@@ -90,6 +90,9 @@ type BillingResult struct {
 	EnrollmentCreated int
 	LateFeesCreated   int
 	FeesCreated       int
+	// ActivitiesCreated counts the activity periods issued (T17). Their fixed
+	// late fees count in LateFeesCreated.
+	ActivitiesCreated int
 	// EnrollmentMoved counts inscriptions whose deadline the run corrected to
 	// match the tuition table. Reported because a run that silently moves four
 	// hundred due dates is one nobody can audit.
@@ -481,11 +484,26 @@ func (s *FinanceService) RunBilling(ctx context.Context, cycleID, asOfDate strin
 		return BillingResult{}, err
 	}
 
+	// T17: every activity period whose billing date has arrived, for the pupils
+	// active in this cycle. Same idempotency: one ref per pupil and period.
+	activities, err := s.loadActivityBilling(ctx)
+	if err != nil {
+		return BillingResult{}, err
+	}
+	wantedActivities, err := s.wantedActivityCharges(ctx, activities, cycleID, activeStudents(enrollments), asOf, calendar)
+	if err != nil {
+		return BillingResult{}, err
+	}
+	activitiesCreated, err := s.repo.CreateChargesBulk(ctx, wantedActivities)
+	if err != nil {
+		return BillingResult{}, err
+	}
+
 	// Surcharges are computed AFTER the tuition is written, so a month that just
 	// came due and is already overdue is caught on the same run rather than a
 	// month later.
 	lateFees, err := s.accrueLateFees(ctx, cycleID, asOf, planByLevel, levelOfGroup,
-		enrollments, concepts[domain.KindLateFee].ID())
+		enrollments, concepts[domain.KindLateFee].ID(), activities.lateFees)
 	if err != nil {
 		return BillingResult{}, err
 	}
@@ -494,13 +512,14 @@ func (s *FinanceService) RunBilling(ctx context.Context, cycleID, asOfDate strin
 		return BillingResult{}, err
 	}
 
-	wanted := len(wantedEnrollment) + len(wantedTuition) + len(wantedFees) + len(lateFees)
-	created := enrollmentCreated + tuitionCreated + feesCreated + lateCreated
+	wanted := len(wantedEnrollment) + len(wantedTuition) + len(wantedFees) + len(wantedActivities) + len(lateFees)
+	created := enrollmentCreated + tuitionCreated + feesCreated + activitiesCreated + lateCreated
 	return BillingResult{
 		TuitionCreated:     tuitionCreated,
 		EnrollmentCreated:  enrollmentCreated,
 		LateFeesCreated:    lateCreated,
 		FeesCreated:        feesCreated,
+		ActivitiesCreated:  activitiesCreated,
 		EnrollmentMoved:    enrollmentMoved,
 		EnrollmentRepriced: enrollmentRepriced,
 		Skipped:            wanted - created,
@@ -608,6 +627,7 @@ func (s *FinanceService) accrueLateFees(
 	levelOfGroup map[string]string,
 	enrollments []ports.EnrollmentRef,
 	lateFeeConceptID string,
+	activityLateFees map[string]int64,
 ) ([]domain.Charge, error) {
 	overdue, err := s.allOverdue(ctx, cycleID, asOf)
 	if err != nil {
@@ -623,6 +643,18 @@ func (s *FinanceService) accrueLateFees(
 	var out []domain.Charge
 	for _, c := range overdue {
 		if c.Charge.ConceptID() == lateFeeConceptID {
+			continue
+		}
+		if domain.IsActivityRef(c.Charge.ExternalRef()) {
+			// An activity answers to its own fixed fee (T17), never to the
+			// tuition table's rule.
+			fee, ok, err := s.activityLateFee(c.Charge, cycleID, lateFeeConceptID, activityLateFees)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
+				out = append(out, fee)
+			}
 			continue
 		}
 		plan, ok := planOfStudent[c.Charge.StudentID()]
@@ -655,6 +687,17 @@ func (s *FinanceService) accrueLateFees(
 		}
 	}
 	return out, nil
+}
+
+// activeStudents is the set of pupils actively enrolled in the cycle.
+func activeStudents(enrollments []ports.EnrollmentRef) map[string]bool {
+	out := make(map[string]bool, len(enrollments))
+	for _, e := range enrollments {
+		if e.Status == enrolmentStatusActive {
+			out[e.StudentID] = true
+		}
+	}
+	return out
 }
 
 // chargeSpec is what the run knows about a charge before the domain validates it.
