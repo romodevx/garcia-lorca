@@ -32,6 +32,8 @@ type CreateApplicantInput struct {
 	LevelID          string // a config level id; the service resolves its name
 	GradeGroup       string
 	GuardianName     string
+	// BirthDate is optional (T11): "2019-03-12", or empty.
+	BirthDate string
 }
 
 // StudentResult is the edge's view of a student, with enums flattened to their
@@ -149,6 +151,7 @@ func (c *StudentsClient) CreateApplicant(ctx context.Context, in CreateApplicant
 		LevelId:          in.LevelID,
 		GradeGroup:       in.GradeGroup,
 		GuardianName:     in.GuardianName,
+		BirthDate:        in.BirthDate,
 	}))
 	if err != nil {
 		return StudentResult{}, err

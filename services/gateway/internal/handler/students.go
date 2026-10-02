@@ -40,6 +40,8 @@ type createStudentRequest struct {
 	LevelID          string `json:"levelId"`
 	GradeGroup       string `json:"gradeGroup"`
 	GuardianName     string `json:"guardianName"`
+	// BirthDate is optional at intake (T11).
+	BirthDate string `json:"birthDate"`
 }
 
 type studentResponse struct {
@@ -147,6 +149,7 @@ func (h *StudentsHandler) Create(w http.ResponseWriter, r *http.Request) {
 		LevelID:          req.LevelID,
 		GradeGroup:       req.GradeGroup,
 		GuardianName:     req.GuardianName,
+		BirthDate:        req.BirthDate,
 	})
 	if err != nil {
 		writeConnectError(w, err)
