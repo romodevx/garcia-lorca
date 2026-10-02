@@ -225,6 +225,23 @@ func (h *ConfigHandler) ListSubjects(ctx context.Context, req *connect.Request[c
 	return connect.NewResponse(&configv1.ListSubjectsResponse{Subjects: out}), nil
 }
 
+// RenameSubject renames a subject in place (same id, same grade).
+func (h *ConfigHandler) RenameSubject(ctx context.Context, req *connect.Request[configv1.RenameSubjectRequest]) (*connect.Response[configv1.RenameSubjectResponse], error) {
+	s, err := h.catalog.RenameSubject(ctx, req.Msg.GetId(), req.Msg.GetName())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&configv1.RenameSubjectResponse{Subject: toProtoSubject(s)}), nil
+}
+
+// DeleteSubject removes a subject no teacher is assigned to.
+func (h *ConfigHandler) DeleteSubject(ctx context.Context, req *connect.Request[configv1.DeleteSubjectRequest]) (*connect.Response[configv1.DeleteSubjectResponse], error) {
+	if err := h.catalog.DeleteSubject(ctx, req.Msg.GetId()); err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&configv1.DeleteSubjectResponse{}), nil
+}
+
 // --- terms -----------------------------------------------------------------
 
 // SetTermMonths replaces the calendar months a term covers.

@@ -39,6 +39,8 @@ type fakeCatalog struct {
 	events       map[string]domain.SchoolEvent
 	profile      *domain.SchoolProfile
 	unique       map[string]bool // scope-qualified unique keys across all entities
+	// renames counts the subject renames that reached the repository.
+	renames int
 	// reassignWrites counts the reassignments that actually moved a row.
 	reassignWrites int
 	// applyCalls counts ApplyTermMonths transactions; applyErr fails them.
@@ -228,6 +230,39 @@ func (f *fakeCatalog) ListSubjects(_ context.Context, gradeLevelID string) ([]do
 		}
 	}
 	return out, nil
+}
+
+func (f *fakeCatalog) RenameSubject(_ context.Context, id, name string) (domain.Subject, error) {
+	cur, ok := f.subjects[id]
+	if !ok {
+		return domain.Subject{}, glerrors.ErrNotFound
+	}
+	if err := f.claim("subject|" + cur.GradeLevelID() + "|" + name); err != nil {
+		return domain.Subject{}, err
+	}
+	delete(f.unique, "subject|"+cur.GradeLevelID()+"|"+cur.Name())
+	renamed, err := cur.Renamed(name)
+	if err != nil {
+		return domain.Subject{}, err
+	}
+	f.renames++
+	f.subjects[id] = renamed
+	return renamed, nil
+}
+
+func (f *fakeCatalog) DeleteSubject(_ context.Context, id string) error {
+	cur, ok := f.subjects[id]
+	if !ok {
+		return glerrors.ErrNotFound
+	}
+	for _, a := range f.assignments {
+		if a.SubjectID() == id {
+			return glerrors.ErrConflict
+		}
+	}
+	delete(f.unique, "subject|"+cur.GradeLevelID()+"|"+cur.Name())
+	delete(f.subjects, id)
+	return nil
 }
 
 func (f *fakeCatalog) CreateTerm(_ context.Context, t domain.Term) error {

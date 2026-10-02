@@ -87,6 +87,13 @@ type CatalogRepository interface {
 	GetSubject(ctx context.Context, id string) (domain.Subject, error)
 	// ListSubjects returns the subjects of gradeLevelID.
 	ListSubjects(ctx context.Context, gradeLevelID string) ([]domain.Subject, error)
+	// RenameSubject changes a subject's name, keeping its id and grade, and
+	// returns the stored row. Unknown id → KindNotFound; a name already used in
+	// the grade → KindConflict.
+	RenameSubject(ctx context.Context, id, name string) (domain.Subject, error)
+	// DeleteSubject removes a subject. Unknown id → KindNotFound; a subject a
+	// teaching assignment still points at → KindConflict.
+	DeleteSubject(ctx context.Context, id string) error
 
 	// --- terms (periodos, per (cycle, level)) ---
 

@@ -38,3 +38,21 @@ func TestNewSubjectValidates(t *testing.T) {
 		t.Errorf("accessors: %q %q %q %q", s.ID(), s.TenantID(), s.GradeLevelID(), s.Name())
 	}
 }
+
+func TestSubjectRenamedKeepsIdentityAndGrade(t *testing.T) {
+	s, _ := domain.NewSubject("s1", "t1", "g1", "Matemáticas")
+
+	got, err := s.Renamed("Matemáticas I")
+	if err != nil {
+		t.Fatalf("Renamed: %v", err)
+	}
+	if got.ID() != "s1" || got.TenantID() != "t1" || got.GradeLevelID() != "g1" || got.Name() != "Matemáticas I" {
+		t.Errorf("renamed = %q %q %q %q", got.ID(), got.TenantID(), got.GradeLevelID(), got.Name())
+	}
+	if s.Name() != "Matemáticas" {
+		t.Errorf("the original must not change, now %q", s.Name())
+	}
+	if _, err := s.Renamed("   "); glerrors.KindOf(err) != glerrors.KindInvalid {
+		t.Errorf("a blank name must be KindInvalid, got %v", err)
+	}
+}

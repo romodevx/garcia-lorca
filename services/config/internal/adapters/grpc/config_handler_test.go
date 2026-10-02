@@ -215,6 +215,32 @@ func (f *fakeCatalog) GetSubject(_ context.Context, id string) (domain.Subject, 
 	return domain.Subject{}, glerrors.ErrNotFound
 }
 
+func (f *fakeCatalog) RenameSubject(_ context.Context, id, name string) (domain.Subject, error) {
+	cur, ok := f.subjects[id]
+	if !ok {
+		return domain.Subject{}, glerrors.ErrNotFound
+	}
+	renamed, err := cur.Renamed(name)
+	if err != nil {
+		return domain.Subject{}, err
+	}
+	f.subjects[id] = renamed
+	return renamed, nil
+}
+
+func (f *fakeCatalog) DeleteSubject(_ context.Context, id string) error {
+	if _, ok := f.subjects[id]; !ok {
+		return glerrors.ErrNotFound
+	}
+	for _, a := range f.assignments {
+		if a.SubjectID() == id {
+			return glerrors.ErrConflict
+		}
+	}
+	delete(f.subjects, id)
+	return nil
+}
+
 func (f *fakeCatalog) ListSubjects(_ context.Context, gradeLevelID string) ([]domain.Subject, error) {
 	out := make([]domain.Subject, 0)
 	for _, s := range f.subjects {
@@ -692,6 +718,39 @@ func TestGetSubjectAndList(t *testing.T) {
 	list, err := h.ListSubjects(ctx(), connect.NewRequest(&configv1.ListSubjectsRequest{GradeLevelId: gradeID}))
 	if err != nil || len(list.Msg.GetSubjects()) != 1 {
 		t.Errorf("ListSubjects: %d %v", len(list.Msg.GetSubjects()), err)
+	}
+}
+
+func TestRenameSubject(t *testing.T) {
+	h, _ := newHandler(t)
+	gradeID := seedGradeLevel(t, h, seedLevel(t, h))
+	id := seedSubject(t, h, gradeID)
+
+	res, err := h.RenameSubject(ctx(), connect.NewRequest(&configv1.RenameSubjectRequest{Id: id, Name: "Lengua"}))
+	if err != nil {
+		t.Fatalf("RenameSubject: %v", err)
+	}
+	if got := res.Msg.GetSubject(); got.GetId() != id || got.GetName() != "Lengua" || got.GetGradeLevelId() != gradeID {
+		t.Errorf("renamed = %+v", got)
+	}
+	if _, err := h.RenameSubject(ctx(), connect.NewRequest(&configv1.RenameSubjectRequest{Id: id, Name: " "})); codeOf(err) != connect.CodeInvalidArgument {
+		t.Errorf("blank name: code = %v, want InvalidArgument", codeOf(err))
+	}
+	if _, err := h.RenameSubject(ctx(), connect.NewRequest(&configv1.RenameSubjectRequest{Id: "nope", Name: "X"})); codeOf(err) != connect.CodeNotFound {
+		t.Errorf("unknown: code = %v, want NotFound", codeOf(err))
+	}
+}
+
+func TestDeleteSubject(t *testing.T) {
+	h, _ := newHandler(t)
+	gradeID := seedGradeLevel(t, h, seedLevel(t, h))
+	id := seedSubject(t, h, gradeID)
+
+	if _, err := h.DeleteSubject(ctx(), connect.NewRequest(&configv1.DeleteSubjectRequest{Id: id})); err != nil {
+		t.Fatalf("DeleteSubject: %v", err)
+	}
+	if _, err := h.DeleteSubject(ctx(), connect.NewRequest(&configv1.DeleteSubjectRequest{Id: id})); codeOf(err) != connect.CodeNotFound {
+		t.Errorf("second delete: code = %v, want NotFound", codeOf(err))
 	}
 }
 

@@ -48,3 +48,10 @@ func (s Subject) GradeLevelID() string { return s.gradeLevelID }
 
 // Name returns the human-readable subject name (e.g. "Matemáticas").
 func (s Subject) Name() string { return s.name }
+
+// Renamed returns the same subject — same id, same grade — under a new name.
+// Grades, attendance and teaching assignments point at the id, so a rename
+// reaches all of them. A blank name is KindInvalid.
+func (s Subject) Renamed(name string) (Subject, error) {
+	return NewSubject(s.id, s.tenantID, s.gradeLevelID, name)
+}

@@ -228,6 +228,28 @@ func (s *CatalogService) ListSubjects(ctx context.Context, gradeLevelID string) 
 	return s.repo.ListSubjects(ctx, gradeLevelID)
 }
 
+// RenameSubject renames a subject in place: same id, same grade, so grades,
+// attendance and teaching assignments follow it. A blank name is KindInvalid,
+// an unknown id KindNotFound, a name the grade already has KindConflict.
+func (s *CatalogService) RenameSubject(ctx context.Context, id, name string) (domain.Subject, error) {
+	current, err := s.repo.GetSubject(ctx, id)
+	if err != nil {
+		return domain.Subject{}, err
+	}
+	renamed, err := current.Renamed(name)
+	if err != nil {
+		return domain.Subject{}, err
+	}
+	return s.repo.RenameSubject(ctx, renamed.ID(), renamed.Name())
+}
+
+// DeleteSubject removes a subject no teacher is assigned to. An unknown id is
+// KindNotFound; a subject still in a teaching assignment (of any cycle) is
+// KindConflict — free its slots first.
+func (s *CatalogService) DeleteSubject(ctx context.Context, id string) error {
+	return s.repo.DeleteSubject(ctx, id)
+}
+
 // --- terms -----------------------------------------------------------------
 
 // CreateTerm validates the input, verifies both parents (cycle and level) exist
