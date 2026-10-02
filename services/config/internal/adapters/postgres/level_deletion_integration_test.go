@@ -41,6 +41,7 @@ const (
 	ldEvLevel  = "f0000000-0000-0000-0000-0000000000a8"
 	ldEvGroup  = "f0000000-0000-0000-0000-0000000000a9"
 	ldEvSchool = "f0000000-0000-0000-0000-0000000000aa"
+	ldBlock    = "f0000000-0000-0000-0000-0000000000ab"
 	mLevel     = "f0000000-0000-0000-0000-0000000000b1"
 	mGrade     = "f0000000-0000-0000-0000-0000000000b2"
 	mGroup     = "f0000000-0000-0000-0000-0000000000b4"
@@ -68,6 +69,10 @@ func seedLevelDeletion(t *testing.T) {
 		"DELETE FROM config_deletion_archive WHERE tenant_id = @t",
 		"DELETE FROM level_deletions WHERE tenant_id = @t",
 		"DELETE FROM school_events WHERE tenant_id = @t",
+		"DELETE FROM schedule_events WHERE tenant_id = @t",
+		"DELETE FROM schedule_overrides WHERE tenant_id = @t",
+		"DELETE FROM schedule_blocks WHERE tenant_id = @t",
+		"DELETE FROM schedule_settings WHERE tenant_id = @t",
 		"DELETE FROM teaching_assignments WHERE tenant_id = @t",
 		"DELETE FROM evaluation_periods WHERE tenant_id = @t",
 		"DELETE FROM term_months WHERE tenant_id = @t",
@@ -94,6 +99,11 @@ func seedLevelDeletion(t *testing.T) {
 			(@t, '` + ldCycle + `', '` + mGrade + `', 1, 'B1', '2026-09-01', '2026-10-31', NULL)`,
 		`INSERT INTO teachers (id, tenant_id, first_name, last_name, email) VALUES ('` + ldTeacher + `', @t, 'Ana', 'Ruiz', 'ana@f.mx')`,
 		`INSERT INTO teaching_assignments (id, tenant_id, cycle_id, group_id, subject_id, teacher_id) VALUES ('` + ldAssign + `', @t, '` + ldCycle + `', '` + ldGroup + `', '` + ldSubject + `', '` + ldTeacher + `')`,
+		`INSERT INTO schedule_blocks (id, tenant_id, cycle_id, assignment_id, group_id, subject_id, teacher_id, weekday, starts_at, ends_at)
+			VALUES ('` + ldBlock + `', @t, '` + ldCycle + `', '` + ldAssign + `', '` + ldGroup + `', '` + ldSubject + `', '` + ldTeacher + `', 1, 480, 530)`,
+		`INSERT INTO schedule_overrides (tenant_id, cycle_id, block_id, on_date, kind, reason, created_by, created_by_name)
+			VALUES (@t, '` + ldCycle + `', '` + ldBlock + `', '2026-10-05', 'cancel', 'Junta', 'u', 'Directora')`,
+		`INSERT INTO schedule_settings (tenant_id, level_id, grid_start, grid_end) VALUES (@t, '` + ldLevel + `', 420, 840)`,
 		`INSERT INTO school_events (id, tenant_id, cycle_id, title, starts_on, ends_on, level_id, group_id) VALUES
 			('` + ldEvLevel + `', @t, '` + ldCycle + `', 'Festival de primaria', '2026-10-01', '2026-10-01', '` + ldLevel + `', NULL),
 			('` + ldEvGroup + `', @t, '` + ldCycle + `', 'Salida 1A', '2026-10-02', '2026-10-02', NULL, '` + ldGroup + `'),
@@ -119,6 +129,7 @@ func countRows(t *testing.T, table, where string, args ...any) int64 {
 var wantLevelCounts = levelarchive.Counts{
 	"levels": 1, "gradeLevels": 1, "subjects": 1, "groups": 1, "terms": 1,
 	"termMonths": 2, "teachingAssignments": 1, "schoolEvents": 2, "evaluationPeriods": 1,
+	"scheduleBlocks": 1, "scheduleOverrides": 1, "scheduleSettings": 1,
 }
 
 func archiveInput(batch string) ports.ArchiveLevelInput {
@@ -221,6 +232,9 @@ func TestLevelDeletionArchiveRestoreRoundTrip(t *testing.T) {
 	assert.Equal(t, int64(1), countRows(t, "evaluation_periods", "grade_level_id = ? AND term_id = ?", ldGrade, ldTerm),
 		"a period comes back with its term link")
 	assert.Equal(t, int64(1), countRows(t, "teaching_assignments", "id = ?", ldAssign))
+	assert.Equal(t, int64(1), countRows(t, "schedule_blocks", "id = ?", ldBlock), "the timetable comes back with its classes")
+	assert.Equal(t, int64(1), countRows(t, "schedule_overrides", "block_id = ?", ldBlock))
+	assert.Equal(t, int64(1), countRows(t, "schedule_settings", "level_id = ?", ldLevel))
 
 	rep2, err := repo.RestoreLevelBatch(ctx, batch)
 	require.NoError(t, err, "a retried restore answers its first report")
@@ -264,10 +278,13 @@ func TestLevelDeletionRestoreSkipsWhatLostItsParent(t *testing.T) {
 	rep, err := repo.RestoreLevelBatch(ctx, batch)
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), rep.Restored["teachingAssignments"])
-	require.Len(t, rep.Skipped, 1)
+	// The assignment, and the timetable class (and its change) that hang from it.
+	require.Len(t, rep.Skipped, 3)
 	assert.Equal(t, "teachingAssignments", rep.Skipped[0].Kind)
 	assert.Equal(t, int64(1), rep.Skipped[0].Count)
 	assert.NotEmpty(t, rep.Skipped[0].Reason)
+	assert.Equal(t, "scheduleBlocks", rep.Skipped[1].Kind)
+	assert.Equal(t, "scheduleOverrides", rep.Skipped[2].Kind)
 	assert.Equal(t, int64(1), countRows(t, "groups", "id = ?", ldGroup), "the rest came back")
 
 	// Review finding 2/3: the teacher comes back; a retry finishes the batch —
@@ -469,8 +486,11 @@ func TestADeletingLevelRefusesStructureWrites(t *testing.T) {
 		{"event of the level", `INSERT INTO school_events (tenant_id, cycle_id, title, starts_on, ends_on, level_id) VALUES (@t, @c, 'x', '2026-10-09', '2026-10-09', @l)`},
 		{"event of a group", `INSERT INTO school_events (tenant_id, cycle_id, title, starts_on, ends_on, group_id) VALUES (@t, @c, 'x', '2026-10-09', '2026-10-09', @grp)`},
 		{"the level itself", `UPDATE levels SET name = 'Primaria 2' WHERE id = @l`},
+		{"a class of the timetable", `UPDATE schedule_blocks SET starts_at = 485 WHERE id = @blk`},
+		{"a change of the timetable", `INSERT INTO schedule_overrides (tenant_id, cycle_id, block_id, on_date, kind, reason, created_by, created_by_name) VALUES (@t, @c, @blk, '2026-10-12', 'cancel', 'x', 'u', 'D')`},
+		{"the level's grid", `UPDATE schedule_settings SET grid_end = 900 WHERE level_id = @l`},
 	}
-	args := map[string]any{"t": tenantF, "l": ldLevel, "g": ldGrade, "c": ldCycle, "term": ldTerm, "a": ldAssign, "grp": ldGroup}
+	args := map[string]any{"t": tenantF, "l": ldLevel, "g": ldGrade, "c": ldCycle, "term": ldTerm, "a": ldAssign, "grp": ldGroup, "blk": ldBlock}
 	for _, w := range writes {
 		t.Run(w.name, func(t *testing.T) {
 			err := appDB(t).Transaction(func(tx *gorm.DB) error {

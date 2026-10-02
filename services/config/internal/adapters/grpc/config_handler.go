@@ -29,6 +29,8 @@ type ConfigHandler struct {
 	health  *usecase.HealthService
 	trash   *usecase.LevelDeletionService
 	periods *usecase.EvaluationPeriodService
+	// schedule is the timetable (T16); see WithSchedule.
+	schedule ScheduleService
 }
 
 // WithLevelDeletion wires the level trash (ADR 0021). The composition root
