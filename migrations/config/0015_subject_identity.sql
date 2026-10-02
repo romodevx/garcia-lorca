@@ -14,8 +14,9 @@
 --    load. Grades, monthly grades, report cards and per-class attendance (other
 --    services) keep the subject id after the slot is freed, so a subject that
 --    was EVER assigned cannot be deleted — only renamed. A trigger stamps it on
---    every teaching_assignments insert / subject change; existing assignments
---    are backfilled here.
+--    every teaching_assignments insert / subject change; every subject that
+--    exists before this migration is backfilled as used (its history is not
+--    visible from config).
 --
 -- RLS: subjects and teaching_assignments are FORCE ROW LEVEL SECURITY; the
 -- trigger runs as the invoker under the caller's tenant. SET LOCAL binds the one
@@ -49,11 +50,16 @@ CREATE UNIQUE INDEX subjects_name_per_grade_key
 
 ALTER TABLE subjects ADD COLUMN first_assigned_at timestamptz;
 
+-- Backfill: EVERY subject that exists today counts as used. A slot freed before
+-- this migration leaves no assignment behind, but its grades and attendance
+-- (other services) still carry the subject id, and config cannot see them. So
+-- the past is assumed used: an old subject can be renamed, not deleted. The
+-- date is the first assignment when there is one, else the subject's creation.
 UPDATE subjects s
-   SET first_assigned_at = (SELECT min(ta.created_at) FROM teaching_assignments ta
-                             WHERE ta.subject_id = s.id AND ta.tenant_id = s.tenant_id)
- WHERE EXISTS (SELECT 1 FROM teaching_assignments ta
-                WHERE ta.subject_id = s.id AND ta.tenant_id = s.tenant_id);
+   SET first_assigned_at = COALESCE(
+       (SELECT min(ta.created_at) FROM teaching_assignments ta
+         WHERE ta.subject_id = s.id AND ta.tenant_id = s.tenant_id),
+       s.created_at);
 
 CREATE FUNCTION config_mark_subject_assigned() RETURNS trigger
     LANGUAGE plpgsql AS

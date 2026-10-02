@@ -300,8 +300,9 @@ func TestMigration0015StopsOnCaseDuplicates(t *testing.T) {
 	}
 }
 
-// 0015 backfills: a subject already in a load before the migration counts as used.
-func TestMigration0015MarksSubjectsAlreadyAssigned(t *testing.T) {
+// 0015 backfills: every subject that predates it counts as used — a slot freed
+// earlier leaves grades behind that config cannot see.
+func TestMigration0015MarksEveryExistingSubjectUsed(t *testing.T) {
 	db := migrateUpTo(t, "mig_cfg_subject_used", "0015")
 	for _, stmt := range []string{
 		"INSERT INTO cycles (id, tenant_id, name, status, starts_on, ends_on) VALUES ('c6000000-0000-0000-0000-000000000001', '" + schoolTenant + "', '2026-2027', 'active', '2026-08-01', '2027-07-15')",
@@ -320,7 +321,7 @@ func TestMigration0015MarksSubjectsAlreadyAssigned(t *testing.T) {
 	if err := tryMigration(t, db, "0015_subject_identity.sql"); err != nil {
 		t.Fatalf("0015: %v", err)
 	}
-	if n := scalar[int64](t, db, "SELECT count(*) FROM subjects WHERE first_assigned_at IS NOT NULL"); n != 1 {
-		t.Errorf("only the assigned subject is marked, have %d", n)
+	if n := scalar[int64](t, db, "SELECT count(*) FROM subjects WHERE first_assigned_at IS NULL"); n != 0 {
+		t.Errorf("every pre-existing subject must be marked used, %d are not", n)
 	}
 }

@@ -214,6 +214,21 @@ describe("SubjectsPanel — the level's subjects, grade by grade (T13)", () => {
     expect(screen.queryByRole("button", { name: /deshacer/i })).toBeNull();
   });
 
+  it("a second click while the delete is in flight sends nothing more", async () => {
+    let finish: () => void = () => {};
+    mocked.deleteSubject.mockImplementation(() => new Promise<void>((resolve) => (finish = resolve)));
+    renderPanel();
+    const block = await screen.findByRole("region", { name: "Materias de 1° PRIMARIA" });
+    await within(block).findByText("ESPAÑOL");
+
+    fireEvent.click(within(block).getByRole("button", { name: "Eliminar ESPAÑOL" }));
+    fireEvent.click(within(block).getByRole("button", { name: "Eliminar ESPAÑOL" }));
+    await act(async () => finish());
+
+    expect(mocked.deleteSubject).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   it("a subject that was ever in a teacher's load stays, with the reason", async () => {
     mocked.deleteSubject.mockRejectedValue(new api.ConfigError(409, "used"));
     renderPanel();

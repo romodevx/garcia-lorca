@@ -50,6 +50,9 @@ export function SubjectsPanel({ level, gradeLevels, selectedGradeLevelId }: Subj
   const [error, setError] = useState<string | undefined>(undefined);
   const [notice, setNotice] = useState<string | undefined>(undefined);
   const [deleted, setDeleted] = useState<Subject | undefined>(undefined);
+  // Deletes in flight: a double click must not send a second DELETE (its 404
+  // would read as a failure of a delete that worked).
+  const deleting = useRef(new Set<string>());
 
   // ONE request for the school's subjects, kept to this level's grades. A
   // response that arrives after a newer one (a grade was just added) is dropped.
@@ -91,6 +94,8 @@ export function SubjectsPanel({ level, gradeLevels, selectedGradeLevelId }: Subj
    * deletes a subject nothing ever pointed at.
    */
   const remove = async (s: Subject): Promise<void> => {
+    if (deleting.current.has(s.id)) return;
+    deleting.current.add(s.id);
     setError(undefined);
     try {
       await deleteSubject(API_URL, s.id);
@@ -102,6 +107,8 @@ export function SubjectsPanel({ level, gradeLevels, selectedGradeLevelId }: Subj
           ? `${s.name} ya estuvo en una carga académica: se puede renombrar, pero no eliminar.`
           : `No se pudo eliminar ${s.name}.`,
       );
+    } finally {
+      deleting.current.delete(s.id);
     }
   };
 
