@@ -70,6 +70,10 @@ type ActivitySpec struct {
 	LateFeeCents    int64
 	Active          bool
 	Options         []PriceOption
+	// ResumedOn is the day the activity was last switched back on; zero when
+	// it never was. Periods due before it are never billed: the months an
+	// activity was off are months it did not run.
+	ResumedOn time.Time
 }
 
 // Activity is an extracurricular the school charges for (T17, ADR 0031): its
@@ -87,6 +91,7 @@ type Activity struct {
 	lateFee         Cents
 	active          bool
 	options         []PriceOption
+	resumedOn       time.Time
 }
 
 // NewActivity validates a spec. Every failure is KindInvalid, in Spanish,
@@ -120,7 +125,7 @@ func NewActivity(s ActivitySpec) (Activity, error) {
 	return Activity{
 		id: s.ID, name: name, schedule: schedule, periodicity: s.Periodicity,
 		billingStartsOn: s.BillingStartsOn, firstDueOn: s.FirstDueOn,
-		lateFee: lateFee, active: s.Active, options: options,
+		lateFee: lateFee, active: s.Active, options: options, resumedOn: s.ResumedOn,
 	}, nil
 }
 
@@ -229,11 +234,18 @@ func optionOrder(o PriceOption) int {
 
 // ActivityPeriod is one billable period: its identity inside the charge ref,
 // the day it is billed (and opens to the family) and the day it falls due.
+// Single marks the one period of a once-a-cycle activity, which has no "next
+// period" to start a late joiner on.
 type ActivityPeriod struct {
 	Key     string
 	BillsOn time.Time
 	DueOn   time.Time
+	Single  bool
 }
+
+// perCycleKey is the one period of a once-a-cycle activity: fixed, so moving
+// its date never re-issues it.
+const perCycleKey = "ciclo"
 
 // PeriodsUpTo lists the periods whose billing date has arrived by asOf, oldest
 // first. A period is the first billing and due dates moved n periods along:
@@ -245,12 +257,18 @@ func (a Activity) PeriodsUpTo(asOf time.Time) []ActivityPeriod {
 		if bills.After(asOf) {
 			break
 		}
-		out = append(out, ActivityPeriod{
+		p := ActivityPeriod{
 			Key:     a.periodKey(bills),
 			BillsOn: bills,
 			DueOn:   shift(a.periodicity, a.firstDueOn, n),
-		})
-		if a.periodicity == PeriodicityPerCycle {
+			Single:  a.periodicity == PeriodicityPerCycle,
+		}
+		// The months it was off are skipped; the period in course is billed
+		// when it came back on or before its due date.
+		if p.Single || a.resumedOn.IsZero() || !a.resumedOn.After(p.DueOn) {
+			out = append(out, p)
+		}
+		if p.Single {
 			break
 		}
 	}
@@ -268,8 +286,17 @@ func (a Activity) periodKey(bills time.Time) string {
 		y, w := bills.ISOWeek()
 		return fmt.Sprintf("%d-W%02d", y, w)
 	default:
-		return bills.Format("2006-01-02")
+		return perCycleKey
 	}
+}
+
+// SameBillingCalendar reports whether another version of this activity mints
+// the same period keys: same periodicity and a first billing date in the same
+// period. Changing either once pupils are enrolled would re-issue periods
+// already billed under new refs.
+func (a Activity) SameBillingCalendar(other Activity) bool {
+	return a.periodicity == other.periodicity &&
+		a.periodKey(a.billingStartsOn) == other.periodKey(other.billingStartsOn)
 }
 
 // shift moves a date n periods along.
@@ -313,6 +340,7 @@ func (a Activity) FirstDueOn() time.Time      { return a.firstDueOn }
 func (a Activity) LateFee() Cents             { return a.lateFee }
 func (a Activity) Active() bool               { return a.active }
 func (a Activity) Options() []PriceOption     { return append([]PriceOption(nil), a.options...) }
+func (a Activity) ResumedOn() time.Time       { return a.resumedOn }
 
 // ParseClock reads "HH:MM" (24 h) as minutes from midnight.
 func ParseClock(raw string) (int, error) {
@@ -410,10 +438,11 @@ func (e ActivityEnrollment) WithOption(optionID string) (ActivityEnrollment, err
 
 // Bills reports whether the period is charged to this enrolment: the pupil
 // joined on or before its due date (plan T17: the period in course is charged
-// up to its due date, otherwise from the next; no proration), and the period
-// is billed before the enrolment ended.
+// up to its due date, otherwise from the next; no proration) — except the one
+// period of a once-a-cycle activity, which has no next and is always charged —
+// and the period is billed before the enrolment ended.
 func (e ActivityEnrollment) Bills(p ActivityPeriod) bool {
-	if e.startsOn.After(p.DueOn) {
+	if !p.Single && e.startsOn.After(p.DueOn) {
 		return false
 	}
 	if e.endsOn.IsZero() {

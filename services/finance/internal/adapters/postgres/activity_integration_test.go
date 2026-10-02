@@ -261,3 +261,60 @@ func TestActivityChargesUseTheActivityKindAndTheirRef(t *testing.T) {
 		}
 	}
 }
+
+// Review: swapping the days of two options in one edit must not trip the
+// live-days unique index, and the resumed_on day survives the round trip.
+func TestActivityOptionsSwapDaysAndResumedOnRoundTrips(t *testing.T) {
+	ctx := context.Background()
+	const id = "ac000000-0000-0000-0000-000000000031"
+	const o2, o3 = "ac000000-0000-0000-0000-0000000003a2", "ac000000-0000-0000-0000-0000000003a3"
+	repo := appRepo(t, tenantA)
+	spec := swimSpec(id, "Teatro",
+		domain.PriceOption{ID: o2, DaysPerWeek: 2, AmountCents: 200},
+		domain.PriceOption{ID: o3, DaysPerWeek: 3, AmountCents: 300})
+	if _, err := repo.CreateActivity(ctx, mustActivityOf(t, spec)); err != nil {
+		t.Fatal(err)
+	}
+	spec.Options = []domain.PriceOption{{ID: o2, DaysPerWeek: 3, AmountCents: 300}, {ID: o3, DaysPerWeek: 2, AmountCents: 200}}
+	spec.ResumedOn = actDay.AddDate(0, 2, 0)
+	if _, err := repo.UpdateActivity(ctx, mustActivityOf(t, spec)); err != nil {
+		t.Fatalf("swapping days: %v", err)
+	}
+	got, err := repo.GetActivity(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if o, _ := got.Option(o2); o.DaysPerWeek != 3 {
+		t.Fatalf("swap lost: %+v", got.Options())
+	}
+	if !got.ResumedOn().Equal(actDay.AddDate(0, 2, 0)) {
+		t.Fatalf("resumed_on = %v", got.ResumedOn())
+	}
+}
+
+// Review: an option still used by an enrolment that ends in the future (it
+// still owes the periods before its end) cannot be retired.
+func TestAnOptionUsedByAnEnrolmentEndingLaterCannotBeRetired(t *testing.T) {
+	ctx := context.Background()
+	const id = "ac000000-0000-0000-0000-000000000041"
+	const o1, o2 = "ac000000-0000-0000-0000-0000000004a1", "ac000000-0000-0000-0000-0000000004a2"
+	repo := appRepo(t, tenantA)
+	spec := swimSpec(id, "Ballet",
+		domain.PriceOption{ID: o1, DaysPerWeek: 1, AmountCents: 100},
+		domain.PriceOption{ID: o2, DaysPerWeek: 2, AmountCents: 200})
+	if _, err := repo.CreateActivity(ctx, mustActivityOf(t, spec)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.CreateEnrollments(ctx, []domain.ActivityEnrollment{
+		actEnrollment(t, "ac000000-0000-0000-0000-0000000004e1", id, actStudent1, o1, actDay),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.EndEnrollments(ctx, id, []string{actStudent1}, time.Now().AddDate(1, 0, 0)); err != nil {
+		t.Fatal(err)
+	}
+	spec.Options = spec.Options[1:]
+	if _, err := repo.UpdateActivity(ctx, mustActivityOf(t, spec)); glerrors.KindOf(err) != glerrors.KindConflict {
+		t.Fatalf("retiring an option an enrolment still bills under: want KindConflict, got %v", err)
+	}
+}

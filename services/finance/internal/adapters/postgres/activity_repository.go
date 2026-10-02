@@ -3,7 +3,10 @@ package postgres
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -20,7 +23,15 @@ var _ ports.ActivityRepository = (*Repository)(nil)
 
 const (
 	errActivityNameTaken = "ya existe una actividad con ese nombre"
-	errOptionInUse       = "un esquema de cobro que quitaste lo usa un alumno inscrito; cámbialo antes de quitarlo"
+	errOptionDaysTaken   = "hay dos esquemas de cobro para los mismos días"
+	// optionDaysIndex is the live-days unique index (finance/0025), named so a
+	// violation of it is told apart from a taken name.
+	optionDaysIndex = "uq_activity_price_options_days"
+	// billableEndedWindowDays is how long after its end an enrolment is still
+	// read by the run: every period billed before the end is issued by the
+	// daily run long before this; it only covers a run that was down.
+	billableEndedWindowDays = 90
+	errOptionInUse          = "un esquema de cobro que quitaste lo usa un alumno inscrito; cámbialo antes de quitarlo"
 	// maxActivityEnrollmentRows bounds the billing read: a school of thousands
 	// of pupils in a dozen activities, with room.
 	maxActivityEnrollmentRows = 20000
@@ -62,7 +73,8 @@ func (r *Repository) UpdateActivity(ctx context.Context, a domain.Activity) (dom
 		res := tx.Model(&activityModel{}).Where("id = ?", a.ID()).Updates(map[string]any{
 			"name": m.Name, "schedule": m.Schedule, "periodicity": m.Periodicity,
 			"billing_starts_on": m.BillingStartsOn, "first_due_on": m.FirstDueOn,
-			"late_fee_cents": m.LateFeeCents, "active": m.Active, "updated_at": gorm.Expr("now()"),
+			"late_fee_cents": m.LateFeeCents, "active": m.Active, "resumed_on": m.ResumedOn,
+			"updated_at": gorm.Expr("now()"),
 		})
 		if res.Error != nil {
 			return activityWriteErr(res.Error, "updating an activity")
@@ -81,10 +93,11 @@ func (r *Repository) UpdateActivity(ctx context.Context, a domain.Activity) (dom
 	return a, nil
 }
 
-// retireMissingOptions retires the live options the activity no longer lists,
-// refusing when an open enrolment uses one. It runs BEFORE the live options are
-// written, so a retired 2-day option and its new replacement never collide on
-// the live-days unique index.
+// retireMissingOptions refuses when an option the activity no longer lists is
+// used by an enrolment still running (or ending later: it still owes the
+// periods before its end), then retires EVERY live option. writeOptions brings
+// back the ones listed, so swapping the days of two options in one edit never
+// collides on the live-days unique index halfway through.
 func retireMissingOptions(tx *gorm.DB, a domain.Activity) error {
 	keep := make([]string, 0, len(a.Options()))
 	for _, o := range a.Options() {
@@ -92,7 +105,7 @@ func retireMissingOptions(tx *gorm.DB, a domain.Activity) error {
 	}
 	var inUse int64
 	if err := tx.Model(&activityEnrollmentModel{}).
-		Where("activity_id = ? AND option_id NOT IN ? AND ends_on IS NULL", a.ID(), keep).
+		Where("activity_id = ? AND option_id NOT IN ? AND (ends_on IS NULL OR ends_on > CURRENT_DATE)", a.ID(), keep).
 		Count(&inUse).Error; err != nil {
 		return glerrors.Wrap(glerrors.KindInternal, "checking options in use", err)
 	}
@@ -100,7 +113,7 @@ func retireMissingOptions(tx *gorm.DB, a domain.Activity) error {
 		return glerrors.New(glerrors.KindConflict, errOptionInUse)
 	}
 	if err := tx.Model(&activityOptionModel{}).
-		Where("activity_id = ? AND id NOT IN ? AND NOT retired", a.ID(), keep).
+		Where("activity_id = ? AND NOT retired", a.ID()).
 		Updates(map[string]any{"retired": true, "updated_at": gorm.Expr("now()")}).Error; err != nil {
 		return glerrors.Wrap(glerrors.KindInternal, "retiring options", err)
 	}
@@ -144,6 +157,9 @@ func daysColumn(o domain.PriceOption) *int {
 // the same days) to KindConflict.
 func activityWriteErr(err error, what string) error {
 	if isUniqueViolation(err) {
+		if violatedConstraint(err) == optionDaysIndex {
+			return glerrors.Wrap(glerrors.KindConflict, errOptionDaysTaken, err)
+		}
 		return glerrors.Wrap(glerrors.KindConflict, errActivityNameTaken, err)
 	}
 	return glerrors.Wrap(glerrors.KindInternal, what, err)
@@ -258,12 +274,22 @@ func (r *Repository) ListActivityEnrollments(ctx context.Context, activityID str
 	return r.listEnrollments(ctx, func(q *gorm.DB) *gorm.DB { return q.Where("activity_id = ?", activityID) })
 }
 
-// ListBillableEnrollments lists the enrolments of every active activity.
+// ListBillableEnrollments lists the enrolments of every active activity that
+// are running or ended recently. Hitting the row cap is an error, never a
+// silently shorter list: the rows cut would be pupils nobody bills.
 func (r *Repository) ListBillableEnrollments(ctx context.Context) ([]domain.ActivityEnrollment, error) {
-	return r.listEnrollments(ctx, func(q *gorm.DB) *gorm.DB {
+	rows, err := r.listEnrollments(ctx, func(q *gorm.DB) *gorm.DB {
 		return q.Where("activity_id IN (?)", q.Session(&gorm.Session{NewDB: true}).
-			Model(&activityModel{}).Select("id").Where("active"))
+			Model(&activityModel{}).Select("id").Where("active")).
+			Where("ends_on IS NULL OR ends_on > CURRENT_DATE - ?::int", billableEndedWindowDays)
 	})
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) >= maxActivityEnrollmentRows {
+		return nil, glerrors.New(glerrors.KindInternal, "too many activity enrolments to bill in one run")
+	}
+	return rows, nil
 }
 
 func (r *Repository) listEnrollments(ctx context.Context, filter func(*gorm.DB) *gorm.DB) ([]domain.ActivityEnrollment, error) {
@@ -305,7 +331,10 @@ func (r *Repository) CreateEnrollments(ctx context.Context, es []domain.Activity
 				DoNothing:   true,
 			}).Create(&m)
 			if res.Error != nil {
-				return glerrors.Wrap(glerrors.KindInvalid, "no se pudo inscribir: revisa el esquema de cobro", res.Error)
+				if isForeignKeyViolation(res.Error) {
+					return glerrors.Wrap(glerrors.KindInvalid, "el esquema de cobro no es de esta actividad", res.Error)
+				}
+				return glerrors.Wrap(glerrors.KindInternal, "enrolling in an activity", res.Error)
 			}
 			if res.RowsAffected == 1 {
 				out = append(out, e)
@@ -389,9 +418,14 @@ func (r *Repository) fromDomainActivity(a domain.Activity) (activityModel, error
 	if err != nil {
 		return activityModel{}, glerrors.Wrap(glerrors.KindInternal, "encoding the schedule", err)
 	}
+	var resumed *time.Time
+	if on := a.ResumedOn(); !on.IsZero() {
+		resumed = &on
+	}
 	return activityModel{
 		ID: a.ID(), TenantID: r.tenantID, Name: a.Name(), Schedule: schedule, Periodicity: a.Periodicity(),
 		BillingStartsOn: a.BillingStartsOn(), FirstDueOn: a.FirstDueOn(), LateFeeCents: a.LateFee().Int64(), Active: a.Active(),
+		ResumedOn: resumed,
 	}, nil
 }
 
@@ -412,10 +446,14 @@ func toDomainActivity(m activityModel, options []domain.PriceOption) (domain.Act
 		}
 		schedule = append(schedule, domain.ActivitySlot{Weekday: s.Weekday, StartMin: start, EndMin: end})
 	}
+	var resumed time.Time
+	if m.ResumedOn != nil {
+		resumed = asDate(*m.ResumedOn)
+	}
 	return domain.NewActivity(domain.ActivitySpec{
 		ID: m.ID, Name: m.Name, Schedule: schedule, Periodicity: m.Periodicity,
 		BillingStartsOn: asDate(m.BillingStartsOn), FirstDueOn: asDate(m.FirstDueOn),
-		LateFeeCents: m.LateFeeCents, Active: m.Active, Options: options,
+		LateFeeCents: m.LateFeeCents, Active: m.Active, Options: options, ResumedOn: resumed,
 	})
 }
 
@@ -430,4 +468,21 @@ func toDomainEnrollment(m activityEnrollmentModel) (domain.ActivityEnrollment, e
 // asDate is a `date` column as the service's day: midnight UTC.
 func asDate(t time.Time) time.Time {
 	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
+}
+
+// foreignKeyViolation is Postgres' SQLSTATE for a broken foreign key.
+const foreignKeyViolation = "23503"
+
+func isForeignKeyViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == foreignKeyViolation
+}
+
+// violatedConstraint names the constraint or index a Postgres error broke.
+func violatedConstraint(err error) string {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.ConstraintName
+	}
+	return ""
 }

@@ -185,8 +185,54 @@ func TestWeeklyPeriodsAreKeyedByISOWeek(t *testing.T) {
 func TestPerCycleIsASingleCharge(t *testing.T) {
 	a := mustActivity(t, func(s *domain.ActivitySpec) { s.Periodicity = domain.PeriodicityPerCycle })
 	got := a.PeriodsUpTo(day(2027, 6, 30))
-	want := []domain.ActivityPeriod{{Key: "2026-09-01", BillsOn: day(2026, 9, 1), DueOn: day(2026, 9, 10)}}
+	want := []domain.ActivityPeriod{{Key: "ciclo", BillsOn: day(2026, 9, 1), DueOn: day(2026, 9, 10), Single: true}}
 	assertPeriods(t, got, want)
+}
+
+// Review: a once-a-cycle activity has no "next period", so a pupil who joins
+// after its due date is still charged — never left out.
+func TestPerCycleChargesAPupilWhoJoinsAfterTheDueDate(t *testing.T) {
+	a := mustActivity(t, func(s *domain.ActivitySpec) { s.Periodicity = domain.PeriodicityPerCycle })
+	p := a.PeriodsUpTo(day(2026, 10, 1))[0]
+	if !mustEnrollment(t, day(2026, 9, 15)).Bills(p) {
+		t.Fatalf("a late joiner of a once-a-cycle activity must be charged")
+	}
+}
+
+// Review: reactivating an activity must not bill the months it was off. The
+// period in course is billed when it was reactivated on or before its due
+// date, the same rule as a mid-period enrolment.
+func TestReactivatedActivitySkipsThePeriodsItWasOff(t *testing.T) {
+	a := mustActivity(t, func(s *domain.ActivitySpec) { s.ResumedOn = day(2026, 11, 5) })
+	got := a.PeriodsUpTo(day(2026, 12, 1))
+	keys := []string{}
+	for _, p := range got {
+		keys = append(keys, p.Key)
+	}
+	if strings.Join(keys, ",") != "2026-11,2026-12" {
+		t.Fatalf("periods after reactivating on Nov 5 = %v, want 2026-11,2026-12", keys)
+	}
+	if !a.ResumedOn().Equal(day(2026, 11, 5)) {
+		t.Fatalf("ResumedOn lost")
+	}
+}
+
+// Review: a period's ref is minted from the periodicity and the first billing
+// date; editing either re-keys every period and bills it twice. Only edits
+// that keep the calendar are safe once pupils are enrolled.
+func TestSameBillingCalendar(t *testing.T) {
+	base := mustActivity(t, nil)
+	sameMonth := mustActivity(t, func(s *domain.ActivitySpec) {
+		s.BillingStartsOn, s.FirstDueOn, s.Name, s.LateFeeCents = day(2026, 9, 3), day(2026, 9, 20), "Otra", 0
+	})
+	if !base.SameBillingCalendar(sameMonth) {
+		t.Errorf("moving the day inside its month keeps the calendar")
+	}
+	otherMonth := mustActivity(t, func(s *domain.ActivitySpec) { s.BillingStartsOn, s.FirstDueOn = day(2026, 10, 1), day(2026, 10, 10) })
+	weekly := mustActivity(t, func(s *domain.ActivitySpec) { s.Periodicity, s.FirstDueOn = domain.PeriodicityWeekly, day(2026, 9, 3) })
+	if base.SameBillingCalendar(otherMonth) || base.SameBillingCalendar(weekly) {
+		t.Errorf("another month or another periodicity is another calendar")
+	}
 }
 
 func assertPeriods(t *testing.T, got, want []domain.ActivityPeriod) {
@@ -195,7 +241,7 @@ func assertPeriods(t *testing.T, got, want []domain.ActivityPeriod) {
 		t.Fatalf("periods = %+v, want %+v", got, want)
 	}
 	for i := range want {
-		if got[i].Key != want[i].Key || !got[i].BillsOn.Equal(want[i].BillsOn) || !got[i].DueOn.Equal(want[i].DueOn) {
+		if got[i].Key != want[i].Key || !got[i].BillsOn.Equal(want[i].BillsOn) || !got[i].DueOn.Equal(want[i].DueOn) || got[i].Single != want[i].Single {
 			t.Fatalf("period %d = %+v, want %+v", i, got[i], want[i])
 		}
 	}

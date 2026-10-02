@@ -307,17 +307,18 @@ func (cashCutClosureModel) TableName() string { return "cash_cut_closures" }
 // activityModel is the GORM row for `activities` (T17, migration 0025).
 // Schedule is the JSONB [{weekday, start, end}]; the dates map `date`.
 type activityModel struct {
-	ID              string    `gorm:"column:id;primaryKey"`
-	TenantID        string    `gorm:"column:tenant_id"`
-	Name            string    `gorm:"column:name"`
-	Schedule        []byte    `gorm:"column:schedule;type:jsonb"`
-	Periodicity     string    `gorm:"column:periodicity"`
-	BillingStartsOn time.Time `gorm:"column:billing_starts_on"`
-	FirstDueOn      time.Time `gorm:"column:first_due_on"`
-	LateFeeCents    int64     `gorm:"column:late_fee_cents"`
-	Active          bool      `gorm:"column:active"`
-	CreatedAt       time.Time `gorm:"column:created_at;default:now()"`
-	UpdatedAt       time.Time `gorm:"column:updated_at;default:now()"`
+	ID              string     `gorm:"column:id;primaryKey"`
+	TenantID        string     `gorm:"column:tenant_id"`
+	Name            string     `gorm:"column:name"`
+	Schedule        []byte     `gorm:"column:schedule;type:jsonb"`
+	Periodicity     string     `gorm:"column:periodicity"`
+	BillingStartsOn time.Time  `gorm:"column:billing_starts_on"`
+	FirstDueOn      time.Time  `gorm:"column:first_due_on"`
+	LateFeeCents    int64      `gorm:"column:late_fee_cents"`
+	Active          bool       `gorm:"column:active"`
+	ResumedOn       *time.Time `gorm:"column:resumed_on"`
+	CreatedAt       time.Time  `gorm:"column:created_at;default:now()"`
+	UpdatedAt       time.Time  `gorm:"column:updated_at;default:now()"`
 }
 
 func (activityModel) TableName() string { return "activities" }

@@ -23,9 +23,12 @@
   the option belongs to the SAME activity).
 - **Periods repeat the two dates the school types.** Monthly: same day of the
   month (clamped to the month's end), keyed `YYYY-MM`. Weekly: +7 days, keyed by
-  ISO week `YYYY-Www`. Per cycle: one charge, keyed by its billing date. Keys are
-  coarse on purpose, so moving the billing day inside its period re-issues
-  nothing. The due date must fall inside the first period. (The plan sketched
+  ISO week `YYYY-Www`. Per cycle: one charge, keyed `ciclo`. Keys are coarse on
+  purpose, so moving the billing day inside its period re-issues nothing; and
+  once anyone has been enrolled, the periodicity and the period of the first
+  billing date are FIXED (409) — changing them would mint new refs for periods
+  already billed (the T1 class of bug). The due date must fall inside the
+  first period. (The plan sketched
   `bill_day/due_day`; two dates express every periodicity with one rule.)
 - **Charges are ordinary charges** under a new system concept kind `activity`,
   ref `activity:<activityId>:<studentId>:<period>` — ids, never names, so a
@@ -37,7 +40,12 @@
   show them as pending from that day, and several activities simply add up.
 - **Mid-period enrolment**: the period in course is charged when the pupil
   joined on or before its due date; otherwise billing starts with the next one.
-  No proration. **Unenrolling** stops periods billed on or after `ends_on`;
+  No proration. A once-a-cycle activity has no next period, so a late joiner
+  is charged with the same window to pay, counted from the day they joined.
+  **Switching an activity off and on**: `resumed_on` records the day it came
+  back; periods due before it are never billed (the months it was off), the
+  period in course is billed when it came back by its due date.
+  **Unenrolling** stops periods billed on or after `ends_on`;
   issued charges, paid or not, are never touched. A pupil is billed in the cycle
   they are actively enrolled in (a charge needs a cycle); one not yet placed in
   a group is billed by the run of the cycle that takes them.
@@ -56,7 +64,14 @@
   activities and arbitrary billing days. Enrolling also issues, at once, what is
   already billable — the same refs the run would write. The panel's existing
   "Generar cargos" button (`POST /api/v1/finance/billing-runs`) is the local and
-  manual trigger.
+  manual trigger. Enrolling bills every requested pupil who is enrolled now
+  (not only the new rows), so if billing failed after the enrolments were
+  saved, enrolling the same pupils again issues what is owed.
+- Known cost (deferred): an enrolment batch makes two students RPCs per pupil
+  (≤ 200 per request), and the daily run re-offers every past period of every
+  running enrolment to an `ON CONFLICT DO NOTHING` insert, so `skipped` grows
+  over the year. Correct and bounded today (one school); a batch lookup and a
+  last-billed cut-off are the upgrade when it matters.
 - **Access**: `module_activities` (default OFF; ON in compose and dev
   ENABLED_MODULES) behind `module_finance`; `activities:read|write` (iam 0029,
   owner by default, delegable). Turning the flag off does not stop the run; an

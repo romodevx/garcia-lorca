@@ -114,14 +114,46 @@ func (s *ActivityService) UpdateActivity(ctx context.Context, id string, in Acti
 		}
 		options[i] = o
 	}
-	a, err := domain.NewActivity(in.spec(id, options))
+	spec := in.spec(id, options)
+	spec.ResumedOn = s.resumedOn(current, in.Active)
+	a, err := domain.NewActivity(spec)
 	if err != nil {
 		return domain.Activity{}, err
 	}
 	if err := s.refuseTakenName(ctx, a); err != nil {
 		return domain.Activity{}, err
 	}
+	if err := s.refuseNewCalendar(ctx, current, a); err != nil {
+		return domain.Activity{}, err
+	}
 	return s.repo.UpdateActivity(ctx, a)
+}
+
+// resumedOn is today when this edit switches the activity back on, so the
+// months it was off are never billed; otherwise it keeps what it had.
+func (s *ActivityService) resumedOn(current domain.Activity, active bool) time.Time {
+	if !current.Active() && active {
+		return s.today()
+	}
+	return current.ResumedOn()
+}
+
+// refuseNewCalendar keeps period refs stable: once anyone has been enrolled,
+// the periodicity and the period of the first billing date are fixed —
+// changing them would re-issue every period already billed under a new ref.
+func (s *ActivityService) refuseNewCalendar(ctx context.Context, current, next domain.Activity) error {
+	if current.SameBillingCalendar(next) {
+		return nil
+	}
+	enrolled, err := s.repo.ListActivityEnrollments(ctx, current.ID())
+	if err != nil {
+		return err
+	}
+	if len(enrolled) > 0 {
+		return glerrors.New(glerrors.KindConflict,
+			"ya hay alumnos inscritos: la periodicidad y el periodo del primer cobro no se pueden cambiar (crea otra actividad)")
+	}
+	return nil
 }
 
 func (in ActivityInput) spec(id string, options []domain.PriceOption) domain.ActivitySpec {
@@ -223,13 +255,39 @@ func (s *ActivityService) Enroll(ctx context.Context, activityID string, startsO
 	if err != nil {
 		return EnrollResult{}, err
 	}
-	charged := 0
-	if len(created) > 0 {
-		if charged, err = s.biller.BillActivityEnrollments(ctx, a, created); err != nil {
-			return EnrollResult{}, err
-		}
+	// Bill every requested pupil who is enrolled now, not only the new ones:
+	// enrolling and billing are two writes, and when billing failed the first
+	// time, enrolling the same pupils again is how the office gets the charges
+	// (idempotent by ref) instead of nothing.
+	open, err := s.openEnrollmentsOf(ctx, a.ID(), wanted)
+	if err != nil {
+		return EnrollResult{}, err
+	}
+	charged, err := s.biller.BillActivityEnrollments(ctx, a, open)
+	if err != nil {
+		return EnrollResult{}, err
 	}
 	return EnrollResult{Enrollments: created, ChargesCreated: charged}, nil
+}
+
+// openEnrollmentsOf is the running enrolment of each requested pupil.
+func (s *ActivityService) openEnrollmentsOf(ctx context.Context, activityID string, wanted []domain.ActivityEnrollment) ([]domain.ActivityEnrollment, error) {
+	requested := make(map[string]bool, len(wanted))
+	for _, e := range wanted {
+		requested[e.StudentID()] = true
+	}
+	all, err := s.repo.ListActivityEnrollments(ctx, activityID)
+	if err != nil {
+		return nil, err
+	}
+	today := s.today()
+	out := make([]domain.ActivityEnrollment, 0, len(wanted))
+	for _, e := range all {
+		if requested[e.StudentID()] && e.ActiveOn(today) {
+			out = append(out, e)
+		}
+	}
+	return out, nil
 }
 
 // newEnrollments validates the batch — each option is the activity's, each

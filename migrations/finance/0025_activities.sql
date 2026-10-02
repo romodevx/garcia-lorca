@@ -12,7 +12,7 @@
 --     descriptive — what the family is told — and never read by SQL), the
 --     periodicity (monthly | weekly | per_cycle), the first billing date and
 --     the first due date (later periods repeat both), an optional fixed late
---     fee (0 = none), active.
+--     fee (0 = none), active, and the day it was last switched back on.
 --   * activity_price_options: the charging schemes — a price per period for
 --     attending N days a week, or (days_per_week NULL) a flat fee. Retired,
 --     never deleted, once an enrolment has pointed at one: the history keeps
@@ -49,6 +49,9 @@ CREATE TABLE activities (
     first_due_on      date NOT NULL,
     late_fee_cents    bigint NOT NULL DEFAULT 0 CHECK (late_fee_cents >= 0 AND late_fee_cents <= 1000000000000000),
     active            boolean NOT NULL DEFAULT true,
+    -- The day it was last switched back on: periods due before it are never
+    -- billed (the months it was off are months it did not run). NULL = never.
+    resumed_on        date NULL,
     created_at        timestamptz NOT NULL DEFAULT now(),
     updated_at        timestamptz NOT NULL DEFAULT now(),
 

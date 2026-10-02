@@ -113,13 +113,20 @@ func (s *FinanceService) activityCharges(
 		if !e.Bills(p) {
 			continue
 		}
+		due := p.DueOn
+		if e.StartsOn().After(due) {
+			// Only a once-a-cycle period bills a pupil who joined after its due
+			// date (domain Bills). They get the same window everyone had, from
+			// the day they joined — not a debt already late.
+			due = e.StartsOn().Add(p.DueOn.Sub(p.BillsOn))
+		}
 		charge, err := s.buildCharge(chargeSpec{
 			studentID:   e.StudentID(),
 			cycleID:     cycleID,
 			conceptID:   conceptID,
 			description: activityDescription(a, p),
 			amount:      option.AmountCents,
-			due:         calendar.NextWorkingDay(p.DueOn),
+			due:         calendar.NextWorkingDay(due),
 			ref:         domain.ActivityChargeRef(a.ID(), e.StudentID(), p.Key),
 		})
 		if err != nil {

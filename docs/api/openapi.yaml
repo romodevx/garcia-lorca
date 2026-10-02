@@ -4385,8 +4385,12 @@ paths:
         with its `id` is edited in place (a new price applies to periods billed
         from now on — charges already issued never change); one sent without
         an id is new; one left out is removed, which is 409 while an enrolled
-        pupil still uses it. Same validation as create. Requires
-        `activities:write`.
+        pupil still uses it. Once anyone has been enrolled, the periodicity and
+        the period of the first billing date are fixed (409): changing them
+        would re-issue periods already billed. Switching an inactive activity
+        back on never bills the periods it was off (the period in course is
+        billed when it is switched on by its due date). Same validation as
+        create. Requires `activities:write`.
       operationId: updateActivity
       security: [{ sessionCookie: [] }]
       parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
@@ -7380,7 +7384,7 @@ components:
         periodicity:
           type: string
           enum: [monthly, weekly, per_cycle]
-          description: How often it is charged. per_cycle is a single charge, on the first billing date.
+          description: How often it is charged. per_cycle is a single charge, on the first billing date; a pupil who joins after its due date is still charged, with the same window to pay from the day they joined.
           example: monthly
         billingStartsOn:
           type: string

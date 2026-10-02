@@ -430,3 +430,104 @@ func TestADepositUnderTheDailyRuleWritesNoSurchargeOnAnActivity(t *testing.T) {
 		t.Fatalf("the $400 did not settle the activity period: unallocated %d", got.UnallocatedCents)
 	}
 }
+
+// Review: once pupils are enrolled, changing the periodicity or moving the
+// first billing date to another period would re-key every period and bill it
+// twice. Refused; moving the day inside its period is fine.
+func TestEditingTheBillingCalendarIsRefusedOnceEnrolled(t *testing.T) {
+	f := newActivityFixture(t)
+	a := f.create(t, swimmingInput())
+	in := swimmingInput()
+	in.Options = a.Options()
+	in.Periodicity, in.FirstDueOn = domain.PeriodicityWeekly, day(2026, 9, 3)
+	_, err := f.svcA.UpdateActivity(context.Background(), a.ID(), in)
+	requireNoError(t, err) // nobody enrolled yet: free to change
+
+	in = swimmingInput()
+	in.Options = a.Options()
+	_, err = f.svcA.UpdateActivity(context.Background(), a.ID(), in)
+	requireNoError(t, err)
+	f.enroll(t, a, day(2026, 9, 1), usecase.EnrollItem{StudentID: testStudent, OptionID: optionFor(t, a, 1)})
+
+	weekly := swimmingInput()
+	weekly.Options, weekly.Periodicity, weekly.FirstDueOn = a.Options(), domain.PeriodicityWeekly, day(2026, 9, 3)
+	_, err = f.svcA.UpdateActivity(context.Background(), a.ID(), weekly)
+	requireKind(t, err, glerrors.KindConflict)
+
+	nextMonth := swimmingInput()
+	nextMonth.Options, nextMonth.BillingStartsOn, nextMonth.FirstDueOn = a.Options(), day(2026, 10, 1), day(2026, 10, 10)
+	_, err = f.svcA.UpdateActivity(context.Background(), a.ID(), nextMonth)
+	requireKind(t, err, glerrors.KindConflict)
+
+	sameMonth := swimmingInput()
+	sameMonth.Options, sameMonth.BillingStartsOn, sameMonth.FirstDueOn = a.Options(), day(2026, 9, 2), day(2026, 9, 15)
+	_, err = f.svcA.UpdateActivity(context.Background(), a.ID(), sameMonth)
+	requireNoError(t, err)
+}
+
+// Review: switching an activity off and back on must not bill the months it
+// was off.
+func TestReactivatingDoesNotBillTheMonthsItWasOff(t *testing.T) {
+	f := newActivityFixture(t)
+	a := f.create(t, swimmingInput())
+	f.enroll(t, a, day(2026, 9, 1), usecase.EnrollItem{StudentID: testStudent, OptionID: optionFor(t, a, 1)})
+	off := swimmingInput()
+	off.Options, off.Active = a.Options(), false
+	_, err := f.svcA.UpdateActivity(context.Background(), a.ID(), off)
+	requireNoError(t, err)
+
+	f.clock = time.Date(2027, 1, 5, 9, 0, 0, 0, time.UTC)
+	on := swimmingInput()
+	on.Options = a.Options()
+	_, err = f.svcA.UpdateActivity(context.Background(), a.ID(), on)
+	requireNoError(t, err)
+
+	runOn(t, f.fixture, "2027-01-05")
+	got := f.activityCharges(t, testStudent)
+	for _, key := range []string{"2026-10", "2026-11", "2026-12"} {
+		if _, billed := got[domain.ActivityChargeRef(a.ID(), testStudent, key)]; billed {
+			t.Errorf("%s billed although the activity was off", key)
+		}
+	}
+	if _, jan := got[domain.ActivityChargeRef(a.ID(), testStudent, "2027-01")]; !jan {
+		t.Errorf("January (reactivated before its due date) not billed: %v", got)
+	}
+}
+
+// Review: a once-a-cycle activity charges a late joiner too, with the same
+// window to pay from the day they joined.
+func TestAOnceACycleActivityChargesALateJoiner(t *testing.T) {
+	f := newActivityFixture(t) // today 15 Sept
+	in := swimmingInput()
+	in.Periodicity = domain.PeriodicityPerCycle
+	a := f.create(t, in)
+	got := f.enroll(t, a, time.Time{}, usecase.EnrollItem{StudentID: testStudent, OptionID: optionFor(t, a, 0)})
+	if got.ChargesCreated != 1 {
+		t.Fatalf("late joiner charged %d, want 1", got.ChargesCreated)
+	}
+	c := f.activityCharges(t, testStudent)[domain.ActivityChargeRef(a.ID(), testStudent, "ciclo")]
+	// The same nine-day window everyone had (Sept 1 → 10), from the day they
+	// joined.
+	if !c.DueDate().Equal(day(2026, 9, 24)) {
+		t.Fatalf("due = %s, want 2026-09-24", c.DueDate())
+	}
+}
+
+// Review: enrolling saves the enrolments and then bills; when billing could
+// not run, enrolling the same pupils again must issue what is owed rather
+// than nothing.
+func TestEnrollingAgainBillsAPupilAlreadyEnrolled(t *testing.T) {
+	f := newActivityFixture(t)
+	a := f.create(t, swimmingInput())
+	// No cycle yet: nothing to bill.
+	got := f.enroll(t, a, day(2026, 9, 1), usecase.EnrollItem{StudentID: otherStudent, OptionID: optionFor(t, a, 1)})
+	if got.ChargesCreated != 0 {
+		t.Fatalf("charged a pupil with no cycle")
+	}
+	f.enrollments.byCycle[testCycle] = append(f.enrollments.byCycle[testCycle],
+		ports.EnrollmentRef{ID: "enr-2", StudentID: otherStudent, GroupID: testGroup, CycleID: testCycle, Status: "active"})
+	again := f.enroll(t, a, day(2026, 9, 1), usecase.EnrollItem{StudentID: otherStudent, OptionID: optionFor(t, a, 1)})
+	if len(again.Enrollments) != 0 || again.ChargesCreated != 1 {
+		t.Fatalf("re-enrolling = %+v, want no new enrolment and September billed", again)
+	}
+}
