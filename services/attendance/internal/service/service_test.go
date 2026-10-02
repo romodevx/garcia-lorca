@@ -56,7 +56,24 @@ type fakeRepo struct {
 	// and is reported in ListChanges.HeldElsewhere.
 	held map[string]bool
 
+	summaryCalls     int
+	lastSummaryGroup string
+	lastSummaryIDs   []string
+	lastSummaryFrom  time.Time
+	lastSummaryTo    time.Time
+	summary          service.GroupSummary
+
 	err error // forced failure, returned by every method when set
+}
+
+func (f *fakeRepo) SummarizeGroup(_ context.Context, groupID string, enrollmentIDs []string, from, to time.Time) (service.GroupSummary, error) {
+	f.summaryCalls++
+	f.lastSummaryGroup, f.lastSummaryIDs = groupID, append([]string(nil), enrollmentIDs...)
+	f.lastSummaryFrom, f.lastSummaryTo = from, to
+	if f.err != nil {
+		return service.GroupSummary{}, f.err
+	}
+	return f.summary, nil
 }
 
 func (f *fakeRepo) ListSessions(_ context.Context, groupIDs []string, from, to time.Time) ([]service.TakenList, error) {

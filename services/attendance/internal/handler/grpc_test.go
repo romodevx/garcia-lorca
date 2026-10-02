@@ -26,10 +26,16 @@ type fakeRepo struct {
 	taker    service.Taker
 	taken    []service.TakenList
 	held     map[string]bool // enrollment ids another group's list holds
+	summary  service.GroupSummary
 }
 
 func (f *fakeRepo) ListSessions(_ context.Context, _ []string, _, _ time.Time) ([]service.TakenList, error) {
 	return f.taken, nil
+}
+
+// SummarizeGroup answers the canned summary (T12 report).
+func (f *fakeRepo) SummarizeGroup(_ context.Context, _ string, _ []string, _, _ time.Time) (service.GroupSummary, error) {
+	return f.summary, nil
 }
 
 func newFakeRepo() *fakeRepo {

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sort"
 	"strings"
@@ -193,6 +194,40 @@ type Repo interface {
 	// ListSessions returns the lists TAKEN for any of groupIDs between two
 	// inclusive days, newest first, in one query.
 	ListSessions(ctx context.Context, groupIDs []string, from, to time.Time) ([]TakenList, error)
+	// SummarizeGroup counts, over two inclusive days and in ONE transaction,
+	// the lists taken for groupID and each of enrollmentIDs' exceptions on the
+	// group's lists (its own marks, plus legacy marks stored before lists were
+	// stamped with their group). Enrollments without a mark are absent from
+	// Counts.
+	SummarizeGroup(ctx context.Context, groupID string, enrollmentIDs []string, from, to time.Time) (GroupSummary, error)
+}
+
+// ExceptionCounts is how many of a pupil's marks were each stored exception.
+type ExceptionCounts struct {
+	Absent  int
+	Late    int
+	Excused int
+}
+
+// GroupSummary is what the repository counts for a report: the group's lists
+// taken and the exceptions per enrollment id.
+type GroupSummary struct {
+	ListsTaken int
+	Counts     map[string]ExceptionCounts
+}
+
+// StudentCounts is one active pupil's line of the report.
+type StudentCounts struct {
+	EnrollmentID string
+	StudentID    string
+	ExceptionCounts
+}
+
+// AttendanceSummary is a group's attendance over a range: the lists taken and
+// one line per active pupil, ordered by enrollment id.
+type AttendanceSummary struct {
+	ListsTaken int
+	Students   []StudentCounts
 }
 
 // TakenList is one list that was taken: its group, school day and subject (""
@@ -528,21 +563,60 @@ func (s *AttendanceService) ListSessions(ctx context.Context, groupIDs []string,
 	if err != nil {
 		return nil, err
 	}
-	from, err := parseDate(fromStr)
+	from, to, err := parseRange(fromStr, toStr, maxSessionRangeDays)
 	if err != nil {
 		return nil, err
+	}
+	return s.repo.ListSessions(ctx, groups, from, to)
+}
+
+// maxSummaryRangeDays bounds a report: a school year (leap day included).
+const maxSummaryRangeDays = 366
+
+// SummarizeAttendance is the T12 report's read: the group's lists taken between
+// two required inclusive ISO days and, for every ACTIVE pupil, the exceptions on
+// them — zeros included. Present is what is left, so it is not computed here
+// (default-present model). The range is bounded at the boundary.
+func (s *AttendanceService) SummarizeAttendance(ctx context.Context, groupID, fromStr, toStr string) (AttendanceSummary, error) {
+	from, to, err := parseRange(fromStr, toStr, maxSummaryRangeDays)
+	if err != nil {
+		return AttendanceSummary{}, err
+	}
+	if err := s.requireGroup(ctx, groupID); err != nil {
+		return AttendanceSummary{}, err
+	}
+	enrollmentIDs, studentByEnrollment, err := s.activeRoster(ctx, groupID)
+	if err != nil {
+		return AttendanceSummary{}, err
+	}
+	sum, err := s.repo.SummarizeGroup(ctx, groupID, enrollmentIDs, from, to)
+	if err != nil {
+		return AttendanceSummary{}, err
+	}
+	out := AttendanceSummary{ListsTaken: sum.ListsTaken, Students: make([]StudentCounts, 0, len(enrollmentIDs))}
+	for _, id := range enrollmentIDs {
+		out.Students = append(out.Students, StudentCounts{EnrollmentID: id, StudentID: studentByEnrollment[id], ExceptionCounts: sum.Counts[id]})
+	}
+	return out, nil
+}
+
+// parseRange parses two required inclusive ISO days spanning at most maxDays.
+func parseRange(fromStr, toStr string, maxDays int) (time.Time, time.Time, error) {
+	from, err := parseDate(fromStr)
+	if err != nil {
+		return time.Time{}, time.Time{}, err
 	}
 	to, err := parseDate(toStr)
 	if err != nil {
-		return nil, err
+		return time.Time{}, time.Time{}, err
 	}
 	if to.Before(from) {
-		return nil, glerrors.New(glerrors.KindInvalid, "to_date is before from_date")
+		return time.Time{}, time.Time{}, glerrors.New(glerrors.KindInvalid, "to_date is before from_date")
 	}
-	if days := int(to.Sub(from).Hours()/hoursPerDay) + 1; days > maxSessionRangeDays {
-		return nil, glerrors.New(glerrors.KindInvalid, "the range spans more than 62 days")
+	if days := int(to.Sub(from).Hours()/hoursPerDay) + 1; days > maxDays {
+		return time.Time{}, time.Time{}, glerrors.New(glerrors.KindInvalid, fmt.Sprintf("the range spans more than %d days", maxDays))
 	}
-	return s.repo.ListSessions(ctx, groups, from, to)
+	return from, to, nil
 }
 
 // hoursPerDay converts a UTC-midnight difference to days (no DST in UTC).

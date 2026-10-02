@@ -449,3 +449,58 @@ func (r *Repo) ListSessions(ctx context.Context, groupIDs []string, from, to tim
 	}
 	return out, nil
 }
+
+// summaryRow is one enrollment's exception counts, as SummarizeGroup scans it.
+type summaryRow struct {
+	EnrollmentID string `gorm:"column:enrollment_id"`
+	Absent       int    `gorm:"column:absent"`
+	Late         int    `gorm:"column:late"`
+	Excused      int    `gorm:"column:excused"`
+}
+
+// SummarizeGroup counts, in ONE tenant-bound transaction, the group's lists
+// taken between two inclusive days and each enrollment's exceptions on the
+// group's lists: marks stamped with this group, plus legacy marks (group_id
+// NULL, stored before 0004) of the given enrollments. A mark another group's
+// list holds — a transferred pupil's day there — is not this group's. Both
+// reads are aggregates (one row per enrollment at most, one count), served by
+// idx_attendance_group_date and the sessions' list key.
+func (r *Repo) SummarizeGroup(ctx context.Context, groupID string, enrollmentIDs []string, from, to time.Time) (service.GroupSummary, error) {
+	out := service.GroupSummary{Counts: map[string]service.ExceptionCounts{}}
+	fromDay, toDay := from.Format(dateLayout), to.Format(dateLayout)
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		var lists int64
+		if err := tx.Model(&sessionModel{}).
+			Where("group_id = ? AND date BETWEEN ?::date AND ?::date", groupID, fromDay, toDay).
+			Count(&lists).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "counting attendance lists", err)
+		}
+		out.ListsTaken = int(lists)
+		if len(enrollmentIDs) == 0 {
+			return nil
+		}
+		var rows []summaryRow
+		if err := tx.Model(&attendanceModel{}).
+			Select("enrollment_id, "+
+				"count(*) FILTER (WHERE status = 'absent') AS absent, "+
+				"count(*) FILTER (WHERE status = 'late') AS late, "+
+				"count(*) FILTER (WHERE status = 'excused') AS excused").
+			Where("enrollment_id IN ? AND date BETWEEN ?::date AND ?::date", enrollmentIDs, fromDay, toDay).
+			Where("(group_id = ? OR group_id IS NULL)", groupID).
+			Group("enrollment_id").
+			Scan(&rows).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "counting attendance marks", err)
+		}
+		for _, row := range rows {
+			counts := service.ExceptionCounts{Absent: row.Absent, Late: row.Late, Excused: row.Excused}
+			if counts != (service.ExceptionCounts{}) {
+				out.Counts[row.EnrollmentID] = counts
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return service.GroupSummary{}, err
+	}
+	return out, nil
+}
