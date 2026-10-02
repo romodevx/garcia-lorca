@@ -52,7 +52,7 @@ type NewApplicantParams struct {
 	GradeGroup       string
 	GuardianName     string
 	// Profile is the file's editable half (birth date, contact, address). A new
-	// applicant starts with an empty one.
+	// applicant may arrive with its birth date (T11); the rest starts empty.
 	Profile Profile
 }
 
@@ -100,6 +100,7 @@ func NewApplicant(p NewApplicantParams) (*Student, error) {
 		gradeGroup:       strings.TrimSpace(p.GradeGroup),
 		guardianName:     strings.TrimSpace(p.GuardianName),
 		status:           AdmissionPending,
+		profile:          p.Profile,
 	}, nil
 }
 

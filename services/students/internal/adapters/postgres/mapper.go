@@ -88,11 +88,7 @@ func profileColumns(p domain.Profile) (map[string]any, error) {
 	if err != nil {
 		return nil, glerrors.Wrap(glerrors.KindInternal, "encoding phones", err)
 	}
-	var born *time.Time
-	if !p.BirthDate().IsZero() {
-		b := p.BirthDate()
-		born = &b
-	}
+	born := birthDateOrNil(p.BirthDate())
 	a := p.Address()
 	return map[string]any{
 		"birth_date": born, "sex": string(p.Sex()), "email": p.Email(), "phones": string(phones),
@@ -117,7 +113,18 @@ func fromDomain(s *domain.Student) studentModel {
 		GuardianName:     s.GuardianName(),
 		AdmissionStatus:  s.Status().String(),
 		Phones:           "[]",
+		// The only profile field captured at intake (T11); the rest is written
+		// by UpdateDetails from the file.
+		BirthDate: birthDateOrNil(s.Profile().BirthDate()),
 	}
+}
+
+// birthDateOrNil maps "not captured" (the zero time) to NULL.
+func birthDateOrNil(born time.Time) *time.Time {
+	if born.IsZero() {
+		return nil
+	}
+	return &born
 }
 
 // enrollmentToDomain rebuilds a domain Enrollment from its row. A NULL term_id
