@@ -141,7 +141,8 @@ then repeat from §2. `deletion_protection` is off outside prod, so this works.
 
 * Deploy `master` to the school's account — same Terraform plus a `prod.tfvars`,
   when they sign.
-* Deploy `billing`, `scholarships` or `docs` — no implementation, flags off.
+* Deploy `billing` or `docs` — no implementation, flags off. (Scholarships are
+  part of finance since T18, ADR 0022.)
 * Survive past November 2026. This environment is temporary: it is torn down and
   `dev` is handed to the director's own GCP account. There is deliberately no
   demo→prod data migration path, because the demo holds synthetic data only.
