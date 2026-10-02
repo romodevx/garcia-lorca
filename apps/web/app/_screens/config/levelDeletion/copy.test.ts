@@ -17,8 +17,13 @@ describe("deletedLines", () => {
   it("names the kinds a director recognises beyond the headline ones (QA, deferred)", () => {
     const lines = deletedLines({ ...ZERO, enrollmentTransfers: 2, attendanceSessions: 1, gradeEntries: 3, periodClosures: 1 });
     expect(lines).toEqual([
-      "2 cambios de grupo", "1 lista de asistencia", "3 calificaciones por periodo", "1 periodo cerrado",
+      "2 cambios de grupo", "1 lista de asistencia", "3 calificaciones por trimestre (anteriores)", "1 periodo cerrado",
     ]);
+  });
+
+  it("tells the period grades (T15) from the monthly ones they replaced", () => {
+    const lines = deletedLines({ ...ZERO, periodGrades: 12, monthlyGrades: 1 });
+    expect(lines).toEqual(["12 calificaciones por periodo", "1 calificación mensual (anterior)"]);
   });
 
   it("reads an older server's counts, without the newer kinds", () => {

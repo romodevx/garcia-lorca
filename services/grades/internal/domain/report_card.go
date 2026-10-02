@@ -42,8 +42,22 @@ type ReportCardHeader struct {
 	CycleName        string
 	TermName         string
 	TermOrdinal      int // the term's order in its cycle (1 = first); 0 = unknown (issued before T8)
-	Months           []Month
-	Scale            GradingScale
+	// Periods are the card's columns (T15): the evaluation periods of the
+	// pupil's grade from the first up to the one closed, in ordinal order.
+	Periods []ReportCardPeriod
+	// Months are the columns of a card issued before T15 (monthly capture);
+	// a T15 card has none. Kept so an issued card reads back as it was.
+	Months []Month
+	Scale  GradingScale
+}
+
+// ReportCardPeriod is one column of a report card: an evaluation period of the
+// pupil's grade as it read at issue time.
+type ReportCardPeriod struct {
+	ID       string
+	Ordinal  int
+	Name     string
+	StartsOn time.Time
 }
 
 // ReportCardSubject is one subject a report card lists, in print order.
@@ -52,14 +66,25 @@ type ReportCardSubject struct {
 	Name string
 }
 
-// ReportCardLine is one subject of a report card: its grade per month of the
-// term (a month without a grade is absent) and its trimester grade.
+// ReportCardLine is one subject of a report card: its grade per period (a
+// period without a grade is absent) and their average (exact mean, truncated
+// to 2 decimals). A card issued before T15 carries MonthValues instead.
 type ReportCardLine struct {
-	SubjectID   string
-	SubjectName string
-	Position    int
-	MonthValues map[Month]GradeValue
-	TermAverage Average
+	SubjectID    string
+	SubjectName  string
+	Position     int
+	PeriodValues map[string]GradeValue
+	MonthValues  map[Month]GradeValue
+	Average      Average
+}
+
+// PeriodValueStrings is PeriodValues valued by their text ({"<period id>": "9"}).
+func (l ReportCardLine) PeriodValueStrings() map[string]string {
+	out := make(map[string]string, len(l.PeriodValues))
+	for id, v := range l.PeriodValues {
+		out[id] = v.String()
+	}
+	return out
 }
 
 // MonthValueStrings is MonthValues keyed and valued by their text
@@ -81,40 +106,40 @@ type ReportCard struct {
 	lines          []ReportCardLine
 }
 
-// BuildReportCard freezes one enrollment's grades for the header's term: for
-// each subject (in the given order), the grades of that enrollment in the
-// term's months and their half-up mean; then the general average of the
-// subjects that have one. Grades of other enrollments or other months are
-// ignored. The card is issued published.
-func BuildReportCard(h ReportCardHeader, subjects []ReportCardSubject, grades []MonthlyGrade) (ReportCard, error) {
+// BuildReportCard freezes one enrollment's grades for the header's columns
+// (T15): for each subject (in the given order), its grade in each of the
+// header's periods and their exact mean; then the general average — the exact
+// mean of the subjects' exact averages, only subjects that have one. Grades of
+// other enrollments or periods are ignored. The card is issued published.
+func BuildReportCard(h ReportCardHeader, subjects []ReportCardSubject, grades []PeriodGrade) (ReportCard, error) {
 	if err := validateHeader(h); err != nil {
 		return ReportCard{}, err
 	}
-	bySubject := map[string]map[Month]GradeValue{}
+	inCard := make(map[string]bool, len(h.Periods))
+	for _, p := range h.Periods {
+		inCard[p.ID] = true
+	}
+	bySubject := map[string]map[string]GradeValue{}
 	for _, g := range grades {
-		if g.EnrollmentID() != h.EnrollmentID || !ContainsMonth(h.Months, g.Month()) {
+		if g.EnrollmentID() != h.EnrollmentID || !inCard[g.PeriodID()] {
 			continue
 		}
 		if bySubject[g.SubjectID()] == nil {
-			bySubject[g.SubjectID()] = map[Month]GradeValue{}
+			bySubject[g.SubjectID()] = map[string]GradeValue{}
 		}
-		bySubject[g.SubjectID()][g.Month()] = g.Value()
+		bySubject[g.SubjectID()][g.PeriodID()] = g.Value()
 	}
 	lines := make([]ReportCardLine, 0, len(subjects))
 	averages := make([]Average, 0, len(subjects))
 	for i, s := range subjects {
-		monthValues := bySubject[s.ID]
-		if monthValues == nil {
-			monthValues = map[Month]GradeValue{}
+		values := bySubject[s.ID]
+		if values == nil {
+			values = map[string]GradeValue{}
 		}
-		values := make([]GradeValue, 0, len(monthValues))
-		for _, v := range monthValues {
-			values = append(values, v)
-		}
-		avg := SubjectAverage(values)
+		avg := SubjectAverage(slices.Collect(maps.Values(values)))
 		averages = append(averages, avg)
 		lines = append(lines, ReportCardLine{
-			SubjectID: s.ID, SubjectName: s.Name, Position: i + 1, MonthValues: monthValues, TermAverage: avg,
+			SubjectID: s.ID, SubjectName: s.Name, Position: i + 1, PeriodValues: values, Average: avg,
 		})
 	}
 	return ReportCard{header: h, status: ReportCardPublished, generalAverage: GeneralAverage(averages), lines: lines}, nil
@@ -147,19 +172,20 @@ func validateHeader(h ReportCardHeader) error {
 	if h.Version < 1 {
 		return glerrors.New(glerrors.KindInvalid, "report card version must be at least 1")
 	}
-	if len(h.Months) == 0 {
-		return glerrors.New(glerrors.KindInvalid, "report card months are required")
+	if len(h.Periods) == 0 && len(h.Months) == 0 {
+		return glerrors.New(glerrors.KindInvalid, "report card periods are required")
 	}
 	return nil
 }
 
 // SameGradesAs reports whether r carries the grades other did: the same
-// subjects (by id), and per subject the same month values and trimester grade,
-// and the same general average. Ids, versions, names and print order do not
+// subjects (by id), and per subject the same period (or month) values and
+// average, and the same general average — averages compared as they read
+// (truncated), so a fresh exact average equals the stored one. Ids, versions, names and print order do not
 // count — a re-close that changes none of these has nothing new to tell the
 // family.
 func (r ReportCard) SameGradesAs(other ReportCard) bool {
-	if r.generalAverage != other.generalAverage || len(r.lines) != len(other.lines) {
+	if !r.generalAverage.SameAs(other.generalAverage) || len(r.lines) != len(other.lines) {
 		return false
 	}
 	previous := make(map[string]ReportCardLine, len(other.lines))
@@ -168,7 +194,9 @@ func (r ReportCard) SameGradesAs(other ReportCard) bool {
 	}
 	for _, l := range r.lines {
 		p, ok := previous[l.SubjectID]
-		if !ok || l.TermAverage != p.TermAverage || !maps.Equal(l.MonthValueStrings(), p.MonthValueStrings()) {
+		if !ok || !l.Average.SameAs(p.Average) ||
+			!maps.Equal(l.PeriodValueStrings(), p.PeriodValueStrings()) ||
+			!maps.Equal(l.MonthValueStrings(), p.MonthValueStrings()) {
 			return false
 		}
 	}
@@ -193,8 +221,9 @@ func (r ReportCard) WithStatus(s ReportCardStatus) ReportCard {
 }
 
 // SortNewestTermFirst returns cards (a copy; the input keeps its order) newest
-// period first: the newest cycle first, then, within a cycle, the card whose
-// first month is latest. A cycle is dated by the earliest month any of its
+// period first: the newest cycle first, then, within a cycle, the card that
+// starts latest (its first month; a T15 card, the start of the period it was
+// closed for). A cycle is dated by the earliest month any of its
 // cards covers — never by its name, which the school chooses freely, nor by
 // issue date, which a reopen moves. The term ordinal only breaks ties: legacy
 // cards carry ordinal 0, so ordering by it first would put a legacy T3 behind
@@ -202,10 +231,10 @@ func (r ReportCard) WithStatus(s ReportCardStatus) ReportCard {
 func SortNewestTermFirst(cards []ReportCard) []ReportCard {
 	cycleStart := map[string]time.Time{}
 	for _, c := range cards {
-		if len(c.header.Months) == 0 {
-			continue // only a zero ReportCard has none; it sorts last
+		first := startOf(c.header)
+		if first.IsZero() {
+			continue // only a zero ReportCard has no columns; it sorts last
 		}
-		first := firstMonth(c.header)
 		if start, ok := cycleStart[c.header.CycleID]; !ok || first.Before(start) {
 			cycleStart[c.header.CycleID] = first
 		}
@@ -216,7 +245,7 @@ func SortNewestTermFirst(cards []ReportCard) []ReportCard {
 		return cmp.Or(
 			cycleStart[hb.CycleID].Compare(cycleStart[ha.CycleID]),
 			cmp.Compare(hb.CycleID, ha.CycleID),
-			firstMonth(hb).Compare(firstMonth(ha)),
+			startOf(hb).Compare(startOf(ha)),
 			cmp.Compare(hb.TermOrdinal, ha.TermOrdinal),
 			cmp.Compare(ha.TermID, hb.TermID),
 			cmp.Compare(ha.ID, hb.ID),
@@ -225,11 +254,21 @@ func SortNewestTermFirst(cards []ReportCard) []ReportCard {
 	return out
 }
 
-// firstMonth is the first day of the card's first month; a zero header (no
-// months) answers the zero time, so it sorts last.
-func firstMonth(h ReportCardHeader) time.Time {
-	if len(h.Months) == 0 {
+// startOf dates a card: the first day of its first month (issued before
+// T15), or the start of the period it was closed for — the column whose
+// ordinal is the term's, else its last column. A card without columns answers
+// the zero time, so it sorts last.
+func startOf(h ReportCardHeader) time.Time {
+	if len(h.Months) > 0 {
+		return h.Months[0].FirstDay()
+	}
+	if len(h.Periods) == 0 {
 		return time.Time{}
 	}
-	return h.Months[0].FirstDay()
+	for _, p := range h.Periods {
+		if p.Ordinal == h.TermOrdinal {
+			return p.StartsOn
+		}
+	}
+	return h.Periods[len(h.Periods)-1].StartsOn
 }

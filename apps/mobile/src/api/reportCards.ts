@@ -1,6 +1,6 @@
 import { apiFetch } from "./client";
 import { ApiError } from "./errors";
-import { normalizeScale, type GradeScale } from "./grades";
+import { byOrdinal, normalizeScale, type GradeScale } from "./grades";
 
 /**
  * A guardian's view of one child's issued trimester report cards (boletas):
@@ -27,11 +27,23 @@ export interface ReportCardSummary {
   hasGrades: boolean;
 }
 
-/** One subject row of a boleta: its grade per month ("YYYY-MM") and the term average. */
+/** One column of a T15 boleta: an evaluation period of the pupil's grade. */
+export interface ReportCardPeriod {
+  id: string;
+  ordinal: number;
+  name: string;
+}
+
+/**
+ * One subject row of a boleta: its grade per column and the term average. A
+ * T15 card fills `periods` (period id → grade); a card issued before T15 keeps
+ * its month columns in `months` ("YYYY-MM" → grade).
+ */
 export interface ReportCardLine {
   /** Stable subject id; empty only when the server omits it. */
   subjectId: string;
   subjectName: string;
+  periods: Record<string, number>;
   months: Record<string, number>;
   average: number | null;
 }
@@ -44,7 +56,9 @@ export interface ReportCard {
   /** See {@link ReportCardSummary.termOrdinal}. */
   termOrdinal: number;
   cycleName: string;
-  /** The term's months, oldest first. */
+  /** The card's evaluation-period columns, by ordinal; [] on a card issued before T15. */
+  periods: ReportCardPeriod[];
+  /** The columns of a card issued before T15 (monthly capture), oldest first; [] since T15. */
   months: string[];
   lines: ReportCardLine[];
   generalAverage: number | null;
@@ -71,6 +85,7 @@ interface WireSummary {
 interface WireLine {
   subjectId?: string;
   subjectName?: string;
+  periods?: Record<string, WireNumber> | null;
   months?: Record<string, WireNumber> | null;
   average?: WireNumber;
 }
@@ -82,6 +97,7 @@ interface WireReportCard {
   termName?: string;
   termOrdinal?: number;
   cycleName?: string;
+  periods?: ReportCardPeriod[] | null;
   months?: string[] | null;
   lines?: WireLine[] | null;
   generalAverage?: WireNumber;
@@ -99,11 +115,11 @@ function toNumber(value: WireNumber): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-function toMonthValues(months: Record<string, WireNumber> | null | undefined): Record<string, number> {
+function toValues(byColumn: Record<string, WireNumber> | null | undefined): Record<string, number> {
   const out: Record<string, number> = {};
-  for (const [month, raw] of Object.entries(months ?? {})) {
+  for (const [column, raw] of Object.entries(byColumn ?? {})) {
     const value = toNumber(raw);
-    if (value !== null) out[month] = value;
+    if (value !== null) out[column] = value;
   }
   return out;
 }
@@ -155,11 +171,13 @@ export async function getReportCard(studentId: string, reportCardId: string): Pr
     termName: data.termName ?? "",
     termOrdinal: data.termOrdinal ?? NO_ORDINAL,
     cycleName: data.cycleName ?? "",
+    periods: byOrdinal(data.periods ?? []),
     months: data.months ?? [],
     lines: (data.lines ?? []).map((l) => ({
       subjectId: l.subjectId ?? "",
       subjectName: l.subjectName ?? "",
-      months: toMonthValues(l.months),
+      periods: toValues(l.periods),
+      months: toValues(l.months),
       average: toNumber(l.average),
     })),
     generalAverage: toNumber(data.generalAverage),

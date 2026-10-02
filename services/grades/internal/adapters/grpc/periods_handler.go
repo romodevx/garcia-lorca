@@ -46,7 +46,7 @@ func (h *GradesHandler) ListPeriods(ctx context.Context, req *connect.Request[gr
 		c := p.Closure
 		out = append(out, &gradesv1.Period{
 			TermId: p.Term.ID, TermName: p.Term.Name, Ordinal: int32(p.Term.Ordinal),
-			LevelId: p.Term.LevelID, LevelName: p.LevelName, Months: monthStrings(p.Term.Months),
+			LevelId: p.Term.LevelID, LevelName: p.LevelName, StartsOn: dayText(p.StartsOn), EndsOn: dayText(p.EndsOn),
 			Status: string(c.Status()), ClosedAt: timestampOrNil(c.ClosedAt()), ClosedByName: c.ClosedByName(),
 			Version:  int32(c.Version()),
 			Progress: &gradesv1.PeriodProgress{Captured: int32(p.Captured), Expected: int32(p.Expected)},
@@ -69,8 +69,9 @@ func (h *GradesHandler) GetPeriodProgress(ctx context.Context, req *connect.Requ
 		})
 	}
 	return connect.NewResponse(&gradesv1.GetPeriodProgressResponse{
-		TermId: p.TermID, Months: monthStrings(p.Months), UnfinishedMonths: monthStrings(p.UnfinishedMonths),
-		Expected: int32(p.Expected), Captured: int32(p.Captured), Missing: missing,
+		TermId: p.TermID, Unfinished: p.Unfinished, EndsOn: dayText(p.EndsOn),
+		GroupsWithoutPeriod: nonNil(p.GroupsWithoutPeriod),
+		Expected:            int32(p.Expected), Captured: int32(p.Captured), Missing: missing,
 	}), nil
 }
 
@@ -131,8 +132,12 @@ func toProtoReportCard(rc domain.ReportCard) *gradesv1.ReportCard {
 	for _, l := range rc.Lines() {
 		lines = append(lines, &gradesv1.ReportCardLine{
 			SubjectId: l.SubjectID, SubjectName: l.SubjectName, Position: int32(l.Position),
-			MonthValues: l.MonthValueStrings(), TermAverage: l.TermAverage.String(),
+			MonthValues: l.MonthValueStrings(), PeriodValues: l.PeriodValueStrings(), TermAverage: l.Average.String(),
 		})
+	}
+	periods := make([]*gradesv1.ReportCardPeriod, 0, len(hd.Periods))
+	for _, p := range hd.Periods {
+		periods = append(periods, &gradesv1.ReportCardPeriod{Id: p.ID, Ordinal: int32(p.Ordinal), Name: p.Name})
 	}
 	return &gradesv1.ReportCard{
 		Id: hd.ID, TermId: hd.TermID, CycleId: hd.CycleID, LevelId: hd.LevelID, GroupId: hd.GroupID,
@@ -140,6 +145,13 @@ func toProtoReportCard(rc domain.ReportCard) *gradesv1.ReportCard {
 		IssuedAt: timestampOrNil(hd.IssuedAt), IssuedBy: hd.IssuedBy, StudentName: hd.StudentName,
 		EnrollmentNumber: hd.EnrollmentNumber, GroupLabel: hd.GroupLabel, LevelName: hd.LevelName,
 		CycleName: hd.CycleName, TermName: hd.TermName, TermOrdinal: int32(hd.TermOrdinal), Months: monthStrings(hd.Months),
-		GeneralAverage: rc.GeneralAverage().String(), Scale: toProtoScale(hd.Scale), Lines: lines,
+		GeneralAverage: rc.GeneralAverage().String(), Scale: toProtoScale(hd.Scale), Lines: lines, Periods: periods,
 	}
+}
+
+func nonNil(ss []string) []string {
+	if ss == nil {
+		return []string{}
+	}
+	return ss
 }

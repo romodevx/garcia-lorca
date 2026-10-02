@@ -1,6 +1,6 @@
-import type { ReportCardSummary } from "../../api/reportCards";
+import type { ReportCard, ReportCardLine, ReportCardSummary } from "../../api/reportCards";
 import { formatDate } from "../format";
-import { formatGrade } from "../gradesView";
+import { formatAverage, monthName, shortMonthLabel } from "../gradesView";
 
 /** Pure presentation helpers for the Boletas list. */
 
@@ -16,9 +16,28 @@ export function versionBadge(version: number): string | null {
   return version > FIRST_VERSION ? `Versión ${version} · Actualizada` : null;
 }
 
-/** The average as stored (never rounded), or null when nothing was captured. */
+/** The average as the server sent it (already truncated), or null when nothing was captured. */
 export function averageText(card: Pick<ReportCardSummary, "generalAverage" | "hasGrades">): string | null {
-  return card.hasGrades && card.generalAverage !== null ? formatGrade(card.generalAverage) : null;
+  return card.hasGrades && card.generalAverage !== null ? formatAverage(card.generalAverage) : null;
+}
+
+/** One column of the boleta table: what it shows, what is read aloud, and which grades fill it. */
+export interface ReportCardColumn {
+  key: string;
+  header: string;
+  spoken: string;
+  valueOf: (line: ReportCardLine) => number | undefined;
+}
+
+/**
+ * The boleta's columns: its evaluation periods (T15), or — on a card issued
+ * before T15, whose `periods` is empty — its months, exactly as before.
+ */
+export function reportCardColumns(card: Pick<ReportCard, "periods" | "months">): ReportCardColumn[] {
+  if (card.periods.length > 0) {
+    return card.periods.map((p) => ({ key: p.id, header: p.name, spoken: p.name, valueOf: (line) => line.periods[p.id] }));
+  }
+  return card.months.map((m) => ({ key: m, header: shortMonthLabel(m), spoken: monthName(m), valueOf: (line) => line.months[m] }));
 }
 
 /** What a screen reader says for one boleta row. */

@@ -1,71 +1,82 @@
 package domain
 
-import "fmt"
+import "math/big"
 
-// Average is a report-card average held in exact tenths (8.5 = 85), or no
-// average at all (the zero value): a subject without a grade in the term has
-// no trimester grade, which is not the same as a zero.
+// Average is a system-computed average (T15): the EXACT arithmetic mean of the
+// grades that exist, held as a rational — or no average at all (the zero
+// value): a subject without a grade has no average, which is not a zero.
 //
-// Every average is computed with integer arithmetic on exact hundredths and
-// rounded HALF-UP to one decimal. A float64 would read 8.45 as 8.4499… and
-// round it down; the owner's rule is that 8.45 is 8.5.
+// It is shown and stored TRUNCATED, never rounded, to two decimals (8.666… →
+// 8.66), and printed without trailing zeros ("8.5", "9"). No float takes part:
+// the web and the parents' app run the same table of cases
+// (packages/domain/src/gradeAverage.vectors.json).
 type Average struct {
-	tenths  int
+	exact   *big.Rat // in grade units; nil when absent
 	present bool
 }
 
-// hundredthsPerTenth is how many hundredths make a tenth.
-const hundredthsPerTenth = 10
-
-// AverageFromTenths rebuilds a stored average.
-func AverageFromTenths(tenths int) Average { return Average{tenths: tenths, present: true} }
+// AverageFromHundredths rebuilds a stored (already truncated) average.
+func AverageFromHundredths(h int) Average {
+	return Average{exact: big.NewRat(int64(h), hundredthsPerUnit), present: true}
+}
 
 // Present reports whether there is an average.
 func (a Average) Present() bool { return a.present }
 
-// Tenths is the average in tenths (meaningless when not Present).
-func (a Average) Tenths() int { return a.tenths }
+// Hundredths is the average truncated to whole hundredths (8.666… → 866);
+// meaningless when not Present.
+func (a Average) Hundredths() int {
+	if !a.present {
+		return 0
+	}
+	scaled := new(big.Rat).Mul(a.exact, big.NewRat(hundredthsPerUnit, 1))
+	return int(new(big.Int).Quo(scaled.Num(), scaled.Denom()).Int64())
+}
 
-// String is the average with exactly one decimal ("8.5", "10.0"), or "" when
-// there is none.
+// String is the truncated average without trailing zeros ("8.66", "8.5",
+// "9"), or "" when there is none.
 func (a Average) String() string {
 	if !a.present {
 		return ""
 	}
-	return fmt.Sprintf("%d.%d", a.tenths/hundredthsPerTenth, a.tenths%hundredthsPerTenth)
+	return formatHundredths(a.Hundredths())
 }
 
-// SubjectAverage is a subject's trimester grade: the arithmetic mean of its
-// captured monthly grades, one decimal, half-up. No grades, no average.
+// SameAs reports whether a and b read the same: both absent, or both present
+// with the same truncated value. An exact 26/3 is the same as a stored 8.66.
+func (a Average) SameAs(b Average) bool {
+	if a.present != b.present {
+		return false
+	}
+	return !a.present || a.Hundredths() == b.Hundredths()
+}
+
+// SubjectAverage is a subject's average: the exact mean of its grades. No
+// grades, no average.
 func SubjectAverage(grades []GradeValue) Average {
 	if len(grades) == 0 {
 		return Average{}
 	}
-	sum := 0
+	sum := int64(0)
 	for _, g := range grades {
-		sum += g.Hundredths()
+		sum += int64(g.Hundredths())
 	}
-	return Average{tenths: roundHalfUp(sum, len(grades)*hundredthsPerTenth), present: true}
+	return Average{exact: big.NewRat(sum, int64(len(grades))*hundredthsPerUnit), present: true}
 }
 
-// GeneralAverage is the mean of the subjects' trimester grades, counting only
-// subjects that have one, one decimal, half-up. No graded subject, no average.
+// GeneralAverage is the exact mean of the subjects' EXACT averages, counting
+// only subjects that have one; it is truncated only when read. No graded
+// subject, no average.
 func GeneralAverage(subjects []Average) Average {
-	sum, n := 0, 0
+	sum, n := new(big.Rat), int64(0)
 	for _, s := range subjects {
 		if s.present {
-			sum += s.tenths
+			sum.Add(sum, s.exact)
 			n++
 		}
 	}
 	if n == 0 {
 		return Average{}
 	}
-	return Average{tenths: roundHalfUp(sum, n), present: true}
-}
-
-// roundHalfUp is numerator/denominator rounded half-up, for a non-negative
-// numerator and a positive denominator: floor((2n + d) / 2d).
-func roundHalfUp(numerator, denominator int) int {
-	return (2*numerator + denominator) / (2 * denominator)
+	return Average{exact: sum.Quo(sum, big.NewRat(n, 1)), present: true}
 }

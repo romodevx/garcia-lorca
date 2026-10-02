@@ -61,9 +61,10 @@ type ConfigService interface {
 // guard (module_config) plus RequireAuth + rotation-enforcement, with writes
 // gated on config:write and reads on config:read.
 type ConfigHandler struct {
-	svc   ConfigService
-	scale ScaleGuard
-	lock  TermLockGuard
+	svc    ConfigService
+	scale  ScaleGuard
+	lock   TermLockGuard
+	graded PeriodGradesGuard
 }
 
 // TermLockGuard answers which terms are closed periods (grades, T7): their

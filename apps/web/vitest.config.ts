@@ -10,6 +10,7 @@ export default defineConfig({
       "@garcia-lorca/ui/command-core": resolve(__dirname, "../../packages/ui/src/command/core.ts"),
       "@garcia-lorca/ui": resolve(__dirname, "../../packages/ui/index.ts"),
       "@garcia-lorca/domain/student-name": resolve(__dirname, "../../packages/domain/src/studentName.ts"),
+      "@garcia-lorca/domain/grade-average": resolve(__dirname, "../../packages/domain/src/gradeAverage.ts"),
       "@garcia-lorca/domain": resolve(__dirname, "../../packages/domain/index.ts"),
       "@garcia-lorca/i18n": resolve(__dirname, "../../packages/i18n/index.ts"),
       "@garcia-lorca/api-client": resolve(__dirname, "../../packages/api-client/index.ts")

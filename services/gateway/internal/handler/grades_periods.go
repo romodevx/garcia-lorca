@@ -10,16 +10,17 @@ import (
 	"github.com/garcia-lorca/services/gateway/internal/middleware"
 )
 
-// Period closing (T7). The director closes a period — one level of one cycle,
-// a set of months — once its grades are captured; the grades service freezes a
-// report card per pupil in the same transaction and locks the months for
-// everyone (MONTH_LOCKED). Reopening unlocks them; closing again issues the
-// next version of every report card.
+// Period closing (T7). The director closes a period — one level term of one
+// cycle, standing since T15 for the evaluation period of the same ordinal in
+// each grade of the level — once its grades are captured; the grades service
+// freezes a report card per pupil in the same transaction and locks those
+// periods for everyone (PERIOD_LOCKED). Reopening unlocks them; closing again
+// issues the next version of every report card.
 //
 // Reads (the periods and their progress) answer to grades:read; closing and
 // reopening to grades:close, which only the owner holds (iam 0023). Refusals
 // are 409 with X-Error-Code: MISSING_GRADES (captures missing and force unset),
-// TERM_WITHOUT_MONTHS, ALREADY_CLOSED, LEVEL_NOT_GRADED, ALREADY_OPEN.
+// PERIOD_NOT_CONFIGURED, ALREADY_CLOSED, LEVEL_NOT_GRADED, ALREADY_OPEN.
 
 // PeriodsService is the grades surface the periods handler consumes. The
 // Connect GradesClient satisfies it.
@@ -55,7 +56,8 @@ type periodResponse struct {
 	Ordinal      int                    `json:"ordinal"`
 	LevelID      string                 `json:"levelId"`
 	LevelName    string                 `json:"levelName"`
-	Months       []string               `json:"months"`
+	StartsOn     *string                `json:"startsOn"`
+	EndsOn       *string                `json:"endsOn"`
 	Status       string                 `json:"status"`
 	ClosedAt     *string                `json:"closedAt,omitempty"`
 	ClosedByName string                 `json:"closedByName,omitempty"`
@@ -73,15 +75,18 @@ type missingGradesResponse struct {
 }
 
 type progressResponse struct {
-	TermID string   `json:"termId"`
-	Months []string `json:"months"`
-	// UnfinishedMonths are the term's months after the current UTC month:
+	TermID string `json:"termId"`
+	// Unfinished is true while a grade's period of the term has not ended:
 	// still expected (closing now needs force), so the screen warns "Aún no
-	// terminan sus meses".
-	UnfinishedMonths []string                `json:"unfinishedMonths"`
-	Expected         int                     `json:"expected"`
-	Captured         int                     `json:"captured"`
-	Missing          []missingGradesResponse `json:"missing"`
+	// termina el periodo".
+	Unfinished bool    `json:"unfinished"`
+	EndsOn     *string `json:"endsOn"`
+	// GroupsWithoutPeriod are the groups whose grade lacks the term's period:
+	// the term cannot close (PERIOD_NOT_CONFIGURED).
+	GroupsWithoutPeriod []string                `json:"groupsWithoutPeriod"`
+	Expected            int                     `json:"expected"`
+	Captured            int                     `json:"captured"`
+	Missing             []missingGradesResponse `json:"missing"`
 }
 
 type closePeriodRequest struct {
@@ -115,7 +120,8 @@ func (h *GradesPeriodsHandler) List(w http.ResponseWriter, r *http.Request) {
 	for _, p := range periods {
 		out = append(out, periodResponse{
 			TermID: p.TermID, TermName: p.TermName, Ordinal: p.Ordinal, LevelID: p.LevelID, LevelName: p.LevelName,
-			Months: nonNilMonths(p.Months), Status: p.Status, ClosedAt: rfc3339OrNil(p.ClosedAt), ClosedByName: p.ClosedByName,
+			StartsOn: stringOrNil(p.StartsOn), EndsOn: stringOrNil(p.EndsOn), Status: p.Status,
+			ClosedAt: rfc3339OrNil(p.ClosedAt), ClosedByName: p.ClosedByName,
 			Version: p.Version, Progress: periodProgressResponse{Captured: p.Captured, Expected: p.Expected},
 		})
 	}
@@ -143,8 +149,9 @@ func (h *GradesPeriodsHandler) Progress(w http.ResponseWriter, r *http.Request) 
 		})
 	}
 	writeJSON(w, http.StatusOK, progressResponse{
-		TermID: p.TermID, Months: nonNilMonths(p.Months), UnfinishedMonths: nonNilMonths(p.UnfinishedMonths),
-		Expected: p.Expected, Captured: p.Captured, Missing: missing,
+		TermID: p.TermID, Unfinished: p.Unfinished, EndsOn: stringOrNil(p.EndsOn),
+		GroupsWithoutPeriod: nonNilMonths(p.GroupsWithoutPeriod),
+		Expected:            p.Expected, Captured: p.Captured, Missing: missing,
 	})
 }
 

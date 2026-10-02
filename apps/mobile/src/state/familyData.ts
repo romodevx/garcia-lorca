@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { getCard, getStatement, type FamilyCard, type FamilyStatement } from "../api";
 import { getAttendanceMonth, type AttendanceMonth } from "../api/attendance";
-import { getMonthlyGrades, type MonthlyGrades } from "../api/grades";
+import { getPeriodGrades, type PeriodGrades } from "../api/grades";
 import { getReportCard, listReportCards, type ReportCard, type ReportCardSummary } from "../api/reportCards";
 import { useFreshDataSignal } from "./freshness";
 import { useAsyncResource, type AsyncResource } from "./useAsyncResource";
@@ -59,11 +59,12 @@ export function useChildAttendanceMonth(
 }
 
 /**
- * The selected child's monthly grades for the cycle. Reloads on the freshness
- * signal: a teacher's capture should show up when the parent reopens the app.
+ * The selected child's grades per evaluation period for the cycle. Reloads on
+ * the freshness signal: a teacher's capture should show up when the parent
+ * reopens the app.
  */
-export function useChildMonthlyGrades(childId: string | null): AsyncResource<MonthlyGrades> {
-  const load = useMemo(() => (childId ? () => getMonthlyGrades(childId) : null), [childId]);
+export function useChildPeriodGrades(childId: string | null): AsyncResource<PeriodGrades> {
+  const load = useMemo(() => (childId ? () => getPeriodGrades(childId) : null), [childId]);
   const resource = useAsyncResource(load);
   useFreshDataSignal(resource.reload, load !== null);
   return resource;

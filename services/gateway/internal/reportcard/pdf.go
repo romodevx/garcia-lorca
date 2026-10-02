@@ -88,10 +88,11 @@ func layoutFor(months int) layout {
 	return l
 }
 
-// PDF renders the report card on a letter page, landscape for a term longer
-// than four months (more pages when its subjects do not fit one).
+// PDF renders the report card on a letter page, landscape past four columns
+// (more pages when its subjects do not fit one). A T15 card prints a column
+// per evaluation period; a card issued before, a column per month.
 func PDF(d Document) ([]byte, error) {
-	l := layoutFor(len(d.Card.Months))
+	l := layoutFor(len(columnsOf(d.Card).labels))
 	pdf := &gopdf.GoPdf{}
 	pdf.Start(gopdf.Config{PageSize: gopdf.Rect{W: l.pageWidth, H: l.pageHeight}})
 	pdf.AddPage()
@@ -119,7 +120,7 @@ func PDF(d Document) ([]byte, error) {
 }
 
 // HasGrades reports whether any subject of the card has a grade in the term: a
-// month value or a trimester grade. A card without one is still issued, but
+// period (or month) value or an average. A card without one is still issued, but
 // says NoGradesNotice instead of a table of dashes.
 func HasGrades(c client.ReportCard) bool {
 	if c.GeneralAverage != "" {
@@ -129,13 +130,40 @@ func HasGrades(c client.ReportCard) bool {
 		if l.TermAverage != "" {
 			return true
 		}
-		for _, v := range l.MonthValues {
-			if v != "" {
-				return true
+		for _, values := range []map[string]string{l.PeriodValues, l.MonthValues} {
+			for _, v := range values {
+				if v != "" {
+					return true
+				}
 			}
 		}
 	}
 	return false
+}
+
+// columns are a card's grade columns: their labels, and how a line's value of
+// each column is read.
+type columns struct {
+	labels []string
+	keys   []string
+	values func(client.ReportCardLine) map[string]string
+}
+
+// columnsOf is a T15 card's evaluation periods (named as the school named
+// them) or, for a card issued before T15, its months ("Sep 2026").
+func columnsOf(c client.ReportCard) columns {
+	if len(c.Periods) > 0 {
+		cols := columns{values: func(l client.ReportCardLine) map[string]string { return l.PeriodValues }}
+		for _, p := range c.Periods {
+			cols.labels = append(cols.labels, p.Name)
+			cols.keys = append(cols.keys, p.ID)
+		}
+		return cols
+	}
+	return columns{
+		labels: monthLabels(c.Months), keys: c.Months,
+		values: func(l client.ReportCardLine) map[string]string { return l.MonthValues },
+	}
 }
 
 // Filename is the download name: boleta-<matrícula>-<period>-v<version>.pdf,
@@ -201,17 +229,19 @@ func (w *writer) student(c client.ReportCard) {
 	w.rule()
 }
 
-// table prints subject × month and the trimester grade, then the general
-// average. A page break inside the body repeats the header row on top.
+// table prints subject × column (period, or month before T15) and the
+// subject's average, then the general average. A page break inside the body
+// repeats the header row on top.
 func (w *writer) table(c client.ReportCard) {
-	labels := monthLabels(c.Months)
-	w.tableHeader = func() { w.row(pdffont.Bold, "Materia", labels, "Promedio") }
+	cols := columnsOf(c)
+	w.tableHeader = func() { w.row(pdffont.Bold, "Materia", cols.labels, "Promedio") }
 	w.breakPage(2 * rowHeight)
 	w.tableHeader()
 	for _, l := range c.Lines {
-		values := make([]string, 0, len(c.Months))
-		for _, m := range c.Months {
-			values = append(values, orDash(l.MonthValues[m]))
+		lineValues := cols.values(l)
+		values := make([]string, 0, len(cols.keys))
+		for _, k := range cols.keys {
+			values = append(values, orDash(lineValues[k]))
 		}
 		w.bodyRow(pdffont.Regular, l.SubjectName, values, orDash(l.TermAverage))
 	}

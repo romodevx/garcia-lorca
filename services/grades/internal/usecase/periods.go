@@ -20,18 +20,22 @@ import (
 
 // Sentences the period surface refuses with.
 const (
-	msgTermWithoutMonths = "El periodo no tiene meses asignados"
-	msgMissingOne        = "Falta 1 calificación por capturar"
-	msgMissingMany       = "Faltan %d calificaciones por capturar"
-	msgActorRequired     = "closing director is required"
-	msgFilterRequired    = "Indica el periodo, el grupo o el alumno"
+	msgPeriodNotConfiguredOne  = "El grupo %s no tiene el periodo %d configurado"
+	msgPeriodNotConfiguredMany = "Los grupos %s no tienen el periodo %d configurado"
+	msgMissingOne              = "Falta 1 calificación por capturar"
+	msgMissingMany             = "Faltan %d calificaciones por capturar"
+	msgActorRequired           = "closing director is required"
+	msgFilterRequired          = "Indica el periodo, el grupo o el alumno"
 )
 
 // PeriodsService closes and reopens periods and serves their report cards
-// (T7). A period is one config term: one level of one cycle, a set of months.
+// (T7). A period is one config term: one level of one cycle. Since T15 the
+// term stands for the evaluation period with the SAME ordinal in each grade of
+// the level (ADR 0030): its grades are the period grades of those periods.
 //
-//	Close: term (config) ─> level catalog, cycle, enrollments, names (RPCs,
-//	       all BEFORE writing; any failure aborts with nothing written)
+//	Close: term (config) ─> level catalog, cycle, the level's evaluation
+//	       periods, enrollments, names (RPCs, all BEFORE writing; any
+//	       failure aborts with nothing written)
 //	       ─> ONE transaction holding the term's exclusive lock: closure
 //	       state, the grades under the lock, missing count (force?),
 //	       report cards v = closure.version+1, supersede v-1, one
@@ -43,7 +47,8 @@ const (
 // is no cross-service commit. It depends only on ports + domain.
 type PeriodsService struct {
 	periods     ports.PeriodRepository
-	grades      ports.MonthlyGradeRepository
+	grades      ports.PeriodGradeRepository
+	evalPeriods ports.EvaluationPeriodReader
 	terms       ports.AssignmentReader
 	catalog     ports.CatalogReader
 	enrollments ports.EnrollmentReader
@@ -52,14 +57,17 @@ type PeriodsService struct {
 	tenantID    string
 	newID       func() string
 	now         func() time.Time
+	loc         *time.Location
 	log         *slog.Logger
 }
 
 // PeriodsDeps are the collaborators of a PeriodsService (a parameter object:
-// eleven positional arguments would invite a swapped one). Log may be nil.
+// eleven positional arguments would invite a swapped one). Log may be nil;
+// Location is the school's time zone (nil = UTC).
 type PeriodsDeps struct {
 	Periods     ports.PeriodRepository
-	Grades      ports.MonthlyGradeRepository
+	Grades      ports.PeriodGradeRepository
+	EvalPeriods ports.EvaluationPeriodReader
 	Terms       ports.AssignmentReader
 	Catalog     ports.CatalogReader
 	Enrollments ports.EnrollmentReader
@@ -68,6 +76,7 @@ type PeriodsDeps struct {
 	TenantID    string
 	NewID       func() string
 	Now         func() time.Time
+	Location    *time.Location
 	Log         *slog.Logger
 }
 
@@ -77,19 +86,28 @@ func NewPeriodsService(d PeriodsDeps) *PeriodsService {
 	if log == nil {
 		log = slog.Default()
 	}
+	loc := d.Location
+	if loc == nil {
+		loc = time.UTC
+	}
 	return &PeriodsService{
-		periods: d.Periods, grades: d.Grades, terms: d.Terms, catalog: d.Catalog, enrollments: d.Enrollments,
-		students: d.Students, publisher: d.Publisher, tenantID: d.TenantID, newID: d.NewID, now: d.Now, log: log,
+		periods: d.Periods, grades: d.Grades, evalPeriods: d.EvalPeriods, terms: d.Terms, catalog: d.Catalog,
+		enrollments: d.Enrollments, students: d.Students, publisher: d.Publisher, tenantID: d.TenantID,
+		newID: d.NewID, now: d.Now, loc: loc, log: log,
 	}
 }
 
-// Period is one term with its closure and capture progress.
+// Period is one term with its closure and capture progress. StartsOn/EndsOn
+// span the term's evaluation periods across the level's grades (zero when no
+// grade has one).
 type Period struct {
 	Term      ports.TermRef
 	LevelName string
 	Closure   domain.PeriodClosure
 	Expected  int
 	Captured  int
+	StartsOn  time.Time
+	EndsOn    time.Time
 }
 
 // MissingGrades is how many captures one group+subject still owes.
@@ -102,15 +120,18 @@ type MissingGrades struct {
 	Missing     int
 }
 
-// PeriodProgress is one term's capture progress. UnfinishedMonths are the
-// term's months after the current UTC month: still expected, not taught yet.
+// PeriodProgress is one term's capture progress. Unfinished is true while a
+// grade's period of the term has not ended (the school's local day): still
+// expected. GroupsWithoutPeriod are the groups (with active pupils) whose
+// grade has no period of the term's ordinal: the term cannot close.
 type PeriodProgress struct {
-	TermID           string
-	Months           []domain.Month
-	UnfinishedMonths []domain.Month
-	Expected         int
-	Captured         int
-	Missing          []MissingGrades
+	TermID              string
+	Unfinished          bool
+	EndsOn              time.Time
+	GroupsWithoutPeriod []string
+	Expected            int
+	Captured            int
+	Missing             []MissingGrades
 }
 
 // CloseResult is what a close answers.
@@ -131,10 +152,89 @@ type levelView struct {
 	// teacher names the teacher of each group+subject.
 	subjects map[string][]string
 	teacher  map[string]string
-	// joined is the month each enrollment joined its group (enrolment or the
-	// latest move INTO the group, whichever is later); absent = unknown, so
-	// every month of the term is expected.
-	joined map[string]domain.Month
+	// gradeOf is each group's grade; periods are each grade's evaluation
+	// periods in the cycle, by ordinal.
+	gradeOf map[string]string
+	periods map[string][]domain.EvaluationPeriod
+	// joined is the school day each enrollment joined its group (enrolment or
+	// the latest move INTO the group, whichever is later); absent = unknown,
+	// so the pupil is expected in every period.
+	joined map[string]time.Time
+}
+
+// termPeriod is the evaluation period of the term's ordinal in a group's
+// grade; false when the grade has none.
+func (v levelView) termPeriod(term ports.TermRef, groupID string) (domain.EvaluationPeriod, bool) {
+	for _, p := range v.periods[v.gradeOf[groupID]] {
+		if p.Ordinal == term.Ordinal {
+			return p, true
+		}
+	}
+	return domain.EvaluationPeriod{}, false
+}
+
+// columns are a group's grade's periods from the first up to the term's
+// ordinal: the columns of its report cards.
+func (v levelView) columns(term ports.TermRef, groupID string) []domain.EvaluationPeriod {
+	out := []domain.EvaluationPeriod{}
+	for _, p := range v.periods[v.gradeOf[groupID]] {
+		if p.Ordinal <= term.Ordinal {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// columnIDs are the ids of every column of the term across the level's groups
+// with active pupils (one grades read covers the whole close).
+func (v levelView) columnIDs(term ports.TermRef) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, e := range v.enrollments {
+		for _, p := range v.columns(term, e.GroupID) {
+			if !seen[p.ID] {
+				seen[p.ID] = true
+				out = append(out, p.ID)
+			}
+		}
+	}
+	return out
+}
+
+// groupsWithoutPeriod lists, by label, the groups with active pupils whose
+// grade has no period of the term's ordinal.
+func (v levelView) groupsWithoutPeriod(term ports.TermRef) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, e := range v.enrollments {
+		if _, ok := v.termPeriod(term, e.GroupID); ok || seen[e.GroupID] {
+			continue
+		}
+		seen[e.GroupID] = true
+		out = append(out, v.groupLabel[e.GroupID])
+	}
+	col := collate.New(language.Spanish)
+	sort.Slice(out, func(i, j int) bool { return col.CompareString(out[i], out[j]) < 0 })
+	return out
+}
+
+// span is the earliest start and latest end of the term's period across the
+// level's grades; zero times when no grade has it.
+func (v levelView) span(term ports.TermRef) (start, end time.Time) {
+	for _, ps := range v.periods {
+		for _, p := range ps {
+			if p.Ordinal != term.Ordinal {
+				continue
+			}
+			if start.IsZero() || p.StartsOn.Before(start) {
+				start = p.StartsOn
+			}
+			if p.EndsOn.After(end) {
+				end = p.EndsOn
+			}
+		}
+	}
+	return start, end
 }
 
 func (v levelView) enrollmentIDs() []string {
@@ -162,14 +262,16 @@ func (s *PeriodsService) Progress(ctx context.Context, termID string) (PeriodPro
 	if err != nil {
 		return PeriodProgress{}, err
 	}
-	grades, err := s.grades.MonthlyGradesForEnrollments(ctx, view.enrollmentIDs(), term.Months)
+	grades, err := s.grades.PeriodGradesForEnrollments(ctx, view.enrollmentIDs(), view.termPeriodIDs(term))
 	if err != nil {
 		return PeriodProgress{}, err
 	}
 	expected, captured, missing := s.tally(view, term, grades)
+	_, endsOn := view.span(term)
 	return PeriodProgress{
-		TermID: term.ID, Months: term.Months, UnfinishedMonths: s.unfinishedMonths(term),
-		Expected: expected, Captured: captured, Missing: missing,
+		TermID: term.ID, Unfinished: s.unfinished(view, term), EndsOn: endsOn,
+		GroupsWithoutPeriod: view.groupsWithoutPeriod(term),
+		Expected:            expected, Captured: captured, Missing: missing,
 	}, nil
 }
 
@@ -191,7 +293,8 @@ func (s *PeriodsService) ClosedTerms(ctx context.Context, termIDs []string) ([]s
 
 // ListPeriods lists every term of a cycle with its closure and progress. It
 // reads the cycle's terms, their closures, the cycle's enrollments, each
-// level's catalog once and every grade of the cycle's terms in ONE query.
+// level's catalog and periods once and every grade of the terms' periods in
+// ONE query.
 func (s *PeriodsService) ListPeriods(ctx context.Context, cycleID string) ([]Period, error) {
 	terms, err := s.terms.ListTerms(ctx, cycleID, "")
 	if err != nil {
@@ -210,20 +313,19 @@ func (s *PeriodsService) ListPeriods(ctx context.Context, cycleID string) ([]Per
 		return nil, err
 	}
 	views := map[string]levelView{}
-	var ids []string
-	var months []domain.Month
+	var ids, periodIDs []string
 	for _, t := range terms {
-		if _, ok := views[t.LevelID]; !ok {
-			v, err := s.levelView(ctx, cycleID, t.LevelID, enrollments)
-			if err != nil {
+		v, ok := views[t.LevelID]
+		if !ok {
+			if v, err = s.levelView(ctx, cycleID, t.LevelID, enrollments); err != nil {
 				return nil, err
 			}
 			views[t.LevelID] = v
 			ids = append(ids, v.enrollmentIDs()...)
 		}
-		months = appendMissing(months, t.Months)
+		periodIDs = append(periodIDs, v.termPeriodIDs(t)...)
 	}
-	grades, err := s.grades.MonthlyGradesForEnrollments(ctx, ids, months)
+	grades, err := s.grades.PeriodGradesForEnrollments(ctx, ids, periodIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -235,7 +337,11 @@ func (s *PeriodsService) ListPeriods(ctx context.Context, cycleID string) ([]Per
 		}
 		v := views[t.LevelID]
 		expected, captured, _ := s.tally(v, t, grades)
-		out = append(out, Period{Term: t, LevelName: v.catalog.LevelName, Closure: closure, Expected: expected, Captured: captured})
+		start, end := v.span(t)
+		out = append(out, Period{
+			Term: t, LevelName: v.catalog.LevelName, Closure: closure, Expected: expected, Captured: captured,
+			StartsOn: start, EndsOn: end,
+		})
 	}
 	return out, nil
 }
@@ -272,9 +378,6 @@ func (s *PeriodsService) Close(ctx context.Context, termID string, force bool, a
 	if err != nil {
 		return CloseResult{}, err
 	}
-	if len(term.Months) == 0 {
-		return CloseResult{}, domain.Conflict(domain.CodeTermWithoutMonths, msgTermWithoutMonths)
-	}
 	if err := s.refuseClosed(ctx, termID); err != nil {
 		return CloseResult{}, err
 	}
@@ -292,6 +395,9 @@ func (s *PeriodsService) Close(ctx context.Context, termID string, force bool, a
 	if !view.catalog.GradingEnabled {
 		return CloseResult{}, domain.Conflict(domain.CodeLevelNotGraded, msgGradingDisabled)
 	}
+	if without := view.groupsWithoutPeriod(term); len(without) > 0 {
+		return CloseResult{}, domain.Conflict(domain.CodePeriodNotConfigured, notConfiguredMessage(without, term.Ordinal))
+	}
 	names, err := s.students.StudentsByIDs(ctx, studentIDs(view.enrollments))
 	if err != nil {
 		return CloseResult{}, err
@@ -307,10 +413,10 @@ func (s *PeriodsService) Close(ctx context.Context, termID string, force bool, a
 		if !found {
 			current = domain.NewOpenPeriod(term.ID, term.CycleID, term.LevelID)
 		}
-		if closed, err = current.Close(actor, s.now(), term.Months); err != nil {
+		if closed, err = current.Close(actor, s.now(), nil); err != nil {
 			return err
 		}
-		grades, err := tx.MonthlyGrades(ctx, view.enrollmentIDs(), term.Months)
+		grades, err := tx.PeriodGrades(ctx, view.enrollmentIDs(), view.columnIDs(term))
 		if err != nil {
 			return err
 		}
@@ -517,9 +623,21 @@ func (s *PeriodsService) levelView(ctx context.Context, cycleID, levelID string,
 	v := levelView{
 		catalog: catalog, cycle: cycle,
 		groupLabel: map[string]string{}, subjects: map[string][]string{}, teacher: map[string]string{},
+		gradeOf: map[string]string{}, periods: map[string][]domain.EvaluationPeriod{},
 	}
 	for _, g := range catalog.Groups {
 		v.groupLabel[g.ID] = g.Label
+		v.gradeOf[g.ID] = g.GradeLevelID
+	}
+	periods, err := s.evalPeriods.EvaluationPeriods(ctx, cycleID, levelID, "")
+	if err != nil {
+		return levelView{}, err
+	}
+	for _, p := range periods {
+		v.periods[p.GradeLevelID] = append(v.periods[p.GradeLevelID], p)
+	}
+	for g := range v.periods {
+		sort.SliceStable(v.periods[g], func(i, j int) bool { return v.periods[g][i].Ordinal < v.periods[g][j].Ordinal })
 	}
 	for _, a := range catalog.Assignments {
 		key := a.GroupID + "|" + a.SubjectID
@@ -535,16 +653,30 @@ func (s *PeriodsService) levelView(ctx context.Context, cycleID, levelID string,
 		}
 	}
 	sort.Slice(v.enrollments, func(i, j int) bool { return v.enrollments[i].ID < v.enrollments[j].ID })
-	if v.joined, err = s.joinedMonths(ctx, v.enrollments); err != nil {
+	if v.joined, err = s.joinedDays(ctx, v.enrollments); err != nil {
 		return levelView{}, err
 	}
 	return v, nil
 }
 
-// joinedMonths is the month each enrollment joined the group it sits in now:
-// the later of its enrolment month and its latest move INTO that group. It
+// termPeriodIDs are the ids of the term's period in each grade of the level.
+func (v levelView) termPeriodIDs(term ports.TermRef) []string {
+	out := []string{}
+	for _, ps := range v.periods {
+		for _, p := range ps {
+			if p.Ordinal == term.Ordinal {
+				out = append(out, p.ID)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// joinedDays is the school day each enrollment joined the group it sits in
+// now: the later of its enrolment and its latest move INTO that group. It
 // reads the moves once per group (never per pupil).
-func (s *PeriodsService) joinedMonths(ctx context.Context, enrollments []ports.EnrollmentRef) (map[string]domain.Month, error) {
+func (s *PeriodsService) joinedDays(ctx context.Context, enrollments []ports.EnrollmentRef) (map[string]time.Time, error) {
 	joinedAt := make(map[string]time.Time, len(enrollments))
 	groups := []string{}
 	seen := map[string]bool{}
@@ -566,79 +698,65 @@ func (s *PeriodsService) joinedMonths(ctx context.Context, enrollments []ports.E
 			}
 		}
 	}
-	out := make(map[string]domain.Month, len(joinedAt))
+	out := make(map[string]time.Time, len(joinedAt))
 	for id, at := range joinedAt {
 		if !at.IsZero() {
-			out[id] = domain.MonthOf(at)
+			out[id] = domain.SchoolDay(at, s.loc)
 		}
 	}
 	return out, nil
 }
 
-// unfinishedMonths are the term's months after the current month. The school
-// day is the UTC day fleet-wide (as in finance): after 18:00 in Mexico it is
-// already tomorrow here, consistently across services, so a month turns over
-// a few hours early rather than differently per service.
-func (s *PeriodsService) unfinishedMonths(term ports.TermRef) []domain.Month {
-	current := domain.MonthOf(s.now()).FirstDay()
-	out := []domain.Month{}
-	for _, m := range term.Months {
-		if m.FirstDay().After(current) {
-			out = append(out, m)
+// unfinished reports whether the term's period of a grade with active pupils
+// has not ended on the school's day: its grades are still expected.
+func (s *PeriodsService) unfinished(v levelView, term ports.TermRef) bool {
+	today := domain.SchoolDay(s.now(), s.loc)
+	for _, e := range v.enrollments {
+		if p, ok := v.termPeriod(term, e.GroupID); ok && !p.EndedBefore(today) {
+			return true
 		}
 	}
-	return out
-}
-
-// expectedMonths are the term's months a pupil owes: every one, reached or
-// not (closing an unfinished term needs force), from the month they joined
-// their group.
-func (v levelView) expectedMonths(term ports.TermRef, enrollmentID string) []domain.Month {
-	joined, ok := v.joined[enrollmentID]
-	if !ok {
-		return term.Months
-	}
-	out := make([]domain.Month, 0, len(term.Months))
-	for _, m := range term.Months {
-		if !m.FirstDay().Before(joined.FirstDay()) {
-			out = append(out, m)
-		}
-	}
-	return out
+	return false
 }
 
 // tally counts the expected cells of a term — active enrollment × subject
-// taught in its group × month of the term since the pupil joined the group —
-// how many are captured, and what is missing per group and subject. A level
+// taught in its group, one grade for its grade's period of the term's ordinal
+// (a pupil who joined the group after that period ended owes none; a group
+// whose grade lacks the period owes none here, and blocks the close) — how
+// many are captured, and what is missing per group and subject. A level
 // without numeric grades owes nothing.
-func (s *PeriodsService) tally(v levelView, term ports.TermRef, grades []domain.MonthlyGrade) (expected, captured int, missing []MissingGrades) {
+func (s *PeriodsService) tally(v levelView, term ports.TermRef, grades []domain.PeriodGrade) (expected, captured int, missing []MissingGrades) {
 	missing = []MissingGrades{}
 	if !v.catalog.GradingEnabled {
 		return 0, 0, missing
 	}
 	have := make(map[string]bool, len(grades))
 	for _, g := range grades {
-		have[g.EnrollmentID()+"|"+g.SubjectID()+"|"+g.Month().String()] = true
+		have[g.EnrollmentID()+"|"+g.SubjectID()+"|"+g.PeriodID()] = true
 	}
 	perGroupSubject := map[string]*MissingGrades{}
 	for _, e := range v.enrollments {
-		owed := v.expectedMonths(term, e.ID)
+		period, ok := v.termPeriod(term, e.GroupID)
+		if !ok {
+			continue
+		}
+		if joined, known := v.joined[e.ID]; known && period.EndedBefore(joined) {
+			continue
+		}
 		for _, subject := range v.subjects[e.GroupID] {
-			for _, m := range owed {
-				expected++
-				if have[e.ID+"|"+subject+"|"+m.String()] {
-					captured++
-					continue
-				}
-				key := e.GroupID + "|" + subject
-				if perGroupSubject[key] == nil {
-					perGroupSubject[key] = &MissingGrades{
-						GroupID: e.GroupID, GroupLabel: v.groupLabel[e.GroupID], SubjectID: subject,
-						SubjectName: v.catalog.SubjectNames[subject], TeacherName: v.teacher[key],
-					}
-				}
-				perGroupSubject[key].Missing++
+			expected++
+			if have[e.ID+"|"+subject+"|"+period.ID] {
+				captured++
+				continue
 			}
+			key := e.GroupID + "|" + subject
+			if perGroupSubject[key] == nil {
+				perGroupSubject[key] = &MissingGrades{
+					GroupID: e.GroupID, GroupLabel: v.groupLabel[e.GroupID], SubjectID: subject,
+					SubjectName: v.catalog.SubjectNames[subject], TeacherName: v.teacher[key],
+				}
+			}
+			perGroupSubject[key].Missing++
 		}
 	}
 	for _, m := range perGroupSubject {
@@ -655,10 +773,12 @@ func (s *PeriodsService) tally(v levelView, term ports.TermRef, grades []domain.
 }
 
 // buildReportCards freezes one report card per active enrollment of the level.
-// Each lists its group's subjects plus any subject graded in the term, in
-// Spanish name order.
+// Its columns are the pupil's grade's periods up to the term's ordinal; it
+// lists its group's subjects plus any subject graded in those columns, in
+// Spanish name order. The card is named after the pupil's period (each grade
+// may name it its own way).
 func (s *PeriodsService) buildReportCards(v levelView, term ports.TermRef, closed domain.PeriodClosure, actor domain.Actor,
-	names map[string]ports.StudentRef, grades []domain.MonthlyGrade) ([]domain.ReportCard, error) {
+	names map[string]ports.StudentRef, grades []domain.PeriodGrade) ([]domain.ReportCard, error) {
 	graded := map[string][]string{}
 	for _, g := range grades {
 		graded[g.EnrollmentID()] = append(graded[g.EnrollmentID()], g.SubjectID())
@@ -666,13 +786,17 @@ func (s *PeriodsService) buildReportCards(v levelView, term ports.TermRef, close
 	out := make([]domain.ReportCard, 0, len(v.enrollments))
 	for _, e := range v.enrollments {
 		student := names[e.StudentID]
+		termName := term.Name
+		if p, ok := v.termPeriod(term, e.GroupID); ok {
+			termName = p.Name
+		}
 		rc, err := domain.BuildReportCard(domain.ReportCardHeader{
 			ID: s.newID(), TenantID: s.tenantID, TermID: term.ID, CycleID: term.CycleID, LevelID: term.LevelID,
 			GroupID: e.GroupID, EnrollmentID: e.ID, StudentID: e.StudentID, Version: closed.Version(),
 			IssuedAt: closed.ClosedAt(), IssuedBy: actor.ID, StudentName: student.Name,
 			EnrollmentNumber: student.EnrollmentNumber, GroupLabel: v.groupLabel[e.GroupID],
-			LevelName: v.catalog.LevelName, CycleName: v.cycle.Name, TermName: term.Name,
-			TermOrdinal: term.Ordinal, Months: term.Months, Scale: v.catalog.Scale,
+			LevelName: v.catalog.LevelName, CycleName: v.cycle.Name, TermName: termName,
+			TermOrdinal: term.Ordinal, Periods: cardPeriods(v.columns(term, e.GroupID)), Scale: v.catalog.Scale,
 		}, s.subjectsFor(v, e.GroupID, graded[e.ID]), grades)
 		if err != nil {
 			return nil, err
@@ -723,12 +847,19 @@ func missingMessage(n int) string {
 	return fmt.Sprintf(msgMissingMany, n)
 }
 
-// appendMissing appends the months of add not already in ms.
-func appendMissing(ms, add []domain.Month) []domain.Month {
-	for _, m := range add {
-		if !domain.ContainsMonth(ms, m) {
-			ms = append(ms, m)
-		}
+// cardPeriods are a report card's columns as it freezes them.
+func cardPeriods(periods []domain.EvaluationPeriod) []domain.ReportCardPeriod {
+	out := make([]domain.ReportCardPeriod, 0, len(periods))
+	for _, p := range periods {
+		out = append(out, domain.ReportCardPeriod{ID: p.ID, Ordinal: p.Ordinal, Name: p.Name, StartsOn: p.StartsOn})
 	}
-	return ms
+	return out
+}
+
+// notConfiguredMessage names the groups whose grade lacks the term's period.
+func notConfiguredMessage(groups []string, ordinal int) string {
+	if len(groups) == 1 {
+		return fmt.Sprintf(msgPeriodNotConfiguredOne, groups[0], ordinal)
+	}
+	return fmt.Sprintf(msgPeriodNotConfiguredMany, strings.Join(groups, ", "), ordinal)
 }

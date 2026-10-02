@@ -22,7 +22,7 @@ import (
 // stages every write and applies it only when fn succeeds (a rollback keeps
 // nothing), like the real transaction.
 type fakePeriods struct {
-	grades    *fakeMonthly
+	grades    *fakePeriodGrades
 	cards     []domain.ReportCard
 	lockCalls int
 	// outbox holds the queued events, committed with the transaction.
@@ -116,8 +116,8 @@ func (t *fakePeriodTx) Closure(context.Context) (domain.PeriodClosure, bool, err
 	return c, ok, nil
 }
 
-func (t *fakePeriodTx) MonthlyGrades(_ context.Context, ids []string, months []domain.Month) ([]domain.MonthlyGrade, error) {
-	return t.p.grades.gradesIn(ids, months), nil
+func (t *fakePeriodTx) PeriodGrades(_ context.Context, ids, periods []string) ([]domain.PeriodGrade, error) {
+	return t.p.grades.gradesIn(ids, periods), nil
 }
 
 func (t *fakePeriodTx) SaveClosure(_ context.Context, c domain.PeriodClosure) error {
@@ -214,23 +214,25 @@ const (
 	levelName = "Primaria"
 )
 
-// Two groups of the primary level: grp-1 (enr-1, enr-2; Matemáticas by
-// teacher-1, Español by teacher-2) and grp-2 (enr-3; Matemáticas by
-// teacher-3). The first trimester is Sep–Nov; "now" is late November, so
-// every month counts: expected = 2×2×3 + 1×1×3 = 15.
+// Two groups of the primary level: grp-1, of grade gl-1 (enr-1, enr-2;
+// Matemáticas by teacher-1, Español by teacher-2) and grp-2, of grade gl-2
+// (enr-3; Matemáticas by teacher-3). Each grade has three trimesters; the 1.er
+// trimestre term stands for period 1 of each grade (ADR 0030). "Now" is late
+// November, inside period 1: expected = 2×2 + 1×1 = 5.
 type periodsFixture struct {
 	svc       *usecase.PeriodsService
-	grades    *fakeMonthly
+	grades    *fakePeriodGrades
 	periods   *fakePeriods
 	directory *fakeDirectory
 	publisher *fakePublisher
 	catalog   *fakeCatalog
 	asg       *fakeAssignments
 	enr       *fakeEnrollments
+	evals     *fakeEvalPeriods
 	now       *time.Time
 }
 
-var periodsNow = time.Date(2026, 11, 20, 9, 0, 0, 0, time.UTC)
+var periodsNow = time.Date(2026, 11, 20, 15, 0, 0, 0, time.UTC)
 
 func newPeriodsFixture(t *testing.T) periodsFixture {
 	t.Helper()
@@ -238,7 +240,7 @@ func newPeriodsFixture(t *testing.T) periodsFixture {
 	catalog := baseCatalog(t)
 	catalog.levelCatalogs = map[string]ports.LevelCatalog{levelPrimaria: {
 		LevelName: levelName, GradingEnabled: true, Scale: scale,
-		Groups: []ports.GroupRef{{ID: groupID, Label: "1° · A"}, {ID: group2ID, Label: "2° · A"}},
+		Groups: []ports.GroupRef{{ID: groupID, Label: "1° · A", GradeLevelID: gradeOne}, {ID: group2ID, Label: "2° · A", GradeLevelID: gradeTwo}},
 		Assignments: []ports.AssignmentRef{
 			{ID: assignmentID, GroupID: groupID, SubjectID: subjectID, TeacherID: teacherID, CycleID: cycleID},
 			{ID: "asg-2", GroupID: groupID, SubjectID: subject2, TeacherID: "teacher-2", CycleID: cycleID},
@@ -246,13 +248,14 @@ func newPeriodsFixture(t *testing.T) periodsFixture {
 		},
 		SubjectNames: map[string]string{subjectID: "Matemáticas", subject2: "Español"},
 		TeacherNames: map[string]string{teacherID: "Gabriela Rojas", "teacher-2": "Luis Pérez", "teacher-3": "Ana Ruiz"},
-	}, levelPreescolar: {LevelName: "Preescolar", GradingEnabled: false}}
+	}, levelPreescolar: {LevelName: "Preescolar", GradingEnabled: false,
+		Groups: []ports.GroupRef{{ID: kinderGroupID, Label: "K · A", GradeLevelID: gradeKinder}}}}
 	asg := baseAssignments()
 	asg.terms = map[string]ports.TermRef{
-		firstTermID:   {ID: firstTermID, CycleID: cycleID, LevelID: levelPrimaria, Name: "1.er trimestre", Ordinal: 1, Months: months(t, "2026-09", "2026-10", "2026-11")},
-		secondTermID:  {ID: secondTermID, CycleID: cycleID, LevelID: levelPrimaria, Name: "2.º trimestre", Ordinal: 2, Months: months(t, "2026-12", "2027-01", "2027-02")},
-		"term-empty":  {ID: "term-empty", CycleID: cycleID, LevelID: levelPrimaria, Name: "3.er trimestre", Ordinal: 3},
-		"term-kinder": {ID: "term-kinder", CycleID: cycleID, LevelID: levelPreescolar, Name: "1.er trimestre", Ordinal: 1, Months: months(t, "2026-09")},
+		firstTermID:   {ID: firstTermID, CycleID: cycleID, LevelID: levelPrimaria, Name: "1.er trimestre", Ordinal: 1},
+		secondTermID:  {ID: secondTermID, CycleID: cycleID, LevelID: levelPrimaria, Name: "2.º trimestre", Ordinal: 2},
+		"term-fourth": {ID: "term-fourth", CycleID: cycleID, LevelID: levelPrimaria, Name: "4.º bloque", Ordinal: 4},
+		"term-kinder": {ID: "term-kinder", CycleID: cycleID, LevelID: levelPreescolar, Name: "1.er trimestre", Ordinal: 1},
 	}
 	enr := &fakeEnrollments{byID: map[string]ports.EnrollmentRef{
 		"enr-1":    {ID: "enr-1", StudentID: "stu-1", GroupID: groupID, CycleID: cycleID, Status: "active"},
@@ -261,7 +264,7 @@ func newPeriodsFixture(t *testing.T) periodsFixture {
 		"enr-gone": {ID: "enr-gone", StudentID: "stu-4", GroupID: groupID, CycleID: cycleID, Status: "withdrawn"},
 		"enr-kid":  {ID: "enr-kid", StudentID: "stu-5", GroupID: kinderGroupID, CycleID: cycleID, Status: "active"},
 	}}
-	grades := newFakeMonthly()
+	grades := newFakePeriodGrades()
 	periods := &fakePeriods{grades: grades}
 	directory := &fakeDirectory{names: map[string]ports.StudentRef{
 		"stu-1": {ID: "stu-1", Name: "Ana López", EnrollmentNumber: "2026-00001"},
@@ -269,39 +272,39 @@ func newPeriodsFixture(t *testing.T) periodsFixture {
 		"stu-3": {ID: "stu-3", Name: "Carla Ñúñez", EnrollmentNumber: "2026-00003"},
 	}}
 	publisher := &fakePublisher{}
+	evals := baseEvalPeriods()
 	seq := 0
 	now := periodsNow
 	svc := usecase.NewPeriodsService(usecase.PeriodsDeps{
-		Periods: periods, Grades: grades, Terms: asg, Catalog: catalog, Enrollments: enr,
+		Periods: periods, Grades: grades, EvalPeriods: evals, Terms: asg, Catalog: catalog, Enrollments: enr,
 		Students: directory, Publisher: publisher, TenantID: testTenant,
-		NewID: func() string { seq++; return "rc-" + string(rune('a'+seq-1)) },
-		Now:   func() time.Time { return now },
+		NewID:    func() string { seq++; return "rc-" + string(rune('a'+seq-1)) },
+		Now:      func() time.Time { return now },
+		Location: mexicoCity(t),
 	})
-	return periodsFixture{svc: svc, grades: grades, periods: periods, directory: directory, publisher: publisher, catalog: catalog, asg: asg, enr: enr, now: &now}
+	return periodsFixture{svc: svc, grades: grades, periods: periods, directory: directory, publisher: publisher,
+		catalog: catalog, asg: asg, enr: enr, evals: evals, now: &now}
 }
 
-// capture stores a grade directly (the monthly knot is tested elsewhere).
-func (f periodsFixture) capture(t *testing.T, enrollment, subject, month string, hundredths int) {
+// capture stores a whole-number grade directly (the capture knot is tested
+// elsewhere).
+func (f periodsFixture) capture(t *testing.T, enrollment, subject, period string, whole int) {
 	t.Helper()
-	m, err := domain.ParseMonth(month)
-	require.NoError(t, err)
-	g, err := domain.NewMonthlyGrade(domain.MonthlyGradeFields{
-		ID: "mg-" + enrollment + subject + month, TenantID: testTenant, EnrollmentID: enrollment, SubjectID: subject,
-		TeacherID: teacherID, CapturedBy: capturer, Month: m, Value: domain.GradeValueFromHundredths(hundredths),
+	g, err := domain.NewPeriodGrade(domain.PeriodGradeFields{
+		ID: "pg-" + enrollment + subject + period, TenantID: testTenant, EnrollmentID: enrollment, SubjectID: subject,
+		PeriodID: period, CapturedBy: capturer, Value: domain.GradeValueFromHundredths(whole * 100),
 	})
 	require.NoError(t, err)
-	f.grades.rows[monthlyKey(enrollment, subject, m)] = g
+	f.grades.rows[gradeKey(enrollment, subject, period)] = g
 }
 
 // captureAll fills every expected cell of the first trimester.
 func (f periodsFixture) captureAll(t *testing.T) {
-	for _, month := range []string{"2026-09", "2026-10", "2026-11"} {
-		f.capture(t, "enr-1", subjectID, month, 900)
-		f.capture(t, "enr-1", subject2, month, 800)
-		f.capture(t, "enr-2", subjectID, month, 700)
-		f.capture(t, "enr-2", subject2, month, 1000)
-		f.capture(t, "enr-3", subjectID, month, 850)
-	}
+	f.capture(t, "enr-1", subjectID, period1, 9)
+	f.capture(t, "enr-1", subject2, period1, 8)
+	f.capture(t, "enr-2", subjectID, period1, 7)
+	f.capture(t, "enr-2", subject2, period1, 10)
+	f.capture(t, "enr-3", subjectID, "gl-2-"+period1, 8)
 }
 
 var dirActor = domain.Actor{ID: director, Name: "Directora Ruiz"}
@@ -310,79 +313,78 @@ var dirActor = domain.Actor{ID: director, Name: "Directora Ruiz"}
 
 func TestPeriodProgressCountsAndGroupsWhatIsMissing(t *testing.T) {
 	f := newPeriodsFixture(t)
-	f.capture(t, "enr-1", subjectID, "2026-09", 900)
-	f.capture(t, "enr-1", subjectID, "2026-10", 900)
-	f.capture(t, "enr-2", subjectID, "2026-09", 900)
-	f.capture(t, "enr-3", subjectID, "2026-11", 900)
-	f.capture(t, "enr-gone", subjectID, "2026-09", 900)   // withdrawn: not expected, not counted
-	f.capture(t, "enr-1", subjectID, "2026-12", 900)      // next term
-	f.capture(t, "enr-1", "subj-dropped", "2026-09", 900) // no longer taught: not expected
+	f.capture(t, "enr-1", subjectID, period1, 9)
+	f.capture(t, "enr-2", subjectID, period1, 9)
+	f.capture(t, "enr-gone", subjectID, period1, 9)   // withdrawn: not expected, not counted
+	f.capture(t, "enr-1", subjectID, period2, 9)      // next term
+	f.capture(t, "enr-1", "subj-dropped", period1, 9) // no longer taught: not expected
+	f.capture(t, "enr-3", subjectID, period1, 9)      // a period of ANOTHER grade: not grp-2's
 
 	got, err := f.svc.Progress(context.Background(), firstTermID)
 	require.NoError(t, err)
-	assert.Equal(t, 15, got.Expected)
-	assert.Equal(t, 4, got.Captured)
-	assert.Equal(t, []string{"2026-09", "2026-10", "2026-11"}, monthStrings(got.Months))
+	assert.Equal(t, 5, got.Expected)
+	assert.Equal(t, 2, got.Captured)
+	assert.True(t, got.Unfinished, "period 1 ends Nov 30")
+	assert.Equal(t, day(2026, 11, 30), got.EndsOn)
+	assert.Empty(t, got.GroupsWithoutPeriod)
 	assert.Equal(t, 1, f.grades.batchCalls, "every grade of the level in ONE read")
 	assert.Equal(t, 1, f.catalog.catalogCalls)
 	assert.Equal(t, []usecase.MissingGrades{
-		{GroupID: groupID, GroupLabel: "1° · A", SubjectID: subject2, SubjectName: "Español", TeacherName: "Luis Pérez", Missing: 6},
-		{GroupID: groupID, GroupLabel: "1° · A", SubjectID: subjectID, SubjectName: "Matemáticas", TeacherName: "Gabriela Rojas", Missing: 3},
-		{GroupID: group2ID, GroupLabel: "2° · A", SubjectID: subjectID, SubjectName: "Matemáticas", TeacherName: "Ana Ruiz", Missing: 2},
+		{GroupID: groupID, GroupLabel: "1° · A", SubjectID: subject2, SubjectName: "Español", TeacherName: "Luis Pérez", Missing: 2},
+		{GroupID: group2ID, GroupLabel: "2° · A", SubjectID: subjectID, SubjectName: "Matemáticas", TeacherName: "Ana Ruiz", Missing: 1},
 	}, got.Missing)
 }
 
-// Every month of the term is expected, even those not reached yet: closing an
-// unfinished term reports them missing (and needs force). The months after the
-// current UTC month are listed apart so the screen can warn about them.
-func TestPeriodProgressCountsEveryMonthAndListsTheUnfinished(t *testing.T) {
+// A term is finished once every grade's period of it ended on the school's
+// LOCAL day; a group whose grade lacks the period is named.
+func TestPeriodProgressUnfinishedAndGroupsWithoutPeriod(t *testing.T) {
 	f := newPeriodsFixture(t)
-	*f.now = time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC)
+	*f.now = time.Date(2026, 12, 1, 3, 0, 0, 0, time.UTC) // 21:00 Nov 30 in Mexico City
 	got, err := f.svc.Progress(context.Background(), firstTermID)
 	require.NoError(t, err)
-	assert.Equal(t, 15, got.Expected, "November is expected too")
-	assert.Equal(t, []string{"2026-11"}, monthStrings(got.UnfinishedMonths))
+	assert.True(t, got.Unfinished, "still Nov 30 at school")
 
-	*f.now = periodsNow
+	*f.now = time.Date(2026, 12, 1, 15, 0, 0, 0, time.UTC)
 	got, err = f.svc.Progress(context.Background(), firstTermID)
 	require.NoError(t, err)
-	assert.Empty(t, got.UnfinishedMonths, "November has begun")
-	assert.NotNil(t, got.UnfinishedMonths)
+	assert.False(t, got.Unfinished)
 
-	empty, err := f.svc.Progress(context.Background(), "term-empty")
+	f.evals.byGrade[gradeTwo] = trimesters(gradeTwo)[1:] // gl-2 has no period 1
+	got, err = f.svc.Progress(context.Background(), firstTermID)
 	require.NoError(t, err)
-	assert.Zero(t, empty.Expected)
+	assert.Equal(t, []string{"2° · A"}, got.GroupsWithoutPeriod)
+	assert.Equal(t, 4, got.Expected, "grp-2 owes nothing it cannot capture")
+
+	fourth, err := f.svc.Progress(context.Background(), "term-fourth")
+	require.NoError(t, err)
+	assert.Zero(t, fourth.Expected)
+	assert.Equal(t, []string{"1° · A", "2° · A"}, fourth.GroupsWithoutPeriod)
+	assert.True(t, fourth.EndsOn.IsZero())
 
 	_, err = f.svc.Progress(context.Background(), "ghost")
 	assert.Equal(t, glerrors.KindNotFound, glerrors.KindOf(err))
 }
 
-// A pupil is expected only from the month they joined their group: the month
-// they enrolled in, or the month they were last moved INTO it. Earlier months
-// are not expected (they belong to before, or to the previous group).
-func TestPeriodProgressExpectsFromTheMonthThePupilJoined(t *testing.T) {
+// A pupil who joined the group after the term's period ended owes nothing in
+// it (it belongs to before, or to the previous group).
+func TestPeriodProgressSkipsPupilsWhoJoinedAfterThePeriod(t *testing.T) {
 	f := newPeriodsFixture(t)
+	*f.now = time.Date(2027, 1, 20, 15, 0, 0, 0, time.UTC)
 	late := f.enr.byID["enr-3"]
-	late.EnrolledAt = time.Date(2026, 10, 10, 8, 0, 0, 0, time.UTC)
+	late.EnrolledAt = time.Date(2026, 12, 10, 15, 0, 0, 0, time.UTC)
 	f.enr.byID["enr-3"] = late
-	moved := f.enr.byID["enr-2"]
-	moved.EnrolledAt = time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC)
-	f.enr.byID["enr-2"] = moved
 	f.enr.transfers = []ports.TransferRef{
-		{EnrollmentID: "enr-2", ToGroupID: group2ID, MovedAt: time.Date(2026, 9, 5, 0, 0, 0, 0, time.UTC)},
-		{EnrollmentID: "enr-2", ToGroupID: groupID, MovedAt: time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)},
+		{EnrollmentID: "enr-2", ToGroupID: groupID, MovedAt: time.Date(2026, 11, 2, 15, 0, 0, 0, time.UTC)}, // during period 1
 	}
-	f.capture(t, "enr-2", subjectID, "2026-09", 900) // before joining: neither expected nor counted
 
 	got, err := f.svc.Progress(context.Background(), firstTermID)
 	require.NoError(t, err)
-	// enr-1: 2 subjects × 3 months; enr-2: 2 × November; enr-3: 1 × Oct–Nov.
-	assert.Equal(t, 6+2+2, got.Expected)
-	assert.Zero(t, got.Captured)
+	assert.Equal(t, 4, got.Expected, "enr-3 joined after period 1 ended; enr-2 joined during it")
 
 	f.captureAll(t)
+	delete(f.grades.rows, gradeKey("enr-3", subjectID, "gl-2-"+period1))
 	res, err := f.svc.Close(context.Background(), firstTermID, false, dirActor)
-	require.NoError(t, err, "complete from each pupil's joining month: no force needed")
+	require.NoError(t, err, "complete for every pupil who owes it: no force needed")
 	assert.Equal(t, 3, res.ReportCards)
 }
 
@@ -391,8 +393,8 @@ func TestPeriodProgressExpectsFromTheMonthThePupilJoined(t *testing.T) {
 func TestCloseRefusesMissingGradesWithoutForce(t *testing.T) {
 	f := newPeriodsFixture(t)
 	f.captureAll(t)
-	delete(f.grades.rows, monthlyKey("enr-3", subjectID, months(t, "2026-11")[0]))
-	delete(f.grades.rows, monthlyKey("enr-2", subject2, months(t, "2026-10")[0]))
+	delete(f.grades.rows, gradeKey("enr-3", subjectID, "gl-2-"+period1))
+	delete(f.grades.rows, gradeKey("enr-2", subject2, period1))
 
 	_, err := f.svc.Close(context.Background(), firstTermID, false, dirActor)
 	assert.Equal(t, glerrors.KindConflict, glerrors.KindOf(err))
@@ -402,29 +404,30 @@ func TestCloseRefusesMissingGradesWithoutForce(t *testing.T) {
 	assert.Empty(t, f.periods.cards, "no report card issued")
 	assert.Empty(t, f.publisher.published)
 
-	delete(f.grades.rows, monthlyKey("enr-1", subject2, months(t, "2026-10")[0]))
-	f.capture(t, "enr-3", subjectID, "2026-11", 900)
-	f.capture(t, "enr-2", subject2, "2026-10", 900)
+	f.capture(t, "enr-3", subjectID, "gl-2-"+period1, 9)
 	_, err = f.svc.Close(context.Background(), firstTermID, false, dirActor)
 	assert.Equal(t, "Falta 1 calificación por capturar", glerrors.SafeMessage(err))
 }
 
 // Closing with force issues a report card per ACTIVE enrollment of the level,
-// version 1, with the names frozen, then announces each one.
+// version 1, with the names frozen, then announces each one. Its columns are
+// the pupil's grade's periods up to the term's ordinal; the averages are
+// exact, truncated to 2 decimals.
 func TestCloseWithForceIssuesReportCards(t *testing.T) {
 	f := newPeriodsFixture(t)
-	f.capture(t, "enr-1", subjectID, "2026-09", 840)
-	f.capture(t, "enr-1", subjectID, "2026-10", 850)
-	f.capture(t, "enr-1", subject2, "2026-11", 800)
+	*f.now = time.Date(2027, 3, 30, 15, 0, 0, 0, time.UTC)
+	f.capture(t, "enr-1", subjectID, period1, 9)
+	f.capture(t, "enr-1", subjectID, period2, 8)
+	f.capture(t, "enr-1", subject2, period2, 7)
+	f.capture(t, "enr-1", subjectID, period3, 5) // a later period: not on this card
 
-	res, err := f.svc.Close(context.Background(), firstTermID, true, dirActor)
+	res, err := f.svc.Close(context.Background(), secondTermID, true, dirActor)
 	require.NoError(t, err)
 	assert.Equal(t, usecase.CloseResult{Status: domain.PeriodClosed, Version: 1, ReportCards: 3}, res)
 
-	closure := f.grades.closures[firstTermID]
+	closure := f.grades.closures[secondTermID]
 	assert.True(t, closure.IsClosed())
 	assert.Equal(t, "Directora Ruiz", closure.ClosedByName())
-	assert.Equal(t, periodsNow, closure.ClosedAt())
 	assert.Equal(t, levelPrimaria, closure.LevelID())
 
 	require.Len(t, f.periods.cards, 3)
@@ -440,18 +443,22 @@ func TestCloseWithForceIssuesReportCards(t *testing.T) {
 	assert.Equal(t, "1° · A", h.GroupLabel)
 	assert.Equal(t, levelName, h.LevelName)
 	assert.Equal(t, "2026-2027", h.CycleName)
-	assert.Equal(t, "1.er trimestre", h.TermName)
-	assert.Equal(t, 1, h.TermOrdinal, "the term's order is frozen with the card")
+	assert.Equal(t, "2.º trimestre", h.TermName, "named after the pupil's grade's period")
+	assert.Equal(t, 2, h.TermOrdinal)
+	assert.Empty(t, h.Months, "a T15 card has period columns, no months")
+	require.Len(t, h.Periods, 2)
+	assert.Equal(t, period1, h.Periods[0].ID)
+	assert.Equal(t, period2, h.Periods[1].ID)
 	assert.Equal(t, director, h.IssuedBy)
-	assert.Equal(t, periodsNow, h.IssuedAt)
-	assert.Equal(t, 600, h.Scale.PassingHundredths())
 	require.Len(t, ana.Lines(), 2)
 	assert.Equal(t, "Español", ana.Lines()[0].SubjectName, "subjects in Spanish name order")
-	assert.Equal(t, "8.0", ana.Lines()[0].TermAverage.String())
+	assert.Equal(t, "7", ana.Lines()[0].Average.String())
 	assert.Equal(t, "Matemáticas", ana.Lines()[1].SubjectName)
-	assert.Equal(t, "8.5", ana.Lines()[1].TermAverage.String(), "8.45 half-up")
-	assert.Equal(t, "8.3", ana.GeneralAverage().String(), "mean of 8.0 and 8.5 = 8.25 → 8.3")
-	assert.Len(t, byEnrollment["enr-3"].Lines(), 1, "grp-2 is taught one subject")
+	assert.Equal(t, map[string]string{period1: "9", period2: "8"}, ana.Lines()[1].PeriodValueStrings())
+	assert.Equal(t, "8.5", ana.Lines()[1].Average.String())
+	assert.Equal(t, "7.75", ana.GeneralAverage().String(), "exact mean of 7 and 8.5")
+	carla := byEnrollment["enr-3"].Header()
+	assert.Equal(t, "gl-2-"+period1, carla.Periods[0].ID, "grp-2's card has its own grade's periods")
 	_, withdrawn := byEnrollment["enr-gone"]
 	assert.False(t, withdrawn, "a withdrawn enrollment gets no report card")
 
@@ -466,9 +473,14 @@ func TestCloseRefusals(t *testing.T) {
 		prepare  func(t *testing.T, f periodsFixture)
 		wantKind glerrors.Kind
 		wantCode domain.RefusalCode
+		wantMsg  string
 	}{
 		{name: "unknown term", term: "ghost", wantKind: glerrors.KindNotFound},
-		{name: "term without months", term: "term-empty", wantKind: glerrors.KindConflict, wantCode: domain.CodeTermWithoutMonths},
+		{name: "no grade has the term's period", term: "term-fourth", wantKind: glerrors.KindConflict,
+			wantCode: domain.CodePeriodNotConfigured, wantMsg: "Los grupos 1° · A, 2° · A no tienen el periodo 4 configurado"},
+		{name: "a grade lacks the term's period", term: firstTermID, prepare: func(_ *testing.T, f periodsFixture) {
+			f.evals.byGrade[gradeTwo] = trimesters(gradeTwo)[1:]
+		}, wantKind: glerrors.KindConflict, wantCode: domain.CodePeriodNotConfigured, wantMsg: "El grupo 2° · A no tiene el periodo 1 configurado"},
 		{name: "level without numeric grades", term: "term-kinder", wantKind: glerrors.KindConflict, wantCode: domain.CodeLevelNotGraded},
 		{name: "already closed", term: firstTermID, prepare: func(t *testing.T, f periodsFixture) {
 			_, err := f.svc.Close(context.Background(), firstTermID, true, dirActor)
@@ -493,6 +505,9 @@ func TestCloseRefusals(t *testing.T) {
 			require.Error(t, err)
 			assert.Equal(t, tt.wantKind, glerrors.KindOf(err), "err = %v", err)
 			assert.Equal(t, tt.wantCode, domain.RefusalCodeOf(err))
+			if tt.wantMsg != "" {
+				assert.Equal(t, tt.wantMsg, glerrors.SafeMessage(err))
+			}
 			assert.Len(t, f.periods.cards, cardsBefore, "a refused close issues nothing")
 			assert.Empty(t, f.publisher.published)
 		})
@@ -528,7 +543,7 @@ func TestReopenAndCloseAgainIssuesVersion2(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, latest, 3, "reopening keeps the report cards published")
 
-	f.capture(t, "enr-1", subjectID, "2026-10", 1000)
+	f.capture(t, "enr-1", subjectID, period1, 10)
 	res, err := f.svc.Close(context.Background(), firstTermID, false, dirActor)
 	require.NoError(t, err)
 	assert.Equal(t, 2, res.Version)
@@ -587,7 +602,6 @@ func TestReCloseNotifiesAPupilWithoutAPreviousCard(t *testing.T) {
 	require.NoError(t, err)
 	_, err = f.svc.Reopen(context.Background(), firstTermID, director)
 	require.NoError(t, err)
-	// The previous card of stu-3 is gone from the published set (as if it never existed).
 	kept := f.periods.cards[:0]
 	for _, rc := range f.periods.cards {
 		if rc.StudentID() != "stu-3" {
@@ -685,12 +699,15 @@ func TestListPeriods(t *testing.T) {
 	assert.Equal(t, levelName, first.LevelName)
 	assert.True(t, first.Closure.IsClosed())
 	assert.Equal(t, 1, first.Closure.Version())
-	assert.Equal(t, 15, first.Expected)
-	assert.Equal(t, 15, first.Captured)
+	assert.Equal(t, 5, first.Expected)
+	assert.Equal(t, 5, first.Captured)
+	assert.Equal(t, day(2026, 8, 24), first.StartsOn)
+	assert.Equal(t, day(2026, 11, 30), first.EndsOn)
 	second := byTerm[secondTermID]
 	assert.False(t, second.Closure.IsClosed())
-	assert.Equal(t, 15, second.Expected, "every month of the term is expected, reached or not")
+	assert.Equal(t, 5, second.Expected, "every pupil owes the period, reached or not")
 	assert.Zero(t, second.Captured)
+	assert.True(t, byTerm["term-fourth"].StartsOn.IsZero(), "no grade has a 4th period")
 	assert.Equal(t, "Preescolar", byTerm["term-kinder"].LevelName)
 	assert.Zero(t, byTerm["term-kinder"].Expected, "a level without numeric grades owes nothing")
 	assert.Equal(t, 1, f.grades.batchCalls, "every grade of the cycle in ONE read")
@@ -746,15 +763,4 @@ func TestClosedTerms(t *testing.T) {
 	none, err := f.svc.ClosedTerms(context.Background(), nil)
 	require.NoError(t, err)
 	assert.Empty(t, none)
-}
-
-// Closing a term whose months are not over reports them missing: without
-// force it is refused.
-func TestCloseUnfinishedTermNeedsForce(t *testing.T) {
-	f := newPeriodsFixture(t)
-	f.captureAll(t)
-	*f.now = time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC)
-	delete(f.grades.rows, monthlyKey("enr-3", subjectID, months(t, "2026-11")[0]))
-	_, err := f.svc.Close(context.Background(), firstTermID, false, dirActor)
-	assert.Equal(t, domain.CodeMissingGrades, domain.RefusalCodeOf(err))
 }

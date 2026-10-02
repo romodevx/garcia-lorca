@@ -1,6 +1,6 @@
 # ADR 0019: Monthly grades — transfers, scale changes, refusal codes
 
-- Status: Accepted
+- Status: Accepted — monthly capture superseded by ADR 0030 (T15: grades per evaluation period; the transfer and scale rules carry over to periods)
 - Date: 2026-09-27
 - Context: Task 6 (calificaciones mensuales) code review. The owner decided the
   transfer rule and the scale-change rule; this records them and how they are

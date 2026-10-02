@@ -315,8 +315,15 @@ func (stubConfig) CopyTermMonths(_ context.Context, req *connect.Request[configv
 	return connect.NewResponse(&configv1.CopyTermMonthsResponse{}), nil
 }
 
-func (stubConfig) ListEvaluationPeriods(_ context.Context, _ *connect.Request[configv1.ListEvaluationPeriodsRequest]) (*connect.Response[configv1.ListEvaluationPeriodsResponse], error) {
-	return connect.NewResponse(&configv1.ListEvaluationPeriodsResponse{}), nil
+// ListEvaluationPeriods: grade "…a9" holds one period, "per-graded" (it has
+// grades in stubGrades); every other grade has none.
+func (stubConfig) ListEvaluationPeriods(_ context.Context, req *connect.Request[configv1.ListEvaluationPeriodsRequest]) (*connect.Response[configv1.ListEvaluationPeriodsResponse], error) {
+	if req.Msg.GetGradeLevelId() != gradeWithGradedPeriod {
+		return connect.NewResponse(&configv1.ListEvaluationPeriodsResponse{}), nil
+	}
+	return connect.NewResponse(&configv1.ListEvaluationPeriodsResponse{Periods: []*configv1.EvaluationPeriod{
+		{Id: periodGraded, GradeLevelId: gradeWithGradedPeriod, Ordinal: 1, Name: "1.er trimestre"},
+	}}), nil
 }
 
 func (stubConfig) UpsertEvaluationPeriods(_ context.Context, _ *connect.Request[configv1.UpsertEvaluationPeriodsRequest]) (*connect.Response[configv1.UpsertEvaluationPeriodsResponse], error) {
@@ -1016,6 +1023,24 @@ func TestEvaluationPeriodRoutesGuardChain(t *testing.T) {
 		})
 	}
 }
+
+// T15: the composition root wires the period-grades guard: clearing a grade's
+// periods when one of them holds grades is 409 PERIOD_HAS_GRADES, and config
+// is never asked to remove it.
+func TestEvaluationPeriodWithGradesCannotBeRemoved(t *testing.T) {
+	const cycle = "00000000-0000-4000-8000-0000000000c1"
+	gw := newTestGateway(t, map[string]bool{"module_config": true})
+	res := doGateway(t, gw, http.MethodPut, "/api/v1/config/grade-levels/"+gradeWithGradedPeriod+"/evaluation-periods",
+		"config-writer", `{"cycleId":"`+cycle+`","periods":[]}`)
+	if res.StatusCode != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", res.StatusCode)
+	}
+	if got := res.Header.Get("X-Error-Code"); got != "PERIOD_HAS_GRADES" {
+		t.Errorf("X-Error-Code = %q, want PERIOD_HAS_GRADES", got)
+	}
+}
+
+const gradeWithGradedPeriod = "00000000-0000-4000-8000-0000000000a9"
 
 // T13: renaming and deleting a subject ride the config chain — module_config
 // OFF ⇒ 404, no token ⇒ 401, config:read alone ⇒ 403, config:write ⇒ done.

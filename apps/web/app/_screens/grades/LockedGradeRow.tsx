@@ -5,7 +5,7 @@ import type { ReactElement } from "react";
 export interface LockedGradeRowProps {
   name: string;
   value: number | null;
-  /** Why this row cannot change, e.g. the month belongs to the pupil's previous group. */
+  /** Why this row cannot change, e.g. the period belongs to the pupil's previous group. */
   reason: string;
   failing: boolean;
 }

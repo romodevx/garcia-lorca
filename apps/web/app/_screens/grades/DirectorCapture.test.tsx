@@ -67,9 +67,13 @@ beforeEach(() => {
   grades.gradeSheetClient.mockReturnValue(client);
   client.load.mockResolvedValue({
     assignmentId: "a-p2",
-    month: "2026-09",
-    months: ["2026-09"],
-    scale: { min: 5, max: 10, decimals: 1, passing: 6 },
+    periodId: "p1",
+    periods: [{ id: "p1", ordinal: 1, name: "1.er trimestre", startsOn: "2026-08-24", endsOn: "2026-11-30" }],
+    currentPeriodId: "p1",
+    today: "2026-10-01",
+    closedPeriodIds: [],
+    scale: { min: 5, max: 10, decimals: 0, passing: 6 },
+    gradingEnabled: true,
     editable: true,
     rows: [{ enrollmentId: "en1", studentId: "st1", name: "Grace Hopper", value: null, updatedAt: null, rowEditable: true }],
   });
@@ -94,7 +98,7 @@ describe("DirectorCapture", () => {
     ]);
   });
 
-  it("opens the chosen assignment's monthly sheet, with no term to pick", async () => {
+  it("opens the chosen assignment's sheet on the period the server picks, with its period chips", async () => {
     const user = userEvent.setup();
     render(<DirectorCapture onBack={() => {}} />);
 
@@ -104,12 +108,13 @@ describe("DirectorCapture", () => {
 
     expect(await screen.findByRole("textbox", { name: "Calificación de Grace Hopper" })).toBeInTheDocument();
     expect(client.load).toHaveBeenCalledWith({ assignmentId: "a-p2" });
-    expect(screen.queryByLabelText("Periodo")).toBeNull();
+    expect(screen.getByRole("group", { name: "Periodo" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^1\.er trimestre/ })).toHaveAttribute("aria-pressed", "true");
   });
 
   it("asks for an assignment before showing any sheet", async () => {
     render(<DirectorCapture onBack={() => {}} />);
-    expect(await screen.findByText("Elige una asignación para capturar sus calificaciones del mes.")).toBeInTheDocument();
+    expect(await screen.findByText("Elige una asignación para capturar sus calificaciones del periodo.")).toBeInTheDocument();
     expect(client.load).not.toHaveBeenCalled();
   });
 

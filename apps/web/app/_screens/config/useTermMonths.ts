@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ConfigError, type Term } from "../../config/api";
 import { assignMonth, savePlan, type MonthAssignment, type TermMonthsSave } from "../../config/termMonths";
-import { monthChips } from "../../grades/monthly";
+import { monthChips } from "../../_lib/monthChips";
 
 export type SaveTermMonths = (termId: string, months: readonly string[]) => Promise<Term>;
 

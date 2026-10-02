@@ -6,7 +6,7 @@ import { Page } from "../../_design/Page";
 import { listAssignments, teachingGradeSheet, type TeachingAssignment } from "../../teaching/api";
 import { ErrorAlert } from "../config/parts";
 import { TeachingPicker } from "../teaching/TeachingPicker";
-import { MonthlyGradeSheet } from "./MonthlyGradeSheet";
+import { PeriodGradeSheet } from "./PeriodGradeSheet";
 import { confirmLeavingUnsaved, useGradeSaves } from "./useGradeSaves";
 
 export interface TeacherCaptureProps {
@@ -19,8 +19,8 @@ export interface TeacherCaptureProps {
  * `/api/v1/teaching/*` client, so a teacher never triggers a students-list,
  * `/grades/*`, or `/config/*` fetch (all of which they lack permission for).
  *
- * Fewest taps: subject → group → the month's sheet, each step skipped when it
- * has a single choice (TeachingPicker); the month is a chip inside the sheet.
+ * Fewest taps: subject → group → the period's sheet, each step skipped when it
+ * has a single choice (TeachingPicker); the evaluation period is a chip inside the sheet.
  * The gateway is the security boundary — this is UX only.
  */
 export function TeacherCapture({ onBack }: TeacherCaptureProps): ReactElement {
@@ -71,7 +71,7 @@ export function TeacherCapture({ onBack }: TeacherCaptureProps): ReactElement {
         </div>
         <div>
           <h1 style={{ fontSize: 30, fontWeight: 800, color: "var(--text)" }}>Calificaciones</h1>
-          <p style={{ color: "var(--text-muted)", fontSize: 15, marginTop: 3 }}>Captura mensual por materia y grupo · solo tus grupos</p>
+          <p style={{ color: "var(--text-muted)", fontSize: 15, marginTop: 3 }}>Captura por periodo, materia y grupo · solo tus grupos</p>
         </div>
       </div>
 
@@ -84,7 +84,7 @@ export function TeacherCapture({ onBack }: TeacherCaptureProps): ReactElement {
           <TeachingPicker title="Calificaciones" options={assignments} bySubject canLeave={canLeave}>
             {(assignment) => (
               <OpenSheet key={assignment.id} assignmentId={assignment.id} openAssignment={openAssignment}>
-                <MonthlyGradeSheet assignmentId={assignment.id} client={teachingGradeSheet} saves={saves} />
+                <PeriodGradeSheet assignmentId={assignment.id} client={teachingGradeSheet} saves={saves} />
               </OpenSheet>
             )}
           </TeachingPicker>

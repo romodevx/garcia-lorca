@@ -4,8 +4,8 @@ import { useCallback, useEffect, useRef, useState, type ReactElement } from "rea
 
 import { Btn } from "../../../_design/Controls";
 import { DrawerShell } from "../../../_design/DrawerShell";
-import { GradeRequestError } from "../../../grades/monthly";
 import { MISSING_GRADES, type CloseResult, type GradingPeriod, type PeriodCaptureProgress, type PeriodsClient } from "../../../grades/periods";
+import { GradeRequestError } from "../../../grades/requestError";
 import { EmptyHint, ErrorAlert } from "../../config/parts";
 import { CaptureReview, captureVerdict } from "./CaptureReview";
 import { periodTitle } from "./format";
@@ -24,7 +24,7 @@ type ProgressLoad = { kind: "loading" } | { kind: "ready"; progress: PeriodCaptu
 
 /**
  * Review before closing: closing publishes a boleta per pupil to the parents'
- * app and locks the months for everyone, so this confirmation earns its place.
+ * app and locks the period for everyone, so this confirmation earns its place.
  * Unless the capture is honestly complete, the only way forward is the
  * explicit "de todos modos".
  */
@@ -69,13 +69,13 @@ export function ClosePeriodDialog({ period, client, onClose, onClosed, onStale }
     }
   };
 
-  const verdict = load.kind === "ready" ? captureVerdict(period, load.progress, new Date()) : undefined;
+  const verdict = load.kind === "ready" ? captureVerdict(load.progress) : undefined;
   const footer = (
     <>
       <button type="button" onClick={onClose} style={{ minHeight: 44, color: "var(--text-muted)", fontWeight: 600, cursor: "pointer" }}>Cancelar</button>
       <div style={{ flex: 1 }} />
       {verdict?.complete === true && <Btn kind="forest" icon="lock" onClick={() => void close(false)}>{busy ? "Cerrando…" : "Cerrar periodo"}</Btn>}
-      {verdict?.complete === false && <Btn danger icon="warning" onClick={() => void close(true)}>{busy ? "Cerrando…" : "Cerrar de todos modos"}</Btn>}
+      {verdict?.complete === false && !verdict.blocked && <Btn danger icon="warning" onClick={() => void close(true)}>{busy ? "Cerrando…" : "Cerrar de todos modos"}</Btn>}
     </>
   );
 
@@ -86,9 +86,9 @@ export function ClosePeriodDialog({ period, client, onClose, onClosed, onStale }
         {load.kind === "failed" && <ErrorAlert message="No se pudo revisar la captura del periodo." />}
         {load.kind === "ready" && verdict !== undefined && (
           <>
-            <CaptureReview progress={load.progress} verdict={verdict} />
+            <CaptureReview period={period} progress={load.progress} verdict={verdict} />
             <p style={{ fontSize: 14, color: "var(--text-muted)" }}>
-              Al cerrar, nadie podrá modificar las calificaciones de estos meses hasta que la dirección reabra el periodo.
+              Al cerrar, nadie podrá modificar las calificaciones de este periodo hasta que la dirección reabra el periodo.
             </p>
           </>
         )}

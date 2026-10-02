@@ -5,7 +5,7 @@ import { useState, type CSSProperties, type ReactElement } from "react";
 import { Icon } from "../../_design/Icon";
 import type { Term } from "../../config/api";
 import { unassignedMonths, type MonthAssignment } from "../../config/termMonths";
-import { monthChips, type MonthChip } from "../../grades/monthly";
+import { monthChips, type MonthChip } from "../../_lib/monthChips";
 import { ErrorAlert, SelectChip } from "./parts";
 
 export interface TermMonthsEditorProps {

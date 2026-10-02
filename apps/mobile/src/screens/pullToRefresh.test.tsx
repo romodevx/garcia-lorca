@@ -25,7 +25,7 @@ const callsTo = (mock: jest.Mock, suffix: string): number =>
 describe.each<[string, () => ReactElement, string]>([
   ["Avisos", () => <AnnouncementsScreen />, "/family/notifications"],
   ["Cuenta", () => <AccountScreen />, "/family/students/s1/statement"],
-  ["Calificaciones", () => <GradesScreen currentMonth="2026-10" />, "/family/students/s1/grades/monthly"],
+  ["Calificaciones", () => <GradesScreen today="2026-10-15" />, "/family/students/s1/grades/periods"],
 ])("%s pull-to-refresh", (_name, ui, endpoint) => {
   beforeEach(async () => {
     await saveTokens({ accessToken: "a1", refreshToken: "r1" });
@@ -50,7 +50,7 @@ describe.each<[string, () => ReactElement, string]>([
 
 describe.each<[string, () => ReactElement, string, string]>([
   ["Cuenta", () => <AccountScreen />, "/family/students/s1/statement", "No pudimos cargar tu cuenta"],
-  ["Calificaciones", () => <GradesScreen currentMonth="2026-10" />, "/family/students/s1/grades/monthly", "No pudimos cargar las calificaciones"],
+  ["Calificaciones", () => <GradesScreen today="2026-10-15" />, "/family/students/s1/grades/periods", "No pudimos cargar las calificaciones"],
 ])("%s failed refresh", (_name, ui, endpoint, fullScreenError) => {
   beforeEach(async () => {
     await saveTokens({ accessToken: "a1", refreshToken: "r1" });

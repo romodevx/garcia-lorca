@@ -11,8 +11,14 @@ type Child = { id: string; firstName: string; lastName: string; level: string; l
 type Subject = { subjectId: string; subjectName: string; grades: Record<string, number> };
 type Reply = { status: number; subjects?: Subject[]; gradingEnabled?: boolean; scale?: typeof SCALE | null } | "hang";
 
-const MONTHS = ["2026-08", "2026-09", "2026-10"];
-const SCALE = { min: 5, max: 10, decimals: 1, passing: 6 };
+const PERIODS = [
+  { id: "p1", ordinal: 1, name: "1.er trimestre", startsOn: "2026-08-24", endsOn: "2026-11-30" },
+  { id: "p2", ordinal: 2, name: "2.º trimestre", startsOn: "2026-12-01", endsOn: "2027-03-15" },
+  { id: "p3", ordinal: 3, name: "3.er trimestre", startsOn: "2027-03-16", endsOn: "2027-07-10" },
+];
+const SCALE = { min: 5, max: 10, decimals: 0, passing: 6 };
+/** Inside the 2.º trimestre. */
+const TODAY = "2027-01-20";
 
 const mateo: Child = { id: "s1", firstName: "Mateo", lastName: "Herrera", level: "Primaria", levelId: "l1", gradeGroup: "3° A" };
 const lucia: Child = { id: "s2", firstName: "Lucía", lastName: "Herrera", level: "Primaria", levelId: "l1", gradeGroup: "1° A" };
@@ -23,11 +29,11 @@ const subject = (subjectName: string, grades: Record<string, number>): Subject =
   grades,
 });
 
-/** Routes family requests; `replies` answers the monthly grades per student id. */
+/** Routes family requests; `replies` answers the period grades per student id. */
 function mockGateway(replies: Record<string, Reply | (() => Reply)>, children: Child[] = [mateo]): jest.Mock {
   const fetchMock = jest.fn(async (url: string) => {
     const u = String(url);
-    const match = /\/family\/students\/([^/]+)\/grades\/monthly/.exec(u);
+    const match = /\/family\/students\/([^/]+)\/grades\/periods/.exec(u);
     if (match) {
       const entry = replies[match[1] ?? ""] ?? { status: 200 };
       const reply = typeof entry === "function" ? entry() : entry;
@@ -38,7 +44,7 @@ function mockGateway(replies: Record<string, Reply | (() => Reply)>, children: C
         status: 200,
         json: async () => ({
           cycleName: "2026-2027",
-          months: MONTHS,
+          periods: PERIODS,
           ...(reply.scale === null ? {} : { scale: reply.scale ?? SCALE }),
           gradingEnabled: reply.gradingEnabled ?? true,
           subjects: reply.subjects ?? [],
@@ -53,14 +59,14 @@ function mockGateway(replies: Record<string, Reply | (() => Reply)>, children: C
 }
 
 const gradeCalls = (mock: jest.Mock): number =>
-  mock.mock.calls.filter((c) => String((c as unknown[])[0]).includes("/grades/monthly")).length;
+  mock.mock.calls.filter((c) => String((c as unknown[])[0]).includes("/grades/periods")).length;
 
-const render = (ui: ReactElement = <GradesScreen currentMonth="2026-10" />): Promise<unknown> => renderWithProviders(ui);
+const render = (ui: ReactElement = <GradesScreen today={TODAY} />): Promise<unknown> => renderWithProviders(ui);
 
 const selectedChip = (): string | undefined =>
   screen.getAllByRole("button").find((b) => b.props.accessibilityState?.selected)?.props.accessibilityLabel as string | undefined;
 
-describe("GradesScreen (monthly grades)", () => {
+describe("GradesScreen (grades per evaluation period)", () => {
   beforeEach(async () => {
     await saveTokens({ accessToken: "a1", refreshToken: "r1" });
   });
@@ -68,62 +74,69 @@ describe("GradesScreen (monthly grades)", () => {
     await clearTokens();
   });
 
-  it("opens on the latest month that has a grade and shows it with the scale decimals", async () => {
-    mockGateway({ s1: { status: 200, subjects: [subject("Matemáticas", { "2026-08": 8, "2026-09": 9.5 })] } });
+  it("opens on the period that contains today and shows each grade exactly as captured", async () => {
+    mockGateway({ s1: { status: 200, subjects: [subject("Matemáticas", { p1: 8, p2: 9 })] } });
     await render();
 
-    await waitFor(() => expect(screen.getByLabelText("Matemáticas, septiembre: 9.5")).toBeTruthy());
-    expect(selectedChip()).toBe("Septiembre 2026");
+    await waitFor(() => expect(screen.getByLabelText(/^Matemáticas, 2\.º trimestre: 9/)).toBeTruthy());
+    expect(selectedChip()).toBe("2.º trimestre");
   });
 
-  it("opens on the current month when nothing is captured yet", async () => {
-    mockGateway({ s1: { status: 200, subjects: [subject("Matemáticas", {})] } });
-    await render(<GradesScreen currentMonth="2026-09" />);
+  it("between periods, opens on the latest one that already started", async () => {
+    mockGateway({ s1: { status: 200, subjects: [subject("Matemáticas", { p1: 8 })] } });
+    await render(<GradesScreen today="2027-12-01" />);
 
     await waitFor(() => expect(screen.getByText("Matemáticas")).toBeTruthy());
-    expect(selectedChip()).toBe("Septiembre 2026");
+    expect(selectedChip()).toBe("3.er trimestre");
   });
 
-  it("switches month when a chip is pressed", async () => {
-    mockGateway({ s1: { status: 200, subjects: [subject("Matemáticas", { "2026-08": 8, "2026-09": 9.5 })] } });
+  it("switches period when a chip is pressed", async () => {
+    mockGateway({ s1: { status: 200, subjects: [subject("Matemáticas", { p1: 8, p2: 9 })] } });
     await render();
-    await waitFor(() => expect(screen.getByLabelText("Matemáticas, septiembre: 9.5")).toBeTruthy());
+    await waitFor(() => expect(screen.getByLabelText(/^Matemáticas, 2\.º trimestre: 9/)).toBeTruthy());
 
-    await fireEvent.press(screen.getByRole("button", { name: "Agosto 2026" }));
+    await fireEvent.press(screen.getByRole("button", { name: "1.er trimestre" }));
 
-    expect(screen.getByLabelText("Matemáticas, agosto: 8")).toBeTruthy();
-    expect(selectedChip()).toBe("Agosto 2026");
+    expect(screen.getByLabelText(/^Matemáticas, 1\.er trimestre: 8/)).toBeTruthy();
+    expect(selectedChip()).toBe("1.er trimestre");
   });
 
-  it("says clearly when a subject has no grade yet for the month", async () => {
-    mockGateway({
-      s1: { status: 200, subjects: [subject("Matemáticas", { "2026-09": 9 }), subject("Inglés", {})] },
-    });
+  it("shows a dash when a subject has no grade yet for the period", async () => {
+    mockGateway({ s1: { status: 200, subjects: [subject("Matemáticas", { p2: 9 }), subject("Inglés", {})] } });
     await render();
 
     await waitFor(() => expect(screen.getByText("Inglés")).toBeTruthy());
-    expect(screen.getByText("Sin calificación aún")).toBeTruthy();
+    expect(screen.getByLabelText(/^Inglés, 2\.º trimestre: sin calificación aún/)).toBeTruthy();
+    expect(screen.getAllByText("—").length).toBeGreaterThan(0);
   });
 
   it("marks a failing grade with the word Reprobada, not only colour", async () => {
-    mockGateway({ s1: { status: 200, subjects: [subject("Historia", { "2026-09": 5 })] } });
+    mockGateway({ s1: { status: 200, subjects: [subject("Historia", { p2: 5 })] } });
     await render();
 
     await waitFor(() => expect(screen.getByText("Reprobada")).toBeTruthy());
-    expect(screen.getByLabelText("Historia, septiembre: 5, reprobada")).toBeTruthy();
+    expect(screen.getByLabelText(/^Historia, 2\.º trimestre: 5, reprobada/)).toBeTruthy();
     expect(screen.getByText(/Aprobatoria: 6/)).toBeTruthy();
   });
 
-  it("averages the month's captured subjects", async () => {
+  it("shows each subject's average across periods, truncated to 2 decimals", async () => {
+    mockGateway({ s1: { status: 200, subjects: [subject("Matemáticas", { p1: 9, p2: 9, p3: 8 })] } });
+    await render();
+
+    await waitFor(() => expect(screen.getByText("Promedio 8.66")).toBeTruthy());
+    expect(screen.getByLabelText("Matemáticas, 2.º trimestre: 9. Promedio 8.66")).toBeTruthy();
+  });
+
+  it("shows the general average: the exact mean of the subjects' exact averages", async () => {
     mockGateway({
       s1: {
         status: 200,
-        subjects: [subject("Matemáticas", { "2026-09": 9 }), subject("Español", { "2026-09": 8 }), subject("Inglés", {})],
+        subjects: [subject("Matemáticas", { p1: 9, p2: 9, p3: 8 }), subject("Español", { p1: 9, p2: 8, p3: 8 }), subject("Inglés", {})],
       },
     });
     await render();
 
-    await waitFor(() => expect(screen.getByLabelText("Promedio del mes: 8.5")).toBeTruthy());
+    await waitFor(() => expect(screen.getByLabelText("Promedio general: 8.5")).toBeTruthy());
   });
 
   it("keeps the qualitative placeholder for preescolar", async () => {
@@ -135,29 +148,20 @@ describe("GradesScreen (monthly grades)", () => {
   });
 
   it("shows grades captured before the level stopped grading, as stored, without a passing line", async () => {
-    mockGateway({ s1: { status: 200, gradingEnabled: false, scale: null, subjects: [subject("Matemáticas", { "2026-09": 5.25 })] } });
+    mockGateway({ s1: { status: 200, gradingEnabled: false, scale: null, subjects: [subject("Matemáticas", { p2: 5.25 })] } });
     await render();
 
-    await waitFor(() => expect(screen.getByLabelText("Matemáticas, septiembre: 5.25")).toBeTruthy());
+    await waitFor(() => expect(screen.getByLabelText(/^Matemáticas, 2\.º trimestre: 5\.25/)).toBeTruthy());
     expect(screen.queryByText("Próximamente")).toBeNull();
     expect(screen.queryByText(/Aprobatoria/)).toBeNull();
     expect(screen.queryByText("Reprobada")).toBeNull();
   });
 
-  it("shows captured grades for a qualitative level too, instead of the placeholder", async () => {
-    const kinder: Child = { ...mateo, level: "Kínder" };
-    mockGateway({ s1: { status: 200, gradingEnabled: false, scale: null, subjects: [subject("Lenguaje", { "2026-09": 9 })] } }, [kinder]);
-    await render();
-
-    await waitFor(() => expect(screen.getByLabelText("Lenguaje, septiembre: 9")).toBeTruthy());
-    expect(screen.queryByText("Próximamente")).toBeNull();
-  });
-
   it("never marks failing against a 0–0 scale", async () => {
-    mockGateway({ s1: { status: 200, gradingEnabled: false, scale: { min: 0, max: 0, decimals: 0, passing: 0 }, subjects: [subject("Arte", { "2026-09": 3 })] } });
+    mockGateway({ s1: { status: 200, gradingEnabled: false, scale: { min: 0, max: 0, decimals: 0, passing: 0 }, subjects: [subject("Arte", { p2: 3 })] } });
     await render();
 
-    await waitFor(() => expect(screen.getByLabelText("Arte, septiembre: 3")).toBeTruthy());
+    await waitFor(() => expect(screen.getByLabelText(/^Arte, 2\.º trimestre: 3/)).toBeTruthy());
     expect(screen.queryByText(/Aprobatoria/)).toBeNull();
   });
 
@@ -171,7 +175,7 @@ describe("GradesScreen (monthly grades)", () => {
   it("shows an error with retry, and retrying loads the grades", async () => {
     let fail = true;
     const fetchMock = mockGateway({
-      s1: () => (fail ? { status: 500 } : { status: 200, subjects: [subject("Matemáticas", { "2026-09": 9.5 })] }),
+      s1: () => (fail ? { status: 500 } : { status: 200, subjects: [subject("Matemáticas", { p2: 9 })] }),
     });
     await render();
     await waitFor(() => expect(screen.getByText("No pudimos cargar las calificaciones")).toBeTruthy());
@@ -180,45 +184,42 @@ describe("GradesScreen (monthly grades)", () => {
     fail = false;
     await fireEvent.press(screen.getByRole("button", { name: "Reintentar" }));
 
-    await waitFor(() => expect(screen.getByLabelText("Matemáticas, septiembre: 9.5")).toBeTruthy());
+    await waitFor(() => expect(screen.getByLabelText(/^Matemáticas, 2\.º trimestre: 9/)).toBeTruthy());
     expect(gradeCalls(fetchMock)).toBe(before + 1);
   });
 
   it("clears one child's grades the moment another child is selected", async () => {
-    mockGateway({ s1: { status: 200, subjects: [subject("Matemáticas", { "2026-09": 9.5 })] }, s2: "hang" }, [mateo, lucia]);
+    mockGateway({ s1: { status: 200, subjects: [subject("Matemáticas", { p2: 9 })] }, s2: "hang" }, [mateo, lucia]);
     await render(
       <>
         <PickChild id="s2" />
-        <GradesScreen currentMonth="2026-10" />
+        <GradesScreen today={TODAY} />
       </>,
     );
-    await waitFor(() => expect(screen.getByLabelText("Matemáticas, septiembre: 9.5")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("Matemáticas")).toBeTruthy());
 
     await fireEvent.press(screen.getByText("pick s2"));
 
     await waitFor(() => expect(screen.queryByText("Matemáticas")).toBeNull());
   });
 
-  it("opens a subject's sheet with its grade for every month of the cycle", async () => {
-    mockGateway({
-      s1: { status: 200, subjects: [subject("Matemáticas", { "2026-08": 8, "2026-09": 5 }), subject("Inglés", { "2026-09": 9 })] },
-    });
+  it("opens a subject's sheet with its grade for every period and its average", async () => {
+    mockGateway({ s1: { status: 200, subjects: [subject("Matemáticas", { p1: 8, p2: 5 }), subject("Inglés", { p2: 9 })] } });
     await render();
-    await waitFor(() => expect(screen.getByLabelText("Matemáticas, septiembre: 5, reprobada")).toBeTruthy());
-    expect(screen.queryByLabelText("Matemáticas, agosto: 8")).toBeNull();
+    await waitFor(() => expect(screen.getByLabelText(/^Matemáticas, 2\.º trimestre: 5, reprobada/)).toBeTruthy());
+    expect(screen.queryByLabelText("Matemáticas, 1.er trimestre: 8")).toBeNull();
 
-    await fireEvent.press(screen.getByLabelText("Matemáticas, septiembre: 5, reprobada"));
+    await fireEvent.press(screen.getByLabelText(/^Matemáticas, 2\.º trimestre: 5, reprobada/));
 
-    expect(screen.getByLabelText("Matemáticas, agosto: 8")).toBeTruthy();
-    expect(screen.getAllByLabelText("Matemáticas, septiembre: 5, reprobada").length).toBe(2);
-    expect(screen.getByLabelText("Matemáticas, octubre: sin calificación aún")).toBeTruthy();
-    expect(screen.getByText("—")).toBeTruthy();
+    expect(screen.getByLabelText("Matemáticas, 1.er trimestre: 8")).toBeTruthy();
+    expect(screen.getByLabelText("Matemáticas, 2.º trimestre: 5, reprobada")).toBeTruthy();
+    expect(screen.getByLabelText("Matemáticas, 3.er trimestre: sin calificación aún")).toBeTruthy();
     expect(screen.getByLabelText("Promedio del ciclo: 6.5")).toBeTruthy();
-    expect(screen.queryByLabelText(/Inglés, agosto/)).toBeNull();
+    expect(screen.queryByLabelText(/Inglés, 1\.er trimestre/)).toBeNull();
   });
 
   it("reloads when the app comes back to the foreground", async () => {
-    const fetchMock = mockGateway({ s1: { status: 200, subjects: [subject("Matemáticas", { "2026-09": 9 })] } });
+    const fetchMock = mockGateway({ s1: { status: 200, subjects: [subject("Matemáticas", { p2: 9 })] } });
     await render();
     await waitFor(() => expect(screen.getByText("Matemáticas")).toBeTruthy());
     const before = gradeCalls(fetchMock);

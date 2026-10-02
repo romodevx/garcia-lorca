@@ -146,11 +146,11 @@ func TestDirectorReadsAReportCard(t *testing.T) {
 	assert.JSONEq(t, `{
 		"id":"`+rcID+`","termId":"`+pTerm+`","termName":"1.er trimestre","termOrdinal":1,"cycleName":"2026-2027","levelName":"Primaria",
 		"groupId":"`+rcGroup+`","groupLabel":"1° · A","studentId":"`+rcStudent+`","studentName":"Ana López","enrollmentNumber":"2026-00001",
-		"version":2,"status":"published","issuedAt":"2026-12-01T10:00:00Z","months":["2026-09","2026-10"],
+		"version":2,"status":"published","issuedAt":"2026-12-01T10:00:00Z","periods":[],"months":["2026-09","2026-10"],
 		"scale":{"min":5,"max":10,"decimals":1,"passing":6},"generalAverage":8.5,"hasGrades":true,
 		"lines":[
-			{"subjectId":"sub-1","subjectName":"Matemáticas","position":1,"months":{"2026-09":8.4,"2026-10":8.5},"average":8.5},
-			{"subjectId":"sub-2","subjectName":"Artes","position":2,"months":{},"average":null}
+			{"subjectId":"sub-1","subjectName":"Matemáticas","position":1,"periods":{},"months":{"2026-09":8.4,"2026-10":8.5},"average":8.5},
+			{"subjectId":"sub-2","subjectName":"Artes","position":2,"periods":{},"months":{},"average":null}
 		],
 		"school":{"name":"COLEGIO GARCÍA LORCA","legalName":"","rfc":"","cct":"09PPR0001A","address":"","phone":"","legend":""}
 	}`, rec.Body.String())
@@ -254,4 +254,25 @@ func TestFamilyDownloadsOwnChildsPDF(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	assert.Equal(t, "application/pdf", rec.Header().Get("Content-Type"))
 	assert.True(t, bytes.HasPrefix(rec.Body.Bytes(), []byte("%PDF-")))
+}
+
+// T15: a card issued per evaluation period answers its period columns and,
+// per line, period id → grade, with averages truncated to 2 decimals; a card
+// issued before keeps its months (above).
+func TestReportCardJSONOfAPeriodCard(t *testing.T) {
+	card := issuedCard()
+	card.Months, card.GeneralAverage = nil, "8.66"
+	card.Periods = []client.ReportCardPeriod{{ID: "per-1", Ordinal: 1, Name: "1.er trimestre"}}
+	card.Lines = []client.ReportCardLine{{SubjectID: "sub-1", SubjectName: "Matemáticas", Position: 1,
+		PeriodValues: map[string]string{"per-1": "9"}, TermAverage: "8.66"}}
+	f := &fakeReportCards{card: card}
+	req := closerReq(http.MethodGet, "/x", "")
+	req.SetPathValue("id", rcID)
+	rec := httptest.NewRecorder()
+	newReportCardsHandler(f).Get(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	body := rec.Body.String()
+	assert.Contains(t, body, `"periods":[{"id":"per-1","ordinal":1,"name":"1.er trimestre"}],"months":[]`)
+	assert.Contains(t, body, `"periods":{"per-1":9},"months":{},"average":8.66`)
+	assert.Contains(t, body, `"generalAverage":8.66`)
 }

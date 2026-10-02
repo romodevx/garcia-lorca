@@ -62,7 +62,7 @@ describe("step 1 — the summary", () => {
     expect(await screen.findByText("Se eliminará PRIMARIA y todo lo académico que depende de él.")).toBeInTheDocument();
     const goes = screen.getByRole("list", { name: "Se eliminará" });
     expect(within(goes).getByText("6 grados")).toBeInTheDocument();
-    expect(within(goes).getByText("2000 calificaciones")).toBeInTheDocument();
+    expect(within(goes).getByText("2000 calificaciones mensuales (anteriores)")).toBeInTheDocument();
     expect(within(goes).queryByText(/asignaturas|boletas/)).toBeNull();
     const stays = screen.getByRole("list", { name: "Se conserva" });
     expect(within(stays).getByText("10 cargos y 8 pagos en Finanzas")).toBeInTheDocument();

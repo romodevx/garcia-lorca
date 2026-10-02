@@ -1,6 +1,6 @@
 # ADR 0020: Boletas — foto fija en grades, cierre transaccional, redondeo
 
-- Status: Accepted
+- Status: Accepted — averages, columns and the term↔period mapping amended by ADR 0030 (T15)
 - Date: 2026-09-27
 - Context: T7 part B (cierre de periodos y boletas). The owner approved the
   rules; this records them and how they are built. Part A (config term months,

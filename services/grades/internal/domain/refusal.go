@@ -11,28 +11,39 @@ import (
 // a refusal (mark a cell, lock a row) without parsing Spanish.
 type RefusalCode string
 
-// The refusal codes the monthly grade surface answers with. The gateway
-// forwards them as the X-Error-Code response header.
+// The refusal codes the grade capture answers with (GRADE_DECIMALS is the
+// legacy per-term capture's). The gateway forwards them as the X-Error-Code
+// response header.
 const (
 	CodeGradeOutOfRange       RefusalCode = "GRADE_OUT_OF_RANGE"
 	CodeGradeDecimals         RefusalCode = "GRADE_DECIMALS"
 	CodeGradeNotNumber        RefusalCode = "GRADE_NOT_NUMBER"
-	CodeMonthOutsideCycle     RefusalCode = "MONTH_OUTSIDE_CYCLE"
 	CodeLevelNotGraded        RefusalCode = "LEVEL_NOT_GRADED"
 	CodeEnrollmentNotInGroup  RefusalCode = "ENROLLMENT_NOT_IN_GROUP"
-	CodeMonthPreviousGroup    RefusalCode = "MONTH_PREVIOUS_GROUP"
-	CodeMonthInFuture         RefusalCode = "MONTH_IN_FUTURE"
 	CodeLevelScaleUnavailable RefusalCode = "LEVEL_SCALE_NOT_CONFIGURED"
+)
+
+// The per-period capture codes (T15).
+const (
+	CodeGradeNotInteger     RefusalCode = "GRADE_NOT_INTEGER"
+	CodePeriodNotInGrade    RefusalCode = "PERIOD_NOT_IN_GRADE"
+	CodePeriodNotStarted    RefusalCode = "PERIOD_NOT_STARTED"
+	CodePeriodPreviousGroup RefusalCode = "PERIOD_PREVIOUS_GROUP"
+	// CodePeriodLocked is a write into a period whose level term is closed
+	// (409 at the edge).
+	CodePeriodLocked RefusalCode = "PERIOD_LOCKED"
+	// CodePeriodNotConfigured refuses closing a term when a grade of the level
+	// with active pupils has no evaluation period of that ordinal (409).
+	CodePeriodNotConfigured RefusalCode = "PERIOD_NOT_CONFIGURED"
 )
 
 // The period-closing codes (T7). They are conflicts with the period's state
 // (409 at the edge), not malformed input.
 const (
-	CodeMonthLocked       RefusalCode = "MONTH_LOCKED"
-	CodeMissingGrades     RefusalCode = "MISSING_GRADES"
-	CodeTermWithoutMonths RefusalCode = "TERM_WITHOUT_MONTHS"
-	CodeAlreadyClosed     RefusalCode = "ALREADY_CLOSED"
-	CodeAlreadyOpen       RefusalCode = "ALREADY_OPEN"
+	CodeMonthLocked   RefusalCode = "MONTH_LOCKED"
+	CodeMissingGrades RefusalCode = "MISSING_GRADES"
+	CodeAlreadyClosed RefusalCode = "ALREADY_CLOSED"
+	CodeAlreadyOpen   RefusalCode = "ALREADY_OPEN"
 )
 
 // RefusalError is a typed domain error (KindInvalid or KindConflict) naming its RefusalCode.

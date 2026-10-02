@@ -196,6 +196,31 @@ func TestAPupilWithoutGradesGetsASentenceNotADashTable(t *testing.T) {
 	assert.Equal(t, 1, strings.Count(text, "—"), "only the title's dash; no dash cells")
 }
 
+// T15: a card issued per evaluation period prints one column per period of
+// the pupil's grade (named as the school named it), each grade exactly as
+// captured (whole numbers), and averages truncated to 2 decimals as frozen.
+func TestAPeriodCardPrintsItsPeriods(t *testing.T) {
+	card := sampleCard()
+	card.TermName, card.TermOrdinal, card.Months, card.GeneralAverage = "2.º trimestre", 2, nil, "8.58"
+	card.Periods = []client.ReportCardPeriod{{ID: "p1", Ordinal: 1, Name: "1.er trimestre"}, {ID: "p2", Ordinal: 2, Name: "2.º trimestre"}}
+	card.Lines = []client.ReportCardLine{
+		{SubjectName: "Español", Position: 1, PeriodValues: map[string]string{"p1": "9", "p2": "8"}, TermAverage: "8.5"},
+		{SubjectName: "Matemáticas", Position: 2, PeriodValues: map[string]string{"p2": "7"}, TermAverage: "7"},
+	}
+	doc, err := reportcard.PDF(reportcard.Document{School: school, Card: card})
+	require.NoError(t, err)
+	text := textOf(t, doc)
+	for _, want := range []string{"Boleta de calificaciones — 2.º trimestre", "1.er trimestre", "Español", "Matemáticas",
+		"9", "8.5", "Promedio general", "8.58"} {
+		assert.Contains(t, text, want)
+	}
+	assert.NotContains(t, text, "Sep 2026", "a period card has no month columns")
+	assert.True(t, reportcard.HasGrades(card))
+	card.GeneralAverage = ""
+	card.Lines = []client.ReportCardLine{{SubjectName: "Español", PeriodValues: map[string]string{"p1": "9"}}}
+	assert.True(t, reportcard.HasGrades(card), "a period value is a grade")
+}
+
 func TestHasGrades(t *testing.T) {
 	card := sampleCard()
 	assert.True(t, reportcard.HasGrades(card))

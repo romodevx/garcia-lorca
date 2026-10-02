@@ -9,7 +9,7 @@ import { API_URL } from "../../api-url";
 import { gradeSheetClient } from "../../grades/api";
 import { EmptyHint, ErrorAlert } from "../config/parts";
 import { TabBar } from "../finance/parts";
-import { MonthlyGradeSheet } from "./MonthlyGradeSheet";
+import { PeriodGradeSheet } from "./PeriodGradeSheet";
 import { PeriodsPanel } from "./PeriodsPanel";
 import { useDirectorAssignments } from "./useDirectorAssignments";
 import { confirmLeavingUnsaved, useGradeSaves } from "./useGradeSaves";
@@ -29,7 +29,7 @@ const SECTIONS = [
 
 /**
  * Director-scoped grade capture (module_grades, `grades:read/write`): any
- * group's assignment, school-wide, then the same monthly sheet the teacher
+ * group's assignment, school-wide, then the same period sheet the teacher
  * uses. Names come from the sheet itself, so no students list is fetched. The
  * gateway is the security boundary; this is UX only.
  */
@@ -61,7 +61,7 @@ export function DirectorCapture({ onBack, permissions }: DirectorCaptureProps): 
         </div>
         <div>
           <h1 style={{ fontSize: 30, fontWeight: 800, color: "var(--text)" }}>Calificaciones</h1>
-          <p style={{ color: "var(--text-muted)", fontSize: 15, marginTop: 3 }}>Captura mensual por asignación · se guarda sola</p>
+          <p style={{ color: "var(--text-muted)", fontSize: 15, marginTop: 3 }}>Captura por periodo de evaluación · se guarda sola</p>
         </div>
       </div>
 
@@ -87,8 +87,8 @@ export function DirectorCapture({ onBack, permissions }: DirectorCaptureProps): 
             />
           </div>
         )}
-        {!failed && assignmentId === "" && <EmptyHint>Elige una asignación para capturar sus calificaciones del mes.</EmptyHint>}
-        {assignmentId !== "" && <MonthlyGradeSheet key={assignmentId} assignmentId={assignmentId} client={client} saves={saves} />}
+        {!failed && assignmentId === "" && <EmptyHint>Elige una asignación para capturar sus calificaciones del periodo.</EmptyHint>}
+        {assignmentId !== "" && <PeriodGradeSheet key={assignmentId} assignmentId={assignmentId} client={client} saves={saves} />}
       </div>
       )}
     </Page>

@@ -3,19 +3,19 @@ import { StyleSheet, View } from "react-native";
 import { useAppState } from "../state/AppState";
 import { ScreenTitle, Segment, type SegmentOption } from "../ui";
 import { AsyncErrorState } from "./AsyncStates";
-import { MonthlyGradesView } from "./grades/MonthlyGradesView";
+import { PeriodGradesView } from "./grades/PeriodGradesView";
 import { ReportCardsView } from "./grades/ReportCardsView";
 
-export type GradesView = "mes" | "boletas";
+export type GradesView = "periodo" | "boletas";
 
 const VIEWS: ReadonlyArray<SegmentOption<GradesView>> = [
-  { value: "mes", label: "Por mes" },
+  { value: "periodo", label: "Por periodo" },
   { value: "boletas", label: "Boletas" },
 ];
 
 export interface GradesScreenProps {
-  /** The phone's month by default (tests pin it); only a fallback for the first month shown. */
-  currentMonth?: string;
+  /** The phone's LOCAL date (YYYY-MM-DD) by default (tests pin it); picks the first period shown. */
+  today?: string;
   /** A segment the route asks for (a boleta push opens "boletas"). */
   requestedView?: GradesView;
   /** Changes on every new request, so asking for the same segment again re-applies it. */
@@ -23,12 +23,13 @@ export interface GradesScreenProps {
 }
 
 /**
- * Calificaciones: two segments — "Por mes" (each month's grade per subject, as
- * captured) and "Boletas" (the issued trimester report cards).
+ * Calificaciones: two segments — "Por periodo" (each evaluation period's grade
+ * per subject, as captured, with the averages) and "Boletas" (the issued
+ * report cards).
  */
-export function GradesScreen({ currentMonth, requestedView, requestKey }: GradesScreenProps): ReactElement {
+export function GradesScreen({ today, requestedView, requestKey }: GradesScreenProps): ReactElement {
   const { childError, refreshChildren } = useAppState();
-  const [view, setView] = useState<GradesView>(requestedView ?? "mes");
+  const [view, setView] = useState<GradesView>(requestedView ?? "periodo");
 
   useEffect(() => {
     if (requestedView !== undefined) {
@@ -48,8 +49,8 @@ export function GradesScreen({ currentMonth, requestedView, requestKey }: Grades
           subtitle="Revisa tu conexión e inténtalo de nuevo."
           onRetry={refreshChildren}
         />
-      ) : view === "mes" ? (
-        <MonthlyGradesView currentMonth={currentMonth} />
+      ) : view === "periodo" ? (
+        <PeriodGradesView today={today} />
       ) : (
         <ReportCardsView />
       )}

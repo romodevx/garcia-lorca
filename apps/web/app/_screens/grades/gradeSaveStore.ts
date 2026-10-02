@@ -1,4 +1,4 @@
-import { isRejectedValue, refusalScope, type GradeSheet, type GradeSheetClient, type MonthlyGradeKey } from "../../grades/monthly";
+import { isRejectedValue, refusalScope, type GradeSheetClient, type PeriodGradeKey, type PeriodSheet } from "../../grades/periodSheet";
 
 export type CellStatus =
   | { kind: "idle" }
@@ -9,21 +9,21 @@ export type CellStatus =
   | { kind: "failed" }
   /** The server refused the value itself; its words go on the row. */
   | { kind: "rejected"; message: string }
-  /** The month belongs to the pupil's previous group: the row can no longer change. */
+  /** The period belongs to the pupil's previous group: the row can no longer change. */
   | { kind: "locked"; reason: string }
-  /** The level cannot take grades right now: a notice for the whole sheet. */
+  /** The level or the period cannot take grades right now: a notice for the whole sheet. */
   | { kind: "sheetRefused"; message: string };
 
 type Grade = number | null;
 
-/** A sheet (assignment + month) or a whole assignment. */
+/** A sheet (assignment + period) or a whole assignment. */
 export interface SaveScope {
   assignmentId: string;
-  month?: string;
+  periodId?: string;
 }
 
 interface Cell {
-  key: MonthlyGradeKey;
+  key: PeriodGradeKey;
   /** What the server holds, as far as this page knows. */
   confirmed: Grade;
   /** What the teacher last asked for. */
@@ -37,9 +37,9 @@ interface Cell {
 
 const IDLE: CellStatus = { kind: "idle" };
 
-const idOf = (k: MonthlyGradeKey): string => `${k.assignmentId}|${k.month}|${k.enrollmentId}`;
-const inScope = (k: MonthlyGradeKey, s: SaveScope | undefined): boolean =>
-  s === undefined || (k.assignmentId === s.assignmentId && (s.month === undefined || k.month === s.month));
+const idOf = (k: PeriodGradeKey): string => `${k.assignmentId}|${k.periodId}|${k.enrollmentId}`;
+const inScope = (k: PeriodGradeKey, s: SaveScope | undefined): boolean =>
+  s === undefined || (k.assignmentId === s.assignmentId && (s.periodId === undefined || k.periodId === s.periodId));
 const isUnsaved = (c: Cell): boolean => c.status.kind === "failed" || c.status.kind === "rejected" || c.invalidText !== undefined;
 const format = (g: Grade): string => (g === null ? "" : String(g));
 /** Nothing the teacher can do on this row will store the value: stop, and do not resend. */
@@ -59,9 +59,9 @@ function refusalOutcome(err: unknown): CellStatus {
 
 /**
  * Every grade cell's save, for the whole capture screen — it lives above the
- * month and assignment switches, so nothing typed is forgotten by one.
+ * period and assignment switches, so nothing typed is forgotten by one.
  *
- * Per cell (assignment, month, enrollment) at most ONE request is in flight.
+ * Per cell (assignment, period, enrollment) at most ONE request is in flight.
  * A value asked for meanwhile replaces any earlier waiting one and is sent
  * when the current request settles; "saved" means the server confirmed the
  * latest value asked for. A plain external store: React reads it through
@@ -82,7 +82,7 @@ export class GradeSaveStore {
   getVersion = (): number => this.version;
 
   /** Saves (or, for null, clears) a cell. `baseline` is the loaded value, for a cell not seen yet. */
-  commit(key: MonthlyGradeKey, next: Grade, baseline: Grade): void {
+  commit(key: PeriodGradeKey, next: Grade, baseline: Grade): void {
     const cell = this.cellFor(key, baseline);
     cell.invalidText = undefined;
     // The same value again is a no-op — also on a failed cell, whose resend is the explicit retry.
@@ -98,7 +98,7 @@ export class GradeSaveStore {
     this.send(cell);
   }
 
-  retry(key: MonthlyGradeKey): void {
+  retry(key: PeriodGradeKey): void {
     const cell = this.cells.get(idOf(key));
     if (cell?.status.kind === "failed" && cell.sent === undefined) this.send(cell);
   }
@@ -108,7 +108,7 @@ export class GradeSaveStore {
   }
 
   /** The teacher is typing again: the server's old complaint no longer applies. */
-  dismissRejection(key: MonthlyGradeKey): void {
+  dismissRejection(key: PeriodGradeKey): void {
     const cell = this.cells.get(idOf(key));
     if (cell?.status.kind !== "rejected") return;
     // What the server refused was never stored: compare the next commit with what was.
@@ -117,22 +117,22 @@ export class GradeSaveStore {
     this.notify();
   }
 
-  markInvalid(key: MonthlyGradeKey, text: string, baseline: Grade = null): void {
+  markInvalid(key: PeriodGradeKey, text: string, baseline: Grade = null): void {
     this.cellFor(key, baseline).invalidText = text;
     this.notify();
   }
 
-  statusOf(key: MonthlyGradeKey): CellStatus {
+  statusOf(key: PeriodGradeKey): CellStatus {
     return this.cells.get(idOf(key))?.status ?? IDLE;
   }
 
-  confirmedOf(key: MonthlyGradeKey, fallback: Grade): Grade {
+  confirmedOf(key: PeriodGradeKey, fallback: Grade): Grade {
     const cell = this.cells.get(idOf(key));
     return cell === undefined ? fallback : cell.confirmed;
   }
 
   /** The text to put back in a remounted field: an unsent or unconfirmed value. */
-  draftOf(key: MonthlyGradeKey): string | undefined {
+  draftOf(key: PeriodGradeKey): string | undefined {
     const cell = this.cells.get(idOf(key));
     if (cell === undefined) return undefined;
     if (cell.invalidText !== undefined) return cell.invalidText;
@@ -174,9 +174,11 @@ export class GradeSaveStore {
   }
 
   /** A freshly loaded sheet is the truth for its clean cells; unsaved drafts stay. */
-  adopt(sheet: GradeSheet): void {
+  adopt(sheet: PeriodSheet): void {
+    const { periodId } = sheet;
+    if (periodId === null) return;
     for (const row of sheet.rows) {
-      const id = idOf({ assignmentId: sheet.assignmentId, month: sheet.month, enrollmentId: row.enrollmentId });
+      const id = idOf({ assignmentId: sheet.assignmentId, periodId, enrollmentId: row.enrollmentId });
       const cell = this.cells.get(id);
       if (cell === undefined || cell.sent !== undefined) continue;
       // A row the server says cannot change keeps no draft: there is nothing to save.
@@ -186,7 +188,7 @@ export class GradeSaveStore {
     this.notify();
   }
 
-  private cellFor(key: MonthlyGradeKey, baseline: Grade): Cell {
+  private cellFor(key: PeriodGradeKey, baseline: Grade): Cell {
     const id = idOf(key);
     let cell = this.cells.get(id);
     if (cell === undefined) {

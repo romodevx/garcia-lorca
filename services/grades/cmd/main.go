@@ -7,6 +7,10 @@
 // and students (enrollments) — both reached over Connect as server-to-server
 // clients (network-private in shared environments).
 //
+// T15 replaces monthly capture with capture per evaluation period
+// (PeriodGradesService): "today" is the school's calendar day
+// (SCHOOL_TIMEZONE, default America/Mexico_City).
+//
 // T7 adds period closing and report cards (PeriodsService). An issued report
 // card is announced as GradesPublished on grades-events through a
 // transactional outbox (queued with the close, drained after its commit and by
@@ -18,10 +22,12 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"time"
+	_ "time/tzdata" // the school's zone must load in a distroless image
 
 	connect "connectrpc.com/connect"
 	"github.com/google/uuid"
@@ -55,6 +61,9 @@ const (
 	// http://config:8080 / http://students:8080.
 	defaultConfigBaseURL   = "http://localhost:8101"
 	defaultStudentsBaseURL = "http://localhost:8092"
+	// defaultSchoolTimezone is the school's calendar (SCHOOL_TIMEZONE), as in
+	// attendance and comms.
+	defaultSchoolTimezone = "America/Mexico_City"
 
 	readHeaderTimeout = 10 * time.Second
 	readTimeout       = 30 * time.Second
@@ -123,6 +132,10 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	loc, err := schoolLocation()
+	if err != nil {
+		return nil, nil, nil, err
+	}
 
 	repo := pgadapter.NewRepository(db, tenantID)
 
@@ -143,22 +156,26 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 
 	newID := func() string { return uuid.NewString() }
 	// The same config client reads the catalog (group → level scale, cycles,
-	// a group's assignments) for the monthly knot and the term-level check.
+	// a group's assignments, the grades' evaluation periods) for the period
+	// knot and the term-level check.
 	svc := usecase.NewGradesService(repo, assignments, assignments, enrollments, tenantID, newID, time.Now)
-	monthly := usecase.NewMonthlyGradesService(repo, assignments, assignments, enrollments, tenantID, newID, time.Now)
+	periodGrades := usecase.NewPeriodGradesService(usecase.PeriodGradesDeps{
+		Grades: repo, Assignments: assignments, Catalog: assignments, Periods: assignments, Enrollments: enrollments,
+		TenantID: tenantID, NewID: newID, Now: time.Now, Location: loc,
+	})
 	// Period closing (T7): the same repository stores closures and report
 	// cards; the students client names the pupils a report card freezes.
 	periods := usecase.NewPeriodsService(usecase.PeriodsDeps{
-		Periods: repo, Grades: repo, Terms: assignments, Catalog: assignments, Enrollments: enrollments,
-		Students: enrollments, Publisher: pubsubadapter.NewEventPublisher(events), TenantID: tenantID,
-		NewID: newID, Now: time.Now, Log: log,
+		Periods: repo, Grades: repo, EvalPeriods: assignments, Terms: assignments, Catalog: assignments,
+		Enrollments: enrollments, Students: enrollments, Publisher: pubsubadapter.NewEventPublisher(events),
+		TenantID: tenantID, NewID: newID, Now: time.Now, Location: loc, Log: log,
 	})
 	health := usecase.NewHealthService(serviceName)
 	// Level deletion (ADR 0021): grades' step of the gateway's saga. The
 	// gateway's hourly sweep (always warm, unlike this scale-to-zero service)
 	// purges each batch past config's restorable_until via PurgeLevelBatch.
 	levels := usecase.NewLevelArchiveService(repo, time.Now)
-	handler := grpcadapter.NewGradesHandler(svc, monthly, periods, health).WithLevelArchive(levels)
+	handler := grpcadapter.NewGradesHandler(svc, periodGrades, periods, health).WithLevelArchive(levels)
 
 	mux := http.NewServeMux()
 	path, h := gradesv1connect.NewGradesServiceHandler(handler, connect.WithRecover(recoverFn))
@@ -238,6 +255,18 @@ func openDB() (*gorm.DB, error) {
 
 func recoverFn(_ context.Context, _ connect.Spec, _ http.Header, _ any) error {
 	return connect.NewError(connect.CodeInternal, errors.New("internal error"))
+}
+
+// schoolLocation is the school's time zone (SCHOOL_TIMEZONE, default
+// America/Mexico_City). An unknown zone fails startup: falling back to UTC
+// would open a period a day early after 18:00.
+func schoolLocation() (*time.Location, error) {
+	name := envOr("SCHOOL_TIMEZONE", defaultSchoolTimezone)
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		return nil, fmt.Errorf("SCHOOL_TIMEZONE %q: %w", name, err)
+	}
+	return loc, nil
 }
 
 func envOr(key, fallback string) string {

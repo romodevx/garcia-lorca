@@ -18,7 +18,7 @@ const config = vi.mocked(configApi);
 
 const PERIOD: GradingPeriod = {
   termId: "t1", termName: "TRIMESTRE 1", ordinal: 1, levelId: "l1", levelName: "PRIMARIA",
-  months: ["2026-09", "2026-10", "2026-11"], status: "closed", version: 2, progress: { captured: 8, expected: 36 },
+  startsOn: "2026-08-24", endsOn: "2026-11-30", status: "closed", version: 2, progress: { captured: 8, expected: 36 },
 };
 
 afterEach(() => vi.clearAllMocks());

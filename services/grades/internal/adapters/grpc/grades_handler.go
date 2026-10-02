@@ -23,18 +23,26 @@ import (
 var _ gradesv1connect.GradesServiceHandler = (*GradesHandler)(nil)
 
 // GradesHandler adapts the grades use cases to the generated Connect service.
+//
+// It embeds the generated Unimplemented handler for the monthly RPCs retired
+// in T15 (UpsertMonthlyGrade, ClearMonthlyGrade, GetMonthlySheet,
+// GetEnrollmentMonthlyGrades — deprecated in the contract): they answer
+// Unimplemented, so nothing can write or depend on monthly_grades any more.
+// Every other RPC is implemented explicitly below.
 type GradesHandler struct {
-	grades  *usecase.GradesService
-	monthly *usecase.MonthlyGradesService
-	periods PeriodsUseCase
-	health  *usecase.HealthService
-	levels  *usecase.LevelArchiveService
+	gradesv1connect.UnimplementedGradesServiceHandler
+
+	grades       *usecase.GradesService
+	periodGrades *usecase.PeriodGradesService
+	periods      PeriodsUseCase
+	health       *usecase.HealthService
+	levels       *usecase.LevelArchiveService
 }
 
-// NewGradesHandler wires the handler to the term grades, monthly grades,
+// NewGradesHandler wires the handler to the term grades, period grades (T15),
 // period closing (T7) and health use cases.
-func NewGradesHandler(grades *usecase.GradesService, monthly *usecase.MonthlyGradesService, periods PeriodsUseCase, health *usecase.HealthService) *GradesHandler {
-	return &GradesHandler{grades: grades, monthly: monthly, periods: periods, health: health}
+func NewGradesHandler(grades *usecase.GradesService, periodGrades *usecase.PeriodGradesService, periods PeriodsUseCase, health *usecase.HealthService) *GradesHandler {
+	return &GradesHandler{grades: grades, periodGrades: periodGrades, periods: periods, health: health}
 }
 
 // Health is the liveness/ping probe present on every service.

@@ -74,6 +74,26 @@ func (s GradingScale) ParseValue(text string) (GradeValue, error) {
 	return GradeValue{hundredths: int(scaled.Num().Int64())}, nil
 }
 
+// ParseWholeValue judges a grade the way T15 captures it: a WHOLE number
+// inside the scale's range, whatever decimals the level allows (owner
+// decision: grades are integers; only system averages carry decimals). The
+// text is read exactly; the range is checked first, so 10.5 on a 5–10 scale
+// reads "out of range" and 9.5 reads "integers only" (GRADE_NOT_INTEGER).
+func (s GradingScale) ParseWholeValue(text string) (GradeValue, error) {
+	r, ok := parseDecimal(text)
+	if !ok {
+		return GradeValue{}, Refusal(CodeGradeNotNumber, "La calificación debe ser un número")
+	}
+	if r.Cmp(ratHundredths(s.min)) < 0 || r.Cmp(ratHundredths(s.max)) > 0 {
+		return GradeValue{}, Refusal(CodeGradeOutOfRange, fmt.Sprintf(
+			"La calificación debe estar entre %s y %s", formatHundredths(s.min), formatHundredths(s.max)))
+	}
+	if !r.IsInt() {
+		return GradeValue{}, Refusal(CodeGradeNotInteger, decimalsMessage(0))
+	}
+	return GradeValue{hundredths: int(r.Num().Int64()) * hundredthsPerUnit}, nil
+}
+
 // Admits reports whether a stored value fits this scale: inside the range and
 // with no more decimals than it allows — what ParseValue would have accepted.
 func (s GradingScale) Admits(v GradeValue) bool {

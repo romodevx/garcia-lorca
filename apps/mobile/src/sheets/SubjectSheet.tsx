@@ -1,16 +1,15 @@
 import { type ReactElement } from "react";
 import { StyleSheet, Text, View } from "react-native";
-import type { GradeScale, MonthlySubject } from "../api/grades";
-import { monthLabel } from "../screens/attendanceView";
-import { formatAverage, formatGrade, gradeLabel, isFailing, subjectAverage } from "../screens/gradesView";
+import type { EvaluationPeriod, GradeScale, PeriodSubject } from "../api/grades";
+import { formatAverage, formatGrade, gradeLabel, isFailing, subjectAverageOf } from "../screens/gradesView";
 import { useTheme } from "../theme";
 import { BottomSheet, Button } from "../ui";
 
 export interface SubjectSheetProps {
   visible: boolean;
-  subject: MonthlySubject | null;
-  /** Every month of the cycle, oldest first. */
-  months: string[];
+  subject: PeriodSubject | null;
+  /** Every evaluation period of the grade, by ordinal. */
+  periods: EvaluationPeriod[];
   scale: GradeScale | null;
   onClose: () => void;
 }
@@ -19,18 +18,19 @@ const MISSING = "—";
 const FAILED = "Reprobada";
 
 /**
- * One subject across the whole cycle: its average on top, then each month with
- * its grade ("—" when not captured). A failing grade says "Reprobada" in words
- * as well as in colour.
+ * One subject across the whole cycle: its average on top (the exact mean of its
+ * period grades, truncated to 2 decimals), then each period with its grade ("—"
+ * when not captured). A failing grade says "Reprobada" in words as well as in
+ * colour.
  */
-export function SubjectSheet({ visible, subject, months, scale, onClose }: SubjectSheetProps): ReactElement {
+export function SubjectSheet({ visible, subject, periods, scale, onClose }: SubjectSheetProps): ReactElement {
   const theme = useTheme();
   if (subject === null) {
     return <BottomSheet visible={visible} onClose={onClose} />;
   }
   const name = subject.subjectName || "Materia sin nombre";
-  const average = subjectAverage(subject);
-  const averageText = average === null ? MISSING : formatAverage(average);
+  const average = subjectAverageOf(subject);
+  const averageText = average === undefined ? MISSING : formatAverage(average);
 
   return (
     <BottomSheet visible={visible} onClose={onClose}>
@@ -39,7 +39,7 @@ export function SubjectSheet({ visible, subject, months, scale, onClose }: Subje
       </Text>
       <View
         accessible
-        accessibilityLabel={`Promedio del ciclo: ${average === null ? "sin calificaciones aún" : averageText}`}
+        accessibilityLabel={`Promedio del ciclo: ${average === undefined ? "sin calificaciones aún" : averageText}`}
         style={styles.averageRow}
       >
         <Text style={[styles.averageLabel, { color: theme.colors.text2, fontFamily: theme.fonts.uiSemi }]}>Promedio del ciclo</Text>
@@ -47,18 +47,18 @@ export function SubjectSheet({ visible, subject, months, scale, onClose }: Subje
       </View>
 
       <View style={[styles.card, { backgroundColor: theme.colors.surface, borderColor: theme.colors.line }]}>
-        {months.map((month, i) => {
-          const value = subject.grades[month];
+        {periods.map((period, i) => {
+          const value = subject.grades[period.id];
           const failed = value !== undefined && isFailing(value, scale);
           return (
             <View
-              key={month}
+              key={period.id}
               accessible
-              accessibilityLabel={gradeLabel(name, month, value, scale)}
+              accessibilityLabel={gradeLabel(name, period.name, value, scale)}
               style={[styles.row, i > 0 ? { borderTopColor: theme.colors.line, borderTopWidth: StyleSheet.hairlineWidth } : null]}
             >
-              <View style={styles.monthText}>
-                <Text style={[styles.month, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]}>{monthLabel(month)}</Text>
+              <View style={styles.periodText}>
+                <Text style={[styles.period, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]}>{period.name}</Text>
                 {failed ? <Text style={[styles.failed, { color: theme.colors.bad, fontFamily: theme.fonts.uiExtra }]}>{FAILED}</Text> : null}
               </View>
               <Text
@@ -88,8 +88,8 @@ const styles = StyleSheet.create({
   averageValue: { fontSize: 28, fontWeight: "800" },
   card: { borderWidth: 1, borderRadius: 20, overflow: "hidden" },
   row: { flexDirection: "row", alignItems: "center", gap: 12, minHeight: MIN_TOUCH_TARGET + 8, paddingVertical: 12, paddingHorizontal: 16 },
-  monthText: { flex: 1 },
-  month: { fontSize: 17, fontWeight: "800" },
+  periodText: { flex: 1 },
+  period: { fontSize: 17, fontWeight: "800" },
   failed: { fontSize: 15, fontWeight: "800", marginTop: 2 },
   grade: { fontSize: 22, fontWeight: "800" },
   close: { marginTop: 18 },

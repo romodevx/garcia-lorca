@@ -408,6 +408,8 @@ export interface LevelDeletionCounts {
   enrollmentTransfers?: number;
   attendanceSessions?: number;
   gradeEntries?: number;
+  /** Grades by evaluation period (T15). */
+  periodGrades?: number;
   periodClosures?: number;
 }
 

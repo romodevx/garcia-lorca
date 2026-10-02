@@ -36,6 +36,13 @@ type stubCatalog struct {
 	teachers    []*configv1.Teacher
 	terms       []*configv1.Term
 	termsReq    *configv1.ListTermsRequest
+	periods     []*configv1.EvaluationPeriod
+	periodsReq  *configv1.ListEvaluationPeriodsRequest
+}
+
+func (s *stubCatalog) ListEvaluationPeriods(_ context.Context, r *connect.Request[configv1.ListEvaluationPeriodsRequest]) (*connect.Response[configv1.ListEvaluationPeriodsResponse], error) {
+	s.periodsReq = r.Msg
+	return connect.NewResponse(&configv1.ListEvaluationPeriodsResponse{Periods: s.periods}), nil
 }
 
 func (s *stubCatalog) ListSubjects(context.Context, *connect.Request[configv1.ListSubjectsRequest]) (*connect.Response[configv1.ListSubjectsResponse], error) {
@@ -146,6 +153,7 @@ func TestLevelOfGroupWalksGroupGradeLevel(t *testing.T) {
 	got, err := c.LevelOfGroup(context.Background(), "grp-1")
 	require.NoError(t, err)
 	assert.Equal(t, "lvl-1", got.ID)
+	assert.Equal(t, "gl-1", got.GradeLevelID, "the group's grade, whose evaluation periods it uses")
 	assert.True(t, got.GradingEnabled)
 	assert.Equal(t, 500, got.Scale.MinHundredths())
 	assert.Equal(t, 1000, got.Scale.MaxHundredths())
@@ -279,7 +287,7 @@ func TestLevelCatalogReadsOnlyTheLevel(t *testing.T) {
 	assert.Equal(t, "Primaria", got.LevelName)
 	assert.True(t, got.GradingEnabled)
 	assert.Equal(t, 600, got.Scale.PassingHundredths())
-	assert.Equal(t, []ports.GroupRef{{ID: "grp-1", Label: "1° PRIMARIA · A"}}, got.Groups)
+	assert.Equal(t, []ports.GroupRef{{ID: "grp-1", Label: "1° PRIMARIA · A", GradeLevelID: "gl-1"}}, got.Groups)
 	require.Len(t, got.Assignments, 1)
 	assert.Equal(t, "a1", got.Assignments[0].ID)
 	assert.Equal(t, "cyc-1", stub.listReq.GetCycleId())
@@ -341,4 +349,39 @@ func TestLevelLookupsCarryTheDeletingStatus(t *testing.T) {
 			assert.Equal(t, want, catalog.Deleting, "a period's close/reopen reads it here")
 		})
 	}
+}
+
+// T15: a grade's evaluation periods are read in ONE call, narrowed by cycle,
+// level and/or grade, with their dates as calendar days.
+func TestEvaluationPeriodsProjectsDates(t *testing.T) {
+	stub := catalogStub()
+	stub.periods = []*configv1.EvaluationPeriod{
+		{Id: "p2", GradeLevelId: "gl-1", Ordinal: 2, Name: "2.º trimestre",
+			StartsOn: timestamppb.New(time.Date(2026, 12, 7, 0, 0, 0, 0, time.UTC)),
+			EndsOn:   timestamppb.New(time.Date(2027, 3, 26, 0, 0, 0, 0, time.UTC))},
+		{Id: "p1", GradeLevelId: "gl-1", Ordinal: 1, Name: "1.er trimestre",
+			StartsOn: timestamppb.New(time.Date(2026, 8, 24, 0, 0, 0, 0, time.UTC)),
+			EndsOn:   timestamppb.New(time.Date(2026, 11, 30, 0, 0, 0, 0, time.UTC))},
+	}
+	got, err := newCatalogClient(t, stub).EvaluationPeriods(context.Background(), "cyc-1", "lvl-1", "gl-1")
+	require.NoError(t, err)
+	assert.Equal(t, "cyc-1", stub.periodsReq.GetCycleId())
+	assert.Equal(t, "lvl-1", stub.periodsReq.GetLevelId())
+	assert.Equal(t, "gl-1", stub.periodsReq.GetGradeLevelId())
+	require.Len(t, got, 2)
+	assert.Equal(t, domain.EvaluationPeriod{ID: "p1", GradeLevelID: "gl-1", Ordinal: 1, Name: "1.er trimestre",
+		StartsOn: time.Date(2026, 8, 24, 0, 0, 0, 0, time.UTC), EndsOn: time.Date(2026, 11, 30, 0, 0, 0, 0, time.UTC)}, got[0],
+		"by grade, then ordinal")
+}
+
+// A level's catalog says which grade each group belongs to (a report card's
+// columns are its grade's periods).
+func TestLevelCatalogGroupsCarryTheirGrade(t *testing.T) {
+	stub := catalogStub()
+	stub.gradeLevels = []*configv1.GradeLevel{{Id: "gl-1", LevelId: "lvl-1", Name: "1°"}}
+	stub.allGroups = []*configv1.Group{{Id: "grp-1", CycleId: "cyc-1", GradeLevelId: "gl-1", Name: "A"}}
+	got, err := newCatalogClient(t, stub).LevelCatalog(context.Background(), "cyc-1", "lvl-1")
+	require.NoError(t, err)
+	require.Len(t, got.Groups, 1)
+	assert.Equal(t, ports.GroupRef{ID: "grp-1", Label: "1° · A", GradeLevelID: "gl-1"}, got.Groups[0])
 }

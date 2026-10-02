@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { GradeRequestError, type GradeSheet, type GradeSheetClient, type SavedMonthlyGrade } from "../../grades/monthly";
+import { type GradeSheetClient, type PeriodSheet, type SavedPeriodGrade } from "../../grades/periodSheet";
+import { GradeRequestError } from "../../grades/requestError";
 import { GradeSaveStore } from "./gradeSaveStore";
 
 interface Call {
@@ -16,21 +17,25 @@ function manualClient(): { client: GradeSheetClient; calls: Call[] } {
     new Promise<T>((resolve, reject) => calls.push({ kind, value, settle: { resolve: () => resolve(result), reject } }));
   const client: GradeSheetClient = {
     load: vi.fn(),
-    save: (i) => pending<SavedMonthlyGrade>("save", i.value, { ...i, updatedAt: "x" }),
+    save: (i) => pending<SavedPeriodGrade>("save", i.value, { ...i, updatedAt: "x" }),
     remove: () => pending<void>("remove", null, undefined),
   };
   return { client, calls };
 }
 
-const KEY = { assignmentId: "a1", month: "2026-09", enrollmentId: "en1" };
+const KEY = { assignmentId: "a1", periodId: "p1", enrollmentId: "en1" };
 const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
 
-function sheet(value: number | null): GradeSheet {
+function sheet(value: number | null): PeriodSheet {
   return {
     assignmentId: "a1",
-    month: "2026-09",
-    months: ["2026-09"],
-    scale: { min: 5, max: 10, decimals: 1, passing: 6 },
+    periodId: "p1",
+    periods: [{ id: "p1", ordinal: 1, name: "1.er trimestre", startsOn: "2026-08-24", endsOn: "2026-11-30" }],
+    currentPeriodId: "p1",
+    today: "2026-10-01",
+    closedPeriodIds: [],
+    scale: { min: 5, max: 10, decimals: 0, passing: 6 },
+    gradingEnabled: true,
     editable: true,
     rows: [{ enrollmentId: "en1", studentId: "s1", name: "Ada", value, updatedAt: null, rowEditable: true }],
   };
@@ -120,22 +125,22 @@ describe("GradeSaveStore — what is not saved", () => {
     const { client, calls } = manualClient();
     const store = new GradeSaveStore(client);
     const other = { ...KEY, enrollmentId: "en2" };
-    const october = { ...KEY, month: "2026-10" };
+    const secondPeriod = { ...KEY, periodId: "p2" };
 
     store.commit(KEY, 8, null);
     store.commit(other, 9, null);
-    store.markInvalid(october, "11");
+    store.markInvalid(secondPeriod, "11");
     calls[0]!.settle.reject(new Error("network"));
-    calls[1]!.settle.reject(new GradeRequestError(400, "Solo se permite 1 decimal"));
+    calls[1]!.settle.reject(new GradeRequestError(400, "Solo se permiten calificaciones enteras"));
     await flush();
 
     expect(store.unsavedCount()).toBe(3);
-    expect(store.unsavedCount({ assignmentId: "a1", month: "2026-09" })).toBe(2);
+    expect(store.unsavedCount({ assignmentId: "a1", periodId: "p1" })).toBe(2);
     expect(store.unsavedCount({ assignmentId: "a2" })).toBe(0);
     expect(store.retryableCount()).toBe(1);
     expect(store.draftOf(KEY)).toBe("8");
-    expect(store.draftOf(october)).toBe("11");
-    expect(store.statusOf(other)).toEqual({ kind: "rejected", message: "Solo se permite 1 decimal" });
+    expect(store.draftOf(secondPeriod)).toBe("11");
+    expect(store.statusOf(other)).toEqual({ kind: "rejected", message: "Solo se permiten calificaciones enteras" });
   });
 
   it("retryAll resends every failed cell's value", async () => {
@@ -168,13 +173,13 @@ describe("GradeSaveStore — what is not saved", () => {
   });
 });
 
-describe("GradeSaveStore — loading a month", () => {
-  it("settled waits for the month's saves in flight", async () => {
+describe("GradeSaveStore — loading a period", () => {
+  it("settled waits for the period's saves in flight", async () => {
     const { client, calls } = manualClient();
     const store = new GradeSaveStore(client);
     store.commit(KEY, 8, null);
     let done = false;
-    void store.settled({ assignmentId: "a1", month: "2026-09" }).then(() => { done = true; });
+    void store.settled({ assignmentId: "a1", periodId: "p1" }).then(() => { done = true; });
     await flush();
     expect(done).toBe(false);
 
@@ -183,11 +188,11 @@ describe("GradeSaveStore — loading a month", () => {
     expect(done).toBe(true);
   });
 
-  it("settled does not wait for other months", async () => {
+  it("settled does not wait for other periods", async () => {
     const { client } = manualClient();
     const store = new GradeSaveStore(client);
     store.commit(KEY, 8, null);
-    await expect(store.settled({ assignmentId: "a1", month: "2026-10" })).resolves.toBeUndefined();
+    await expect(store.settled({ assignmentId: "a1", periodId: "p2" })).resolves.toBeUndefined();
   });
 
   it("adopt takes the server's values for clean cells and keeps unsaved drafts", async () => {
@@ -210,15 +215,15 @@ describe("GradeSaveStore — loading a month", () => {
 describe("GradeSaveStore — refusals by code", () => {
   const refused = (code: string, text: string): GradeRequestError => new GradeRequestError(400, text, code);
 
-  it("MONTH_PREVIOUS_GROUP locks the row with the reason and is not unsaved", async () => {
+  it("PERIOD_PREVIOUS_GROUP locks the row with the reason and is not unsaved", async () => {
     const { client, calls } = manualClient();
     const store = new GradeSaveStore(client);
 
     store.commit(KEY, 8, null);
-    calls[0]!.settle.reject(refused("MONTH_PREVIOUS_GROUP", "Ese mes corresponde al grupo anterior del alumno"));
+    calls[0]!.settle.reject(refused("PERIOD_PREVIOUS_GROUP", "Ese periodo corresponde al grupo anterior del alumno"));
     await flush();
 
-    expect(store.statusOf(KEY)).toEqual({ kind: "locked", reason: "Ese mes corresponde al grupo anterior del alumno" });
+    expect(store.statusOf(KEY)).toEqual({ kind: "locked", reason: "Ese periodo corresponde al grupo anterior del alumno" });
     expect(store.unsavedCount()).toBe(0);
     expect(store.draftOf(KEY)).toBeUndefined();
   });
@@ -231,8 +236,8 @@ describe("GradeSaveStore — refusals by code", () => {
     calls[0]!.settle.reject(refused("LEVEL_SCALE_NOT_CONFIGURED", "El nivel no tiene escala"));
     await flush();
 
-    expect(store.sheetNotice({ assignmentId: "a1", month: "2026-09" })).toBe("El nivel no tiene escala");
-    expect(store.sheetNotice({ assignmentId: "a1", month: "2026-10" })).toBeUndefined();
+    expect(store.sheetNotice({ assignmentId: "a1", periodId: "p1" })).toBe("El nivel no tiene escala");
+    expect(store.sheetNotice({ assignmentId: "a1", periodId: "p2" })).toBeUndefined();
     expect(store.statusOf(KEY).kind).not.toBe("rejected");
     expect(store.unsavedCount()).toBe(0);
   });
@@ -242,10 +247,10 @@ describe("GradeSaveStore — refusals by code", () => {
     const store = new GradeSaveStore(client);
 
     store.commit(KEY, 8, null);
-    calls[0]!.settle.reject(refused("GRADE_DECIMALS", "Solo se permite 1 decimal"));
+    calls[0]!.settle.reject(refused("GRADE_DECIMALS", "Solo se permiten calificaciones enteras"));
     await flush();
 
-    expect(store.statusOf(KEY)).toEqual({ kind: "rejected", message: "Solo se permite 1 decimal" });
+    expect(store.statusOf(KEY)).toEqual({ kind: "rejected", message: "Solo se permiten calificaciones enteras" });
   });
 
   it("a reloaded read-only row drops the draft kept for it", async () => {
@@ -257,7 +262,7 @@ describe("GradeSaveStore — refusals by code", () => {
     expect(store.unsavedCount()).toBe(1);
 
     const loaded = sheet(null);
-    store.adopt({ ...loaded, rows: loaded.rows.map((r) => ({ ...r, rowEditable: false, rowReadOnlyReason: "Ese mes corresponde al grupo anterior del alumno" })) });
+    store.adopt({ ...loaded, rows: loaded.rows.map((r) => ({ ...r, rowEditable: false, rowReadOnlyReason: "Ese periodo corresponde al grupo anterior del alumno" })) });
 
     expect(store.unsavedCount()).toBe(0);
     expect(store.draftOf(KEY)).toBeUndefined();

@@ -33,6 +33,7 @@ export const UNDO_MS = 8_000;
 const FIELD_ORDER: readonly PeriodField[] = ["name", "startsOn", "endsOn"];
 const SAVE_FAILED = "No se pudieron guardar los periodos. Intenta de nuevo.";
 const COPY_FAILED = "No se pudieron copiar los periodos. Intenta de nuevo.";
+const RESTORE_FAILED = "No se pudieron restaurar los periodos de este grado.";
 const SAVE_SOURCE_FIRST = "Guarda primero los cambios de este grado para copiarlos.";
 const SOURCE_EMPTY = "Este grado aún no tiene periodos guardados para copiar.";
 
@@ -291,8 +292,10 @@ export function useLevelPeriods(levelId: string): LevelPeriods {
       try {
         const restored = await saveGradeEvaluationPeriods(API_URL, gradeId, cycle.id, toInputs(draftsOf(periods)));
         if (shownCycle.current === cycle.id) adopt({ [gradeId]: restored });
-      } catch {
-        setErrors((prev) => ({ ...prev, [gradeId]: "No se pudieron restaurar los periodos de este grado." }));
+      } catch (err) {
+        // PERIOD_HAS_GRADES names the period that cannot go: say it, not a generic failure.
+        const detail = err instanceof ConfigError && err.detail !== "" ? err.detail : RESTORE_FAILED;
+        setErrors((prev) => ({ ...prev, [gradeId]: detail }));
       }
     }
   }, [undo, cycle, adopt]);
