@@ -140,12 +140,13 @@ func (s *ScheduleService) Day(ctx context.Context, cycleID string, date time.Tim
 	if strings.TrimSpace(cycleID) == "" {
 		return ScheduleDay{}, glerrors.New(glerrors.KindInvalid, "cycle id is required")
 	}
-	if _, err := s.repo.GetCycle(ctx, cycleID); err != nil {
+	cycle, err := s.repo.GetCycle(ctx, cycleID)
+	if err != nil {
 		return ScheduleDay{}, err
 	}
 	date = asDate(date)
 	day := ScheduleDay{Date: date, Weekday: domain.WeekdayOf(date)}
-	if day.Weekday > domain.LastSchoolDay {
+	if day.Weekday > domain.LastSchoolDay || date.Before(cycle.StartsOn()) || date.After(cycle.EndsOn()) {
 		return day, nil
 	}
 	blocks, err := s.repo.ListScheduleBlocks(ctx, cycleID)
@@ -229,7 +230,8 @@ func (s *ScheduleService) UpdateBlock(ctx context.Context, id string, in BlockIn
 	return p.block, nil
 }
 
-// DeleteBlock removes a class from the base timetable, with its changes.
+// DeleteBlock removes a class from the base timetable, with its changes —
+// unless dropping them would double-book someone on a date ahead.
 func (s *ScheduleService) DeleteBlock(ctx context.Context, id, reason string, by domain.Actor) error {
 	b, cat, err := s.blockAndCatalog(ctx, id)
 	if err != nil {
@@ -246,8 +248,24 @@ func (s *ScheduleService) DeleteBlock(ctx context.Context, id, reason string, by
 		if err != nil {
 			return err
 		}
+		undone, err := s.checkRemoval(tx, current, names)
+		if err != nil {
+			return err
+		}
+		blocks, err := tx.Blocks(current.CycleID())
+		if err != nil {
+			return err
+		}
 		if err := tx.DeleteBlock(id); err != nil {
 			return err
+		}
+		// The class's changes ahead go with it (FK cascade): each undo is
+		// recorded, as every override and its undo always are.
+		for _, o := range undone {
+			if err := tx.AppendEvent(s.event(cat.Cycle.ID(), by, domain.ActionOverrideDeleted, o.BlockID(), o.ID(), o.Date(), reason,
+				"Se deshizo al quitar la clase — "+overrideSummaryIn(blocks, o, names))); err != nil {
+				return err
+			}
 		}
 		if !started {
 			return nil
@@ -292,11 +310,10 @@ func (s *ScheduleService) CreateOverride(ctx context.Context, in OverrideInput, 
 		if err != nil {
 			return err
 		}
-		ahead, err := tx.OverridesFrom(b.CycleID(), date)
+		sameDay, err := tx.OverridesOn(b.CycleID(), date)
 		if err != nil {
 			return err
 		}
-		sameDay := onDate(ahead, date)
 		for _, other := range sameDay {
 			if other.Touches(b.ID()) || (partner != nil && other.Touches(partner.ID())) {
 				return refusal(glerrors.KindConflict, domain.CodeScheduleBlockTaken,
@@ -354,12 +371,12 @@ func (s *ScheduleService) DeleteOverride(ctx context.Context, id, reason string,
 		if err != nil {
 			return err
 		}
-		ahead, err := tx.OverridesFrom(cycleID, o.Date())
+		sameDay, err := tx.OverridesOn(cycleID, o.Date())
 		if err != nil {
 			return err
 		}
 		var rest []domain.ScheduleOverride
-		for _, other := range onDate(ahead, o.Date()) {
+		for _, other := range sameDay {
 			if other.ID() != id {
 				rest = append(rest, other)
 			}
@@ -406,6 +423,7 @@ func (s *ScheduleService) AvailableTeachers(ctx context.Context, q AvailabilityQ
 		return nil, err
 	}
 	var day []domain.ScheduledClass
+	cover := ""
 	if q.Date.IsZero() {
 		if q.Weekday < domain.FirstSchoolDay || q.Weekday > domain.LastSchoolDay {
 			return nil, refusal(glerrors.KindInvalid, domain.CodeScheduleWeekdayInvalid, "El día va de lunes (1) a viernes (5)")
@@ -413,6 +431,15 @@ func (s *ScheduleService) AvailableTeachers(ctx context.Context, q AvailabilityQ
 		day = domain.BaseDay(blocks, q.Weekday)
 	} else {
 		date := asDate(q.Date)
+		if date.Before(cat.Cycle.StartsOn()) || date.After(cat.Cycle.EndsOn()) || domain.WeekdayOf(date) > domain.LastSchoolDay {
+			return []domain.AvailableTeacher{}, nil
+		}
+		// Covering a class on a date: its own teacher is no substitute.
+		for _, b := range blocks {
+			if b.ID() == q.ExcludeBlockID {
+				cover = b.TeacherID()
+			}
+		}
 		overrides, err := s.repo.ListScheduleOverrides(ctx, q.CycleID, date, date)
 		if err != nil {
 			return nil, err
@@ -432,8 +459,15 @@ func (s *ScheduleService) AvailableTeachers(ctx context.Context, q AvailabilityQ
 			sameGrade[g.ID()] = true
 		}
 	}
-	return domain.AvailableTeachers(cat.Teachers, day, slot, q.ExcludeBlockID, cat.Assignments,
-		func(id string) bool { return sameSubject[id] }, func(id string) bool { return sameGrade[id] }), nil
+	free := domain.AvailableTeachers(cat.Teachers, day, slot, q.ExcludeBlockID, cat.Assignments,
+		func(id string) bool { return sameSubject[id] }, func(id string) bool { return sameGrade[id] })
+	out := free[:0]
+	for _, a := range free {
+		if a.Teacher.ID() != cover {
+			out = append(out, a)
+		}
+	}
+	return out, nil
 }
 
 // SetGrid saves the hours the calendar shows for a level.
@@ -534,6 +568,53 @@ func (s *ScheduleService) checkPlacement(tx ports.ScheduleTx, blocks []domain.Sc
 		}
 	}
 	return nil
+}
+
+// checkRemoval refuses removing b when a change it takes with it (a swap
+// sends the other class back to its base time) would double-book someone on a
+// date ahead — the same check as undoing that change.
+func (s *ScheduleService) checkRemoval(tx ports.ScheduleTx, b domain.ScheduleBlock, names scheduleNames) ([]domain.ScheduleOverride, error) {
+	ahead, err := tx.OverridesFrom(b.CycleID(), s.today())
+	if err != nil {
+		return nil, err
+	}
+	var touching []domain.ScheduleOverride
+	for _, o := range ahead {
+		if o.Touches(b.ID()) {
+			touching = append(touching, o)
+		}
+	}
+	if len(touching) == 0 {
+		return nil, nil
+	}
+	blocks, err := tx.Blocks(b.CycleID())
+	if err != nil {
+		return nil, err
+	}
+	others := filterBlocks(blocks, func(x domain.ScheduleBlock) bool { return x.ID() != b.ID() })
+	for _, date := range datesOn(touching, b.Weekday()) {
+		// Without b, EffectiveDay skips b's own changes and leaves a swap
+		// partner at its base time: exactly what the cascade leaves behind.
+		if _, other, kind, found := domain.FirstClashInDay(domain.EffectiveDay(others, onDate(ahead, date), date)); found {
+			return nil, domain.OverrideConflictError(date, kind, other, names)
+		}
+	}
+	return touching, nil
+}
+
+// overrideSummaryIn describes o with its classes looked up in blocks.
+func overrideSummaryIn(blocks []domain.ScheduleBlock, o domain.ScheduleOverride, names scheduleNames) string {
+	var b domain.ScheduleBlock
+	var partner *domain.ScheduleBlock
+	for i := range blocks {
+		switch blocks[i].ID() {
+		case o.BlockID():
+			b = blocks[i]
+		case o.SwapBlockID():
+			partner = &blocks[i]
+		}
+	}
+	return domain.OverrideSummary(o, b, partner, names)
 }
 
 // refuseIfAhead refuses moving a class that has changes on dates ahead.

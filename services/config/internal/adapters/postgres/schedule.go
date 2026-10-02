@@ -321,6 +321,10 @@ func (s scheduleTx) OverridesFrom(cycleID string, from time.Time) ([]domain.Sche
 	return findMapped(s.tx.Where("cycle_id = ? AND on_date >= ?", cycleID, dateOnly(from)).Order("on_date, created_at, id"), toDomainOverride)
 }
 
+func (s scheduleTx) OverridesOn(cycleID string, date time.Time) ([]domain.ScheduleOverride, error) {
+	return findMapped(s.tx.Where("cycle_id = ? AND on_date = ?", cycleID, dateOnly(date)).Order("created_at, id"), toDomainOverride)
+}
+
 func (s scheduleTx) GetBlock(id string) (domain.ScheduleBlock, error) { return getBlock(s.tx, id) }
 
 func (s scheduleTx) GetOverride(id string) (domain.ScheduleOverride, error) {

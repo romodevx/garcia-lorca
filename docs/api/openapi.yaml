@@ -4127,7 +4127,9 @@ paths:
         (`match: subject`), then those who teach in that grade
         (`match: grade`), then everybody else (`match: other`); by name within
         each. `excludeBlockId` leaves that class out of the busy check (the
-        class being edited or covered). Requires `schedule:read`.
+        class being edited or covered); on a `date` its own teacher is also
+        left out (they are no substitute for themselves). A `date` on a
+        weekend or outside the cycle lists nobody. Requires `schedule:read`.
       operationId: listAvailableTeachers
       security: [{ sessionCookie: [] }]
       parameters:

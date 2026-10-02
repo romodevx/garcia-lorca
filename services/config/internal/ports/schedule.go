@@ -53,11 +53,13 @@ type ScheduleRepository interface {
 // ScheduleTx is the timetable seen from inside RunScheduleTx.
 //
 //   - GetBlock / GetOverride: KindNotFound when absent.
-//   - OverridesFrom returns the cycle's changes dated on or after from.
+//   - OverridesFrom returns the cycle's changes dated on or after from;
+//     OverridesOn, those of one date.
 //   - DeleteBlock removes the class and (FK cascade) its changes.
 type ScheduleTx interface {
 	Blocks(cycleID string) ([]domain.ScheduleBlock, error)
 	OverridesFrom(cycleID string, from time.Time) ([]domain.ScheduleOverride, error)
+	OverridesOn(cycleID string, date time.Time) ([]domain.ScheduleOverride, error)
 	GetBlock(id string) (domain.ScheduleBlock, error)
 	GetOverride(id string) (domain.ScheduleOverride, error)
 	InsertBlock(b domain.ScheduleBlock) error

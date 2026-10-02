@@ -182,6 +182,9 @@ func (f *fakeSchedule) Blocks(string) ([]domain.ScheduleBlock, error) {
 func (f *fakeSchedule) OverridesFrom(_ string, from time.Time) ([]domain.ScheduleOverride, error) {
 	return f.ListScheduleOverrides(context.Background(), sCycle, from, d(9999, time.December, 31))
 }
+func (f *fakeSchedule) OverridesOn(_ string, date time.Time) ([]domain.ScheduleOverride, error) {
+	return f.ListScheduleOverrides(context.Background(), sCycle, date, date)
+}
 func (f *fakeSchedule) GetBlock(id string) (domain.ScheduleBlock, error) {
 	b, ok := f.blocks[id]
 	if !ok {
@@ -531,9 +534,9 @@ func TestAvailableTeachersRanksByFit(t *testing.T) {
 	for _, a := range got {
 		ids = append(ids, a.Teacher.ID()+":"+string(a.Match))
 	}
-	// Luis (the class's own, excluded block) and Zoe teach Música (any grade,
-	// any case); Eva teaches in neither; Ana is busy.
-	assert.Equal(t, []string{tZoe + ":subject", tLuis + ":subject", tEva + ":other"}, ids)
+	// Zoe teaches Música (any grade, any case); Eva teaches in neither; Ana is
+	// busy; Luis gives the class being covered, so he is no substitute.
+	assert.Equal(t, []string{tZoe + ":subject", tEva + ":other"}, ids)
 
 	// by weekday (base timetable) with no date
 	got, err = s.AvailableTeachers(ctx, usecase.AvailabilityQuery{CycleID: sCycle, GroupID: gr3A, SubjectID: sMus3, Weekday: 2, Start: at(9, 0), End: at(9, 50)})
@@ -635,4 +638,88 @@ func TestCreateOverrideRefusesAClassMovedMeanwhile(t *testing.T) {
 	s := usecase.NewScheduleService(staleRead{fakeSchedule: f, stale: music}, "ten", func() string { return "id-x" }, duringCycle, loc)
 	_, err = s.CreateOverride(context.Background(), usecase.OverrideInput{BlockID: music.ID(), Date: mon5, Kind: domain.OverrideCancel, Reason: "x"}, director)
 	assert.Equal(t, domain.CodeScheduleChanged, codeOf(err))
+}
+
+// Removing a class takes its changes with it: a swap's other class goes back
+// to its base time that day. If someone covered another class at that time
+// meanwhile, removing the class would double-book them — refused, like
+// undoing the swap itself.
+func TestDeleteBlockCannotUndoASwapIntoADoubleBooking(t *testing.T) {
+	f := newFakeSchedule(t)
+	pre := newScheduleService(f, beforeCycle())
+	math := addBlock(t, pre, aMat3A, 1, at(8, 0), at(8, 50))
+	music := addBlock(t, pre, aMus3A, 1, at(8, 50), at(9, 40))
+	spanish := addBlock(t, pre, aEsp4A, 1, at(8, 0), at(8, 50))
+	s := newScheduleService(f, duringCycle())
+	ctx := context.Background()
+
+	// Monday the 5th: math and music trade places, so Ana is free at 8:00 and
+	// covers Spanish in 4A then.
+	_, err := s.CreateOverride(ctx, usecase.OverrideInput{BlockID: math.ID(), Date: mon5, Kind: domain.OverrideSwap, SwapBlockID: music.ID(), Reason: "Música primero"}, director)
+	require.NoError(t, err)
+	_, err = s.CreateOverride(ctx, usecase.OverrideInput{BlockID: spanish.ID(), Date: mon5, Kind: domain.OverrideSubstitute, TeacherID: tAna, Reason: "junta"}, director)
+	require.NoError(t, err)
+
+	// Removing music drops the swap: math returns to 8:00, where Ana covers 4A.
+	err = s.DeleteBlock(ctx, music.ID(), "Ya no hay música", director)
+	assert.Equal(t, domain.CodeScheduleOverrideConflict, codeOf(err))
+	assert.Contains(t, f.blocks, music.ID())
+	assert.Len(t, f.overrides, 2)
+}
+
+// A cycle's timetable has no classes outside the cycle's dates.
+func TestDayOutsideTheCycleHasNoClasses(t *testing.T) {
+	f := newFakeSchedule(t)
+	addBlock(t, newScheduleService(f, beforeCycle()), aMus3A, 1, at(8, 50), at(9, 40))
+	s := newScheduleService(f, duringCycle())
+
+	before, err := s.Day(context.Background(), sCycle, d(2026, time.August, 17), "") // a Monday before the 24th
+	require.NoError(t, err)
+	assert.Empty(t, before.Classes)
+	after, err := s.Day(context.Background(), sCycle, d(2027, time.July, 12), "") // a Monday after the 9th
+	require.NoError(t, err)
+	assert.Empty(t, after.Classes)
+	inside, err := s.Day(context.Background(), sCycle, mon5, "")
+	require.NoError(t, err)
+	assert.Len(t, inside.Classes, 1)
+}
+
+func TestDeletingAClassRecordsTheChangesItTakesAlong(t *testing.T) {
+	f := newFakeSchedule(t)
+	pre := newScheduleService(f, beforeCycle())
+	music := addBlock(t, pre, aMus3A, 1, at(8, 50), at(9, 40))
+	s := newScheduleService(f, duringCycle())
+	ctx := context.Background()
+	_, err := s.CreateOverride(ctx, usecase.OverrideInput{BlockID: music.ID(), Date: mon5.AddDate(0, 0, 7), Kind: domain.OverrideCancel, Reason: "junta"}, director)
+	require.NoError(t, err)
+
+	require.NoError(t, s.DeleteBlock(ctx, music.ID(), "Ya no se imparte", director))
+	require.Len(t, f.events, 3)
+	assert.Equal(t, domain.ActionBlockDeleted, f.events[0].Action)
+	assert.Equal(t, domain.ActionOverrideDeleted, f.events[1].Action)
+	assert.Contains(t, f.events[1].Summary, "Clase cancelada el 12 de octubre de 2026")
+}
+
+func TestAvailableTeachersOnADateOutsideTheSchoolWeekOrCycleIsEmpty(t *testing.T) {
+	f := newFakeSchedule(t)
+	pre := newScheduleService(f, beforeCycle())
+	music := addBlock(t, pre, aMus3A, 1, at(8, 50), at(9, 40))
+	s := newScheduleService(f, duringCycle())
+	ctx := context.Background()
+	q := usecase.AvailabilityQuery{CycleID: sCycle, GroupID: gr3A, SubjectID: sMus3, Start: at(8, 50), End: at(9, 40), ExcludeBlockID: music.ID()}
+
+	for _, date := range []time.Time{mon5.AddDate(0, 0, 5), d(2027, time.August, 2)} {
+		q.Date = date
+		got, err := s.AvailableTeachers(ctx, q)
+		require.NoError(t, err)
+		assert.Empty(t, got, date)
+	}
+
+	// On a date, covering the class: its own teacher is no substitute.
+	q.Date = mon5
+	got, err := s.AvailableTeachers(ctx, q)
+	require.NoError(t, err)
+	for _, a := range got {
+		assert.NotEqual(t, tLuis, a.Teacher.ID())
+	}
 }

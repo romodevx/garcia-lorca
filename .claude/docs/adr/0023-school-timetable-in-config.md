@@ -72,5 +72,15 @@
   recorded on a holiday. The "now" view is driven by the date picked.
 - A level's grid is not re-checked when changed; the calendar widens itself
   to show any class outside it.
+- Removing a class takes its changes ahead along (FK cascade); the removal is
+  refused when that would double-book someone (a swap partner returning to
+  its base time) and each undone change is written to the history.
+- **Known gap (deferred):** reassigning an assignment's teacher (teaching load,
+  outside the timetable lock) is checked against the BASE timetable only (the
+  EXCLUDE via the cascade), not against changes already recorded for future
+  dates; a cover could end up double-booked on such a date. Closing it needs
+  the teaching-load use case to take the cycle's timetable lock.
+- The gateway's principal→teacher lookup for `/teaching/schedule` repeats the
+  one in the teaching handler (small; to be unified with it).
 - Flags gate only the gateway (memory `feature-flags-env-not-db`); the
   timetable has no background work, so OFF hides it completely.
