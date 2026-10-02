@@ -2576,12 +2576,15 @@ paths:
       tags: [attendance]
       summary: Attendance report of a group over a date range
       description: >
-        T12. For every active pupil of the group, how many of the group's lists
-        taken in the range found them present, absent, late (retardo) or excused,
-        plus the totals. Only exceptions are stored (default-present model), so
-        `present` = lists taken − absent − late − excused (never below zero).
-        Daily and per-class lists count alike. A pupil's marks held by another
-        group's list (a transfer) are that group's. `/pdf` and `/xlsx` export the
+        T12. For every pupil who was in the group during the range (one who
+        withdrew included, with `active: false`), how many of the group's lists
+        taken WHILE THEY WERE IN IT — from enrolling, or their latest move into
+        the group, to leaving it — found them present, absent, late (retardo)
+        or excused, plus the totals. Only exceptions are stored (default-present
+        model), so `present` = those lists − absent − late − excused (never
+        below zero). Daily and per-class lists count alike. A pupil's marks held
+        by another group's list, or from before they joined, are not this
+        group's. `/pdf` and `/xlsx` export the
         same report. An unknown group is 404; a missing or reversed range, or one
         longer than 366 days, is 400. Requires `attendance:read`.
       operationId: attendanceReport
@@ -6126,11 +6129,12 @@ components:
       allOf:
         - $ref: '#/components/schemas/AttendanceCounts'
         - type: object
-          required: [enrollmentId, studentId, name]
+          required: [enrollmentId, studentId, name, active]
           properties:
             enrollmentId: { type: string, format: uuid }
             studentId: { type: string, format: uuid }
-            name: { type: string, description: Surnames first; empty when the directory cannot name the pupil. }
+            name: { type: string, description: Surnames first; "(sin nombre)" when the directory cannot name the pupil. }
+            active: { type: boolean, description: False for a pupil who left the group during the range. }
     AttendanceReport:
       type: object
       required: [groupId, groupLabel, from, to, listsTaken, rows, totals]
@@ -6142,7 +6146,7 @@ components:
         listsTaken: { type: integer, minimum: 0, description: Lists of the group taken in the range (daily and per-class). }
         rows:
           type: array
-          description: One per active pupil, by surname.
+          description: One per pupil who was in the group during the range, by surname.
           items: { $ref: '#/components/schemas/AttendanceReportRow' }
         totals: { $ref: '#/components/schemas/AttendanceCounts' }
       example:
@@ -6152,7 +6156,7 @@ components:
         to: "2026-09-30"
         listsTaken: 20
         rows:
-          - { enrollmentId: 3f2504e0-4f89-41d3-9a0c-0305e82c3301, studentId: 6c1d2e3f-0000-4000-8000-000000000002, name: "GARCÍA LÓPEZ ANA", present: 17, absent: 1, late: 2, excused: 0 }
+          - { enrollmentId: 3f2504e0-4f89-41d3-9a0c-0305e82c3301, studentId: 6c1d2e3f-0000-4000-8000-000000000002, name: "GARCÍA LÓPEZ ANA", active: true, present: 17, absent: 1, late: 2, excused: 0 }
         totals: { present: 17, absent: 1, late: 2, excused: 0 }
     FinanceReport:
       type: object

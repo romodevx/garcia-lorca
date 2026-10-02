@@ -26,11 +26,19 @@ func (c Counts) plus(o Counts) Counts {
 	return Counts{Present: c.Present + o.Present, Absent: c.Absent + o.Absent, Late: c.Late + o.Late, Excused: c.Excused + o.Excused}
 }
 
-// Row is one pupil's line.
+// unnamed is how a pupil the directory cannot name is printed.
+const unnamed = "(sin nombre)"
+
+// leftSuffix marks, in print, a pupil who left the group during the range.
+const leftSuffix = " (baja)"
+
+// Row is one pupil's line. Active is false for a pupil who left the group
+// during the range.
 type Row struct {
 	EnrollmentID string `json:"enrollmentId"`
 	StudentID    string `json:"studentId"`
 	Name         string `json:"name"`
+	Active       bool   `json:"active"`
 	Counts
 }
 
@@ -53,9 +61,10 @@ type Report struct {
 	period string // "Del … al …", for the printed heading
 }
 
-// Build derives each pupil's presence from the lists taken and their
-// exceptions (default-present model), keeping the summary's order; nameOf names
-// a pupil by student id ("" when unknown).
+// Build derives each pupil's presence from the lists taken while they were in
+// the group and their exceptions (default-present model), keeping the
+// summary's order; nameOf names a pupil by student id ("" when unknown, printed
+// as "(sin nombre)").
 func Build(group Group, from, to time.Time, sum client.AttendanceSummary, nameOf func(studentID string) string) Report {
 	rep := Report{
 		GroupID: group.ID, GroupLabel: group.Label,
@@ -66,8 +75,12 @@ func Build(group Group, from, to time.Time, sum client.AttendanceSummary, nameOf
 	for _, c := range sum.Counts {
 		counts := Counts{Absent: c.Absent, Late: c.Late, Excused: c.Excused}
 		// A legacy mark on a day the group took no list can outnumber the lists.
-		counts.Present = max(0, sum.ListsTaken-c.Absent-c.Late-c.Excused)
-		rep.Rows = append(rep.Rows, Row{EnrollmentID: c.EnrollmentID, StudentID: c.StudentID, Name: nameOf(c.StudentID), Counts: counts})
+		counts.Present = max(0, c.Lists-c.Absent-c.Late-c.Excused)
+		name := nameOf(c.StudentID)
+		if name == "" {
+			name = unnamed
+		}
+		rep.Rows = append(rep.Rows, Row{EnrollmentID: c.EnrollmentID, StudentID: c.StudentID, Name: name, Active: c.Active, Counts: counts})
 		rep.Totals = rep.Totals.plus(counts)
 	}
 	return rep
@@ -118,7 +131,11 @@ func pupilsTable(rep Report) report.Table {
 		Total: countCells("Total", rep.Totals),
 	}
 	for _, r := range rep.Rows {
-		t.Rows = append(t.Rows, countCells(r.Name, r.Counts))
+		label := r.Name
+		if !r.Active {
+			label += leftSuffix
+		}
+		t.Rows = append(t.Rows, countCells(label, r.Counts))
 	}
 	return t
 }

@@ -176,6 +176,8 @@ func (h *AttendanceHandler) SummarizeAttendance(ctx context.Context, req *connec
 			Absent:       int32(s.Absent),
 			Late:         int32(s.Late),
 			Excused:      int32(s.Excused),
+			Lists:        int32(s.Lists),
+			Active:       s.Active,
 		})
 	}
 	return connect.NewResponse(&attendancev1.SummarizeAttendanceResponse{ListsTaken: int32(sum.ListsTaken), Counts: out}), nil

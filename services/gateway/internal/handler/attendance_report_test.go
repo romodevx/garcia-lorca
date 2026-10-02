@@ -76,8 +76,8 @@ func newReportHandler(sum *fakeSummarizer) (*handler.AttendanceReportHandler, *r
 
 func twoPupils() *fakeSummarizer {
 	return &fakeSummarizer{sum: client.AttendanceSummary{ListsTaken: 20, Counts: []client.AttendanceCount{
-		{EnrollmentID: "enr-1", StudentID: "stu-1", Absent: 2, Late: 1},
-		{EnrollmentID: "enr-2", StudentID: "stu-2", Late: 4, Excused: 1},
+		{EnrollmentID: "enr-1", StudentID: "stu-1", Lists: 20, Active: true, Absent: 2, Late: 1},
+		{EnrollmentID: "enr-2", StudentID: "stu-2", Lists: 20, Active: true, Late: 4, Excused: 1},
 	}}}
 }
 

@@ -12,7 +12,8 @@ import (
 )
 
 // maxReportDays bounds an attendance report's range: a school year, leap day
-// included (attendance enforces the same bound).
+// included. The attendance service enforces the same bound (its
+// maxSummaryRangeDays); checking it here too answers the person in Spanish.
 const maxReportDays = 366
 
 // AttendanceSummarizer is the attendance surface the report reads. The Connect
@@ -49,7 +50,7 @@ func reportRange(r *http.Request) (time.Time, time.Time, string) {
 	case to.Before(from):
 		return time.Time{}, time.Time{}, "La fecha final es anterior a la inicial."
 	case to.Sub(from) >= maxReportDays*24*time.Hour:
-		return time.Time{}, time.Time{}, "El reporte abarca como máximo 366 días."
+		return time.Time{}, time.Time{}, fmt.Sprintf("El reporte abarca como máximo %d días.", maxReportDays)
 	}
 	return from, to, ""
 }
@@ -82,31 +83,14 @@ func (h *AttendanceReportHandler) reportOf(w http.ResponseWriter, r *http.Reques
 		writeConnectError(w, err)
 		return attendancereport.Report{}, false
 	}
-	names := namesOf(ctx, h.students, sum.Counts)
+	ids := make([]string, 0, len(sum.Counts))
+	for _, c := range sum.Counts {
+		ids = append(ids, c.StudentID)
+	}
+	names := studentsByIDs(ctx, h.students, ids)
 	rep := attendancereport.Build(attendancereport.Group{ID: groupID, Label: group.Label}, from, to, sum, names.name)
 	sortBySurname(names, rep.Rows, func(row attendancereport.Row) string { return row.StudentID })
 	return rep, true
-}
-
-// namesOf names the report's pupils in ONE read by id, best-effort: a failed
-// read leaves names empty, never fails the report.
-func namesOf(ctx context.Context, students StudentNamesReader, counts []client.AttendanceCount) studentDirectory {
-	out := studentDirectory{}
-	if len(counts) == 0 || students == nil {
-		return out
-	}
-	ids := make([]string, 0, len(counts))
-	for _, c := range counts {
-		ids = append(ids, c.StudentID)
-	}
-	list, err := students.StudentsByIDs(ctx, ids)
-	if err != nil {
-		return out
-	}
-	for _, s := range list {
-		out[s.ID] = s
-	}
-	return out
 }
 
 // Report handles GET /api/v1/attendance/reports: the report as JSON.
@@ -130,20 +114,19 @@ func (h *AttendanceReportHandler) ReportXLSX(w http.ResponseWriter, r *http.Requ
 }
 
 func (h *AttendanceReportHandler) serve(w http.ResponseWriter, r *http.Request, extension, contentType string, render func(report.Document) ([]byte, error)) {
+	// The school's heading does not depend on the report: read it alongside.
+	heading := make(chan schoolHeading, 1)
+	go func() { heading <- h.readHeading(r.Context()) }()
 	rep, ok := h.reportOf(w, r)
+	head := <-heading
 	if !ok {
 		return
 	}
-	heading := []string{"Reporte de asistencia"}
-	school, found, err := h.profiles.GetSchoolProfile(r.Context())
-	if err != nil {
-		writeConnectError(w, err)
+	if head.err != nil {
+		writeConnectError(w, head.err)
 		return
 	}
-	if found {
-		heading = report.SchoolHeading(school.Name, school.LegalName, school.RFC)
-	}
-	body, err := render(attendancereport.Document(rep, heading))
+	body, err := render(attendancereport.Document(rep, head.lines))
 	if err != nil {
 		http.Error(w, "the report could not be rendered", http.StatusInternalServerError)
 		return
@@ -155,4 +138,23 @@ func (h *AttendanceReportHandler) serve(w http.ResponseWriter, r *http.Request, 
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(body) // the status is sent; a client that hung up is not an error to report
+}
+
+// schoolHeading is the printed heading's lines, or why they could not be read.
+type schoolHeading struct {
+	lines []string
+	err   error
+}
+
+// readHeading is the school's lines, or a generic title before anybody filled
+// in the school's details.
+func (h *AttendanceReportHandler) readHeading(ctx context.Context) schoolHeading {
+	school, found, err := h.profiles.GetSchoolProfile(ctx)
+	if err != nil {
+		return schoolHeading{err: err}
+	}
+	if !found {
+		return schoolHeading{lines: []string{"Reporte de asistencia"}}
+	}
+	return schoolHeading{lines: report.SchoolHeading(school.Name, school.LegalName, school.RFC)}
 }

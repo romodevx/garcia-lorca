@@ -69,10 +69,10 @@ service AttendanceService {
 
   // SummarizeAttendance counts one group's attendance over an inclusive date
   // range (T12 report): how many lists were taken for the group (daily and
-  // per-class alike) and, for every ACTIVE enrollment of the group, how many of
-  // its marks on those lists were absent, late or excused. Present is what is
-  // left (default-present model) and is not computed here. Both bounds are
-  // required and span at most 366 days.
+  // per-class alike) and, for every pupil who was in the group during the
+  // range, the lists taken while they were in it and their absent, late and
+  // excused marks on them. Present is what is left (default-present model).
+  // Both bounds are required and span at most 366 days.
   rpc SummarizeAttendance(SummarizeAttendanceRequest) returns (SummarizeAttendanceResponse);
 
   // --- level deletion (ADR 0021) ---
@@ -249,19 +249,25 @@ message SummarizeAttendanceRequest {
   string to_date = 3;
 }
 
-// StudentAttendanceCount is one enrollment's exceptions over the range, on the
-// group's lists only (a mark another group's list holds is not counted).
+// StudentAttendanceCount is one pupil's line: the group's lists taken while
+// they were in it (from enrolling, or their latest move into the group, to
+// leaving it) and their exceptions on those lists. Present is lists minus the
+// exceptions.
 message StudentAttendanceCount {
   string enrollment_id = 1;
   string student_id = 2;
   int32 absent = 3;
   int32 late = 4;
   int32 excused = 5;
+  int32 lists = 6;
+  // active is false for a pupil who left the group (withdrew) in the range.
+  bool active = 7;
 }
 
 // SummarizeAttendanceResponse: lists_taken is how many lists of the group were
-// taken in the range; counts has one entry per active enrollment, ordered by
-// enrollment id, zeros included.
+// taken in the range; counts has one entry per pupil who was in the group at
+// some point of the range (withdrawn ones included), ordered by enrollment id,
+// zeros included.
 message SummarizeAttendanceResponse {
   int32 lists_taken = 1;
   repeated StudentAttendanceCount counts = 2;

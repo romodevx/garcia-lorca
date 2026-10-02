@@ -5,6 +5,7 @@ package repo_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -22,11 +23,11 @@ const (
 	enrollmentReportCruz = "e0000000-0000-0000-0000-000000001203"
 )
 
-// The report counts the group's lists in the range (daily and per-class) and
-// each pupil's exceptions on them: a legacy mark (no group) counts, a mark
-// another group's list holds does not, nor anything outside the range or of
-// another tenant.
-func TestSummarizeGroupCountsTheGroupsListsAndMarks(t *testing.T) {
+// The report reads the group's lists in the range (daily and per-class, one
+// entry each) and the pupils' exceptions on them: a legacy mark (no group)
+// comes along, a mark another group's list holds does not, nor anything
+// outside the range or of another tenant.
+func TestGroupHistoryReadsTheGroupsListsAndMarks(t *testing.T) {
 	ctx := context.Background()
 	a := appRepo(t, tenantA)
 	scope := []string{enrollmentReportAna, enrollmentReportBeto, enrollmentReportCruz}
@@ -51,24 +52,35 @@ func TestSummarizeGroupCountsTheGroupsListsAndMarks(t *testing.T) {
 	saveList(t, b, list(groupReport, "2026-09-05", ""), scope, testTaker,
 		subjectMark("a0000000-0000-0000-0000-000000001208", enrollmentReportAna, day(t, "2026-09-05"), "", "absent"))
 
-	got, err := a.SummarizeGroup(ctx, groupReport, scope, day(t, "2026-09-01"), day(t, "2026-09-30"))
+	got, err := a.GroupHistory(ctx, groupReport, scope, day(t, "2026-09-01"), day(t, "2026-09-30"))
 	require.NoError(t, err)
 
-	assert.Equal(t, 3, got.ListsTaken)
-	assert.Equal(t, map[string]service.ExceptionCounts{
-		enrollmentReportAna:  {Absent: 1, Late: 1, Excused: 1},
-		enrollmentReportBeto: {Absent: 1, Late: 1},
-	}, got.Counts)
+	assert.Equal(t, []time.Time{day(t, "2026-09-01"), day(t, "2026-09-02"), day(t, "2026-09-03")}, utcDays(got.Lists))
+	assert.Equal(t, []service.DayMark{
+		{EnrollmentID: enrollmentReportAna, Date: day(t, "2026-09-01"), Status: "absent"},
+		{EnrollmentID: enrollmentReportAna, Date: day(t, "2026-09-02"), Status: "late"},
+		{EnrollmentID: enrollmentReportAna, Date: day(t, "2026-09-03"), Status: "excused"},
+		{EnrollmentID: enrollmentReportBeto, Date: day(t, "2026-09-01"), Status: "late"},
+		{EnrollmentID: enrollmentReportBeto, Date: day(t, "2026-09-04"), Status: "absent"},
+	}, got.Marks)
 
-	gotB, err := b.SummarizeGroup(ctx, groupReport, scope, day(t, "2026-09-01"), day(t, "2026-09-30"))
+	gotB, err := b.GroupHistory(ctx, groupReport, scope, day(t, "2026-09-01"), day(t, "2026-09-30"))
 	require.NoError(t, err)
-	assert.Equal(t, 1, gotB.ListsTaken, "tenant B counts only its own list")
-	assert.Equal(t, map[string]service.ExceptionCounts{enrollmentReportAna: {Absent: 1}}, gotB.Counts)
+	assert.Len(t, gotB.Lists, 1, "tenant B reads only its own list")
+	assert.Equal(t, []service.DayMark{{EnrollmentID: enrollmentReportAna, Date: day(t, "2026-09-05"), Status: "absent"}}, gotB.Marks)
 }
 
-func TestSummarizeGroupWithoutPupilsCountsOnlyLists(t *testing.T) {
-	got, err := appRepo(t, tenantA).SummarizeGroup(context.Background(), groupReportOther, nil, day(t, "2026-09-01"), day(t, "2026-09-30"))
+func TestGroupHistoryWithoutPupilsReadsOnlyLists(t *testing.T) {
+	got, err := appRepo(t, tenantA).GroupHistory(context.Background(), groupReportOther, nil, day(t, "2026-09-01"), day(t, "2026-09-30"))
 	require.NoError(t, err)
-	assert.Equal(t, 1, got.ListsTaken)
-	assert.Empty(t, got.Counts)
+	assert.Len(t, got.Lists, 1)
+	assert.Empty(t, got.Marks)
+}
+
+func utcDays(ts []time.Time) []time.Time {
+	out := make([]time.Time, 0, len(ts))
+	for _, t := range ts {
+		out = append(out, t.UTC())
+	}
+	return out
 }

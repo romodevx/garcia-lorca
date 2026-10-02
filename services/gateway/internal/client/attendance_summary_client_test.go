@@ -23,7 +23,7 @@ type stubSummary struct {
 func (s *stubSummary) SummarizeAttendance(_ context.Context, req *connect.Request[attendancev1.SummarizeAttendanceRequest]) (*connect.Response[attendancev1.SummarizeAttendanceResponse], error) {
 	s.got = req.Msg
 	return connect.NewResponse(&attendancev1.SummarizeAttendanceResponse{ListsTaken: 20, Counts: []*attendancev1.StudentAttendanceCount{
-		{EnrollmentId: "enr-1", StudentId: "stu-1", Absent: 1, Late: 2, Excused: 3},
+		{EnrollmentId: "enr-1", StudentId: "stu-1", Absent: 1, Late: 2, Excused: 3, Lists: 18, Active: true},
 	}}), nil
 }
 
@@ -43,6 +43,6 @@ func TestAttendanceClientSummarizeAttendance(t *testing.T) {
 	assert.Equal(t, "2026-09-01", stub.got.GetFromDate())
 	assert.Equal(t, "2026-09-30", stub.got.GetToDate())
 	assert.Equal(t, client.AttendanceSummary{ListsTaken: 20, Counts: []client.AttendanceCount{
-		{EnrollmentID: "enr-1", StudentID: "stu-1", Absent: 1, Late: 2, Excused: 3},
+		{EnrollmentID: "enr-1", StudentID: "stu-1", Absent: 1, Late: 2, Excused: 3, Lists: 18, Active: true},
 	}}, got)
 }

@@ -28,8 +28,8 @@ const report: AttendanceReport = {
   to: TODAY,
   listsTaken: 12,
   rows: [
-    { enrollmentId: "e1", studentId: "s1", name: "ÁLVAREZ PAZ ANA", present: 8, absent: 1, late: 3, excused: 0 },
-    { enrollmentId: "e2", studentId: "s2", name: "ZAMORA RUIZ ZOE", present: 12, absent: 0, late: 0, excused: 0 },
+    { enrollmentId: "e1", studentId: "s1", name: "ÁLVAREZ PAZ ANA", active: true, present: 8, absent: 1, late: 3, excused: 0 },
+    { enrollmentId: "e2", studentId: "s2", name: "ZAMORA RUIZ ZOE", active: false, present: 12, absent: 0, late: 0, excused: 0 },
   ],
   totals: { present: 20, absent: 1, late: 3, excused: 0 },
 };
@@ -88,6 +88,7 @@ describe("AttendanceReportPanel (T12)", () => {
     const total = within(table).getByRole("row", { name: /Total/ });
     expect(within(total).getAllByRole("cell").map((c) => c.textContent)).toEqual(["Total", "20", "1", "3", "0"]);
     expect(screen.getByText("12 listas tomadas")).toBeInTheDocument();
+    expect(within(table).getByRole("row", { name: /ZAMORA RUIZ ZOE \(baja\)/ })).toBeInTheDocument();
   });
 
   it("reloads when the range changes", async () => {

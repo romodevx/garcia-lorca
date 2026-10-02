@@ -68,6 +68,18 @@ type EnrollmentRef struct {
 	StudentID string
 	GroupID   string
 	Status    string
+	// EnrolledAt / EndedAt bound the enrollment (EndedAt zero while active):
+	// the report counts a pupil only on lists taken in between (T12).
+	EnrolledAt time.Time
+	EndedAt    time.Time
+}
+
+// TransferIn is a move of an enrollment INTO a group. A transfer rewrites the
+// enrollment's group in place, so this is how the report learns when a pupil
+// joined the group.
+type TransferIn struct {
+	EnrollmentID string
+	MovedAt      time.Time
 }
 
 // EnrollmentReader lists a group's enrollments from the students bounded context
@@ -75,6 +87,8 @@ type EnrollmentRef struct {
 // propagates unchanged.
 type EnrollmentReader interface {
 	ByGroup(ctx context.Context, groupID string) ([]EnrollmentRef, error)
+	// TransfersInto lists every move into the group, in one read (T12).
+	TransfersInto(ctx context.Context, groupID string) ([]TransferIn, error)
 }
 
 // GroupReader validates a group reference against the config bounded context (by
@@ -194,12 +208,11 @@ type Repo interface {
 	// ListSessions returns the lists TAKEN for any of groupIDs between two
 	// inclusive days, newest first, in one query.
 	ListSessions(ctx context.Context, groupIDs []string, from, to time.Time) ([]TakenList, error)
-	// SummarizeGroup counts, over two inclusive days and in ONE transaction,
-	// the lists taken for groupID and each of enrollmentIDs' exceptions on the
-	// group's lists (its own marks, plus legacy marks stored before lists were
-	// stamped with their group). Enrollments without a mark are absent from
-	// Counts.
-	SummarizeGroup(ctx context.Context, groupID string, enrollmentIDs []string, from, to time.Time) (GroupSummary, error)
+	// GroupHistory reads, in ONE transaction, the days of the group's lists
+	// taken between two inclusive days (one entry per list) and the exceptions
+	// of enrollmentIDs on the group's lists in that span: marks stamped with
+	// this group, plus legacy marks (no group, stored before lists carried one).
+	GroupHistory(ctx context.Context, groupID string, enrollmentIDs []string, from, to time.Time) (GroupHistory, error)
 }
 
 // ExceptionCounts is how many of a pupil's marks were each stored exception.
@@ -209,22 +222,34 @@ type ExceptionCounts struct {
 	Excused int
 }
 
-// GroupSummary is what the repository counts for a report: the group's lists
-// taken and the exceptions per enrollment id.
-type GroupSummary struct {
-	ListsTaken int
-	Counts     map[string]ExceptionCounts
+// DayMark is one stored exception of a report's span.
+type DayMark struct {
+	EnrollmentID string
+	Date         time.Time
+	Status       string
 }
 
-// StudentCounts is one active pupil's line of the report.
+// GroupHistory is what the repository reads for a report: the day of every
+// list the group took, and the exceptions on them.
+type GroupHistory struct {
+	Lists []time.Time
+	Marks []DayMark
+}
+
+// StudentCounts is one pupil's line of the report: the lists taken while they
+// were in the group, and their exceptions on them.
 type StudentCounts struct {
 	EnrollmentID string
 	StudentID    string
+	// Active is false for a pupil who left the group during the range.
+	Active bool
+	Lists  int
 	ExceptionCounts
 }
 
 // AttendanceSummary is a group's attendance over a range: the lists taken and
-// one line per active pupil, ordered by enrollment id.
+// one line per pupil who was in the group at some point of it, ordered by
+// enrollment id.
 type AttendanceSummary struct {
 	ListsTaken int
 	Students   []StudentCounts
@@ -574,9 +599,13 @@ func (s *AttendanceService) ListSessions(ctx context.Context, groupIDs []string,
 const maxSummaryRangeDays = 366
 
 // SummarizeAttendance is the T12 report's read: the group's lists taken between
-// two required inclusive ISO days and, for every ACTIVE pupil, the exceptions on
-// them — zeros included. Present is what is left, so it is not computed here
-// (default-present model). The range is bounded at the boundary.
+// two required inclusive ISO days and, for every pupil who was in the group at
+// some point of that span, the lists taken while they were in it — from
+// enrolling, or their latest move into the group, to leaving it — and their
+// exceptions on those lists. Present is what is left, so it is not computed
+// here (default-present model). A mark outside a pupil's window (a legacy mark
+// from the group they came from) is not this group's. The range is bounded at
+// the boundary.
 func (s *AttendanceService) SummarizeAttendance(ctx context.Context, groupID, fromStr, toStr string) (AttendanceSummary, error) {
 	from, to, err := parseRange(fromStr, toStr, maxSummaryRangeDays)
 	if err != nil {
@@ -585,19 +614,132 @@ func (s *AttendanceService) SummarizeAttendance(ctx context.Context, groupID, fr
 	if err := s.requireGroup(ctx, groupID); err != nil {
 		return AttendanceSummary{}, err
 	}
-	enrollmentIDs, studentByEnrollment, err := s.activeRoster(ctx, groupID)
+	pupils, err := s.pupilsDuring(ctx, groupID, from, to)
 	if err != nil {
 		return AttendanceSummary{}, err
 	}
-	sum, err := s.repo.SummarizeGroup(ctx, groupID, enrollmentIDs, from, to)
+	ids := make([]string, 0, len(pupils))
+	for _, p := range pupils {
+		ids = append(ids, p.enrollment.ID)
+	}
+	history, err := s.repo.GroupHistory(ctx, groupID, ids, from, to)
 	if err != nil {
 		return AttendanceSummary{}, err
 	}
-	out := AttendanceSummary{ListsTaken: sum.ListsTaken, Students: make([]StudentCounts, 0, len(enrollmentIDs))}
-	for _, id := range enrollmentIDs {
-		out.Students = append(out.Students, StudentCounts{EnrollmentID: id, StudentID: studentByEnrollment[id], ExceptionCounts: sum.Counts[id]})
+	return summarize(pupils, history), nil
+}
+
+// window is the span of days a pupil belonged to the group, clipped to a range.
+type window struct{ from, to time.Time }
+
+func (w window) holds(day time.Time) bool { return !day.Before(w.from) && !day.After(w.to) }
+
+// pupilInGroup is an enrollment and the days of the range it was in the group.
+type pupilInGroup struct {
+	enrollment EnrollmentRef
+	window     window
+}
+
+// pupilsDuring lists, by enrollment id, every enrollment of the group whose
+// time in it overlaps [from, to]: it starts on the day of enrolling or of the
+// latest move into the group, and ends on the day it ended (open while
+// active). An inactive enrollment without an end is skipped: its span is
+// unknown.
+func (s *AttendanceService) pupilsDuring(ctx context.Context, groupID string, from, to time.Time) ([]pupilInGroup, error) {
+	enrollments, err := s.enrollments.ByGroup(ctx, groupID)
+	if err != nil {
+		return nil, err
 	}
+	moves, err := s.enrollments.TransfersInto(ctx, groupID)
+	if err != nil {
+		return nil, err
+	}
+	joined := make(map[string]time.Time, len(moves))
+	for _, m := range moves {
+		if day := schoolDay(m.MovedAt); day.After(joined[m.EnrollmentID]) {
+			joined[m.EnrollmentID] = day
+		}
+	}
+	out := make([]pupilInGroup, 0, len(enrollments))
+	for _, enr := range enrollments {
+		active := enr.Status == enrollmentStatusActive
+		if !active && enr.EndedAt.IsZero() {
+			continue
+		}
+		w := window{from: latest(from, schoolDay(enr.EnrolledAt), joined[enr.ID]), to: to}
+		if !active {
+			w.to = earliest(to, schoolDay(enr.EndedAt))
+		}
+		if w.from.After(w.to) {
+			continue
+		}
+		out = append(out, pupilInGroup{enrollment: enr, window: w})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].enrollment.ID < out[j].enrollment.ID })
 	return out, nil
+}
+
+// summarize counts each pupil's lists and exceptions inside their window.
+func summarize(pupils []pupilInGroup, history GroupHistory) AttendanceSummary {
+	marksOf := make(map[string][]DayMark, len(pupils))
+	for _, m := range history.Marks {
+		marksOf[m.EnrollmentID] = append(marksOf[m.EnrollmentID], m)
+	}
+	out := AttendanceSummary{ListsTaken: len(history.Lists), Students: make([]StudentCounts, 0, len(pupils))}
+	for _, p := range pupils {
+		line := StudentCounts{EnrollmentID: p.enrollment.ID, StudentID: p.enrollment.StudentID, Active: p.enrollment.Status == enrollmentStatusActive}
+		for _, day := range history.Lists {
+			if p.window.holds(day) {
+				line.Lists++
+			}
+		}
+		for _, m := range marksOf[p.enrollment.ID] {
+			if p.window.holds(m.Date) {
+				line.ExceptionCounts = line.add(m.Status)
+			}
+		}
+		out.Students = append(out.Students, line)
+	}
+	return out
+}
+
+// add counts one more mark of status.
+func (c ExceptionCounts) add(status string) ExceptionCounts {
+	switch status {
+	case statusAbsent:
+		c.Absent++
+	case statusLate:
+		c.Late++
+	case statusExcused:
+		c.Excused++
+	}
+	return c
+}
+
+// schoolDay is an instant's school day (the UTC day, see school-day-is-utc-day);
+// the zero time stays zero.
+func schoolDay(t time.Time) time.Time {
+	if t.IsZero() {
+		return t
+	}
+	u := t.UTC()
+	return time.Date(u.Year(), u.Month(), u.Day(), 0, 0, 0, 0, time.UTC)
+}
+
+func latest(first time.Time, rest ...time.Time) time.Time {
+	for _, t := range rest {
+		if t.After(first) {
+			first = t
+		}
+	}
+	return first
+}
+
+func earliest(a, b time.Time) time.Time {
+	if b.Before(a) {
+		return b
+	}
+	return a
 }
 
 // parseRange parses two required inclusive ISO days spanning at most maxDays.

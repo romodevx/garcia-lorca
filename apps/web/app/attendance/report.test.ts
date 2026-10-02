@@ -16,7 +16,7 @@ const report: AttendanceReport = {
   from: "2026-09-01",
   to: "2026-09-30",
   listsTaken: 20,
-  rows: [{ enrollmentId: "e1", studentId: "s1", name: "GARCÍA ANA", present: 16, absent: 1, late: 3, excused: 0 }],
+  rows: [{ enrollmentId: "e1", studentId: "s1", name: "GARCÍA ANA", active: true, present: 16, absent: 1, late: 3, excused: 0 }],
   totals: { present: 16, absent: 1, late: 3, excused: 0 },
 };
 

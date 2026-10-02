@@ -6,6 +6,7 @@ import { Btn } from "../../_design/Controls";
 import { DateField } from "../../_design/form";
 import { GroupChain, NO_GROUP_CHOICE, type GroupChoice } from "../../_design/students/GroupChain";
 import type { FilterCatalog } from "../../_design/students/studentFilter";
+import { downloadBlob } from "../../_lib/downloadBlob";
 import type { AttendanceCounts, AttendanceReport, AttendanceReportQuery, ReportFormat } from "../../attendance/report";
 import { EmptyHint } from "../config/parts";
 
@@ -32,15 +33,6 @@ const COLUMNS: readonly { key: keyof AttendanceCounts; label: string; tone?: str
 ];
 
 const firstOfMonth = (day: string): string => `${day.slice(0, 7)}-01`;
-
-function saveFile({ blob, filename }: { blob: Blob; filename: string }): void {
-  const href = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = href;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(href);
-}
 
 function CountsRow({ label, counts, strong = false }: { label: string; counts: AttendanceCounts; strong?: boolean }): ReactElement {
   const weight = strong ? 700 : undefined;
@@ -85,7 +77,8 @@ export function AttendanceReportPanel({ catalog, today, load, download }: Attend
   const exportAs = async (format: ReportFormat): Promise<void> => {
     setExporting(format);
     try {
-      saveFile(await download({ groupId, from, to }, format));
+      const { blob, filename } = await download({ groupId, from, to }, format);
+      downloadBlob(blob, filename);
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo exportar el reporte.");
     } finally {
@@ -135,7 +128,7 @@ export function AttendanceReportPanel({ catalog, today, load, download }: Attend
                   </tr>
                 </thead>
                 <tbody>
-                  {report.rows.map((r) => <CountsRow key={r.enrollmentId} label={r.name !== "" ? r.name : "(sin nombre)"} counts={r} />)}
+                  {report.rows.map((r) => <CountsRow key={r.enrollmentId} label={r.active ? r.name : `${r.name} (baja)`} counts={r} />)}
                   <CountsRow label="Total" counts={report.totals} strong />
                 </tbody>
               </table>

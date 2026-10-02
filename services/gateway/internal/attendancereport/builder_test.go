@@ -21,14 +21,17 @@ var names = map[string]string{"stu-1": "GARCÍA LÓPEZ ANA", "stu-2": "PÉREZ RU
 
 func sample() attendancereport.Report {
 	sum := client.AttendanceSummary{ListsTaken: 20, Counts: []client.AttendanceCount{
-		{EnrollmentID: "enr-1", StudentID: "stu-1", Absent: 1, Late: 3, Excused: 1},
-		{EnrollmentID: "enr-2", StudentID: "stu-2"},
+		{EnrollmentID: "enr-1", StudentID: "stu-1", Lists: 20, Active: true, Absent: 1, Late: 3, Excused: 1},
+		{EnrollmentID: "enr-2", StudentID: "stu-2", Lists: 20, Active: true},
+		{EnrollmentID: "enr-3", StudentID: "stu-3", Lists: 4, Absent: 1},
 	}}
 	group := attendancereport.Group{ID: "grp-1", Label: "1° SECUNDARIA · A"}
 	return attendancereport.Build(group, day("2026-09-01"), day("2026-09-30"), sum, func(id string) string { return names[id] })
 }
 
-// Present is what the exceptions leave of the lists taken (default-present).
+// Present is what the exceptions leave of the lists taken while the pupil was
+// in the group (default-present); a pupil who left is marked and unnamed
+// pupils read "(sin nombre)".
 func TestBuildDerivesPresentAndTotals(t *testing.T) {
 	rep := sample()
 
@@ -37,17 +40,19 @@ func TestBuildDerivesPresentAndTotals(t *testing.T) {
 	assert.Equal(t, "2026-09-01", rep.From)
 	assert.Equal(t, "2026-09-30", rep.To)
 	assert.Equal(t, 20, rep.ListsTaken)
-	require.Len(t, rep.Rows, 2)
-	assert.Equal(t, attendancereport.Row{EnrollmentID: "enr-1", StudentID: "stu-1", Name: "GARCÍA LÓPEZ ANA",
+	require.Len(t, rep.Rows, 3)
+	assert.Equal(t, attendancereport.Row{EnrollmentID: "enr-1", StudentID: "stu-1", Name: "GARCÍA LÓPEZ ANA", Active: true,
 		Counts: attendancereport.Counts{Present: 15, Absent: 1, Late: 3, Excused: 1}}, rep.Rows[0])
 	assert.Equal(t, attendancereport.Counts{Present: 20}, rep.Rows[1].Counts)
-	assert.Equal(t, attendancereport.Counts{Present: 35, Absent: 1, Late: 3, Excused: 1}, rep.Totals)
+	assert.Equal(t, attendancereport.Row{EnrollmentID: "enr-3", StudentID: "stu-3", Name: "(sin nombre)",
+		Counts: attendancereport.Counts{Present: 3, Absent: 1}}, rep.Rows[2])
+	assert.Equal(t, attendancereport.Counts{Present: 38, Absent: 2, Late: 3, Excused: 1}, rep.Totals)
 }
 
 // A legacy mark on a day the group took no list can leave more exceptions
 // than lists: present never goes below zero.
 func TestBuildNeverCountsNegativePresence(t *testing.T) {
-	sum := client.AttendanceSummary{ListsTaken: 1, Counts: []client.AttendanceCount{{EnrollmentID: "e", StudentID: "s", Absent: 2}}}
+	sum := client.AttendanceSummary{ListsTaken: 1, Counts: []client.AttendanceCount{{EnrollmentID: "e", StudentID: "s", Lists: 1, Absent: 2}}}
 	rep := attendancereport.Build(attendancereport.Group{ID: "g"}, day("2026-09-01"), day("2026-09-30"), sum, func(string) string { return "" })
 	assert.Equal(t, 0, rep.Rows[0].Present)
 }
@@ -70,7 +75,8 @@ func TestDocumentLaysOutTheReport(t *testing.T) {
 	}
 	assert.Equal(t, []string{"Alumno", "Presentes", "Ausentes", "Retardos", "Justificadas"}, headers)
 	assert.Equal(t, []report.Cell{report.TextCell("GARCÍA LÓPEZ ANA"), report.CountCell(15), report.CountCell(1), report.CountCell(3), report.CountCell(1)}, pupils.Rows[0])
-	assert.Equal(t, []report.Cell{report.TextCell("Total"), report.CountCell(35), report.CountCell(1), report.CountCell(3), report.CountCell(1)}, pupils.Total)
+	assert.Equal(t, []report.Cell{report.TextCell("(sin nombre) (baja)"), report.CountCell(3), report.CountCell(1), report.CountCell(0), report.CountCell(0)}, pupils.Rows[2])
+	assert.Equal(t, []report.Cell{report.TextCell("Total"), report.CountCell(38), report.CountCell(2), report.CountCell(3), report.CountCell(1)}, pupils.Total)
 }
 
 // The engine renders it: a real PDF and a real workbook come out.

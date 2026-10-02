@@ -13,8 +13,10 @@ package studentsclient
 import (
 	"context"
 	"net/http"
+	"time"
 
 	connect "connectrpc.com/connect"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	studentsv1 "github.com/garcia-lorca/gen/go/garcialorca/students/v1"
 	"github.com/garcia-lorca/gen/go/garcialorca/students/v1/studentsv1connect"
@@ -62,11 +64,35 @@ func (c *Client) ByGroup(ctx context.Context, groupID string) ([]service.Enrollm
 // Only the student id travels with it — attendance never carries student PII.
 func toRef(e *studentsv1.Enrollment) service.EnrollmentRef {
 	return service.EnrollmentRef{
-		ID:        e.GetId(),
-		StudentID: e.GetStudentId(),
-		GroupID:   e.GetGroupId(),
-		Status:    statusString(e.GetStatus()),
+		ID:         e.GetId(),
+		StudentID:  e.GetStudentId(),
+		GroupID:    e.GetGroupId(),
+		Status:     statusString(e.GetStatus()),
+		EnrolledAt: timeOf(e.GetEnrolledAt()),
+		EndedAt:    timeOf(e.GetEndedAt()),
 	}
+}
+
+// timeOf is a timestamp as a UTC time; an unset one is the zero time.
+func timeOf(ts *timestamppb.Timestamp) time.Time {
+	if ts == nil {
+		return time.Time{}
+	}
+	return ts.AsTime().UTC()
+}
+
+// TransfersInto lists every move INTO the group in ONE read (T12: when each
+// pupil joined it, since a transfer rewrites the enrollment's group in place).
+func (c *Client) TransfersInto(ctx context.Context, groupID string) ([]service.TransferIn, error) {
+	res, err := c.rpc.ListTransfers(ctx, connect.NewRequest(&studentsv1.ListTransfersRequest{ToGroupId: groupID}))
+	if err != nil {
+		return nil, mapStudentsErr(err, "transfers")
+	}
+	out := make([]service.TransferIn, 0, len(res.Msg.GetTransfers()))
+	for _, t := range res.Msg.GetTransfers() {
+		out = append(out, service.TransferIn{EnrollmentID: t.GetEnrollmentId(), MovedAt: timeOf(t.GetMovedAt())})
+	}
+	return out, nil
 }
 
 // statusString maps the proto EnrollmentStatus enum to the lowercase status string

@@ -26,16 +26,16 @@ type fakeRepo struct {
 	taker    service.Taker
 	taken    []service.TakenList
 	held     map[string]bool // enrollment ids another group's list holds
-	summary  service.GroupSummary
+	history  service.GroupHistory
 }
 
 func (f *fakeRepo) ListSessions(_ context.Context, _ []string, _, _ time.Time) ([]service.TakenList, error) {
 	return f.taken, nil
 }
 
-// SummarizeGroup answers the canned summary (T12 report).
-func (f *fakeRepo) SummarizeGroup(_ context.Context, _ string, _ []string, _, _ time.Time) (service.GroupSummary, error) {
-	return f.summary, nil
+// GroupHistory answers the canned history (T12 report).
+func (f *fakeRepo) GroupHistory(_ context.Context, _ string, _ []string, _, _ time.Time) (service.GroupHistory, error) {
+	return f.history, nil
 }
 
 func newFakeRepo() *fakeRepo {
@@ -103,6 +103,10 @@ type fakeEnrollments struct {
 
 func (f *fakeEnrollments) ByGroup(_ context.Context, groupID string) ([]service.EnrollmentRef, error) {
 	return f.byGroup[groupID], nil
+}
+
+func (f *fakeEnrollments) TransfersInto(context.Context, string) ([]service.TransferIn, error) {
+	return nil, nil
 }
 
 type fakeGroups struct{ existing map[string]bool }

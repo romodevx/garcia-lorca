@@ -18,8 +18,10 @@ export interface AttendanceCounts {
 export interface AttendanceReportRow extends AttendanceCounts {
   enrollmentId: string;
   studentId: string;
-  /** Surnames first; "" when the directory could not name the pupil. */
+  /** Surnames first; "(sin nombre)" when the directory could not name the pupil. */
   name: string;
+  /** False for a pupil who left the group during the range. */
+  active: boolean;
 }
 
 export interface AttendanceReport {

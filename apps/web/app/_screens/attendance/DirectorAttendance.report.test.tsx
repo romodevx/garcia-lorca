@@ -73,7 +73,7 @@ describe("DirectorAttendance — Reporte (T12)", () => {
     const user = userEvent.setup();
     reports.getAttendanceReport.mockResolvedValue({
       groupId: "gSec", groupLabel: "1° SECUNDARIA · A", from: "2026-09-01", to: TODAY, listsTaken: 1,
-      rows: [{ enrollmentId: "en1", studentId: "st1", name: "LOVELACE ADA", present: 0, absent: 0, late: 1, excused: 0 }],
+      rows: [{ enrollmentId: "en1", studentId: "st1", name: "LOVELACE ADA", active: true, present: 0, absent: 0, late: 1, excused: 0 }],
       totals: { present: 0, absent: 0, late: 1, excused: 0 },
     });
     renderScreen();
