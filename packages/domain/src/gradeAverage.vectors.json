@@ -1,0 +1,26 @@
+{
+  "_comment": "ONE table of cases for the system's grade averages (T15). Run by packages/domain/src/gradeAverage.test.ts (web + parents' app) AND services/grades/internal/domain/average_test.go. Grades are typed as decimal text; an average is the EXACT mean, TRUNCATED (never rounded) to 2 decimals, printed without trailing zeros.",
+  "subject": [
+    { "values": ["9", "8", "9"], "want": "8.66" },
+    { "values": ["8", "9"], "want": "8.5" },
+    { "values": ["9"], "want": "9" },
+    { "values": ["10", "10", "9"], "want": "9.66" },
+    { "values": ["7", "7", "8"], "want": "7.33" },
+    { "values": ["6", "7", "7"], "want": "6.66" },
+    { "values": ["5", "6"], "want": "5.5" },
+    { "values": ["10", "10"], "want": "10" },
+    { "values": ["6", "6", "6", "7", "7", "7", "7"], "want": "6.57" },
+    { "values": ["8.45"], "want": "8.45" },
+    { "values": ["8.4", "8.5"], "want": "8.45" },
+    { "values": ["9.99", "9.98"], "want": "9.98" },
+    { "values": [], "want": "" }
+  ],
+  "general": [
+    { "subjects": [["9", "8", "9"], ["8", "9"]], "want": "8.58" },
+    { "subjects": [["9", "8", "9"], ["8", "8", "9"]], "want": "8.5" },
+    { "subjects": [["10"], ["9"], ["9"]], "want": "9.33" },
+    { "subjects": [["10"], []], "want": "10" },
+    { "subjects": [[], []], "want": "" },
+    { "subjects": [], "want": "" }
+  ]
+}
