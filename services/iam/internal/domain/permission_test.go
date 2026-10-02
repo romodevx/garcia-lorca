@@ -139,6 +139,9 @@ func TestIsOwnerOnly(t *testing.T) {
 		// T16: the Horarios module is delegable (owner by default).
 		{"schedule:read", false},
 		{"schedule:write", false},
+		// T17: the Actividades module is delegable (owner by default).
+		{"activities:read", false},
+		{"activities:write", false},
 		{"users:write", false},
 		{"config:write", false},
 		// Task 9: the counter's permissions are the Cobranza role's, so they
