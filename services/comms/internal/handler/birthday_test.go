@@ -16,7 +16,7 @@ import (
 type oneBirthday struct{}
 
 func (oneBirthday) BirthdaysOn(_ context.Context, month, day int, _ bool) ([]service.Pupil, error) {
-	if month == 10 && day == 1 {
+	if month == 9 && day == 15 {
 		return []service.Pupil{{ID: studentID, FirstName: "Ana"}}, nil
 	}
 	return nil, nil
@@ -59,12 +59,12 @@ func newBirthdayHandler(t *testing.T, repo *fakeRepo) *handler.CommsHandler {
 func TestRunBirthdaysReportsTheRun(t *testing.T) {
 	repo := &fakeRepo{}
 	h := newBirthdayHandler(t, repo)
-	res, err := h.RunBirthdays(context.Background(), connect.NewRequest(&commsv1.RunBirthdaysRequest{Date: "2026-10-01"}))
+	res, err := h.RunBirthdays(context.Background(), connect.NewRequest(&commsv1.RunBirthdaysRequest{Date: "2026-09-15"}))
 	if err != nil {
 		t.Fatalf("RunBirthdays: %v", err)
 	}
 	m := res.Msg
-	if m.GetDate() != "2026-10-01" || m.GetGreeted() != 1 || m.GetAlreadyGreeted() != 0 || m.GetWithoutGuardians() != 0 {
+	if m.GetDate() != "2026-09-15" || m.GetGreeted() != 1 || m.GetAlreadyGreeted() != 0 || m.GetWithoutGuardians() != 0 {
 		t.Errorf("response = %+v", m)
 	}
 	if len(repo.notifications) != 1 || repo.notifications[0].Type != "birthday" {

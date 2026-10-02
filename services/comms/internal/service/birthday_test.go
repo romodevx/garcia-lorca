@@ -105,6 +105,10 @@ func newBirthdayService(t *testing.T, now time.Time, guardians service.GuardianR
 	return birthdayFixture{svc: svc, repo: repo, dir: dir, templates: templates, sender: sender}
 }
 
+// lateNow is a clock past every day these tests replay: a run may not be for
+// a future day, and these tests are about what a run does, not when.
+var lateNow = time.Date(2101, 1, 1, 18, 0, 0, 0, time.UTC)
+
 var anaOct1 = map[[2]int][]service.Pupil{{10, 1}: {{ID: studentID, FirstName: "Ana Sofía"}}}
 
 // --- tests -------------------------------------------------------------------
@@ -112,7 +116,7 @@ var anaOct1 = map[[2]int][]service.Pupil{{10, 1}: {{ID: studentID, FirstName: "A
 // The family of a pupil born today gets the greeting in the app: a feed entry
 // of its own kind, and a push to the guardians' phones.
 func TestRunBirthdaysGreetsTheFamily(t *testing.T) {
-	f := newBirthdayService(t, fixedNow, newFakeGuardians(), anaOct1)
+	f := newBirthdayService(t, lateNow, newFakeGuardians(), anaOct1)
 
 	run, err := f.svc.RunBirthdays(context.Background(), "2026-10-01")
 	if err != nil {
@@ -145,7 +149,7 @@ func TestRunBirthdaysGreetsTheFamily(t *testing.T) {
 // The scheduler retries, and anybody can curl the run again: a family is
 // greeted once a year, however many times the job runs that day.
 func TestRunBirthdaysIsIdempotent(t *testing.T) {
-	f := newBirthdayService(t, fixedNow, newFakeGuardians(), anaOct1)
+	f := newBirthdayService(t, lateNow, newFakeGuardians(), anaOct1)
 	ctx := context.Background()
 	if _, err := f.svc.RunBirthdays(ctx, "2026-10-01"); err != nil {
 		t.Fatalf("first run: %v", err)
@@ -173,7 +177,7 @@ func TestRunBirthdaysIsIdempotent(t *testing.T) {
 // reaches them.
 func TestRunBirthdaysSkipsPupilsWithoutGuardians(t *testing.T) {
 	guardians := &fakeGuardians{links: map[string][]string{}}
-	f := newBirthdayService(t, fixedNow, guardians, anaOct1)
+	f := newBirthdayService(t, lateNow, guardians, anaOct1)
 	ctx := context.Background()
 
 	run, err := f.svc.RunBirthdays(ctx, "2026-10-01")
@@ -224,7 +228,7 @@ func TestRunBirthdaysLeapDay(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.date, func(t *testing.T) {
-			f := newBirthdayService(t, fixedNow, newFakeGuardians(), nil)
+			f := newBirthdayService(t, lateNow, newFakeGuardians(), nil)
 			if _, err := f.svc.RunBirthdays(context.Background(), tc.date); err != nil {
 				t.Fatalf("RunBirthdays: %v", err)
 			}
@@ -235,7 +239,7 @@ func TestRunBirthdaysLeapDay(t *testing.T) {
 	}
 
 	leapling := map[[2]int][]service.Pupil{{2, 29}: {{ID: studentID, FirstName: "Bisi"}}}
-	f := newBirthdayService(t, fixedNow, newFakeGuardians(), leapling)
+	f := newBirthdayService(t, lateNow, newFakeGuardians(), leapling)
 	run, err := f.svc.RunBirthdays(context.Background(), "2027-02-28")
 	if err != nil || run.Greeted != 1 {
 		t.Errorf("leap-day pupil on 2027-02-28 = %+v %v, want greeted", run, err)
@@ -243,7 +247,7 @@ func TestRunBirthdaysLeapDay(t *testing.T) {
 }
 
 func TestRunBirthdaysRejectsAMalformedDate(t *testing.T) {
-	f := newBirthdayService(t, fixedNow, newFakeGuardians(), anaOct1)
+	f := newBirthdayService(t, lateNow, newFakeGuardians(), anaOct1)
 	for _, raw := range []string{"01/10/2026", "2026-02-30", "mañana"} {
 		if _, err := f.svc.RunBirthdays(context.Background(), raw); glerrors.KindOf(err) != glerrors.KindInvalid {
 			t.Errorf("%q: want KindInvalid, got %v", raw, err)
@@ -256,7 +260,7 @@ func TestRunBirthdaysRejectsAMalformedDate(t *testing.T) {
 
 // The school's own text replaces the default, {nombre} wherever it appears.
 func TestRunBirthdaysUsesTheSchoolsTemplate(t *testing.T) {
-	f := newBirthdayService(t, fixedNow, newFakeGuardians(), anaOct1)
+	f := newBirthdayService(t, lateNow, newFakeGuardians(), anaOct1)
 	f.templates.saved = &service.BirthdayTemplate{Title: "¡Felicidades, {nombre}!", Body: "{nombre}: hoy es tu día, {nombre}."}
 
 	if _, err := f.svc.RunBirthdays(context.Background(), "2026-10-01"); err != nil {
@@ -271,7 +275,7 @@ func TestRunBirthdaysUsesTheSchoolsTemplate(t *testing.T) {
 // students down: nothing can be greeted, and the run says so — the scheduler's
 // retry is the recovery.
 func TestRunBirthdaysReportsADirectoryOutage(t *testing.T) {
-	f := newBirthdayService(t, fixedNow, newFakeGuardians(), anaOct1)
+	f := newBirthdayService(t, lateNow, newFakeGuardians(), anaOct1)
 	f.dir.err = errors.New("students is down")
 	if _, err := f.svc.RunBirthdays(context.Background(), "2026-10-01"); err == nil {
 		t.Error("want an error when the directory fails")
@@ -285,7 +289,7 @@ func TestRunBirthdaysKeepsGoingPastOneFailure(t *testing.T) {
 		{ID: secondStudentID, FirstName: "Luis"},
 		{ID: studentID, FirstName: "Ana"},
 	}}
-	f := newBirthdayService(t, fixedNow, failingGuardians{newFakeGuardians(), secondStudentID}, two)
+	f := newBirthdayService(t, lateNow, failingGuardians{newFakeGuardians(), secondStudentID}, two)
 
 	run, err := f.svc.RunBirthdays(context.Background(), "2026-10-01")
 	if err == nil {
@@ -299,7 +303,7 @@ func TestRunBirthdaysKeepsGoingPastOneFailure(t *testing.T) {
 // --- template -----------------------------------------------------------------
 
 func TestBirthdayTemplateDefaultsUntilTheSchoolWritesOne(t *testing.T) {
-	f := newBirthdayService(t, fixedNow, newFakeGuardians(), nil)
+	f := newBirthdayService(t, lateNow, newFakeGuardians(), nil)
 	ctx := context.Background()
 
 	got, err := f.svc.BirthdayTemplate(ctx)
@@ -314,7 +318,7 @@ func TestBirthdayTemplateDefaultsUntilTheSchoolWritesOne(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpdateBirthdayTemplate: %v", err)
 	}
-	if saved.IsDefault || saved.Title != "¡Feliz día!" || saved.Body != "Felicidades, {nombre}." || saved.UpdatedBy != userID || !saved.UpdatedAt.Equal(fixedNow) {
+	if saved.IsDefault || saved.Title != "¡Feliz día!" || saved.Body != "Felicidades, {nombre}." || saved.UpdatedBy != userID || !saved.UpdatedAt.Equal(lateNow) {
 		t.Errorf("saved = %+v", saved)
 	}
 	again, err := f.svc.BirthdayTemplate(ctx)
@@ -335,7 +339,7 @@ func TestUpdateBirthdayTemplateValidates(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			f := newBirthdayService(t, fixedNow, newFakeGuardians(), nil)
+			f := newBirthdayService(t, lateNow, newFakeGuardians(), nil)
 			if _, err := f.svc.UpdateBirthdayTemplate(context.Background(), tc.title, tc.body, tc.by); glerrors.KindOf(err) != glerrors.KindInvalid {
 				t.Errorf("want KindInvalid, got %v", err)
 			}
@@ -348,7 +352,7 @@ func TestUpdateBirthdayTemplateValidates(t *testing.T) {
 
 // A 500-character greeting in Spanish counts characters, not bytes.
 func TestUpdateBirthdayTemplateCountsCharacters(t *testing.T) {
-	f := newBirthdayService(t, fixedNow, newFakeGuardians(), nil)
+	f := newBirthdayService(t, lateNow, newFakeGuardians(), nil)
 	if _, err := f.svc.UpdateBirthdayTemplate(context.Background(), "Hola", strings.Repeat("ñ", 500), userID); err != nil {
 		t.Errorf("500 ñ: %v", err)
 	}
@@ -368,7 +372,7 @@ func TestRunBirthdaysWritesTheNameInNameCase(t *testing.T) {
 	for raw, want := range cases {
 		t.Run(raw, func(t *testing.T) {
 			born := map[[2]int][]service.Pupil{{10, 1}: {{ID: studentID, FirstName: raw}}}
-			f := newBirthdayService(t, fixedNow, newFakeGuardians(), born)
+			f := newBirthdayService(t, lateNow, newFakeGuardians(), born)
 			if _, err := f.svc.RunBirthdays(context.Background(), "2026-10-01"); err != nil {
 				t.Fatalf("RunBirthdays: %v", err)
 			}
@@ -376,5 +380,39 @@ func TestRunBirthdaysWritesTheNameInNameCase(t *testing.T) {
 				t.Errorf("title = %q, want the name as %q", n.Title, want)
 			}
 		})
+	}
+}
+
+// Review: a replay of a FUTURE day would greet families early and claim the
+// year's key, so the real birthday would then be skipped as already greeted.
+// Past days may be replayed (recovery); tomorrow may not.
+func TestRunBirthdaysRefusesAFutureDay(t *testing.T) {
+	ninePMOct1 := time.Date(2026, 10, 2, 3, 0, 0, 0, time.UTC) // 2026-10-01 21:00 in Mexico City
+	f := newBirthdayService(t, ninePMOct1, newFakeGuardians(), anaOct1)
+	if _, err := f.svc.RunBirthdays(context.Background(), "2026-10-02"); glerrors.KindOf(err) != glerrors.KindInvalid {
+		t.Errorf("tomorrow (school time): want KindInvalid, got %v", err)
+	}
+	if len(f.dir.queries) != 0 {
+		t.Error("a future day reached the directory")
+	}
+	if run, err := f.svc.RunBirthdays(context.Background(), "2026-10-01"); err != nil || run.Greeted != 1 {
+		t.Errorf("today = %+v %v", run, err)
+	}
+	if _, err := f.svc.RunBirthdays(context.Background(), "2026-09-30"); err != nil {
+		t.Errorf("yesterday must replay: %v", err)
+	}
+}
+
+// Review: without a guardian reader there is nobody to greet — a clear error,
+// never a nil dereference.
+func TestRunBirthdaysWithoutAGuardianReaderIsAnError(t *testing.T) {
+	ids := 0
+	svc := service.NewCommsService(newFakeRepo(), nil, nil, tenantID,
+		func() string { ids++; return "id" },
+		func() time.Time { return fixedNow },
+		slog.New(slog.DiscardHandler),
+		service.WithBirthdays(&fakeDirectory{born: anaOct1}, &fakeTemplates{}, mexicoCity(t)))
+	if _, err := svc.RunBirthdays(context.Background(), "2026-10-01"); err == nil {
+		t.Error("want an error, not a panic")
 	}
 }

@@ -32,9 +32,6 @@ const (
 	maxBirthdayBody  = 500
 )
 
-// isoDate is the wire shape of a day.
-const isoDate = "2006-01-02"
-
 // Pupil is an enrolled pupil whose birthday it is: the id the greeting is filed
 // under and the first name it says.
 type Pupil struct {
@@ -102,14 +99,14 @@ var errBirthdaysOff = glerrors.New(glerrors.KindInternal, "birthday greetings ar
 // error, so the scheduler retries and the ledger skips everybody already
 // greeted.
 func (s *CommsService) RunBirthdays(ctx context.Context, date string) (BirthdayRun, error) {
-	if s.birthdays == nil || s.templates == nil || s.school == nil {
+	if s.birthdays == nil || s.templates == nil || s.school == nil || s.guardians == nil {
 		return BirthdayRun{}, errBirthdaysOff
 	}
 	day, err := s.greetingDay(date)
 	if err != nil {
 		return BirthdayRun{}, err
 	}
-	run := BirthdayRun{Date: day.Format(isoDate)}
+	run := BirthdayRun{Date: day.Format(isoDateLayout)}
 
 	template, err := s.BirthdayTemplate(ctx)
 	if err != nil {
@@ -170,15 +167,23 @@ func (s *CommsService) greet(ctx context.Context, p Pupil, t BirthdayTemplate, y
 
 // greetingDay is the day to greet: raw when given, else today in the school's
 // zone. A day that is not YYYY-MM-DD, or does not exist, is the caller's mistake.
+//
+// A day after today is refused: greeting it now would reach families early and
+// claim the year's ledger key, so the real birthday would be skipped as already
+// greeted. Past days replay (a missed morning is recovered that way).
 func (s *CommsService) greetingDay(raw string) (time.Time, error) {
+	y, m, d := s.now().In(s.school).Date()
+	today := time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		y, m, d := s.now().In(s.school).Date()
-		return time.Date(y, m, d, 0, 0, 0, 0, time.UTC), nil
+		return today, nil
 	}
-	day, err := time.Parse(isoDate, raw)
+	day, err := time.Parse(isoDateLayout, raw)
 	if err != nil {
 		return time.Time{}, glerrors.New(glerrors.KindInvalid, "date must be YYYY-MM-DD")
+	}
+	if day.After(today) {
+		return time.Time{}, glerrors.New(glerrors.KindInvalid, "a birthday run cannot be for a future day")
 	}
 	return day, nil
 }

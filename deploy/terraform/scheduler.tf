@@ -97,6 +97,10 @@ resource "google_cloud_scheduler_job" "monthly_billing" {
 # greetings means birthday_schedule_enabled = false here and an apply (or
 # pausing the job in the console).
 #
+# comms also pins RunBirthdays to THIS service account's OIDC email
+# (BIRTHDAYS_CALLER_SA_EMAIL in services.tf): run.invoker alone is shared with
+# the runtime SA, so without the pin any internal workload could trigger a send.
+#
 # Repo config only as of T11: NOT applied. Turn it on per environment with
 # birthday_schedule_enabled = true.
 

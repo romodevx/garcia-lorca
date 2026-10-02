@@ -155,7 +155,13 @@ func run(ctx context.Context, log *slog.Logger) error {
 
 	mux := http.NewServeMux()
 	path, connectHandler := commsv1connect.NewCommsServiceHandler(handler.NewCommsHandler(svc, tenantID), connect.WithRecover(recoverFn))
-	mux.Handle(path, connectHandler)
+	// The birthday run is Cloud Scheduler's alone (T11). run.invoker on comms is
+	// also held by the shared runtime SA, so — like /pubsub — the procedure is
+	// pinned to the scheduler's own identity. Terraform always sets
+	// BIRTHDAYS_CALLER_SA_EMAIL (a sentinel nobody holds while the schedule is
+	// off); unset locally, the check is skipped so `make birthdays` works.
+	mux.Handle(path, pinProcedureToCaller(connectHandler,
+		commsv1connect.CommsServiceRunBirthdaysProcedure, os.Getenv("BIRTHDAYS_CALLER_SA_EMAIL"), log))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
@@ -345,6 +351,25 @@ func selectSender(provider, expoAccessToken string, log *slog.Logger) (service.S
 	default:
 		return nil, fmt.Errorf("PUSH_PROVIDER %q is not one of log, expo", provider)
 	}
+}
+
+// pinProcedureToCaller lets procedure through only when the caller's OIDC email
+// is expectedSA (empty = not checked). Every other path goes straight to next.
+func pinProcedureToCaller(next http.Handler, procedure, expectedSA string, log *slog.Logger) http.Handler {
+	if expectedSA == "" {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == procedure {
+			if err := gcp.VerifyCaller(r.Header.Get("Authorization"), expectedSA); err != nil {
+				log.Warn("comms refused a call from an unexpected caller",
+					slog.String("procedure", procedure), slog.Any("error", err))
+				http.Error(w, "forbidden", http.StatusForbidden)
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // schoolLocation is the school's time zone (SCHOOL_TIMEZONE, default

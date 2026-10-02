@@ -147,8 +147,12 @@ locals {
   students_env = merge(local.common_env, {
     PUBSUB_PUSH_MODE     = "true"
     PUBSUB_PUSH_SA_EMAIL = google_service_account.pubsub_push.email
-    CONFIG_BASE_URL      = module.config.uri
-    IAM_BASE_URL         = module.iam.uri
+    # T11: RunBirthdays is pinned to the birthday scheduler's own SA (the
+    # runtime SA also holds run.invoker on comms). While the schedule is off the
+    # value is a sentinel no caller can match, so the run is closed, not open.
+    BIRTHDAYS_CALLER_SA_EMAIL = var.birthday_schedule_enabled ? google_service_account.birthday_scheduler[0].email : "birthday-schedule-disabled"
+    CONFIG_BASE_URL           = module.config.uri
+    IAM_BASE_URL              = module.iam.uri
     # Pupils' photos (task 5): the private bucket in storage.tf.
     PHOTOS_BUCKET = google_storage_bucket.student_photos.name
   })
