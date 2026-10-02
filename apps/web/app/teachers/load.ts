@@ -16,6 +16,11 @@ import type { Teacher, TeachingAssignment } from "./api";
 
 const LOCALE = "es-MX";
 const byName = (a: string, b: string): number => a.localeCompare(b, LOCALE);
+/**
+ * Two spellings of one subject are one subject: the catalog captures names in
+ * uppercase now, and older rows ("Matemáticas") are mixed case.
+ */
+const nameKey = (name: string): string => name.trim().toLocaleUpperCase(LOCALE);
 
 /** Everything the page reads for one cycle. */
 export interface LoadCatalogue {
@@ -73,7 +78,9 @@ export function isSelectable(availability: GroupAvailability): availability is S
 
 /** Each subject name once, sorted the way a Mexican reader expects. */
 export function subjectNames(subjects: readonly Subject[]): string[] {
-  return [...new Set(subjects.map((s) => s.name))].sort(byName);
+  const byKey = new Map<string, string>();
+  for (const s of subjects) if (!byKey.has(nameKey(s.name))) byKey.set(nameKey(s.name), s.name);
+  return [...byKey.values()].sort(byName);
 }
 
 export function teacherName(teacher: Teacher): string {
@@ -92,15 +99,16 @@ export function currentLoad(teacherId: string, cat: LoadCatalogue): SubjectLoad[
     if (a.teacherId !== teacherId || group === undefined) continue;
     const subjectName = subjectById.get(a.subjectId)?.name ?? "Asignatura";
     const slot: LoadSlot = { assignmentId: a.id, groupId: a.groupId, subjectId: a.subjectId, groupLabel: group.label, subjectName };
-    bySubject.set(subjectName, [...(bySubject.get(subjectName) ?? []), { group, slot }]);
+    const key = nameKey(subjectName);
+    bySubject.set(key, [...(bySubject.get(key) ?? []), { group, slot }]);
   }
 
-  return [...bySubject.entries()]
-    .sort(([a], [b]) => byName(a, b))
-    .map(([subjectName, entries]) => ({
-      subjectName,
+  return [...bySubject.values()]
+    .map((entries) => ({
+      subjectName: entries[0]?.slot.subjectName ?? "",
       slots: [...entries].sort((x, y) => order(x.group, y.group)).map((e) => e.slot),
-    }));
+    }))
+    .sort((a, b) => byName(a.subjectName, b.subjectName));
 }
 
 /**
@@ -110,7 +118,7 @@ export function currentLoad(teacherId: string, cat: LoadCatalogue): SubjectLoad[
  */
 export function groupChoices(teacherId: string, subjectName: string, cat: LoadCatalogue): LevelChoices[] {
   const subjectOfGrade = new Map(
-    cat.subjects.filter((s) => s.name === subjectName).map((s) => [s.gradeLevelId, s.id]),
+    cat.subjects.filter((s) => nameKey(s.name) === nameKey(subjectName)).map((s) => [s.gradeLevelId, s.id]),
   );
   const holder = new Map(cat.assignments.map((a) => [`${a.groupId}|${a.subjectId}`, a.teacherId]));
   const nameOf = new Map(cat.teachers.map((t) => [t.id, teacherName(t)]));

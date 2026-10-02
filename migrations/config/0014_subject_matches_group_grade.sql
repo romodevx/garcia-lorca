@@ -73,17 +73,34 @@ CREATE TRIGGER teaching_assignments_subject_of_group_grade
     BEFORE INSERT OR UPDATE OF group_id, subject_id, tenant_id ON teaching_assignments
     FOR EACH ROW EXECUTE FUNCTION config_assignment_subject_of_group_grade();
 
--- A subject or group keeps its grade while an assignment pairs it.
-CREATE FUNCTION config_keep_assigned_grade() RETURNS trigger
+-- A subject or group keeps its grade while an assignment pairs it. One function
+-- per table, so each lookup is a plain equality the index on subject_id /
+-- group_id serves.
+CREATE FUNCTION config_keep_assigned_subject_grade() RETURNS trigger
     LANGUAGE plpgsql AS
 $$
 BEGIN
     IF NEW.grade_level_id IS DISTINCT FROM OLD.grade_level_id AND EXISTS (
         SELECT 1 FROM teaching_assignments ta
-         WHERE ta.tenant_id = OLD.tenant_id
-           AND (CASE TG_TABLE_NAME WHEN 'subjects' THEN ta.subject_id ELSE ta.group_id END) = OLD.id
+         WHERE ta.subject_id = OLD.id AND ta.tenant_id = OLD.tenant_id
     ) THEN
-        RAISE EXCEPTION '% % is in a teaching assignment; its grade level cannot change', TG_TABLE_NAME, OLD.id
+        RAISE EXCEPTION 'the subject is in a teaching assignment; its grade level cannot change'
+            USING ERRCODE = 'check_violation',
+                  CONSTRAINT = 'teaching_assignments_subject_of_group_grade';
+    END IF;
+    RETURN NEW;
+END
+$$;
+
+CREATE FUNCTION config_keep_assigned_group_grade() RETURNS trigger
+    LANGUAGE plpgsql AS
+$$
+BEGIN
+    IF NEW.grade_level_id IS DISTINCT FROM OLD.grade_level_id AND EXISTS (
+        SELECT 1 FROM teaching_assignments ta
+         WHERE ta.group_id = OLD.id AND ta.tenant_id = OLD.tenant_id
+    ) THEN
+        RAISE EXCEPTION 'the group is in a teaching assignment; its grade level cannot change'
             USING ERRCODE = 'check_violation',
                   CONSTRAINT = 'teaching_assignments_subject_of_group_grade';
     END IF;
@@ -93,10 +110,10 @@ $$;
 
 CREATE TRIGGER subjects_keep_assigned_grade
     BEFORE UPDATE OF grade_level_id ON subjects
-    FOR EACH ROW EXECUTE FUNCTION config_keep_assigned_grade();
+    FOR EACH ROW EXECUTE FUNCTION config_keep_assigned_subject_grade();
 
 CREATE TRIGGER groups_keep_assigned_grade
     BEFORE UPDATE OF grade_level_id ON groups
-    FOR EACH ROW EXECUTE FUNCTION config_keep_assigned_grade();
+    FOR EACH ROW EXECUTE FUNCTION config_keep_assigned_group_grade();
 
 COMMIT;

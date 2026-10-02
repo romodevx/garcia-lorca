@@ -440,27 +440,38 @@ func (r *Repository) RenameSubject(ctx context.Context, id, name string) (domain
 	return out, nil
 }
 
-// DeleteSubject removes a subject. A malformed or unknown id is KindNotFound;
-// a subject a teaching assignment still points at (ON DELETE RESTRICT) is
-// KindConflict.
+// DeleteSubject removes a subject that never entered a teacher's load. A
+// malformed or unknown id is KindNotFound; a subject a teaching assignment
+// points at now (ON DELETE RESTRICT) or ever did (first_assigned_at, 0015) is
+// KindConflict — grades and attendance in other services keep its id.
 func (r *Repository) DeleteSubject(ctx context.Context, id string) error {
 	if !isUUID(id) {
 		return glerrors.ErrNotFound
 	}
 	return r.withTenant(ctx, func(tx *gorm.DB) error {
-		res := tx.Where("id = ?", id).Delete(&subjectModel{})
+		res := tx.Where("id = ? AND first_assigned_at IS NULL", id).Delete(&subjectModel{})
 		if pgCode(res.Error) == foreignKeyViolation {
-			return glerrors.Wrap(glerrors.KindConflict, "the subject is assigned to a teacher; free its groups first", res.Error)
+			return glerrors.Wrap(glerrors.KindConflict, subjectInUse, res.Error)
 		}
 		if res.Error != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "deleting subject", res.Error)
 		}
-		if res.RowsAffected == 0 {
+		if res.RowsAffected == 1 {
+			return nil
+		}
+		var n int64
+		if err := tx.Model(&subjectModel{}).Where("id = ?", id).Count(&n).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "deleting subject", err)
+		}
+		if n == 0 {
 			return glerrors.ErrNotFound
 		}
-		return nil
+		return glerrors.New(glerrors.KindConflict, subjectInUse)
 	})
 }
+
+// subjectInUse is the refusal for deleting a subject that was ever assigned.
+const subjectInUse = "the subject has been in a teaching load; it can be renamed but not deleted"
 
 // --- terms ----------------------------------------------------------------
 

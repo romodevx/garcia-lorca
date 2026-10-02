@@ -21,6 +21,7 @@ vi.mock("../../config/api", () => {
     ConfigError,
     listSubjects: vi.fn(),
     createSubjectInGrades: vi.fn(),
+    createSubject: vi.fn(),
     renameSubject: vi.fn(),
     deleteSubject: vi.fn(),
   };
@@ -40,7 +41,9 @@ let store: Subject[];
 
 beforeEach(() => {
   store = [sub("s1", "g1", "ESPAÑOL"), sub("s2", "g1", "MATEMÁTICAS"), sub("s3", "g2", "MATEMÁTICAS")];
-  mocked.listSubjects.mockImplementation(async (_base, gradeLevelId) => store.filter((s) => s.gradeLevelId === gradeLevelId));
+  mocked.listSubjects.mockImplementation(async (_base, gradeLevelId) =>
+    gradeLevelId === "" ? [...store, sub("x9", "other-level-grade", "AJENA")] : store.filter((s) => s.gradeLevelId === gradeLevelId),
+  );
 });
 
 afterEach(() => {
@@ -170,38 +173,57 @@ describe("SubjectsPanel — the level's subjects, grade by grade (T13)", () => {
     expect(mocked.renameSubject).not.toHaveBeenCalled();
   });
 
-  it("deletes with eight seconds to undo, and undo never reaches the server", async () => {
+  it("reads the level's subjects in ONE request and shows only its grades' rows", async () => {
     renderPanel();
-    const block = await screen.findByRole("region", { name: "Materias de 1° PRIMARIA" });
-    await within(block).findByText("ESPAÑOL");
-    vi.useFakeTimers();
-
-    fireEvent.click(within(block).getByRole("button", { name: "Eliminar ESPAÑOL" }));
-    expect(within(block).queryByText("ESPAÑOL")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: /deshacer/i }));
-    expect(within(block).getByText("ESPAÑOL")).toBeInTheDocument();
-
-    await act(async () => {
-      vi.advanceTimersByTime(9_000);
-    });
-    expect(mocked.deleteSubject).not.toHaveBeenCalled();
+    await screen.findAllByText("MATEMÁTICAS");
+    expect(mocked.listSubjects).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("AJENA")).toBeNull();
   });
 
-  it("a subject a teacher is assigned to comes back with the reason when the delete is refused", async () => {
-    mocked.deleteSubject.mockRejectedValue(new api.ConfigError(409, "assigned"));
+  it("deletes at once and offers to undo, which puts the subject back in its grade", async () => {
+    mocked.deleteSubject.mockResolvedValue(undefined);
+    mocked.createSubject.mockResolvedValue(sub("s1b", "g1", "ESPAÑOL"));
     renderPanel();
     const block = await screen.findByRole("region", { name: "Materias de 1° PRIMARIA" });
     await within(block).findByText("ESPAÑOL");
-    vi.useFakeTimers();
+
+    await userEvent.click(within(block).getByRole("button", { name: "Eliminar ESPAÑOL" }));
+    expect(mocked.deleteSubject).toHaveBeenCalledWith(expect.any(String), "s1");
+    await waitFor(() => expect(within(block).queryByText("ESPAÑOL")).toBeNull());
+
+    await userEvent.click(screen.getByRole("button", { name: /deshacer/i }));
+    expect(mocked.createSubject).toHaveBeenCalledWith(expect.any(String), { gradeLevelId: "g1", name: "ESPAÑOL" });
+    expect(await within(block).findByText("ESPAÑOL")).toBeInTheDocument();
+  });
+
+  it("the undo offer leaves on its own after eight seconds", async () => {
+    mocked.deleteSubject.mockResolvedValue(undefined);
+    renderPanel();
+    const block = await screen.findByRole("region", { name: "Materias de 1° PRIMARIA" });
+    await within(block).findByText("ESPAÑOL");
+    vi.useFakeTimers({ shouldAdvanceTime: true });
 
     fireEvent.click(within(block).getByRole("button", { name: "Eliminar ESPAÑOL" }));
     await act(async () => {
-      vi.advanceTimersByTime(8_000);
+      await Promise.resolve();
     });
-    vi.useRealTimers();
+    expect(screen.getByRole("button", { name: /deshacer/i })).toBeInTheDocument();
+    await act(async () => {
+      vi.advanceTimersByTime(8_100);
+    });
+    expect(screen.queryByRole("button", { name: /deshacer/i })).toBeNull();
+  });
 
-    expect(mocked.deleteSubject).toHaveBeenCalledWith(expect.any(String), "s1");
-    expect(await screen.findByRole("alert")).toHaveTextContent(/ESPAÑOL tiene profesores asignados/);
-    expect(await within(block).findByText("ESPAÑOL")).toBeInTheDocument();
+  it("a subject that was ever in a teacher's load stays, with the reason", async () => {
+    mocked.deleteSubject.mockRejectedValue(new api.ConfigError(409, "used"));
+    renderPanel();
+    const block = await screen.findByRole("region", { name: "Materias de 1° PRIMARIA" });
+    await within(block).findByText("ESPAÑOL");
+
+    await userEvent.click(within(block).getByRole("button", { name: "Eliminar ESPAÑOL" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/ESPAÑOL ya estuvo en una carga académica/);
+    expect(within(block).getByText("ESPAÑOL")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /deshacer/i })).toBeNull();
   });
 });

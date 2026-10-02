@@ -527,7 +527,7 @@ export async function renameSubject(baseURL: string, id: string, name: string): 
   return (await res.json()) as Subject;
 }
 
-/** Deletes a subject. One a teacher is assigned to answers 409 (`isConflict`). */
+/** Deletes a subject. One that was ever in a teacher's load answers 409 (`isConflict`). */
 export async function deleteSubject(baseURL: string, id: string): Promise<void> {
   const res = await authFetch(url(baseURL, `${BASE_PATH}/subjects/${encodeURIComponent(id)}`), {
     method: "DELETE",

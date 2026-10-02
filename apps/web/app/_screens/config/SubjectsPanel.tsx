@@ -7,9 +7,9 @@ import { Btn } from "../../_design/Controls";
 import { Icon } from "../../_design/Icon";
 import { UndoToast } from "../../_design/UndoToast";
 import { TextField, useFocusFirstInvalid } from "../../_design/form";
-import { useUndoableRemoval } from "../../_design/useUndoableRemoval";
 import {
   ConfigError,
+  createSubject,
   createSubjectInGrades,
   deleteSubject,
   listSubjects,
@@ -32,6 +32,8 @@ export interface SubjectsPanelProps {
 const LOCALE = "es-MX";
 const NO_NAME = "Escribe el nombre de la materia.";
 const NO_GRADE = "Elige al menos un grado.";
+/** How long the undo offer stays after a delete. */
+const UNDO_MS = 8_000;
 
 /**
  * Las materias de un nivel, grado por grado (T13).
@@ -47,19 +49,28 @@ export function SubjectsPanel({ level, gradeLevels, selectedGradeLevelId }: Subj
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [error, setError] = useState<string | undefined>(undefined);
   const [notice, setNotice] = useState<string | undefined>(undefined);
-  const removal = useUndoableRemoval<Subject>();
-  const pendingIds = useMemo(() => new Set(removal.pending.map((s) => s.id)), [removal.pending]);
+  const [deleted, setDeleted] = useState<Subject | undefined>(undefined);
 
+  // ONE request for the school's subjects, kept to this level's grades. A
+  // response that arrives after a newer one (a grade was just added) is dropped.
   const gradeKey = grades.map((g) => g.id).join(",");
-  const reload = useCallback(async (): Promise<void> => {
-    const ids = gradeKey === "" ? [] : gradeKey.split(",");
-    const lists = await Promise.all(ids.map((id) => listSubjects(API_URL, id)));
-    setSubjects(lists.flat());
+  useEffect(() => {
+    const ids = new Set(gradeKey === "" ? [] : gradeKey.split(","));
+    let active = true;
+    listSubjects(API_URL, "")
+      .then((all) => active && setSubjects(all.filter((s) => ids.has(s.gradeLevelId))))
+      .catch(() => active && setError("No se pudieron cargar las materias de este nivel."));
+    return () => {
+      active = false;
+    };
   }, [gradeKey]);
 
+  // The undo offer leaves on its own (≥ 8 s, like every undo toast).
   useEffect(() => {
-    reload().catch(() => setError("No se pudieron cargar las materias de este nivel."));
-  }, [reload]);
+    if (deleted === undefined) return;
+    const timer = setTimeout(() => setDeleted(undefined), UNDO_MS);
+    return () => clearTimeout(timer);
+  }, [deleted]);
 
   const onCreated = (name: string, res: SubjectsInGrades): void => {
     setSubjects((prev) => [...prev, ...res.created]);
@@ -71,20 +82,37 @@ export function SubjectsPanel({ level, gradeLevels, selectedGradeLevelId }: Subj
     setSubjects((prev) => prev.map((s) => (s.id === renamed.id ? renamed : s)));
   };
 
-  const remove = (s: Subject): void => {
+  /*
+   * The delete goes out AT ONCE, not after the undo window: the server is the
+   * one that knows whether the subject was ever in a teacher's load, and that
+   * refusal has to reach the person while they are still looking — not eight
+   * seconds later, or never if they already moved to another level. Undo puts
+   * it back as a new row, which is harmless precisely because the server only
+   * deletes a subject nothing ever pointed at.
+   */
+  const remove = async (s: Subject): Promise<void> => {
     setError(undefined);
-    setSubjects((prev) => prev.filter((x) => x.id !== s.id));
-    removal.remove(s, () => {
-      void deleteSubject(API_URL, s.id)
-        .catch((cause: unknown) => {
-          setError(
-            cause instanceof ConfigError && cause.isConflict
-              ? `${s.name} tiene profesores asignados: quítala de su carga académica antes de eliminarla.`
-              : `No se pudo eliminar ${s.name}.`,
-          );
-          void reload().catch(() => {});
-        });
-    });
+    try {
+      await deleteSubject(API_URL, s.id);
+      setSubjects((prev) => prev.filter((x) => x.id !== s.id));
+      setDeleted(s);
+    } catch (cause) {
+      setError(
+        cause instanceof ConfigError && cause.isConflict
+          ? `${s.name} ya estuvo en una carga académica: se puede renombrar, pero no eliminar.`
+          : `No se pudo eliminar ${s.name}.`,
+      );
+    }
+  };
+
+  const undo = async (s: Subject): Promise<void> => {
+    setDeleted(undefined);
+    try {
+      const back = await createSubject(API_URL, { gradeLevelId: s.gradeLevelId, name: s.name });
+      setSubjects((prev) => [...prev, back]);
+    } catch {
+      setError(`No se pudo devolver ${s.name}. Agrégala de nuevo.`);
+    }
   };
 
   return (
@@ -105,21 +133,15 @@ export function SubjectsPanel({ level, gradeLevels, selectedGradeLevelId }: Subj
             <GradeSubjects
               key={g.id}
               grade={g}
-              subjects={subjects.filter((s) => s.gradeLevelId === g.id && !pendingIds.has(s.id)).sort((a, b) => a.name.localeCompare(b.name, LOCALE))}
+              subjects={subjects.filter((s) => s.gradeLevelId === g.id).sort((a, b) => a.name.localeCompare(b.name, LOCALE))}
               onRenamed={onRenamed}
-              onRemove={remove}
+              onRemove={(s) => void remove(s)}
             />
           ))}
         </div>
       )}
 
-      {removal.latest !== undefined && (
-        <UndoToast message={`Se eliminó ${removal.latest.name}`} onUndo={() => {
-            const back = removal.undo() ?? [];
-            setSubjects((prev) => [...prev, ...back]);
-          }}
-        />
-      )}
+      {deleted !== undefined && <UndoToast message={`Se eliminó ${deleted.name}`} onUndo={() => void undo(deleted)} />}
     </Section>
   );
 }

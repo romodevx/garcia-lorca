@@ -2336,7 +2336,8 @@ paths:
       tags: [config]
       summary: Add a subject to a grade
       description: >
-        One row per grade. The web's "several grades at once" sends one request
+        One row per grade; the name is trimmed and unique within the grade
+        whatever its case. The web's "several grades at once" sends one request
         per grade, so a grade that already has the name answers 409 alone and
         the others are created. Requires `config:write`.
       operationId: createSubject
@@ -2416,10 +2417,11 @@ paths:
               example: a subject with this name already exists in the grade level
     delete:
       tags: [config]
-      summary: Delete a subject nobody teaches
+      summary: Delete a subject that was never taught
       description: >
-        A subject a teacher is assigned to (in any cycle) is refused with 409:
-        free its groups in the teacher's load first. Requires `config:write`.
+        A subject that is, or ever was, in a teacher's load (any cycle) is
+        refused with 409 — grades and attendance keep its id — and can only be
+        renamed. Requires `config:write`.
       operationId: deleteSubject
       security: [{ sessionCookie: [] }]
       parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
@@ -2430,11 +2432,11 @@ paths:
         '403': { $ref: '#/components/responses/PlainForbidden' }
         '404': { $ref: '#/components/responses/PlainNotFound' }
         '409':
-          description: A teacher is assigned to the subject; nothing was deleted.
+          description: The subject has been in a teaching load; nothing was deleted.
           content:
             text/plain:
               schema: { type: string }
-              example: the subject is assigned to a teacher; free its groups first
+              example: the subject has been in a teaching load; it can be renamed but not deleted
 
   /api/v1/config/terms:
     get:

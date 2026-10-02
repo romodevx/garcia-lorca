@@ -126,9 +126,7 @@ describe("Catalog — nested level → grade level", () => {
       { id: "g1", levelId: "l1", name: "1° PRIMARIA", ordinal: 1 },
       { id: "g2", levelId: "l1", name: "2° PRIMARIA", ordinal: 2 },
     ]);
-    mocked.listSubjects.mockImplementation(async (_b, gradeLevelId) =>
-      gradeLevelId === "g2" ? [{ id: "s2", gradeLevelId: "g2", name: "HISTORIA" }] : [],
-    );
+    mocked.listSubjects.mockResolvedValue([{ id: "s2", gradeLevelId: "g2", name: "HISTORIA" }]);
     render(<Catalog onBack={() => {}} />);
 
     await user.click(await screen.findByRole("button", { name: /PRIMARIA/ }));

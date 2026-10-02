@@ -560,8 +560,8 @@ func (h *ConfigHandler) RenameSubject(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toSubjectResponse(res))
 }
 
-// DeleteSubject handles DELETE /api/v1/config/subjects/{id}. A subject a
-// teacher is assigned to is refused (409): its groups are freed first.
+// DeleteSubject handles DELETE /api/v1/config/subjects/{id}. A subject that
+// was ever in a teacher's load is refused (409): it can only be renamed.
 func (h *ConfigHandler) DeleteSubject(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if !uuidShape.MatchString(id) {

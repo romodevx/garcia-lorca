@@ -85,6 +85,33 @@ describe("subjectNames", () => {
   });
 });
 
+describe("names are compared without case (legacy 'Matemáticas' beside a new 'MATEMÁTICAS')", () => {
+  const mixed: Subject[] = [
+    { id: "mat-s1", gradeLevelId: "s1", name: "Matemáticas" },
+    { id: "mat-s2", gradeLevelId: "s2", name: "MATEMÁTICAS" },
+  ];
+  const cat = (): LoadCatalogue => ({ ...catalogue([]), subjects: mixed });
+
+  it("lists the subject once", () => {
+    expect(subjectNames(mixed)).toHaveLength(1);
+  });
+
+  it("offers both grades under that one name, each with its own row", () => {
+    const [name] = subjectNames(mixed);
+    const grades = groupChoices("ada", name ?? "", cat()).flatMap((l) => l.grades);
+    expect(grades.map((g) => [g.grade.id, g.groups[0]?.availability])).toEqual([
+      ["s1", { kind: "free", subjectId: "mat-s1" }],
+      ["s2", { kind: "free", subjectId: "mat-s2" }],
+    ]);
+  });
+
+  it("groups the teacher's load under one subject", () => {
+    const load = currentLoad("ada", { ...cat(), assignments: [ta("a1", "s1A", "mat-s1", "ada"), ta("a2", "s2A", "mat-s2", "ada")] });
+    expect(load).toHaveLength(1);
+    expect(load[0]?.slots).toHaveLength(2);
+  });
+});
+
 describe("groupChoices", () => {
   it("resolves, per group, the subject row of THAT group's grade with the chosen name", () => {
     const tree = groupChoices("ada", "Matemáticas", catalogue([]));

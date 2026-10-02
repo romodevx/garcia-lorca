@@ -56,3 +56,17 @@ func TestSubjectRenamedKeepsIdentityAndGrade(t *testing.T) {
 		t.Errorf("a blank name must be KindInvalid, got %v", err)
 	}
 }
+
+func TestSubjectNameIsStoredTrimmed(t *testing.T) {
+	s, err := domain.NewSubject("s1", "t1", "g1", "  Lengua \t")
+	if err != nil {
+		t.Fatalf("NewSubject: %v", err)
+	}
+	if s.Name() != "Lengua" {
+		t.Errorf("name = %q, want it trimmed", s.Name())
+	}
+	r, _ := s.Renamed(" Inglés ")
+	if r.Name() != "Inglés" {
+		t.Errorf("renamed = %q, want it trimmed", r.Name())
+	}
+}

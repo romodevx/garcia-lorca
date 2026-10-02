@@ -229,3 +229,98 @@ func TestRenameAndDeleteSubjectAreTenantScoped(t *testing.T) {
 		t.Errorf("another tenant's delete must be KindNotFound, got %v", err)
 	}
 }
+
+// A subject that was ever in a teacher's load cannot be deleted, even after the
+// slot was freed: grades and attendance in other services keep its id (0015).
+func TestDeleteSubjectOnceAssignedIsRefusedForever(t *testing.T) {
+	ctx := context.Background()
+	repo := pgadapter.NewRepository(appDB(t), tenantA)
+	cycleID, groupID, subjectID, teacherID := teachingAssignmentFixture(t, tenantA, "d8d8")
+	const assignID = "d8d87000-0000-0000-0000-000000000001"
+	a, _ := domain.NewTeachingAssignment(assignID, tenantA, cycleID, groupID, subjectID, teacherID)
+	if err := repo.CreateTeachingAssignment(ctx, a); err != nil {
+		t.Fatalf("CreateTeachingAssignment: %v", err)
+	}
+	if err := repo.DeleteTeachingAssignment(ctx, assignID); err != nil {
+		t.Fatalf("DeleteTeachingAssignment: %v", err)
+	}
+
+	if err := repo.DeleteSubject(ctx, subjectID); glerrors.KindOf(err) != glerrors.KindConflict {
+		t.Fatalf("a subject once assigned must be KindConflict, got %v", err)
+	}
+	if _, err := repo.GetSubject(ctx, subjectID); err != nil {
+		t.Fatalf("the refused delete must keep the subject: %v", err)
+	}
+}
+
+// One name per grade whatever the capitalization: "Matemáticas" and
+// "MATEMÁTICAS" are the same subject (0015, like grade names in 0006).
+func TestSubjectNameIsUniqueInItsGradeIgnoringCase(t *testing.T) {
+	ctx := context.Background()
+	repo := pgadapter.NewRepository(appDB(t), tenantA)
+	_, _, _, _ = teachingAssignmentFixture(t, tenantA, "d9d9")
+	const gradeID = "d9d90000-0000-0000-0000-000000000003"
+	first, _ := domain.NewSubject("d9d90000-0000-0000-0000-000000000091", tenantA, gradeID, "Matemáticas")
+	if err := repo.CreateSubject(ctx, first); err != nil {
+		t.Fatalf("CreateSubject: %v", err)
+	}
+	again, _ := domain.NewSubject("d9d90000-0000-0000-0000-000000000092", tenantA, gradeID, "MATEMÁTICAS")
+	if err := repo.CreateSubject(ctx, again); glerrors.KindOf(err) != glerrors.KindConflict {
+		t.Fatalf("the same name in another case must be KindConflict, got %v", err)
+	}
+	other, _ := domain.NewSubject("d9d90000-0000-0000-0000-000000000093", tenantA, gradeID, "Artes")
+	if err := repo.CreateSubject(ctx, other); err != nil {
+		t.Fatalf("CreateSubject(Artes): %v", err)
+	}
+	if _, err := repo.RenameSubject(ctx, other.ID(), "matemáticas"); glerrors.KindOf(err) != glerrors.KindConflict {
+		t.Errorf("renaming onto another case of a sibling must be KindConflict, got %v", err)
+	}
+}
+
+// Migration 0015 stops, naming the rows, if a grade already repeats a subject
+// name in another case.
+func TestMigration0015StopsOnCaseDuplicates(t *testing.T) {
+	db := migrateUpTo(t, "mig_cfg_subject_case", "0015")
+	for _, stmt := range []string{
+		"INSERT INTO levels (id, tenant_id, name, enrollment_granularity) VALUES ('c5000000-0000-0000-0000-000000000002', '" + schoolTenant + "', 'Primaria', 'CYCLE')",
+		"INSERT INTO grade_levels (id, tenant_id, level_id, name, ordinal) VALUES ('c5000000-0000-0000-0000-000000000011', '" + schoolTenant + "', 'c5000000-0000-0000-0000-000000000002', '1°', 1)",
+		"INSERT INTO subjects (id, tenant_id, grade_level_id, name) VALUES ('c5000000-0000-0000-0000-000000000021', '" + schoolTenant + "', 'c5000000-0000-0000-0000-000000000011', 'Español')",
+		"INSERT INTO subjects (id, tenant_id, grade_level_id, name) VALUES ('c5000000-0000-0000-0000-000000000022', '" + schoolTenant + "', 'c5000000-0000-0000-0000-000000000011', 'ESPAÑOL')",
+	} {
+		if err := db.Exec(stmt).Error; err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+	err := tryMigration(t, db, "0015_subject_identity.sql")
+	if err == nil {
+		t.Fatal("case duplicates must stop the migration")
+	}
+	if !strings.Contains(err.Error(), "c5000000-0000-0000-0000-000000000022") {
+		t.Errorf("the error must name the rows: %v", err)
+	}
+}
+
+// 0015 backfills: a subject already in a load before the migration counts as used.
+func TestMigration0015MarksSubjectsAlreadyAssigned(t *testing.T) {
+	db := migrateUpTo(t, "mig_cfg_subject_used", "0015")
+	for _, stmt := range []string{
+		"INSERT INTO cycles (id, tenant_id, name, status, starts_on, ends_on) VALUES ('c6000000-0000-0000-0000-000000000001', '" + schoolTenant + "', '2026-2027', 'active', '2026-08-01', '2027-07-15')",
+		"INSERT INTO levels (id, tenant_id, name, enrollment_granularity) VALUES ('c6000000-0000-0000-0000-000000000002', '" + schoolTenant + "', 'Primaria', 'CYCLE')",
+		"INSERT INTO grade_levels (id, tenant_id, level_id, name, ordinal) VALUES ('c6000000-0000-0000-0000-000000000011', '" + schoolTenant + "', 'c6000000-0000-0000-0000-000000000002', '1°', 1)",
+		"INSERT INTO subjects (id, tenant_id, grade_level_id, name) VALUES ('c6000000-0000-0000-0000-000000000021', '" + schoolTenant + "', 'c6000000-0000-0000-0000-000000000011', 'Español')",
+		"INSERT INTO subjects (id, tenant_id, grade_level_id, name) VALUES ('c6000000-0000-0000-0000-000000000022', '" + schoolTenant + "', 'c6000000-0000-0000-0000-000000000011', 'Artes')",
+		"INSERT INTO groups (id, tenant_id, cycle_id, grade_level_id, name) VALUES ('c6000000-0000-0000-0000-000000000031', '" + schoolTenant + "', 'c6000000-0000-0000-0000-000000000001', 'c6000000-0000-0000-0000-000000000011', 'A')",
+		"INSERT INTO teachers (id, tenant_id, first_name, last_name, email) VALUES ('c6000000-0000-0000-0000-000000000041', '" + schoolTenant + "', 'x', 'y', 'x@example.com')",
+		"INSERT INTO teaching_assignments (id, tenant_id, cycle_id, group_id, subject_id, teacher_id) VALUES ('c6000000-0000-0000-0000-000000000051', '" + schoolTenant + "', 'c6000000-0000-0000-0000-000000000001', 'c6000000-0000-0000-0000-000000000031', 'c6000000-0000-0000-0000-000000000021', 'c6000000-0000-0000-0000-000000000041')",
+	} {
+		if err := db.Exec(stmt).Error; err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+	if err := tryMigration(t, db, "0015_subject_identity.sql"); err != nil {
+		t.Fatalf("0015: %v", err)
+	}
+	if n := scalar[int64](t, db, "SELECT count(*) FROM subjects WHERE first_assigned_at IS NOT NULL"); n != 1 {
+		t.Errorf("only the assigned subject is marked, have %d", n)
+	}
+}

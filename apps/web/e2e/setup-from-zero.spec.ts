@@ -133,10 +133,10 @@ test.describe.serial("setting up a school from zero", () => {
     await page.getByLabel("Nombre del grupo").press("Enter");
     await expect(page.getByText(group, { exact: false }).first()).toBeVisible();
 
-    // Y la materia es un chip que se vuelve campo: un solo dato.
-    await page.getByRole("button", { name: "Nueva materia" }).click();
-    await page.getByLabel("Nombre de la materia").fill(subject);
-    await page.getByLabel("Nombre de la materia").press("Enter");
+    // La materia (T13): nombre + grados; con un grado elegido arriba, va a ese.
+    const subjectName = page.getByRole("textbox", { name: /Nombre de la materia/ });
+    await subjectName.fill(subject);
+    await subjectName.press("Enter");
     await expect(page.getByText(subject, { exact: false }).first()).toBeVisible();
   });
 

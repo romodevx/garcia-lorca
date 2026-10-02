@@ -69,8 +69,8 @@ service ConfigService {
   // RenameSubject changes a subject's name; its id and grade stay, so grades,
   // attendance and assignments follow it.
   rpc RenameSubject(RenameSubjectRequest) returns (RenameSubjectResponse);
-  // DeleteSubject removes a subject no teacher is assigned to (FailedPrecondition
-  // style conflict otherwise).
+  // DeleteSubject removes a subject that was never in a teacher's load
+  // (AlreadyExists-coded conflict otherwise; it can only be renamed).
   rpc DeleteSubject(DeleteSubjectRequest) returns (DeleteSubjectResponse);
 
   // --- terms (per cycle, level) ---

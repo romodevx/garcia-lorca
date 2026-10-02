@@ -92,7 +92,7 @@ type CatalogRepository interface {
 	// the grade → KindConflict.
 	RenameSubject(ctx context.Context, id, name string) (domain.Subject, error)
 	// DeleteSubject removes a subject. Unknown id → KindNotFound; a subject a
-	// teaching assignment still points at → KindConflict.
+	// teaching assignment points at now or ever did → KindConflict.
 	DeleteSubject(ctx context.Context, id string) error
 
 	// --- terms (periodos, per (cycle, level)) ---

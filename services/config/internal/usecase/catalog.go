@@ -243,9 +243,10 @@ func (s *CatalogService) RenameSubject(ctx context.Context, id, name string) (do
 	return s.repo.RenameSubject(ctx, renamed.ID(), renamed.Name())
 }
 
-// DeleteSubject removes a subject no teacher is assigned to. An unknown id is
-// KindNotFound; a subject still in a teaching assignment (of any cycle) is
-// KindConflict — free its slots first.
+// DeleteSubject removes a subject that never entered a teacher's load. An
+// unknown id is KindNotFound; a subject that is or ever was in a teaching
+// assignment is KindConflict — grades and attendance keep its id, so it can
+// only be renamed.
 func (s *CatalogService) DeleteSubject(ctx context.Context, id string) error {
 	return s.repo.DeleteSubject(ctx, id)
 }
