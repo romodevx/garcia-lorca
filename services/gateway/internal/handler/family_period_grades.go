@@ -14,10 +14,11 @@ import (
 	"github.com/garcia-lorca/services/gateway/internal/middleware"
 )
 
-// The family monthly grades read (T6): a parent sees each subject's grade per
-// month of the current school year, as soon as the teacher captures it. Same
-// scoping rule as every by-child family route: the {studentId} in the path is
-// checked against the principal's own children first (404 otherwise).
+// The family period grades read (T15): a parent sees each subject's grade per
+// evaluation period of the child's grade in the current school year, as soon
+// as the teacher captures it. Same scoping rule as every by-child family
+// route: the {studentId} in the path is checked against the principal's own
+// children first (404 otherwise).
 
 // FamilyEnrollmentReader resolves the caller's children and one child's
 // enrollments. The Connect StudentsClient satisfies it.
@@ -26,10 +27,10 @@ type FamilyEnrollmentReader interface {
 	ListEnrollments(ctx context.Context, studentID, cycleID, groupID string) ([]client.Enrollment, error)
 }
 
-// EnrollmentMonthlyGradesReader reads one enrollment's monthly grades. The
+// EnrollmentPeriodGradesReader reads one enrollment's period grades. The
 // Connect GradesClient satisfies it.
-type EnrollmentMonthlyGradesReader interface {
-	GetEnrollmentMonthlyGrades(ctx context.Context, enrollmentID string) (client.EnrollmentMonthlyGrades, error)
+type EnrollmentPeriodGradesReader interface {
+	GetEnrollmentPeriodGrades(ctx context.Context, enrollmentID string) (client.EnrollmentPeriodGrades, error)
 }
 
 // SubjectNamesReader names subjects. The Connect ConfigClient satisfies it.
@@ -37,23 +38,23 @@ type SubjectNamesReader interface {
 	ListSubjects(ctx context.Context, gradeLevelID string) ([]client.SubjectResult, error)
 }
 
-// FamilyMonthlyGradesHandler serves GET /family/students/{studentId}/grades/monthly.
-type FamilyMonthlyGradesHandler struct {
+// FamilyPeriodGradesHandler serves GET /family/students/{studentId}/grades/periods.
+type FamilyPeriodGradesHandler struct {
 	students FamilyEnrollmentReader
-	grades   EnrollmentMonthlyGradesReader
+	grades   EnrollmentPeriodGradesReader
 	subjects SubjectNamesReader
 	cycles   CycleLister
 	now      func() time.Time
 }
 
-// NewFamilyMonthlyGradesHandler wires the handler. cycles decides which of a
+// NewFamilyPeriodGradesHandler wires the handler. cycles decides which of a
 // child's active enrollments is the current school year's.
-func NewFamilyMonthlyGradesHandler(students FamilyEnrollmentReader, grades EnrollmentMonthlyGradesReader, subjects SubjectNamesReader, cycles CycleLister) *FamilyMonthlyGradesHandler {
-	return &FamilyMonthlyGradesHandler{students: students, grades: grades, subjects: subjects, cycles: cycles, now: time.Now}
+func NewFamilyPeriodGradesHandler(students FamilyEnrollmentReader, grades EnrollmentPeriodGradesReader, subjects SubjectNamesReader, cycles CycleLister) *FamilyPeriodGradesHandler {
+	return &FamilyPeriodGradesHandler{students: students, grades: grades, subjects: subjects, cycles: cycles, now: time.Now}
 }
 
 // WithClock replaces the clock "today" is read from (tests).
-func (h *FamilyMonthlyGradesHandler) WithClock(now func() time.Time) *FamilyMonthlyGradesHandler {
+func (h *FamilyPeriodGradesHandler) WithClock(now func() time.Time) *FamilyPeriodGradesHandler {
 	h.now = now
 	return h
 }
@@ -67,10 +68,10 @@ type familySubjectGradesResponse struct {
 	Grades      map[string]json.Number `json:"grades"`
 }
 
-type familyMonthlyGradesResponse struct {
-	GradingEnabled bool     `json:"gradingEnabled"`
-	CycleName      string   `json:"cycleName"`
-	Months         []string `json:"months"`
+type familyPeriodGradesResponse struct {
+	GradingEnabled bool                `json:"gradingEnabled"`
+	CycleName      string              `json:"cycleName"`
+	Periods        []periodRefResponse `json:"periods"`
 	// Scale is absent when the level no longer grades numerically: grades do
 	// not record the scale they were captured under, so there is nothing
 	// honest to judge them by (the app then marks none as failing).
@@ -78,17 +79,18 @@ type familyMonthlyGradesResponse struct {
 	Subjects []familySubjectGradesResponse `json:"subjects"`
 }
 
-// MonthlyGrades handles GET /api/v1/family/students/{studentId}/grades/monthly
-// — the child's ACTIVE enrollment's monthly grades: one entry per subject of
-// the group (sorted by name, Spanish order), each a month → grade object ({}
-// when nothing is captured yet). A level without numeric grading answers
+// PeriodGrades handles GET /api/v1/family/students/{studentId}/grades/periods
+// — the child's ACTIVE enrollment's grades by evaluation period: the periods
+// of the child's grade, and one entry per subject of the group (sorted by
+// name, Spanish order), each a period id → grade object ({} when nothing is
+// captured yet). A level without numeric grading answers
 // gradingEnabled:false, still listing the grades captured before it stopped
 // (never hidden); a child without an active enrollment is 404. Of two active
 // enrollments (re-enrolled for next year) the current cycle's is shown.
 //
 // It runs behind RequireAuth + rotation, the module_grades + module_students
 // guards and RequirePermission("family:read").
-func (h *FamilyMonthlyGradesHandler) MonthlyGrades(w http.ResponseWriter, r *http.Request) {
+func (h *FamilyPeriodGradesHandler) PeriodGrades(w http.ResponseWriter, r *http.Request) {
 	p, ok := middleware.PrincipalFrom(r.Context())
 	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -113,7 +115,7 @@ func (h *FamilyMonthlyGradesHandler) MonthlyGrades(w http.ResponseWriter, r *htt
 		writeNotFound(w)
 		return
 	}
-	got, err := h.grades.GetEnrollmentMonthlyGrades(r.Context(), enrollmentID)
+	got, err := h.grades.GetEnrollmentPeriodGrades(r.Context(), enrollmentID)
 	if err != nil {
 		writeConnectError(w, err)
 		return
@@ -126,7 +128,7 @@ func (h *FamilyMonthlyGradesHandler) MonthlyGrades(w http.ResponseWriter, r *htt
 // pick is by cycle, deterministically: the enrollment whose cycle is ACTIVE;
 // else the one whose cycle's dates contain today (UTC); else the active
 // enrollment of the earliest-starting cycle (enrollment id breaks every tie).
-func (h *FamilyMonthlyGradesHandler) activeEnrollment(ctx context.Context, studentID string) (string, error) {
+func (h *FamilyPeriodGradesHandler) activeEnrollment(ctx context.Context, studentID string) (string, error) {
 	enrollments, err := h.students.ListEnrollments(ctx, studentID, "", "")
 	if err != nil {
 		return "", err
@@ -182,13 +184,9 @@ func pickCurrentEnrollment(live []client.Enrollment, cycles []client.CycleResult
 	return live[0].ID
 }
 
-func (h *FamilyMonthlyGradesHandler) toResponse(ctx context.Context, g client.EnrollmentMonthlyGrades) familyMonthlyGradesResponse {
-	months := g.Months
-	if months == nil {
-		months = []string{}
-	}
-	out := familyMonthlyGradesResponse{
-		GradingEnabled: g.GradingEnabled, CycleName: g.CycleName, Months: months,
+func (h *FamilyPeriodGradesHandler) toResponse(ctx context.Context, g client.EnrollmentPeriodGrades) familyPeriodGradesResponse {
+	out := familyPeriodGradesResponse{
+		GradingEnabled: g.GradingEnabled, CycleName: g.CycleName, Periods: toPeriodRefResponses(g.Periods),
 		Subjects: []familySubjectGradesResponse{},
 	}
 	if g.GradingEnabled {
@@ -202,7 +200,7 @@ func (h *FamilyMonthlyGradesHandler) toResponse(ctx context.Context, g client.En
 	}
 	for _, grade := range g.Grades {
 		if cells, ok := bySubject[grade.SubjectID]; ok {
-			cells[grade.Month] = json.Number(grade.Value)
+			cells[grade.PeriodID] = json.Number(grade.Value)
 		}
 	}
 	for _, id := range g.SubjectIDs {
@@ -217,7 +215,7 @@ func (h *FamilyMonthlyGradesHandler) toResponse(ctx context.Context, g client.En
 
 // subjectNames is best-effort: a failed read leaves names empty, never fails
 // the parent's screen.
-func (h *FamilyMonthlyGradesHandler) subjectNames(ctx context.Context, enrich bool) map[string]string {
+func (h *FamilyPeriodGradesHandler) subjectNames(ctx context.Context, enrich bool) map[string]string {
 	out := map[string]string{}
 	if !enrich || h.subjects == nil {
 		return out

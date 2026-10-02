@@ -12,12 +12,15 @@ import (
 // Period is one term with its closure state and capture progress (T7).
 // Status is "open" or "closed"; Version counts the closes (0 = never closed).
 type Period struct {
-	TermID       string
-	TermName     string
-	Ordinal      int
-	LevelID      string
-	LevelName    string
-	Months       []string
+	TermID    string
+	TermName  string
+	Ordinal   int
+	LevelID   string
+	LevelName string
+	// StartsOn/EndsOn ("YYYY-MM-DD", "" when none) span the term's evaluation
+	// periods across the level's grades (T15).
+	StartsOn     string
+	EndsOn       string
 	Status       string
 	ClosedAt     time.Time
 	ClosedByName string
@@ -36,15 +39,17 @@ type MissingGrades struct {
 	MissingCount int
 }
 
-// PeriodProgress is one term's capture progress and what is missing.
+// PeriodProgress is one term's capture progress and what is missing (T15).
+// Unfinished is true while a grade's period of the term has not ended;
+// GroupsWithoutPeriod are the groups whose grade lacks the term's period.
 type PeriodProgress struct {
-	TermID string
-	Months []string
-	// UnfinishedMonths are the term's months after the current UTC month.
-	UnfinishedMonths []string
-	Expected         int
-	Captured         int
-	Missing          []MissingGrades
+	TermID              string
+	Unfinished          bool
+	EndsOn              string
+	GroupsWithoutPeriod []string
+	Expected            int
+	Captured            int
+	Missing             []MissingGrades
 }
 
 // ClosePeriodInput closes a term on behalf of the authenticated director.
@@ -69,8 +74,8 @@ type ReportCardFilter struct {
 	StudentID string
 }
 
-// ReportCardSummary is one report card in a list. GeneralAverage is one
-// decimal ("8.5") or "" when there is none. TermOrdinal is the term's order in
+// ReportCardSummary is one report card in a list. GeneralAverage is decimal
+// text — truncated to 2 decimals since T15 ("8.66") — or "" when there is none. TermOrdinal is the term's order in
 // its cycle frozen at issue (0 = issued before it was recorded).
 type ReportCardSummary struct {
 	ID             string
@@ -89,14 +94,23 @@ type ReportCardSummary struct {
 	CycleName      string
 }
 
-// ReportCardLine is one subject of a report card: month → exact grade text,
-// and the one-decimal trimester grade ("" = none).
+// ReportCardLine is one subject of a report card: period id → exact grade
+// text (T15; MonthValues on a card issued before), and the average — exact
+// mean truncated to 2 decimals ("" = none).
 type ReportCardLine struct {
-	SubjectID   string
-	SubjectName string
-	Position    int
-	MonthValues map[string]string
-	TermAverage string
+	SubjectID    string
+	SubjectName  string
+	Position     int
+	PeriodValues map[string]string
+	MonthValues  map[string]string
+	TermAverage  string
+}
+
+// ReportCardPeriod is one column of a T15 report card.
+type ReportCardPeriod struct {
+	ID      string
+	Ordinal int
+	Name    string
 }
 
 // ReportCard is the frozen snapshot a period's close issued.
@@ -119,10 +133,13 @@ type ReportCard struct {
 	CycleName        string
 	TermName         string
 	TermOrdinal      int
-	Months           []string
-	GeneralAverage   string
-	Scale            GradeScale
-	Lines            []ReportCardLine
+	// Periods are the columns of a T15 card; Months those of a card issued
+	// before (exactly one of the two is non-empty).
+	Periods        []ReportCardPeriod
+	Months         []string
+	GeneralAverage string
+	Scale          GradeScale
+	Lines          []ReportCardLine
 }
 
 // ListPeriods lists a cycle's terms with their closure and progress.
@@ -135,7 +152,7 @@ func (c *GradesClient) ListPeriods(ctx context.Context, cycleID string) ([]Perio
 	for _, p := range res.Msg.GetPeriods() {
 		out = append(out, Period{
 			TermID: p.GetTermId(), TermName: p.GetTermName(), Ordinal: int(p.GetOrdinal()), LevelID: p.GetLevelId(),
-			LevelName: p.GetLevelName(), Months: p.GetMonths(), Status: p.GetStatus(), ClosedAt: timeOrZero(p.GetClosedAt()),
+			LevelName: p.GetLevelName(), StartsOn: p.GetStartsOn(), EndsOn: p.GetEndsOn(), Status: p.GetStatus(), ClosedAt: timeOrZero(p.GetClosedAt()),
 			ClosedByName: p.GetClosedByName(), Version: int(p.GetVersion()),
 			Captured: int(p.GetProgress().GetCaptured()), Expected: int(p.GetProgress().GetExpected()),
 		})
@@ -158,7 +175,7 @@ func (c *GradesClient) GetPeriodProgress(ctx context.Context, termID string) (Pe
 		})
 	}
 	return PeriodProgress{
-		TermID: m.GetTermId(), Months: m.GetMonths(), UnfinishedMonths: m.GetUnfinishedMonths(),
+		TermID: m.GetTermId(), Unfinished: m.GetUnfinished(), EndsOn: m.GetEndsOn(), GroupsWithoutPeriod: m.GetGroupsWithoutPeriod(),
 		Expected: int(m.GetExpected()), Captured: int(m.GetCaptured()), Missing: missing,
 	}, nil
 }
@@ -173,7 +190,7 @@ func (c *GradesClient) ClosedTerms(ctx context.Context, termIDs []string) ([]str
 }
 
 // ClosePeriod closes a term and issues its report cards. Refusals come back
-// AlreadyExists with an X-Error-Code (MISSING_GRADES, TERM_WITHOUT_MONTHS,
+// AlreadyExists with an X-Error-Code (MISSING_GRADES, PERIOD_NOT_CONFIGURED,
 // ALREADY_CLOSED, LEVEL_NOT_GRADED).
 func (c *GradesClient) ClosePeriod(ctx context.Context, in ClosePeriodInput) (ClosePeriodResult, error) {
 	res, err := c.rpc.ClosePeriod(ctx, connect.NewRequest(&gradesv1.ClosePeriodRequest{
@@ -226,15 +243,19 @@ func (c *GradesClient) GetReportCard(ctx context.Context, id string) (ReportCard
 	for _, l := range rc.GetLines() {
 		lines = append(lines, ReportCardLine{
 			SubjectID: l.GetSubjectId(), SubjectName: l.GetSubjectName(), Position: int(l.GetPosition()),
-			MonthValues: l.GetMonthValues(), TermAverage: l.GetTermAverage(),
+			PeriodValues: l.GetPeriodValues(), MonthValues: l.GetMonthValues(), TermAverage: l.GetTermAverage(),
 		})
+	}
+	periods := make([]ReportCardPeriod, 0, len(rc.GetPeriods()))
+	for _, p := range rc.GetPeriods() {
+		periods = append(periods, ReportCardPeriod{ID: p.GetId(), Ordinal: int(p.GetOrdinal()), Name: p.GetName()})
 	}
 	return ReportCard{
 		ID: rc.GetId(), TermID: rc.GetTermId(), CycleID: rc.GetCycleId(), LevelID: rc.GetLevelId(), GroupID: rc.GetGroupId(),
 		EnrollmentID: rc.GetEnrollmentId(), StudentID: rc.GetStudentId(), Version: int(rc.GetVersion()), Status: rc.GetStatus(),
 		IssuedAt: timeOrZero(rc.GetIssuedAt()), IssuedBy: rc.GetIssuedBy(), StudentName: rc.GetStudentName(),
 		EnrollmentNumber: rc.GetEnrollmentNumber(), GroupLabel: rc.GetGroupLabel(), LevelName: rc.GetLevelName(),
-		CycleName: rc.GetCycleName(), TermName: rc.GetTermName(), TermOrdinal: int(rc.GetTermOrdinal()), Months: rc.GetMonths(), GeneralAverage: rc.GetGeneralAverage(),
+		CycleName: rc.GetCycleName(), TermName: rc.GetTermName(), TermOrdinal: int(rc.GetTermOrdinal()), Periods: periods, Months: rc.GetMonths(), GeneralAverage: rc.GetGeneralAverage(),
 		Scale: toGradeScale(rc.GetScale()), Lines: lines,
 	}, nil
 }

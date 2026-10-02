@@ -82,7 +82,7 @@ func withTerm(req *http.Request, term string) *http.Request {
 
 func TestListPeriodsShape(t *testing.T) {
 	f := &fakePeriods{periods: []client.Period{
-		{TermID: pTerm, TermName: "1.er trimestre", Ordinal: 1, LevelID: "lvl-1", LevelName: "Primaria", Months: []string{"2026-09"},
+		{TermID: pTerm, TermName: "1.er trimestre", Ordinal: 1, LevelID: "lvl-1", LevelName: "Primaria", StartsOn: "2026-08-24", EndsOn: "2026-11-30",
 			Status: "closed", ClosedAt: pClosedAt, ClosedByName: "Directora Ruiz", Version: 2, Captured: 7, Expected: 9},
 		{TermID: "term-2", TermName: "2.º trimestre", Ordinal: 2, LevelID: "lvl-1", LevelName: "Primaria", Status: "open"},
 	}}
@@ -92,9 +92,9 @@ func TestListPeriodsShape(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	assert.Equal(t, pCycle, f.gotCycle, "canonicalised")
 	assert.JSONEq(t, `{"periods":[
-		{"termId":"`+pTerm+`","termName":"1.er trimestre","ordinal":1,"levelId":"lvl-1","levelName":"Primaria","months":["2026-09"],
+		{"termId":"`+pTerm+`","termName":"1.er trimestre","ordinal":1,"levelId":"lvl-1","levelName":"Primaria","startsOn":"2026-08-24","endsOn":"2026-11-30",
 		 "status":"closed","closedAt":"2026-12-01T10:00:00Z","closedByName":"Directora Ruiz","version":2,"progress":{"captured":7,"expected":9}},
-		{"termId":"term-2","termName":"2.º trimestre","ordinal":2,"levelId":"lvl-1","levelName":"Primaria","months":[],
+		{"termId":"term-2","termName":"2.º trimestre","ordinal":2,"levelId":"lvl-1","levelName":"Primaria","startsOn":null,"endsOn":null,
 		 "status":"open","version":0,"progress":{"captured":0,"expected":0}}
 	]}`, rec.Body.String())
 
@@ -106,13 +106,13 @@ func TestListPeriodsShape(t *testing.T) {
 }
 
 func TestPeriodProgressShape(t *testing.T) {
-	f := &fakePeriods{progress: client.PeriodProgress{TermID: pTerm, Months: []string{"2026-09", "2026-10"}, UnfinishedMonths: []string{"2026-10"}, Expected: 9, Captured: 7,
+	f := &fakePeriods{progress: client.PeriodProgress{TermID: pTerm, Unfinished: true, EndsOn: "2026-11-30", GroupsWithoutPeriod: []string{"2° · A"}, Expected: 9, Captured: 7,
 		Missing: []client.MissingGrades{{GroupID: "grp-1", GroupLabel: "1° · A", SubjectID: "sub-1", SubjectName: "Matemáticas", TeacherName: "Gabriela Rojas", MissingCount: 2}}}}
 	h := handler.NewGradesPeriodsHandler(f, nil)
 	rec := httptest.NewRecorder()
 	h.Progress(rec, withTerm(closerReq(http.MethodGet, "/x", ""), pTerm))
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-	assert.JSONEq(t, `{"termId":"`+pTerm+`","months":["2026-09","2026-10"],"unfinishedMonths":["2026-10"],"expected":9,"captured":7,
+	assert.JSONEq(t, `{"termId":"`+pTerm+`","unfinished":true,"endsOn":"2026-11-30","groupsWithoutPeriod":["2° · A"],"expected":9,"captured":7,
 		"missing":[{"groupId":"grp-1","groupLabel":"1° · A","subjectId":"sub-1","subjectName":"Matemáticas","teacherName":"Gabriela Rojas","missingCount":2}]}`, rec.Body.String())
 
 	rec = httptest.NewRecorder()

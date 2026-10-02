@@ -31,6 +31,15 @@ func (f *fakeConfig) ListEvaluationPeriods(_ context.Context, cycleID, levelID, 
 	if f.err != nil {
 		return nil, f.err
 	}
+	if f.evalPeriods != nil {
+		out := []client.EvaluationPeriod{}
+		for _, p := range f.evalPeriods {
+			if gradeLevelID == "" || p.GradeLevelID == gradeLevelID {
+				out = append(out, p)
+			}
+		}
+		return out, nil
+	}
 	return []client.EvaluationPeriod{{ID: "p-1", CycleID: cycleID, GradeLevelID: evG1, Ordinal: 1, Name: "T1",
 		StartsOn: evDay(time.September, 1), EndsOn: evDay(time.November, 30), TermID: "trm-1"}}, nil
 }
@@ -184,4 +193,112 @@ func TestCopyEvaluationPeriods(t *testing.T) {
 			}
 		})
 	}
+}
+
+// fakePeriodGradesGuard is grades' answer to "which of these periods hold
+// grades?" (T15).
+type fakePeriodGradesGuard struct {
+	withGrades map[string]bool
+	err        error
+	asked      []string
+}
+
+func (g *fakePeriodGradesGuard) PeriodsWithGrades(_ context.Context, ids []string) ([]string, error) {
+	g.asked = ids
+	if g.err != nil {
+		return nil, g.err
+	}
+	out := []string{}
+	for _, id := range ids {
+		if g.withGrades[id] {
+			out = append(out, id)
+		}
+	}
+	return out, nil
+}
+
+const (
+	evP1 = "00000000-0000-4000-8000-0000000000e1"
+	evP2 = "00000000-0000-4000-8000-0000000000e2"
+	evT1 = "00000000-0000-4000-8000-0000000000f1"
+	evT2 = "00000000-0000-4000-8000-0000000000f2"
+)
+
+// twoGrades: evG1 has periods 1 and 2; evG2 (a copy target) has 1 and 2 too.
+func twoGrades() []client.EvaluationPeriod {
+	return []client.EvaluationPeriod{
+		{ID: evP1, GradeLevelID: evG1, Ordinal: 1, Name: "1.er trimestre"},
+		{ID: evP2, GradeLevelID: evG1, Ordinal: 2, Name: "2.º trimestre"},
+		{ID: evT1, GradeLevelID: evG2, Ordinal: 1, Name: "1.er bimestre"},
+		{ID: evT2, GradeLevelID: evG2, Ordinal: 2, Name: "2.º bimestre"},
+	}
+}
+
+// T14's pending guard (T15): a save that would REMOVE a period that already
+// holds grades is refused with 409 PERIOD_HAS_GRADES before config is
+// touched; keeping it (same id, even renumbered) or removing an empty one goes
+// through. An unknown answer from grades never lets the change through.
+func TestPutGradeEvaluationPeriodsRefusesRemovingAPeriodWithGrades(t *testing.T) {
+	keepFirst := `{"cycleId":"` + evCycle + `","periods":[{"id":"` + evP1 + `","ordinal":1,"name":"T1","startsOn":"2026-09-01","endsOn":"2026-11-30"}]}`
+	keepSecondRenumbered := `{"cycleId":"` + evCycle + `","periods":[{"id":"` + evP2 + `","ordinal":1,"name":"T2","startsOn":"2026-09-01","endsOn":"2026-11-30"}]}`
+	tests := []struct {
+		name       string
+		body       string
+		withGrades map[string]bool
+		guardErr   error
+		wantStatus int
+		wantCode   string
+		wantAsked  []string
+	}{
+		{name: "drops a period with grades", body: keepFirst, withGrades: map[string]bool{evP2: true},
+			wantStatus: http.StatusConflict, wantCode: "PERIOD_HAS_GRADES", wantAsked: []string{evP2}},
+		{name: "drops an empty period", body: keepFirst, withGrades: map[string]bool{evP1: true},
+			wantStatus: http.StatusOK, wantAsked: []string{evP2}},
+		{name: "keeps the graded period renumbered", body: keepSecondRenumbered, withGrades: map[string]bool{evP2: true},
+			wantStatus: http.StatusOK, wantAsked: []string{evP1}},
+		{name: "grades cannot answer", body: keepFirst, guardErr: refusal(connect.CodeUnavailable, "", "grades down"),
+			wantStatus: http.StatusInternalServerError, wantAsked: []string{evP2}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := &fakeConfig{evalPeriods: twoGrades()}
+			guard := &fakePeriodGradesGuard{withGrades: tt.withGrades, err: tt.guardErr}
+			r := newPathRequest(http.MethodPut, "/api/v1/config/grade-levels/"+evG1+"/evaluation-periods", tt.body, "id", evG1)
+			rec := serve(handler.NewConfigHandler(svc).WithPeriodGradesGuard(guard).PutGradeEvaluationPeriods, r)
+			assert.Equal(t, tt.wantStatus, rec.Code, rec.Body.String())
+			assert.Equal(t, tt.wantCode, rec.Header().Get("X-Error-Code"))
+			assert.Equal(t, tt.wantAsked, guard.asked)
+			assert.Equal(t, [3]string{evCycle, "", evG1}, svc.evalList, "the grade's current periods are read first")
+			if tt.wantStatus != http.StatusOK {
+				assert.Nil(t, svc.evalIn, "config is never asked to remove it")
+			}
+			if tt.wantCode == "PERIOD_HAS_GRADES" {
+				assert.Contains(t, rec.Body.String(), "«2.º trimestre» ya tiene calificaciones; no se puede quitar")
+			}
+		})
+	}
+}
+
+// A copy replaces each target's periods matching by ordinal: a target period
+// whose ordinal the source lacks is removed, so it must hold no grades.
+func TestCopyEvaluationPeriodsRefusesRemovingATargetPeriodWithGrades(t *testing.T) {
+	all := twoGrades()
+	periods := []client.EvaluationPeriod{all[0], all[2], all[3]} // the source evG1 has ordinal 1 only
+	body := `{"cycleId":"` + evCycle + `","fromGradeLevelId":"` + evG1 + `","toGradeLevelIds":["` + evG2 + `"]}`
+
+	svc := &fakeConfig{evalPeriods: periods}
+	guard := &fakePeriodGradesGuard{withGrades: map[string]bool{evT2: true}}
+	rec := serve(handler.NewConfigHandler(svc).WithPeriodGradesGuard(guard).CopyEvaluationPeriods,
+		newPathRequest(http.MethodPost, "/api/v1/config/evaluation-periods/copy", body, "", ""))
+	assert.Equal(t, http.StatusConflict, rec.Code, rec.Body.String())
+	assert.Equal(t, "PERIOD_HAS_GRADES", rec.Header().Get("X-Error-Code"))
+	assert.Equal(t, []string{evT2}, guard.asked, "only the target period the copy would remove")
+	assert.Nil(t, svc.evalCopyTo, "config is never asked to copy")
+
+	guard = &fakePeriodGradesGuard{withGrades: map[string]bool{evT1: true}}
+	svc = &fakeConfig{evalPeriods: periods}
+	rec = serve(handler.NewConfigHandler(svc).WithPeriodGradesGuard(guard).CopyEvaluationPeriods,
+		newPathRequest(http.MethodPost, "/api/v1/config/evaluation-periods/copy", body, "", ""))
+	assert.Equal(t, http.StatusOK, rec.Code, "the graded target period keeps its ordinal (and id)")
+	assert.Equal(t, []string{evG2}, svc.evalCopyTo)
 }

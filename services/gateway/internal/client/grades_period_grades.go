@@ -10,47 +10,59 @@ import (
 	gradesv1 "github.com/garcia-lorca/gen/go/garcialorca/grades/v1"
 )
 
-// MonthlyGradeInput is one autosaved cell. Value is the decimal text exactly as
-// the client sent it; the grades service judges it on the level's scale.
-type MonthlyGradeInput struct {
-	AssignmentID string
-	Month        string // "YYYY-MM"
-	EnrollmentID string
-	Value        string
-	CapturedBy   string // the authenticated user id
-	SchoolWide   bool   // the director's routes: months of a previous group stay writable
+// EvaluationPeriodRef is an evaluation period of a grade (config, T14) as the
+// grades service names it; dates are inclusive "YYYY-MM-DD".
+type EvaluationPeriodRef struct {
+	ID       string
+	Ordinal  int
+	Name     string
+	StartsOn string
+	EndsOn   string
 }
 
-// MonthlyCell names one cell to clear.
-type MonthlyCell struct {
+// PeriodGradeInput is one autosaved cell (T15). Value is the decimal text
+// exactly as the client sent it; the grades service judges it — a whole number
+// on the level's scale.
+type PeriodGradeInput struct {
+	AssignmentID   string
+	PeriodID       string
+	EnrollmentID   string
+	Value          string
+	CapturedBy     string // the authenticated user id
+	CapturedByName string // the authenticated user's name (audit)
+	SchoolWide     bool   // the director's routes: periods of a previous group stay writable
+}
+
+// PeriodCell names one cell to clear.
+type PeriodCell struct {
 	AssignmentID string
-	Month        string
+	PeriodID     string
 	EnrollmentID string
 	SchoolWide   bool
 }
 
-// MonthlySheetQuery names the sheet to read; Month "" lets the service pick
-// the current month clamped into the cycle.
-type MonthlySheetQuery struct {
+// PeriodSheetQuery names the sheet to read; PeriodID "" lets the service pick
+// the period of the school's day.
+type PeriodSheetQuery struct {
 	AssignmentID string
-	Month        string
+	PeriodID     string
 	SchoolWide   bool
 }
 
-// MonthlyGrade is one captured monthly grade. Value is canonical decimal text
-// ("9.5", "10").
-type MonthlyGrade struct {
+// PeriodGrade is one captured period grade. Value is canonical decimal text
+// of a whole number ("9", "10").
+type PeriodGrade struct {
 	EnrollmentID string
 	SubjectID    string
-	Month        string
+	PeriodID     string
 	Value        string
 	UpdatedAt    time.Time
 }
 
-// MonthlySheetRow is one active enrollment of the sheet; Value "" = no grade.
+// PeriodSheetRow is one active enrollment of the sheet; Value "" = no grade.
 // Editable is whether the caller may write this row's cell; ReadOnlyReason
 // says why not.
-type MonthlySheetRow struct {
+type PeriodSheetRow struct {
 	EnrollmentID   string
 	StudentID      string
 	Value          string
@@ -59,93 +71,104 @@ type MonthlySheetRow struct {
 	ReadOnlyReason string
 }
 
-// MonthlySheet is the capture grid of one assignment for one month.
-type MonthlySheet struct {
-	AssignmentID   string
-	Month          string
-	Months         []string
-	Scale          GradeScale
-	GradingEnabled bool
-	Editable       bool
-	ReadOnlyReason string
-	Rows           []MonthlySheetRow
-	// ClosedMonths are the months of a CLOSED period of the level (T7).
-	ClosedMonths []string
-	// UnmappedMonths are the months no period of the level covers.
-	UnmappedMonths []string
+// PeriodSheet is the capture grid of one assignment for one period.
+type PeriodSheet struct {
+	AssignmentID    string
+	PeriodID        string
+	Periods         []EvaluationPeriodRef
+	CurrentPeriodID string
+	Today           string
+	Scale           GradeScale
+	GradingEnabled  bool
+	Editable        bool
+	ReadOnlyReason  string
+	Rows            []PeriodSheetRow
+	// ClosedPeriodIDs are the periods whose level term is CLOSED.
+	ClosedPeriodIDs []string
 }
 
-// EnrollmentMonthlyGrades is one enrollment's monthly grades for its cycle.
-type EnrollmentMonthlyGrades struct {
+// EnrollmentPeriodGrades is one enrollment's period grades for its cycle.
+type EnrollmentPeriodGrades struct {
 	CycleID        string
 	CycleName      string
-	Months         []string
+	Periods        []EvaluationPeriodRef
 	Scale          GradeScale
 	GradingEnabled bool
 	SubjectIDs     []string
-	Grades         []MonthlyGrade
+	Grades         []PeriodGrade
 }
 
-// UpsertMonthlyGrade records or corrects one cell. Refusals (scale, decimals,
-// month, level) come back InvalidArgument with the user's sentence; an unknown
-// assignment is NotFound.
-func (c *GradesClient) UpsertMonthlyGrade(ctx context.Context, in MonthlyGradeInput) (MonthlyGrade, error) {
-	res, err := c.rpc.UpsertMonthlyGrade(ctx, connect.NewRequest(&gradesv1.UpsertMonthlyGradeRequest{
-		AssignmentId: in.AssignmentID, Month: in.Month, EnrollmentId: in.EnrollmentID, Value: in.Value, CapturedBy: in.CapturedBy,
-		SchoolWide: in.SchoolWide,
+// UpsertPeriodGrade records or corrects one cell. Refusals come back
+// InvalidArgument (or AlreadyExists for a closed term) with the user's
+// sentence and an X-Error-Code; an unknown assignment is NotFound.
+func (c *GradesClient) UpsertPeriodGrade(ctx context.Context, in PeriodGradeInput) (PeriodGrade, error) {
+	res, err := c.rpc.UpsertPeriodGrade(ctx, connect.NewRequest(&gradesv1.UpsertPeriodGradeRequest{
+		AssignmentId: in.AssignmentID, PeriodId: in.PeriodID, EnrollmentId: in.EnrollmentID, Value: in.Value,
+		CapturedBy: in.CapturedBy, CapturedByName: in.CapturedByName, SchoolWide: in.SchoolWide,
 	}))
 	if err != nil {
-		return MonthlyGrade{}, err
+		return PeriodGrade{}, err
 	}
-	return toMonthlyGrade(res.Msg.GetGrade()), nil
+	return toPeriodGrade(res.Msg.GetGrade()), nil
 }
 
-// ClearMonthlyGrade empties one cell (clearing an empty cell succeeds).
-func (c *GradesClient) ClearMonthlyGrade(ctx context.Context, cell MonthlyCell) error {
-	_, err := c.rpc.ClearMonthlyGrade(ctx, connect.NewRequest(&gradesv1.ClearMonthlyGradeRequest{
-		AssignmentId: cell.AssignmentID, Month: cell.Month, EnrollmentId: cell.EnrollmentID, SchoolWide: cell.SchoolWide,
+// ClearPeriodGrade empties one cell (clearing an empty cell succeeds).
+func (c *GradesClient) ClearPeriodGrade(ctx context.Context, cell PeriodCell) error {
+	_, err := c.rpc.ClearPeriodGrade(ctx, connect.NewRequest(&gradesv1.ClearPeriodGradeRequest{
+		AssignmentId: cell.AssignmentID, PeriodId: cell.PeriodID, EnrollmentId: cell.EnrollmentID, SchoolWide: cell.SchoolWide,
 	}))
 	return err
 }
 
-// GetMonthlySheet reads the capture grid.
-func (c *GradesClient) GetMonthlySheet(ctx context.Context, q MonthlySheetQuery) (MonthlySheet, error) {
-	res, err := c.rpc.GetMonthlySheet(ctx, connect.NewRequest(&gradesv1.GetMonthlySheetRequest{
-		AssignmentId: q.AssignmentID, Month: q.Month, SchoolWide: q.SchoolWide,
+// GetPeriodSheet reads the capture grid.
+func (c *GradesClient) GetPeriodSheet(ctx context.Context, q PeriodSheetQuery) (PeriodSheet, error) {
+	res, err := c.rpc.GetPeriodSheet(ctx, connect.NewRequest(&gradesv1.GetPeriodSheetRequest{
+		AssignmentId: q.AssignmentID, PeriodId: q.PeriodID, SchoolWide: q.SchoolWide,
 	}))
 	if err != nil {
-		return MonthlySheet{}, err
+		return PeriodSheet{}, err
 	}
 	m := res.Msg
-	rows := make([]MonthlySheetRow, 0, len(m.GetRows()))
+	rows := make([]PeriodSheetRow, 0, len(m.GetRows()))
 	for _, r := range m.GetRows() {
-		rows = append(rows, MonthlySheetRow{
+		rows = append(rows, PeriodSheetRow{
 			EnrollmentID: r.GetEnrollmentId(), StudentID: r.GetStudentId(), Value: r.GetValue(), UpdatedAt: timeOrZero(r.GetUpdatedAt()),
 			Editable: r.GetEditable(), ReadOnlyReason: r.GetReadOnlyReason(),
 		})
 	}
-	return MonthlySheet{
-		AssignmentID: m.GetAssignmentId(), Month: m.GetMonth(), Months: m.GetMonths(), Scale: toGradeScale(m.GetScale()),
+	return PeriodSheet{
+		AssignmentID: m.GetAssignmentId(), PeriodID: m.GetPeriodId(), Periods: toPeriodRefs(m.GetPeriods()),
+		CurrentPeriodID: m.GetCurrentPeriodId(), Today: m.GetToday(), Scale: toGradeScale(m.GetScale()),
 		GradingEnabled: m.GetGradingEnabled(), Editable: m.GetEditable(), ReadOnlyReason: m.GetReadOnlyReason(), Rows: rows,
-		ClosedMonths: m.GetClosedMonths(), UnmappedMonths: m.GetUnmappedMonths(),
+		ClosedPeriodIDs: m.GetClosedPeriodIds(),
 	}, nil
 }
 
-// GetEnrollmentMonthlyGrades reads one enrollment's monthly grades.
-func (c *GradesClient) GetEnrollmentMonthlyGrades(ctx context.Context, enrollmentID string) (EnrollmentMonthlyGrades, error) {
-	res, err := c.rpc.GetEnrollmentMonthlyGrades(ctx, connect.NewRequest(&gradesv1.GetEnrollmentMonthlyGradesRequest{EnrollmentId: enrollmentID}))
+// GetEnrollmentPeriodGrades reads one enrollment's period grades.
+func (c *GradesClient) GetEnrollmentPeriodGrades(ctx context.Context, enrollmentID string) (EnrollmentPeriodGrades, error) {
+	res, err := c.rpc.GetEnrollmentPeriodGrades(ctx, connect.NewRequest(&gradesv1.GetEnrollmentPeriodGradesRequest{EnrollmentId: enrollmentID}))
 	if err != nil {
-		return EnrollmentMonthlyGrades{}, err
+		return EnrollmentPeriodGrades{}, err
 	}
 	m := res.Msg
-	grades := make([]MonthlyGrade, 0, len(m.GetGrades()))
+	grades := make([]PeriodGrade, 0, len(m.GetGrades()))
 	for _, g := range m.GetGrades() {
-		grades = append(grades, toMonthlyGrade(g))
+		grades = append(grades, toPeriodGrade(g))
 	}
-	return EnrollmentMonthlyGrades{
-		CycleID: m.GetCycleId(), CycleName: m.GetCycleName(), Months: m.GetMonths(), Scale: toGradeScale(m.GetScale()),
+	return EnrollmentPeriodGrades{
+		CycleID: m.GetCycleId(), CycleName: m.GetCycleName(), Periods: toPeriodRefs(m.GetPeriods()), Scale: toGradeScale(m.GetScale()),
 		GradingEnabled: m.GetGradingEnabled(), SubjectIDs: m.GetSubjectIds(), Grades: grades,
 	}, nil
+}
+
+// PeriodsWithGrades asks which of these evaluation periods hold a grade (one
+// call). The gateway asks before config removes a period.
+func (c *GradesClient) PeriodsWithGrades(ctx context.Context, periodIDs []string) ([]string, error) {
+	res, err := c.rpc.PeriodsWithGrades(ctx, connect.NewRequest(&gradesv1.PeriodsWithGradesRequest{PeriodIds: periodIDs}))
+	if err != nil {
+		return nil, err
+	}
+	return res.Msg.GetPeriodIds(), nil
 }
 
 // CountScaleViolations counts the grades captured in the level's active cycle
@@ -165,8 +188,16 @@ func (c *GradesClient) CountScaleViolations(ctx context.Context, levelID string,
 	return int(res.Msg.GetViolations()), nil
 }
 
-func toMonthlyGrade(g *gradesv1.MonthlyGrade) MonthlyGrade {
-	return MonthlyGrade{EnrollmentID: g.GetEnrollmentId(), SubjectID: g.GetSubjectId(), Month: g.GetMonth(), Value: g.GetValue(), UpdatedAt: timeOrZero(g.GetUpdatedAt())}
+func toPeriodGrade(g *gradesv1.PeriodGrade) PeriodGrade {
+	return PeriodGrade{EnrollmentID: g.GetEnrollmentId(), SubjectID: g.GetSubjectId(), PeriodID: g.GetPeriodId(), Value: g.GetValue(), UpdatedAt: timeOrZero(g.GetUpdatedAt())}
+}
+
+func toPeriodRefs(ps []*gradesv1.EvaluationPeriodRef) []EvaluationPeriodRef {
+	out := make([]EvaluationPeriodRef, 0, len(ps))
+	for _, p := range ps {
+		out = append(out, EvaluationPeriodRef{ID: p.GetId(), Ordinal: int(p.GetOrdinal()), Name: p.GetName(), StartsOn: p.GetStartsOn(), EndsOn: p.GetEndsOn()})
+	}
+	return out
 }
 
 func toGradeScale(s *gradesv1.GradingScale) GradeScale {

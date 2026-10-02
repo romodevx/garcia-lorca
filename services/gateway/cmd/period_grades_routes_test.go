@@ -11,35 +11,48 @@ import (
 	gradesv1 "github.com/garcia-lorca/gen/go/garcialorca/grades/v1"
 )
 
-// T6 monthly grade stubs: every call echoes, so a route test observes only the
+// T15 period grade stubs: every call echoes, so a route test observes only the
 // security chain (flags, auth, permissions, ownership).
 
-func (stubGrades) GetMonthlySheet(_ context.Context, req *connect.Request[gradesv1.GetMonthlySheetRequest]) (*connect.Response[gradesv1.GetMonthlySheetResponse], error) {
-	return connect.NewResponse(&gradesv1.GetMonthlySheetResponse{
-		AssignmentId: req.Msg.GetAssignmentId(), Month: "2026-09", Months: []string{"2026-09"},
+func (stubGrades) GetPeriodSheet(_ context.Context, req *connect.Request[gradesv1.GetPeriodSheetRequest]) (*connect.Response[gradesv1.GetPeriodSheetResponse], error) {
+	return connect.NewResponse(&gradesv1.GetPeriodSheetResponse{
+		AssignmentId: req.Msg.GetAssignmentId(), PeriodId: "per-1", Today: "2026-10-01",
+		Periods:        []*gradesv1.EvaluationPeriodRef{{Id: "per-1", Ordinal: 1, Name: "1.er trimestre", StartsOn: "2026-08-24", EndsOn: "2026-11-30"}},
 		Scale:          &gradesv1.GradingScale{MinHundredths: 500, MaxHundredths: 1000, Decimals: 1, PassingHundredths: 600},
 		GradingEnabled: true, Editable: true,
-		Rows: []*gradesv1.MonthlySheetRow{{EnrollmentId: "enr-1", StudentId: "stu-1", Value: "9.5"}},
+		Rows: []*gradesv1.PeriodSheetRow{{EnrollmentId: "enr-1", StudentId: "stu-1", Value: "9"}},
 	}), nil
 }
 
-func (stubGrades) UpsertMonthlyGrade(_ context.Context, req *connect.Request[gradesv1.UpsertMonthlyGradeRequest]) (*connect.Response[gradesv1.UpsertMonthlyGradeResponse], error) {
-	return connect.NewResponse(&gradesv1.UpsertMonthlyGradeResponse{Grade: &gradesv1.MonthlyGrade{
-		EnrollmentId: req.Msg.GetEnrollmentId(), SubjectId: "sub-1", Month: req.Msg.GetMonth(), Value: req.Msg.GetValue(),
+func (stubGrades) UpsertPeriodGrade(_ context.Context, req *connect.Request[gradesv1.UpsertPeriodGradeRequest]) (*connect.Response[gradesv1.UpsertPeriodGradeResponse], error) {
+	return connect.NewResponse(&gradesv1.UpsertPeriodGradeResponse{Grade: &gradesv1.PeriodGrade{
+		EnrollmentId: req.Msg.GetEnrollmentId(), SubjectId: "sub-1", PeriodId: req.Msg.GetPeriodId(), Value: req.Msg.GetValue(),
 	}}), nil
 }
 
-func (stubGrades) ClearMonthlyGrade(context.Context, *connect.Request[gradesv1.ClearMonthlyGradeRequest]) (*connect.Response[gradesv1.ClearMonthlyGradeResponse], error) {
-	return connect.NewResponse(&gradesv1.ClearMonthlyGradeResponse{}), nil
+func (stubGrades) ClearPeriodGrade(context.Context, *connect.Request[gradesv1.ClearPeriodGradeRequest]) (*connect.Response[gradesv1.ClearPeriodGradeResponse], error) {
+	return connect.NewResponse(&gradesv1.ClearPeriodGradeResponse{}), nil
 }
 
-func (stubGrades) GetEnrollmentMonthlyGrades(_ context.Context, req *connect.Request[gradesv1.GetEnrollmentMonthlyGradesRequest]) (*connect.Response[gradesv1.GetEnrollmentMonthlyGradesResponse], error) {
-	return connect.NewResponse(&gradesv1.GetEnrollmentMonthlyGradesResponse{
-		CycleId: "cyc-1", CycleName: "2026-2027", Months: []string{"2026-09"},
+func (stubGrades) GetEnrollmentPeriodGrades(_ context.Context, req *connect.Request[gradesv1.GetEnrollmentPeriodGradesRequest]) (*connect.Response[gradesv1.GetEnrollmentPeriodGradesResponse], error) {
+	return connect.NewResponse(&gradesv1.GetEnrollmentPeriodGradesResponse{
+		CycleId: "cyc-1", CycleName: "2026-2027",
+		Periods:        []*gradesv1.EvaluationPeriodRef{{Id: "per-1", Ordinal: 1, Name: "1.er trimestre", StartsOn: "2026-08-24", EndsOn: "2026-11-30"}},
 		Scale:          &gradesv1.GradingScale{MinHundredths: 500, MaxHundredths: 1000, Decimals: 1, PassingHundredths: 600},
 		GradingEnabled: true, SubjectIds: []string{"sub-1"},
-		Grades: []*gradesv1.MonthlyGrade{{EnrollmentId: req.Msg.GetEnrollmentId(), SubjectId: "sub-1", Month: "2026-09", Value: "9.5"}},
+		Grades: []*gradesv1.PeriodGrade{{EnrollmentId: req.Msg.GetEnrollmentId(), SubjectId: "sub-1", PeriodId: "per-1", Value: "9"}},
 	}), nil
+}
+
+// PeriodsWithGrades: period "per-graded" holds grades; no other period does.
+func (stubGrades) PeriodsWithGrades(_ context.Context, req *connect.Request[gradesv1.PeriodsWithGradesRequest]) (*connect.Response[gradesv1.PeriodsWithGradesResponse], error) {
+	out := []string{}
+	for _, id := range req.Msg.GetPeriodIds() {
+		if id == periodGraded {
+			out = append(out, id)
+		}
+	}
+	return connect.NewResponse(&gradesv1.PeriodsWithGradesResponse{PeriodIds: out}), nil
 }
 
 // GetTeachingAssignment knows only the stub's one assignment, by its uuid form
@@ -57,20 +70,22 @@ const (
 	// The teacher's owned assignment in uuid form is not known to the stubs
 	// (they use "asg-1"), so a well-formed foreign uuid proves the 404 path and
 	// the director routes (any assignment) prove the 200 path.
-	monthlyForeignAsg = "a0000000-0000-0000-0000-00000000ffff"
-	monthlyEnr        = "e0000000-0000-0000-0000-000000000001"
+	periodForeignAsg = "a0000000-0000-0000-0000-00000000ffff"
+	periodEnr        = "e0000000-0000-0000-0000-000000000001"
+	periodID         = "0e000000-0000-0000-0000-000000000001"
+	periodGraded     = "0e000000-0000-0000-0000-0000000000aa"
 )
 
 var (
 	gradesModulesOn         = map[string]bool{"module_grades": true, "module_config": true}
-	monthlyFamilyModulesOn  = map[string]bool{"module_grades": true, "module_students": true}
-	monthlyPutBody          = `{"assignmentId":"` + monthlyForeignAsg + `","month":"2026-09","enrollmentId":"` + monthlyEnr + `","value":9.5}`
-	monthlyDeleteQuery      = "?assignmentId=" + monthlyForeignAsg + "&month=2026-09&enrollmentId=" + monthlyEnr
-	directorSheetPath       = "/api/v1/grades/sheet?assignmentId=" + monthlyForeignAsg
-	teacherSheetForeignPath = "/api/v1/teaching/grades/sheet?assignmentId=" + monthlyForeignAsg
+	periodFamilyModulesOn   = map[string]bool{"module_grades": true, "module_students": true}
+	periodPutBody           = `{"assignmentId":"` + periodForeignAsg + `","periodId":"` + periodID + `","enrollmentId":"` + periodEnr + `","value":9}`
+	periodDeleteQuery       = "?assignmentId=" + periodForeignAsg + "&periodId=" + periodID + "&enrollmentId=" + periodEnr
+	directorSheetPath       = "/api/v1/grades/period-sheet?assignmentId=" + periodForeignAsg
+	teacherSheetForeignPath = "/api/v1/teaching/grades/period-sheet?assignmentId=" + periodForeignAsg
 )
 
-func TestMonthlyGradeRoutes(t *testing.T) {
+func TestPeriodGradeRoutes(t *testing.T) {
 	tests := []struct {
 		name     string
 		flags    map[string]bool
@@ -85,10 +100,15 @@ func TestMonthlyGradeRoutes(t *testing.T) {
 		{"director sheet grades OFF", map[string]bool{"module_config": true}, http.MethodGet, directorSheetPath, "grades-reader", "", http.StatusNotFound},
 		{"director sheet no token", gradesModulesOn, http.MethodGet, directorSheetPath, "", "", http.StatusUnauthorized},
 		{"director sheet teaching:read is not grades:read", gradesModulesOn, http.MethodGet, directorSheetPath, "teaching-reader", "", http.StatusForbidden},
-		{"director put", gradesModulesOn, http.MethodPut, "/api/v1/grades/monthly", "grades-writer", monthlyPutBody, http.StatusOK},
-		{"director put needs grades:write", gradesModulesOn, http.MethodPut, "/api/v1/grades/monthly", "grades-reader", monthlyPutBody, http.StatusForbidden},
-		{"director delete", gradesModulesOn, http.MethodDelete, "/api/v1/grades/monthly" + monthlyDeleteQuery, "grades-writer", "", http.StatusNoContent},
-		{"director delete needs grades:write", gradesModulesOn, http.MethodDelete, "/api/v1/grades/monthly" + monthlyDeleteQuery, "grades-reader", "", http.StatusForbidden},
+		{"director put", gradesModulesOn, http.MethodPut, "/api/v1/grades/period-grades", "grades-writer", periodPutBody, http.StatusOK},
+		{"director put needs grades:write", gradesModulesOn, http.MethodPut, "/api/v1/grades/period-grades", "grades-reader", periodPutBody, http.StatusForbidden},
+		{"director delete", gradesModulesOn, http.MethodDelete, "/api/v1/grades/period-grades" + periodDeleteQuery, "grades-writer", "", http.StatusNoContent},
+		{"director delete needs grades:write", gradesModulesOn, http.MethodDelete, "/api/v1/grades/period-grades" + periodDeleteQuery, "grades-reader", "", http.StatusForbidden},
+		// the retired monthly routes are gone
+		{"monthly sheet is gone", gradesModulesOn, http.MethodGet, "/api/v1/grades/sheet?assignmentId=" + periodForeignAsg, "grades-reader", "", http.StatusNotFound},
+		{"monthly put is gone", gradesModulesOn, http.MethodPut, "/api/v1/grades/monthly", "grades-writer", periodPutBody, http.StatusNotFound},
+		{"teacher monthly put is gone", gradesModulesOn, http.MethodPut, "/api/v1/teaching/grades/monthly", "teaching-writer", periodPutBody, http.StatusNotFound},
+		{"family monthly is gone", periodFamilyModulesOn, http.MethodGet, "/api/v1/family/students/stu-1/grades/monthly", "family-reader", "", http.StatusNotFound},
 		{"director terms", gradesModulesOn, http.MethodGet, "/api/v1/grades/terms?assignmentId=asg-1", "grades-reader", "", http.StatusOK},
 		{"director terms config OFF", map[string]bool{"module_grades": true}, http.MethodGet, "/api/v1/grades/terms?assignmentId=asg-1", "grades-reader", "", http.StatusNotFound},
 		// teacher
@@ -96,15 +116,15 @@ func TestMonthlyGradeRoutes(t *testing.T) {
 		{"teacher sheet config OFF", map[string]bool{"module_grades": true}, http.MethodGet, teacherSheetForeignPath, "teaching-reader", "", http.StatusNotFound},
 		{"teacher sheet no token", gradesModulesOn, http.MethodGet, teacherSheetForeignPath, "", "", http.StatusUnauthorized},
 		{"teacher sheet grades:read is not teaching:read", gradesModulesOn, http.MethodGet, teacherSheetForeignPath, "grades-reader", "", http.StatusForbidden},
-		{"teacher put foreign assignment is 404", gradesModulesOn, http.MethodPut, "/api/v1/teaching/grades/monthly", "teaching-writer", monthlyPutBody, http.StatusNotFound},
-		{"teacher put needs teaching:write", gradesModulesOn, http.MethodPut, "/api/v1/teaching/grades/monthly", "teaching-reader", monthlyPutBody, http.StatusForbidden},
-		{"teacher delete foreign assignment is 404", gradesModulesOn, http.MethodDelete, "/api/v1/teaching/grades/monthly" + monthlyDeleteQuery, "teaching-writer", "", http.StatusNotFound},
+		{"teacher put foreign assignment is 404", gradesModulesOn, http.MethodPut, "/api/v1/teaching/grades/period-grades", "teaching-writer", periodPutBody, http.StatusNotFound},
+		{"teacher put needs teaching:write", gradesModulesOn, http.MethodPut, "/api/v1/teaching/grades/period-grades", "teaching-reader", periodPutBody, http.StatusForbidden},
+		{"teacher delete foreign assignment is 404", gradesModulesOn, http.MethodDelete, "/api/v1/teaching/grades/period-grades" + periodDeleteQuery, "teaching-writer", "", http.StatusNotFound},
 		// family
-		{"family monthly", monthlyFamilyModulesOn, http.MethodGet, "/api/v1/family/students/stu-1/grades/monthly", "family-reader", "", http.StatusOK},
-		{"family monthly other child", monthlyFamilyModulesOn, http.MethodGet, "/api/v1/family/students/stu-999/grades/monthly", "family-reader", "", http.StatusNotFound},
-		{"family monthly grades OFF", map[string]bool{"module_students": true}, http.MethodGet, "/api/v1/family/students/stu-1/grades/monthly", "family-reader", "", http.StatusNotFound},
-		{"family monthly students OFF", map[string]bool{"module_grades": true}, http.MethodGet, "/api/v1/family/students/stu-1/grades/monthly", "family-reader", "", http.StatusNotFound},
-		{"family monthly needs family:read", monthlyFamilyModulesOn, http.MethodGet, "/api/v1/family/students/stu-1/grades/monthly", "grades-reader", "", http.StatusForbidden},
+		{"family periods", periodFamilyModulesOn, http.MethodGet, "/api/v1/family/students/stu-1/grades/periods", "family-reader", "", http.StatusOK},
+		{"family periods other child", periodFamilyModulesOn, http.MethodGet, "/api/v1/family/students/stu-999/grades/periods", "family-reader", "", http.StatusNotFound},
+		{"family periods grades OFF", map[string]bool{"module_students": true}, http.MethodGet, "/api/v1/family/students/stu-1/grades/periods", "family-reader", "", http.StatusNotFound},
+		{"family periods students OFF", map[string]bool{"module_grades": true}, http.MethodGet, "/api/v1/family/students/stu-1/grades/periods", "family-reader", "", http.StatusNotFound},
+		{"family periods needs family:read", periodFamilyModulesOn, http.MethodGet, "/api/v1/family/students/stu-1/grades/periods", "grades-reader", "", http.StatusForbidden},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

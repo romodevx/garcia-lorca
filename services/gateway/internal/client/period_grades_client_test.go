@@ -80,58 +80,73 @@ func TestConfigClientGradingScaleRoundTrip(t *testing.T) {
 	assert.Equal(t, connect.CodeNotFound, connect.CodeOf(err))
 }
 
-// --- grades: monthly -----------------------------------------------------------
+// --- grades: by evaluation period (T15) ----------------------------------------
 
-var updated = time.Date(2026, 9, 3, 15, 4, 5, 0, time.UTC)
+var updated = time.Date(2026, 10, 3, 15, 4, 5, 0, time.UTC)
 
-type stubMonthly struct {
+type stubPeriodGrades struct {
 	gradesv1connect.UnimplementedGradesServiceHandler
-	gotUpsert *gradesv1.UpsertMonthlyGradeRequest
-	gotClear  *gradesv1.ClearMonthlyGradeRequest
-	gotSheet  *gradesv1.GetMonthlySheetRequest
+	gotUpsert *gradesv1.UpsertPeriodGradeRequest
+	gotClear  *gradesv1.ClearPeriodGradeRequest
+	gotSheet  *gradesv1.GetPeriodSheetRequest
 	gotCount  *gradesv1.CountScaleViolationsRequest
+	gotWith   *gradesv1.PeriodsWithGradesRequest
 }
 
-func (s *stubMonthly) CountScaleViolations(_ context.Context, req *connect.Request[gradesv1.CountScaleViolationsRequest]) (*connect.Response[gradesv1.CountScaleViolationsResponse], error) {
+func (s *stubPeriodGrades) CountScaleViolations(_ context.Context, req *connect.Request[gradesv1.CountScaleViolationsRequest]) (*connect.Response[gradesv1.CountScaleViolationsResponse], error) {
 	s.gotCount = req.Msg
 	return connect.NewResponse(&gradesv1.CountScaleViolationsResponse{Violations: 3}), nil
 }
 
-func (s *stubMonthly) UpsertMonthlyGrade(_ context.Context, req *connect.Request[gradesv1.UpsertMonthlyGradeRequest]) (*connect.Response[gradesv1.UpsertMonthlyGradeResponse], error) {
+func (s *stubPeriodGrades) UpsertPeriodGrade(_ context.Context, req *connect.Request[gradesv1.UpsertPeriodGradeRequest]) (*connect.Response[gradesv1.UpsertPeriodGradeResponse], error) {
 	s.gotUpsert = req.Msg
-	return connect.NewResponse(&gradesv1.UpsertMonthlyGradeResponse{Grade: &gradesv1.MonthlyGrade{
-		EnrollmentId: req.Msg.GetEnrollmentId(), SubjectId: "sub-1", Month: req.Msg.GetMonth(), Value: "9.5", UpdatedAt: timestamppb.New(updated)}}), nil
+	return connect.NewResponse(&gradesv1.UpsertPeriodGradeResponse{Grade: &gradesv1.PeriodGrade{
+		EnrollmentId: req.Msg.GetEnrollmentId(), SubjectId: "sub-1", PeriodId: req.Msg.GetPeriodId(), Value: "9",
+		UpdatedAt: timestamppb.New(updated), CapturedByName: "Gabriela Rojas"}}), nil
 }
 
-func (s *stubMonthly) ClearMonthlyGrade(_ context.Context, req *connect.Request[gradesv1.ClearMonthlyGradeRequest]) (*connect.Response[gradesv1.ClearMonthlyGradeResponse], error) {
+func (s *stubPeriodGrades) ClearPeriodGrade(_ context.Context, req *connect.Request[gradesv1.ClearPeriodGradeRequest]) (*connect.Response[gradesv1.ClearPeriodGradeResponse], error) {
 	s.gotClear = req.Msg
-	return connect.NewResponse(&gradesv1.ClearMonthlyGradeResponse{}), nil
+	return connect.NewResponse(&gradesv1.ClearPeriodGradeResponse{}), nil
 }
 
-func (s *stubMonthly) GetMonthlySheet(_ context.Context, req *connect.Request[gradesv1.GetMonthlySheetRequest]) (*connect.Response[gradesv1.GetMonthlySheetResponse], error) {
+func (s *stubPeriodGrades) PeriodsWithGrades(_ context.Context, req *connect.Request[gradesv1.PeriodsWithGradesRequest]) (*connect.Response[gradesv1.PeriodsWithGradesResponse], error) {
+	s.gotWith = req.Msg
+	return connect.NewResponse(&gradesv1.PeriodsWithGradesResponse{PeriodIds: []string{"per-1"}}), nil
+}
+
+var stubPeriodRefs = []*gradesv1.EvaluationPeriodRef{
+	{Id: "per-1", Ordinal: 1, Name: "1.er trimestre", StartsOn: "2026-08-24", EndsOn: "2026-11-30"},
+}
+
+var wantPeriodRefs = []client.EvaluationPeriodRef{
+	{ID: "per-1", Ordinal: 1, Name: "1.er trimestre", StartsOn: "2026-08-24", EndsOn: "2026-11-30"},
+}
+
+func (s *stubPeriodGrades) GetPeriodSheet(_ context.Context, req *connect.Request[gradesv1.GetPeriodSheetRequest]) (*connect.Response[gradesv1.GetPeriodSheetResponse], error) {
 	s.gotSheet = req.Msg
-	return connect.NewResponse(&gradesv1.GetMonthlySheetResponse{
-		AssignmentId: "asg-1", Month: "2026-09", Months: []string{"2026-08", "2026-09"},
+	return connect.NewResponse(&gradesv1.GetPeriodSheetResponse{
+		AssignmentId: "asg-1", PeriodId: "per-1", Periods: stubPeriodRefs, CurrentPeriodId: "per-1", Today: "2026-10-01",
 		Scale:          &gradesv1.GradingScale{MinHundredths: 500, MaxHundredths: 1000, Decimals: 1, PassingHundredths: 600},
-		GradingEnabled: true, Editable: false, ReadOnlyReason: "Periodo cerrado",
-		Rows: []*gradesv1.MonthlySheetRow{
+		GradingEnabled: true, Editable: false, ReadOnlyReason: "El periodo está cerrado", ClosedPeriodIds: []string{"per-1"},
+		Rows: []*gradesv1.PeriodSheetRow{
 			{EnrollmentId: "enr-1", StudentId: "stu-1", Value: "8", UpdatedAt: timestamppb.New(updated), Editable: true},
-			{EnrollmentId: "enr-2", StudentId: "stu-2", ReadOnlyReason: "Ese mes corresponde al grupo anterior del alumno"},
+			{EnrollmentId: "enr-2", StudentId: "stu-2", ReadOnlyReason: "Ese periodo corresponde al grupo anterior del alumno"},
 		},
 	}), nil
 }
 
-func (s *stubMonthly) GetEnrollmentMonthlyGrades(_ context.Context, req *connect.Request[gradesv1.GetEnrollmentMonthlyGradesRequest]) (*connect.Response[gradesv1.GetEnrollmentMonthlyGradesResponse], error) {
-	return connect.NewResponse(&gradesv1.GetEnrollmentMonthlyGradesResponse{
-		CycleId: "cyc-1", CycleName: "2026-2027", Months: []string{"2026-09"},
+func (s *stubPeriodGrades) GetEnrollmentPeriodGrades(_ context.Context, req *connect.Request[gradesv1.GetEnrollmentPeriodGradesRequest]) (*connect.Response[gradesv1.GetEnrollmentPeriodGradesResponse], error) {
+	return connect.NewResponse(&gradesv1.GetEnrollmentPeriodGradesResponse{
+		CycleId: "cyc-1", CycleName: "2026-2027", Periods: stubPeriodRefs,
 		Scale:          &gradesv1.GradingScale{MinHundredths: 500, MaxHundredths: 1000, Decimals: 1, PassingHundredths: 600},
 		GradingEnabled: true, SubjectIds: []string{"sub-1"},
-		Grades: []*gradesv1.MonthlyGrade{{EnrollmentId: req.Msg.GetEnrollmentId(), SubjectId: "sub-1", Month: "2026-09", Value: "9.5"}},
+		Grades: []*gradesv1.PeriodGrade{{EnrollmentId: req.Msg.GetEnrollmentId(), SubjectId: "sub-1", PeriodId: "per-1", Value: "9"}},
 	}), nil
 }
 
-func TestGradesClientMonthlyRoundTrip(t *testing.T) {
-	stub := &stubMonthly{}
+func TestGradesClientPeriodGradesRoundTrip(t *testing.T) {
+	stub := &stubPeriodGrades{}
 	mux := http.NewServeMux()
 	path, h := gradesv1connect.NewGradesServiceHandler(stub)
 	mux.Handle(path, h)
@@ -140,30 +155,31 @@ func TestGradesClientMonthlyRoundTrip(t *testing.T) {
 	c := client.NewGradesClient(srv.URL, srv.Client())
 	ctx := context.Background()
 
-	g, err := c.UpsertMonthlyGrade(ctx, client.MonthlyGradeInput{AssignmentID: "asg-1", Month: "2026-09", EnrollmentID: "enr-1", Value: "9.5", CapturedBy: "usr-1", SchoolWide: true})
+	g, err := c.UpsertPeriodGrade(ctx, client.PeriodGradeInput{AssignmentID: "asg-1", PeriodID: "per-1", EnrollmentID: "enr-1",
+		Value: "9", CapturedBy: "usr-1", CapturedByName: "Gabriela Rojas", SchoolWide: true})
 	require.NoError(t, err)
-	assert.Equal(t, client.MonthlyGrade{EnrollmentID: "enr-1", SubjectID: "sub-1", Month: "2026-09", Value: "9.5", UpdatedAt: updated}, g)
+	assert.Equal(t, client.PeriodGrade{EnrollmentID: "enr-1", SubjectID: "sub-1", PeriodID: "per-1", Value: "9", UpdatedAt: updated}, g)
 	assert.Equal(t, "usr-1", stub.gotUpsert.GetCapturedBy())
-	assert.Equal(t, "9.5", stub.gotUpsert.GetValue())
-	assert.Equal(t, "asg-1", stub.gotUpsert.GetAssignmentId())
+	assert.Equal(t, "Gabriela Rojas", stub.gotUpsert.GetCapturedByName())
+	assert.Equal(t, "9", stub.gotUpsert.GetValue())
 	assert.True(t, stub.gotUpsert.GetSchoolWide())
 
-	require.NoError(t, c.ClearMonthlyGrade(ctx, client.MonthlyCell{AssignmentID: "asg-1", Month: "2026-09", EnrollmentID: "enr-1", SchoolWide: true}))
+	require.NoError(t, c.ClearPeriodGrade(ctx, client.PeriodCell{AssignmentID: "asg-1", PeriodID: "per-1", EnrollmentID: "enr-1", SchoolWide: true}))
 	assert.Equal(t, "enr-1", stub.gotClear.GetEnrollmentId())
-	assert.Equal(t, "2026-09", stub.gotClear.GetMonth())
+	assert.Equal(t, "per-1", stub.gotClear.GetPeriodId())
 	assert.True(t, stub.gotClear.GetSchoolWide())
 
-	sheet, err := c.GetMonthlySheet(ctx, client.MonthlySheetQuery{AssignmentID: "asg-1"})
+	sheet, err := c.GetPeriodSheet(ctx, client.PeriodSheetQuery{AssignmentID: "asg-1"})
 	require.NoError(t, err)
-	assert.Equal(t, "", stub.gotSheet.GetMonth())
+	assert.Equal(t, "", stub.gotSheet.GetPeriodId())
 	assert.False(t, stub.gotSheet.GetSchoolWide())
-	assert.Equal(t, client.MonthlySheet{
-		AssignmentID: "asg-1", Month: "2026-09", Months: []string{"2026-08", "2026-09"},
+	assert.Equal(t, client.PeriodSheet{
+		AssignmentID: "asg-1", PeriodID: "per-1", Periods: wantPeriodRefs, CurrentPeriodID: "per-1", Today: "2026-10-01",
 		Scale:          client.GradeScale{MinHundredths: 500, MaxHundredths: 1000, Decimals: 1, PassingHundredths: 600},
-		GradingEnabled: true, Editable: false, ReadOnlyReason: "Periodo cerrado",
-		Rows: []client.MonthlySheetRow{
+		GradingEnabled: true, Editable: false, ReadOnlyReason: "El periodo está cerrado", ClosedPeriodIDs: []string{"per-1"},
+		Rows: []client.PeriodSheetRow{
 			{EnrollmentID: "enr-1", StudentID: "stu-1", Value: "8", UpdatedAt: updated, Editable: true},
-			{EnrollmentID: "enr-2", StudentID: "stu-2", ReadOnlyReason: "Ese mes corresponde al grupo anterior del alumno"},
+			{EnrollmentID: "enr-2", StudentID: "stu-2", ReadOnlyReason: "Ese periodo corresponde al grupo anterior del alumno"},
 		},
 	}, sheet)
 
@@ -171,15 +187,19 @@ func TestGradesClientMonthlyRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 3, n)
 	assert.Equal(t, "lvl-1", stub.gotCount.GetLevelId())
-	assert.True(t, stub.gotCount.GetGradingEnabled())
 	assert.Equal(t, int32(950), stub.gotCount.GetScale().GetMaxHundredths())
 
-	fam, err := c.GetEnrollmentMonthlyGrades(ctx, "enr-1")
+	fam, err := c.GetEnrollmentPeriodGrades(ctx, "enr-1")
 	require.NoError(t, err)
-	assert.Equal(t, client.EnrollmentMonthlyGrades{
-		CycleID: "cyc-1", CycleName: "2026-2027", Months: []string{"2026-09"},
+	assert.Equal(t, client.EnrollmentPeriodGrades{
+		CycleID: "cyc-1", CycleName: "2026-2027", Periods: wantPeriodRefs,
 		Scale:          client.GradeScale{MinHundredths: 500, MaxHundredths: 1000, Decimals: 1, PassingHundredths: 600},
 		GradingEnabled: true, SubjectIDs: []string{"sub-1"},
-		Grades: []client.MonthlyGrade{{EnrollmentID: "enr-1", SubjectID: "sub-1", Month: "2026-09", Value: "9.5"}},
+		Grades: []client.PeriodGrade{{EnrollmentID: "enr-1", SubjectID: "sub-1", PeriodID: "per-1", Value: "9"}},
 	}, fam)
+
+	with, err := c.PeriodsWithGrades(ctx, []string{"per-1", "per-2"})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"per-1"}, with)
+	assert.Equal(t, []string{"per-1", "per-2"}, stub.gotWith.GetPeriodIds())
 }

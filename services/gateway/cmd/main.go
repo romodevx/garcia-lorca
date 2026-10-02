@@ -196,13 +196,16 @@ func main() {
 //	/api/v1/config/...         → ModuleGuard(config) → RequireAuth → rotation →
 //	                             RequirePermission(config:write on POST, config:read
 //	                             on GET) → config (academic catalog) service
-//	GET/PUT/DELETE /api/v1/grades/{sheet,monthly} (T6) → ModuleGuard(grades) →
-//	                             RequireAuth → rotation → grades:read|grades:write
-//	GET  /api/v1/teaching/grades/sheet, PUT/DELETE /api/v1/teaching/grades/monthly
+//	GET /api/v1/grades/period-sheet, PUT/DELETE /api/v1/grades/period-grades
+//	                             (T15) → ModuleGuard(grades) → RequireAuth →
+//	                             rotation → grades:read|grades:write
+//	GET  /api/v1/teaching/grades/period-sheet, PUT/DELETE
+//	     /api/v1/teaching/grades/period-grades
 //	                           → ModuleGuard(grades+config) → teaching:read|write →
 //	                             ownership of the assignment (404)
-//	GET  /api/v1/family/students/{studentId}/grades/monthly → grades+students →
+//	GET  /api/v1/family/students/{studentId}/grades/periods → grades+students →
 //	                             family:read → ownership (404)
+//	(The T6 monthly routes were retired in T15: 404.)
 //	/api/v1/grades/...         → ModuleGuard(grades) → RequireAuth → rotation →
 //	                             RequirePermission(grades:write on capture,
 //	                             grades:read on roster/list) → grades service
@@ -394,7 +397,8 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	// enforced, permission-gated. Writes need config:write, reads config:read;
 	// every route sits behind guard.Protect("config", …) so module_config OFF ⇒
 	// 404 (the module is invisible before auth even runs).
-	configH := handler.NewConfigHandler(configClient).WithScaleGuard(gradesClient).WithTermLock(gradesClient)
+	configH := handler.NewConfigHandler(configClient).WithScaleGuard(gradesClient).WithTermLock(gradesClient).
+		WithPeriodGradesGuard(gradesClient)
 	configWrite := func(h http.HandlerFunc) http.Handler {
 		return guard.Protect("config", requireAuthChanged(middleware.RequirePermission("config:write")(http.HandlerFunc(h))))
 	}
@@ -492,13 +496,14 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	gradesTermsH := handler.NewGradesTermsHandler(configClient)
 	mux.Handle("GET /api/v1/grades/terms", guard.Protect("grades", guard.Protect("config",
 		requireAuthChanged(middleware.RequirePermission("grades:read")(http.HandlerFunc(gradesTermsH.Terms))))))
-	// T6 monthly grades, director: any assignment of the school. Scale, month,
-	// enrollment and level rules are the grades service's, identical for the
-	// teacher routes below; the capturing user (principal) is recorded.
-	directorMonthlyH := handler.NewMonthlyGradesHandler(gradesClient, studentsClient, handler.AnyTenantAssignment, handler.ScopeSchool)
-	mux.Handle("GET /api/v1/grades/sheet", gradesRead(directorMonthlyH.Sheet))
-	mux.Handle("PUT /api/v1/grades/monthly", gradesWrite(directorMonthlyH.Put))
-	mux.Handle("DELETE /api/v1/grades/monthly", gradesWrite(directorMonthlyH.Clear))
+	// T15 grades by evaluation period, director: any assignment of the school.
+	// Scale, period, enrollment and level rules are the grades service's,
+	// identical for the teacher routes below; the capturing user (principal,
+	// named from iam's directory) is recorded. Monthly capture (T6) is retired.
+	directorPeriodH := handler.NewPeriodGradesHandler(gradesClient, studentsClient, authClient, handler.AnyTenantAssignment, handler.ScopeSchool)
+	mux.Handle("GET /api/v1/grades/period-sheet", gradesRead(directorPeriodH.Sheet))
+	mux.Handle("PUT /api/v1/grades/period-grades", gradesWrite(directorPeriodH.Put))
+	mux.Handle("DELETE /api/v1/grades/period-grades", gradesWrite(directorPeriodH.Clear))
 
 	// T7 period closing and report cards. Reading the periods, their progress
 	// and the report cards is grades:read; closing and reopening is
@@ -552,16 +557,17 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 		teachingModules("teaching:read", []string{"grades"}, teachingH.Roster))
 	mux.Handle("POST /api/v1/teaching/grades",
 		teachingModules("teaching:write", []string{"grades"}, teachingH.CaptureGrade))
-	// T6 monthly grades, teacher: only the assignments the caller teaches in the
-	// active cycle (OwnsAssignment ⇒ 404 otherwise). The ownership check reads
-	// the config catalog, so these compose module_grades + module_config.
-	teacherMonthlyH := handler.NewMonthlyGradesHandler(gradesClient, studentsClient, teachingH.OwnsAssignment, handler.ScopeTeacher)
-	mux.Handle("GET /api/v1/teaching/grades/sheet",
-		teachingModules("teaching:read", []string{"grades", "config"}, teacherMonthlyH.Sheet))
-	mux.Handle("PUT /api/v1/teaching/grades/monthly",
-		teachingModules("teaching:write", []string{"grades", "config"}, teacherMonthlyH.Put))
-	mux.Handle("DELETE /api/v1/teaching/grades/monthly",
-		teachingModules("teaching:write", []string{"grades", "config"}, teacherMonthlyH.Clear))
+	// T15 grades by evaluation period, teacher: only the assignments the caller
+	// teaches in the active cycle (OwnsAssignment ⇒ 404 otherwise). The
+	// ownership check reads the config catalog, so these compose
+	// module_grades + module_config.
+	teacherPeriodH := handler.NewPeriodGradesHandler(gradesClient, studentsClient, authClient, teachingH.OwnsAssignment, handler.ScopeTeacher)
+	mux.Handle("GET /api/v1/teaching/grades/period-sheet",
+		teachingModules("teaching:read", []string{"grades", "config"}, teacherPeriodH.Sheet))
+	mux.Handle("PUT /api/v1/teaching/grades/period-grades",
+		teachingModules("teaching:write", []string{"grades", "config"}, teacherPeriodH.Put))
+	mux.Handle("DELETE /api/v1/teaching/grades/period-grades",
+		teachingModules("teaching:write", []string{"grades", "config"}, teacherPeriodH.Clear))
 
 	// M07 teaching-attendance (teacher self-scoped daily pass list): the maestro
 	// takes attendance ONLY for the groups they teach. Attendance is per GROUP, so
@@ -907,10 +913,11 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 		familyReadModules([]string{"students"}, familyH.Profile))
 	mux.Handle("GET /api/v1/family/students/{studentId}/grades",
 		familyReadModules([]string{"grades", "students"}, familyH.Grades))
-	// T6: the child's monthly grades, visible as soon as they are captured.
-	familyMonthlyH := handler.NewFamilyMonthlyGradesHandler(studentsClient, gradesClient, configClient, configClient)
-	mux.Handle("GET /api/v1/family/students/{studentId}/grades/monthly",
-		familyReadModules([]string{"grades", "students"}, familyMonthlyH.MonthlyGrades))
+	// T15: the child's grades by evaluation period, visible as soon as they
+	// are captured.
+	familyPeriodsH := handler.NewFamilyPeriodGradesHandler(studentsClient, gradesClient, configClient, configClient)
+	mux.Handle("GET /api/v1/family/students/{studentId}/grades/periods",
+		familyReadModules([]string{"grades", "students"}, familyPeriodsH.PeriodGrades))
 	// T7: the child's report cards — the latest published version per period —
 	// and their PDF. Ownership (404 for another family's child, or a card of
 	// another pupil) is checked by the handler.

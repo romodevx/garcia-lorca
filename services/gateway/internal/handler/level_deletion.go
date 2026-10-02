@@ -187,7 +187,7 @@ var restoreOrder = []string{stepConfig, stepStudents, stepUniforms, stepFinance,
 // nothing to a person.
 var shownKinds = []string{
 	"gradeLevels", "groups", "subjects", "terms", "teachingAssignments", "students", "enrollments",
-	"enrollmentTransfers", "attendanceSessions", "attendanceMarks", "monthlyGrades", "gradeEntries",
+	"enrollmentTransfers", "attendanceSessions", "attendanceMarks", "monthlyGrades", "periodGrades", "gradeEntries",
 	"periodClosures", "reportCards", "tuitionPlans", "uniformItems", "schoolEvents",
 }
 

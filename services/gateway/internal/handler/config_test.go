@@ -72,6 +72,9 @@ type fakeConfig struct {
 	copyTo       []string
 	// T14 evaluation periods.
 	evalList    [3]string // cycle, level, grade of the last list
+	// evalPeriods, when set, is what ListEvaluationPeriods answers (filtered
+	// by grade when one is asked).
+	evalPeriods []client.EvaluationPeriod
 	evalCycle   string
 	evalGrade   string
 	evalIn      []client.EvaluationPeriodInput

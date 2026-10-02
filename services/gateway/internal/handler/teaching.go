@@ -229,7 +229,7 @@ func (h *TeachingHandler) assertOwnsAssignment(w http.ResponseWriter, r *http.Re
 	return false
 }
 
-// OwnsAssignment is the teacher's AssignmentGate for the monthly grade routes
+// OwnsAssignment is the teacher's AssignmentGate for the period grade routes
 // (T6): the same active-cycle ownership rule as the roster and capture, with the
 // principal taken from the request. 401 without a principal; 404 for any
 // assignment the caller does not teach.
