@@ -65,6 +65,36 @@ describe("ReportCardScreen", () => {
     expect(screen.getByLabelText("Promedio general: 6.95")).toBeTruthy();
   });
 
+  it("renders a T15 boleta as a subject × evaluation period table, averages truncated", async () => {
+    mockGateway({
+      status: 200,
+      body: {
+        ...card,
+        termName: "Tercer trimestre",
+        periods: [
+          { id: "p1", ordinal: 1, name: "1.er trimestre" },
+          { id: "p2", ordinal: 2, name: "2.º trimestre" },
+          { id: "p3", ordinal: 3, name: "3.er trimestre" },
+        ],
+        months: [],
+        lines: [
+          { subjectName: "Matemáticas", periods: { p1: 9, p2: 9, p3: 8 }, months: {}, average: 8.66 },
+          { subjectName: "Historia", periods: { p1: 5, p2: 6 }, months: {}, average: 5.5 },
+        ],
+        generalAverage: 7.08,
+      },
+    });
+    await renderWithProviders(<ReportCardScreen id="rc1" studentId="s1" />);
+
+    await waitFor(() => expect(screen.getByText("Tercer trimestre")).toBeTruthy());
+    expect(screen.getByText("1.er trimestre", { includeHiddenElements: true })).toBeTruthy();
+    expect(screen.getByText("2.º trimestre", { includeHiddenElements: true })).toBeTruthy();
+    expect(screen.queryByText("Sep", { includeHiddenElements: true })).toBeNull();
+    expect(screen.getByLabelText("Matemáticas: 1.er trimestre 9, 2.º trimestre 9, 3.er trimestre 8, promedio 8.66")).toBeTruthy();
+    expect(screen.getByLabelText("Historia: 1.er trimestre 5, 2.º trimestre 6, 3.er trimestre sin calificación, promedio 5.5, reprobada")).toBeTruthy();
+    expect(screen.getByLabelText("Promedio general: 7.08")).toBeTruthy();
+  });
+
   it("says so when the term closed without grades", async () => {
     mockGateway({ status: 200, body: { ...card, lines: [], generalAverage: null, hasGrades: false } });
     await renderWithProviders(<ReportCardScreen id="rc1" studentId="s1" />);

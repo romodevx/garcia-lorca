@@ -27,8 +27,8 @@ function mockGateway(replies: Record<string, Reply | (() => Reply)>, children = 
       if (reply.status !== 200) return { ok: false, status: reply.status, json: async () => ({}) };
       return { ok: true, status: 200, json: async () => ({ reportCards: reply.reportCards ?? [] }) };
     }
-    if (/\/grades\/monthly/.test(u)) {
-      return { ok: true, status: 200, json: async () => ({ cycleName: "2026-2027", months: ["2026-09"], subjects: [] }) };
+    if (/\/grades\/periods/.test(u)) {
+      return { ok: true, status: 200, json: async () => ({ cycleName: "2026-2027", periods: [], subjects: [] }) };
     }
     if (u.endsWith("/family/students")) return { ok: true, status: 200, json: async () => ({ students: children }) };
     return { ok: true, status: 200, json: async () => ({ notifications: [] }) };
@@ -51,18 +51,18 @@ describe("GradesScreen — Boletas", () => {
     await clearTokens();
   });
 
-  it("shows two segments and opens on Por mes", async () => {
+  it("shows two segments and opens on Por periodo", async () => {
     mockGateway({});
-    await renderWithProviders(<GradesScreen currentMonth="2026-09" />);
+    await renderWithProviders(<GradesScreen today="2026-09-15" />);
 
-    await waitFor(() => expect(screen.getByRole("tab", { name: "Por mes" })).toBeTruthy());
-    expect(screen.getByRole("tab", { name: "Por mes" }).props.accessibilityState).toMatchObject({ selected: true });
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Por periodo" })).toBeTruthy());
+    expect(screen.getByRole("tab", { name: "Por periodo" }).props.accessibilityState).toMatchObject({ selected: true });
     expect(screen.getByRole("tab", { name: "Boletas" }).props.accessibilityState).toMatchObject({ selected: false });
   });
 
   it("lists the issued boletas with version badge, average and date", async () => {
     mockGateway({ s1: { status: 200, reportCards: [second, first] } });
-    await renderWithProviders(<GradesScreen currentMonth="2026-09" />);
+    await renderWithProviders(<GradesScreen today="2026-09-15" />);
     await openBoletas();
 
     await waitFor(() => expect(screen.getByText("2.º trimestre · 2026-2027")).toBeTruthy());
@@ -75,7 +75,7 @@ describe("GradesScreen — Boletas", () => {
 
   it("opens the boleta preview when a boleta is tapped", async () => {
     mockGateway({ s1: { status: 200, reportCards: [second] } });
-    await renderWithProviders(<GradesScreen currentMonth="2026-09" />);
+    await renderWithProviders(<GradesScreen today="2026-09-15" />);
     await openBoletas();
     await waitFor(() => expect(screen.getByText("2.º trimestre · 2026-2027")).toBeTruthy());
 
@@ -86,7 +86,7 @@ describe("GradesScreen — Boletas", () => {
 
   it("says so when no boleta has been issued", async () => {
     mockGateway({ s1: { status: 200, reportCards: [] } });
-    await renderWithProviders(<GradesScreen currentMonth="2026-09" />);
+    await renderWithProviders(<GradesScreen today="2026-09-15" />);
     await openBoletas();
 
     await waitFor(() => expect(screen.getByText("Aún no hay boletas emitidas")).toBeTruthy());
@@ -95,7 +95,7 @@ describe("GradesScreen — Boletas", () => {
   it("shows an error with retry, and retrying loads the boletas", async () => {
     let fail = true;
     mockGateway({ s1: () => (fail ? { status: 500 } : { status: 200, reportCards: [first] }) });
-    await renderWithProviders(<GradesScreen currentMonth="2026-09" />);
+    await renderWithProviders(<GradesScreen today="2026-09-15" />);
     await openBoletas();
     await waitFor(() => expect(screen.getByText("No pudimos cargar las boletas")).toBeTruthy());
 
@@ -107,7 +107,7 @@ describe("GradesScreen — Boletas", () => {
 
   it("opens straight on Boletas when the route asks for it", async () => {
     mockGateway({ s1: { status: 200, reportCards: [first] } });
-    await renderWithProviders(<GradesScreen currentMonth="2026-09" requestedView="boletas" />);
+    await renderWithProviders(<GradesScreen today="2026-09-15" requestedView="boletas" />);
 
     await waitFor(() => expect(screen.getByText("1.er trimestre · 2026-2027")).toBeTruthy());
   });
@@ -117,7 +117,7 @@ describe("GradesScreen — Boletas", () => {
     await renderWithProviders(
       <>
         <PickChild id="s2" />
-        <GradesScreen currentMonth="2026-09" requestedView="boletas" />
+        <GradesScreen today="2026-09-15" requestedView="boletas" />
       </>,
     );
     await waitFor(() => expect(screen.getByText("1.er trimestre · 2026-2027")).toBeTruthy());

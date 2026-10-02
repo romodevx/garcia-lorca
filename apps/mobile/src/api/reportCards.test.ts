@@ -66,9 +66,35 @@ describe("report cards API", () => {
 
     expect(String(fetchMock.mock.calls[0][0])).toContain("/api/v1/family/students/s1/report-cards/rc%201");
     expect(card.termOrdinal).toBe(1);
-    expect(card.lines[0]).toEqual({ subjectId: "sub-math", subjectName: "Matemáticas", months: { "2026-09": 9.5, "2026-10": 8 }, average: 8.75 });
+    expect(card.periods).toEqual([]);
+    expect(card.lines[0]).toEqual({ subjectId: "sub-math", subjectName: "Matemáticas", periods: {}, months: { "2026-09": 9.5, "2026-10": 8 }, average: 8.75 });
     expect(card.scale?.passing).toBe(6);
     expect(card.hasGrades).toBe(true);
+  });
+
+  it("reads a T15 card: its evaluation-period columns, by ordinal, and each line's grade per period", async () => {
+    globalThis.fetch = jest.fn().mockResolvedValue(
+      respond(200, {
+        id: "rc1",
+        periods: [
+          { id: "p2", ordinal: 2, name: "2.º trimestre" },
+          { id: "p1", ordinal: 1, name: "1.er trimestre" },
+        ],
+        months: [],
+        lines: [{ subjectId: "sub-math", subjectName: "Matemáticas", periods: { p1: 9, p2: "8" }, months: {}, average: 8.5 }],
+        generalAverage: 8.5,
+        hasGrades: true,
+      }),
+    ) as unknown as typeof fetch;
+
+    const card = await getReportCard("s1", "rc1");
+
+    expect(card.periods).toEqual([
+      { id: "p1", ordinal: 1, name: "1.er trimestre" },
+      { id: "p2", ordinal: 2, name: "2.º trimestre" },
+    ]);
+    expect(card.lines[0]?.periods).toEqual({ p1: 9, p2: 8 });
+    expect(card.months).toEqual([]);
   });
 
   it("fills a sparse report card with safe defaults", async () => {
@@ -83,6 +109,7 @@ describe("report cards API", () => {
       termName: "",
       termOrdinal: 0,
       cycleName: "",
+      periods: [],
       months: [],
       lines: [],
       generalAverage: null,

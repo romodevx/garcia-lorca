@@ -4,7 +4,7 @@ import { ThemeProvider } from "../../theme";
 import { lineKey, ReportCardTable } from "./ReportCardTable";
 
 function line(subjectId: string, subjectName: string): ReportCardLine {
-  return { subjectId, subjectName, months: {}, average: null };
+  return { subjectId, subjectName, periods: {}, months: {}, average: null };
 }
 
 describe("lineKey", () => {
@@ -20,6 +20,7 @@ describe("lineKey", () => {
 describe("ReportCardTable rows", () => {
   it("renders two subjects that share a name as two rows", async () => {
     const card = {
+      periods: [],
       months: ["2026-09"],
       lines: [line("sub-a", "Inglés"), line("sub-b", "Inglés")],
       scale: null,

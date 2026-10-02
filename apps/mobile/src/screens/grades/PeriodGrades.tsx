@@ -1,48 +1,51 @@
 import { useState, type ReactElement } from "react";
 import { StyleSheet, Text, View } from "react-native";
-import type { GradeScale, MonthlySubject } from "../../api/grades";
+import type { EvaluationPeriod, GradeScale, PeriodSubject } from "../../api/grades";
 import { Icon } from "../../icons";
 import { useTheme } from "../../theme";
 import { Card, ListRow, SectionLabel } from "../../ui";
 import { SubjectSheet } from "../../sheets/SubjectSheet";
-import { formatAverage, formatGrade, gradeLabel, isFailing, monthAverage } from "../gradesView";
+import { formatAverage, formatGrade, generalAverageOf, gradeLabel, isFailing, subjectAverageOf } from "../gradesView";
 
 const MISSING_SUBJECT_NAME = "Materia sin nombre";
-const NO_GRADE = "Sin calificación aún";
+const MISSING = "—";
 const FAILED = "Reprobada";
 
-export interface MonthGradesProps {
-  subjects: MonthlySubject[];
-  month: string;
-  /** Every month of the cycle, oldest first — the subject sheet lists them all. */
-  months: string[];
+export interface PeriodGradesProps {
+  subjects: PeriodSubject[];
+  period: EvaluationPeriod;
+  /** Every period of the grade, by ordinal — the subject sheet lists them all. */
+  periods: EvaluationPeriod[];
   /** Null when there is nothing to judge by: no passing line, nothing marked failing. */
   scale: GradeScale | null;
 }
 
 /**
- * One month: its average on top, then every subject with its grade or
- * "Sin calificación aún". Tapping a subject opens its grades for the whole cycle.
+ * One period: the general average on top, then every subject with its grade
+ * in the period ("—" when not captured) and its average across periods.
+ * Tapping a subject opens its grade in every period.
  */
-export function MonthGrades({ subjects, month, months, scale }: MonthGradesProps): ReactElement {
+export function PeriodGrades({ subjects, period, periods, scale }: PeriodGradesProps): ReactElement {
   const [openSubjectId, setOpenSubjectId] = useState<string | null>(null);
   const openSubject = subjects.find((s) => s.subjectId === openSubjectId) ?? null;
   return (
     <>
-      <AverageCard average={monthAverage(subjects, month)} scale={scale} />
+      <AverageCard average={generalAverageOf(subjects)} scale={scale} />
       <SectionLabel>Materias</SectionLabel>
       <Card>
         {subjects.map((s, i) => {
           const name = s.subjectName || MISSING_SUBJECT_NAME;
+          const average = subjectAverageOf(s);
+          const spokenAverage = average === undefined ? "" : `. Promedio ${formatAverage(average)}`;
           return (
             <ListRow
               key={s.subjectId}
               divider={i > 0}
               onPress={() => setOpenSubjectId(s.subjectId)}
-              accessibilityLabel={gradeLabel(name, month, s.grades[month], scale)}
-              accessibilityHint="Ver todos los meses"
+              accessibilityLabel={`${gradeLabel(name, period.name, s.grades[period.id], scale)}${spokenAverage}`}
+              accessibilityHint="Ver todos los periodos"
             >
-              <SubjectGrade name={name} value={s.grades[month]} scale={scale} />
+              <SubjectGrade name={name} value={s.grades[period.id]} average={average} scale={scale} />
             </ListRow>
           );
         })}
@@ -50,7 +53,7 @@ export function MonthGrades({ subjects, month, months, scale }: MonthGradesProps
       <SubjectSheet
         visible={openSubject !== null}
         subject={openSubject}
-        months={months}
+        periods={periods}
         scale={scale}
         onClose={() => setOpenSubjectId(null)}
       />
@@ -58,13 +61,13 @@ export function MonthGrades({ subjects, month, months, scale }: MonthGradesProps
   );
 }
 
-function AverageCard({ average, scale }: { average: number | null; scale: GradeScale | null }): ReactElement {
+function AverageCard({ average, scale }: { average: number | undefined; scale: GradeScale | null }): ReactElement {
   const theme = useTheme();
-  const text = average === null ? "—" : formatAverage(average);
+  const text = average === undefined ? MISSING : formatAverage(average);
   return (
     <Card style={styles.hero}>
-      <View accessible accessibilityLabel={`Promedio del mes: ${average === null ? NO_GRADE : text}`}>
-        <Text style={[styles.heroLabel, { color: theme.colors.text2, fontFamily: theme.fonts.uiSemi }]}>Promedio del mes</Text>
+      <View accessible accessibilityLabel={`Promedio general: ${average === undefined ? "sin calificación aún" : text}`}>
+        <Text style={[styles.heroLabel, { color: theme.colors.text2, fontFamily: theme.fonts.uiSemi }]}>Promedio general</Text>
         <Text style={[styles.heroNum, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]}>{text}</Text>
       </View>
       {scale === null ? null : (
@@ -76,23 +79,31 @@ function AverageCard({ average, scale }: { average: number | null; scale: GradeS
   );
 }
 
-function SubjectGrade({ name, value, scale }: { name: string; value: number | undefined; scale: GradeScale | null }): ReactElement {
+interface SubjectGradeProps {
+  name: string;
+  value: number | undefined;
+  average: number | undefined;
+  scale: GradeScale | null;
+}
+
+function SubjectGrade({ name, value, average, scale }: SubjectGradeProps): ReactElement {
   const theme = useTheme();
   const failed = value !== undefined && isFailing(value, scale);
-  const grade = value === undefined ? null : formatGrade(value);
-  const gradeColor = failed ? theme.colors.bad : theme.colors.text;
+  const gradeColor = failed ? theme.colors.bad : value === undefined ? theme.colors.text3 : theme.colors.text;
   return (
     <View style={styles.subject}>
       <View style={styles.subjectText}>
         <Text style={[styles.name, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]}>{name}</Text>
-        {grade === null ? (
-          <Text style={[styles.note, { color: theme.colors.text2, fontFamily: theme.fonts.uiSemi }]}>{NO_GRADE}</Text>
-        ) : null}
+        {average === undefined ? null : (
+          <Text style={[styles.note, { color: theme.colors.text2, fontFamily: theme.fonts.uiSemi }]}>
+            {`Promedio ${formatAverage(average)}`}
+          </Text>
+        )}
         {failed ? <Text style={[styles.note, { color: theme.colors.bad, fontFamily: theme.fonts.uiExtra }]}>{FAILED}</Text> : null}
       </View>
-      {grade === null ? null : (
-        <Text style={[styles.grade, { color: gradeColor, fontFamily: theme.fonts.uiExtra }]}>{grade}</Text>
-      )}
+      <Text style={[styles.grade, { color: gradeColor, fontFamily: theme.fonts.uiExtra }]}>
+        {value === undefined ? MISSING : formatGrade(value)}
+      </Text>
       <Icon name="chevron-right" size={20} color={theme.colors.text3} />
     </View>
   );

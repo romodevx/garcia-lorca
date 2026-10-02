@@ -1,29 +1,28 @@
 import { type ReactElement } from "react";
 import { Pressable, ScrollView, StyleSheet, Text } from "react-native";
+import type { EvaluationPeriod } from "../../api/grades";
 import { useTheme } from "../../theme";
-import { monthLabel } from "../attendanceView";
-import { shortMonthLabel } from "../gradesView";
 
-export interface MonthChipsProps {
-  months: string[];
+export interface PeriodChipsProps {
+  periods: EvaluationPeriod[];
   selected: string;
-  onSelect: (month: string) => void;
+  onSelect: (periodId: string) => void;
 }
 
-/** The cycle's months as a horizontal row of chips; the selected one is filled. */
-export function MonthChips({ months, selected, onSelect }: MonthChipsProps): ReactElement {
+/** The grade's evaluation periods as a horizontal row of chips; the selected one is filled. */
+export function PeriodChips({ periods, selected, onSelect }: PeriodChipsProps): ReactElement {
   const theme = useTheme();
   return (
     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row} style={styles.scroll}>
-      {months.map((month) => {
-        const isSelected = month === selected;
+      {periods.map((period) => {
+        const isSelected = period.id === selected;
         return (
           <Pressable
-            key={month}
+            key={period.id}
             accessibilityRole="button"
-            accessibilityLabel={monthLabel(month)}
+            accessibilityLabel={period.name}
             accessibilityState={{ selected: isSelected }}
-            onPress={() => onSelect(month)}
+            onPress={() => onSelect(period.id)}
             style={[
               styles.chip,
               { backgroundColor: isSelected ? theme.colors.primary : theme.colors.surfaceSunken },
@@ -35,7 +34,7 @@ export function MonthChips({ months, selected, onSelect }: MonthChipsProps): Rea
                 { color: isSelected ? theme.colors.primaryInk : theme.colors.text2, fontFamily: theme.fonts.uiExtra },
               ]}
             >
-              {shortMonthLabel(month)}
+              {period.name}
             </Text>
           </Pressable>
         );
