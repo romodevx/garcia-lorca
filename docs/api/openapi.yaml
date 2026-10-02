@@ -70,6 +70,17 @@ tags:
     description: >
       The school's levels (Preescolar, Primaria…). Behind `module_config`;
       reads require `config:read`, writes `config:write`.
+  - name: schedule
+    description: >
+      T16 — the school timetable (Horarios). A base weekly timetable per cycle
+      (Monday–Friday), built ONLY from the cycle's teaching assignments, plus
+      date-specific changes (substitute, swap, cancel) that never touch the
+      base. A teacher is never in two groups at once and a group never has two
+      classes at once — enforced by the database on the base and by config on
+      each date's effective timetable. Behind `module_schedule` (and
+      `module_config`); reads `schedule:read`, writes `schedule:write`; the
+      teacher's own timetable under `/api/v1/teaching/schedule` needs
+      `teaching:read`.
   - name: config-evaluation-periods
     description: >
       T14 — the evaluation periods (trimesters, bimesters…) of each GRADE in a
@@ -3877,6 +3888,397 @@ paths:
             text/plain:
               schema: { type: string }
 
+  /api/v1/schedule:
+    get:
+      tags: [schedule]
+      summary: The school timetable of a cycle, with everything needed to draw it (T16)
+      description: >
+        The base weekly timetable (Monday–Friday) of `cycleId` — or of the
+        ACTIVE cycle when omitted — together with the catalog the calendar
+        needs to name and filter it (levels, grades, groups, subjects,
+        teachers, the cycle's teaching assignments) and each level's time
+        grid. A user with `schedule:read` and no `config:read` can draw the
+        whole screen from this one call. `started` is true once the cycle's
+        first day has arrived in the school's time zone
+        (America/Mexico_City): from then on every base edit needs a `reason`
+        and is recorded in the history. Requires `schedule:read`.
+      operationId: getSchedule
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: cycleId, in: query, required: false, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The timetable and its catalog.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ScheduleBoard' }
+        '400':
+          description: A malformed `cycleId`.
+          content:
+            text/plain:
+              schema: { type: string }
+              example: cycleId must be an id
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404':
+          description: The module is off, the cycle does not exist, or there is no active cycle and none was named.
+          content:
+            text/plain:
+              schema: { type: string }
+              example: No hay un ciclo activo
+
+  /api/v1/schedule/blocks:
+    post:
+      tags: [schedule]
+      summary: Add a class block to the base timetable (T16)
+      description: >
+        A class is ALWAYS one of the cycle's teaching assignments (teacher +
+        group + subject, T13) placed on a weekday (1 = Monday … 5 = Friday)
+        between `startsAt` and `endsAt` (`HH:MM`, 5-minute steps, end after
+        start, inside the level's grid). A teacher cannot be in two groups at
+        the same time and a group cannot have two classes at the same time:
+        409 `SCHEDULE_TEACHER_BUSY` / `SCHEDULE_GROUP_BUSY` naming the
+        conflicting class ("Ana Ruiz ya da Matemáticas a 3.º A de 08:00 a
+        08:50"); the database enforces both rules too (EXCLUDE), so two
+        editors racing cannot double-book. A class that would collide with a
+        date-specific change already recorded (a substitute on a future date)
+        is 409 `SCHEDULE_OVERRIDE_CONFLICT`. Once the cycle has started a
+        `reason` is required (400 `SCHEDULE_REASON_REQUIRED`) and the edit goes
+        to the history. Requires `schedule:write`.
+      operationId: createScheduleBlock
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ScheduleBlockInput' }
+            example: { assignmentId: 6f1c2b8e-0000-4000-8000-000000000031, weekday: 1, startsAt: '08:00', endsAt: '08:50' }
+      responses:
+        '201':
+          description: The new class.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [block]
+                properties:
+                  block: { $ref: '#/components/schemas/ScheduleBlock' }
+        '400': { $ref: '#/components/responses/ScheduleBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409': { $ref: '#/components/responses/ScheduleConflict' }
+
+  /api/v1/schedule/blocks/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    put:
+      tags: [schedule]
+      summary: Move or change a class of the base timetable (T16)
+      description: >
+        Same rules as creating one. Moving a class to another weekday while it
+        has date-specific changes on future dates is 409
+        `SCHEDULE_BLOCK_HAS_OVERRIDES` (remove those changes first). Requires
+        `schedule:write`.
+      operationId: updateScheduleBlock
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ScheduleBlockInput' }
+      responses:
+        '200':
+          description: The class as saved.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [block]
+                properties:
+                  block: { $ref: '#/components/schemas/ScheduleBlock' }
+        '400': { $ref: '#/components/responses/ScheduleBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409': { $ref: '#/components/responses/ScheduleConflict' }
+    delete:
+      tags: [schedule]
+      summary: Remove a class from the base timetable (T16)
+      description: >
+        Removes the class and its date-specific changes. Once the cycle has
+        started `reason` is required (400 `SCHEDULE_REASON_REQUIRED`) and the
+        removal goes to the history. Requires `schedule:write`.
+      operationId: deleteScheduleBlock
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/CsrfToken' }
+        - { name: reason, in: query, required: false, schema: { type: string, maxLength: 200 } }
+      responses:
+        '204': { description: Removed. }
+        '400': { $ref: '#/components/responses/ScheduleBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
+  /api/v1/schedule/day:
+    get:
+      tags: [schedule]
+      summary: The timetable as it really is on one date — base plus that day's changes (T16)
+      description: >
+        The classes of `date` (`YYYY-MM-DD`): the base classes of its weekday
+        with that date's changes applied — a substitute teacher, two classes
+        swapped, a cancelled class (returned with `status: cancelled` so the
+        screen can show it struck through). A Saturday or Sunday has no
+        classes. "¿Qué está pasando ahora?" is this call for today, filtered
+        by the time on the screen. Requires `schedule:read`.
+      operationId: getScheduleDay
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: cycleId, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: date, in: query, required: true, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: The effective classes of the date.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ScheduleDay' }
+        '400':
+          description: A malformed `cycleId` or `date`.
+          content:
+            text/plain:
+              schema: { type: string }
+              example: date must be YYYY-MM-DD
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
+  /api/v1/schedule/overrides:
+    post:
+      tags: [schedule]
+      summary: Change one class for ONE date without touching the base timetable (T16)
+      description: >
+        `kind`: `substitute` (another teacher gives the class that day —
+        `teacherId`), `swap` (the class trades its time with another class of
+        the SAME group that day — `swapBlockId`), or `cancel`. The date must
+        fall on the class's weekday (400 `SCHEDULE_DATE_WRONG_WEEKDAY`) and
+        inside the cycle (400 `SCHEDULE_DATE_OUTSIDE_CYCLE`); a class takes at
+        most one change per date (409 `SCHEDULE_BLOCK_TAKEN`). The conflict
+        rules are judged on the EFFECTIVE timetable of that date (base +
+        changes): a substitute or a swapped teacher who already teaches at
+        that time that day is 409 `SCHEDULE_TEACHER_BUSY` naming the class.
+        `reason` is required. Every change goes to the history with who made
+        it. Requires `schedule:write`.
+      operationId: createScheduleOverride
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ScheduleOverrideInput' }
+            example: { blockId: 6f1c2b8e-0000-4000-8000-000000000041, date: '2026-10-05', kind: substitute, teacherId: 6f1c2b8e-0000-4000-8000-000000000021, reason: La maestra de música llegó tarde }
+      responses:
+        '201':
+          description: The change.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [override]
+                properties:
+                  override: { $ref: '#/components/schemas/ScheduleOverride' }
+        '400': { $ref: '#/components/responses/ScheduleBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409': { $ref: '#/components/responses/ScheduleConflict' }
+
+  /api/v1/schedule/overrides/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    delete:
+      tags: [schedule]
+      summary: Undo a date-specific change (T16)
+      description: The class goes back to its base timetable for that date; the undo goes to the history. Requires `schedule:write`.
+      operationId: deleteScheduleOverride
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/CsrfToken' }
+        - { name: reason, in: query, required: false, schema: { type: string, maxLength: 200 } }
+      responses:
+        '204': { description: Undone. }
+        '400': { $ref: '#/components/responses/ScheduleBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
+  /api/v1/schedule/available-teachers:
+    get:
+      tags: [schedule]
+      summary: Teachers free in a slot, the best fits first (T16)
+      description: >
+        Every teacher with no class in the slot — on `date` when given
+        (effective timetable: base + that day's changes, substitutes
+        included), otherwise in the base timetable of `weekday`. Ordered:
+        those who teach that subject (same name, any grade) first
+        (`match: subject`), then those who teach in that grade
+        (`match: grade`), then everybody else (`match: other`); by name within
+        each. `excludeBlockId` leaves that class out of the busy check (the
+        class being edited or covered). Requires `schedule:read`.
+      operationId: listAvailableTeachers
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: cycleId, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: groupId, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: subjectId, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: weekday, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 5 }, description: Required unless `date` is given. }
+        - { name: date, in: query, required: false, schema: { type: string, format: date } }
+        - { name: startsAt, in: query, required: true, schema: { type: string, pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$' } }
+        - { name: endsAt, in: query, required: true, schema: { type: string, pattern: '^([01][0-9]|2[0-4]):[0-5][0-9]$' } }
+        - { name: excludeBlockId, in: query, required: false, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The free teachers, best fits first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [teachers]
+                properties:
+                  teachers:
+                    type: array
+                    items: { $ref: '#/components/schemas/ScheduleAvailableTeacher' }
+        '400': { $ref: '#/components/responses/ScheduleBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
+  /api/v1/schedule/settings/{levelId}:
+    parameters:
+      - { name: levelId, in: path, required: true, schema: { type: string, format: uuid } }
+    put:
+      tags: [schedule]
+      summary: Set a level's time grid (T16)
+      description: >
+        The hours the calendar shows for the level (default 07:00–15:00),
+        `HH:MM` in 5-minute steps, at least one hour. Existing classes are not
+        touched; the calendar widens itself to show any class outside the
+        grid. Requires `schedule:write`.
+      operationId: putScheduleSettings
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [gridStart, gridEnd]
+              properties:
+                gridStart: { type: string, example: '07:00' }
+                gridEnd: { type: string, example: '15:00' }
+      responses:
+        '200':
+          description: The level's grid.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [settings]
+                properties:
+                  settings: { $ref: '#/components/schemas/ScheduleSettings' }
+        '400': { $ref: '#/components/responses/ScheduleBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
+  /api/v1/schedule/events:
+    get:
+      tags: [schedule]
+      summary: The timetable's change history (T16)
+      description: >
+        Who changed what, when and why: every date-specific change (and its
+        undo) and every base edit made after the cycle started; newest first,
+        at most `limit` (default 100, max 500). Requires `schedule:read`.
+      operationId: listScheduleEvents
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: cycleId, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 500 } }
+      responses:
+        '200':
+          description: The history.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [events]
+                properties:
+                  events:
+                    type: array
+                    items: { $ref: '#/components/schemas/ScheduleEvent' }
+        '400':
+          description: A malformed `cycleId` or `limit`.
+          content:
+            text/plain:
+              schema: { type: string }
+              example: cycleId is required
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
+  /api/v1/teaching/schedule:
+    get:
+      tags: [schedule]
+      summary: The calling teacher's own timetable (T16)
+      description: >
+        The same board as `GET /api/v1/schedule`, narrowed to the classes of
+        the teacher linked to the caller's account (active cycle). A caller
+        with no teacher record linked gets an empty timetable. Requires
+        `teaching:read`; behind `module_schedule`.
+      operationId: getOwnSchedule
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200':
+          description: The caller's timetable.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ScheduleBoard' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
+  /api/v1/teaching/schedule/day:
+    get:
+      tags: [schedule]
+      summary: The calling teacher's classes on one date, changes included (T16)
+      description: >
+        `GET /api/v1/schedule/day` for the active cycle, narrowed to the
+        classes the caller gives that day — including the ones they cover as a
+        substitute. Requires `teaching:read`; behind `module_schedule`.
+      operationId: getOwnScheduleDay
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: date, in: query, required: true, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: The caller's classes that day.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ScheduleDay' }
+        '400':
+          description: A malformed `date`.
+          content:
+            text/plain:
+              schema: { type: string }
+              example: date must be YYYY-MM-DD
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
   /api/v1/expense-categories:
     get:
       tags: [expenses]
@@ -5118,6 +5520,37 @@ components:
       schema: { type: string, format: uuid }
 
   responses:
+    ScheduleBadRequest:
+      description: >
+        The timetable refuses the request's shape (T16); the sentence is shown
+        as is and the code rides in `X-Error-Code`: SCHEDULE_TIME_INVALID
+        (`HH:MM`, 5-minute steps, end after start), SCHEDULE_OUTSIDE_GRID,
+        SCHEDULE_WEEKDAY_INVALID (1–5), SCHEDULE_REASON_REQUIRED,
+        SCHEDULE_DATE_OUTSIDE_CYCLE, SCHEDULE_DATE_WRONG_WEEKDAY,
+        SCHEDULE_SWAP_INVALID, SCHEDULE_SUBSTITUTE_INVALID,
+        SCHEDULE_ASSIGNMENT_INVALID (not one of the cycle's teaching
+        assignments), SCHEDULE_GRID_INVALID. A malformed body is a plain 400.
+      headers:
+        X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
+      content:
+        text/plain:
+          schema: { type: string }
+          example: La hora va en pasos de 5 minutos
+    ScheduleConflict:
+      description: >
+        The timetable would double-book someone (T16): SCHEDULE_TEACHER_BUSY
+        or SCHEDULE_GROUP_BUSY name the conflicting class;
+        SCHEDULE_OVERRIDE_CONFLICT names the date whose change it would break;
+        SCHEDULE_BLOCK_TAKEN (the class already has a change that date);
+        SCHEDULE_BLOCK_HAS_OVERRIDES (move it after removing its future
+        changes); SCHEDULE_CHANGED (another editor won a race — reload);
+        LEVEL_BEING_DELETED.
+      headers:
+        X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
+      content:
+        text/plain:
+          schema: { type: string }
+          example: Ana Ruiz ya da Matemáticas a 3.º A el lunes de 08:00 a 08:50
     PeriodRefused:
       description: >
         The period's state refuses the request; the sentence is shown as is and
@@ -5338,6 +5771,195 @@ components:
           example: teaching assignment not found
 
   schemas:
+    ScheduleBoard:
+      type: object
+      description: The base timetable of a cycle and the catalog to draw it (T16).
+      required: [cycle, cycles, started, settings, levels, grades, groups, subjects, teachers, assignments, blocks]
+      properties:
+        cycle: { $ref: '#/components/schemas/ScheduleCycle' }
+        cycles:
+          type: array
+          description: Every cycle, for the cycle picker.
+          items: { $ref: '#/components/schemas/ScheduleCycle' }
+        started:
+          type: boolean
+          description: The cycle's first day has arrived (school time zone); base edits now need a reason and are recorded.
+        settings:
+          type: array
+          description: One grid per level (the default 07:00–15:00 when the level has none saved).
+          items: { $ref: '#/components/schemas/ScheduleSettings' }
+        levels:
+          type: array
+          items:
+            type: object
+            required: [id, name]
+            properties:
+              id: { type: string, format: uuid }
+              name: { type: string, example: Primaria }
+        grades:
+          type: array
+          items:
+            type: object
+            required: [id, levelId, name, ordinal]
+            properties:
+              id: { type: string, format: uuid }
+              levelId: { type: string, format: uuid }
+              name: { type: string, example: 3.º }
+              ordinal: { type: integer, example: 3 }
+        groups:
+          type: array
+          items:
+            type: object
+            required: [id, gradeLevelId, name]
+            properties:
+              id: { type: string, format: uuid }
+              gradeLevelId: { type: string, format: uuid }
+              name: { type: string, example: A }
+        subjects:
+          type: array
+          items:
+            type: object
+            required: [id, gradeLevelId, name]
+            properties:
+              id: { type: string, format: uuid }
+              gradeLevelId: { type: string, format: uuid }
+              name: { type: string, example: Matemáticas }
+        teachers:
+          type: array
+          items:
+            type: object
+            required: [id, firstName, lastName]
+            properties:
+              id: { type: string, format: uuid }
+              firstName: { type: string, example: Ana }
+              lastName: { type: string, example: Ruiz }
+        assignments:
+          type: array
+          description: The cycle's teaching assignments — the only things a class can be built from.
+          items:
+            type: object
+            required: [id, groupId, subjectId, teacherId]
+            properties:
+              id: { type: string, format: uuid }
+              groupId: { type: string, format: uuid }
+              subjectId: { type: string, format: uuid }
+              teacherId: { type: string, format: uuid }
+        blocks:
+          type: array
+          items: { $ref: '#/components/schemas/ScheduleBlock' }
+    ScheduleCycle:
+      type: object
+      required: [id, name, startsOn, endsOn, active]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, example: 2026-2027 }
+        startsOn: { type: string, format: date, example: '2026-08-24' }
+        endsOn: { type: string, format: date, example: '2027-07-09' }
+        active: { type: boolean }
+    ScheduleSettings:
+      type: object
+      required: [levelId, gridStart, gridEnd]
+      properties:
+        levelId: { type: string, format: uuid }
+        gridStart: { type: string, example: '07:00' }
+        gridEnd: { type: string, example: '15:00' }
+    ScheduleBlock:
+      type: object
+      description: One class of the base timetable — a teaching assignment on a weekday and time.
+      required: [id, cycleId, assignmentId, groupId, subjectId, teacherId, weekday, startsAt, endsAt]
+      properties:
+        id: { type: string, format: uuid }
+        cycleId: { type: string, format: uuid }
+        assignmentId: { type: string, format: uuid }
+        groupId: { type: string, format: uuid }
+        subjectId: { type: string, format: uuid }
+        teacherId: { type: string, format: uuid }
+        weekday: { type: integer, minimum: 1, maximum: 5, description: '1 = Monday … 5 = Friday.' }
+        startsAt: { type: string, example: '08:00' }
+        endsAt: { type: string, example: '08:50', description: Exclusive — a class ending at 08:50 and one starting at 08:50 do not collide. }
+    ScheduleBlockInput:
+      type: object
+      required: [assignmentId, weekday, startsAt, endsAt]
+      properties:
+        assignmentId: { type: string, format: uuid }
+        weekday: { type: integer, minimum: 1, maximum: 5 }
+        startsAt: { type: string, pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$', example: '08:00' }
+        endsAt: { type: string, pattern: '^([01][0-9]|2[0-4]):[0-5][0-9]$', example: '08:50' }
+        reason: { type: string, maxLength: 200, description: Required once the cycle has started. }
+    ScheduleDay:
+      type: object
+      required: [date, weekday, classes]
+      properties:
+        date: { type: string, format: date }
+        weekday: { type: integer, minimum: 1, maximum: 7, description: '1 = Monday … 7 = Sunday (6 and 7 have no classes).' }
+        classes:
+          type: array
+          description: By start time, then group.
+          items: { $ref: '#/components/schemas/ScheduleClass' }
+    ScheduleClass:
+      type: object
+      description: A class as it happens on a date.
+      required: [blockId, groupId, subjectId, teacherId, startsAt, endsAt, status, baseTeacherId, baseStartsAt, baseEndsAt, overrideId, reason]
+      properties:
+        blockId: { type: string, format: uuid }
+        groupId: { type: string, format: uuid }
+        subjectId: { type: string, format: uuid }
+        teacherId: { type: string, format: uuid, description: Who gives it that day. }
+        startsAt: { type: string, example: '09:00' }
+        endsAt: { type: string, example: '09:50' }
+        status: { type: string, enum: [regular, substitute, swapped, cancelled] }
+        baseTeacherId: { type: string, format: uuid }
+        baseStartsAt: { type: string, example: '08:00' }
+        baseEndsAt: { type: string, example: '08:50' }
+        overrideId: { type: [string, 'null'], format: uuid }
+        reason: { type: [string, 'null'] }
+    ScheduleOverrideInput:
+      type: object
+      required: [blockId, date, kind, reason]
+      properties:
+        blockId: { type: string, format: uuid }
+        date: { type: string, format: date }
+        kind: { type: string, enum: [substitute, swap, cancel] }
+        teacherId: { type: string, format: uuid, description: The substitute (kind substitute). }
+        swapBlockId: { type: string, format: uuid, description: The other class of the same group (kind swap). }
+        reason: { type: string, minLength: 1, maxLength: 200 }
+    ScheduleOverride:
+      type: object
+      required: [id, cycleId, blockId, date, kind, teacherId, swapBlockId, reason, createdBy, createdByName, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        cycleId: { type: string, format: uuid }
+        blockId: { type: string, format: uuid }
+        date: { type: string, format: date }
+        kind: { type: string, enum: [substitute, swap, cancel] }
+        teacherId: { type: [string, 'null'], format: uuid }
+        swapBlockId: { type: [string, 'null'], format: uuid }
+        reason: { type: string }
+        createdBy: { type: string }
+        createdByName: { type: string }
+        createdAt: { type: string, format: date-time }
+    ScheduleAvailableTeacher:
+      type: object
+      required: [teacherId, firstName, lastName, match]
+      properties:
+        teacherId: { type: string, format: uuid }
+        firstName: { type: string }
+        lastName: { type: string }
+        match: { type: string, enum: [subject, grade, other], description: Teaches that subject / teaches in that grade / anybody free. }
+    ScheduleEvent:
+      type: object
+      required: [id, at, actorId, actorName, action, blockId, overrideId, date, reason, summary]
+      properties:
+        id: { type: string, format: uuid }
+        at: { type: string, format: date-time }
+        actorId: { type: string }
+        actorName: { type: string }
+        action: { type: string, enum: [block_created, block_updated, block_deleted, override_created, override_deleted] }
+        blockId: { type: [string, 'null'], format: uuid }
+        overrideId: { type: [string, 'null'], format: uuid }
+        date: { type: [string, 'null'], format: date, description: The date a change applies to (overrides only). }
+        reason: { type: string }
+        summary: { type: string, example: 'Suplencia el 2026-10-05: Música, 3.º A, lunes 08:00–08:50 — Luis Pérez en lugar de Ana Ruiz' }
     GradePeriod:
       type: object
       required: [termId, termName, ordinal, levelId, levelName, startsOn, endsOn, status, version, progress]
