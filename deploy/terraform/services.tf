@@ -121,7 +121,7 @@ locals {
     # assignments (M14), and uniforms is a real Clean-Architecture service with
     # its own migrations since M12 — not a stub. There is deliberately NO
     # `tuition` entry: M15 rides on module_finance (FLAGS.md).
-    ENABLED_MODULES = "iam,gateway,students,config,grades,finance,attendance,comms,teachers,uniforms,expenses,schedule"
+    ENABLED_MODULES = "iam,gateway,students,config,grades,finance,attendance,comms,teachers,uniforms,expenses,schedule,activities"
     # CORS allow-list for clients that call the gateway cross-origin. The web app
     # does not: it proxies same-origin. This is a plain variable rather than
     # module.web.uri on purpose — see var.web_origin for the dependency cycle.

@@ -1,4 +1,12 @@
-# Cloud Scheduler: the monthly billing run (M15).
+# Cloud Scheduler: the billing run (M15), DAILY since T17.
+#
+# It used to fire on the 1st of each month. Activities (T17) are billed per
+# period on their own billing date — monthly on any day of the month, or every
+# week — so the run now fires every morning at 06:00 school time (12:00 UTC, so
+# the UTC day finance bills by is the school's day). Daily is safe for the same
+# reason the button is: every charge carries an external_ref unique per school,
+# so the days with nothing new due issue nothing. The job keeps its name
+# (renaming would destroy and recreate it).
 #
 # The school can always press "Generar cargos del mes" in the panel. This exists
 # so nobody has to remember. Both call the SAME endpoint, and that is safe for
@@ -47,7 +55,7 @@ resource "google_cloud_scheduler_job" "monthly_billing" {
   project     = var.project_id
   region      = var.region
   name        = "monthly-billing-run"
-  description = "Generates tuition, inscriptions and late fees for the active cycle"
+  description = "Generates tuition, inscriptions, activity periods and late fees for the active cycle (daily, idempotent)"
   schedule    = var.billing_schedule_cron
   time_zone   = var.billing_schedule_timezone
 

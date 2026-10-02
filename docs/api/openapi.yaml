@@ -42,6 +42,19 @@ servers:
     description: Production
 
 tags:
+  - name: activities
+    description: >
+      T17 — Actividades (extracurriculares) with their own charge. An activity
+      has a weekly schedule (several days, each with its own hours), price
+      options (by days per week attended, or a flat fee), a periodicity
+      (monthly, weekly or once per cycle), the first billing date and the
+      first due date, and an optional fixed late fee. Pupils are enrolled with
+      the price option chosen per pupil. The billing run issues one charge per
+      period, `activity:<activityId>:<studentId>:<period>`, on its billing date;
+      it then shows in the counter, the statement and the parents' app like any
+      other debt, and several activities add up. Behind `module_activities`
+      (and `module_finance`); reads `activities:read`, writes
+      `activities:write`.
   - name: expenses
     description: >
       T10 — Egresos: expenses, categories, receipts, the period's money and
@@ -4281,6 +4294,284 @@ paths:
         '403': { $ref: '#/components/responses/PlainForbidden' }
         '404': { $ref: '#/components/responses/PlainNotFound' }
 
+  /api/v1/activities:
+    get:
+      tags: [activities]
+      summary: The school's activities
+      description: >
+        Every activity with its schedule, price options and how many pupils are
+        enrolled today, by name. Inactive ones only when asked. Requires
+        `activities:read`.
+      operationId: listActivities
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: includeInactive
+          in: query
+          required: false
+          schema: { type: boolean }
+      responses:
+        '200':
+          description: The activities.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [activities]
+                properties:
+                  activities:
+                    type: array
+                    items: { $ref: '#/components/schemas/Activity' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+    post:
+      tags: [activities]
+      summary: Create an activity
+      description: >
+        A name the school already uses (ignoring case and accents) is 409. The
+        schedule needs at least one slot (weekday 1 = Monday … 7 = Sunday,
+        `HH:MM`, end after start, no two slots of one day overlapping). At least
+        one price option; `daysPerWeek` null is the flat fee (at most one), and
+        no two options for the same number of days. The first due date is on or
+        after the first billing date and before the next period starts.
+        Requires `activities:write`.
+      operationId: createActivity
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ActivityInput' }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Activity' }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409':
+          description: The name is taken.
+          content:
+            text/plain:
+              schema: { type: string }
+
+  /api/v1/activities/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [activities]
+      summary: One activity
+      description: Requires `activities:read`.
+      operationId: getActivity
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200':
+          description: The activity.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Activity' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+    put:
+      tags: [activities]
+      summary: Edit an activity
+      description: >
+        Replaces the activity's fields and its price options. An option sent
+        with its `id` is edited in place (a new price applies to periods billed
+        from now on — charges already issued never change); one sent without
+        an id is new; one left out is removed, which is 409 while an enrolled
+        pupil still uses it. Same validation as create. Requires
+        `activities:write`.
+      operationId: updateActivity
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ActivityInput' }
+      responses:
+        '200':
+          description: The activity as stored.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Activity' }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409':
+          description: The name is taken, or a removed option is still in use.
+          content:
+            text/plain:
+              schema: { type: string }
+
+  /api/v1/activities/{id}/enrollments:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [activities]
+      summary: Who is enrolled
+      description: >
+        The pupils enrolled today (no end date, or one in the future), each
+        with the price option chosen for them. Requires `activities:read`.
+      operationId: listActivityEnrollments
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200':
+          description: The enrolments.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [enrollments]
+                properties:
+                  enrollments:
+                    type: array
+                    items: { $ref: '#/components/schemas/ActivityEnrollment' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+    post:
+      tags: [activities]
+      summary: Enroll pupils
+      description: >
+        Enrolls up to 200 pupils at once, each with its own price option (the
+        screen pre-fills the batch's choice). A pupil already enrolled is left
+        as is. The periods already billable are charged at once: the period in
+        course is charged when the enrolment starts on or before its due date,
+        otherwise billing starts with the next period (no proration). The
+        activity must be active. Requires `activities:write`.
+      operationId: enrollInActivity
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enrollments]
+              properties:
+                startsOn:
+                  type: string
+                  format: date
+                  description: The day the enrolment starts. Empty means today.
+                  example: '2026-10-02'
+                enrollments:
+                  type: array
+                  minItems: 1
+                  maxItems: 200
+                  items:
+                    type: object
+                    required: [studentId, optionId]
+                    properties:
+                      studentId: { type: string, format: uuid }
+                      optionId: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The pupils now enrolled by this request, and the charges issued.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [enrollments, chargesCreated]
+                properties:
+                  enrollments:
+                    type: array
+                    items: { $ref: '#/components/schemas/ActivityEnrollment' }
+                  chargesCreated: { type: integer, example: 3 }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409':
+          description: The activity is inactive.
+          content:
+            text/plain:
+              schema: { type: string }
+
+  /api/v1/activities/{id}/enrollments/end:
+    post:
+      tags: [activities]
+      summary: Unenroll pupils
+      description: >
+        Ends the enrolment of up to 200 pupils on `endsOn` (default today). No
+        period whose billing date comes after it is charged; charges already
+        issued, paid or not, are never touched. A pupil not enrolled is
+        ignored. Requires `activities:write`.
+      operationId: unenrollFromActivity
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/CsrfToken' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [studentIds]
+              properties:
+                endsOn: { type: string, format: date, example: '2026-10-31' }
+                studentIds:
+                  type: array
+                  minItems: 1
+                  maxItems: 200
+                  items: { type: string, format: uuid }
+      responses:
+        '200':
+          description: How many enrolments ended.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ended]
+                properties:
+                  ended: { type: integer, example: 2 }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
+  /api/v1/activities/{id}/enrollments/{studentId}:
+    put:
+      tags: [activities]
+      summary: Change a pupil's price option
+      description: >
+        Applies to periods billed from now on; charges already issued keep their
+        amount. Requires `activities:write`.
+      operationId: changeActivityOption
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: studentId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/CsrfToken' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [optionId]
+              properties:
+                optionId: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The enrolment as stored.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ActivityEnrollment' }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
   /api/v1/expense-categories:
     get:
       tags: [expenses]
@@ -7051,6 +7342,88 @@ components:
         transferCents: { type: integer, format: int64, example: 80000 }
         totalCents: { type: integer, format: int64, example: 700000 }
 
+    ActivitySlot:
+      type: object
+      required: [weekday, start, end]
+      properties:
+        weekday: { type: integer, minimum: 1, maximum: 7, description: 1 = Monday … 7 = Sunday., example: 2 }
+        start: { type: string, pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$', example: '15:00' }
+        end: { type: string, pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$', example: '16:30' }
+
+    ActivityPriceOption:
+      type: object
+      required: [amountCents]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Present on what the server returns; on input, send it to edit an existing option and omit it for a new one.
+        daysPerWeek:
+          type: [integer, 'null']
+          minimum: 1
+          maximum: 7
+          description: Days a week the pupil attends for this price; null is the flat fee, whatever the days.
+          example: 2
+        amountCents: { type: integer, format: int64, minimum: 1, description: Charged per period., example: 60000 }
+
+    ActivityInput:
+      type: object
+      required: [name, schedule, periodicity, billingStartsOn, firstDueOn, options]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 80, example: Natación }
+        schedule:
+          type: array
+          minItems: 1
+          maxItems: 21
+          items: { $ref: '#/components/schemas/ActivitySlot' }
+        periodicity:
+          type: string
+          enum: [monthly, weekly, per_cycle]
+          description: How often it is charged. per_cycle is a single charge, on the first billing date.
+          example: monthly
+        billingStartsOn:
+          type: string
+          format: date
+          description: The first billing date; later periods repeat it (same day each month, or each week).
+          example: '2026-10-01'
+        firstDueOn:
+          type: string
+          format: date
+          description: The first period's due date; later periods keep the same distance.
+          example: '2026-10-10'
+        lateFeeCents:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Fixed late fee once a period is past due and unpaid. 0 is none.
+          example: 5000
+        active: { type: boolean, example: true }
+        options:
+          type: array
+          minItems: 1
+          maxItems: 8
+          items: { $ref: '#/components/schemas/ActivityPriceOption' }
+
+    Activity:
+      allOf:
+        - $ref: '#/components/schemas/ActivityInput'
+        - type: object
+          required: [id, active, lateFeeCents, enrolledCount]
+          properties:
+            id: { type: string, format: uuid }
+            enrolledCount: { type: integer, example: 12 }
+
+    ActivityEnrollment:
+      type: object
+      required: [id, activityId, studentId, optionId, startsOn]
+      properties:
+        id: { type: string, format: uuid }
+        activityId: { type: string, format: uuid }
+        studentId: { type: string, format: uuid }
+        optionId: { type: string, format: uuid }
+        startsOn: { type: string, format: date, example: '2026-10-02' }
+        endsOn: { type: [string, 'null'], format: date, example: null }
+
     ExpenseCategory:
       type: object
       required: [id, name, active]
@@ -7218,6 +7591,13 @@ components:
         tuitionCreated: { type: integer, example: 30 }
         enrollmentCreated: { type: integer, example: 10 }
         lateFeesCreated: { type: integer, example: 4 }
+        activitiesCreated:
+          type: integer
+          example: 5
+          description: >
+            Activity charges issued (T17): one per enrolled pupil per period
+            whose billing date has arrived. Their fixed late fees count in
+            lateFeesCreated.
         feesCreated:
           type: integer
           example: 8

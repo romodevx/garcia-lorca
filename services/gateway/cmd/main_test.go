@@ -109,8 +109,10 @@ func (stubIAM) ValidateToken(_ context.Context, req *connect.Request[iamv1.Valid
 		"expenses-writer": {"expenses:write", "expenses:read"},
 		"expenses-reader": {"expenses:read"},
 		// T16: the Horarios module's two permissions (iam 0028, delegable).
-		"schedule-writer": {"schedule:write", "schedule:read"},
-		"schedule-reader": {"schedule:read"},
+		"schedule-writer":   {"schedule:write", "schedule:read"},
+		"schedule-reader":   {"schedule:read"},
+		"activities-writer": {"activities:write", "activities:read"},
+		"activities-reader": {"activities:read"},
 		// T2: the maestro role, exactly as migrations/iam/0022 seeds it.
 		"maestro": {"teaching:read", "teaching:write", "attendance_own:read", "attendance_own:write"},
 		// "Dar acceso al sistema" needs teachers:write AND users:write, and the

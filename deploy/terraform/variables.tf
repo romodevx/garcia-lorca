@@ -204,9 +204,9 @@ variable "billing_cycle_id" {
 }
 
 variable "billing_schedule_cron" {
-  description = "When the billing run fires. Default: 06:00 on the 1st of each month."
+  description = "When the billing run fires. Default: 06:00 every day (T17: weekly activities need a daily run; RunBilling is idempotent, so the other days issue nothing new)."
   type        = string
-  default     = "0 6 1 * *"
+  default     = "0 6 * * *"
 }
 
 variable "billing_schedule_timezone" {

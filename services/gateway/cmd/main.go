@@ -739,6 +739,28 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("POST /api/v1/finance/cash-up/close", expensesWrite(expensesH.CloseCashCut))
 	mux.Handle("POST /api/v1/finance/cash-up/reopen", expensesModule("finance:write", expensesH.ReopenCashCut))
 
+	// T17 — Actividades: extracurriculars with their schedule, price options
+	// and periodicity, and the pupils enrolled in each. Behind module_finance
+	// AND module_activities (default OFF). Reads answer to activities:read,
+	// writes (create/edit, enrol, unenrol, change a pupil's option) to
+	// activities:write (iam 0029: owner by default, delegable). The charges an
+	// enrolment causes are ordinary finance charges, collected through
+	// Registrar pago (finance:write) like any other.
+	activitiesH := handler.NewActivitiesHandler(financeClient)
+	activitiesModule := func(perm string, h http.HandlerFunc) http.Handler {
+		return guard.Protect("finance", guard.Protect("activities", requireAuthChanged(middleware.RequirePermission(perm)(h))))
+	}
+	activitiesRead := func(h http.HandlerFunc) http.Handler { return activitiesModule("activities:read", h) }
+	activitiesWrite := func(h http.HandlerFunc) http.Handler { return activitiesModule("activities:write", h) }
+	mux.Handle("GET /api/v1/activities", activitiesRead(activitiesH.List))
+	mux.Handle("POST /api/v1/activities", activitiesWrite(activitiesH.Create))
+	mux.Handle("GET /api/v1/activities/{id}", activitiesRead(activitiesH.Get))
+	mux.Handle("PUT /api/v1/activities/{id}", activitiesWrite(activitiesH.Update))
+	mux.Handle("GET /api/v1/activities/{id}/enrollments", activitiesRead(activitiesH.ListEnrollments))
+	mux.Handle("POST /api/v1/activities/{id}/enrollments", activitiesWrite(activitiesH.Enroll))
+	mux.Handle("POST /api/v1/activities/{id}/enrollments/end", activitiesWrite(activitiesH.Unenroll))
+	mux.Handle("PUT /api/v1/activities/{id}/enrollments/{studentId}", activitiesWrite(activitiesH.ChangeOption))
+
 	// M06 attendance (daily pass list): flag-guarded, authenticated + rotation-
 	// enforced, permission-gated. Saving a group·day is the only write
 	// (attendance:write) — it reconciles the whole day, so it also erases marks;
