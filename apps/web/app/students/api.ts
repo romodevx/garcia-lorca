@@ -221,6 +221,8 @@ export interface CreateStudentInput {
   levelId: string;
   gradeGroup: string;
   guardianName: string;
+  /** Optional (T11): "2019-03-12". It is what the morning birthday greeting reads. */
+  birthDate?: string;
 }
 
 /**

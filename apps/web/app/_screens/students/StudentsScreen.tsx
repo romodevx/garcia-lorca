@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import { Avatar } from "../../_design/Brand";
 import { Btn } from "../../_design/Controls";
 import { DrawerShell } from "../../_design/DrawerShell";
-import { SelectField, TextArea, TextField, useFocusFirstInvalid } from "../../_design/form";
+import { DateField, SelectField, TextArea, TextField, useFocusFirstInvalid } from "../../_design/form";
 import { Icon, type IconName } from "../../_design/Icon";
 import { Page } from "../../_design/Page";
 import type { ColorKey } from "../../_design/colors";
@@ -259,6 +259,11 @@ export function placementFailureMessage(err: unknown): string {
   return "No se pudo inscribir al alumno en ese grado." + tail;
 }
 
+/** Today on the device's calendar, YYYY-MM-DD: nobody is born tomorrow. */
+function todayISO(): string {
+  return new Date().toLocaleDateString("en-CA");
+}
+
 // ── quick-add slide-over: create a student in one panel, minimal fields ──
 function QuickAdd({
   onClose,
@@ -281,6 +286,11 @@ function QuickAdd({
   const [gradeLevelId, setGradeLevelId] = useState("");
   const [grades, setGrades] = useState<GradeLevel[]>([]);
   const [guardianName, setGuardian] = useState("");
+  // T11: the birth date waits under "Más datos". The drawer already holds eight
+  // fields — the most a drawer takes — and the 80% case creates the pupil
+  // without it, so it starts collapsed rather than growing the form.
+  const [birthDate, setBirthDate] = useState("");
+  const [showMore, setShowMore] = useState(false);
   // Los faltantes vienen de missingFields, que conserva el mensaje propio de
   // cada campo ("llevas 17 caracteres"), así que no se usa useRequired: ese
   // hook da un mensaje genérico y aquí ya había uno mejor.
@@ -348,6 +358,7 @@ function QuickAdd({
           // group, so the record cannot claim a group the pupil is not in.
           gradeGroup: "",
           guardianName: guardianName.trim(),
+          ...(birthDate !== "" ? { birthDate } : {}),
         },
         gradeLevelId,
         withNote ? note.trim() : "",
@@ -454,6 +465,31 @@ function QuickAdd({
             error={fieldErrors.guardianName}
             onClearError={() => clearField("guardianName")}
           />
+          <div>
+            <button
+              type="button"
+              aria-expanded={showMore}
+              aria-controls="alta-mas-datos"
+              onClick={() => setShowMore((v) => !v)}
+              style={{ display: "inline-flex", alignItems: "center", gap: 6, minHeight: 44, padding: "0 4px", background: "none", border: "none", color: "var(--forest)", fontSize: 14.5, fontWeight: 700, cursor: "pointer" }}
+            >
+              <span style={{ display: "inline-flex", transform: showMore ? "rotate(90deg)" : "none", transition: "transform .15s" }}>
+                <Icon name="chevron" size={16} stroke={2.4} />
+              </span>
+              Más datos (opcional)
+            </button>
+            {showMore && (
+              <div id="alta-mas-datos" style={{ marginTop: 8 }}>
+                <DateField
+                  label="Fecha de nacimiento"
+                  value={birthDate}
+                  onChange={setBirthDate}
+                  max={todayISO()}
+                  help="Con ella el sistema felicita al alumno en la app de sus papás el día de su cumpleaños. Se puede capturar después en su ficha."
+                />
+              </div>
+            )}
+          </div>
           {withNote && (
             <TextArea
               label="Nota"
