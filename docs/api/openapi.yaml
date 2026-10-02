@@ -70,6 +70,12 @@ tags:
     description: >
       The school's levels (Preescolar, Primaria…). Behind `module_config`;
       reads require `config:read`, writes `config:write`.
+  - name: config-evaluation-periods
+    description: >
+      T14 — the evaluation periods (trimesters, bimesters…) of each GRADE in a
+      cycle, with editable start and end dates (both inclusive). A grade's
+      periods never overlap and lie inside the cycle; the database enforces the
+      overlap rule too (EXCLUDE), so concurrent editors cannot break it.
   - name: config-terms
     description: >
       The periods (trimesters) of each cycle and level, and the calendar months
@@ -2616,6 +2622,189 @@ paths:
               examples:
                 closed: { value: El periodo está cerrado; reábrelo para cambiar sus meses }
                 otherTerm: { value: Ese mes ya pertenece a otro periodo del nivel }
+
+  /api/v1/config/evaluation-periods:
+    get:
+      tags: [config-evaluation-periods]
+      summary: The evaluation periods of a cycle, by grade (T14)
+      description: >
+        The periods of `cycleId`, narrowed to the grades of `levelId` and/or to
+        `gradeLevelId` when given; ordered by grade ordinal, then period
+        ordinal. A grade with no periods simply does not appear. Requires
+        `config:read`.
+      operationId: listEvaluationPeriods
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: cycleId, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: levelId, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: gradeLevelId, in: query, required: false, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The periods.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [periods]
+                properties:
+                  periods:
+                    type: array
+                    items: { $ref: '#/components/schemas/ConfigEvaluationPeriod' }
+        '400':
+          description: A missing or malformed `cycleId`, `levelId` or `gradeLevelId`.
+          content:
+            text/plain:
+              schema: { type: string }
+              example: cycleId is required
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
+  /api/v1/config/grade-levels/{id}/evaluation-periods:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The grade whose periods are replaced.
+        schema: { type: string, format: uuid }
+    put:
+      tags: [config-evaluation-periods]
+      summary: Replace one grade's evaluation periods in a cycle (T14)
+      description: >
+        `periods` becomes the grade's COMPLETE set in `cycleId`. A row carrying
+        the `id` of one of the grade's periods keeps that id (and its term
+        link); any other row is a new period; a period no row names is
+        removed; `[]` clears the grade. A save that lost a race with another
+        save of the same grade is 409 `PERIODS_CHANGED` (reload and retry). Every period needs a name (≤ 60
+        characters), an ordinal 1–12 and dates `YYYY-MM-DD` with
+        `startsOn ≤ endsOn` (400 `PERIOD_ENDS_BEFORE_START`), inside the cycle
+        (400 `PERIOD_OUTSIDE_CYCLE`); at most 12 periods
+        (`TOO_MANY_PERIODS`), each ordinal once (`PERIOD_ORDINAL_TAKEN`). Two
+        periods sharing a day is 409 `PERIOD_OVERLAP` ("El periodo 1 (1.er
+        trimestre) se encima con el periodo 2 (2.º trimestre)"), also when a
+        concurrent change caused it. Nothing is written on any refusal. A
+        grade of a level being deleted is 409 `LEVEL_BEING_DELETED`. Returns
+        the grade's periods by ordinal. Requires `config:write`.
+      operationId: putGradeEvaluationPeriods
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cycleId, periods]
+              properties:
+                cycleId: { type: string, format: uuid }
+                periods:
+                  type: array
+                  maxItems: 12
+                  items: { $ref: '#/components/schemas/ConfigEvaluationPeriodInput' }
+            example:
+              cycleId: 6f1c2b8e-0000-4000-8000-000000000001
+              periods:
+                - { ordinal: 1, name: 1.er trimestre, startsOn: '2026-08-24', endsOn: '2026-11-30' }
+                - { ordinal: 2, name: 2.º trimestre, startsOn: '2026-12-01', endsOn: '2027-03-31' }
+                - { ordinal: 3, name: 3.er trimestre, startsOn: '2027-04-01', endsOn: '2027-07-09' }
+      responses:
+        '200':
+          description: The grade's periods, by ordinal.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [periods]
+                properties:
+                  periods:
+                    type: array
+                    items: { $ref: '#/components/schemas/ConfigEvaluationPeriod' }
+        '400':
+          description: >
+            A malformed body or date; a period outside the cycle, ending before
+            it starts, with no name, a repeated ordinal or more than 12 periods;
+            an unknown cycle or grade.
+          headers:
+            X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
+          content:
+            text/plain:
+              schema: { type: string }
+              examples:
+                outsideCycle: { value: '«3.er trimestre» queda fuera del ciclo (2026-08-24 a 2027-07-09)' }
+                backwards: { value: «1.er trimestre» termina antes de empezar }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409':
+          description: Two periods of the grade share a day (`PERIOD_OVERLAP`), another save of the grade won a race (`PERIODS_CHANGED`), or the level is being deleted (`LEVEL_BEING_DELETED`).
+          headers:
+            X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
+          content:
+            text/plain:
+              schema: { type: string }
+              example: El periodo 1 (1.er trimestre) se encima con el periodo 2 (2.º trimestre)
+
+  /api/v1/config/evaluation-periods/copy:
+    post:
+      tags: [config-evaluation-periods]
+      summary: Copy one grade's evaluation periods onto other grades (T14)
+      description: >
+        Each target grade takes the source grade's periods (names and dates)
+        in ONE transaction, matched by `ordinal` like a replace: a target's
+        existing ordinal keeps its id, a missing one is created, an extra one
+        is removed. "Apply to the whole level" is this call with every other
+        grade of the level. Targets are de-duplicated. 400 when
+        `toGradeLevelIds` is empty or contains the source, a grade or the cycle
+        does not exist, or the source has no periods in the cycle. Returns the
+        targets' periods, grade by grade in request order, then by ordinal.
+        Requires `config:write`.
+      operationId: copyEvaluationPeriods
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cycleId, fromGradeLevelId, toGradeLevelIds]
+              properties:
+                cycleId: { type: string, format: uuid }
+                fromGradeLevelId: { type: string, format: uuid }
+                toGradeLevelIds:
+                  type: array
+                  minItems: 1
+                  maxItems: 50
+                  items: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The target grades' periods.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [periods]
+                properties:
+                  periods:
+                    type: array
+                    items: { $ref: '#/components/schemas/ConfigEvaluationPeriod' }
+        '400':
+          description: A malformed body or scope.
+          content:
+            text/plain:
+              schema: { type: string }
+              example: El grado de origen no tiene periodos en el ciclo
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409':
+          description: A concurrent change made two periods of a target overlap (`PERIOD_OVERLAP`), or a target's level is being deleted (`LEVEL_BEING_DELETED`).
+          headers:
+            X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
+          content:
+            text/plain:
+              schema: { type: string }
+              example: Los periodos de un grado no pueden encimarse
 
   /api/v1/attendance/roster:
     get:
@@ -6509,6 +6698,36 @@ components:
           type: array
           description: The calendar months the term covers ("YYYY-MM", ascending); [] when none are set.
           items: { type: string, example: '2026-09' }
+    ConfigEvaluationPeriod:
+      type: object
+      required: [id, cycleId, gradeLevelId, ordinal, name, startsOn, endsOn, termId]
+      properties:
+        id: { type: string, format: uuid }
+        cycleId: { type: string, format: uuid }
+        gradeLevelId: { type: string, format: uuid }
+        ordinal: { type: integer, minimum: 1, maximum: 12, example: 1 }
+        name: { type: string, maxLength: 60, example: 1.er trimestre }
+        startsOn: { type: string, format: date, example: '2026-08-24', description: 'First day (inclusive).' }
+        endsOn: { type: string, format: date, example: '2026-11-30', description: 'Last day (inclusive).' }
+        termId:
+          type: [string, 'null']
+          format: uuid
+          description: The level term this period was migrated from (provenance), or null.
+    ConfigEvaluationPeriodInput:
+      type: object
+      required: [ordinal, name, startsOn, endsOn]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: >
+            The grade's existing period this row edits; omit it for a new
+            period. The id follows the row, so removing the 1st period removes
+            that one even though the rest are renumbered.
+        ordinal: { type: integer, minimum: 1, maximum: 12, example: 1 }
+        name: { type: string, minLength: 1, maxLength: 60, example: 1.er trimestre }
+        startsOn: { type: string, format: date, example: '2026-08-24' }
+        endsOn: { type: string, format: date, example: '2026-11-30' }
     MonthlySheet:
       type: object
       required: [assignmentId, month, months, scale, gradingEnabled, currentMonth, editable, closedMonths, unmappedMonths, rows]

@@ -69,6 +69,7 @@ func seedLevelDeletion(t *testing.T) {
 		"DELETE FROM level_deletions WHERE tenant_id = @t",
 		"DELETE FROM school_events WHERE tenant_id = @t",
 		"DELETE FROM teaching_assignments WHERE tenant_id = @t",
+		"DELETE FROM evaluation_periods WHERE tenant_id = @t",
 		"DELETE FROM term_months WHERE tenant_id = @t",
 		"DELETE FROM terms WHERE tenant_id = @t",
 		"DELETE FROM groups WHERE tenant_id = @t",
@@ -88,6 +89,9 @@ func seedLevelDeletion(t *testing.T) {
 		`INSERT INTO groups (id, tenant_id, cycle_id, grade_level_id, name) VALUES ('` + ldGroup + `', @t, '` + ldCycle + `', '` + ldGrade + `', 'A'), ('` + mGroup + `', @t, '` + ldCycle + `', '` + mGrade + `', 'A')`,
 		`INSERT INTO terms (id, tenant_id, cycle_id, level_id, name, ordinal, starts_on, ends_on) VALUES ('` + ldTerm + `', @t, '` + ldCycle + `', '` + ldLevel + `', 'T1', 1, '2026-09-01', '2026-11-30')`,
 		`INSERT INTO term_months (tenant_id, term_id, cycle_id, level_id, month) VALUES (@t, '` + ldTerm + `', '` + ldCycle + `', '` + ldLevel + `', '2026-09-01'), (@t, '` + ldTerm + `', '` + ldCycle + `', '` + ldLevel + `', '2026-10-01')`,
+		`INSERT INTO evaluation_periods (tenant_id, cycle_id, grade_level_id, ordinal, name, starts_on, ends_on, term_id) VALUES
+			(@t, '` + ldCycle + `', '` + ldGrade + `', 1, 'T1', '2026-09-01', '2026-11-30', '` + ldTerm + `'),
+			(@t, '` + ldCycle + `', '` + mGrade + `', 1, 'B1', '2026-09-01', '2026-10-31', NULL)`,
 		`INSERT INTO teachers (id, tenant_id, first_name, last_name, email) VALUES ('` + ldTeacher + `', @t, 'Ana', 'Ruiz', 'ana@f.mx')`,
 		`INSERT INTO teaching_assignments (id, tenant_id, cycle_id, group_id, subject_id, teacher_id) VALUES ('` + ldAssign + `', @t, '` + ldCycle + `', '` + ldGroup + `', '` + ldSubject + `', '` + ldTeacher + `')`,
 		`INSERT INTO school_events (id, tenant_id, cycle_id, title, starts_on, ends_on, level_id, group_id) VALUES
@@ -114,7 +118,7 @@ func countRows(t *testing.T, table, where string, args ...any) int64 {
 
 var wantLevelCounts = levelarchive.Counts{
 	"levels": 1, "gradeLevels": 1, "subjects": 1, "groups": 1, "terms": 1,
-	"termMonths": 2, "teachingAssignments": 1, "schoolEvents": 2,
+	"termMonths": 2, "teachingAssignments": 1, "schoolEvents": 2, "evaluationPeriods": 1,
 }
 
 func archiveInput(batch string) ports.ArchiveLevelInput {
@@ -190,6 +194,8 @@ func TestLevelDeletionArchiveRestoreRoundTrip(t *testing.T) {
 	assert.Zero(t, countRows(t, "levels", "id = ?", ldLevel))
 	assert.Zero(t, countRows(t, "groups", "id = ?", ldGroup))
 	assert.Zero(t, countRows(t, "term_months", "level_id = ?", ldLevel))
+	assert.Zero(t, countRows(t, "evaluation_periods", "grade_level_id = ?", ldGrade))
+	assert.Equal(t, int64(1), countRows(t, "evaluation_periods", "grade_level_id = ?", mGrade), "the bystander's periods stay")
 	assert.Zero(t, countRows(t, "school_events", "id IN ?", []string{ldEvLevel, ldEvGroup}))
 	assert.Equal(t, int64(1), countRows(t, "school_events", "id = ?", ldEvSchool), "a whole-school event stays")
 	assert.Equal(t, int64(1), countRows(t, "levels", "id = ?", mLevel), "the bystander level stays")
@@ -212,6 +218,8 @@ func TestLevelDeletionArchiveRestoreRoundTrip(t *testing.T) {
 	assert.Equal(t, int64(1), countRows(t, "levels", "id = ? AND name = 'Primaria'", ldLevel))
 	assert.Equal(t, "active", levelStatus(t, ldLevel), "a restored level is writable again, never frozen as it was archived")
 	assert.Equal(t, int64(2), countRows(t, "term_months", "level_id = ?", ldLevel))
+	assert.Equal(t, int64(1), countRows(t, "evaluation_periods", "grade_level_id = ? AND term_id = ?", ldGrade, ldTerm),
+		"a period comes back with its term link")
 	assert.Equal(t, int64(1), countRows(t, "teaching_assignments", "id = ?", ldAssign))
 
 	rep2, err := repo.RestoreLevelBatch(ctx, batch)
@@ -456,6 +464,7 @@ func TestADeletingLevelRefusesStructureWrites(t *testing.T) {
 		{"group", `INSERT INTO groups (tenant_id, cycle_id, grade_level_id, name) VALUES (@t, @c, @g, 'B')`},
 		{"term", `INSERT INTO terms (tenant_id, cycle_id, level_id, name, ordinal, starts_on, ends_on) VALUES (@t, @c, @l, 'T2', 2, '2026-12-01', '2027-02-28')`},
 		{"term month", `INSERT INTO term_months (tenant_id, term_id, cycle_id, level_id, month) VALUES (@t, @term, @c, @l, '2026-11-01')`},
+		{"evaluation period", `INSERT INTO evaluation_periods (tenant_id, cycle_id, grade_level_id, ordinal, name, starts_on, ends_on) VALUES (@t, @c, @g, 2, 'T2', '2026-12-01', '2027-02-28')`},
 		{"teaching assignment", `UPDATE teaching_assignments SET teacher_id = teacher_id WHERE id = @a`},
 		{"event of the level", `INSERT INTO school_events (tenant_id, cycle_id, title, starts_on, ends_on, level_id) VALUES (@t, @c, 'x', '2026-10-09', '2026-10-09', @l)`},
 		{"event of a group", `INSERT INTO school_events (tenant_id, cycle_id, title, starts_on, ends_on, group_id) VALUES (@t, @c, 'x', '2026-10-09', '2026-10-09', @grp)`},

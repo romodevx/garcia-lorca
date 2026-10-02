@@ -315,6 +315,18 @@ func (stubConfig) CopyTermMonths(_ context.Context, req *connect.Request[configv
 	return connect.NewResponse(&configv1.CopyTermMonthsResponse{}), nil
 }
 
+func (stubConfig) ListEvaluationPeriods(_ context.Context, _ *connect.Request[configv1.ListEvaluationPeriodsRequest]) (*connect.Response[configv1.ListEvaluationPeriodsResponse], error) {
+	return connect.NewResponse(&configv1.ListEvaluationPeriodsResponse{}), nil
+}
+
+func (stubConfig) UpsertEvaluationPeriods(_ context.Context, _ *connect.Request[configv1.UpsertEvaluationPeriodsRequest]) (*connect.Response[configv1.UpsertEvaluationPeriodsResponse], error) {
+	return connect.NewResponse(&configv1.UpsertEvaluationPeriodsResponse{}), nil
+}
+
+func (stubConfig) CopyEvaluationPeriods(_ context.Context, _ *connect.Request[configv1.CopyEvaluationPeriodsRequest]) (*connect.Response[configv1.CopyEvaluationPeriodsResponse], error) {
+	return connect.NewResponse(&configv1.CopyEvaluationPeriodsResponse{}), nil
+}
+
 func (stubConfig) RenameSubject(_ context.Context, req *connect.Request[configv1.RenameSubjectRequest]) (*connect.Response[configv1.RenameSubjectResponse], error) {
 	return connect.NewResponse(&configv1.RenameSubjectResponse{Subject: &configv1.Subject{Id: req.Msg.GetId(), Name: req.Msg.GetName()}}), nil
 }
@@ -948,6 +960,49 @@ func TestTermMonthsRoutesGuardChain(t *testing.T) {
 		{"put: read-only", on, http.MethodPut, putPath, putBody, "config-reader", http.StatusForbidden},
 		{"put: writer", on, http.MethodPut, putPath, putBody, "config-writer", http.StatusOK},
 		{"copy: module off hides it", map[string]bool{}, http.MethodPost, copyPath, copyBody, "config-writer", http.StatusNotFound},
+		{"copy: read-only", on, http.MethodPost, copyPath, copyBody, "config-reader", http.StatusForbidden},
+		{"copy: writer", on, http.MethodPost, copyPath, copyBody, "config-writer", http.StatusOK},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gw := newTestGateway(t, tt.flags)
+			res := doGateway(t, gw, tt.method, tt.path, tt.token, tt.body)
+			if res.StatusCode != tt.want {
+				t.Errorf("status = %d, want %d", res.StatusCode, tt.want)
+			}
+		})
+	}
+}
+
+// T14: the evaluation-period routes ride the config chain — module_config OFF
+// ⇒ 404, no token ⇒ 401, reads need config:read, writes config:write.
+func TestEvaluationPeriodRoutesGuardChain(t *testing.T) {
+	const (
+		cycle    = "00000000-0000-4000-8000-0000000000c1"
+		grade    = "00000000-0000-4000-8000-0000000000a1"
+		other    = "00000000-0000-4000-8000-0000000000a2"
+		listPath = "/api/v1/config/evaluation-periods?cycleId=" + cycle
+		putPath  = "/api/v1/config/grade-levels/" + grade + "/evaluation-periods"
+		putBody  = `{"cycleId":"` + cycle + `","periods":[]}`
+		copyPath = "/api/v1/config/evaluation-periods/copy"
+		copyBody = `{"cycleId":"` + cycle + `","fromGradeLevelId":"` + grade + `","toGradeLevelIds":["` + other + `"]}`
+	)
+	on := map[string]bool{"module_config": true}
+	tests := []struct {
+		name   string
+		flags  map[string]bool
+		method string
+		path   string
+		body   string
+		token  string
+		want   int
+	}{
+		{"list: module off hides it", map[string]bool{}, http.MethodGet, listPath, "", "config-reader", http.StatusNotFound},
+		{"list: no token", on, http.MethodGet, listPath, "", "", http.StatusUnauthorized},
+		{"list: reader", on, http.MethodGet, listPath, "", "config-reader", http.StatusOK},
+		{"put: module off hides it", map[string]bool{}, http.MethodPut, putPath, putBody, "config-writer", http.StatusNotFound},
+		{"put: read-only", on, http.MethodPut, putPath, putBody, "config-reader", http.StatusForbidden},
+		{"put: writer", on, http.MethodPut, putPath, putBody, "config-writer", http.StatusOK},
 		{"copy: read-only", on, http.MethodPost, copyPath, copyBody, "config-reader", http.StatusForbidden},
 		{"copy: writer", on, http.MethodPost, copyPath, copyBody, "config-writer", http.StatusOK},
 	}

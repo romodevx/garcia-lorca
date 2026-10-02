@@ -26,7 +26,8 @@ export type View =
   | { screen: "module"; moduleId: string }
   | { screen: "studentEdit"; studentId: string }
   | { screen: "teacherLoad"; teacherId: string }
-  | { screen: "levelDelete"; levelId: string };
+  | { screen: "levelDelete"; levelId: string }
+  | { screen: "levelPeriods"; levelId: string };
 
 /** El prefijo de un módulo que aún no tiene pantalla propia. */
 const MODULE_PREFIX = "/modulo/";
@@ -36,6 +37,8 @@ const STUDENT_EDIT = /^\/alumnos\/([^/]+)\/editar$/;
 const TEACHER_LOAD = /^\/docentes\/([^/]+)\/carga$/;
 /** /configuracion/niveles/{id}/eliminar — the three-step deletion of one level. */
 const LEVEL_DELETE = /^\/configuracion\/niveles\/([^/]+)\/eliminar$/;
+/** /configuracion/niveles/{id}/periodos — the evaluation periods of a level's grades (T14). */
+const LEVEL_PERIODS = /^\/configuracion\/niveles\/([^/]+)\/periodos$/;
 
 /**
  * Las pantallas de una sola pieza. Los módulos sin backend van por
@@ -56,7 +59,7 @@ const BY_SCREEN = {
   teachers: "/docentes",
   uniforms: "/uniformes",
   admin: "/administracion",
-} as const satisfies Record<Exclude<View["screen"], "module" | "studentEdit" | "teacherLoad" | "levelDelete">, string>;
+} as const satisfies Record<Exclude<View["screen"], "module" | "studentEdit" | "teacherLoad" | "levelDelete" | "levelPeriods">, string>;
 
 const BY_PATH: ReadonlyMap<string, View> = new Map(
   Object.entries(BY_SCREEN).map(([screen, path]) => [path, { screen } as View]),
@@ -75,6 +78,9 @@ export function viewToPath(view: View): string {
   }
   if (view.screen === "levelDelete") {
     return `/configuracion/niveles/${encodeURIComponent(view.levelId)}/eliminar`;
+  }
+  if (view.screen === "levelPeriods") {
+    return `/configuracion/niveles/${encodeURIComponent(view.levelId)}/periodos`;
   }
   return BY_SCREEN[view.screen];
 }
@@ -120,6 +126,12 @@ export function pathToView(pathname: string): View {
   const levelId = del?.[1] === undefined ? undefined : safeDecode(del[1]);
   if (levelId !== undefined) {
     return { screen: "levelDelete", levelId };
+  }
+
+  const periods = LEVEL_PERIODS.exec(clean);
+  const periodsLevelId = periods?.[1] === undefined ? undefined : safeDecode(periods[1]);
+  if (periodsLevelId !== undefined) {
+    return { screen: "levelPeriods", levelId: periodsLevelId };
   }
 
   return { screen: "dashboard" };

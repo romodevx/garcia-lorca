@@ -11,6 +11,7 @@ const MODULE_OF_SCREEN: Partial<Record<View["screen"], string>> = {
   announcements: "announcements",
   config: "settings",
   levelDelete: "settings",
+  levelPeriods: "settings",
   grades: "grades",
   attendance: "attendance",
   teachers: "teachers",

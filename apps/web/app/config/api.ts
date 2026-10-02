@@ -598,6 +598,77 @@ export async function copyTermMonths(baseURL: string, input: CopyTermMonthsInput
   return data.terms ?? [];
 }
 
+// --- evaluation periods per grade (T14) -----------------------------------
+
+/**
+ * One evaluation period (trimester, bimester…) of ONE grade in a cycle. Dates
+ * are `YYYY-MM-DD`, both inclusive. `termId` names the level term a migrated
+ * period came from (provenance), or null.
+ */
+export interface EvaluationPeriod {
+  id: string;
+  cycleId: string;
+  gradeLevelId: string;
+  ordinal: number;
+  name: string;
+  startsOn: string;
+  endsOn: string;
+  termId: string | null;
+}
+
+/** One period of a grade's new set; `id` is the saved period the row edits. */
+export interface EvaluationPeriodInput {
+  id?: string;
+  ordinal: number;
+  name: string;
+  startsOn: string;
+  endsOn: string;
+}
+
+export interface CopyEvaluationPeriodsInput {
+  cycleId: string;
+  fromGradeLevelId: string;
+  toGradeLevelIds: string[];
+}
+
+/** The periods of a cycle, narrowed to a level's grades and/or one grade. */
+export function listEvaluationPeriods(
+  baseURL: string,
+  scope: { cycleId: string; levelId?: string; gradeLevelId?: string },
+): Promise<EvaluationPeriod[]> {
+  return getList<EvaluationPeriod>(baseURL, `/evaluation-periods${query(scope)}`, "periods");
+}
+
+/**
+ * Replaces one grade's periods in a cycle (the complete set; `[]` clears it).
+ * The server refuses overlaps (409 PERIOD_OVERLAP) and dates outside the cycle
+ * (400 PERIOD_OUTSIDE_CYCLE) — the screen checks both first.
+ */
+export async function saveGradeEvaluationPeriods(
+  baseURL: string,
+  gradeLevelId: string,
+  cycleId: string,
+  periods: readonly EvaluationPeriodInput[],
+): Promise<EvaluationPeriod[]> {
+  const res = await authFetch(url(baseURL, `${BASE_PATH}/grade-levels/${encodeURIComponent(gradeLevelId)}/evaluation-periods`), {
+    method: "PUT",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cycleId, periods }),
+  });
+  if (!res.ok) {
+    throw await configFailure(res);
+  }
+  const data = (await res.json()) as { periods?: EvaluationPeriod[] };
+  return data.periods ?? [];
+}
+
+/** Gives every target grade the source grade's periods, in one transaction. */
+export async function copyEvaluationPeriods(baseURL: string, input: CopyEvaluationPeriodsInput): Promise<EvaluationPeriod[]> {
+  const data = await postJSON<{ periods?: EvaluationPeriod[] }>(baseURL, "/evaluation-periods/copy", input);
+  return data.periods ?? [];
+}
+
 // --- groups ---------------------------------------------------------------
 
 export function createGroup(baseURL: string, input: CreateGroupInput): Promise<Group> {

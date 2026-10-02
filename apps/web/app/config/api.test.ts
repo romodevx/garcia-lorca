@@ -14,6 +14,9 @@ import {
   createTerm,
   copyTermMonths,
   setTermMonths,
+  copyEvaluationPeriods,
+  listEvaluationPeriods,
+  saveGradeEvaluationPeriods,
   getSchoolProfile,
   labelGroups,
   listCycles,
@@ -474,5 +477,52 @@ describe("term months (T7)", () => {
     expect(url).toBe("http://gw/api/v1/config/terms/copy-months");
     expect(init.method).toBe("POST");
     expect(JSON.parse(init.body as string)).toEqual({ cycleId: "c1", fromLevelId: "l1", toLevelIds: ["l2", "l3"] });
+  });
+});
+
+describe("evaluation periods (T14)", () => {
+  const period = {
+    id: "p1", cycleId: "c1", gradeLevelId: "g1", ordinal: 1, name: "1.ER TRIMESTRE",
+    startsOn: "2026-08-24", endsOn: "2026-11-30", termId: null,
+  };
+
+  it("listEvaluationPeriods GETs a level's periods of a cycle and unwraps {periods}", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ periods: [period] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(listEvaluationPeriods(BASE, { cycleId: "c1", levelId: "l1" })).resolves.toEqual([period]);
+    const [url, init] = lastCall(fetchMock);
+    expect(url).toBe("http://gw/api/v1/config/evaluation-periods?cycleId=c1&levelId=l1");
+    expect(init.credentials).toBe("include");
+  });
+
+  it("saveGradeEvaluationPeriods PUTs the whole set of one grade", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ periods: [period] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const input = [{ ordinal: 1, name: "1.ER TRIMESTRE", startsOn: "2026-08-24", endsOn: "2026-11-30" }];
+
+    await expect(saveGradeEvaluationPeriods(BASE, "g1", "c1", input)).resolves.toEqual([period]);
+    const [url, init] = lastCall(fetchMock);
+    expect(url).toBe("http://gw/api/v1/config/grade-levels/g1/evaluation-periods");
+    expect(init.method).toBe("PUT");
+    expect(JSON.parse(init.body as string)).toEqual({ cycleId: "c1", periods: input });
+  });
+
+  it("saveGradeEvaluationPeriods surfaces the refusal code (PERIOD_OVERLAP)", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("Se enciman", { status: 409, headers: { "X-Error-Code": "PERIOD_OVERLAP" } })));
+
+    const err = (await saveGradeEvaluationPeriods(BASE, "g1", "c1", []).catch((e: unknown) => e)) as ConfigError;
+    expect(err).toBeInstanceOf(ConfigError);
+    expect(err.code).toBe("PERIOD_OVERLAP");
+  });
+
+  it("copyEvaluationPeriods POSTs the source and the targets", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ periods: [period] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(copyEvaluationPeriods(BASE, { cycleId: "c1", fromGradeLevelId: "g1", toGradeLevelIds: ["g2"] })).resolves.toEqual([period]);
+    const [url, init] = lastCall(fetchMock);
+    expect(url).toBe("http://gw/api/v1/config/evaluation-periods/copy");
+    expect(JSON.parse(init.body as string)).toEqual({ cycleId: "c1", fromGradeLevelId: "g1", toGradeLevelIds: ["g2"] });
   });
 });

@@ -136,6 +136,18 @@ describe("Catalog — nested level → grade level", () => {
     expect(screen.getByRole("region", { name: "Materias de 1° PRIMARIA" })).toBeInTheDocument();
   });
 
+  it("choosing a level offers its evaluation periods page, grade by grade (T14)", async () => {
+    const user = userEvent.setup();
+    const onOpenLevelPeriods = vi.fn();
+    mocked.listLevels.mockResolvedValue([{ id: "l1", name: "PRIMARIA", sepCode: "", enrollmentGranularity: "cycle" }]);
+    render(<Catalog onBack={() => {}} onOpenLevelPeriods={onOpenLevelPeriods} />);
+
+    await user.click(await screen.findByRole("button", { name: /PRIMARIA/ }));
+    await user.click(await screen.findByRole("button", { name: "Periodos por grado de PRIMARIA" }));
+
+    expect(onOpenLevelPeriods).toHaveBeenCalledWith("l1");
+  });
+
   it("switches a level's attendance to per class and keeps the new value on screen", async () => {
     const user = userEvent.setup();
     const secundaria = { id: "l1", name: "SECUNDARIA", sepCode: "", enrollmentGranularity: "cycle" as const, attendanceMode: "daily" as const };

@@ -34,6 +34,7 @@ const (
 	kindTermMonths          = "termMonths"
 	kindTeachingAssignments = "teachingAssignments"
 	kindSchoolEvents        = "schoolEvents"
+	kindEvaluationPeriods   = "evaluationPeriods"
 )
 
 // Sub-selects that resolve the level's structure. They are evaluated per
@@ -52,6 +53,7 @@ func levelSteps(levelID string) []gormarchive.Step {
 		return gormarchive.Step{Kind: kind, Table: table, Where: where, Args: levelArgs(where, levelID)}
 	}
 	return []gormarchive.Step{
+		step(kindEvaluationPeriods, "evaluation_periods", "grade_level_id IN ("+gradesOfLevel+")"),
 		step(kindTermMonths, "term_months", "level_id = ?"),
 		step(kindTeachingAssignments, "teaching_assignments",
 			"group_id IN ("+groupsOfLevel+") OR subject_id IN ("+subjectsOfLevel+")"),
@@ -91,6 +93,10 @@ var levelRestore = []restoreStep{
 	{kindSubjects, "subjects", []gormarchive.Parent{{Column: "grade_level_id", Table: "grade_levels"}}},
 	{kindTerms, "terms", []gormarchive.Parent{{Column: "cycle_id", Table: "cycles"}, {Column: "level_id", Table: "levels"}}},
 	{kindTermMonths, "term_months", []gormarchive.Parent{{Column: "term_id", Table: "terms"}}},
+	{kindEvaluationPeriods, "evaluation_periods", []gormarchive.Parent{
+		{Column: "cycle_id", Table: "cycles"}, {Column: "grade_level_id", Table: "grade_levels"},
+		{Column: "term_id", Table: "terms", Nullable: true},
+	}},
 	{kindGroups, "groups", []gormarchive.Parent{{Column: "cycle_id", Table: "cycles"}, {Column: "grade_level_id", Table: "grade_levels"}}},
 	{kindTeachingAssignments, "teaching_assignments", []gormarchive.Parent{
 		{Column: "cycle_id", Table: "cycles"}, {Column: "group_id", Table: "groups"},

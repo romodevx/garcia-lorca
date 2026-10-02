@@ -70,10 +70,17 @@ type fakeConfig struct {
 	copyCycle    string
 	copyFrom     string
 	copyTo       []string
-	groupIn      client.CreateGroupInput
-	groups       []client.GroupResult
-	groupsCycle  string
-	groupsGrade  string
+	// T14 evaluation periods.
+	evalList    [3]string // cycle, level, grade of the last list
+	evalCycle   string
+	evalGrade   string
+	evalIn      []client.EvaluationPeriodInput
+	evalCopyTo  []string
+	evalCalls   int
+	groupIn     client.CreateGroupInput
+	groups      []client.GroupResult
+	groupsCycle string
+	groupsGrade string
 
 	teacherFirst string
 	teacherLast  string

@@ -41,6 +41,7 @@ import { SchoolProfilePanel } from "./SchoolProfilePanel";
 import { SubjectsPanel } from "./SubjectsPanel";
 import { EmptyHint, ErrorAlert } from "./parts";
 import { TermsPanel } from "./TermsPanel";
+import { LevelPeriodsEntry } from "./periods/LevelPeriodsEntry";
 import { useLevelTerms } from "./useLevelTerms";
 
 import { API_URL } from "../../api-url";
@@ -58,6 +59,8 @@ export interface CatalogProps {
   onDeleteLevel?: (levelId: string) => void;
   /** A message another screen left for this one (a finished deletion). */
   notice?: string;
+  /** Opens the evaluation periods page of one level, grade by grade (T14). */
+  onOpenLevelPeriods?: (levelId: string) => void;
 }
 
 /**
@@ -68,7 +71,7 @@ export interface CatalogProps {
  * gateway (behind the flag + config:read/write) is the security boundary; this
  * screen is UX only.
  */
-export function Catalog({ onBack, canDeleteLevels = false, onDeleteLevel, notice }: CatalogProps): ReactElement {
+export function Catalog({ onBack, canDeleteLevels = false, onDeleteLevel, notice, onOpenLevelPeriods }: CatalogProps): ReactElement {
   const [cycles, setCycles] = useState<Cycle[]>([]);
   const [levels, setLevels] = useState<Level[]>([]);
   const [gradeLevels, setGradeLevels] = useState<GradeLevel[]>([]);
@@ -330,6 +333,13 @@ export function Catalog({ onBack, canDeleteLevels = false, onDeleteLevel, notice
                 )}
                 {levelTerms.load.kind === "loading" && <EmptyHint>Cargando periodos…</EmptyHint>}
                 {levelTerms.load.kind === "failed" && <ErrorAlert message="No se pudieron cargar los periodos de este nivel." />}
+              </div>
+            )}
+
+            {selectedLevel !== undefined && onOpenLevelPeriods !== undefined && (
+              // Full row: the grades' own evaluation periods live on their own page (T14).
+              <div style={{ gridColumn: "1 / -1", minWidth: 0 }}>
+                <LevelPeriodsEntry level={selectedLevel} onOpen={onOpenLevelPeriods} />
               </div>
             )}
 

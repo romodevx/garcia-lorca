@@ -19,8 +19,9 @@ import type { CutAccess } from "./_screens/finance/CashCutClosing";
 import { FinanceScreen } from "./_screens/finance/FinanceScreen";
 import { Catalog } from "./_screens/config/Catalog";
 import { LevelDeleteScreen } from "./_screens/config/levelDeletion/LevelDeleteScreen";
+import { LevelPeriodsScreen } from "./_screens/config/periods/LevelPeriodsScreen";
 import { clearLevelNotice, leaveLevelNotice, peekLevelNotice } from "./_screens/config/levelDeletion/pendingNotice";
-import { canDeleteLevels } from "./config/permissions";
+import { canDeleteLevels, canWriteConfig } from "./config/permissions";
 import { canDeleteUsers } from "./admin/permissions";
 import { AdminScreen } from "./_screens/admin/AdminScreen";
 import { StudentEditScreen } from "./_screens/students/StudentEditScreen";
@@ -466,6 +467,10 @@ export function AppShell(): ReactElement {
   // Owner-only (levels:delete). UX only: the gateway refuses the delete without it.
   const mayDeleteLevels = canDeleteLevels(principal?.permissions);
   const openLevelDelete = (levelId: string): void => go({ screen: "levelDelete", levelId });
+  // T14: a level's evaluation periods, grade by grade. UX only: the gateway
+  // answers reads with config:read and edits with config:write.
+  const openLevelPeriods = (levelId: string): void => go({ screen: "levelPeriods", levelId });
+  const mayWriteConfig = canWriteConfig(principal?.permissions);
   // What a finished deletion tells Configuración; it belongs to that one visit.
   // Next remounts this shell on the route change, so the sentence travels in
   // pendingNotice (module scope) and the new shell picks it up once.
@@ -473,7 +478,7 @@ export function AppShell(): ReactElement {
   useEffect(() => {
     if (peekLevelNotice() !== undefined) clearLevelNotice();
   }, []);
-  const onConfigScreens = view.screen === "config" || view.screen === "levelDelete";
+  const onConfigScreens = view.screen === "config" || view.screen === "levelDelete" || view.screen === "levelPeriods";
   useEffect(() => {
     if (!onConfigScreens) setConfigNotice(undefined);
   }, [onConfigScreens]);
@@ -635,9 +640,14 @@ export function AppShell(): ReactElement {
       {view.screen === "levelDelete" && configEnabled && mayDeleteLevels && (
         <LevelDeleteScreen key={view.levelId} levelId={view.levelId} onBack={() => go({ screen: "config" })} onDeleted={finishLevelDelete} />
       )}
-      {(view.screen === "config" || (view.screen === "levelDelete" && !(configEnabled && mayDeleteLevels))) &&
+      {view.screen === "levelPeriods" && configEnabled && (
+        <LevelPeriodsScreen key={view.levelId} levelId={view.levelId} canWrite={mayWriteConfig} onBack={() => go({ screen: "config" })} />
+      )}
+      {(view.screen === "config" ||
+        (view.screen === "levelDelete" && !(configEnabled && mayDeleteLevels)) ||
+        (view.screen === "levelPeriods" && !configEnabled)) &&
         (configEnabled ? (
-          <Catalog onBack={home} canDeleteLevels={mayDeleteLevels} onDeleteLevel={openLevelDelete} notice={configNotice} />
+          <Catalog onBack={home} canDeleteLevels={mayDeleteLevels} onDeleteLevel={openLevelDelete} onOpenLevelPeriods={openLevelPeriods} notice={configNotice} />
         ) : (
           // Flag OFF: never render the catalog; show the friendly stub so
           // navigation never dead-ends. (Backend 404 is authoritative.)

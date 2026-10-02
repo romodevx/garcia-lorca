@@ -8,3 +8,14 @@ const LEVELS_DELETE = "levels:delete";
 export function canDeleteLevels(permissions: readonly string[] | undefined): boolean {
   return permissions !== undefined && permissions.includes(LEVELS_DELETE);
 }
+
+const CONFIG_WRITE = "config:write";
+
+/**
+ * Whether the principal may edit the academic catalog (evaluation periods
+ * included). Unknown permissions edit nothing. UX only — the gateway's 403 is
+ * the boundary.
+ */
+export function canWriteConfig(permissions: readonly string[] | undefined): boolean {
+  return permissions !== undefined && permissions.includes(CONFIG_WRITE);
+}
