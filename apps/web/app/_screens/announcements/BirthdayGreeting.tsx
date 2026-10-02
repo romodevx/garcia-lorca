@@ -24,14 +24,21 @@ export function renderGreeting(text: string, firstName: string): string {
 
 type Errors = Partial<Record<"title" | "body", string>>;
 
+function titleError(title: string): string | undefined {
+  if (title.trim() === "") return "Escribe el título de la felicitación.";
+  if ([...title.trim()].length > MAX_TITLE) return `El título lleva como máximo ${MAX_TITLE} caracteres.`;
+  return undefined;
+}
+
+function bodyError(body: string): string | undefined {
+  if (body.trim() === "") return "Escribe el mensaje de la felicitación.";
+  if ([...body.trim()].length > MAX_BODY) return `El mensaje lleva como máximo ${MAX_BODY} caracteres.`;
+  return undefined;
+}
+
 /** What is wrong with the greeting, by field; empty when it can be saved. */
 function validate(title: string, body: string): Errors {
-  const errors: Errors = {};
-  if (title.trim() === "") errors.title = "Escribe el título de la felicitación.";
-  else if ([...title.trim()].length > MAX_TITLE) errors.title = `El título lleva como máximo ${MAX_TITLE} caracteres.`;
-  if (body.trim() === "") errors.body = "Escribe el mensaje de la felicitación.";
-  else if ([...body.trim()].length > MAX_BODY) errors.body = `El mensaje lleva como máximo ${MAX_BODY} caracteres.`;
-  return errors;
+  return { title: titleError(title), body: bodyError(body) };
 }
 
 /**
@@ -76,6 +83,9 @@ export function BirthdayGreeting(): ReactElement {
 
   const save = async (e: FormEvent): Promise<void> => {
     e.preventDefault();
+    // A second press while saving is ignored rather than the button disabled:
+    // a primary action never goes dead (ui-forms-and-modals.md).
+    if (saving) return;
     const found = validate(title, body);
     setErrors(found);
     if (Object.values(found).some((m) => m !== undefined)) {
@@ -97,6 +107,20 @@ export function BirthdayGreeting(): ReactElement {
     }
   };
 
+  if (!loaded) {
+    // Nothing editable until the current text has arrived: a slow answer must
+    // not overwrite what somebody typed, and a failed one must not let them
+    // replace a text they never saw.
+    return (
+      <section aria-labelledby="cumple-titulo" className="fade-up" style={{ marginTop: 24, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--r-xl)", padding: "22px 24px" }}>
+        <h2 id="cumple-titulo" style={{ fontSize: 18, fontWeight: 800, color: "var(--text)", margin: 0 }}>Felicitación de cumpleaños</h2>
+        {failure !== undefined
+          ? <p role="alert" style={{ color: "var(--bad-fg)", fontSize: 14, margin: "8px 0 0" }}>{failure} Recarga la página para intentarlo de nuevo.</p>
+          : <p style={{ color: "var(--text-muted)", fontSize: 14, margin: "8px 0 0" }}>Cargando…</p>}
+      </section>
+    );
+  }
+
   return (
     <form
       onSubmit={(e) => void save(e)}
@@ -112,7 +136,7 @@ export function BirthdayGreeting(): ReactElement {
           <h2 id="cumple-titulo" style={{ fontSize: 18, fontWeight: 800, color: "var(--text)", margin: 0 }}>Felicitación de cumpleaños</h2>
           <p style={{ color: "var(--text-muted)", fontSize: 14, margin: "2px 0 0" }}>
             Llega sola a la app de los papás cada mañana a las 7:00, el día que el alumno cumple años.
-            {loaded && isDefault && " Hoy se envía el texto predeterminado."}
+            {isDefault && " Hoy se envía el texto predeterminado."}
           </p>
         </div>
       </div>
@@ -124,6 +148,7 @@ export function BirthdayGreeting(): ReactElement {
         required
         error={errors.title}
         onClearError={() => clear("title")}
+        onBlur={() => setErrors((prev) => ({ ...prev, title: titleError(title) }))}
         help={`Lo que se ve en la notificación del celular. Escribe ${NAME_PLACEHOLDER} donde quieras el nombre del alumno. Hasta ${MAX_TITLE} caracteres.`}
       />
       <TextArea
@@ -134,23 +159,22 @@ export function BirthdayGreeting(): ReactElement {
         required
         error={errors.body}
         onClearError={() => clear("body")}
+        onBlur={() => setErrors((prev) => ({ ...prev, body: bodyError(body) }))}
         help={`El mensaje completo. ${NAME_PLACEHOLDER} se cambia por el nombre del alumno. Hasta ${MAX_BODY} caracteres.`}
       />
 
-      {loaded && (
-        <div aria-label="Vista previa" style={{ padding: "14px 16px", borderRadius: "var(--r-md)", background: "var(--surface-3)", border: "1px solid var(--border)" }}>
-          <p style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 0.4, margin: 0 }}>Así lo leen los papás</p>
-          <p style={{ fontSize: 15, fontWeight: 700, color: "var(--text)", margin: "6px 0 2px" }}>{renderGreeting(title, SAMPLE_NAME)}</p>
-          <p style={{ fontSize: 14.5, color: "var(--text)", margin: 0, lineHeight: 1.5 }}>{renderGreeting(body, SAMPLE_NAME)}</p>
-        </div>
-      )}
+      <div aria-label="Vista previa" style={{ padding: "14px 16px", borderRadius: "var(--r-md)", background: "var(--surface-3)", border: "1px solid var(--border)" }}>
+        <p style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 0.4, margin: 0 }}>Así lo leen los papás</p>
+        <p style={{ fontSize: 15, fontWeight: 700, color: "var(--text)", margin: "6px 0 2px" }}>{renderGreeting(title, SAMPLE_NAME)}</p>
+        <p style={{ fontSize: 14.5, color: "var(--text)", margin: 0, lineHeight: 1.5 }}>{renderGreeting(body, SAMPLE_NAME)}</p>
+      </div>
 
       {failure !== undefined && <p role="alert" style={{ color: "var(--bad-fg)", fontSize: 14, margin: 0 }}>{failure}</p>}
       {saved && <p role="status" style={{ color: "var(--ok-fg)", fontSize: 14.5, margin: 0 }}>Felicitación guardada. Se usa desde el próximo envío.</p>}
 
       <div style={{ display: "flex" }}>
         <div style={{ flex: 1 }} />
-        <Btn icon="check" type="submit" disabled={saving} style={{ opacity: saving ? 0.5 : 1, height: 48 }}>
+        <Btn icon="check" type="submit" style={{ opacity: saving ? 0.5 : 1, height: 48 }}>
           {saving ? "Guardando…" : "Guardar felicitación"}
         </Btn>
       </div>

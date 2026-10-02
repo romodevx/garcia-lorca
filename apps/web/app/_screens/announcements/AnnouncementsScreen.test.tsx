@@ -41,8 +41,8 @@ describe("AnnouncementsScreen", () => {
   // T11: the school writes its birthday greeting where it writes to families.
   it("offers the birthday greeting below the announcement", async () => {
     render(<AnnouncementsScreen onBack={() => {}} />);
-    expect(await screen.findByRole("heading", { name: "Felicitación de cumpleaños" })).toBeInTheDocument();
     expect(await screen.findByDisplayValue("¡Feliz cumpleaños, {nombre}!")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Felicitación de cumpleaños" })).toBeInTheDocument();
   });
 
   it("sends one message to a chosen group", async () => {

@@ -22,6 +22,7 @@ import {
 import { listCycles, listGradeLevels, listLabelledGroups, listLevels, type Cycle, type GradeLevel, type LabelledGroup, type Level } from "../../config/api";
 import { addNote, enrollIntoGrade, reissueCard, revokeCard, StudentsError, type Placement } from "../../students/api";
 import { VerifyCardDrawer } from "./VerifyCardDrawer";
+import { todayISO } from "../attendance/sheetModel";
 
 import { API_URL } from "../../api-url";
 import { csvName, downloadCsv, toCsv, type CsvColumn } from "../../_lib/csv";
@@ -259,11 +260,6 @@ export function placementFailureMessage(err: unknown): string {
   return "No se pudo inscribir al alumno en ese grado." + tail;
 }
 
-/** Today on the device's calendar, YYYY-MM-DD: nobody is born tomorrow. */
-function todayISO(): string {
-  return new Date().toLocaleDateString("en-CA");
-}
-
 // ── quick-add slide-over: create a student in one panel, minimal fields ──
 function QuickAdd({
   onClose,
@@ -329,6 +325,12 @@ function QuickAdd({
     // dice por qué es justo lo que esto reemplazó — y ahora se marcan todos los
     // faltantes a la vez, en sus propios campos.
     const missing = missingFields({ curp, firstName, lastName, guardianName, gradeLevelId });
+    // The calendar's max binds only the picker; a typed year can still land
+    // after today. Its field may be collapsed, so the section opens to show it.
+    if (birthDate !== "" && birthDate > todayISO()) {
+      missing.birthDate = "La fecha de nacimiento no puede ser posterior a hoy.";
+      setShowMore(true);
+    }
     setFieldErrors(missing);
     if (Object.keys(missing).length > 0) {
       // Marcarlos no basta: el último campo del cajón queda DEBAJO del pie
@@ -485,6 +487,8 @@ function QuickAdd({
                   value={birthDate}
                   onChange={setBirthDate}
                   max={todayISO()}
+                  error={fieldErrors.birthDate}
+                  onClearError={() => clearField("birthDate")}
                   help="Con ella el sistema felicita al alumno en la app de sus papás el día de su cumpleaños. Se puede capturar después en su ficha."
                 />
               </div>

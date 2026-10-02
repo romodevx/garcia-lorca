@@ -188,6 +188,7 @@ export function TextArea(props: BaseFieldProps & { rows?: number }): ReactElemen
             onChange(e.target.value);
             onClearError?.();
           }}
+          onBlur={props.onBlur}
           style={{
             ...inputStyle(error !== undefined),
             height: "auto",

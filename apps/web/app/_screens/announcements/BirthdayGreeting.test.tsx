@@ -80,4 +80,44 @@ describe("BirthdayGreeting", () => {
     expect(await screen.findByText(/como máximo 500 caracteres/i)).toBeInTheDocument();
     expect(comms.updateBirthdayTemplate).not.toHaveBeenCalled();
   });
+
+  // Review: nothing to edit until the current text has arrived, so a slow
+  // answer cannot overwrite what the director typed, and a failed one cannot
+  // let them replace a text they never saw.
+  it("shows no fields until the current text arrives, and none if it never does", async () => {
+    comms.getBirthdayTemplate.mockRejectedValueOnce(new Error("down"));
+    render(<BirthdayGreeting />);
+    expect(await screen.findByRole("alert")).toHaveTextContent(/no pudimos leer/i);
+    expect(screen.queryByLabelText("Mensaje de cumpleaños")).toBeNull();
+    expect(screen.queryByRole("button", { name: /guardar felicitación/i })).toBeNull();
+  });
+
+  // ui-forms-and-modals: validate on blur, not only on save.
+  it("says what is wrong when leaving an emptied field", async () => {
+    const user = userEvent.setup();
+    render(<BirthdayGreeting />);
+    const title = await screen.findByLabelText("Título de la felicitación");
+    await user.clear(title);
+    await user.tab();
+    expect(await screen.findByText(/escribe el título/i)).toBeInTheDocument();
+  });
+
+  // ui-forms-and-modals: the primary button is never disabled; a second press
+  // while saving is simply ignored.
+  it("never disables the save button, and saves once on a double press", async () => {
+    const user = userEvent.setup();
+    let release: () => void = () => {};
+    comms.updateBirthdayTemplate.mockImplementationOnce(
+      (_b, input) => new Promise((resolve) => { release = () => resolve({ ...input, isDefault: false, updatedAt: "" }); }),
+    );
+    render(<BirthdayGreeting />);
+    await screen.findByLabelText("Mensaje de cumpleaños");
+    const save = screen.getByRole("button", { name: /guardar felicitación/i });
+    await user.click(save);
+    expect(screen.getByRole("button", { name: /guardando/i })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: /guardando/i }));
+    release();
+    await screen.findByRole("status");
+    expect(comms.updateBirthdayTemplate).toHaveBeenCalledTimes(1);
+  });
 });

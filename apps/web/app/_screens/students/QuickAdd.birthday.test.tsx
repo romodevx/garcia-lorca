@@ -85,4 +85,20 @@ describe("quick add: birth date (T11)", () => {
     await waitFor(() => expect(students.createStudent).toHaveBeenCalled());
     expect(students.createStudent.mock.calls[0]?.[1]?.birthDate ?? "").toBe("");
   });
+
+  // Review: a typed date after today (the calendar's max only binds the
+  // picker) is refused on save, in its own field, with the section opened even
+  // if it had been collapsed again.
+  it("refuses a birth date after today, opening the section to show it", async () => {
+    const { drawer, user } = await openAndFill();
+    const more = within(drawer).getByRole("button", { name: /más datos/i });
+    await user.click(more);
+    fireEvent.change(within(drawer).getByLabelText(/Fecha de nacimiento/, CAMPO), { target: { value: "2999-01-01" } });
+    await user.click(more);
+    await user.click(within(drawer).getByRole("button", { name: "Crear alumno" }));
+
+    expect(await within(drawer).findByText(/no puede ser posterior a hoy/i)).toBeInTheDocument();
+    expect(more).toHaveAttribute("aria-expanded", "true");
+    expect(students.createStudent).not.toHaveBeenCalled();
+  });
 });
