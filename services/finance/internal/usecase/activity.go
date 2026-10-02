@@ -72,8 +72,7 @@ type EnrollResult struct {
 
 // today is the school's day as this service counts it (school-day-is-utc-day).
 func (s *ActivityService) today() time.Time {
-	t := s.now().UTC()
-	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
+	return dayOf(s.now())
 }
 
 // CreateActivity adds an activity. A name already used — ignoring case AND

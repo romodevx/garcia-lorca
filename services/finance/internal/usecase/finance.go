@@ -27,7 +27,11 @@ const (
 // cancelled charges are excluded and an over-collected charge contributes zero,
 // never a negative that would silently pay off another debt.
 type AccountStatement struct {
-	Charges           []ports.ChargeWithPaid
+	// Charges are priced as of AsOf: a scholarship's part included (T18).
+	Charges []ports.ChargeWithPaid
+	// raw are the same charges as stored, for the ledger (T7), which prices
+	// each one itself after the inscription ladder.
+	raw               []ports.ChargeWithPaid
 	Payments          []domain.Payment
 	TotalBalanceCents int64
 	// UnallocatedCents is money the family has handed over that no charge has
@@ -80,9 +84,11 @@ type FinanceService struct {
 	publisher ports.PaymentPublisher
 	// activities is T17's (WithActivities); nil bills no activity.
 	activities ports.ActivityRepository
-	tenantID   string
-	newID      func() string
-	now        func() time.Time
+	// scholarships is T18's (WithScholarships); nil prices no scholarship.
+	scholarships ports.ScholarshipRepository
+	tenantID     string
+	newID        func() string
+	now          func() time.Time
 }
 
 // NewFinanceService wires the use case. tenantID is the single-tenant scope for
@@ -276,7 +282,36 @@ func (s *FinanceService) ListCharges(ctx context.Context, studentID, cycleID str
 	if studentID == "" && cycleID == "" {
 		return nil, glerrors.New(glerrors.KindInvalid, "specify a student or a cycle")
 	}
-	return s.repo.ListCharges(ctx, studentID, cycleID)
+	charges, err := s.repo.ListCharges(ctx, studentID, cycleID)
+	if err != nil {
+		return nil, err
+	}
+	// Priced today, as the counter and the statement read them (T18).
+	ids, err := s.conceptIDs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	pricer, err := s.pricerFor(ctx, studentsOf(studentID, charges), ids)
+	if err != nil {
+		return nil, err
+	}
+	return pricer.priceAll(charges, s.now())
+}
+
+// studentsOf is the one pupil asked about, or every pupil in the list.
+func studentsOf(studentID string, charges []ports.ChargeWithPaid) []string {
+	if studentID != "" {
+		return []string{studentID}
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, c := range charges {
+		if id := c.Charge.StudentID(); !seen[id] {
+			seen[id] = true
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
 // ApplyDiscount grants a scholarship or courtesy on an issued charge. The
@@ -660,9 +695,23 @@ func (s *FinanceService) accountWithTerms(
 	if err != nil {
 		return AccountStatement{}, collectionTerms{}, err
 	}
+	// The terms first: the scholarship's part depends on what each charge IS.
+	terms, err := s.collectionTermsFor(ctx, studentID)
+	if err != nil {
+		return AccountStatement{}, collectionTerms{}, err
+	}
+	pricer, err := s.pricerFor(ctx, []string{studentID}, terms.ids())
+	if err != nil {
+		return AccountStatement{}, collectionTerms{}, err
+	}
+	terms.scholarships = pricer
+	priced, err := pricer.priceAll(charges, when)
+	if err != nil {
+		return AccountStatement{}, collectionTerms{}, err
+	}
 
 	var balance int64
-	for _, c := range charges {
+	for _, c := range priced {
 		if c.Charge.Status() == domain.StatusCancelled {
 			continue
 		}
@@ -674,18 +723,15 @@ func (s *FinanceService) accountWithTerms(
 	// counter uses — but against the charges ALREADY read above, and without the
 	// two idempotent writes EnsureConceptOfKind performs. A statement is a read,
 	// and this is the endpoint the parents' app hits most.
-	terms, err := s.collectionTermsFor(ctx, studentID)
-	if err != nil {
-		return AccountStatement{}, collectionTerms{}, err
-	}
 	// The statement needs the totals, not the counter's list: no lines.
 	expected, err := expectedFrom(charges, terms.plan, terms.calendar,
-		terms.lateFeeID, terms.tuitionID, terms.enrolmentID, when, when, false)
+		terms.lateFeeID, terms.tuitionID, terms.enrolmentID, when, when, false, pricer)
 	if err != nil {
 		return AccountStatement{}, collectionTerms{}, err
 	}
 	return AccountStatement{
-		Charges:            charges,
+		raw:                charges,
+		Charges:            priced,
 		Payments:           payments,
 		TotalBalanceCents:  balance,
 		UnallocatedCents:   credit,
@@ -702,6 +748,13 @@ type collectionTerms struct {
 	plan                              domain.TuitionPlan
 	calendar                          *schoolcal.Calendar
 	lateFeeID, tuitionID, enrolmentID string
+	// scholarships prices the pupil's charges (T18); nil prices none.
+	scholarships *scholarshipPricer
+}
+
+// ids are the terms' system concepts.
+func (t collectionTerms) ids() systemConceptIDs {
+	return systemConceptIDs{tuition: t.tuitionID, enrolment: t.enrolmentID, lateFee: t.lateFeeID}
 }
 
 // collectionTermsFor reads the terms a statement is worked out under.
@@ -738,7 +791,20 @@ func (s *FinanceService) collectionTermsFor(ctx context.Context, studentID strin
 // ListOverdue returns the charges past due that still owe money, as of the
 // injected clock. An empty cycleID spans every cycle.
 func (s *FinanceService) ListOverdue(ctx context.Context, cycleID string) ([]ports.ChargeWithPaid, error) {
-	return s.repo.ListOverdue(ctx, cycleID, s.now())
+	rows, err := s.repo.ListOverdue(ctx, cycleID, s.now())
+	if err != nil {
+		return nil, err
+	}
+	// A month a scholarship settled is not a debt (T18).
+	ids, err := s.conceptIDs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	pricer, err := s.pricerFor(ctx, studentsOf("", rows), ids)
+	if err != nil {
+		return nil, err
+	}
+	return stillOwed(pricer, rows, s.now())
 }
 
 // requireStudent asserts the student exists, mapping a NotFound to KindInvalid
