@@ -302,3 +302,29 @@ func TestCopyEvaluationPeriodsRefusesRemovingATargetPeriodWithGrades(t *testing.
 	assert.Equal(t, http.StatusOK, rec.Code, "the graded target period keeps its ordinal (and id)")
 	assert.Equal(t, []string{evG2}, svc.evalCopyTo)
 }
+
+// Review (T15): ids reach config in canonical (lower-case) form, so an
+// upper-case spelling can neither slip past the guard nor make config treat a
+// kept period as new (and drop the old one with its grades).
+func TestEvaluationPeriodWritesCanonicaliseIds(t *testing.T) {
+	upperKeep := `{"cycleId":"` + strings.ToUpper(evCycle) + `","periods":[{"id":"` + strings.ToUpper(evP1) + `","ordinal":1,"name":"T1","startsOn":"2026-09-01","endsOn":"2026-11-30"}]}`
+	svc := &fakeConfig{evalPeriods: twoGrades()}
+	guard := &fakePeriodGradesGuard{withGrades: map[string]bool{evP1: true}}
+	r := newPathRequest(http.MethodPut, "/api/v1/config/grade-levels/"+strings.ToUpper(evG1)+"/evaluation-periods", upperKeep, "id", strings.ToUpper(evG1))
+	rec := serve(handler.NewConfigHandler(svc).WithPeriodGradesGuard(guard).PutGradeEvaluationPeriods, r)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, evCycle, svc.evalCycle)
+	assert.Equal(t, evG1, svc.evalGrade)
+	require.Len(t, svc.evalIn, 1)
+	assert.Equal(t, evP1, svc.evalIn[0].ID, "the kept period reaches config by its canonical id")
+	assert.Equal(t, []string{evP2}, guard.asked)
+
+	all := twoGrades()
+	copySvc := &fakeConfig{evalPeriods: []client.EvaluationPeriod{all[0], all[2], all[3]}}
+	copyGuard := &fakePeriodGradesGuard{withGrades: map[string]bool{evT2: true}}
+	body := `{"cycleId":"` + evCycle + `","fromGradeLevelId":"` + strings.ToUpper(evG1) + `","toGradeLevelIds":["` + strings.ToUpper(evG2) + `"]}`
+	rec = serve(handler.NewConfigHandler(copySvc).WithPeriodGradesGuard(copyGuard).CopyEvaluationPeriods,
+		newPathRequest(http.MethodPost, "/api/v1/config/evaluation-periods/copy", body, "", ""))
+	assert.Equal(t, http.StatusConflict, rec.Code, "an upper-case target is still guarded")
+	assert.Nil(t, copySvc.evalCopyTo)
+}

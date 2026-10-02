@@ -9,6 +9,7 @@ package postgres_test
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
@@ -332,4 +333,32 @@ func TestGradesLevelPurgeBatchTouchesOnlyThatBatch(t *testing.T) {
 	n, err = repo.PurgeLevelBatch(ctx, doomed)
 	require.NoError(t, err)
 	assert.Zero(t, n, "purging twice is harmless")
+}
+
+// Review (T15) blocker: a level trashed BEFORE migration 0008 archived report
+// cards and lines without the new NOT NULL columns (periods, period_values);
+// restoring rebuilds rows from the JSONB, so the missing keys came back NULL
+// and the whole restore failed. Migration 0009 backfills the archive.
+func TestGradesLevelBatchArchivedBefore0008StillRestores(t *testing.T) {
+	seedGradesLevel(t)
+	ctx := context.Background()
+	repo := appRepo(t, tenantG)
+	const batch = "c0000000-0000-0000-0000-00000000f0a1"
+	_, err := repo.ArchiveLevel(ctx, batch, laScope)
+	require.NoError(t, err)
+	// Make the batch look archived before 0008.
+	require.NoError(t, superDB.Exec(`UPDATE grades_deletion_archive SET "row" = "row" - 'periods' WHERE batch_id = ? AND table_name = 'report_cards'`, batch).Error)
+	require.NoError(t, superDB.Exec(`UPDATE grades_deletion_archive SET "row" = "row" - 'period_values' WHERE batch_id = ? AND table_name = 'report_card_lines'`, batch).Error)
+
+	raw, err := os.ReadFile("../../../../../migrations/grades/0009_archive_period_columns.sql")
+	require.NoError(t, err)
+	require.NoError(t, superDB.Exec(string(raw)).Error, "the backfill is re-runnable")
+
+	rep, err := repo.RestoreLevelBatch(ctx, batch, nil)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), rep.Restored["reportCards"])
+	assert.Equal(t, int64(1), rep.Restored["reportCardLines"])
+	var periods string
+	require.NoError(t, superDB.Raw("SELECT periods::text FROM report_cards WHERE id = ?", laCard).Scan(&periods).Error)
+	assert.Equal(t, "[]", periods)
 }

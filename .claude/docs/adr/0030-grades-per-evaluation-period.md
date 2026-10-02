@@ -94,6 +94,9 @@ indexed by.
   removed from the contract in a later release (`buf breaking` is advisory).
 - The level trash archives `period_grades` too (appended LAST to grades'
   steps, so batches archived before T15 keep their step positions).
+  Migration `grades/0009` backfills the new NOT NULL keys (`periods`,
+  `period_values`) into report cards archived before 0008, so a level trashed
+  before T15 still restores.
 
 ### Config refuses removing a period that holds grades
 
@@ -115,3 +118,9 @@ check and write are two calls.
   period's grades under another term's lock; config's save keeps ids, and the
   guard above stops removals, but reordering stays possible — a known edge,
   rare (periods are set at the start of the cycle).
+- Known, accepted (review minors): closing term N holds only term N's lock
+  while it freezes periods 1…N, so an earlier term reopened at the same moment
+  may be frozen mid-correction (re-closing N fixes it); a period whose ordinal
+  has no level term is unguarded and on no report card — the school creates
+  the term. The gateway canonicalises (lower-cases) every id of an
+  evaluation-period write before the guard and config see it.

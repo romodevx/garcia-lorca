@@ -87,11 +87,11 @@ func (h *ConfigHandler) removedBySave(ctx context.Context, cycleID, gradeID stri
 	}
 	kept := make(map[string]bool, len(in))
 	for _, p := range in {
-		kept[strings.ToLower(p.ID)] = true
+		kept[p.ID] = true
 	}
 	var removed []client.EvaluationPeriod
 	for _, p := range current {
-		if !kept[strings.ToLower(p.ID)] {
+		if !kept[p.ID] {
 			removed = append(removed, p)
 		}
 	}
@@ -111,17 +111,17 @@ func (h *ConfigHandler) removedByCopy(ctx context.Context, cycleID, fromID strin
 	}
 	sourceOrdinals := map[int]bool{}
 	for _, p := range all {
-		if strings.EqualFold(p.GradeLevelID, fromID) {
+		if p.GradeLevelID == fromID {
 			sourceOrdinals[p.Ordinal] = true
 		}
 	}
 	targets := make(map[string]bool, len(toIDs))
 	for _, id := range toIDs {
-		targets[strings.ToLower(id)] = true
+		targets[id] = true
 	}
 	var removed []client.EvaluationPeriod
 	for _, p := range all {
-		if targets[strings.ToLower(p.GradeLevelID)] && !sourceOrdinals[p.Ordinal] {
+		if targets[p.GradeLevelID] && !sourceOrdinals[p.Ordinal] {
 			removed = append(removed, p)
 		}
 	}
@@ -212,6 +212,9 @@ func (h *ConfigHandler) PutGradeEvaluationPeriods(w http.ResponseWriter, r *http
 		writeCodedError(w, http.StatusBadRequest, codeTooManyPeriods, fmt.Sprintf("Un grado puede tener hasta %d periodos", maxPeriodsPerGrade))
 		return
 	}
+	// Canonical ids (lower case) from here on: config compares them exactly,
+	// and the period-grades guard must see what config will see.
+	gradeID, req.CycleID = strings.ToLower(gradeID), strings.ToLower(req.CycleID)
 	in := make([]client.EvaluationPeriodInput, 0, len(*req.Periods))
 	for _, p := range *req.Periods {
 		if (p.ID != "" && !uuidShape.MatchString(p.ID)) || p.Ordinal < 1 || p.Ordinal > maxPeriodsPerGrade ||
@@ -225,7 +228,7 @@ func (h *ConfigHandler) PutGradeEvaluationPeriods(w http.ResponseWriter, r *http
 			writeCodedError(w, http.StatusBadRequest, codePeriodDate, "Fecha inválida (usa AAAA-MM-DD)")
 			return
 		}
-		in = append(in, client.EvaluationPeriodInput{ID: p.ID, Ordinal: p.Ordinal, Name: p.Name, StartsOn: from, EndsOn: to})
+		in = append(in, client.EvaluationPeriodInput{ID: strings.ToLower(p.ID), Ordinal: p.Ordinal, Name: p.Name, StartsOn: from, EndsOn: to})
 	}
 	removed, err := h.removedBySave(r.Context(), req.CycleID, gradeID, in)
 	if err != nil {
@@ -257,6 +260,10 @@ func (h *ConfigHandler) CopyEvaluationPeriods(w http.ResponseWriter, r *http.Req
 		!uuidShape.MatchString(req.FromGradeLevelID) || !validCopyTargets(req.ToGradeLevelIDs) {
 		http.Error(w, "cycleId, fromGradeLevelId and 1–50 toGradeLevelIds are required", http.StatusBadRequest)
 		return
+	}
+	req.CycleID, req.FromGradeLevelID = strings.ToLower(req.CycleID), strings.ToLower(req.FromGradeLevelID)
+	for i, id := range req.ToGradeLevelIDs {
+		req.ToGradeLevelIDs[i] = strings.ToLower(id)
 	}
 	removed, err := h.removedByCopy(r.Context(), req.CycleID, req.FromGradeLevelID, req.ToGradeLevelIDs)
 	if err != nil {
