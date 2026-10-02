@@ -21,6 +21,14 @@ describe("notificationKind", () => {
     expect(notificationKind("absence").label).toBe("Asistencia");
   });
 
+  // T11: the morning greeting has its own look, not the generic school one.
+  it("draws the birthday greeting as a celebration", () => {
+    const meta = notificationKind("birthday");
+    expect(meta.label).toBe("Cumpleaños");
+    expect(meta.icon).toBe("sparkles");
+    expect(meta.tint).toBe("yellow");
+  });
+
   it("falls back to a neutral school kind for unknown types", () => {
     const meta = notificationKind("something-new");
     expect(meta.label).toBe("Escuela");
