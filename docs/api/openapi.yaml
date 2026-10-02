@@ -4501,8 +4501,9 @@ paths:
       tags: [activities]
       summary: Unenroll pupils
       description: >
-        Ends the enrolment of up to 200 pupils on `endsOn` (default today). No
-        period whose billing date comes after it is charged; charges already
+        Ends the enrolment of up to 200 pupils on `endsOn` (default today; the
+        first day they are no longer enrolled). No period whose billing date is
+        on or after it is charged; charges already
         issued, paid or not, are never touched. A pupil not enrolled is
         ignored. Requires `activities:write`.
       operationId: unenrollFromActivity

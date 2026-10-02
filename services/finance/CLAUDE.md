@@ -105,6 +105,20 @@ ledger operations run in a single transaction (Unit of Work).
   one arbiter. Naming only the keyless one made the second run of every month
   fail outright.
 
+## T17 — actividades (ADR 0031)
+- `Activity` (schedule descriptive, periodicity `monthly|weekly|per_cycle`,
+  first billing date + first due date repeated per period, fixed late fee,
+  active) + `PriceOption` (days per week 1–7, or 0/NULL = flat fee) +
+  `ActivityEnrollment` (option per pupil, `ends_on` = first day not enrolled).
+  Tables `activities`, `activity_price_options`, `activity_enrollments` (0025).
+- `RunBilling` issues `activity:<activity>:<student>:<period>` once the billing
+  date arrives (`starts_on` = billing date), concept kind `activity`; enrolling
+  issues what is already billable at once. Joined after a period's due date ⇒
+  starts next period; unenrolled ⇒ no period billed on/after `ends_on`.
+- The fixed late fee is written once by the run (`latefee:<charge>:actividad`);
+  the tuition's daily/monthly surcharge rules SKIP `activity:` refs
+  (`accruedSurcharges`, `deriveSurcharge`, `accrueLateFees`).
+
 ## Events
 - **Consumed: `StudentEnrolled`** (student-events → `finance-student-events`).
   It charges the pupil's inscription the moment they take a place in a group,
