@@ -8,6 +8,8 @@ export function chipTint(colors: ThemeColors, kind: ChipKind): { bg: string; fg:
       return { bg: colors.okBg, fg: colors.ok };
     case "warn":
       return { bg: colors.warnBg, fg: colors.warn };
+    case "late":
+      return { bg: colors.lateBg, fg: colors.late };
     case "bad":
       return { bg: colors.badBg, fg: colors.bad };
     case "purple":

@@ -102,7 +102,7 @@ export function todayHeadline(day: AttendanceDay | null): Headline {
     case "absent":
       return headline("Faltó", "x-circle", "bad");
     case "late":
-      return headline("Llegó tarde", "clock", "warn");
+      return headline("Llegó tarde", "clock", "late");
     case "excused":
       return headline(excusedText(day), "document", "warn");
     case "partial":
@@ -139,7 +139,7 @@ export interface Pill {
 const PILLS: Record<AttendanceStatus, Pill> = {
   present: { label: "Asistió", kind: "ok" },
   absent: { label: "Faltó", kind: "bad" },
-  late: { label: "Retardo", kind: "warn" },
+  late: { label: "Retardo", kind: "late" },
   excused: { label: "Justificada", kind: "purple" },
   partial: { label: "Parcial", kind: "warn" },
   not_taken: { label: "Sin lista", kind: "neutral" },
