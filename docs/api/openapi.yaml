@@ -99,19 +99,25 @@ tags:
 
   - name: grades
     description: >
-      Monthly grades (T6). The school captures one grade per student, subject
-      and MONTH, autosaved per cell. The group's LEVEL decides the scale
-      (`GradingScale`: range, decimals, passing mark) and whether it takes
-      numeric grades at all (Preescolar does not). Every rule is judged by the
-      grades service, so the director routes (`grades:read` / `grades:write`,
-      any assignment of the school) and the teacher routes under
-      `/api/v1/teaching/grades` (`teaching:read` / `teaching:write`, only the
-      assignments the caller teaches in the active cycle — any other id is 404)
-      refuse with the same sentences. A grade is a JSON NUMBER whose exact text
-      is judged with decimal arithmetic (9.95 on a one-decimal scale is
-      refused, never rounded). Subject and teacher are derived from the
-      assignment. Corrections are always allowed while the period is open
-      (periods and closing arrive in T7).
+      Period grades (T15). The school captures one WHOLE-NUMBER grade per
+      student, subject and EVALUATION PERIOD of the group's grade (the periods
+      config holds per cycle and grade, T14), autosaved per cell. Monthly
+      capture (T6) was retired: its routes are gone (404) and the
+      monthly_grades rows stay in the database, untouched and unread. The
+      group's LEVEL decides the scale (`GradingScale`: range and passing mark —
+      its `decimals` no longer apply to capture, which is integers only) and
+      whether it takes numeric grades at all (Preescolar does not). Every rule
+      is judged by the grades service, so the director routes (`grades:read` /
+      `grades:write`, any assignment of the school) and the teacher routes
+      under `/api/v1/teaching/grades` (`teaching:read` / `teaching:write`, only
+      the assignments the caller teaches in the active cycle — any other id is
+      404) refuse with the same sentences. A grade is a JSON NUMBER whose exact
+      text is judged (9.5 is refused with `GRADE_NOT_INTEGER`, never rounded).
+      Averages the system computes (report cards, the parents' app, the
+      sheet's counters) are the EXACT mean truncated to 2 decimals (8.666… →
+      8.66). "Today" is the school's local day (America/Mexico_City). A period
+      whose level term (same cycle, level and ordinal) is closed is read-only
+      for everyone (`PERIOD_LOCKED`).
 
   - name: family
     description: >
@@ -2736,7 +2742,7 @@ paths:
         '403': { $ref: '#/components/responses/PlainForbidden' }
         '404': { $ref: '#/components/responses/PlainNotFound' }
         '409':
-          description: Two periods of the grade share a day (`PERIOD_OVERLAP`), another save of the grade won a race (`PERIODS_CHANGED`), or the level is being deleted (`LEVEL_BEING_DELETED`).
+          description: Two periods of the grade share a day (`PERIOD_OVERLAP`), another save of the grade won a race (`PERIODS_CHANGED`), the save would remove a period that already holds grades (`PERIOD_HAS_GRADES` "«1.er trimestre» ya tiene calificaciones; no se puede quitar", T15), or the level is being deleted (`LEVEL_BEING_DELETED`).
           headers:
             X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
           content:
@@ -2798,7 +2804,7 @@ paths:
         '403': { $ref: '#/components/responses/PlainForbidden' }
         '404': { $ref: '#/components/responses/PlainNotFound' }
         '409':
-          description: A concurrent change made two periods of a target overlap (`PERIOD_OVERLAP`), or a target's level is being deleted (`LEVEL_BEING_DELETED`).
+          description: A concurrent change made two periods of a target overlap (`PERIOD_OVERLAP`), the copy would remove a target period that already holds grades (`PERIOD_HAS_GRADES`, T15), or a target's level is being deleted (`LEVEL_BEING_DELETED`).
           headers:
             X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
           content:
@@ -4432,181 +4438,183 @@ paths:
         '403': { $ref: '#/components/responses/PlainForbidden' }
         '404': { $ref: '#/components/responses/PlainNotFound' }
 
-  /api/v1/teaching/grades/sheet:
+  /api/v1/teaching/grades/period-sheet:
     get:
       tags: [grades]
-      summary: The monthly capture sheet of one of the caller's assignments (teacher)
+      summary: The period capture sheet of one of the caller's assignments (teacher)
       description: >
-        Same as `GET /api/v1/grades/sheet`, limited to an assignment the caller
-        teaches in the active cycle (any other id is 404, like an unknown one).
-        A pupil who joined the group by transfer shows the earlier months
-        read-only (`rowEditable: false`, `rowReadOnlyReason` "Ese mes
-        corresponde al grupo anterior del alumno"): they belong to the previous
-        group. Behind `module_grades` AND `module_config`. Requires
-        `teaching:read`.
-      operationId: getTeachingMonthlySheet
+        Same as `GET /api/v1/grades/period-sheet`, limited to an assignment
+        the caller teaches in the active cycle (any other id is 404, like an
+        unknown one). A pupil who joined the group by transfer shows the
+        periods that ended before the move read-only (`rowEditable: false`,
+        `rowReadOnlyReason` "Ese periodo corresponde al grupo anterior del
+        alumno"): they belong to the previous group. Behind `module_grades`
+        AND `module_config`. Requires `teaching:read`.
+      operationId: getTeachingPeriodSheet
       security: [{ sessionCookie: [] }]
       parameters:
         - $ref: '#/components/parameters/GradesAssignmentId'
-        - $ref: '#/components/parameters/GradesMonth'
+        - $ref: '#/components/parameters/GradesPeriodId'
       responses:
         '200':
           description: The sheet.
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/MonthlySheet' }
-        '400': { $ref: '#/components/responses/PlainBadRequest' }
+              schema: { $ref: '#/components/schemas/PeriodSheet' }
+        '400': { $ref: '#/components/responses/PeriodGradeRefused' }
         '401': { $ref: '#/components/responses/PlainUnauthorized' }
         '403': { $ref: '#/components/responses/PlainForbidden' }
         '404': { $ref: '#/components/responses/PlainNotFound' }
 
-  /api/v1/teaching/grades/monthly:
+  /api/v1/teaching/grades/period-grades:
     put:
       tags: [grades]
-      summary: Save one monthly grade (teacher autosave)
+      summary: Save one period grade (teacher autosave)
       description: >
-        Same as `PUT /api/v1/grades/monthly`, limited to an assignment the
-        caller teaches in the active cycle (404 otherwise). A month before the
-        pupil joined the group by transfer is 400 "Ese mes corresponde al grupo
-        anterior del alumno" (`X-Error-Code: MONTH_PREVIOUS_GROUP`). A month
-        after the current UTC month is 400 "Aún no llega ese mes"
-        (`X-Error-Code: MONTH_IN_FUTURE`). Behind
-        `module_grades` AND `module_config`. Requires `teaching:write`.
-      operationId: putTeachingMonthlyGrade
+        Same as `PUT /api/v1/grades/period-grades`, limited to an assignment
+        the caller teaches in the active cycle (404 otherwise). A period that
+        ended before the pupil joined the group by transfer is 400 "Ese
+        periodo corresponde al grupo anterior del alumno" (`X-Error-Code:
+        PERIOD_PREVIOUS_GROUP`). Behind `module_grades` AND `module_config`.
+        Requires `teaching:write`.
+      operationId: putTeachingPeriodGrade
       security: [{ sessionCookie: [] }]
       parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
-      requestBody: { $ref: '#/components/requestBodies/MonthlyGrade' }
+      requestBody: { $ref: '#/components/requestBodies/PeriodGrade' }
       responses:
-        '200': { $ref: '#/components/responses/MonthlyGradeSaved' }
-        '400': { $ref: '#/components/responses/MonthlyGradeRefused' }
+        '200': { $ref: '#/components/responses/PeriodGradeSaved' }
+        '400': { $ref: '#/components/responses/PeriodGradeRefused' }
         '401': { $ref: '#/components/responses/PlainUnauthorized' }
         '403': { $ref: '#/components/responses/PlainForbidden' }
         '404': { $ref: '#/components/responses/PlainNotFound' }
         '409': { $ref: '#/components/responses/PeriodRefused' }
     delete:
       tags: [grades]
-      summary: Empty one monthly grade (teacher)
+      summary: Empty one period grade (teacher)
       description: >
-        Same as `DELETE /api/v1/grades/monthly`, limited to an assignment the
-        caller teaches in the active cycle (404 otherwise); the same
-        previous-group and future-month rules as the PUT. Requires `teaching:write`.
-      operationId: deleteTeachingMonthlyGrade
+        Same as `DELETE /api/v1/grades/period-grades`, limited to an
+        assignment the caller teaches in the active cycle (404 otherwise); the
+        same rules as the PUT. Requires `teaching:write`.
+      operationId: deleteTeachingPeriodGrade
       security: [{ sessionCookie: [] }]
       parameters:
         - $ref: '#/components/parameters/CsrfToken'
         - $ref: '#/components/parameters/GradesAssignmentId'
-        - $ref: '#/components/parameters/GradesMonthRequired'
+        - $ref: '#/components/parameters/GradesPeriodIdRequired'
         - $ref: '#/components/parameters/GradesEnrollmentId'
       responses:
         '204': { description: The cell is empty (also when it already was). }
-        '400': { $ref: '#/components/responses/MonthlyGradeRefused' }
+        '400': { $ref: '#/components/responses/PeriodGradeRefused' }
         '401': { $ref: '#/components/responses/PlainUnauthorized' }
         '403': { $ref: '#/components/responses/PlainForbidden' }
         '404': { $ref: '#/components/responses/PlainNotFound' }
         '409': { $ref: '#/components/responses/PeriodRefused' }
 
-  /api/v1/grades/sheet:
+  /api/v1/grades/period-sheet:
     get:
       tags: [grades]
-      summary: The monthly capture sheet of an assignment (director)
+      summary: The period capture sheet of an assignment (director)
       description: >
         One row per active enrollment of the assignment's group, sorted by last
-        name (Spanish order), with the grade of the month (`value`/`updatedAt`
-        null when empty). `months` are the cycle's months (start to end,
-        inclusive); `month` omitted ⇒ the current UTC month clamped into them.
-        A level without numeric grading still answers, with
-        `editable: false` and `readOnlyReason`. A month after the current UTC
-        month is listed in `months` but read-only (`editable: false`,
-        `readOnlyReason` "Aún no llega ese mes"), for every caller (the
-        current month is the UTC month, fleet-wide). `months` always lists
-        every month of the cycle, mapped into a term or not (T7):
-        `unmappedMonths` are those no period of the level covers — still
-        capturable, marked "Sin periodo" (no report card prints them);
-        `closedMonths` are those of a CLOSED period (the months it was closed
-        with plus any mapped into it since) — read-only for every caller
-        (`readOnlyReason` "El periodo está cerrado"; writes are 409
-        `MONTH_LOCKED`). A month outside the cycle is
-        400 "Ese mes no pertenece al ciclo"; an unknown assignment 404. Behind
+        name (Spanish order), with the grade of the period (`value`/`updatedAt`
+        null when empty). `periods` are the evaluation periods of the group's
+        GRADE in the assignment's cycle (config, T14), by ordinal; `periodId`
+        omitted ⇒ the period containing the school's current local day
+        (`today`), else the latest one that already started, else the first.
+        A grade with no periods answers `periods: []`, `periodId: null`,
+        `editable: false` ("Este grado no tiene periodos de evaluación"). A
+        level without numeric grading answers `editable: false` with
+        `readOnlyReason`. A period that has not started is read-only for every
+        caller ("Aún no empieza ese periodo"; writes `PERIOD_NOT_STARTED`).
+        `closedPeriodIds` are the periods whose level term is CLOSED —
+        read-only for everyone ("El periodo está cerrado"; writes 409
+        `PERIOD_LOCKED`). A period of another grade is 400
+        `PERIOD_NOT_IN_GRADE`; an unknown assignment 404. Behind
         `module_grades`. Requires `grades:read`.
-      operationId: getMonthlySheet
+      operationId: getPeriodSheet
       security: [{ sessionCookie: [] }]
       parameters:
         - $ref: '#/components/parameters/GradesAssignmentId'
-        - $ref: '#/components/parameters/GradesMonth'
+        - $ref: '#/components/parameters/GradesPeriodId'
       responses:
         '200':
           description: The sheet.
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/MonthlySheet' }
-        '400': { $ref: '#/components/responses/PlainBadRequest' }
+              schema: { $ref: '#/components/schemas/PeriodSheet' }
+        '400': { $ref: '#/components/responses/PeriodGradeRefused' }
         '401': { $ref: '#/components/responses/PlainUnauthorized' }
         '403': { $ref: '#/components/responses/PlainForbidden' }
         '404': { $ref: '#/components/responses/PlainNotFound' }
 
-  /api/v1/grades/monthly:
+  /api/v1/grades/period-grades:
     put:
       tags: [grades]
-      summary: Save one monthly grade (director autosave)
+      summary: Save one period grade (director autosave)
       description: >
-        Records or corrects one student's grade for a subject and month (one
-        cell). `value` must be a JSON number — a string, null or a missing
-        value is 400; to empty a cell send DELETE. The caller is recorded as
-        who captured it. The director acts for the whole school: the months a
-        transferred pupil spent in a previous group stay writable, but a month
-        after the current UTC month is 400 "Aún no llega ese mes"
-        (`X-Error-Code: MONTH_IN_FUTURE`), as for a teacher. Every
-        refusal carries its code in `X-Error-Code`. Behind `module_grades`.
-        Requires `grades:write`.
-      operationId: putMonthlyGrade
+        Records or corrects one student's grade for a subject and evaluation
+        period (one cell). `value` must be a JSON number holding a WHOLE number
+        inside the level's range — 9.5 is 400 "Solo se permiten calificaciones
+        enteras" (`GRADE_NOT_INTEGER`); a string, null or a missing value is
+        400; to empty a cell send DELETE. The caller is recorded as who
+        captured it. The director acts for the whole school: the periods a
+        transferred pupil spent in a previous group stay writable, but a period
+        that has not started is 400 "Aún no empieza ese periodo"
+        (`PERIOD_NOT_STARTED`), as for a teacher. Every refusal carries its
+        code in `X-Error-Code`. Behind `module_grades`. Requires
+        `grades:write`.
+      operationId: putPeriodGrade
       security: [{ sessionCookie: [] }]
       parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
-      requestBody: { $ref: '#/components/requestBodies/MonthlyGrade' }
+      requestBody: { $ref: '#/components/requestBodies/PeriodGrade' }
       responses:
-        '200': { $ref: '#/components/responses/MonthlyGradeSaved' }
-        '400': { $ref: '#/components/responses/MonthlyGradeRefused' }
+        '200': { $ref: '#/components/responses/PeriodGradeSaved' }
+        '400': { $ref: '#/components/responses/PeriodGradeRefused' }
         '401': { $ref: '#/components/responses/PlainUnauthorized' }
         '403': { $ref: '#/components/responses/PlainForbidden' }
         '404': { $ref: '#/components/responses/PlainNotFound' }
         '409': { $ref: '#/components/responses/PeriodRefused' }
     delete:
       tags: [grades]
-      summary: Empty one monthly grade (director)
+      summary: Empty one period grade (director)
       description: >
         Removes one cell; emptying an empty cell succeeds. Same rules as the
-        PUT (month in the cycle and not in the future, enrollment in the group,
-        level with numeric grading). Behind `module_grades`. Requires `grades:write`.
-      operationId: deleteMonthlyGrade
+        PUT (period of the group's grade and already started, enrollment in
+        the group, level with numeric grading, term not closed). Behind
+        `module_grades`. Requires `grades:write`.
+      operationId: deletePeriodGrade
       security: [{ sessionCookie: [] }]
       parameters:
         - $ref: '#/components/parameters/CsrfToken'
         - $ref: '#/components/parameters/GradesAssignmentId'
-        - $ref: '#/components/parameters/GradesMonthRequired'
+        - $ref: '#/components/parameters/GradesPeriodIdRequired'
         - $ref: '#/components/parameters/GradesEnrollmentId'
       responses:
         '204': { description: The cell is empty (also when it already was). }
-        '400': { $ref: '#/components/responses/MonthlyGradeRefused' }
+        '400': { $ref: '#/components/responses/PeriodGradeRefused' }
         '401': { $ref: '#/components/responses/PlainUnauthorized' }
         '403': { $ref: '#/components/responses/PlainForbidden' }
         '404': { $ref: '#/components/responses/PlainNotFound' }
         '409': { $ref: '#/components/responses/PeriodRefused' }
 
-  /api/v1/family/students/{studentId}/grades/monthly:
+  /api/v1/family/students/{studentId}/grades/periods:
     get:
       tags: [family]
-      summary: A child's monthly grades
+      summary: A child's grades by evaluation period
       description: >
         The child's ACTIVE enrollment, visible as soon as a grade is captured:
-        one entry per subject of the group (sorted by name, Spanish order),
-        each a month → grade object (`{}` when nothing is captured yet). A
-        level without numeric grading answers `gradingEnabled: false`, still
-        listing any grade captured before it stopped (never hidden, shown as
-        stored) and omitting `scale`. Of two active enrollments (re-enrolled for
-        next year) the one whose cycle is active is shown — else the one whose
-        cycle contains today (UTC). A child that is not the caller's, or has no
-        active enrollment, is 404. Behind `module_grades` AND
-        `module_students`.
-      operationId: getFamilyMonthlyGrades
+        the evaluation periods of the child's grade in the cycle, and one entry
+        per subject of the group (sorted by name, Spanish order), each a
+        period id → grade object (`{}` when nothing is captured yet). Grades
+        are whole numbers, shown as captured; the app computes averages with
+        the shared rule (exact mean truncated to 2 decimals). A level without
+        numeric grading answers `gradingEnabled: false`, still listing any
+        grade captured before it stopped and omitting `scale`. Of two active
+        enrollments (re-enrolled for next year) the one whose cycle is active
+        is shown — else the one whose cycle contains today. A child that is not
+        the caller's, or has no active enrollment, is 404. Behind
+        `module_grades` AND `module_students`. Requires `family:read`.
+      operationId: getFamilyPeriodGrades
       security: [{ familyBearer: [] }]
       parameters:
         - name: studentId
@@ -4615,10 +4623,10 @@ paths:
           schema: { type: string, format: uuid }
       responses:
         '200':
-          description: The child's monthly grades.
+          description: The child's period grades.
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/FamilyMonthlyGrades' }
+              schema: { $ref: '#/components/schemas/FamilyPeriodGrades' }
         '401': { $ref: '#/components/responses/PlainUnauthorized' }
         '403': { $ref: '#/components/responses/PlainForbidden' }
         '404': { $ref: '#/components/responses/PlainNotFound' }
@@ -4629,15 +4637,17 @@ paths:
       summary: The periods (terms) of a cycle with their closure and progress
       description: >
         Every term of the cycle, of every level (a term is exactly one level of
-        one cycle), with its months, whether it is `open` or `closed`, how many
-        times it was closed (`version`, 0 = never; it is the version of its
-        latest report cards) and its capture progress: `expected` = active
-        enrollments of the level's groups × the subjects taught in each group ×
-        EVERY month of the term (reached or not) from the month each pupil
-        joined their group (enrolment, or the latest transfer into it);
-        `captured` = how many of those cells have a grade. A level without
-        numeric grades expects 0. Withdrawn pupils are not expected and get no
-        report card.
+        one cycle — the unit that closes and issues report cards), whether it
+        is `open` or `closed`, how many times it was closed (`version`, 0 =
+        never; it is the version of its latest report cards) and its capture
+        progress (T15): the term stands for the evaluation period with the
+        SAME ordinal in each grade of the level (ADR 0030); `startsOn`/`endsOn`
+        span those periods. `expected` = active enrollments of the level's
+        groups × the subjects taught in each group, one grade each for its
+        grade's period (a pupil who joined the group after that period ended
+        is not expected); `captured` = how many of those cells have a grade. A
+        level without numeric grades expects 0. Withdrawn pupils are not
+        expected and get no report card.
         Behind `module_grades`. Requires `grades:read`.
       operationId: listGradePeriods
       security: [{ sessionCookie: [] }]
@@ -4670,10 +4680,14 @@ paths:
       description: >
         The period's expected and captured grades (see the periods list) and
         what is missing, grouped by group and subject with the teacher who
-        owes it, sorted by group then subject (Spanish order).
-        `unfinishedMonths` are the term's months after the current UTC month:
-        they are still expected — closing now reports them missing and needs
-        `force` — so the screen warns "Aún no terminan sus meses". Behind
+        owes it, sorted by group then subject (Spanish order). `unfinished` is
+        true while a grade's period of this term has not ended (the school's
+        local day): its grades are still expected — closing now reports them
+        missing and needs `force` — so the screen warns "Aún no termina el
+        periodo". `groupsWithoutPeriod` names the groups (with active pupils)
+        whose grade has no evaluation period of the term's ordinal: the term
+        cannot close until config gives them one (409
+        `PERIOD_NOT_CONFIGURED`). Behind
         `module_grades`. Requires `grades:read`.
       operationId: getGradePeriodProgress
       security: [{ sessionCookie: [] }]
@@ -4695,15 +4709,19 @@ paths:
       description: >
         Closes the period and, in the SAME transaction, freezes a report card
         for every ACTIVE enrollment of the level's groups (version = the
-        period's close count; withdrawn pupils get none) and snapshots the
-        term's months. From then on nobody — teacher or director — may write a
-        grade of those months, nor of any month mapped into the term later (409
-        `MONTH_LOCKED` "El periodo está cerrado"), nor change the term's months
-        (409 `TERM_CLOSED`), until it is reopened. Every month of the term
-        counts, so closing before its last month ends needs `force`. A period with missing captures is 409
-        `MISSING_GRADES` "Faltan N calificaciones por capturar" unless
-        `force: true`; a period without months is 409 `TERM_WITHOUT_MONTHS`; a
-        closed one 409 `ALREADY_CLOSED`; a level without numeric grades 409
+        period's close count; withdrawn pupils get none). Each card's columns
+        are the evaluation periods of the pupil's grade from the first up to
+        the one with the term's ordinal, with the grades exactly as captured;
+        each subject's `average` is the exact mean of its columns and the
+        general average the exact mean of those averages, both truncated to 2
+        decimals (ADR 0030). From then on nobody — teacher or director — may
+        write a grade of those periods (409 `PERIOD_LOCKED` "El periodo está
+        cerrado") until it is reopened. A period whose grades are not all
+        captured (an unfinished one included) is 409 `MISSING_GRADES` "Faltan
+        N calificaciones por capturar" unless `force: true`; a level whose
+        grades (with active pupils) lack an evaluation period of the term's
+        ordinal is 409 `PERIOD_NOT_CONFIGURED`; a closed one 409
+        `ALREADY_CLOSED`; a level without numeric grades 409
         `LEVEL_NOT_GRADED`. Closing again after a reopen issues version 2, which
         supersedes EVERY version-1 card of the term — a pupil withdrawn in
         between included (families see the latest) — and notifies them
@@ -4836,8 +4854,8 @@ paths:
       description: >
         The school's internal format (not SEP): the school's header, the title
         "Boleta de calificaciones — <periodo>", the pupil, matrícula, cycle,
-        level and group, a subject × month table with each subject's
-        "Promedio", the general average, the passing mark, "Versión N —
+        level and group, a subject × period table (a card issued before T15:
+        subject × month) with each subject's "Promedio", the general average, the passing mark, "Versión N —
         reemplaza a la anterior" when N > 1, and the issue date. Downloaded as
         `boleta-<matrícula>-<periodo>-v<N>.pdf`, `no-store`. Behind
         `module_grades`. Requires `grades:read`.
@@ -4939,13 +4957,16 @@ components:
       description: >
         The refusal's machine code, so a screen can react (mark the cell, lock
         the row) without parsing the sentence. Exposed to the web via CORS.
-        Monthly grades: GRADE_OUT_OF_RANGE, GRADE_DECIMALS, GRADE_NOT_NUMBER,
-        MONTH_OUTSIDE_CYCLE, LEVEL_NOT_GRADED, ENROLLMENT_NOT_IN_GROUP,
-        MONTH_PREVIOUS_GROUP, MONTH_IN_FUTURE, LEVEL_SCALE_NOT_CONFIGURED, and
-        MONTH_LOCKED (409, a month of a closed period, T7 — also on the legacy
-        per-term capture POST /api/v1/grades). Level scale change:
-        SCALE_TIGHTENING. Period closing (409): MISSING_GRADES,
-        TERM_WITHOUT_MONTHS, ALREADY_CLOSED, ALREADY_OPEN, LEVEL_NOT_GRADED.
+        Period grades (T15): GRADE_NOT_INTEGER, GRADE_OUT_OF_RANGE,
+        GRADE_NOT_NUMBER, PERIOD_NOT_IN_GRADE, PERIOD_NOT_STARTED,
+        PERIOD_PREVIOUS_GROUP, LEVEL_NOT_GRADED, ENROLLMENT_NOT_IN_GROUP,
+        LEVEL_SCALE_NOT_CONFIGURED, and PERIOD_LOCKED (409, a period whose
+        level term is closed). MONTH_LOCKED (409) stays on the legacy per-term
+        capture POST /api/v1/grades. Level scale change: SCALE_TIGHTENING.
+        Period closing (409): MISSING_GRADES, PERIOD_NOT_CONFIGURED,
+        ALREADY_CLOSED, ALREADY_OPEN, LEVEL_NOT_GRADED. Evaluation periods
+        (config): PERIOD_HAS_GRADES (409, a save or copy would remove a period
+        that already holds grades).
         Term months (T7): MONTH_INVALID (400), MONTH_OUTSIDE_CYCLE (400),
         TERM_TOO_LONG (400, more than six months), MONTH_IN_OTHER_TERM (409),
         TERM_CLOSED (409, the term is a closed period). Level deletion (ADR
@@ -4967,27 +4988,28 @@ components:
       description: A scan names a pupil from a credential; nothing caches it.
       schema: { type: string, const: no-store }
   requestBodies:
-    MonthlyGrade:
+    PeriodGrade:
       required: true
       content:
         application/json:
           schema:
             type: object
-            required: [assignmentId, month, enrollmentId, value]
+            required: [assignmentId, periodId, enrollmentId, value]
             properties:
               assignmentId: { type: string, format: uuid }
-              month: { type: string, pattern: '^[0-9]{4}-(0[1-9]|1[0-2])$', example: '2026-09' }
+              periodId: { type: string, format: uuid, description: An evaluation period of the group's grade in the assignment's cycle. }
               enrollmentId: { type: string, format: uuid }
               value:
-                type: number
+                type: integer
                 description: >
-                  A JSON number (never a string). Judged exactly on the level's
-                  scale: range first, then decimals.
+                  A JSON number (never a string) holding a WHOLE number inside
+                  the level's range. Its exact text is judged: 9.5 is refused
+                  (GRADE_NOT_INTEGER), never rounded.
           example:
             assignmentId: 9c3d1e2f-0000-4000-8000-000000000003
-            month: '2026-09'
+            periodId: 0e000000-0000-4000-8000-000000000001
             enrollmentId: 3f2504e0-4f89-41d3-9a0c-0305e82c3301
-            value: 9.5
+            value: 9
     AttendanceScan:
       required: true
       content:
@@ -5011,17 +5033,17 @@ components:
       required: true
       description: A teaching assignment (group + subject). Malformed or unknown ⇒ 404.
       schema: { type: string, format: uuid }
-    GradesMonth:
-      name: month
+    GradesPeriodId:
+      name: periodId
       in: query
       required: false
-      description: '`YYYY-MM`; omitted ⇒ the current UTC month clamped into the cycle.'
-      schema: { type: string, pattern: '^[0-9]{4}-(0[1-9]|1[0-2])$', example: '2026-09' }
-    GradesMonthRequired:
-      name: month
+      description: An evaluation period of the group's grade; omitted ⇒ the period of the school's current local day.
+      schema: { type: string, format: uuid }
+    GradesPeriodIdRequired:
+      name: periodId
       in: query
       required: true
-      schema: { type: string, pattern: '^[0-9]{4}-(0[1-9]|1[0-2])$', example: '2026-09' }
+      schema: { type: string, format: uuid }
     GradesEnrollmentId:
       name: enrollmentId
       in: query
@@ -5100,8 +5122,8 @@ components:
       description: >
         The period's state refuses the request; the sentence is shown as is and
         the machine code rides in `X-Error-Code` (MISSING_GRADES,
-        TERM_WITHOUT_MONTHS, ALREADY_CLOSED, ALREADY_OPEN, LEVEL_NOT_GRADED;
-        MONTH_LOCKED on a grade write; TERM_CLOSED on a term-months change).
+        PERIOD_NOT_CONFIGURED, ALREADY_CLOSED, ALREADY_OPEN, LEVEL_NOT_GRADED;
+        PERIOD_LOCKED on a grade write; TERM_CLOSED on a term-months change).
       headers:
         X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
       content:
@@ -5109,7 +5131,7 @@ components:
           schema: { type: string }
           examples:
             missing: { value: Faltan 3 calificaciones por capturar }
-            noMonths: { value: El periodo no tiene meses asignados }
+            notConfigured: { value: 'El grupo 2° PRIMARIA · A no tiene el periodo 2 configurado' }
             closed: { value: El periodo ya está cerrado }
             open: { value: El periodo ya está abierto }
             locked: { value: El periodo está cerrado }
@@ -5140,20 +5162,20 @@ components:
       content:
         application/pdf:
           schema: { type: string, format: binary }
-    MonthlyGradeSaved:
+    PeriodGradeSaved:
       description: The stored cell.
       content:
         application/json:
           schema:
             type: object
-            required: [enrollmentId, month, value, updatedAt]
+            required: [enrollmentId, periodId, value, updatedAt]
             properties:
               enrollmentId: { type: string, format: uuid }
-              month: { type: string, example: '2026-09' }
-              value: { type: number, example: 9.5 }
+              periodId: { type: string, format: uuid }
+              value: { type: integer, example: 9 }
               updatedAt: { type: [string, 'null'], format: date-time }
-          example: { enrollmentId: 3f2504e0-4f89-41d3-9a0c-0305e82c3301, month: '2026-09', value: 9.5, updatedAt: '2026-09-03T15:04:05Z' }
-    MonthlyGradeRefused:
+          example: { enrollmentId: 3f2504e0-4f89-41d3-9a0c-0305e82c3301, periodId: 0e000000-0000-4000-8000-000000000001, value: 9, updatedAt: '2026-10-03T15:04:05Z' }
+    PeriodGradeRefused:
       description: >
         A sentence for the teacher, shown as is, with its machine code in
         `X-Error-Code`.
@@ -5163,14 +5185,14 @@ components:
         text/plain:
           schema: { type: string }
           examples:
+            integer: { value: Solo se permiten calificaciones enteras }
             range: { value: La calificación debe estar entre 5 y 10 }
-            decimals: { value: Solo se permite 1 decimal }
-            month: { value: Ese mes no pertenece al ciclo }
-            future: { value: Aún no llega ese mes }
+            notInGrade: { value: Ese periodo no pertenece al grado del grupo }
+            notStarted: { value: Aún no empieza ese periodo }
             level: { value: Este nivel no lleva calificación numérica }
             notNumber: { value: La calificación debe ser un número }
             enrollment: { value: El alumno no está inscrito en este grupo }
-            previousGroup: { value: Ese mes corresponde al grupo anterior del alumno }
+            previousGroup: { value: Ese periodo corresponde al grupo anterior del alumno }
             scaleNotConfigured: { value: La escala de calificación del nivel no está configurada }
     AttendanceScanResolved:
       description: >
@@ -5318,16 +5340,21 @@ components:
   schemas:
     GradePeriod:
       type: object
-      required: [termId, termName, ordinal, levelId, levelName, months, status, version, progress]
+      required: [termId, termName, ordinal, levelId, levelName, startsOn, endsOn, status, version, progress]
       properties:
         termId: { type: string, format: uuid }
         termName: { type: string, example: 1.er trimestre }
         ordinal: { type: integer, example: 1 }
         levelId: { type: string, format: uuid }
         levelName: { type: string, example: Primaria }
-        months:
-          type: array
-          items: { type: string, example: '2026-09' }
+        startsOn:
+          type: [string, 'null']
+          format: date
+          description: The earliest start of the term's evaluation periods across the level's grades; null when no grade has one.
+        endsOn:
+          type: [string, 'null']
+          format: date
+          description: The latest end of those periods; null when no grade has one.
         status: { type: string, enum: [open, closed] }
         closedAt:
           type: string
@@ -5353,7 +5380,8 @@ components:
         ordinal: 1
         levelId: 1a000000-0000-4000-8000-000000000001
         levelName: Primaria
-        months: ['2026-09', '2026-10', '2026-11']
+        startsOn: '2026-08-24'
+        endsOn: '2026-11-30'
         status: closed
         closedAt: '2026-12-01T16:00:00Z'
         closedByName: Directora Ruiz
@@ -5361,18 +5389,26 @@ components:
         progress: { captured: 288, expected: 288 }
     GradePeriodProgress:
       type: object
-      required: [termId, months, unfinishedMonths, expected, captured, missing]
+      required: [termId, unfinished, endsOn, groupsWithoutPeriod, expected, captured, missing]
       properties:
         termId: { type: string, format: uuid }
-        months:
-          type: array
-          items: { type: string, example: '2026-09' }
-        unfinishedMonths:
+        unfinished:
+          type: boolean
+          description: >
+            True while a grade's period of this term has not ended (the
+            school's local day): its grades are still expected ("Aún no termina
+            el periodo").
+        endsOn:
+          type: [string, 'null']
+          format: date
+          description: The latest end of the term's periods across the level's grades; null when none.
+        groupsWithoutPeriod:
           type: array
           description: >
-            The term's months after the current UTC month: still expected, not
-            taught yet ("Aún no terminan sus meses"). [] when none.
-          items: { type: string, example: '2026-11' }
+            Groups with active pupils whose grade has no evaluation period of
+            the term's ordinal; closing is refused (PERIOD_NOT_CONFIGURED)
+            while any is listed. [] when none.
+          items: { type: string, example: 2° PRIMARIA · A }
         expected: { type: integer, example: 288 }
         captured: { type: integer, example: 270 }
         missing:
@@ -5389,8 +5425,9 @@ components:
               missingCount: { type: integer, minimum: 1, example: 18 }
       example:
         termId: 7a000000-0000-4000-8000-000000000001
-        months: ['2026-09', '2026-10', '2026-11']
-        unfinishedMonths: ['2026-11']
+        unfinished: true
+        endsOn: '2026-11-30'
+        groupsWithoutPeriod: []
         expected: 288
         captured: 270
         missing:
@@ -5410,8 +5447,8 @@ components:
         issuedAt: { type: [string, 'null'], format: date-time }
         generalAverage:
           type: [number, 'null']
-          description: One decimal, half-up; null when no subject has a grade.
-          example: 8.5
+          description: The exact mean truncated to 2 decimals (T15; a card issued before keeps its one decimal); null when no subject has a grade.
+          example: 8.66
         hasGrades:
           type: boolean
           description: False when no subject has a grade in the term; the card is still issued and consumers show "Sin calificaciones capturadas en este periodo" instead of a table.
@@ -5440,13 +5477,17 @@ components:
       type: object
       description: >
         The frozen snapshot issued when the period closed: names as they read
-        then, the term's months, each subject's grade per month (exact, as
-        captured) and its trimester grade — the arithmetic mean of its captured
-        grades, one decimal, rounded half-up with exact arithmetic — and the
-        general average (the mean of the subjects that have a grade, one
-        decimal, half-up). A month without a grade is absent from `months`;
-        `average` is null for a subject without grades.
-      required: [id, termId, termName, termOrdinal, cycleName, levelName, groupId, groupLabel, studentId, studentName, enrollmentNumber, version, status, issuedAt, months, scale, generalAverage, hasGrades, lines, school]
+        then, the card's columns, each subject's grade per column (exact, as
+        captured) and its `average` — the exact mean of its grades, truncated
+        to 2 decimals — and the general average (the exact mean of the
+        subjects' exact averages, truncated to 2 decimals). Since T15 the
+        columns are `periods`: the evaluation periods of the pupil's grade from
+        the first up to the one closed, and each line's grades are `periods`
+        (period id → grade). A card issued before T15 keeps its month columns
+        (`months`, line `months`; `periods` is []) and its one-decimal,
+        half-up averages, exactly as issued. A column without a grade is
+        absent from the line; `average` is null for a subject without grades.
+      required: [id, termId, termName, termOrdinal, cycleName, levelName, groupId, groupLabel, studentId, studentName, enrollmentNumber, version, status, issuedAt, periods, months, scale, generalAverage, hasGrades, lines, school]
       properties:
         id: { type: string, format: uuid }
         termId: { type: string, format: uuid }
@@ -5462,11 +5503,22 @@ components:
         version: { type: integer, minimum: 1 }
         status: { type: string, enum: [published, superseded] }
         issuedAt: { type: [string, 'null'], format: date-time }
+        periods:
+          type: array
+          description: The card's columns (T15), by ordinal; [] on a card issued before T15.
+          items:
+            type: object
+            required: [id, ordinal, name]
+            properties:
+              id: { type: string, format: uuid }
+              ordinal: { type: integer, minimum: 1, example: 1 }
+              name: { type: string, example: 1.er trimestre }
         months:
           type: array
+          description: The columns of a card issued before T15 (monthly capture); [] since T15.
           items: { type: string, example: '2026-09' }
         scale: { $ref: '#/components/schemas/GradingScale' }
-        generalAverage: { type: [number, 'null'], example: 8.4 }
+        generalAverage: { type: [number, 'null'], example: 8.66 }
         hasGrades:
           type: boolean
           description: False when no subject has a grade in the term; the card is still issued and consumers show "Sin calificaciones capturadas en este periodo" instead of a table.
@@ -5475,16 +5527,21 @@ components:
           type: array
           items:
             type: object
-            required: [subjectId, subjectName, position, months, average]
+            required: [subjectId, subjectName, position, periods, months, average]
             properties:
               subjectId: { type: string, format: uuid }
               subjectName: { type: string, example: Matemáticas }
               position: { type: integer, minimum: 1 }
+              periods:
+                type: object
+                description: Period id → the captured grade (T15); {} on a card issued before T15.
+                additionalProperties: { type: number }
+                example: { 0e000000-0000-4000-8000-000000000001: 9, 0e000000-0000-4000-8000-000000000002: 8 }
               months:
                 type: object
-                description: '"YYYY-MM" → the captured grade.'
+                description: '"YYYY-MM" → the captured grade, on a card issued before T15; {} since T15.'
                 additionalProperties: { type: number }
-                example: { '2026-09': 8.4, '2026-10': 8.5 }
+                example: {}
               average: { type: [number, 'null'], example: 8.5 }
         school:
           type: object
@@ -5512,13 +5569,16 @@ components:
         version: 1
         status: published
         issuedAt: '2026-12-01T16:00:00Z'
-        months: ['2026-09', '2026-10', '2026-11']
+        periods:
+          - { id: 0e000000-0000-4000-8000-000000000001, ordinal: 1, name: 1.er trimestre }
+          - { id: 0e000000-0000-4000-8000-000000000002, ordinal: 2, name: 2.º trimestre }
+        months: []
         scale: { min: 5, max: 10, decimals: 1, passing: 6 }
-        generalAverage: 8.4
+        generalAverage: 8.75
         hasGrades: true
         lines:
-          - { subjectId: 5a000000-0000-4000-8000-000000000002, subjectName: Español, position: 1, months: { '2026-09': 8, '2026-11': 8.5 }, average: 8.3 }
-          - { subjectId: 5a000000-0000-4000-8000-000000000001, subjectName: Matemáticas, position: 2, months: { '2026-09': 8.4, '2026-10': 8.5 }, average: 8.5 }
+          - { subjectId: 5a000000-0000-4000-8000-000000000002, subjectName: Español, position: 1, periods: { 0e000000-0000-4000-8000-000000000001: 9, 0e000000-0000-4000-8000-000000000002: 8 }, months: {}, average: 8.5 }
+          - { subjectId: 5a000000-0000-4000-8000-000000000001, subjectName: Matemáticas, position: 2, periods: { 0e000000-0000-4000-8000-000000000001: 9, 0e000000-0000-4000-8000-000000000002: 9 }, months: {}, average: 9 }
         school: { name: COLEGIO GARCÍA LORCA, legalName: '', rfc: '', cct: 09PPR0001A, address: '', phone: '', legend: '' }
     ExpoPushToken:
       type: string
@@ -6728,47 +6788,55 @@ components:
         name: { type: string, minLength: 1, maxLength: 60, example: 1.er trimestre }
         startsOn: { type: string, format: date, example: '2026-08-24' }
         endsOn: { type: string, format: date, example: '2026-11-30' }
-    MonthlySheet:
+    EvaluationPeriodRef:
       type: object
-      required: [assignmentId, month, months, scale, gradingEnabled, currentMonth, editable, closedMonths, unmappedMonths, rows]
+      description: An evaluation period of a grade (config, T14). Both dates inclusive.
+      required: [id, ordinal, name, startsOn, endsOn]
+      properties:
+        id: { type: string, format: uuid }
+        ordinal: { type: integer, minimum: 1, maximum: 12, example: 1 }
+        name: { type: string, example: 1.er trimestre }
+        startsOn: { type: string, format: date, example: '2026-08-24' }
+        endsOn: { type: string, format: date, example: '2026-11-30' }
+    PeriodSheet:
+      type: object
+      required: [assignmentId, periodId, periods, currentPeriodId, today, scale, gradingEnabled, editable, closedPeriodIds, rows]
       properties:
         assignmentId: { type: string, format: uuid }
-        month: { type: string, example: '2026-09' }
-        months:
+        periodId:
+          type: [string, 'null']
+          format: uuid
+          description: The period shown; null when the grade has no periods.
+        periods:
+          type: array
+          description: The evaluation periods of the group's grade in the assignment's cycle, by ordinal.
+          items: { $ref: '#/components/schemas/EvaluationPeriodRef' }
+        currentPeriodId:
+          type: [string, 'null']
+          format: uuid
+          description: The period containing `today`; null when today falls in none.
+        today:
+          type: string
+          format: date
+          description: >
+            The school's current local day (America/Mexico_City). A period that
+            starts after it is not gradable yet (read-only sheet, writes
+            refused with `PERIOD_NOT_STARTED`), so the screen marks it up front.
+          example: '2026-10-01'
+        closedPeriodIds:
           type: array
           description: >
-            The cycle's months, start to end inclusive, mapped into a term or
-            not (T7).
-          items: { type: string, example: '2026-08' }
-        closedMonths:
-          type: array
-          description: >
-            The months of `months` that belong to a CLOSED period of the level
-            (T7): read-only for everyone (writes answer 409 `MONTH_LOCKED`)
-            until the director reopens it. [] when none.
-          items: { type: string, example: '2026-09' }
-        unmappedMonths:
-          type: array
-          description: >
-            The months of `months` no period of the level covers (T7): still
-            capturable, but no report card prints them — the screen marks them
-            "Sin periodo". [] when none.
-          items: { type: string, example: '2026-08' }
+            The periods of `periods` whose level term is CLOSED: read-only for
+            everyone (writes answer 409 `PERIOD_LOCKED`) until the director
+            reopens it. [] when none.
+          items: { type: string, format: uuid }
         scale: { $ref: '#/components/schemas/GradingScale' }
         gradingEnabled: { type: boolean }
-        currentMonth:
-          type: string
-          pattern: '^\d{4}-\d{2}$'
-          description: >
-            The server's current UTC month. Every month in `months` after it is
-            not gradable yet (read-only sheet, writes refused with
-            `MONTH_IN_FUTURE`), so the screen can mark those months up front.
-          example: '2026-09'
         editable: { type: boolean }
         readOnlyReason:
           type: string
           description: Why the sheet cannot be edited; absent when it can.
-          example: Este nivel no lleva calificación numérica
+          example: Aún no empieza ese periodo
         rows:
           type: array
           items:
@@ -6778,49 +6846,51 @@ components:
               enrollmentId: { type: string, format: uuid }
               studentId: { type: string, format: uuid }
               name: { type: string, example: Ana Ávila }
-              value: { type: [number, 'null'], example: 9.5 }
+              value: { type: [integer, 'null'], example: 9 }
               updatedAt: { type: [string, 'null'], format: date-time }
               rowEditable:
                 type: boolean
                 description: >
                   Whether the caller may write THIS row's cell. False when the
                   whole sheet is read-only, or — on the teacher's routes — when
-                  the month is before the one the pupil joined this group by
+                  the period ended before the pupil joined this group by
                   transfer (it belongs to the previous group; the director may
                   edit it).
               rowReadOnlyReason:
                 type: string
                 description: Why the row cannot be edited; absent when it can.
-                example: Ese mes corresponde al grupo anterior del alumno
+                example: Ese periodo corresponde al grupo anterior del alumno
       example:
         assignmentId: 9c3d1e2f-0000-4000-8000-000000000003
-        month: '2026-09'
-        months: ['2026-08', '2026-09', '2026-10']
+        periodId: 0e000000-0000-4000-8000-000000000001
+        periods:
+          - { id: 0e000000-0000-4000-8000-000000000001, ordinal: 1, name: 1.er trimestre, startsOn: '2026-08-24', endsOn: '2026-11-30' }
+          - { id: 0e000000-0000-4000-8000-000000000002, ordinal: 2, name: 2.º trimestre, startsOn: '2026-12-07', endsOn: '2027-03-26' }
+        currentPeriodId: 0e000000-0000-4000-8000-000000000001
+        today: '2026-10-01'
+        closedPeriodIds: []
         scale: { min: 5, max: 10, decimals: 1, passing: 6 }
         gradingEnabled: true
-        currentMonth: '2026-09'
         editable: true
-        closedMonths: []
-        unmappedMonths: ['2026-08']
         rows:
-          - { enrollmentId: 3f2504e0-4f89-41d3-9a0c-0305e82c3301, studentId: 6e1d2c3b-0000-4000-8000-000000000042, name: Ana Ávila, value: 9.5, updatedAt: '2026-09-03T15:04:05Z', rowEditable: true }
-          - { enrollmentId: 3f2504e0-4f89-41d3-9a0c-0305e82c3302, studentId: 6e1d2c3b-0000-4000-8000-000000000043, name: Nico Núñez, value: null, updatedAt: null, rowEditable: false, rowReadOnlyReason: Ese mes corresponde al grupo anterior del alumno }
-    FamilyMonthlyGrades:
+          - { enrollmentId: 3f2504e0-4f89-41d3-9a0c-0305e82c3301, studentId: 6e1d2c3b-0000-4000-8000-000000000042, name: Ana Ávila, value: 9, updatedAt: '2026-10-01T15:04:05Z', rowEditable: true }
+          - { enrollmentId: 3f2504e0-4f89-41d3-9a0c-0305e82c3302, studentId: 6e1d2c3b-0000-4000-8000-000000000043, name: Nico Núñez, value: null, updatedAt: null, rowEditable: true }
+    FamilyPeriodGrades:
       type: object
-      required: [gradingEnabled, cycleName, months, subjects]
+      required: [gradingEnabled, cycleName, periods, subjects]
       properties:
         gradingEnabled: { type: boolean }
         cycleName: { type: string, example: 2026-2027 }
-        months:
+        periods:
           type: array
-          items: { type: string, example: '2026-09' }
+          description: The evaluation periods of the child's grade in the cycle, by ordinal.
+          items: { $ref: '#/components/schemas/EvaluationPeriodRef' }
         scale:
           allOf: [{ $ref: '#/components/schemas/GradingScale' }]
           description: >
             The level's scale, present only when `gradingEnabled` is true.
-            A level that stopped grading numerically omits it: grades do not
-            record the scale they were captured under, so the app shows them
-            as stored and marks none as failing.
+            A level that stopped grading numerically omits it: the app shows
+            the grades as stored and marks none as failing.
         subjects:
           type: array
           items:
@@ -6831,9 +6901,9 @@ components:
               subjectName: { type: string, example: Matemáticas }
               grades:
                 type: object
-                description: Month (`YYYY-MM`) → grade; `{}` when nothing is captured.
+                description: Period id → grade (a whole number); `{}` when nothing is captured.
                 additionalProperties: { type: number }
-                example: { '2026-09': 9.5 }
+                example: { 0e000000-0000-4000-8000-000000000001: 9 }
     AttendanceStatus:
       type: string
       enum: [present, absent, late, excused]
@@ -7196,7 +7266,7 @@ components:
         students: { type: integer, format: int64, minimum: 0, description: Pupils KEPT with their level cleared. }
         enrollments: { type: integer, format: int64, minimum: 0 }
         attendanceMarks: { type: integer, format: int64, minimum: 0 }
-        monthlyGrades: { type: integer, format: int64, minimum: 0 }
+        monthlyGrades: { type: integer, format: int64, minimum: 0, description: 'Monthly grades captured before T15 (kept; no longer written).' }
         reportCards: { type: integer, format: int64, minimum: 0 }
         tuitionPlans: { type: integer, format: int64, minimum: 0 }
         uniformItems: { type: integer, format: int64, minimum: 0, description: 'Garments KEPT, left with no level (unresolved).' }
@@ -7204,6 +7274,7 @@ components:
         enrollmentTransfers: { type: integer, format: int64, minimum: 0, description: Group changes of the level's enrollments. }
         attendanceSessions: { type: integer, format: int64, minimum: 0, description: Attendance lists taken. }
         gradeEntries: { type: integer, format: int64, minimum: 0, description: Per-term grades (the legacy capture). }
+        periodGrades: { type: integer, format: int64, minimum: 0, description: Grades by evaluation period (T15). }
         periodClosures: { type: integer, format: int64, minimum: 0, description: Closed periods. }
       example: { gradeLevels: 3, groups: 6, subjects: 24, terms: 3, teachingAssignments: 24, students: 58, enrollments: 58, attendanceMarks: 4120, monthlyGrades: 1392, reportCards: 58, tuitionPlans: 1, uniformItems: 2, schoolEvents: 1 }
     LevelDeletionPreview:

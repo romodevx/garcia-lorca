@@ -37,32 +37,77 @@ service GradesService {
   // and/or term (each filter is independent; empty = any).
   rpc ListGradeEntries(ListGradeEntriesRequest) returns (ListGradeEntriesResponse);
 
-  // --- monthly grades (T6) ---
-  // The school captures one grade per student, subject and MONTH. The subject
-  // and teacher are DERIVED from the assignment; the level's grading scale
-  // (config) bounds the value; the month must fall inside the assignment's
-  // cycle; the enrollment must be active in the assignment's group.
+  // --- monthly grades (T6) — DEPRECATED by T15 ---
+  // Monthly capture was retired in T15 (grades are captured per evaluation
+  // period). The monthly_grades table and its rows are kept, untouched; these
+  // RPCs are no longer served (Unimplemented) and will be removed from the
+  // contract in a later release.
 
   // UpsertMonthlyGrade records or corrects one student's grade for a month
   // (autosave per cell). Scale, decimals, month and level refusals are
   // InvalidArgument with a sentence for the user; an unknown assignment is
   // NotFound.
-  rpc UpsertMonthlyGrade(UpsertMonthlyGradeRequest) returns (UpsertMonthlyGradeResponse);
+  rpc UpsertMonthlyGrade(UpsertMonthlyGradeRequest) returns (UpsertMonthlyGradeResponse) {
+    option deprecated = true;
+  }
   // ClearMonthlyGrade removes one student's grade for a month (an emptied
   // cell). Clearing a grade that does not exist succeeds.
-  rpc ClearMonthlyGrade(ClearMonthlyGradeRequest) returns (ClearMonthlyGradeResponse);
+  rpc ClearMonthlyGrade(ClearMonthlyGradeRequest) returns (ClearMonthlyGradeResponse) {
+    option deprecated = true;
+  }
   // GetMonthlySheet is the capture grid of one assignment for one month: the
   // cycle's months, the level's scale, whether it is editable, and one row per
   // active enrollment of the group (student names are resolved at the edge).
-  rpc GetMonthlySheet(GetMonthlySheetRequest) returns (GetMonthlySheetResponse);
+  rpc GetMonthlySheet(GetMonthlySheetRequest) returns (GetMonthlySheetResponse) {
+    option deprecated = true;
+  }
   // GetEnrollmentMonthlyGrades is one enrollment's monthly grades for its
   // cycle: the months, the scale, the group's subjects and every captured grade.
-  rpc GetEnrollmentMonthlyGrades(GetEnrollmentMonthlyGradesRequest) returns (GetEnrollmentMonthlyGradesResponse);
-  // CountScaleViolations counts the monthly grades already captured in the
-  // level's ACTIVE cycle that a proposed scale would refuse (out of range or
-  // too many decimals; with grading disabled, every grade counts). Loosening a
-  // scale can never produce a violation. No active cycle counts 0.
+  rpc GetEnrollmentMonthlyGrades(GetEnrollmentMonthlyGradesRequest) returns (GetEnrollmentMonthlyGradesResponse) {
+    option deprecated = true;
+  }
+  // CountScaleViolations counts the PERIOD grades (T15) already captured in
+  // the level's ACTIVE cycle that a proposed scale would refuse (out of range;
+  // period grades are whole numbers, so decimals never refuse one; with
+  // grading disabled, every grade counts). Loosening a scale can never produce
+  // a violation. No active cycle counts 0.
   rpc CountScaleViolations(CountScaleViolationsRequest) returns (CountScaleViolationsResponse);
+
+  // --- period grades (T15) ---
+  // The school captures one WHOLE-NUMBER grade per student, subject and
+  // EVALUATION PERIOD of the group's grade (config, T14/ADR 0029). The subject
+  // is DERIVED from the assignment; the level's scale bounds the value (its
+  // decimals no longer matter: capture is integers only); the period must be
+  // one of the group's grade in the assignment's cycle and must have started
+  // (the school's local day); the enrollment must be active in the group. A
+  // period whose level term (same cycle, level and ordinal) is closed is
+  // read-only for everyone (PERIOD_LOCKED, 409).
+
+  // UpsertPeriodGrade records or corrects one student's grade for a period
+  // (autosave per cell). Refusals are InvalidArgument with a sentence and an
+  // X-Error-Code (GRADE_NOT_INTEGER, GRADE_OUT_OF_RANGE, GRADE_NOT_NUMBER,
+  // PERIOD_NOT_IN_GRADE, PERIOD_NOT_STARTED, PERIOD_PREVIOUS_GROUP,
+  // ENROLLMENT_NOT_IN_GROUP, LEVEL_NOT_GRADED); a closed period is
+  // FailedPrecondition PERIOD_LOCKED; an unknown assignment is NotFound.
+  rpc UpsertPeriodGrade(UpsertPeriodGradeRequest) returns (UpsertPeriodGradeResponse);
+  // ClearPeriodGrade removes one student's grade for a period (an emptied
+  // cell). Clearing a grade that does not exist succeeds; the same rules as
+  // the upsert apply.
+  rpc ClearPeriodGrade(ClearPeriodGradeRequest) returns (ClearPeriodGradeResponse);
+  // GetPeriodSheet is the capture grid of one assignment for one period: the
+  // grade's periods, the level's scale, whether it is editable, and one row
+  // per active enrollment of the group (names are resolved at the edge). An
+  // empty period_id opens the period of the school's current local day (or
+  // the latest that started; before the first, the first).
+  rpc GetPeriodSheet(GetPeriodSheetRequest) returns (GetPeriodSheetResponse);
+  // GetEnrollmentPeriodGrades is one enrollment's period grades for its
+  // cycle: the grade's periods, the scale, the group's subjects and every
+  // captured grade.
+  rpc GetEnrollmentPeriodGrades(GetEnrollmentPeriodGradesRequest) returns (GetEnrollmentPeriodGradesResponse);
+  // PeriodsWithGrades answers which of these evaluation periods already hold
+  // at least one grade, in one read. The gateway asks before config removes
+  // a period (PERIOD_HAS_GRADES): a period with grades cannot be removed.
+  rpc PeriodsWithGrades(PeriodsWithGradesRequest) returns (PeriodsWithGradesResponse);
 
   // --- period closing and report cards (T7) ---
   // A period is one config term: exactly one level of one cycle, covering a
@@ -299,6 +344,116 @@ message CountScaleViolationsResponse {
   int32 violations = 1;
 }
 
+// --- Period grades (T15) -------------------------------------------------
+
+// EvaluationPeriodRef is an evaluation period of a grade as config holds it
+// (T14). starts_on / ends_on are inclusive calendar days, "YYYY-MM-DD".
+message EvaluationPeriodRef {
+  string id = 1;
+  int32 ordinal = 2;
+  string name = 3;
+  string starts_on = 4;
+  string ends_on = 5;
+}
+
+// PeriodGrade is one captured period grade. value is the canonical decimal
+// text of a whole number ("9", "10"); a grade is never a float.
+message PeriodGrade {
+  string enrollment_id = 1;
+  string subject_id = 2;
+  string period_id = 3;
+  string value = 4;
+  google.protobuf.Timestamp updated_at = 5;
+  string captured_by_name = 6;
+}
+
+message UpsertPeriodGradeRequest {
+  string assignment_id = 1;
+  string period_id = 2;
+  string enrollment_id = 3;
+  string value = 4;            // decimal text of a whole number, e.g. "9"
+  string captured_by = 5;      // the authenticated user id (audit)
+  string captured_by_name = 6; // the authenticated user's name (audit)
+  // school_wide is set by the director's routes: periods that belong to a
+  // transferred pupil's previous group stay writable.
+  bool school_wide = 7;
+}
+
+message UpsertPeriodGradeResponse {
+  PeriodGrade grade = 1;
+}
+
+message ClearPeriodGradeRequest {
+  string assignment_id = 1;
+  string period_id = 2;
+  string enrollment_id = 3;
+  bool school_wide = 4;
+}
+
+message ClearPeriodGradeResponse {}
+
+message GetPeriodSheetRequest {
+  string assignment_id = 1;
+  string period_id = 2; // empty = the period of the school's current day
+  bool school_wide = 3;
+}
+
+// PeriodSheetRow is one active enrollment of the group; value is "" when no
+// grade is captured for the period. editable / read_only_reason say whether
+// the caller may write THIS row.
+message PeriodSheetRow {
+  string enrollment_id = 1;
+  string student_id = 2;
+  string value = 3;
+  google.protobuf.Timestamp updated_at = 4;
+  bool editable = 5;
+  string read_only_reason = 6;
+}
+
+message GetPeriodSheetResponse {
+  string assignment_id = 1;
+  // period_id is the period shown; "" when the grade has no periods.
+  string period_id = 2;
+  repeated EvaluationPeriodRef periods = 3;
+  GradingScale scale = 4;
+  bool grading_enabled = 5;
+  bool editable = 6;
+  string read_only_reason = 7;
+  repeated PeriodSheetRow rows = 8;
+  // closed_period_ids are the periods of the sheet whose level term is
+  // CLOSED: nobody may write them until the director reopens it.
+  repeated string closed_period_ids = 9;
+  // current_period_id is the period containing the school's current day, ""
+  // when the day falls in none.
+  string current_period_id = 10;
+  // today is the school's current local day, "YYYY-MM-DD".
+  string today = 11;
+}
+
+message GetEnrollmentPeriodGradesRequest {
+  string enrollment_id = 1;
+}
+
+message GetEnrollmentPeriodGradesResponse {
+  string cycle_id = 1;
+  string cycle_name = 2;
+  repeated EvaluationPeriodRef periods = 3;
+  GradingScale scale = 4;
+  bool grading_enabled = 5;
+  // subject_ids are the group's subjects plus any subject already graded.
+  repeated string subject_ids = 6;
+  repeated PeriodGrade grades = 7;
+}
+
+message PeriodsWithGradesRequest {
+  repeated string period_ids = 1;
+}
+
+message PeriodsWithGradesResponse {
+  // period_ids are the requested periods that hold at least one grade.
+  repeated string period_ids = 1;
+}
+
 // --- Domain events (published) --------------------------------------------
 
 // GradesPublished fires once per report card issued when a period closes (on
@@ -341,6 +496,11 @@ message Period {
   string closed_by_name = 9;
   int32 version = 10;
   PeriodProgress progress = 11;
+  // T15: the dates the term's evaluation periods span across the level's
+  // grades (the earliest start, the latest end; "YYYY-MM-DD", "" when no
+  // grade has that period). months (above) is empty since T15.
+  string starts_on = 12;
+  string ends_on = 13;
 }
 
 message ListPeriodsRequest {
@@ -374,6 +534,15 @@ message GetPeriodProgressResponse {
   // unfinished_months are the term's months after the current UTC month: they
   // are still expected (closing now needs force), but have not been taught yet.
   repeated string unfinished_months = 6;
+  // T15: unfinished is true while a grade's period of this term has not ended
+  // (the school's local day): still expected, closing now needs force.
+  // months / unfinished_months are empty since T15.
+  bool unfinished = 7;
+  string ends_on = 8;
+  // groups_without_period are the labels of the level's groups with active
+  // pupils whose grade has no evaluation period of the term's ordinal: the
+  // term cannot close until config gives them one (PERIOD_NOT_CONFIGURED).
+  repeated string groups_without_period = 9;
 }
 
 message ClosedTermsRequest {
@@ -416,7 +585,8 @@ message ListReportCardsRequest {
 }
 
 // ReportCardSummary is one report card in a list. general_average is decimal
-// text with one decimal ("8.5"); "" = none. term_ordinal is the term's order in
+// text — since T15 the exact mean truncated to 2 decimals ("8.66"; cards
+// issued before keep their one decimal); "" = none. term_ordinal is the term's order in
 // its cycle as frozen at issue (1 = first; 0 = issued before it was recorded).
 // A student's list comes newest period first (cycle, then term_ordinal).
 message ReportCardSummary {
@@ -444,15 +614,26 @@ message GetReportCardRequest {
   string id = 1;
 }
 
-// ReportCardLine is one subject of a report card. month_values maps "YYYY-MM"
-// to the captured grade's exact decimal text; a month without a grade is
-// absent. term_average is one decimal ("8.5"); "" = no grade in the term.
+// ReportCardLine is one subject of a report card. period_values (T15) maps an
+// evaluation period id to the captured grade's exact text; a period without a
+// grade is absent. month_values is the same for a card issued before T15.
+// term_average is the exact mean of the line's grades, truncated to 2
+// decimals ("8.66", "8.5", "9"); "" = no grade.
 message ReportCardLine {
   string subject_id = 1;
   string subject_name = 2;
   int32 position = 3;
   map<string, string> month_values = 4;
   string term_average = 5;
+  map<string, string> period_values = 6;
+}
+
+// ReportCardPeriod is one column of a T15 report card: an evaluation period of
+// the pupil's grade, as it read at issue time.
+message ReportCardPeriod {
+  string id = 1;
+  int32 ordinal = 2;
+  string name = 3;
 }
 
 // ReportCard is the frozen snapshot issued when a period closed. Names are
@@ -480,6 +661,10 @@ message ReportCard {
   GradingScale scale = 20;
   repeated ReportCardLine lines = 21;
   int32 term_ordinal = 22; // see ReportCardSummary.term_ordinal
+  // periods are the card's columns (T15): the pupil's grade's periods from the
+  // first up to the one closed. Empty on a card issued before T15, whose
+  // columns are `months`.
+  repeated ReportCardPeriod periods = 23;
 }
 
 message GetReportCardResponse {
