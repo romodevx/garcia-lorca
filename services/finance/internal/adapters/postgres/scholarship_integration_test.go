@@ -109,7 +109,7 @@ func TestScholarshipHoldings(t *testing.T) {
 		t.Fatalf("one open holding per pupil: %d %v", len(again), err)
 	}
 	held, err := repo.HeldBy(ctx, []string{scStudent1})
-	if err != nil || len(held[scStudent1]) != 1 || held[scStudent1][0].ID() != scFree {
+	if err != nil || len(held[scStudent1]) != 1 || held[scStudent1][0].Scholarship.ID() != scFree {
 		t.Fatalf("held by: %+v %v", held, err)
 	}
 	counts, err := repo.CountHolders(ctx)

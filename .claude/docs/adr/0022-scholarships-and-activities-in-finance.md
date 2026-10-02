@@ -62,7 +62,9 @@ the statement, `ListCharges`, `ListOverdue` and the monthly late-fee run.
    charge by the repository) — the charge was settled in time. Otherwise it is
    lost: full price, and the surcharge (daily or monthly, the plan's) runs on
    the full price like for anyone late. A 100 % month needs no money to be in
-   time: it is never late.
+   time — but only if the pupil already held the scholarship on that due date:
+   assigning a free scholarship today never forgives a month already late and
+   unpaid (it is still owed, with its surcharge).
 5. **Computed at read/payment time, written when settled.** A scholarship is
    never written at issue. Assigning one therefore reaches every pending charge
    at once; taking it away (or deactivating, or editing it) gives pending
@@ -112,9 +114,17 @@ the statement, `ListCharges`, `ListOverdue` and the monthly late-fee run.
 - **Turning `module_scholarships` off hides the screens; scholarships already
   assigned keep pricing charges** (finance does not read flags, see
   feature-flags-env-not-db). Stopping one is taking it away or deactivating it.
-- Loose payments (paid straight against a charge, e.g. a uniforms counter sale)
-  do not apply scholarships: their path vetoes over-payment against the stored
-  price. Becas are collected through Registrar pago (deposits).
+- Scholarships apply to the school's own charges only: typed by hand or issued
+  by the run (tuition, inscription, fees, activities). Another module's sale
+  (a uniforms fulfillment, with its own ref) is never discounted — its module
+  set the price, and it is paid by the single-charge path.
+- That single-charge path (`POST /finance/payments`, the uniforms counter)
+  does not price scholarships, so it **refuses** (409) a charge a scholarship
+  applies to: becas are collected through Registrar pago (deposits).
+- **Known gap (follow-up):** a 100 % scholarship on the INSCRIPTION leaves it
+  owing $0 with no money to register, so no `ChargeSettled` is emitted and the
+  pupil stays "en trámite" in students. Deciding whether a fully covered
+  inscription settles the enrolment by itself is the owner's call.
 - A free (100 %) month is `pending` in the database until frozen (as a full
   discount always was — "stays pending until money lands"); every reader prices
   it at zero and the overdue views and the late-fee run skip it.

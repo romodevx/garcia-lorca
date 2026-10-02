@@ -65,10 +65,10 @@ func (m *memScholarships) ListHolders(context.Context, string) ([]domain.Scholar
 	return m.holdings, nil
 }
 
-func (m *memScholarships) HeldBy(context.Context, []string) (map[string][]domain.Scholarship, error) {
-	out := map[string][]domain.Scholarship{}
+func (m *memScholarships) HeldBy(context.Context, []string) (map[string][]domain.HeldScholarship, error) {
+	out := map[string][]domain.HeldScholarship{}
 	for _, h := range m.holdings {
-		out[h.StudentID] = append(out[h.StudentID], m.scholarships[h.ScholarshipID])
+		out[h.StudentID] = append(out[h.StudentID], domain.HeldScholarship{Scholarship: m.scholarships[h.ScholarshipID], Since: h.StartsOn})
 	}
 	return out, nil
 }

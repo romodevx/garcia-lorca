@@ -2,8 +2,10 @@ package usecase
 
 import (
 	"context"
+	"strings"
 	"time"
 
+	glerrors "github.com/garcia-lorca/pkg/errors"
 	"github.com/garcia-lorca/services/finance/internal/domain"
 	"github.com/garcia-lorca/services/finance/internal/ports"
 )
@@ -20,7 +22,7 @@ func (s *FinanceService) WithScholarships(repo ports.ScholarshipRepository) *Fin
 // charge IS (its target). A nil pricer prices nothing, so a service wired
 // without scholarships, or a test, reads charges exactly as stored.
 type scholarshipPricer struct {
-	held  map[string][]domain.Scholarship
+	held  map[string][]domain.HeldScholarship
 	names map[string]string
 	ids   systemConceptIDs
 }
@@ -41,8 +43,8 @@ func (s *FinanceService) pricerFor(ctx context.Context, studentIDs []string, ids
 	}
 	names := map[string]string{}
 	for _, list := range held {
-		for _, sch := range list {
-			names[sch.ID()] = sch.Name()
+		for _, h := range list {
+			names[h.Scholarship.ID()] = h.Scholarship.Name()
 		}
 	}
 	return &scholarshipPricer{held: held, names: names, ids: ids}, nil
@@ -75,6 +77,11 @@ func (p *scholarshipPricer) target(c domain.Charge) string {
 	switch {
 	case c.ConceptID() == p.ids.lateFee || domain.IsFeeRef(c.ExternalRef()):
 		return ""
+	case !ownLedgerRef(c.ExternalRef()):
+		// Another module's sale (a uniforms fulfillment): its price is that
+		// module's, and it is paid by the single-charge path, which does not
+		// price scholarships.
+		return ""
 	case c.ConceptID() == p.ids.tuition:
 		return domain.TargetTuition
 	case c.ConceptID() == p.ids.enrolment:
@@ -85,6 +92,23 @@ func (p *scholarshipPricer) target(c domain.Charge) string {
 	}
 	return domain.ConceptTarget(c.ConceptID())
 }
+
+// ownLedgerRef reports whether a charge is the school's own: typed by hand
+// (no ref) or issued by finance's run (tuition, inscription, fee, activity).
+func ownLedgerRef(ref string) bool {
+	if ref == "" {
+		return true
+	}
+	for _, prefix := range []string{tuitionRefPrefix, domain.EnrollmentRefPrefix, domain.FeeRefPrefix, domain.ActivityRefPrefix} {
+		if strings.HasPrefix(ref, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// tuitionRefPrefix names a month the run issued, "tuition:<cycle>:<student>:<YYYY-MM>".
+const tuitionRefPrefix = "tuition:"
 
 // price is the charge as a payment (or a read) on `on` finds it: with the
 // scholarship's part, when one applies. Nothing is written.
@@ -217,4 +241,47 @@ func (s *FinanceService) FreezeSettledScholarships(ctx context.Context, studentI
 func dayOf(t time.Time) time.Time {
 	u := t.UTC()
 	return time.Date(u.Year(), u.Month(), u.Day(), 0, 0, 0, 0, time.UTC)
+}
+
+// refuseScholarshipCharge stops the single-charge payment on a charge a
+// scholarship applies to on `when` (T18): that path vetoes over-payment and
+// derives the status against the stored price, so it would collect the full
+// price of a discounted month. Registrar pago (a deposit) prices it.
+func (s *FinanceService) refuseScholarshipCharge(ctx context.Context, chargeID string, when time.Time) error {
+	if s.scholarships == nil {
+		return nil
+	}
+	charge, err := s.repo.GetCharge(ctx, chargeID)
+	if glerrors.KindOf(err) == glerrors.KindNotFound {
+		// The payment path reports a missing charge in its own words.
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	ids, err := s.conceptIDs(ctx)
+	if err != nil {
+		return err
+	}
+	pricer, err := s.pricerFor(ctx, []string{charge.Charge.StudentID()}, ids)
+	if err != nil {
+		return err
+	}
+	all, err := s.repo.ListCharges(ctx, charge.Charge.StudentID(), "")
+	if err != nil {
+		return err
+	}
+	for _, c := range all {
+		if c.Charge.ID() != chargeID || c.Charge.ScholarshipID() != "" {
+			continue
+		}
+		priced, err := pricer.price(c, when)
+		if err != nil {
+			return err
+		}
+		if priced.Charge.ScholarshipID() != "" {
+			return glerrors.New(glerrors.KindConflict, "este cargo tiene beca: cóbralo en Registrar pago")
+		}
+	}
+	return nil
 }

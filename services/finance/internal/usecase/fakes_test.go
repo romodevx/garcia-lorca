@@ -739,7 +739,11 @@ func (f *fakeRepo) release(d domain.Deposit, resetEarned bool) error {
 			// As the repository: a scholarship part stays only while what is
 			// left still settles the charge (T18).
 			if c.Scholarship() > 0 && f.paidFor(chargeID) < c.Effective().Int64() {
-				c = c.WithoutScholarship()
+				cleared, err := c.WithScholarship("", 0, f.paidFor(chargeID))
+				if err != nil {
+					return err
+				}
+				c = cleared
 			}
 			f.charges[chargeID] = c.WithStatus(f.paidFor(chargeID))
 		}

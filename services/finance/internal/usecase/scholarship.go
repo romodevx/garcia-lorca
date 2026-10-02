@@ -327,7 +327,8 @@ func (s *ScholarshipService) withOverlaps(ctx context.Context, sch domain.Schola
 	}
 	for _, h := range holdings {
 		holder := ScholarshipHolder{StudentID: h.StudentID, StartsOn: h.StartsOn, Overlaps: []ScholarshipRef{}}
-		for _, other := range held[h.StudentID] {
+		for _, o := range held[h.StudentID] {
+			other := o.Scholarship
 			if other.ID() != sch.ID() && other.Active() && other.SharesTargetWith(sch) {
 				holder.Overlaps = append(holder.Overlaps, ScholarshipRef{ID: other.ID(), Name: other.Name()})
 			}

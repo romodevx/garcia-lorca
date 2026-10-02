@@ -93,17 +93,17 @@ func (f *fakeScholarshipRepo) ListHolders(_ context.Context, scholarshipID strin
 	return out, nil
 }
 
-func (f *fakeScholarshipRepo) HeldBy(_ context.Context, studentIDs []string) (map[string][]domain.Scholarship, error) {
+func (f *fakeScholarshipRepo) HeldBy(_ context.Context, studentIDs []string) (map[string][]domain.HeldScholarship, error) {
 	wanted := map[string]bool{}
 	for _, id := range studentIDs {
 		wanted[id] = true
 	}
-	out := map[string][]domain.Scholarship{}
+	out := map[string][]domain.HeldScholarship{}
 	for _, h := range f.holdings {
 		if !h.EndsOn.IsZero() || (studentIDs != nil && !wanted[h.StudentID]) {
 			continue
 		}
-		out[h.StudentID] = append(out[h.StudentID], f.scholarships[h.ScholarshipID])
+		out[h.StudentID] = append(out[h.StudentID], domain.HeldScholarship{Scholarship: f.scholarships[h.ScholarshipID], Since: h.StartsOn})
 	}
 	return out, nil
 }

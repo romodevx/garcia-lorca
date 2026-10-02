@@ -214,28 +214,22 @@ func percentOf(base, bp int64) int64 {
 	return int64(q)
 }
 
-// BestScholarship is the scholarship most favourable to the family on a
-// target and a base: the largest discount (they never stack). Ties go to the
-// lowest id, so the same charge always names the same one.
-func BestScholarship(candidates []Scholarship, target string, base Cents) (Scholarship, Cents, bool) {
-	var (
-		best  Scholarship
-		most  Cents
-		found bool
-	)
-	for _, s := range candidates {
-		if !s.AppliesTo(target) {
-			continue
-		}
-		d := s.DiscountOn(base)
-		if d <= 0 {
-			continue
-		}
-		if !found || d > most || (d == most && s.id < best.id) {
-			best, most, found = s, d, true
-		}
+// HeldScholarship is a scholarship a pupil holds, and since which day.
+type HeldScholarship struct {
+	Scholarship Scholarship
+	Since       time.Time
+}
+
+// keptOnLateCharge reports whether a scholarship still holds on a charge read
+// after its due date: the charge was settled in time at its price — by money
+// paid by the due date, or, for a price of zero, by the scholarship itself,
+// which must then have been held on the due date (assigning a free scholarship
+// today never forgives a month already late and unpaid).
+func keptOnLateCharge(h HeldScholarship, price, paidByDue int64, due time.Time) bool {
+	if paidByDue < price {
+		return false
 	}
-	return best, most, found
+	return price > 0 || paidByDue > 0 || !dayOf(h.Since).After(dayOf(due))
 }
 
 // ApplyScholarship is THE rule of T18 (ADR 0022): what a scholarship takes off
@@ -258,20 +252,37 @@ func BestScholarship(candidates []Scholarship, target string, base Cents) (Schol
 //     was settled: unchanged. That part is history.
 //
 // paidByDue is what was paid on or before the due date; paid is everything.
-func ApplyScholarship(c Charge, paid, paidByDue int64, candidates []Scholarship, target string, on time.Time) (Charge, error) {
+//
+// The scholarship most favourable to the family among those that hold wins
+// (largest part; ties go to the lowest id, so a charge always names the same).
+func ApplyScholarship(c Charge, paid, paidByDue int64, candidates []HeldScholarship, target string, on time.Time) (Charge, error) {
 	if target == "" || c.scholarshipID != "" || c.status == StatusCancelled || c.status == StatusPaid {
 		return c, nil
 	}
 	base := c.amount - c.discount
-	best, part, ok := BestScholarship(candidates, target, base)
-	if !ok {
+	late := dayOf(on).After(dayOf(c.dueDate))
+	var (
+		best  Scholarship
+		most  Cents
+		found bool
+	)
+	for _, h := range candidates {
+		s := h.Scholarship
+		if !s.AppliesTo(target) {
+			continue
+		}
+		d := s.DiscountOn(base)
+		if d <= 0 || (late && !keptOnLateCharge(h, (base-d).Int64(), paidByDue, c.dueDate)) {
+			continue
+		}
+		if !found || d > most || (d == most && s.id < best.id) {
+			best, most, found = s, d, true
+		}
+	}
+	if !found {
 		return c, nil
 	}
-	price := (base - part).Int64()
-	if dayOf(on).After(dayOf(c.dueDate)) && paidByDue < price {
-		return c, nil
-	}
-	part = min(part, max(0, base-Cents(paid)))
+	part := min(most, max(0, base-Cents(paid)))
 	if part == 0 {
 		return c, nil
 	}

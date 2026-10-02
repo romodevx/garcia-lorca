@@ -367,14 +367,6 @@ func (c Charge) WithScholarship(scholarshipID string, cents int64, paidCents int
 	return c, nil
 }
 
-// WithoutScholarship returns a copy with no scholarship part. The status is
-// left as it was: the caller that drops a part re-derives it from what it
-// knows was paid.
-func (c Charge) WithoutScholarship() Charge {
-	c.scholarship, c.scholarshipID = 0, ""
-	return c
-}
-
 // Accessors.
 func (c Charge) ID() string          { return c.id }
 func (c Charge) TenantID() string    { return c.tenantID }

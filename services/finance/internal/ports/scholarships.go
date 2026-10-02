@@ -27,9 +27,10 @@ type ScholarshipRepository interface {
 	CountHolders(ctx context.Context) (map[string]int, error)
 	// ListHolders lists the open holdings of one scholarship, oldest first.
 	ListHolders(ctx context.Context, scholarshipID string) ([]domain.ScholarshipHolding, error)
-	// HeldBy is, per pupil, the scholarships they hold now (inactive ones
-	// included: the rule ignores them). nil studentIDs means every pupil.
-	HeldBy(ctx context.Context, studentIDs []string) (map[string][]domain.Scholarship, error)
+	// HeldBy is, per pupil, the scholarships they hold now and since when
+	// (inactive ones included: the rule ignores them). nil studentIDs means
+	// every pupil; an empty list, none.
+	HeldBy(ctx context.Context, studentIDs []string) (map[string][]domain.HeldScholarship, error)
 	// Assign stores new open holdings and returns those written; a pupil who
 	// already holds the scholarship is skipped, never duplicated.
 	Assign(ctx context.Context, hs []domain.ScholarshipHolding) ([]domain.ScholarshipHolding, error)

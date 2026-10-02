@@ -177,7 +177,7 @@ func TestApplyScholarship(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			charge := c.charge(t).WithStatus(c.paid)
-			got, err := domain.ApplyScholarship(charge, c.paid, c.byDue, c.becas, domain.TargetTuition, c.on)
+			got, err := domain.ApplyScholarship(charge, c.paid, c.byDue, held(c.becas...), domain.TargetTuition, c.on)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -194,21 +194,21 @@ func TestApplyScholarshipLeavesAloneWhatItMustNotTouch(t *testing.T) {
 	on := day(2026, 9, 5)
 
 	paid := tuitionCharge(t).WithStatus(300000)
-	if got, _ := domain.ApplyScholarship(paid, 300000, 300000, []domain.Scholarship{half}, domain.TargetTuition, on); got.Scholarship() != 0 {
+	if got, _ := domain.ApplyScholarship(paid, 300000, 300000, held(half), domain.TargetTuition, on); got.Scholarship() != 0 {
 		t.Fatal("a paid charge never changes")
 	}
 	cancelled, _ := tuitionCharge(t).Cancel()
-	if got, _ := domain.ApplyScholarship(cancelled, 0, 0, []domain.Scholarship{half}, domain.TargetTuition, on); got.Scholarship() != 0 {
+	if got, _ := domain.ApplyScholarship(cancelled, 0, 0, held(half), domain.TargetTuition, on); got.Scholarship() != 0 {
 		t.Fatal("a cancelled charge owes nothing to discount")
 	}
 	frozen, err := tuitionCharge(t).WithScholarship("old", 50000, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := domain.ApplyScholarship(frozen, 0, 0, []domain.Scholarship{half}, domain.TargetTuition, on); got.ScholarshipID() != "old" || got.Scholarship() != 50000 {
+	if got, _ := domain.ApplyScholarship(frozen, 0, 0, held(half), domain.TargetTuition, on); got.ScholarshipID() != "old" || got.Scholarship() != 50000 {
 		t.Fatal("a scholarship written on the charge is history and stays")
 	}
-	if got, _ := domain.ApplyScholarship(tuitionCharge(t), 0, 0, []domain.Scholarship{half}, "", on); got.Scholarship() != 0 {
+	if got, _ := domain.ApplyScholarship(tuitionCharge(t), 0, 0, held(half), "", on); got.Scholarship() != 0 {
 		t.Fatal("a charge with no target (a surcharge) takes no scholarship")
 	}
 }
@@ -235,8 +235,8 @@ func TestChargeScholarshipInvariants(t *testing.T) {
 	if beca.Effective() != 0 || beca.DeriveStatus(0) != domain.StatusPending {
 		t.Fatalf("a full scholarship owes nothing and stays pending until money lands, got %d %s", beca.Effective(), beca.DeriveStatus(0))
 	}
-	if got := beca.WithoutScholarship(); got.Scholarship() != 0 || got.ScholarshipID() != "" || got.Effective() != 280000 {
-		t.Fatal("WithoutScholarship returns the charge at its price")
+	if got, err := beca.WithScholarship("", 0, 0); err != nil || got.Scholarship() != 0 || got.ScholarshipID() != "" || got.Effective() != 280000 {
+		t.Fatal("a zero part clears the scholarship")
 	}
 }
 
@@ -255,5 +255,34 @@ func TestNewScholarshipHolding(t *testing.T) {
 	}
 	if _, err := domain.NewScholarshipHolding("h1", "t1", "s1", "st1", time.Time{}); glerrors.KindOf(err) != glerrors.KindInvalid {
 		t.Fatal("a holding starts on a day")
+	}
+}
+
+// held is scholarships held since forever.
+func held(ss ...domain.Scholarship) []domain.HeldScholarship {
+	out := make([]domain.HeldScholarship, len(ss))
+	for i, s := range ss {
+		out[i] = domain.HeldScholarship{Scholarship: s}
+	}
+	return out
+}
+
+// Assigning a free scholarship today does not forgive a month already late
+// and unpaid: settled in time with no money means the scholarship was held
+// on its due date.
+func TestAFreeScholarshipIsNotRetroactive(t *testing.T) {
+	free := scholarship(t, "free", domain.ScholarshipFixedPrice, 0, "tuition")
+	on := day(2026, 10, 1)
+	late := []domain.HeldScholarship{{Scholarship: free, Since: day(2026, 9, 20)}}
+	if got, _ := domain.ApplyScholarship(tuitionCharge(t), 0, 0, late, domain.TargetTuition, on); got.Scholarship() != 0 {
+		t.Fatal("assigned after the due date of an unpaid month: no scholarship")
+	}
+	inTime := []domain.HeldScholarship{{Scholarship: free, Since: day(2026, 9, 10)}}
+	if got, _ := domain.ApplyScholarship(tuitionCharge(t), 0, 0, inTime, domain.TargetTuition, on); got.Scholarship() != 300000 {
+		t.Fatal("held on the due date: the free month stays free")
+	}
+	// Before the due date it applies however recent.
+	if got, _ := domain.ApplyScholarship(tuitionCharge(t), 0, 0, late, domain.TargetTuition, day(2026, 9, 5)); got.Scholarship() != 300000 {
+		t.Fatal("before the due date the scholarship applies")
 	}
 }

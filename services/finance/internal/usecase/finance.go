@@ -304,7 +304,9 @@ func studentsOf(studentID string, charges []ports.ChargeWithPaid) []string {
 		return []string{studentID}
 	}
 	seen := map[string]bool{}
-	var out []string
+	// Never nil: nil asks for every pupil's scholarships, and no charge means
+	// no pupil to price.
+	out := []string{}
 	for _, c := range charges {
 		if id := c.Charge.StudentID(); !seen[id] {
 			seen[id] = true
@@ -444,6 +446,9 @@ func (s *FinanceService) RegisterTenderedPayment(ctx context.Context, in Tendere
 	}
 	payments, err := s.tenderedPayments(in, when)
 	if err != nil {
+		return nil, ports.ChargeWithPaid{}, err
+	}
+	if err := s.refuseScholarshipCharge(ctx, in.ChargeID, when); err != nil {
 		return nil, ports.ChargeWithPaid{}, err
 	}
 

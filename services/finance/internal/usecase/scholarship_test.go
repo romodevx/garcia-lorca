@@ -161,10 +161,11 @@ func TestTheCounterQuotesTheScholarship(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			b := newBecaFixture(t, c.level, c.policy)
-			b.clock = mustDay(t, c.on).Add(12 * time.Hour)
+			// Given on 3 September, before any due date; quoted on c.on.
 			for i, s := range c.becas {
 				b.give(t, "Beca "+string(rune('A'+i)), s)
 			}
+			b.clock = mustDay(t, c.on).Add(12 * time.Hour)
 			got := b.quote(t, c.on)
 			if got.AmountCents != c.wantAmount || got.SurchargeCents != c.wantSurcharge || got.DiscountCents != c.wantEarly {
 				t.Fatalf("asks %d (surcharge %d, early %d); want %d (%d, %d)",
@@ -377,6 +378,23 @@ func TestACorrectionReevaluatesTheScholarship(t *testing.T) {
 	}
 }
 
+// A free scholarship given after a month's due date does not forgive that
+// month, late and unpaid (review T18): it was not held when the month was due.
+func TestAFreeScholarshipGivenLateForgivesNothingPast(t *testing.T) {
+	b := newBecaFixture(t, 0, dailyPolicy)
+	b.clock = time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
+	b.give(t, "Completa", becaSpec{kind: domain.ScholarshipFixedPrice, value: 0})
+
+	got := b.quote(t, "2026-09-20")
+
+	if got.AmountCents != monthlyFee+10000 {
+		t.Fatalf("September stays owed with its surcharge, got %d", got.AmountCents)
+	}
+	if oct := b.quote(t, "2026-10-01"); oct.ScholarshipCents != 0 || oct.AmountCents != monthlyFee+21000 {
+		t.Fatalf("October (free, not yet due) is not asked; September is: got %d (beca %d)", oct.AmountCents, oct.ScholarshipCents)
+	}
+}
+
 // The overdue list and the monthly late fee read the same rule: a month the
 // scholarship settled is not a debt, and earns no fee.
 func TestOverdueAndLateFeesSkipWhatTheScholarshipSettled(t *testing.T) {
@@ -510,4 +528,33 @@ func TestScholarshipServiceRefusals(t *testing.T) {
 
 	_, err = b.becas.Assign(ctx, "nope", []string{testStudent})
 	requireKind(t, err, glerrors.KindNotFound)
+}
+
+// Review T18: the single-charge payment (the legacy API) does not price
+// scholarships, so it refuses a charge a scholarship applies to — the money
+// goes through Registrar pago, which does. Another module's sale (a uniforms
+// fulfillment, with its own ref) is never a scholarship's, so its payment works.
+func TestALoosePaymentRefusesAScholarshipCharge(t *testing.T) {
+	b := newBecaFixture(t, 0, noPolicy)
+	ctx := context.Background()
+	b.give(t, "Media", becaSpec{kind: domain.ScholarshipPercent, value: 5000})
+	sep := b.month(t, time.September).Charge.ID()
+	_, _, err := b.svc.RegisterTenderedPayment(ctx, usecase.TenderedPaymentInput{
+		ChargeID: sep, AmountCents: 150000, Tenders: cashTender(150000),
+	})
+	requireKind(t, err, glerrors.KindConflict)
+
+	uniforms := b.seedConcept(t, "Uniformes", 50000)
+	b.give(t, "Uniformes gratis", becaSpec{kind: domain.ScholarshipPercent, value: 10000,
+		targets: []string{domain.ConceptTarget(uniforms.ID())}})
+	sale, err := b.svc.CreateCharge(ctx, usecase.CreateChargeInput{
+		StudentID: testStudent, CycleID: testCycle, ConceptID: uniforms.ID(), DueDate: "2026-09-25",
+		ExternalRef: "uniforms:order-1",
+	})
+	requireNoError(t, err)
+	if _, _, err := b.svc.RegisterTenderedPayment(ctx, usecase.TenderedPaymentInput{
+		ChargeID: sale.Charge.ID(), AmountCents: 50000, Tenders: cashTender(50000),
+	}); err != nil {
+		t.Fatalf("a uniforms sale is paid in full, never discounted by a beca: %v", err)
+	}
 }

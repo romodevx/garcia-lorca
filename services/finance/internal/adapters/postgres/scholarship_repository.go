@@ -201,8 +201,8 @@ func (r *Repository) ListHolders(ctx context.Context, scholarshipID string) ([]d
 
 // HeldBy is, per pupil, the scholarships they hold now; nil studentIDs means
 // every pupil. One query for the holdings, one for their scholarships.
-func (r *Repository) HeldBy(ctx context.Context, studentIDs []string) (map[string][]domain.Scholarship, error) {
-	out := map[string][]domain.Scholarship{}
+func (r *Repository) HeldBy(ctx context.Context, studentIDs []string) (map[string][]domain.HeldScholarship, error) {
+	out := map[string][]domain.HeldScholarship{}
 	var ids []string
 	if studentIDs != nil {
 		if ids = uuidsOnly(studentIDs); len(ids) == 0 {
@@ -239,7 +239,7 @@ func (r *Repository) HeldBy(ctx context.Context, studentIDs []string) (map[strin
 		}
 		for _, h := range holdings {
 			if s, ok := byID[h.ScholarshipID]; ok {
-				out[h.StudentID] = append(out[h.StudentID], s)
+				out[h.StudentID] = append(out[h.StudentID], domain.HeldScholarship{Scholarship: s, Since: h.StartsOn})
 			}
 		}
 		return nil
