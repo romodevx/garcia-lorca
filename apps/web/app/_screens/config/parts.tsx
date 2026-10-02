@@ -156,6 +156,7 @@ export function SelectChip({
 }): ReactElement {
   return (
     <button
+      type="button"
       onClick={onClick}
       aria-pressed={selected}
       style={{

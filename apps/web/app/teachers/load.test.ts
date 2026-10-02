@@ -99,14 +99,27 @@ describe("groupChoices", () => {
     expect(sec?.grades[1]?.groups[0]?.availability).toEqual({ kind: "free", subjectId: "mat-s2" });
   });
 
-  it("marks a grade that lacks the subject as missing, with the reason — never invents a row", () => {
+  it("offers only the grades that carry the subject — a group of another grade is never a choice (T13)", () => {
     const tree = groupChoices("ada", "Física", catalogue([]));
-    const s2A = tree[1]?.grades[1]?.groups[0];
-    const p1A = tree[0]?.grades[0]?.groups[0];
 
-    expect(s2A?.availability).toEqual({ kind: "missing", reason: "2° Secundaria no tiene Física" });
-    expect(p1A?.availability).toEqual({ kind: "missing", reason: "1° Primaria no tiene Física" });
-    expect(tree[1]?.grades[0]?.groups[0]?.availability).toEqual({ kind: "free", subjectId: "fis-s1" });
+    expect(tree.map((l) => l.level.name)).toEqual(["Secundaria"]);
+    expect(tree[0]?.grades.map((g) => g.grade.name)).toEqual(["1° Secundaria"]);
+    expect(tree[0]?.grades[0]?.groups.map((g) => [g.group.id, g.availability])).toEqual([
+      ["s1A", { kind: "free", subjectId: "fis-s1" }],
+      ["s1B", { kind: "free", subjectId: "fis-s1" }],
+    ]);
+  });
+
+  it("every offered group resolves to the subject row of its OWN grade", () => {
+    const tree = groupChoices("ada", "Matemáticas", catalogue([]));
+    const bySubject = new Map(subjects.map((s) => [s.id, s.gradeLevelId]));
+    for (const level of tree) {
+      for (const grade of level.grades) {
+        for (const { group, availability } of grade.groups) {
+          if (isSelectable(availability)) expect(bySubject.get(availability.subjectId)).toBe(group.gradeLevelId);
+        }
+      }
+    }
   });
 
   it("tells mine from held by another teacher", () => {
@@ -125,6 +138,5 @@ describe("groupChoices", () => {
     expect(isSelectable({ kind: "free", subjectId: "x" })).toBe(true);
     expect(isSelectable({ kind: "held", subjectId: "x", teacherName: "Ana" })).toBe(true);
     expect(isSelectable({ kind: "mine", subjectId: "x" })).toBe(false);
-    expect(isSelectable({ kind: "missing", reason: "r" })).toBe(false);
   });
 });

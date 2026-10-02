@@ -12,26 +12,22 @@ import {
   createLevel,
   updateLevelAttendanceMode,
   updateLevelGrading,
-  createSubject,
   activateCycle,
   listCycles,
   listGradeLevels,
   listGroups,
   listLevels,
-  listSubjects,
   copyTermMonths,
   type CopyTermMonthsInput,
   type CreateCycleInput,
   type CreateGradeLevelInput,
   type CreateGroupInput,
   type CreateLevelInput,
-  type CreateSubjectInput,
   type Cycle,
   type GradeLevel,
   type Group,
   type Level,
   type LevelGrading,
-  type Subject,
   type Term,
 } from "../../config/api";
 import { CycleBar } from "./CycleBar";
@@ -76,7 +72,6 @@ export function Catalog({ onBack, canDeleteLevels = false, onDeleteLevel, notice
   const [cycles, setCycles] = useState<Cycle[]>([]);
   const [levels, setLevels] = useState<Level[]>([]);
   const [gradeLevels, setGradeLevels] = useState<GradeLevel[]>([]);
-  const [subjects, setSubjects] = useState<Subject[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
 
   const [selectedCycleId, setSelectedCycleId] = useState<string | undefined>(undefined);
@@ -117,18 +112,6 @@ export function Catalog({ onBack, canDeleteLevels = false, onDeleteLevel, notice
       active = false;
     };
   }, [selectedLevelId]);
-
-  // Selecting a grade loads its subjects.
-  useEffect(() => {
-    if (selectedGradeLevelId === undefined) return;
-    let active = true;
-    listSubjects(API_URL, selectedGradeLevelId)
-      .then((ss) => active && setSubjects(ss))
-      .catch(() => {});
-    return () => {
-      active = false;
-    };
-  }, [selectedGradeLevelId]);
 
   // Groups are per (cycle, grade level).
   useEffect(() => {
@@ -177,11 +160,6 @@ export function Catalog({ onBack, canDeleteLevels = false, onDeleteLevel, notice
   const handleCreateGradeLevel = useCallback(async (input: CreateGradeLevelInput): Promise<void> => {
     const created = await createGradeLevel(API_URL, input);
     setGradeLevels((prev) => [...prev, created]);
-  }, []);
-
-  const handleCreateSubject = useCallback(async (input: CreateSubjectInput): Promise<void> => {
-    const created = await createSubject(API_URL, input);
-    setSubjects((prev) => [...prev, created]);
   }, []);
 
   const handleCreateGroup = useCallback(async (input: CreateGroupInput): Promise<void> => {
@@ -355,8 +333,16 @@ export function Catalog({ onBack, canDeleteLevels = false, onDeleteLevel, notice
               </div>
             )}
 
-            {selectedGradeLevel !== undefined && (
-              <SubjectsPanel key={`s:${selectedGradeLevel.id}`} gradeLevel={selectedGradeLevel} subjects={subjects} onCreate={handleCreateSubject} />
+            {selectedLevel !== undefined && (
+              // Full row: the level's subjects, grade by grade (T13).
+              <div style={{ gridColumn: "1 / -1", minWidth: 0 }}>
+                <SubjectsPanel
+                  key={`s:${selectedLevel.id}`}
+                  level={selectedLevel}
+                  gradeLevels={gradeLevels.filter((g) => g.levelId === selectedLevel.id)}
+                  selectedGradeLevelId={selectedGradeLevelId}
+                />
+              </div>
             )}
 
             {selectedGradeLevel !== undefined && selectedCycle !== undefined && (

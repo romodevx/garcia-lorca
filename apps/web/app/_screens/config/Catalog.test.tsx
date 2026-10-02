@@ -119,6 +119,25 @@ describe("Catalog — cycles", () => {
 });
 
 describe("Catalog — nested level → grade level", () => {
+  it("choosing a level shows its subjects grade by grade, without choosing a grade first (T13)", async () => {
+    const user = userEvent.setup();
+    mocked.listLevels.mockResolvedValue([{ id: "l1", name: "PRIMARIA", sepCode: "", enrollmentGranularity: "cycle" }]);
+    mocked.listGradeLevels.mockResolvedValue([
+      { id: "g1", levelId: "l1", name: "1° PRIMARIA", ordinal: 1 },
+      { id: "g2", levelId: "l1", name: "2° PRIMARIA", ordinal: 2 },
+    ]);
+    mocked.listSubjects.mockImplementation(async (_b, gradeLevelId) =>
+      gradeLevelId === "g2" ? [{ id: "s2", gradeLevelId: "g2", name: "HISTORIA" }] : [],
+    );
+    render(<Catalog onBack={() => {}} />);
+
+    await user.click(await screen.findByRole("button", { name: /PRIMARIA/ }));
+
+    const second = await screen.findByRole("region", { name: "Materias de 2° PRIMARIA" });
+    expect(await within(second).findByText("HISTORIA")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Materias de 1° PRIMARIA" })).toBeInTheDocument();
+  });
+
   it("switches a level's attendance to per class and keeps the new value on screen", async () => {
     const user = userEvent.setup();
     const secundaria = { id: "l1", name: "SECUNDARIA", sepCode: "", enrollmentGranularity: "cycle" as const, attendanceMode: "daily" as const };

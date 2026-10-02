@@ -513,6 +513,57 @@ export function listSubjects(baseURL: string, gradeLevelId: string): Promise<Sub
   return getList<Subject>(baseURL, `/subjects${query({ gradeLevelId })}`, "subjects");
 }
 
+/** Renames a subject in place: same id and grade, so grades and assignments follow it. */
+export async function renameSubject(baseURL: string, id: string, name: string): Promise<Subject> {
+  const res = await authFetch(url(baseURL, `${BASE_PATH}/subjects/${encodeURIComponent(id)}`), {
+    method: "PATCH",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) {
+    throw await configFailure(res);
+  }
+  return (await res.json()) as Subject;
+}
+
+/** Deletes a subject. One a teacher is assigned to answers 409 (`isConflict`). */
+export async function deleteSubject(baseURL: string, id: string): Promise<void> {
+  const res = await authFetch(url(baseURL, `${BASE_PATH}/subjects/${encodeURIComponent(id)}`), {
+    method: "DELETE",
+    credentials: "include",
+  });
+  if (!res.ok) {
+    throw await configFailure(res);
+  }
+}
+
+/** What adding one subject to several grades did, grade by grade. */
+export interface SubjectsInGrades {
+  created: Subject[];
+  /** Grades that already had a subject with this name (409): nothing to do there. */
+  existing: string[];
+  /** Grades where the request failed for another reason. */
+  failed: string[];
+}
+
+/**
+ * Adds the subject to each grade — one row per grade, since subjects are per
+ * grade (T13). Each grade stands alone: one that already has the name does not
+ * stop the others, and the caller is told which was which.
+ */
+export async function createSubjectInGrades(baseURL: string, name: string, gradeLevelIds: readonly string[]): Promise<SubjectsInGrades> {
+  const results = await Promise.allSettled(gradeLevelIds.map((gradeLevelId) => createSubject(baseURL, { gradeLevelId, name })));
+  const out: SubjectsInGrades = { created: [], existing: [], failed: [] };
+  results.forEach((r, i) => {
+    const gradeId = gradeLevelIds[i] as string;
+    if (r.status === "fulfilled") out.created.push(r.value);
+    else if (r.reason instanceof ConfigError && r.reason.isConflict) out.existing.push(gradeId);
+    else out.failed.push(gradeId);
+  });
+  return out;
+}
+
 // --- terms ----------------------------------------------------------------
 
 export function createTerm(baseURL: string, input: CreateTermInput): Promise<Term> {

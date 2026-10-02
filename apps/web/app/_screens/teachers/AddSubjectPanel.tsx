@@ -94,12 +94,17 @@ export function AddSubjectPanel({ teacherId, catalogue, onAssign }: AddSubjectPa
           onChange={chooseSubject}
           error={subjectError}
           onClearError={() => setSubjectError(undefined)}
-          help="Por nombre: cada grupo recibe la de su propio grado."
+          help="Por nombre: cada grupo recibe la de su propio grado. Sólo aparecen los grados que la tienen."
         />
         {subjectName !== "" && (
           <div ref={gridRef}>
-            {tree.length === 0 ? <EmptyHint>Este ciclo aún no tiene grupos.</EmptyHint> : (
-              <GroupGrid tree={tree} selected={selected} onChange={(next) => { setSelected(next); setGroupError(undefined); }} />
+            {tree.length === 0 ? <EmptyHint>Ningún grupo de este ciclo es de un grado que tenga {subjectName}.</EmptyHint> : (
+              <>
+                <p style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 10 }}>
+                  Sólo aparecen los grados que tienen {subjectName}; las materias de cada grado se dan de alta en Configuración académica.
+                </p>
+                <GroupGrid tree={tree} selected={selected} onChange={(next) => { setSelected(next); setGroupError(undefined); }} />
+              </>
             )}
           </div>
         )}

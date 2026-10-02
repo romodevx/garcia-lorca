@@ -207,15 +207,14 @@ describe("TeacherLoadScreen", () => {
     expect(await screen.findByText("2 grupos asignados")).toBeInTheDocument();
   });
 
-  it("disables a group whose grade lacks the subject, saying why", async () => {
+  it("offers only the groups of grades that have the subject, and says so (T13)", async () => {
     const user = await renderPage();
     await chooseSubject(user, "Física");
 
-    const s2A = screen.getByRole("checkbox", { name: "2° Secundaria · A" });
-    expect(s2A).toBeDisabled();
-    expect(s2A).toHaveAccessibleDescription("2° Secundaria no tiene Física");
-    expect(screen.getByRole("checkbox", { name: "1° Primaria · A" })).toBeDisabled();
+    expect(screen.queryByRole("checkbox", { name: "2° Secundaria · A" })).toBeNull();
+    expect(screen.queryByRole("checkbox", { name: "1° Primaria · A" })).toBeNull();
     expect(screen.getByRole("checkbox", { name: "1° Secundaria · A" })).toBeEnabled();
+    expect(screen.getByText(/Sólo aparecen los grados que tienen Física/)).toBeInTheDocument();
   });
 
   it("marks groups already this teacher's, and labels those another teacher holds", async () => {
@@ -288,7 +287,7 @@ describe("TeacherLoadScreen", () => {
 
     await user.click(screen.getByRole("checkbox", { name: "Todos los de Secundaria" }));
     expect(screen.getByRole("button", { name: "Asignar (2 grupos)" })).toBeInTheDocument();
-    expect(screen.getByRole("checkbox", { name: "2° Secundaria · A" })).not.toBeChecked();
+    expect(screen.queryByRole("checkbox", { name: "2° Secundaria · A" })).toBeNull();
   });
 
   it("offers Reemplazar for conflicts and re-sends ONLY those with replaceConflicts", async () => {
