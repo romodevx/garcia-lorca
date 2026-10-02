@@ -417,6 +417,10 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("GET /api/v1/config/terms", configRead(configH.ListTerms))
 	mux.Handle("PUT /api/v1/config/terms/{id}/months", configWrite(configH.PutTermMonths))
 	mux.Handle("POST /api/v1/config/terms/copy-months", configWrite(configH.CopyTermMonths))
+	// T14: evaluation periods per grade (reads for whoever reads the catalog).
+	mux.Handle("GET /api/v1/config/evaluation-periods", configRead(configH.ListEvaluationPeriods))
+	mux.Handle("PUT /api/v1/config/grade-levels/{id}/evaluation-periods", configWrite(configH.PutGradeEvaluationPeriods))
+	mux.Handle("POST /api/v1/config/evaluation-periods/copy", configWrite(configH.CopyEvaluationPeriods))
 	mux.Handle("POST /api/v1/config/events", configWrite(configH.CreateSchoolEvent))
 	mux.Handle("GET /api/v1/config/events", configRead(configH.ListSchoolEvents))
 	mux.Handle("GET /api/v1/config/school-profile", configRead(configH.GetSchoolProfile))
