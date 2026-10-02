@@ -32,6 +32,8 @@ var AllModuleFlags = []string{
 	featureflag.Key("expenses"),
 	// T16: Horarios (the school timetable, in config).
 	featureflag.Key("schedule"),
+	// T17: Actividades (extracurriculars and their charge, in finance).
+	featureflag.Key("activities"),
 }
 
 // ParseEnabledModules turns a comma-separated list of module names (or full

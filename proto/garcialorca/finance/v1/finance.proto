@@ -167,6 +167,24 @@ service FinanceService {
   // again. The earlier closure stays in the history.
   rpc ReopenCashCut(ReopenCashCutRequest) returns (ReopenCashCutResponse);
 
+  // --- activities (T17, ADR 0031) ---
+  // Extracurricular activities with their schedule, price options (per days a
+  // week, or flat) and periodicity. Their charges are issued by RunBilling.
+  rpc ListActivities(ListActivitiesRequest) returns (ListActivitiesResponse);
+  rpc GetActivity(GetActivityRequest) returns (GetActivityResponse);
+  rpc CreateActivity(CreateActivityRequest) returns (CreateActivityResponse);
+  // UpdateActivity replaces the fields and the price options; an option left
+  // out is retired, refused while an enrolled pupil uses it.
+  rpc UpdateActivity(UpdateActivityRequest) returns (UpdateActivityResponse);
+  // ListActivityEnrollments is who is enrolled today.
+  rpc ListActivityEnrollments(ListActivityEnrollmentsRequest) returns (ListActivityEnrollmentsResponse);
+  // EnrollInActivity enrols pupils (each with its option) and charges the
+  // periods already billable.
+  rpc EnrollInActivity(EnrollInActivityRequest) returns (EnrollInActivityResponse);
+  // UnenrollFromActivity stops future periods; issued charges never change.
+  rpc UnenrollFromActivity(UnenrollFromActivityRequest) returns (UnenrollFromActivityResponse);
+  rpc ChangeActivityOption(ChangeActivityOptionRequest) returns (ChangeActivityOptionResponse);
+
   // --- tuition (M15: what each level costs, and the monthly run) ---
   // UpsertTuitionPlan sets (or replaces) the tuition table for one level of one
   // cycle. Keyed by (cycle, level): a school raises tuition each year, and the
@@ -845,6 +863,9 @@ message RunBillingResponse {
   // the same reason as enrollment_moved, and it matters more: this one moves
   // money, not dates.
   int32 enrollment_repriced = 8;
+  // Activity periods issued (T17). Their fixed late fees count in
+  // late_fees_created.
+  int32 activities_created = 10;
   // Levels of the cycle with no tuition table. They are NOT billed at zero —
   // they are reported, so a school notices it forgot one instead of discovering
   // it in June.
@@ -1497,4 +1518,138 @@ message ReopenCashCutRequest {
 
 message ReopenCashCutResponse {
   CashCutClosure closure = 1;
+}
+
+// --- activities (T17) -------------------------------------------------------
+
+// ActivitySlot is one entry of the weekly schedule: weekday 1 (Monday) … 7
+// (Sunday), start and end as "HH:MM".
+message ActivitySlot {
+  int32 weekday = 1;
+  string start = 2;
+  string end = 3;
+}
+
+// ActivityPriceOption is a charging scheme: a price per period for attending
+// days_per_week days, or (days_per_week 0) a flat fee. id empty on input = new.
+message ActivityPriceOption {
+  string id = 1;
+  int32 days_per_week = 2;
+  int64 amount_cents = 3;
+}
+
+message Activity {
+  string id = 1;
+  string name = 2;
+  repeated ActivitySlot schedule = 3;
+  // monthly | weekly | per_cycle
+  string periodicity = 4;
+  // YYYY-MM-DD: the first billing date and the first due date.
+  string billing_starts_on = 5;
+  string first_due_on = 6;
+  int64 late_fee_cents = 7;
+  bool active = 8;
+  repeated ActivityPriceOption options = 9;
+  int32 enrolled_count = 10;
+}
+
+// ActivityInput is what create and update take.
+message ActivityInput {
+  string name = 1;
+  repeated ActivitySlot schedule = 2;
+  string periodicity = 3;
+  string billing_starts_on = 4;
+  string first_due_on = 5;
+  int64 late_fee_cents = 6;
+  bool active = 7;
+  repeated ActivityPriceOption options = 8;
+}
+
+message ActivityEnrollment {
+  string id = 1;
+  string activity_id = 2;
+  string student_id = 3;
+  string option_id = 4;
+  string starts_on = 5;
+  // Empty while still enrolled.
+  string ends_on = 6;
+}
+
+message ListActivitiesRequest {
+  bool include_inactive = 1;
+}
+
+message ListActivitiesResponse {
+  repeated Activity activities = 1;
+}
+
+message GetActivityRequest {
+  string id = 1;
+}
+
+message GetActivityResponse {
+  Activity activity = 1;
+}
+
+message CreateActivityRequest {
+  ActivityInput activity = 1;
+}
+
+message CreateActivityResponse {
+  Activity activity = 1;
+}
+
+message UpdateActivityRequest {
+  string id = 1;
+  ActivityInput activity = 2;
+}
+
+message UpdateActivityResponse {
+  Activity activity = 1;
+}
+
+message ListActivityEnrollmentsRequest {
+  string activity_id = 1;
+}
+
+message ListActivityEnrollmentsResponse {
+  repeated ActivityEnrollment enrollments = 1;
+}
+
+message EnrollItem {
+  string student_id = 1;
+  string option_id = 2;
+}
+
+message EnrollInActivityRequest {
+  string activity_id = 1;
+  // YYYY-MM-DD; empty is today.
+  string starts_on = 2;
+  repeated EnrollItem items = 3;
+}
+
+message EnrollInActivityResponse {
+  repeated ActivityEnrollment enrollments = 1;
+  int32 charges_created = 2;
+}
+
+message UnenrollFromActivityRequest {
+  string activity_id = 1;
+  repeated string student_ids = 2;
+  // YYYY-MM-DD; empty is today.
+  string ends_on = 3;
+}
+
+message UnenrollFromActivityResponse {
+  int32 ended = 1;
+}
+
+message ChangeActivityOptionRequest {
+  string activity_id = 1;
+  string student_id = 2;
+  string option_id = 3;
+}
+
+message ChangeActivityOptionResponse {
+  ActivityEnrollment enrollment = 1;
 }

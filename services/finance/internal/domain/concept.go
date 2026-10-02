@@ -88,6 +88,10 @@ const (
 	// is for is in its description, because a school invents these every year
 	// and a kind per fee would be a migration per invention.
 	KindFee = "fee"
+	// KindActivity is the concept every activity charge hangs from (T17). Which
+	// activity is in the charge's ref and description, as with fees: an
+	// activity is the school's to invent, a kind is a migration.
+	KindActivity = "activity"
 )
 
 // Kind reports what the concept IS, independent of what it was named.
@@ -99,7 +103,7 @@ func (c ChargeConcept) Kind() string { return c.kind }
 // claim a system kind.
 func (c ChargeConcept) WithKind(kind string) (ChargeConcept, error) {
 	switch kind {
-	case KindCustom, KindTuition, KindEnrollment, KindLateFee, KindFee:
+	case KindCustom, KindTuition, KindEnrollment, KindLateFee, KindFee, KindActivity:
 		c.kind = kind
 		return c, nil
 	default:

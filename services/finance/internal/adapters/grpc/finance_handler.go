@@ -37,6 +37,8 @@ type FinanceHandler struct {
 	levels  *usecase.LevelArchiveService
 	// expenses is T10's (WithExpenses); nil leaves those RPCs Unimplemented.
 	expenses *usecase.ExpenseService
+	// activities is T17's (WithActivities); nil leaves those RPCs Unimplemented.
+	activities *usecase.ActivityService
 }
 
 // NewFinanceHandler wires the handler to the finance + health use cases.
@@ -866,6 +868,7 @@ func (h *FinanceHandler) RunBilling(ctx context.Context, req *connect.Request[fi
 		EnrollmentCreated:  int32(got.EnrollmentCreated),
 		LateFeesCreated:    int32(got.LateFeesCreated),
 		FeesCreated:        int32(got.FeesCreated),
+		ActivitiesCreated:  int32(got.ActivitiesCreated),
 		EnrollmentMoved:    int32(got.EnrollmentMoved),
 		EnrollmentRepriced: int32(got.EnrollmentRepriced),
 		Skipped:            int32(got.Skipped),

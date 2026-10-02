@@ -250,6 +250,11 @@ function RunSummary({ run }: { run: BillingRun }): ReactElement {
         {run.enrollmentCreated} inscripciones, {run.feesCreated} cuotas y{" "}
         {run.lateFeesCreated} recargos. {run.skipped} ya existían.
       </p>
+      {(run.activitiesCreated ?? 0) > 0 && (
+        <p style={{ marginTop: 8 }}>
+          Además, <strong>{run.activitiesCreated} cargos de actividades</strong>.
+        </p>
+      )}
       {run.enrollmentMoved > 0 && (
         <p style={{ marginTop: 8 }}>
           Se corrigió la fecha límite de <strong>{run.enrollmentMoved} inscripciones</strong> que

@@ -303,3 +303,52 @@ type cashCutClosureModel struct {
 }
 
 func (cashCutClosureModel) TableName() string { return "cash_cut_closures" }
+
+// activityModel is the GORM row for `activities` (T17, migration 0025).
+// Schedule is the JSONB [{weekday, start, end}]; the dates map `date`.
+type activityModel struct {
+	ID              string     `gorm:"column:id;primaryKey"`
+	TenantID        string     `gorm:"column:tenant_id"`
+	Name            string     `gorm:"column:name"`
+	Schedule        []byte     `gorm:"column:schedule;type:jsonb"`
+	Periodicity     string     `gorm:"column:periodicity"`
+	BillingStartsOn time.Time  `gorm:"column:billing_starts_on"`
+	FirstDueOn      time.Time  `gorm:"column:first_due_on"`
+	LateFeeCents    int64      `gorm:"column:late_fee_cents"`
+	Active          bool       `gorm:"column:active"`
+	ResumedOn       *time.Time `gorm:"column:resumed_on"`
+	CreatedAt       time.Time  `gorm:"column:created_at;default:now()"`
+	UpdatedAt       time.Time  `gorm:"column:updated_at;default:now()"`
+}
+
+func (activityModel) TableName() string { return "activities" }
+
+// activityOptionModel is the GORM row for `activity_price_options`.
+// DaysPerWeek NULL is the flat fee.
+type activityOptionModel struct {
+	ID          string    `gorm:"column:id;primaryKey"`
+	TenantID    string    `gorm:"column:tenant_id"`
+	ActivityID  string    `gorm:"column:activity_id"`
+	DaysPerWeek *int      `gorm:"column:days_per_week"`
+	AmountCents int64     `gorm:"column:amount_cents"`
+	Retired     bool      `gorm:"column:retired"`
+	CreatedAt   time.Time `gorm:"column:created_at;default:now()"`
+	UpdatedAt   time.Time `gorm:"column:updated_at;default:now()"`
+}
+
+func (activityOptionModel) TableName() string { return "activity_price_options" }
+
+// activityEnrollmentModel is the GORM row for `activity_enrollments`.
+type activityEnrollmentModel struct {
+	ID         string     `gorm:"column:id;primaryKey"`
+	TenantID   string     `gorm:"column:tenant_id"`
+	ActivityID string     `gorm:"column:activity_id"`
+	StudentID  string     `gorm:"column:student_id"`
+	OptionID   string     `gorm:"column:option_id"`
+	StartsOn   time.Time  `gorm:"column:starts_on"`
+	EndsOn     *time.Time `gorm:"column:ends_on"`
+	CreatedAt  time.Time  `gorm:"column:created_at;default:now()"`
+	UpdatedAt  time.Time  `gorm:"column:updated_at;default:now()"`
+}
+
+func (activityEnrollmentModel) TableName() string { return "activity_enrollments" }

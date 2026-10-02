@@ -526,6 +526,11 @@ func accruedSurcharges(
 		if c.Charge.Status() == domain.StatusCancelled || c.Charge.ConceptID() == lateFeeID || owed(c) <= 0 {
 			continue
 		}
+		if domain.IsActivityRef(c.Charge.ExternalRef()) {
+			// An activity's only surcharge is its own fixed fee, written by the
+			// run (T17); the tuition table's daily rule is not its rule.
+			continue
+		}
 		if !expectedBy(c.Charge.DueDate(), when) || !c.Charge.OpenOn(when) {
 			continue
 		}
@@ -1116,6 +1121,10 @@ func (p *depositPlanner) deriveSurcharge(c ports.ChargeWithPaid, existing []port
 	// A surcharge never earns one of its own (a hand-typed one is a debt in
 	// the list): that is how a fixed fee turns into compound interest.
 	if !p.policy.DailyMode || owed(c) <= 0 || c.Charge.ConceptID() == p.lateFeeID {
+		return domain.Charge{}, false, nil
+	}
+	// An activity answers to its own fixed fee (T17), never to the daily rule.
+	if domain.IsActivityRef(c.Charge.ExternalRef()) {
 		return domain.Charge{}, false, nil
 	}
 	total := domain.Surcharge(p.policy, p.calendar, c.Charge.DueDate(), p.paidOn)

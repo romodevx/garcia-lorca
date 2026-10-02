@@ -920,6 +920,8 @@ type BillingRun struct {
 	EnrollmentCreated int `json:"enrollmentCreated"`
 	LateFeesCreated   int `json:"lateFeesCreated"`
 	FeesCreated       int `json:"feesCreated"`
+	// ActivitiesCreated counts the activity periods issued (T17).
+	ActivitiesCreated int `json:"activitiesCreated"`
 	// EnrollmentMoved counts inscriptions whose deadline the run corrected.
 	EnrollmentMoved int `json:"enrollmentMoved"`
 	// EnrollmentRepriced counts unpaid inscriptions moved to the tier now in
@@ -1010,6 +1012,7 @@ func toBillingRun(m *financev1.RunBillingResponse) BillingRun {
 		EnrollmentCreated:  int(m.GetEnrollmentCreated()),
 		LateFeesCreated:    int(m.GetLateFeesCreated()),
 		FeesCreated:        int(m.GetFeesCreated()),
+		ActivitiesCreated:  int(m.GetActivitiesCreated()),
 		EnrollmentMoved:    int(m.GetEnrollmentMoved()),
 		EnrollmentRepriced: int(m.GetEnrollmentRepriced()),
 		Skipped:            int(m.GetSkipped()),

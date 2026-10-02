@@ -156,6 +156,8 @@ describe("every live module's permission is one somebody can hold", () => {
     "expenses:read", "expenses:write",
     // T16: Horarios.
     "schedule:read", "schedule:write",
+    // T17: Actividades.
+    "activities:read", "activities:write",
   ]);
   // These carry a permission nobody is granted ON PURPOSE, so the tile hides
   // itself until the module exists.
@@ -221,5 +223,16 @@ describe("Horarios (T16)", () => {
     expect(isModuleVisible(horarios, ["schedule:read"])).toBe(true);
     expect(isModuleVisible(horarios, ["teaching:read"])).toBe(true);
     expect(isModuleVisible(horarios, ["students:read"])).toBe(false);
+  });
+});
+
+describe("Actividades (T17)", () => {
+  const actividades = MODULES.find((m) => m.id === "activities") as ModuleDef;
+
+  it("is gated by its own flag and permission", () => {
+    expect(actividades.label).toBe("Actividades");
+    expect(actividades.flag).toBe("module_activities");
+    expect(isModuleVisible(actividades, ["activities:read"])).toBe(true);
+    expect(isModuleVisible(actividades, ["finance:read", "students:read"])).toBe(false);
   });
 });

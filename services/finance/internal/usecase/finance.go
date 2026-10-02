@@ -78,9 +78,11 @@ type FinanceService struct {
 	// nothing else, which is what every caller got before M16.
 	calendar  ports.CalendarReader
 	publisher ports.PaymentPublisher
-	tenantID  string
-	newID     func() string
-	now       func() time.Time
+	// activities is T17's (WithActivities); nil bills no activity.
+	activities ports.ActivityRepository
+	tenantID   string
+	newID      func() string
+	now        func() time.Time
 }
 
 // NewFinanceService wires the use case. tenantID is the single-tenant scope for
