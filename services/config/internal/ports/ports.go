@@ -299,3 +299,29 @@ type LevelDeletionRepository interface {
 	GetLevelDeletion(ctx context.Context, batchID string) (domain.LevelDeletion, error)
 	PurgeLevelArchives(ctx context.Context, cutoff time.Time) (int64, error)
 }
+
+// EvaluationPeriodRepository loads and persists the evaluation periods of each
+// grade (T14). Every method is tenant-scoped (RLS) like CatalogRepository.
+//
+//   - ListEvaluationPeriods returns the periods of cycleID, narrowed to a level
+//     (its grades) and/or a grade when those are non-empty, ordered by grade
+//     ordinal then period ordinal.
+//   - ReplaceEvaluationPeriods makes each grade's period set in cycleID exactly
+//     the given one, in ONE transaction: a period whose id exists is updated in
+//     place (its id survives, so T15's grades keep pointing at it), a new id is
+//     inserted, and a period of that grade not in the set is deleted. Two
+//     periods of a grade sharing a day is domain.PeriodOverlap (KindConflict),
+//     also when a concurrent writer caused it; nothing is written then. A grade
+//     of a level being deleted is LEVEL_BEING_DELETED.
+type EvaluationPeriodRepository interface {
+	GetCycle(ctx context.Context, id string) (domain.Cycle, error)
+	GetGradeLevel(ctx context.Context, id string) (domain.GradeLevel, error)
+	ListEvaluationPeriods(ctx context.Context, cycleID, levelID, gradeLevelID string) ([]domain.EvaluationPeriod, error)
+	ReplaceEvaluationPeriods(ctx context.Context, cycleID string, sets []GradePeriodSet) error
+}
+
+// GradePeriodSet is the complete set of periods one grade must end up with.
+type GradePeriodSet struct {
+	GradeLevelID string
+	Periods      []domain.EvaluationPeriod
+}

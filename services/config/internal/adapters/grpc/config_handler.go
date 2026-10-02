@@ -28,6 +28,7 @@ type ConfigHandler struct {
 	catalog *usecase.CatalogService
 	health  *usecase.HealthService
 	trash   *usecase.LevelDeletionService
+	periods *usecase.EvaluationPeriodService
 }
 
 // WithLevelDeletion wires the level trash (ADR 0021). The composition root

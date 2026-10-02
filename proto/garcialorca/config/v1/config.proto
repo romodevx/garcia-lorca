@@ -90,6 +90,21 @@ service ConfigService {
   // source; unmatched target terms emptied), in one transaction.
   rpc CopyTermMonths(CopyTermMonthsRequest) returns (CopyTermMonthsResponse);
 
+  // --- evaluation periods (per cycle, grade_level; T14) ---
+  // ListEvaluationPeriods lists the periods of a cycle, optionally narrowed to
+  // a level's grades and/or one grade, by grade ordinal then period ordinal.
+  rpc ListEvaluationPeriods(ListEvaluationPeriodsRequest) returns (ListEvaluationPeriodsResponse);
+  // UpsertEvaluationPeriods makes the given periods the complete set of one
+  // grade in a cycle (matched by ordinal: an existing ordinal keeps its id, a
+  // missing one is removed; an empty list clears the grade). Overlapping
+  // periods are AlreadyExists (X-Error-Code PERIOD_OVERLAP); a period outside
+  // the cycle is InvalidArgument (PERIOD_OUTSIDE_CYCLE); one ending before it
+  // starts is InvalidArgument (PERIOD_ENDS_BEFORE_START).
+  rpc UpsertEvaluationPeriods(UpsertEvaluationPeriodsRequest) returns (UpsertEvaluationPeriodsResponse);
+  // CopyEvaluationPeriods gives each target grade the source grade's periods
+  // (names and dates, matched by ordinal), in one transaction.
+  rpc CopyEvaluationPeriods(CopyEvaluationPeriodsRequest) returns (CopyEvaluationPeriodsResponse);
+
   // --- groups (per cycle, grade_level) ---
   // CreateGroup adds a class group within a cycle for a grade.
   rpc CreateGroup(CreateGroupRequest) returns (CreateGroupResponse);
@@ -624,6 +639,70 @@ message CopyTermMonthsRequest {
 // request order, then by ordinal.
 message CopyTermMonthsResponse {
   repeated Term terms = 1;
+}
+
+// --- Evaluation period messages (T14) ---------------------------------------
+
+// EvaluationPeriod is one evaluation period (trimester, bimester…) of one grade
+// in one cycle. starts_on/ends_on are calendar dates, both inclusive, carried
+// as midnight UTC.
+message EvaluationPeriod {
+  string id = 1;
+  string tenant_id = 2;
+  string cycle_id = 3;
+  string grade_level_id = 4;
+  int32 ordinal = 5;
+  string name = 6;
+  google.protobuf.Timestamp starts_on = 7;
+  google.protobuf.Timestamp ends_on = 8;
+  // term_id is the term a migrated period came from (provenance), or "".
+  string term_id = 9;
+}
+
+// EvaluationPeriodInput is one period as the school enters it.
+message EvaluationPeriodInput {
+  int32 ordinal = 1;
+  string name = 2;
+  google.protobuf.Timestamp starts_on = 3;
+  google.protobuf.Timestamp ends_on = 4;
+}
+
+// ListEvaluationPeriodsRequest scopes the list to a cycle (required), and
+// optionally a level's grades and/or one grade.
+message ListEvaluationPeriodsRequest {
+  string cycle_id = 1;
+  string level_id = 2;
+  string grade_level_id = 3;
+}
+
+// ListEvaluationPeriodsResponse returns the periods by grade, then ordinal.
+message ListEvaluationPeriodsResponse {
+  repeated EvaluationPeriod periods = 1;
+}
+
+// UpsertEvaluationPeriodsRequest replaces one grade's periods in a cycle.
+message UpsertEvaluationPeriodsRequest {
+  string cycle_id = 1;
+  string grade_level_id = 2;
+  repeated EvaluationPeriodInput periods = 3;
+}
+
+// UpsertEvaluationPeriodsResponse returns the grade's periods by ordinal.
+message UpsertEvaluationPeriodsResponse {
+  repeated EvaluationPeriod periods = 1;
+}
+
+// CopyEvaluationPeriodsRequest copies one grade's periods onto other grades.
+message CopyEvaluationPeriodsRequest {
+  string cycle_id = 1;
+  string from_grade_level_id = 2;
+  repeated string to_grade_level_ids = 3;
+}
+
+// CopyEvaluationPeriodsResponse returns the targets' periods, grade by grade
+// in request order, then by ordinal.
+message CopyEvaluationPeriodsResponse {
+  repeated EvaluationPeriod periods = 1;
 }
 
 // --- Group RPC messages ---------------------------------------------------

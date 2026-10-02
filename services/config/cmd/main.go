@@ -90,7 +90,8 @@ func buildMux(log *slog.Logger) (*http.ServeMux, error) {
 	// (always warm), batch by batch on restorable_until; this scale-to-zero
 	// service keeps no ticker of its own.
 	trash := usecase.NewLevelDeletionService(repo, time.Now)
-	handler := grpcadapter.NewConfigHandler(catalog, health).WithLevelDeletion(trash)
+	periods := usecase.NewEvaluationPeriodService(repo, tenantID, func() string { return uuid.NewString() })
+	handler := grpcadapter.NewConfigHandler(catalog, health).WithLevelDeletion(trash).WithEvaluationPeriods(periods)
 
 	mux := http.NewServeMux()
 	path, h := configv1connect.NewConfigServiceHandler(handler, connect.WithRecover(recoverFn))
