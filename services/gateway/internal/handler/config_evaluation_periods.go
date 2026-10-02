@@ -1,8 +1,10 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
 	"time"
+	"unicode/utf8"
 
 	"github.com/garcia-lorca/services/gateway/internal/client"
 )
@@ -11,7 +13,8 @@ import (
 // business rules; these only keep a malformed or oversized body from leaving
 // the gateway.
 const (
-	maxPeriodsPerGrade = 12
+	maxPeriodsPerGrade = 12 // mirrors config's domain.MaxEvaluationPeriods
+	maxPeriodNameLen   = 60 // mirrors config's domain.MaxPeriodNameLen
 	maxCopyTargets     = 50
 	codePeriodDate     = "PERIOD_DATE_INVALID"
 	codeTooManyPeriods = "TOO_MANY_PERIODS"
@@ -68,6 +71,8 @@ func (h *ConfigHandler) ListEvaluationPeriods(w http.ResponseWriter, r *http.Req
 }
 
 type evaluationPeriodInput struct {
+	// ID is the grade's period the row edits; omitted for a new period.
+	ID       string `json:"id"`
 	Ordinal  int    `json:"ordinal"`
 	Name     string `json:"name"`
 	StartsOn string `json:"startsOn"`
@@ -96,18 +101,23 @@ func (h *ConfigHandler) PutGradeEvaluationPeriods(w http.ResponseWriter, r *http
 		return
 	}
 	if len(*req.Periods) > maxPeriodsPerGrade {
-		writeCodedError(w, http.StatusBadRequest, codeTooManyPeriods, "Un grado puede tener hasta 12 periodos")
+		writeCodedError(w, http.StatusBadRequest, codeTooManyPeriods, fmt.Sprintf("Un grado puede tener hasta %d periodos", maxPeriodsPerGrade))
 		return
 	}
 	in := make([]client.EvaluationPeriodInput, 0, len(*req.Periods))
 	for _, p := range *req.Periods {
+		if (p.ID != "" && !uuidShape.MatchString(p.ID)) || p.Ordinal < 1 || p.Ordinal > maxPeriodsPerGrade ||
+			utf8.RuneCountInString(p.Name) > maxPeriodNameLen {
+			http.Error(w, fmt.Sprintf("each period needs an ordinal 1–%d, a name of at most %d characters and, if any, a period id", maxPeriodsPerGrade, maxPeriodNameLen), http.StatusBadRequest)
+			return
+		}
 		from, errFrom := time.Parse(dateLayout, p.StartsOn)
 		to, errTo := time.Parse(dateLayout, p.EndsOn)
 		if errFrom != nil || errTo != nil {
 			writeCodedError(w, http.StatusBadRequest, codePeriodDate, "Fecha inválida (usa AAAA-MM-DD)")
 			return
 		}
-		in = append(in, client.EvaluationPeriodInput{Ordinal: p.Ordinal, Name: p.Name, StartsOn: from, EndsOn: to})
+		in = append(in, client.EvaluationPeriodInput{ID: p.ID, Ordinal: p.Ordinal, Name: p.Name, StartsOn: from, EndsOn: to})
 	}
 	res, err := h.svc.UpsertEvaluationPeriods(r.Context(), req.CycleID, gradeID, in)
 	if err != nil {

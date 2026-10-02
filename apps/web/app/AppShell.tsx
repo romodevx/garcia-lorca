@@ -21,7 +21,7 @@ import { Catalog } from "./_screens/config/Catalog";
 import { LevelDeleteScreen } from "./_screens/config/levelDeletion/LevelDeleteScreen";
 import { LevelPeriodsScreen } from "./_screens/config/periods/LevelPeriodsScreen";
 import { clearLevelNotice, leaveLevelNotice, peekLevelNotice } from "./_screens/config/levelDeletion/pendingNotice";
-import { canDeleteLevels } from "./config/permissions";
+import { canDeleteLevels, canWriteConfig } from "./config/permissions";
 import { canDeleteUsers } from "./admin/permissions";
 import { AdminScreen } from "./_screens/admin/AdminScreen";
 import { StudentEditScreen } from "./_screens/students/StudentEditScreen";
@@ -470,7 +470,7 @@ export function AppShell(): ReactElement {
   // T14: a level's evaluation periods, grade by grade. UX only: the gateway
   // answers reads with config:read and edits with config:write.
   const openLevelPeriods = (levelId: string): void => go({ screen: "levelPeriods", levelId });
-  const mayWriteConfig = principal?.permissions?.includes("config:write") === true;
+  const mayWriteConfig = canWriteConfig(principal?.permissions);
   // What a finished deletion tells Configuración; it belongs to that one visit.
   // Next remounts this shell on the route change, so the sentence travels in
   // pendingNotice (module scope) and the new shell picks it up once.

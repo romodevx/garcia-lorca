@@ -63,7 +63,7 @@ export function LevelPeriodsScreen({ levelId, canWrite, onBack }: LevelPeriodsSc
       {p.load.kind === "failed" && (
         <div style={{ display: "grid", gap: 10, justifyItems: "start" }}>
           <ErrorAlert message="No se pudieron cargar los periodos de este nivel." />
-          <Btn kind="ghost" onClick={() => p.cycle !== undefined && p.selectCycle(p.cycle.id)}>Reintentar</Btn>
+          <Btn kind="ghost" onClick={p.retry}>Reintentar</Btn>
         </div>
       )}
       {p.load.kind === "ready" && p.cycle === undefined && <EmptyHint>Primero crea un ciclo escolar en Configuración.</EmptyHint>}

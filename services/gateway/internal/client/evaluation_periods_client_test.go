@@ -82,10 +82,11 @@ func TestConfigClientEvaluationPeriods(t *testing.T) {
 		ID: "p-1", CycleID: "cyc-1", GradeLevelID: "g-1", Ordinal: 1, Name: "T1", StartsOn: sept1, EndsOn: nov30, TermID: "trm-1",
 	}, list[0])
 
-	up, err := c.UpsertEvaluationPeriods(ctx, "cyc-1", "g-2", []client.EvaluationPeriodInput{{Ordinal: 1, Name: "T1", StartsOn: sept1, EndsOn: nov30}})
+	up, err := c.UpsertEvaluationPeriods(ctx, "cyc-1", "g-2", []client.EvaluationPeriodInput{{ID: "p-1", Ordinal: 1, Name: "T1", StartsOn: sept1, EndsOn: nov30}})
 	require.NoError(t, err)
 	require.Len(t, stub.gotUpsert.GetPeriods(), 1)
 	assert.True(t, stub.gotUpsert.GetPeriods()[0].GetEndsOn().AsTime().Equal(nov30))
+	assert.Equal(t, "p-1", stub.gotUpsert.GetPeriods()[0].GetId(), "the row's id travels")
 	assert.Equal(t, "g-2", up[0].GradeLevelID)
 
 	_, err = c.UpsertEvaluationPeriods(ctx, "cyc-1", "clash", nil)

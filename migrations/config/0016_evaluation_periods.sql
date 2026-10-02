@@ -27,7 +27,9 @@
 -- cycle; a term without months uses its own dates, clamped. Terms go in
 -- ordinal order and one that would overlap a period already derived for that
 -- grade is skipped with a NOTICE (months like {Sep, Nov} + {Oct} interleave):
--- the school enters it by hand. Nothing stops the migration — this is a
+-- the school enters it by hand. A level frozen by a running deletion (0012)
+-- is skipped: its structure is on its way to the trash and the freeze trigger
+-- would refuse the insert. Nothing stops the migration — this is a
 -- catalog of dates, editable on the screen, not money or grades.
 --
 -- btree_gist (standard contrib: available on Cloud SQL, Neon and the
@@ -134,6 +136,7 @@ BEGIN
                LEAST(COALESCE((m.last_month + interval '1 month' - interval '1 day')::date, t.ends_on), c.ends_on) AS ends_on
           FROM terms t
           JOIN cycles c ON c.id = t.cycle_id
+          JOIN levels l ON l.id = t.level_id AND l.status <> 'deleting'
           JOIN grade_levels g ON g.level_id = t.level_id AND g.tenant_id = t.tenant_id
           LEFT JOIN (SELECT term_id, min(month) AS first_month, max(month) AS last_month
                        FROM term_months GROUP BY term_id) m ON m.term_id = t.id

@@ -26,7 +26,15 @@ const (
 	CodePeriodOverlap         RefusalCode = "PERIOD_OVERLAP"
 	CodePeriodOrdinalTaken    RefusalCode = "PERIOD_ORDINAL_TAKEN"
 	CodeTooManyPeriods        RefusalCode = "TOO_MANY_PERIODS"
+	CodePeriodsChanged        RefusalCode = "PERIODS_CHANGED"
 )
+
+// PeriodsChangedMeanwhile is the KindConflict refusal for a save that lost a
+// race with another save of the same grade: reload and try again.
+func PeriodsChangedMeanwhile() error {
+	return refusal(glerrors.KindConflict, CodePeriodsChanged,
+		"Alguien más guardó los periodos de este grado al mismo tiempo; recarga y vuelve a intentarlo")
+}
 
 // EvaluationPeriod is one evaluation period (a trimester, a bimester) of ONE
 // grade in ONE cycle, with the calendar dates it spans, both inclusive. Grades

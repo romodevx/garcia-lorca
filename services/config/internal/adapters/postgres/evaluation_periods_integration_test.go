@@ -222,3 +222,17 @@ func TestEvaluationPeriodsAreTenantIsolated(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, still, 3, "A's periods survive B's clear")
 }
+
+// A save that re-inserts an id another row already holds (what the later of two
+// simultaneous saves of one grade does) is the coded "changed meanwhile".
+func TestReplaceEvaluationPeriodsTakenIdIsChangedMeanwhile(t *testing.T) {
+	ctx := context.Background()
+	r := seedPeriodsRig(t, tenantA, "e7a00007")
+	g2 := r.trimesters(t, tenantA, r.grade2, "e7a00007-0000-0000-0000-0000000002a")
+	require.NoError(t, r.repo.ReplaceEvaluationPeriods(ctx, r.cycleID, []ports.GradePeriodSet{{GradeLevelID: r.grade2, Periods: g2}}))
+
+	clash := evalPeriod(t, tenantA, g2[0].ID(), r.cycleID, r.grade1, 1, dt(2026, time.September, 1), dt(2026, time.September, 30))
+	err := r.repo.ReplaceEvaluationPeriods(ctx, r.cycleID, []ports.GradePeriodSet{{GradeLevelID: r.grade1, Periods: []domain.EvaluationPeriod{clash}}})
+	assert.Equal(t, glerrors.KindConflict, glerrors.KindOf(err))
+	assert.Equal(t, domain.CodePeriodsChanged, domain.RefusalCodeOf(err))
+}

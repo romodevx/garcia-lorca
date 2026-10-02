@@ -131,8 +131,8 @@ describe("LevelPeriodsScreen — a level's grades with their evaluation periods 
 
     await waitFor(() => expect(mocked.saveGradeEvaluationPeriods).toHaveBeenCalledTimes(1));
     expect(mocked.saveGradeEvaluationPeriods).toHaveBeenCalledWith(expect.anything(), "g1", "c1", [
-      { ordinal: 1, name: "1.ER TRIMESTRE", startsOn: "2026-08-24", endsOn: "2026-11-30" },
-      { ordinal: 2, name: "2.º TRIMESTRE", startsOn: "2026-12-01", endsOn: "2027-03-31" },
+      { id: "p1", ordinal: 1, name: "1.ER TRIMESTRE", startsOn: "2026-08-24", endsOn: "2026-11-30" },
+      { id: "p2", ordinal: 2, name: "2.º TRIMESTRE", startsOn: "2026-12-01", endsOn: "2027-03-31" },
       { ordinal: 3, name: "PERIODO 3", startsOn: "2027-04-01", endsOn: "2027-06-30" },
     ]);
     expect(await screen.findByText("Periodos de 1° PRIMARIA guardados.")).toBeInTheDocument();
@@ -142,11 +142,13 @@ describe("LevelPeriodsScreen — a level's grades with their evaluation periods 
     renderScreen();
     await waitFor(() => expect(field("1° PRIMARIA", 2, "Fin").value).toBe("2027-03-31"));
 
-    await userEvent.click(within(row("1° PRIMARIA", 2)).getByRole("button", { name: "Quitar periodo 2" }));
+    // Removing the FIRST period removes it: the second keeps its own id
+    // although it becomes period 1.
+    await userEvent.click(within(row("1° PRIMARIA", 1)).getByRole("button", { name: "Quitar periodo 1" }));
     await userEvent.click(within(gradeBlock("1° PRIMARIA")).getByRole("button", { name: "Guardar periodos" }));
 
     await waitFor(() => expect(mocked.saveGradeEvaluationPeriods).toHaveBeenCalledWith(expect.anything(), "g1", "c1", [
-      { ordinal: 1, name: "1.ER TRIMESTRE", startsOn: "2026-08-24", endsOn: "2026-11-30" },
+      { id: "p2", ordinal: 1, name: "2.º TRIMESTRE", startsOn: "2026-12-01", endsOn: "2027-03-31" },
     ]));
   });
 
@@ -228,6 +230,29 @@ describe("LevelPeriodsScreen — a level's grades with their evaluation periods 
 
     await waitFor(() => expect(mocked.listEvaluationPeriods).toHaveBeenLastCalledWith(expect.anything(), { cycleId: "c0", levelId: "l1" }));
     await waitFor(() => expect(within(gradeBlock("1° PRIMARIA")).getByText(/aún no tiene periodos/i)).toBeInTheDocument());
+  });
+
+  it("Reintentar reads the periods again after a failed load", async () => {
+    mocked.listEvaluationPeriods.mockRejectedValueOnce(new Error("offline"));
+    renderScreen();
+
+    await userEvent.click(await screen.findByRole("button", { name: "Reintentar" }));
+
+    await waitFor(() => expect(field("1° PRIMARIA", 1, "Nombre").value).toBe("1.ER TRIMESTRE"));
+  });
+
+  it("a save that answers after the cycle changed does not land in the new cycle", async () => {
+    let answer: (v: EvaluationPeriod[]) => void = () => {};
+    mocked.saveGradeEvaluationPeriods.mockImplementationOnce(() => new Promise((resolve) => { answer = resolve; }));
+    renderScreen();
+    await waitFor(() => expect(field("1° PRIMARIA", 1, "Nombre").value).toBe("1.ER TRIMESTRE"));
+
+    await userEvent.click(within(gradeBlock("1° PRIMARIA")).getByRole("button", { name: "Guardar periodos" }));
+    await userEvent.click(screen.getByRole("button", { name: "2025-2026" }));
+    await waitFor(() => expect(within(gradeBlock("1° PRIMARIA")).getByText(/aún no tiene periodos/i)).toBeInTheDocument());
+    await act(async () => answer([period("p1", "g1", 1, "1.ER TRIMESTRE", "2026-08-24", "2026-11-30")]));
+
+    expect(within(gradeBlock("1° PRIMARIA")).getByText(/aún no tiene periodos/i)).toBeInTheDocument();
   });
 
   it("without config:write the periods are read-only", async () => {

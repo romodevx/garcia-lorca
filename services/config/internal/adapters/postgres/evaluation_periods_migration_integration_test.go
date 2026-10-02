@@ -142,6 +142,23 @@ func TestMigration0016SkipsWhatWouldOverlapAndFallsBackToTheTermsDates(t *testin
 	}
 }
 
+// A level frozen by a running deletion (0012's trigger refuses writes to its
+// structure) is skipped, not allowed to abort the whole migration.
+func TestMigration0016SkipsALevelBeingDeleted(t *testing.T) {
+	db := migrateUpTo(t, "mig_cfg_periods_del", "0016")
+	seed0016(t, db)
+	exec16(t, db, `UPDATE levels SET status = 'deleting' WHERE id = ?`, m16Odd)
+
+	applyMigration(t, db, migration0016)
+
+	if got := periodsOf(t, db, m16OddGrade); len(got) != 0 {
+		t.Errorf("a level being deleted gets no periods, got %+v", got)
+	}
+	if got := periodsOf(t, db, m16Grade1); len(got) != 3 {
+		t.Errorf("the other levels are migrated, got %+v", got)
+	}
+}
+
 // The database itself keeps a grade's periods apart, also against writers that
 // skip the use case, and keeps each period's dates in order.
 func TestMigration0016ConstraintsRefuseOverlapsAndBackwardDates(t *testing.T) {

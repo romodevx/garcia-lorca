@@ -132,8 +132,8 @@ func TestUpsertEvaluationPeriodsCreatesThenEditsInPlace(t *testing.T) {
 	// Move the first trimester's end a week earlier and the second's start
 	// with it; drop the third.
 	edited, err := svc.UpsertEvaluationPeriods(ctx, pCycle, pGrade1, []usecase.PeriodInput{
-		{Ordinal: 2, Name: "2.º trimestre", StartsOn: d(2026, time.November, 24), EndsOn: d(2027, time.March, 31)},
-		{Ordinal: 1, Name: "Primer trimestre", StartsOn: d(2026, time.August, 24), EndsOn: d(2026, time.November, 23)},
+		{ID: created[1].ID(), Ordinal: 2, Name: "2.º trimestre", StartsOn: d(2026, time.November, 24), EndsOn: d(2027, time.March, 31)},
+		{ID: firstID, Ordinal: 1, Name: "Primer trimestre", StartsOn: d(2026, time.August, 24), EndsOn: d(2026, time.November, 23)},
 	})
 	require.NoError(t, err)
 	require.Len(t, edited, 2)
@@ -147,6 +147,37 @@ func TestUpsertEvaluationPeriodsCreatesThenEditsInPlace(t *testing.T) {
 	assert.Len(t, left, 2, "a period left out of the set is removed")
 }
 
+// The id follows the row the person edited, never its position: removing the
+// 1st trimester removes IT, and the 2nd and 3rd keep their ids although they
+// are renumbered 1 and 2.
+func TestUpsertEvaluationPeriodsIdsFollowTheRowNotTheOrdinal(t *testing.T) {
+	ctx := context.Background()
+	f := newFakePeriods(t)
+	svc := newPeriodService(f)
+	created, err := svc.UpsertEvaluationPeriods(ctx, pCycle, pGrade1, trimesters())
+	require.NoError(t, err)
+	second, third := created[1], created[2]
+
+	got, err := svc.UpsertEvaluationPeriods(ctx, pCycle, pGrade1, []usecase.PeriodInput{
+		{ID: second.ID(), Ordinal: 1, Name: second.Name(), StartsOn: second.StartsOn(), EndsOn: second.EndsOn()},
+		{ID: third.ID(), Ordinal: 2, Name: third.Name(), StartsOn: third.StartsOn(), EndsOn: third.EndsOn()},
+	})
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	assert.Equal(t, second.ID(), got[0].ID())
+	assert.Equal(t, third.ID(), got[1].ID())
+	_, stillThere := f.periods[created[0].ID()]
+	assert.False(t, stillThere, "the removed period is the one that goes")
+
+	// An id that is not one of the grade's periods is a new period, never a
+	// way to take over another grade's row.
+	foreign, err := svc.UpsertEvaluationPeriods(ctx, pCycle, pGrade2, []usecase.PeriodInput{
+		{ID: second.ID(), Ordinal: 1, Name: "X", StartsOn: second.StartsOn(), EndsOn: second.EndsOn()},
+	})
+	require.NoError(t, err)
+	assert.NotEqual(t, second.ID(), foreign[0].ID())
+}
+
 func TestUpsertEvaluationPeriodsKeepsTheTermLink(t *testing.T) {
 	ctx := context.Background()
 	f := newFakePeriods(t)
@@ -154,7 +185,9 @@ func TestUpsertEvaluationPeriodsKeepsTheTermLink(t *testing.T) {
 	require.NoError(t, err)
 	f.periods["p-old"] = migrated.WithTermID("term-1")
 
-	got, err := newPeriodService(f).UpsertEvaluationPeriods(ctx, pCycle, pGrade1, trimesters()[:1])
+	in := trimesters()[:1]
+	in[0].ID = "p-old"
+	got, err := newPeriodService(f).UpsertEvaluationPeriods(ctx, pCycle, pGrade1, in)
 	require.NoError(t, err)
 	assert.Equal(t, "p-old", got[0].ID())
 	assert.Equal(t, "term-1", got[0].TermID())

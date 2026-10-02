@@ -18,6 +18,10 @@ var _ ports.EvaluationPeriodRepository = (*Repository)(nil)
 // exclusionViolation is SQLSTATE 23P01: a row an EXCLUDE constraint refuses.
 const exclusionViolation = "23P01"
 
+// periodPrimaryKey is evaluation_periods' primary key: two saves of one grade
+// at once both re-insert the same ids, and the later one trips it.
+const periodPrimaryKey = "evaluation_periods_pkey"
+
 // evaluationPeriodModel is the GORM row for `evaluation_periods` (0016).
 // A rewrite deletes and re-inserts a grade's rows with their ids, carrying
 // created_at over; updated_at is the rewrite's.
@@ -157,6 +161,10 @@ func translatePeriodErr(err error, internalMsg string) error {
 	}
 	if pgCode(err) == exclusionViolation {
 		return domain.PeriodOverlap(domain.EvaluationPeriod{}, domain.EvaluationPeriod{})
+	}
+	if isConstraint(err, periodPrimaryKey) {
+		// Another save of the same grade committed the same ids first.
+		return domain.PeriodsChangedMeanwhile()
 	}
 	return translateCreateErr(err, internalMsg, "Ese número de periodo ya existe en el grado")
 }

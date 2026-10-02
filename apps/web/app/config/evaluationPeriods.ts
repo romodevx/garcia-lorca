@@ -17,9 +17,14 @@ export const MAX_PERIODS = 12;
 /** How long a new period is proposed to last: a trimester. */
 const DEFAULT_PERIOD_MONTHS = 3;
 
-/** A period being edited. `key` is the period's id, or a local one for a new row. */
+/**
+ * A period being edited. `key` names the row on screen; `id` is the saved
+ * period it edits ("" for a new row). The id travels with the row, so removing
+ * the first period removes THAT period even though the rest are renumbered.
+ */
 export interface PeriodDraft {
   key: string;
+  id: string;
   name: string;
   startsOn: string;
   endsOn: string;
@@ -108,16 +113,16 @@ export function nextDraft(rows: readonly PeriodDraft[], cycle: CycleSpan, key: s
   const name = `PERIODO ${rows.length + 1}`;
   const lastEnd = rows.reduce((max, r) => (r.endsOn > max ? r.endsOn : max), "");
   const startsOn = lastEnd === "" ? cycle.startsOn : addDays(lastEnd, 1);
-  if (startsOn > cycle.endsOn) return { key, name, startsOn: "", endsOn: "" };
+  if (startsOn > cycle.endsOn) return { key, id: "", name, startsOn: "", endsOn: "" };
   const proposedEnd = addDays(addMonths(startsOn, DEFAULT_PERIOD_MONTHS), -1);
-  return { key, name, startsOn, endsOn: proposedEnd > cycle.endsOn ? cycle.endsOn : proposedEnd };
+  return { key, id: "", name, startsOn, endsOn: proposedEnd > cycle.endsOn ? cycle.endsOn : proposedEnd };
 }
 
 /** The server's periods of one grade as editable rows, in ordinal order. */
 export function draftsOf(periods: readonly EvaluationPeriod[]): PeriodDraft[] {
   return [...periods]
     .sort((a, b) => a.ordinal - b.ordinal)
-    .map((p) => ({ key: p.id, name: p.name, startsOn: p.startsOn, endsOn: p.endsOn }));
+    .map((p) => ({ key: p.id, id: p.id, name: p.name, startsOn: p.startsOn, endsOn: p.endsOn }));
 }
 
 /**
@@ -127,5 +132,11 @@ export function draftsOf(periods: readonly EvaluationPeriod[]): PeriodDraft[] {
 export function toInputs(rows: readonly PeriodDraft[]): EvaluationPeriodInput[] {
   return [...rows]
     .sort((a, b) => a.startsOn.localeCompare(b.startsOn))
-    .map((r, i) => ({ ordinal: i + 1, name: r.name.trim(), startsOn: r.startsOn, endsOn: r.endsOn }));
+    .map((r, i) => ({
+      ...(r.id === "" ? {} : { id: r.id }),
+      ordinal: i + 1,
+      name: r.name.trim(),
+      startsOn: r.startsOn,
+      endsOn: r.endsOn,
+    }));
 }

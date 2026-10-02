@@ -82,6 +82,23 @@ func TestEvaluationPeriodsUpsertListAndCopy(t *testing.T) {
 	assert.Equal(t, g1, p1.GetGradeLevelId())
 	assert.True(t, p1.GetStartsOn().AsTime().Equal(first))
 
+	// Sending the 2nd period alone, by id, keeps that period (not the 1st).
+	p2 := up.Msg.GetPeriods()[1]
+	again, err := h.UpsertEvaluationPeriods(ctx(), connect.NewRequest(&configv1.UpsertEvaluationPeriodsRequest{
+		CycleId: cycleID, GradeLevelId: g1,
+		Periods: []*configv1.EvaluationPeriodInput{{Id: p2.GetId(), Ordinal: 1, Name: "T2", StartsOn: p2.GetStartsOn(), EndsOn: p2.GetEndsOn()}},
+	}))
+	require.NoError(t, err)
+	assert.Equal(t, p2.GetId(), again.Msg.GetPeriods()[0].GetId())
+	_, err = h.UpsertEvaluationPeriods(ctx(), connect.NewRequest(&configv1.UpsertEvaluationPeriodsRequest{
+		CycleId: cycleID, GradeLevelId: g1,
+		Periods: []*configv1.EvaluationPeriodInput{
+			periodIn(2, "T2", second, second.AddDate(0, 2, 0)),
+			periodIn(1, "T1", first, second.AddDate(0, 0, -1)),
+		},
+	}))
+	require.NoError(t, err)
+
 	cp, err := h.CopyEvaluationPeriods(ctx(), connect.NewRequest(&configv1.CopyEvaluationPeriodsRequest{
 		CycleId: cycleID, FromGradeLevelId: g1, ToGradeLevelIds: []string{g2},
 	}))

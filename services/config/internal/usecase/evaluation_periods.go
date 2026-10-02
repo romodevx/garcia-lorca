@@ -28,8 +28,10 @@ func NewEvaluationPeriodService(repo ports.EvaluationPeriodRepository, tenant st
 	return &EvaluationPeriodService{repo: repo, tenant: tenant, newID: newID}
 }
 
-// PeriodInput is one period as the school types it.
+// PeriodInput is one period as the school types it. ID names the grade's
+// existing period the row edits ("" for a new one).
 type PeriodInput struct {
+	ID       string
 	Ordinal  int
 	Name     string
 	StartsOn time.Time
@@ -46,9 +48,11 @@ func (s *EvaluationPeriodService) ListEvaluationPeriods(ctx context.Context, cyc
 }
 
 // UpsertEvaluationPeriods makes inputs the complete period set of one grade in
-// a cycle. Periods are matched to the existing ones by ordinal: a match keeps
-// its id and term link, a new ordinal is created, and an existing ordinal left
-// out is removed. An empty set clears the grade. Returns the set by ordinal.
+// a cycle. A row carrying the id of one of the grade's periods keeps that id
+// and its term link — the id follows the row, not its position, so removing
+// the 1st period removes it even though the rest are renumbered. Any other id
+// (blank, stale, another grade's) is a new period. A period no row names is
+// removed; an empty set clears the grade. Returns the set by ordinal.
 func (s *EvaluationPeriodService) UpsertEvaluationPeriods(ctx context.Context, cycleID, gradeLevelID string, inputs []PeriodInput) ([]domain.EvaluationPeriod, error) {
 	cycle, err := s.repo.GetCycle(ctx, cycleID)
 	if err != nil {
@@ -61,7 +65,14 @@ func (s *EvaluationPeriodService) UpsertEvaluationPeriods(ctx context.Context, c
 	if err != nil {
 		return nil, err
 	}
-	set, err := s.buildSet(cycle, gradeLevelID, inputs, byOrdinal(existing))
+	byID := make(map[string]domain.EvaluationPeriod, len(existing))
+	for _, p := range existing {
+		byID[p.ID()] = p
+	}
+	set, err := s.buildSet(cycle, gradeLevelID, inputs, func(in PeriodInput) (domain.EvaluationPeriod, bool) {
+		p, ok := byID[in.ID]
+		return p, ok
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -85,10 +96,16 @@ func (s *EvaluationPeriodService) CopyEvaluationPeriods(ctx context.Context, cyc
 	if err != nil {
 		return nil, err
 	}
-	source, err := s.repo.ListEvaluationPeriods(ctx, cycleID, "", fromGradeLevelID)
+	// One read of the cycle's periods serves the source and every target.
+	all, err := s.repo.ListEvaluationPeriods(ctx, cycleID, "", "")
 	if err != nil {
 		return nil, err
 	}
+	byGrade := make(map[string][]domain.EvaluationPeriod)
+	for _, p := range all {
+		byGrade[p.GradeLevelID()] = append(byGrade[p.GradeLevelID()], p)
+	}
+	source := byGrade[fromGradeLevelID]
 	if len(source) == 0 {
 		return nil, glerrors.New(glerrors.KindInvalid, "El grado de origen no tiene periodos en el ciclo")
 	}
@@ -99,11 +116,13 @@ func (s *EvaluationPeriodService) CopyEvaluationPeriods(ctx context.Context, cyc
 	sets := make([]ports.GradePeriodSet, 0, len(targets))
 	var out []domain.EvaluationPeriod
 	for _, gradeID := range targets {
-		existing, err := s.repo.ListEvaluationPeriods(ctx, cycleID, "", gradeID)
-		if err != nil {
-			return nil, err
-		}
-		set, err := s.buildSet(cycle, gradeID, inputs, byOrdinal(existing))
+		// A copy has no rows of its own: a target's period with the same
+		// ordinal is the one that takes the source's dates.
+		target := byOrdinal(byGrade[gradeID])
+		set, err := s.buildSet(cycle, gradeID, inputs, func(in PeriodInput) (domain.EvaluationPeriod, bool) {
+			p, ok := target[in.Ordinal]
+			return p, ok
+		})
 		if err != nil {
 			return nil, err
 		}
@@ -128,15 +147,19 @@ func (s *EvaluationPeriodService) EvaluationPeriodOn(ctx context.Context, cycleI
 	return p, ok, nil
 }
 
-// buildSet turns inputs into one grade's validated period set, reusing the id
-// and term link of the existing period with the same ordinal. Sorted by
-// ordinal.
-func (s *EvaluationPeriodService) buildSet(cycle domain.Cycle, gradeLevelID string, inputs []PeriodInput, existing map[int]domain.EvaluationPeriod) ([]domain.EvaluationPeriod, error) {
+// buildSet turns inputs into one grade's validated period set; matchOf names
+// the existing period a row keeps (its id and term link). An existing period
+// is kept by one row at most. Sorted by ordinal.
+func (s *EvaluationPeriodService) buildSet(cycle domain.Cycle, gradeLevelID string, inputs []PeriodInput, matchOf func(PeriodInput) (domain.EvaluationPeriod, bool)) ([]domain.EvaluationPeriod, error) {
 	set := make([]domain.EvaluationPeriod, 0, len(inputs))
+	claimed := make(map[string]struct{}, len(inputs))
 	for _, in := range inputs {
 		id, termID := s.newID(), ""
-		if prev, ok := existing[in.Ordinal]; ok {
-			id, termID = prev.ID(), prev.TermID()
+		if prev, ok := matchOf(in); ok {
+			if _, taken := claimed[prev.ID()]; !taken {
+				id, termID = prev.ID(), prev.TermID()
+				claimed[id] = struct{}{}
+			}
 		}
 		p, err := domain.NewEvaluationPeriod(id, s.tenant, cycle.ID(), gradeLevelID, in.Name, in.Ordinal, in.StartsOn, in.EndsOn)
 		if err != nil {

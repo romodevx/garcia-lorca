@@ -59,6 +59,8 @@ export interface LevelPeriods {
   notice: string | undefined;
   undo: PendingUndo | undefined;
   selectCycle: (id: string) => void;
+  /** Reads everything again after a failed load. */
+  retry: () => void;
   edit: (gradeId: string, key: string, field: PeriodField, value: string) => void;
   blur: (gradeId: string, key: string, field: PeriodField) => void;
   add: (gradeId: string) => string;
@@ -106,6 +108,10 @@ export function useLevelPeriods(levelId: string): LevelPeriods {
   const [notice, setNotice] = useState<string | undefined>(undefined);
   const [undo, setUndo] = useState<PendingUndo | undefined>(undefined);
   const newKeys = useRef(0);
+  const [attempt, setAttempt] = useState(0);
+  // The cycle on screen right now: an answer for another cycle is dropped.
+  const shownCycle = useRef<string | undefined>(undefined);
+  shownCycle.current = cycleId;
 
   const cycle = useMemo(() => cycles.find((c) => c.id === cycleId), [cycles, cycleId]);
 
@@ -118,14 +124,16 @@ export function useLevelPeriods(levelId: string): LevelPeriods {
         setCycles(cs);
         setLevel(ls.find((l) => l.id === levelId));
         setGrades([...gs].filter((g) => g.levelId === levelId).sort((a, b) => a.ordinal - b.ordinal));
-        setCycleId((cs.find((c) => c.status === "active") ?? cs[cs.length - 1])?.id);
+        // A retry keeps the cycle the person had chosen.
+        setCycleId((prev) => prev ?? (cs.find((c) => c.status === "active") ?? cs[cs.length - 1])?.id);
         if (cs.length === 0) setLoad({ kind: "ready" });
       })
       .catch(() => live && setLoad({ kind: "failed" }));
     return () => {
       live = false;
     };
-  }, [levelId]);
+    // attempt: Reintentar after a failed first read.
+  }, [levelId, attempt]);
 
   const adopt = useCallback((byGrade: ByGrade<EvaluationPeriod[]>): void => {
     setSaved((prev) => ({ ...prev, ...byGrade }));
@@ -165,7 +173,7 @@ export function useLevelPeriods(levelId: string): LevelPeriods {
     return () => {
       live = false;
     };
-  }, [cycleId, levelId, grades, adopt]);
+  }, [cycleId, levelId, grades, adopt, attempt]);
 
   useEffect(() => {
     if (undo === undefined) return;
@@ -234,10 +242,12 @@ export function useLevelPeriods(levelId: string): LevelPeriods {
       setBusy((prev) => ({ ...prev, [gradeId]: true }));
       try {
         const result = await saveGradeEvaluationPeriods(API_URL, gradeId, cycle.id, toInputs(rows));
+        if (shownCycle.current !== cycle.id) return undefined;
         adopt({ [gradeId]: result });
         const grade = grades.find((g) => g.id === gradeId);
         setNotice(`Periodos de ${grade?.name ?? "el grado"} guardados.`);
       } catch (err) {
+        if (shownCycle.current !== cycle.id) return undefined;
         const detail = err instanceof ConfigError && err.detail !== "" ? err.detail : SAVE_FAILED;
         setErrors((prev) => ({ ...prev, [gradeId]: detail }));
       } finally {
@@ -261,6 +271,7 @@ export function useLevelPeriods(levelId: string): LevelPeriods {
       const previous = Object.fromEntries(toGradeIds.map((g) => [g, saved[g] ?? []]));
       try {
         const result = groupByGrade(await copyEvaluationPeriods(API_URL, { cycleId: cycle.id, fromGradeLevelId: fromGradeId, toGradeLevelIds: [...toGradeIds] }));
+        if (shownCycle.current !== cycle.id) return true;
         adopt(Object.fromEntries(toGradeIds.map((g) => [g, result[g] ?? []])));
         const n = toGradeIds.length;
         setNotice(undefined);
@@ -279,12 +290,14 @@ export function useLevelPeriods(levelId: string): LevelPeriods {
     for (const [gradeId, periods] of Object.entries(undo.previous)) {
       try {
         const restored = await saveGradeEvaluationPeriods(API_URL, gradeId, cycle.id, toInputs(draftsOf(periods)));
-        adopt({ [gradeId]: restored });
+        if (shownCycle.current === cycle.id) adopt({ [gradeId]: restored });
       } catch {
         setErrors((prev) => ({ ...prev, [gradeId]: "No se pudieron restaurar los periodos de este grado." }));
       }
     }
   }, [undo, cycle, adopt]);
+
+  const retry = useCallback((): void => setAttempt((n) => n + 1), []);
 
   const selectCycle = useCallback((id: string): void => {
     setUndo(undefined);
@@ -293,6 +306,6 @@ export function useLevelPeriods(levelId: string): LevelPeriods {
 
   return {
     load, level, cycles, cycle, grades, drafts, problems, errors, busy, notice, undo,
-    selectCycle, edit, blur, add, remove, save, copy, takeBack,
+    selectCycle, retry, edit, blur, add, remove, save, copy, takeBack,
   };
 }

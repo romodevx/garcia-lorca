@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -100,7 +101,7 @@ func TestListEvaluationPeriods(t *testing.T) {
 }
 
 func TestPutGradeEvaluationPeriods(t *testing.T) {
-	ok := `{"cycleId":"` + evCycle + `","periods":[{"ordinal":1,"name":"T1","startsOn":"2026-09-01","endsOn":"2026-11-30"}]}`
+	ok := `{"cycleId":"` + evCycle + `","periods":[{"id":"` + evG2 + `","ordinal":1,"name":"T1","startsOn":"2026-09-01","endsOn":"2026-11-30"}]}`
 	tests := []struct {
 		name       string
 		grade      string
@@ -116,6 +117,9 @@ func TestPutGradeEvaluationPeriods(t *testing.T) {
 		{name: "a missing periods field", grade: evG1, body: `{"cycleId":"` + evCycle + `"}`, wantStatus: http.StatusBadRequest},
 		{name: "a malformed grade", grade: "g", body: ok, wantStatus: http.StatusBadRequest},
 		{name: "a malformed cycle", grade: evG1, body: `{"cycleId":"c","periods":[]}`, wantStatus: http.StatusBadRequest},
+		{name: "an ordinal out of range never leaves the edge", grade: evG1, body: `{"cycleId":"` + evCycle + `","periods":[{"ordinal":4294967297,"name":"T1","startsOn":"2026-09-01","endsOn":"2026-11-30"}]}`, wantStatus: http.StatusBadRequest},
+		{name: "a name too long", grade: evG1, body: `{"cycleId":"` + evCycle + `","periods":[{"ordinal":1,"name":"` + strings.Repeat("Á", 61) + `","startsOn":"2026-09-01","endsOn":"2026-11-30"}]}`, wantStatus: http.StatusBadRequest},
+		{name: "a malformed period id", grade: evG1, body: `{"cycleId":"` + evCycle + `","periods":[{"id":"x","ordinal":1,"name":"T1","startsOn":"2026-09-01","endsOn":"2026-11-30"}]}`, wantStatus: http.StatusBadRequest},
 		{name: "too many periods", grade: evG1, body: `{"cycleId":"` + evCycle + `","periods":[` + repeatPeriods(13) + `]}`, wantStatus: http.StatusBadRequest, wantCode: "TOO_MANY_PERIODS"},
 		{
 			name: "an overlap", grade: evG1, body: ok,
@@ -139,7 +143,7 @@ func TestPutGradeEvaluationPeriods(t *testing.T) {
 			if tt.forwarded && tt.svcErr == nil && len(svc.evalIn) > 0 {
 				assert.Equal(t, evCycle, svc.evalCycle)
 				assert.Equal(t, evG1, svc.evalGrade)
-				assert.Equal(t, client.EvaluationPeriodInput{Ordinal: 1, Name: "T1", StartsOn: evDay(time.September, 1), EndsOn: evDay(time.November, 30)}, svc.evalIn[0])
+				assert.Equal(t, client.EvaluationPeriodInput{ID: evG2, Ordinal: 1, Name: "T1", StartsOn: evDay(time.September, 1), EndsOn: evDay(time.November, 30)}, svc.evalIn[0])
 			}
 		})
 	}

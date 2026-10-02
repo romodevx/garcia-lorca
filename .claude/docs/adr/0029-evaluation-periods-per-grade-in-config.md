@@ -26,11 +26,14 @@
   grade's set — shifting every period passes through overlapping states — the
   repository deletes the grade's rows and inserts the new set with the SAME ids
   (created_at carried over), in one transaction.
-- **A grade's set is replaced as a whole, matched by ordinal.** Upsert keeps
-  the id of an existing ordinal (T15's grades will point at it), creates new
-  ordinals, removes the ones left out. The web numbers periods 1…n in date
-  order on save. Copy = the same replace on each target grade, in ONE
-  transaction; "Aplicar a todo el nivel" is a copy onto the level's other
+- **A grade's set is replaced as a whole; ids follow the row.** Each input row
+  may carry the id of the grade's period it edits; that period keeps its id
+  (T15's grades will point at it) even when renumbered — removing the 1st
+  trimester removes IT. Rows without a known id are new periods; periods no
+  row names are removed. The web numbers periods 1…n in date order on save.
+  Two saves of one grade racing: the later trips the primary key and gets 409
+  `PERIODS_CHANGED`. Copy matches the target's periods by ordinal (a copy has
+  no rows of its own) and replaces each target grade, in ONE transaction; "Aplicar a todo el nivel" is a copy onto the level's other
   grades. The web offers Deshacer (8 s) by re-saving the targets' previous sets.
 - **RPCs** `ListEvaluationPeriods` / `UpsertEvaluationPeriods` /
   `CopyEvaluationPeriods`; refusal codes `PERIOD_OVERLAP` (409),

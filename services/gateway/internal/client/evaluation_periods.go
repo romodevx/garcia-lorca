@@ -24,8 +24,10 @@ type EvaluationPeriod struct {
 	TermID       string
 }
 
-// EvaluationPeriodInput is one period of a grade's new set.
+// EvaluationPeriodInput is one period of a grade's new set. ID is the grade's
+// existing period the row edits, or "" for a new one.
 type EvaluationPeriodInput struct {
+	ID       string
 	Ordinal  int
 	Name     string
 	StartsOn time.Time
@@ -49,7 +51,7 @@ func (c *ConfigClient) UpsertEvaluationPeriods(ctx context.Context, cycleID, gra
 	periods := make([]*configv1.EvaluationPeriodInput, 0, len(in))
 	for _, p := range in {
 		periods = append(periods, &configv1.EvaluationPeriodInput{
-			Ordinal: int32(p.Ordinal), Name: p.Name,
+			Id: p.ID, Ordinal: int32(p.Ordinal), Name: p.Name, //nolint:gosec // 1..12, checked at the edge
 			StartsOn: timestamppb.New(p.StartsOn), EndsOn: timestamppb.New(p.EndsOn),
 		})
 	}

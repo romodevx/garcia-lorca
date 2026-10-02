@@ -2671,10 +2671,11 @@ paths:
       tags: [config-evaluation-periods]
       summary: Replace one grade's evaluation periods in a cycle (T14)
       description: >
-        `periods` becomes the grade's COMPLETE set in `cycleId`. Periods are
-        matched to the existing ones by `ordinal`: a match keeps its id (and
-        its term link), a new ordinal is created, an existing ordinal left out
-        is removed; `[]` clears the grade. Every period needs a name (≤ 60
+        `periods` becomes the grade's COMPLETE set in `cycleId`. A row carrying
+        the `id` of one of the grade's periods keeps that id (and its term
+        link); any other row is a new period; a period no row names is
+        removed; `[]` clears the grade. A save that lost a race with another
+        save of the same grade is 409 `PERIODS_CHANGED` (reload and retry). Every period needs a name (≤ 60
         characters), an ordinal 1–12 and dates `YYYY-MM-DD` with
         `startsOn ≤ endsOn` (400 `PERIOD_ENDS_BEFORE_START`), inside the cycle
         (400 `PERIOD_OUTSIDE_CYCLE`); at most 12 periods
@@ -2735,7 +2736,7 @@ paths:
         '403': { $ref: '#/components/responses/PlainForbidden' }
         '404': { $ref: '#/components/responses/PlainNotFound' }
         '409':
-          description: Two periods of the grade share a day (`PERIOD_OVERLAP`), or the level is being deleted (`LEVEL_BEING_DELETED`).
+          description: Two periods of the grade share a day (`PERIOD_OVERLAP`), another save of the grade won a race (`PERIODS_CHANGED`), or the level is being deleted (`LEVEL_BEING_DELETED`).
           headers:
             X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
           content:
@@ -6716,6 +6717,13 @@ components:
       type: object
       required: [ordinal, name, startsOn, endsOn]
       properties:
+        id:
+          type: string
+          format: uuid
+          description: >
+            The grade's existing period this row edits; omit it for a new
+            period. The id follows the row, so removing the 1st period removes
+            that one even though the rest are renumbered.
         ordinal: { type: integer, minimum: 1, maximum: 12, example: 1 }
         name: { type: string, minLength: 1, maxLength: 60, example: 1.er trimestre }
         startsOn: { type: string, format: date, example: '2026-08-24' }

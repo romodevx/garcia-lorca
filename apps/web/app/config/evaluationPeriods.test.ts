@@ -11,8 +11,8 @@ import {
 
 const cycle = { startsOn: "2026-08-24", endsOn: "2027-07-09" };
 
-function draft(key: string, startsOn: string, endsOn: string, name = "T"): PeriodDraft {
-  return { key, name, startsOn, endsOn };
+function draft(key: string, startsOn: string, endsOn: string, name = "T", id = ""): PeriodDraft {
+  return { key, id, name, startsOn, endsOn };
 }
 
 describe("rowProblems — one row, checked when its field is left", () => {
@@ -56,16 +56,16 @@ describe("periodProblems — the whole set, checked on save", () => {
 
 describe("nextDraft — the defaults of a new row", () => {
   it("starts the first period on the cycle's first day, three months long", () => {
-    expect(nextDraft([], cycle, "n1")).toEqual({ key: "n1", name: "PERIODO 1", startsOn: "2026-08-24", endsOn: "2026-11-23" });
+    expect(nextDraft([], cycle, "n1")).toEqual({ key: "n1", id: "", name: "PERIODO 1", startsOn: "2026-08-24", endsOn: "2026-11-23" });
   });
 
   it("starts the next period the day after the last one ends, clamped to the cycle", () => {
     const set = [draft("a", "2026-08-24", "2026-11-30"), draft("b", "2026-12-01", "2027-05-31")];
-    expect(nextDraft(set, cycle, "n3")).toEqual({ key: "n3", name: "PERIODO 3", startsOn: "2027-06-01", endsOn: "2027-07-09" });
+    expect(nextDraft(set, cycle, "n3")).toEqual({ key: "n3", id: "", name: "PERIODO 3", startsOn: "2027-06-01", endsOn: "2027-07-09" });
   });
 
   it("leaves the dates empty when the cycle is already covered", () => {
-    expect(nextDraft([draft("a", "2026-08-24", "2027-07-09")], cycle, "n2")).toEqual({ key: "n2", name: "PERIODO 2", startsOn: "", endsOn: "" });
+    expect(nextDraft([draft("a", "2026-08-24", "2027-07-09")], cycle, "n2")).toEqual({ key: "n2", id: "", name: "PERIODO 2", startsOn: "", endsOn: "" });
   });
 });
 
@@ -75,14 +75,14 @@ describe("drafts ↔ the wire", () => {
       { id: "p2", cycleId: "c", gradeLevelId: "g", ordinal: 2, name: "B", startsOn: "2026-12-01", endsOn: "2027-03-31", termId: null },
       { id: "p1", cycleId: "c", gradeLevelId: "g", ordinal: 1, name: "A", startsOn: "2026-08-24", endsOn: "2026-11-30", termId: "t" },
     ];
-    expect(draftsOf(periods)).toEqual([draft("p1", "2026-08-24", "2026-11-30", "A"), draft("p2", "2026-12-01", "2027-03-31", "B")]);
+    expect(draftsOf(periods)).toEqual([draft("p1", "2026-08-24", "2026-11-30", "A", "p1"), draft("p2", "2026-12-01", "2027-03-31", "B", "p2")]);
   });
 
-  it("toInputs numbers the periods in date order and trims names", () => {
-    const set = [draft("b", "2026-12-01", "2027-03-31", " SEGUNDO "), draft("a", "2026-08-24", "2026-11-30", "PRIMERO")];
+  it("toInputs numbers the periods in date order, trims names and sends each saved row's id", () => {
+    const set = [draft("b", "2026-12-01", "2027-03-31", " SEGUNDO ", "p2"), draft("a", "2026-08-24", "2026-11-30", "PRIMERO")];
     expect(toInputs(set)).toEqual([
       { ordinal: 1, name: "PRIMERO", startsOn: "2026-08-24", endsOn: "2026-11-30" },
-      { ordinal: 2, name: "SEGUNDO", startsOn: "2026-12-01", endsOn: "2027-03-31" },
+      { id: "p2", ordinal: 2, name: "SEGUNDO", startsOn: "2026-12-01", endsOn: "2027-03-31" },
     ]);
   });
 });

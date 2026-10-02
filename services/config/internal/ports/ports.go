@@ -307,9 +307,12 @@ type LevelDeletionRepository interface {
 //     (its grades) and/or a grade when those are non-empty, ordered by grade
 //     ordinal then period ordinal.
 //   - ReplaceEvaluationPeriods makes each grade's period set in cycleID exactly
-//     the given one, in ONE transaction: a period whose id exists is updated in
-//     place (its id survives, so T15's grades keep pointing at it), a new id is
-//     inserted, and a period of that grade not in the set is deleted. Two
+//     the given one, in ONE transaction. It DELETES every row of the grade and
+//     re-inserts the set with the ids it carries (created_at kept): ids
+//     survive, rows do not. A table that references evaluation_periods (T15)
+//     must not use an FK with ON DELETE CASCADE/RESTRICT on it — a cascade
+//     would wipe grades on every save, a restrict would refuse every save;
+//     validate by RPC instead, or change this to in-place updates. Two
 //     periods of a grade sharing a day is domain.PeriodOverlap (KindConflict),
 //     also when a concurrent writer caused it; nothing is written then. A grade
 //     of a level being deleted is LEVEL_BEING_DELETED.

@@ -46,7 +46,7 @@ func (h *ConfigHandler) UpsertEvaluationPeriods(ctx context.Context, req *connec
 			return nil, connectErr(glerrors.New(glerrors.KindInvalid, "Cada periodo necesita fecha de inicio y de fin"))
 		}
 		inputs = append(inputs, usecase.PeriodInput{
-			Ordinal: int(in.GetOrdinal()), Name: in.GetName(),
+			ID: in.GetId(), Ordinal: int(in.GetOrdinal()), Name: in.GetName(),
 			StartsOn: asTime(in.GetStartsOn()), EndsOn: asTime(in.GetEndsOn()),
 		})
 	}

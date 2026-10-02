@@ -616,8 +616,9 @@ export interface EvaluationPeriod {
   termId: string | null;
 }
 
-/** One period of a grade's new set. */
+/** One period of a grade's new set; `id` is the saved period the row edits. */
 export interface EvaluationPeriodInput {
+  id?: string;
   ordinal: number;
   name: string;
   startsOn: string;
