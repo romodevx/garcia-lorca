@@ -331,14 +331,16 @@ func (r *Repository) FreezeScholarships(ctx context.Context, charges []domain.Ch
 			if err != nil {
 				return err
 			}
-			frozen, err := stored.WithScholarship(c.ScholarshipID(), c.Scholarship().Int64(), paid)
-			if glerrors.KindOf(err) == glerrors.KindInvalid {
-				// The row moved since it was priced (a discount written
-				// meanwhile) and the part no longer fits: it is not settled as
-				// priced, so it is left for the rule to price again. One such
-				// row must not roll back the others.
+			// Re-checked under the lock against what is collected NOW: the
+			// part never refunds (capped at what is unpaid), and the charge
+			// must still be settled with it — a payment voided meanwhile, or a
+			// discount written meanwhile, leaves the row to the rule.
+			base := stored.Amount().Int64() - stored.Discount().Int64()
+			part := min(c.Scholarship().Int64(), base-paid)
+			if part <= 0 || paid < base-part {
 				continue
 			}
+			frozen, err := stored.WithScholarship(c.ScholarshipID(), part, paid)
 			if err != nil {
 				return err
 			}

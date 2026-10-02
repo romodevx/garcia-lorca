@@ -230,6 +230,16 @@ func TestFreezeScholarships(t *testing.T) {
 	if err != nil || after.Charge.Scholarship() != 300000 || after.Charge.Effective() != 0 {
 		t.Fatalf("frozen %+v %v", after.Charge, err)
 	}
+	// A half that nothing has paid is not settled: the lock re-check leaves it.
+	half := seedConceptAndCharge(t, tenant, "5c000000-0000-0000-0000-0000000000d3", "colegiatura media",
+		"5c000000-0000-0000-0000-0000000000e3", student, scCycle, 300000, 0, time.Date(2031, 9, 10, 0, 0, 0, 0, time.UTC))
+	unpaid, err := half.WithScholarship(becaID, 150000, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, err := repo.FreezeScholarships(ctx, []domain.Charge{unpaid}); err != nil || n != 0 {
+		t.Fatalf("an unsettled charge must not be frozen: %d %v", n, err)
+	}
 	// The database refuses a part that, beside the discount, exceeds the amount.
 	err = superDB.Exec(`UPDATE charges SET discount_cents = 1 WHERE id = ?`, charge.ID()).Error
 	if err == nil {
