@@ -199,6 +199,43 @@ func (c *AttendanceClient) ListSessions(ctx context.Context, groupIDs []string, 
 	return out, nil
 }
 
+// AttendanceCount is one active pupil's exceptions over a report's range.
+type AttendanceCount struct {
+	EnrollmentID string
+	StudentID    string
+	Absent       int
+	Late         int
+	Excused      int
+}
+
+// AttendanceSummary is a group's attendance over a range (T12): the lists
+// taken and one count per active pupil, ordered by enrollment id.
+type AttendanceSummary struct {
+	ListsTaken int
+	Counts     []AttendanceCount
+}
+
+// SummarizeAttendance counts one group's attendance between two inclusive ISO
+// days (at most 366).
+func (c *AttendanceClient) SummarizeAttendance(ctx context.Context, groupID, from, to string) (AttendanceSummary, error) {
+	res, err := c.rpc.SummarizeAttendance(ctx, connect.NewRequest(&attendancev1.SummarizeAttendanceRequest{
+		GroupId:  groupID,
+		FromDate: from,
+		ToDate:   to,
+	}))
+	if err != nil {
+		return AttendanceSummary{}, err
+	}
+	out := AttendanceSummary{ListsTaken: int(res.Msg.GetListsTaken()), Counts: make([]AttendanceCount, 0, len(res.Msg.GetCounts()))}
+	for _, c := range res.Msg.GetCounts() {
+		out.Counts = append(out.Counts, AttendanceCount{
+			EnrollmentID: c.GetEnrollmentId(), StudentID: c.GetStudentId(),
+			Absent: int(c.GetAbsent()), Late: int(c.GetLate()), Excused: int(c.GetExcused()),
+		})
+	}
+	return out, nil
+}
+
 func toAttendanceRosterRow(r *attendancev1.RosterRow) AttendanceRosterRow {
 	return AttendanceRosterRow{
 		EnrollmentID: r.GetEnrollmentId(),
