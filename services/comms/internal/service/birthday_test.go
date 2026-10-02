@@ -353,3 +353,28 @@ func TestUpdateBirthdayTemplateCountsCharacters(t *testing.T) {
 		t.Errorf("500 ñ: %v", err)
 	}
 }
+
+// Regression: ISSUE-001 — the greeting shouted the pupil's name ("¡Feliz
+// cumpleaños, SOFÍA!") because the office captures names in capitals.
+// Found by /qa on 2026-10-01
+// Report: .gstack/qa-reports/run-t11/qa-report-localhost-2026-10-01.md
+func TestRunBirthdaysWritesTheNameInNameCase(t *testing.T) {
+	cases := map[string]string{
+		"SOFÍA":                "Sofía",
+		"ANA LUCÍA":            "Ana Lucía",
+		"MARÍA DE LOS ÁNGELES": "María de los Ángeles",
+		"josé":                 "José",
+	}
+	for raw, want := range cases {
+		t.Run(raw, func(t *testing.T) {
+			born := map[[2]int][]service.Pupil{{10, 1}: {{ID: studentID, FirstName: raw}}}
+			f := newBirthdayService(t, fixedNow, newFakeGuardians(), born)
+			if _, err := f.svc.RunBirthdays(context.Background(), "2026-10-01"); err != nil {
+				t.Fatalf("RunBirthdays: %v", err)
+			}
+			if n := f.repo.notifications[0]; n.Title != "¡Feliz cumpleaños, "+want+"!" {
+				t.Errorf("title = %q, want the name as %q", n.Title, want)
+			}
+		})
+	}
+}

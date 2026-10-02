@@ -2,7 +2,6 @@ package repo
 
 import (
 	"context"
-	"errors"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -22,15 +21,15 @@ func (r *Repo) BirthdayTemplate(ctx context.Context) (service.BirthdayTemplate, 
 		found bool
 	)
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
-		var m birthdayTemplateModel
-		err := tx.Where("tenant_id = ?", r.tenantID).Take(&m).Error
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil
-		}
-		if err != nil {
+		// Find, not Take: "no greeting saved yet" is the normal state, and Take
+		// would log it as a "record not found" error on every read.
+		var rows []birthdayTemplateModel
+		if err := tx.Where("tenant_id = ?", r.tenantID).Limit(1).Find(&rows).Error; err != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "reading the birthday greeting", err)
 		}
-		out, found = toBirthdayTemplate(m), true
+		if len(rows) == 1 {
+			out, found = toBirthdayTemplate(rows[0]), true
+		}
 		return nil
 	})
 	if err != nil {

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
@@ -201,13 +202,33 @@ func birthdayKey(studentID string, year int) string {
 	return fmt.Sprintf("birthday:%s:%d", studentID, year)
 }
 
-// renderGreeting puts the pupil's first name wherever the school wrote {nombre}.
+// renderGreeting puts the pupil's first name wherever the school wrote {nombre},
+// in name case: the office captures names in capitals, and a greeting that
+// shouts "¡Feliz cumpleaños, SOFÍA!" reads like a form, not a card.
 func renderGreeting(text, firstName string) string {
-	name := strings.TrimSpace(firstName)
+	name := nameCase(firstName)
 	if name == "" {
 		name = fallbackStudentName
 	}
 	return strings.ReplaceAll(text, namePlaceholder, name)
+}
+
+// nameParticles stay lowercase inside a name ("María de los Ángeles").
+var nameParticles = map[string]bool{"de": true, "del": true, "la": true, "las": true, "los": true, "y": true}
+
+// nameCase writes each word of a first name with its initial capital, except
+// the particles after the first word.
+func nameCase(raw string) string {
+	words := strings.Fields(strings.ToLower(raw))
+	for i, w := range words {
+		if i > 0 && nameParticles[w] {
+			continue
+		}
+		r := []rune(w)
+		r[0] = unicode.ToUpper(r[0])
+		words[i] = string(r)
+	}
+	return strings.Join(words, " ")
 }
 
 // BirthdayTemplate returns the school's greeting, or the default text while it
