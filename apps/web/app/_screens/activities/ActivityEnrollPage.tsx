@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, type ReactElement } from "react";
 
+import { ConfirmDialog } from "../../_design/ConfirmDialog";
 import { SelectField } from "../../_design/form";
 import { Icon } from "../../_design/Icon";
 import { Page } from "../../_design/Page";
@@ -13,7 +14,7 @@ import { API_URL } from "../../api-url";
 import { changeActivityOption, endEnrollments, enrollStudents, listEnrollments, type Activity } from "../../activities/api";
 import { optionLabel, PERIODICITY_LABEL, scheduleSummary, sortOptions } from "../../activities/format";
 import { ErrorAlert } from "../config/parts";
-import { useToast } from "./useToast";
+import { LONG_TOAST_MS, useToast } from "./useToast";
 
 const LABELS = { available: "Alumnos", assigned: "Inscritos", assign: "Inscribir", unassign: "Dar de baja", emptyAssigned: "Nadie inscrito todavía." };
 
@@ -28,8 +29,9 @@ export interface ActivityEnrollPageProps {
 /**
  * Who takes an activity (T17): the shared DualPanelPicker with the batch's
  * price option, which each pupil moved in starts with, and a per-pupil select
- * on the right to change it. Ending an enrolment never touches issued charges,
- * so it needs no confirmation.
+ * on the right to change it. Enrolling issues the period's charge at once and
+ * unenrolling never cancels it, so moving pupils in asks first; moving them
+ * out does not.
  */
 export function ActivityEnrollPage({ activity, canWrite, onBack }: ActivityEnrollPageProps): ReactElement {
   const roster = useStudentRoster();
@@ -41,6 +43,14 @@ export function ActivityEnrollPage({ activity, canWrite, onBack }: ActivityEnrol
   const [failure, setFailure] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
   const { toast, say } = useToast();
+  const [asking, setAsking] = useState<{ ids: string[]; answer: (yes: boolean) => void } | null>(null);
+
+  const confirmAssign = (ids: string[]): Promise<boolean> => new Promise((answer) => setAsking({ ids, answer }));
+  const reply = (yes: boolean): void => {
+    asking?.answer(yes);
+    setAsking(null);
+  };
+  const batchLabel = optionLabel(options.find((o) => o.id === batch) ?? { daysPerWeek: null, amountCents: 0 });
 
   useEffect(() => {
     let live = true;
@@ -68,13 +78,13 @@ export function ActivityEnrollPage({ activity, canWrite, onBack }: ActivityEnrol
   const assign = (ids: string[]): void => void run(async () => {
     const res = await enrollStudents(API_URL, activity.id, ids.map((studentId) => ({ studentId, optionId: batch })));
     setEnrolled((prev) => new Map([...prev, ...res.enrollments.map((e): [string, string] => [e.studentId, e.optionId])]));
-    say(`${plural(res.enrollments.length, "alumno inscrito", "alumnos inscritos")} · ${plural(res.chargesCreated, "cargo generado", "cargos generados")}`);
+    say(`${plural(res.enrollments.length, "alumno inscrito", "alumnos inscritos")} · ${plural(res.chargesCreated, "cargo generado", "cargos generados")}`, LONG_TOAST_MS);
   });
 
   const unassign = (ids: string[]): void => void run(async () => {
     const ended = await endEnrollments(API_URL, activity.id, ids);
     setEnrolled((prev) => new Map([...prev].filter(([id]) => !ids.includes(id))));
-    say(plural(ended, "alumno dado de baja", "alumnos dados de baja"));
+    say(plural(ended, "alumno dado de baja", "alumnos dados de baja"), LONG_TOAST_MS);
   });
 
   const change = (student: RosterStudent, optionId: string): void => void run(async () => {
@@ -112,6 +122,7 @@ export function ActivityEnrollPage({ activity, canWrite, onBack }: ActivityEnrol
           labels={LABELS}
           describe={(s) => s.room}
           readOnly={!canWrite}
+          confirmAssign={confirmAssign}
           assignedToolbar={canWrite && (
             <SelectField label="Esquema de cobro" value={batch} options={options.map((o) => ({ value: o.id ?? "", label: optionLabel(o) }))}
               onChange={(v) => { if (v !== "") setBatch(v); }}
@@ -126,6 +137,12 @@ export function ActivityEnrollPage({ activity, canWrite, onBack }: ActivityEnrol
             <span style={{ fontSize: 13.5, color: "var(--text-muted)" }}>{optionText(optionOf(s))}</span>
           )}
         />
+      )}
+      {asking !== null && (
+        <ConfirmDialog title="Inscribir alumnos" confirmLabel="Inscribir" icon="students" onConfirm={() => reply(true)} onCancel={() => reply(false)}>
+          <p style={{ margin: 0 }}><b>{`¿Inscribir ${plural(asking.ids.length, "alumno", "alumnos")} a ${activity.name} con ${batchLabel}?`}</b></p>
+          <p style={{ margin: "10px 0 0", color: "var(--text-muted)" }}>Se les generará el cargo del periodo en curso y no se borra al darlos de baja.</p>
+        </ConfirmDialog>
       )}
       {toast !== undefined && <Toast>{toast}</Toast>}
     </Page>

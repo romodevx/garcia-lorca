@@ -146,6 +146,31 @@ describe("DualPanelPicker", () => {
     expect(screen.getByRole("status")).toHaveTextContent(/Marca primero/);
   });
 
+  it("asks before assigning when the screen wants confirmation; a no keeps the selection", async () => {
+    const user = userEvent.setup();
+    const onAssign = vi.fn();
+    const confirmAssign = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    render(<Harness onAssign={onAssign} confirmAssign={confirmAssign} />);
+    await user.click(screen.getByRole("checkbox", { name: "Cano Ceci" }));
+    await user.click(screen.getByRole("button", { name: /Inscribir/ }));
+    expect(confirmAssign).toHaveBeenCalledWith(["3"]);
+    expect(onAssign).not.toHaveBeenCalled();
+    expect(screen.getByRole("checkbox", { name: "Cano Ceci" })).toBeChecked();
+    await user.click(screen.getByRole("button", { name: /Inscribir/ }));
+    await waitFor(() => expect(onAssign).toHaveBeenCalledWith(["3"]));
+  });
+
+  it("a drop asks too", async () => {
+    const onAssign = vi.fn();
+    const confirmAssign = vi.fn().mockResolvedValue(true);
+    render(<Harness onAssign={onAssign} confirmAssign={confirmAssign} />);
+    const dataTransfer = { setData: vi.fn(), getData: vi.fn(), effectAllowed: "", dropEffect: "" };
+    fireEvent.dragStart(screen.getByTestId("picker-row-2"), { dataTransfer });
+    fireEvent.drop(panel("Inscritos"), { dataTransfer });
+    expect(confirmAssign).toHaveBeenCalledWith(["2"]);
+    await waitFor(() => expect(onAssign).toHaveBeenCalledWith(["2"]));
+  });
+
   it("renders the screen's extra per assigned pupil", () => {
     render(<Harness initial={["4"]} renderAssignedExtra={(s) => <span>{`extra-${s.id}`}</span>} />);
     expect(within(panel("Inscritos")).getByText("extra-4")).toBeInTheDocument();

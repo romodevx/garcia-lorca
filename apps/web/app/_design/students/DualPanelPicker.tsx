@@ -40,6 +40,11 @@ export interface DualPanelPickerProps<T extends FilterableStudent> {
   assignedToolbar?: ReactNode;
   /** Without the write permission: both lists, nothing moves. */
   readOnly?: boolean;
+  /**
+   * Asked before anyone moves in, when assigning has a consequence that does
+   * not undo (activities issue charges). Resolves false to keep things as they are.
+   */
+  confirmAssign?: (ids: string[]) => Promise<boolean>;
 }
 
 const NOTHING_MARKED = "Marca primero a los alumnos que quieres mover.";
@@ -61,7 +66,7 @@ const arrowStyle: CSSProperties = {
  * "assigned to a target": activities (T17) and scholarships (T18) share it.
  */
 export function DualPanelPicker<T extends FilterableStudent>(props: DualPanelPickerProps<T>): ReactElement {
-  const { students, catalog, assignedIds, onAssign, onUnassign, labels, describe, renderAssignedExtra, assignedToolbar, readOnly = false } = props;
+  const { students, catalog, assignedIds, onAssign, onUnassign, labels, describe, renderAssignedExtra, assignedToolbar, readOnly = false, confirmAssign } = props;
   const assignedSet = useMemo(() => new Set(assignedIds), [assignedIds]);
   const available = useMemo(() => students.filter((s) => !assignedSet.has(s.id)), [students, assignedSet]);
   const assigned = useMemo(() => students.filter((s) => assignedSet.has(s.id)).sort(compareStudents), [students, assignedSet]);
@@ -81,13 +86,14 @@ export function DualPanelPicker<T extends FilterableStudent>(props: DualPanelPic
   const rightIds = (): string[] => assigned.filter((s) => rightSelected.has(s.id)).map((s) => s.id);
   const leftIds = (): string[] => filter.selectedItems.map((s) => s.id);
 
-  const move = (from: Side, ids: string[]): void => {
+  const move = async (from: Side, ids: string[]): Promise<void> => {
     if (ids.length === 0) {
       setHint(NOTHING_MARKED);
       return;
     }
     setHint("");
     if (from === "available") {
+      if (confirmAssign !== undefined && !(await confirmAssign(ids))) return;
       filter.clearSelection();
       onAssign(ids);
     } else {
@@ -122,7 +128,7 @@ export function DualPanelPicker<T extends FilterableStudent>(props: DualPanelPic
       const drag = dragged.current;
       dragged.current = null;
       if (drag === null || drag.from === to) return;
-      move(drag.from, drag.ids);
+      void move(drag.from, drag.ids);
     },
   });
 
@@ -140,10 +146,10 @@ export function DualPanelPicker<T extends FilterableStudent>(props: DualPanelPic
 
         {!readOnly && (
           <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", gap: 10, flex: "0 0 auto" }}>
-            <button type="button" onClick={() => move("available", leftIds())} style={{ ...arrowStyle, background: "var(--primary)", color: "var(--primary-ink)", borderColor: "var(--lime)" }}>
+            <button type="button" onClick={() => void move("available", leftIds())} style={{ ...arrowStyle, background: "var(--primary)", color: "var(--primary-ink)", borderColor: "var(--lime)" }}>
               {labels.assign}<Icon name="chevron" size={18} stroke={2.6} />
             </button>
-            <button type="button" onClick={() => move("assigned", rightIds())} style={{ ...arrowStyle, background: "var(--surface)", color: "var(--text)" }}>
+            <button type="button" onClick={() => void move("assigned", rightIds())} style={{ ...arrowStyle, background: "var(--surface)", color: "var(--text)" }}>
               <Icon name="back" size={18} stroke={2.6} />{labels.unassign}
             </button>
           </div>

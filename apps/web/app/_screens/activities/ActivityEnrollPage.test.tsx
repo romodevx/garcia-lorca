@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -64,9 +64,30 @@ describe("ActivityEnrollPage (T17)", () => {
     await user.click(screen.getByRole("checkbox", { name: "Bello Beto" }));
     await user.click(screen.getByRole("button", { name: /Inscribir/ }));
 
+    // Charges are issued at once and survive an unenrolment: it asks first.
+    const dialog = await screen.findByRole("dialog", { name: "Inscribir alumnos" });
+    expect(dialog).toHaveTextContent("¿Inscribir 2 alumnos a Natación con 1 día/semana — $600.00?");
+    expect(dialog).toHaveTextContent(/no se borra al darlos de baja/);
+    expect(m.enrollStudents).not.toHaveBeenCalled();
+    await user.click(within(dialog).getByRole("button", { name: "Inscribir" }));
+
     expect(m.enrollStudents).toHaveBeenCalledWith(expect.any(String), ACT, [{ studentId: "s1", optionId: ONE }, { studentId: "s2", optionId: ONE }]);
     expect(await screen.findByText("2 alumnos inscritos · 2 cargos generados")).toBeInTheDocument();
     expect(within(enrolled()).getByLabelText("Esquema de Arce Ana")).toHaveValue(ONE);
+  });
+
+  it("cancelling the confirmation enrolls nobody and keeps the pupil marked", async () => {
+    const user = userEvent.setup();
+    open();
+    await within(enrolled()).findByText("Cano Ceci");
+    await user.click(screen.getByRole("checkbox", { name: "Arce Ana" }));
+    await user.click(screen.getByRole("button", { name: /Inscribir/ }));
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toHaveTextContent("¿Inscribir 1 alumno a Natación");
+    await user.click(within(dialog).getByRole("button", { name: "Cancelar" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(m.enrollStudents).not.toHaveBeenCalled();
+    expect(screen.getByRole("checkbox", { name: "Arce Ana" })).toBeChecked();
   });
 
   it("changes one pupil's option on the spot", async () => {
@@ -90,6 +111,24 @@ describe("ActivityEnrollPage (T17)", () => {
     expect(within(enrolled()).queryByText("Cano Ceci")).not.toBeInTheDocument();
   });
 
+  it("the unenrolment toast stays at least 8 seconds", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      m.endEnrollments.mockResolvedValue(1);
+      open();
+      await user.click(await within(enrolled()).findByRole("checkbox", { name: "Cano Ceci" }));
+      await user.click(screen.getByRole("button", { name: /Dar de baja/ }));
+      expect(await screen.findByText("1 alumno dado de baja")).toBeInTheDocument();
+      act(() => vi.advanceTimersByTime(7900));
+      expect(screen.getByText("1 alumno dado de baja")).toBeInTheDocument();
+      act(() => vi.advanceTimersByTime(200));
+      expect(screen.queryByText("1 alumno dado de baja")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("shows the gateway's refusal and keeps the lists as they were", async () => {
     const user = userEvent.setup();
     m.enrollStudents.mockRejectedValue(new Error("La actividad está inactiva."));
@@ -97,6 +136,7 @@ describe("ActivityEnrollPage (T17)", () => {
     await within(enrolled()).findByText("Cano Ceci");
     await user.click(screen.getByRole("checkbox", { name: "Arce Ana" }));
     await user.click(screen.getByRole("button", { name: /Inscribir/ }));
+    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Inscribir" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("La actividad está inactiva.");
     expect(within(enrolled()).queryByText("Arce Ana")).not.toBeInTheDocument();
   });
