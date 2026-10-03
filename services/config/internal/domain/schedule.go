@@ -394,6 +394,9 @@ const (
 	ClassSubstitute ClassStatus = "substitute"
 	ClassSwapped    ClassStatus = "swapped"
 	ClassCancelled  ClassStatus = "cancelled"
+	// ClassUncovered: the teacher who should give it is absent (T19) and
+	// nobody covers it yet.
+	ClassUncovered ClassStatus = "uncovered"
 )
 
 // ScheduledClass is a class as it happens on a date: its base block, who
@@ -404,6 +407,8 @@ type ScheduledClass struct {
 	Time      ClassTime
 	Status    ClassStatus
 	Override  *ScheduleOverride
+	// Absence is why the class is ClassUncovered (nil otherwise).
+	Absence *TeacherAbsence
 }
 
 // RegularClass is a block as the base timetable has it.
@@ -637,6 +642,9 @@ const (
 	ActionBlockDeleted    ScheduleAction = "block_deleted"
 	ActionOverrideCreated ScheduleAction = "override_created"
 	ActionOverrideDeleted ScheduleAction = "override_deleted"
+	ActionAbsenceCreated  ScheduleAction = "absence_created"
+	ActionAbsenceUpdated  ScheduleAction = "absence_updated"
+	ActionAbsenceCanceled ScheduleAction = "absence_cancelled"
 )
 
 // ScheduleEvent is one entry of the timetable's history: who, when, what and
@@ -650,7 +658,8 @@ type ScheduleEvent struct {
 	Action     ScheduleAction
 	BlockID    string
 	OverrideID string
-	Date       time.Time // zero unless the entry is about a date-specific change
+	AbsenceID  string
+	Date       time.Time // zero unless the entry is about a date-specific change or an absence
 	Reason     string
 	Summary    string
 }

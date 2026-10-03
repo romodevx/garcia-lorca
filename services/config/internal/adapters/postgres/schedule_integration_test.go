@@ -51,6 +51,7 @@ func seedSchedule(t *testing.T) {
 	db := superDB(t)
 	for _, stmt := range []string{
 		"DELETE FROM schedule_events WHERE tenant_id = @t",
+		"DELETE FROM teacher_absences WHERE tenant_id = @t",
 		"DELETE FROM schedule_overrides WHERE tenant_id = @t",
 		"DELETE FROM schedule_blocks WHERE tenant_id = @t",
 		"DELETE FROM schedule_settings WHERE tenant_id = @t",

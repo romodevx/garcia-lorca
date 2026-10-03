@@ -89,11 +89,14 @@ type ScheduleBoard struct {
 	Blocks []domain.ScheduleBlock
 }
 
-// ScheduleDay is the effective timetable of one date.
+// ScheduleDay is the effective timetable of one date. NonWorking is the label
+// of the school-calendar period that closes the date ("" on a school day): a
+// closed date has no classes.
 type ScheduleDay struct {
-	Date    time.Time
-	Weekday int
-	Classes []domain.ScheduledClass
+	Date       time.Time
+	Weekday    int
+	NonWorking string
+	Classes    []domain.ScheduledClass
 }
 
 // today is the school's calendar date, as midnight UTC like every date here.
@@ -134,8 +137,10 @@ func (s *ScheduleService) Board(ctx context.Context, cycleID, teacherID string) 
 	}, nil
 }
 
-// Day is the effective timetable of date in cycleID; with teacherID set, the
-// classes that teacher gives that day (covers included) or was replaced in.
+// Day is the effective timetable of date in cycleID — the base, that date's
+// changes and the teachers' absences (T19: a class of an absent teacher is
+// ClassUncovered) — with teacherID set, the classes that teacher gives that
+// day (covers included) or was replaced in.
 func (s *ScheduleService) Day(ctx context.Context, cycleID string, date time.Time, teacherID string) (ScheduleDay, error) {
 	if strings.TrimSpace(cycleID) == "" {
 		return ScheduleDay{}, glerrors.New(glerrors.KindInvalid, "cycle id is required")
@@ -149,15 +154,15 @@ func (s *ScheduleService) Day(ctx context.Context, cycleID string, date time.Tim
 	if day.Weekday > domain.LastSchoolDay || date.Before(cycle.StartsOn()) || date.After(cycle.EndsOn()) {
 		return day, nil
 	}
-	blocks, err := s.repo.ListScheduleBlocks(ctx, cycleID)
+	t, err := s.loadTimetable(ctx, cycle, date, date)
 	if err != nil {
 		return ScheduleDay{}, err
 	}
-	overrides, err := s.repo.ListScheduleOverrides(ctx, cycleID, date, date)
-	if err != nil {
-		return ScheduleDay{}, err
+	if open, closed := t.schoolDay(date); !open {
+		day.NonWorking = closed
+		return day, nil
 	}
-	for _, c := range domain.EffectiveDay(blocks, overrides, date) {
+	for _, c := range t.on(date) {
 		if teacherID == "" || c.TeacherID == teacherID || c.Block.TeacherID() == teacherID {
 			day.Classes = append(day.Classes, c)
 		}
@@ -286,6 +291,13 @@ func (s *ScheduleService) CreateOverride(ctx context.Context, in OverrideInput, 
 	if err := checkOverrideDate(cat.Cycle, b, date); err != nil {
 		return domain.ScheduleOverride{}, err
 	}
+	periods, err := s.repo.ListNonWorkingPeriods(ctx, b.CycleID())
+	if err != nil {
+		return domain.ScheduleOverride{}, err
+	}
+	if label, closed := domain.NonWorkingLabel(periods, date); closed {
+		return domain.ScheduleOverride{}, domain.NonWorkingDateError(date, label)
+	}
 	if in.Kind == domain.OverrideSubstitute {
 		if err := checkSubstitute(cat, b, in.TeacherID); err != nil {
 			return domain.ScheduleOverride{}, err
@@ -325,6 +337,9 @@ func (s *ScheduleService) CreateOverride(ctx context.Context, in OverrideInput, 
 			return err
 		}
 		if err := clashFreeDay(blocks, append(sameDay, o), date, o, names); err != nil {
+			return err
+		}
+		if err := refuseAbsentInClass(tx, blocks, append(sameDay, o), date, o, names); err != nil {
 			return err
 		}
 		if err := tx.InsertOverride(o); err != nil {
@@ -424,6 +439,7 @@ func (s *ScheduleService) AvailableTeachers(ctx context.Context, q AvailabilityQ
 	}
 	var day []domain.ScheduledClass
 	cover := ""
+	absent := make(map[string]bool)
 	if q.Date.IsZero() {
 		if q.Weekday < domain.FirstSchoolDay || q.Weekday > domain.LastSchoolDay {
 			return nil, refusal(glerrors.KindInvalid, domain.CodeScheduleWeekdayInvalid, "El día va de lunes (1) a viernes (5)")
@@ -440,11 +456,20 @@ func (s *ScheduleService) AvailableTeachers(ctx context.Context, q AvailabilityQ
 				cover = b.TeacherID()
 			}
 		}
-		overrides, err := s.repo.ListScheduleOverrides(ctx, q.CycleID, date, date)
+		t, err := s.loadTimetable(ctx, cat.Cycle, date, date)
 		if err != nil {
 			return nil, err
 		}
-		day = domain.EffectiveDay(blocks, overrides, date)
+		if open, _ := t.schoolDay(date); !open {
+			return []domain.AvailableTeacher{}, nil
+		}
+		day = domain.EffectiveDay(t.blocks, t.overrides, date)
+		// An absent teacher is no substitute (T19).
+		for _, tc := range cat.Teachers {
+			if _, away := domain.AbsentAt(t.absences, tc.ID(), date, slot); away {
+				absent[tc.ID()] = true
+			}
+		}
 	}
 	subjectName := foldName(subject.Name())
 	sameSubject := make(map[string]bool)
@@ -463,7 +488,7 @@ func (s *ScheduleService) AvailableTeachers(ctx context.Context, q AvailabilityQ
 		func(id string) bool { return sameSubject[id] }, func(id string) bool { return sameGrade[id] })
 	out := free[:0]
 	for _, a := range free {
-		if a.Teacher.ID() != cover {
+		if a.Teacher.ID() != cover && !absent[a.Teacher.ID()] {
 			out = append(out, a)
 		}
 	}
@@ -714,6 +739,27 @@ func clashFreeDay(blocks []domain.ScheduleBlock, overrides []domain.ScheduleOver
 		other = a
 	}
 	return domain.ClashError(kind, other, names)
+}
+
+// refuseAbsentInClass refuses o when, on date, it puts a teacher in a class
+// while they are absent: a substitute who is away then, or a swap moving a
+// class into its teacher's absence.
+func refuseAbsentInClass(tx ports.ScheduleTx, blocks []domain.ScheduleBlock, overrides []domain.ScheduleOverride, date time.Time,
+	o domain.ScheduleOverride, names scheduleNames,
+) error {
+	absences, err := tx.ActiveAbsences(o.CycleID(), date, date)
+	if err != nil {
+		return err
+	}
+	for _, c := range domain.EffectiveDay(blocks, overrides, date) {
+		if c.Status == domain.ClassCancelled || !o.Touches(c.Block.ID()) {
+			continue
+		}
+		if a, away := domain.AbsentAt(absences, c.TeacherID, date, c.Time); away {
+			return domain.TeacherAbsentError(names.Teacher(c.TeacherID), a, date)
+		}
+	}
+	return nil
 }
 
 // --- helpers ---------------------------------------------------------------------
