@@ -53,6 +53,12 @@ type ScheduleService interface {
 	ListAvailableTeachers(ctx context.Context, q client.AvailabilityQuery) ([]client.AvailableTeacher, error)
 	SetScheduleGrid(ctx context.Context, levelID string, start, end int) (client.ScheduleGrid, error)
 	ListScheduleEvents(ctx context.Context, cycleID string, limit int) ([]client.ScheduleEvent, error)
+	// T19 — teacher absences.
+	CreateTeacherAbsence(ctx context.Context, in client.TeacherAbsenceInput, by client.ScheduleActor) (client.TeacherAbsenceSaved, error)
+	UpdateTeacherAbsence(ctx context.Context, id string, in client.TeacherAbsenceInput, by client.ScheduleActor) (client.TeacherAbsenceSaved, error)
+	CancelTeacherAbsence(ctx context.Context, id string, by client.ScheduleActor) (client.TeacherAbsence, error)
+	ListTeacherAbsences(ctx context.Context, q client.TeacherAbsenceQuery) ([]client.TeacherAbsence, error)
+	ListUncoveredClasses(ctx context.Context, cycleID string, from, to time.Time) ([]client.UncoveredClass, error)
 	// The teacher's own timetable resolves the caller's teacher record and the
 	// active cycle.
 	TeacherDirectoryReader
@@ -158,12 +164,15 @@ type scheduleClassJSON struct {
 	BaseEndsAt    string  `json:"baseEndsAt"`
 	OverrideID    *string `json:"overrideId"`
 	Reason        *string `json:"reason"`
+	// Absence is why an "uncovered" class has nobody (T19), shaped by caller.
+	Absence *teacherAbsenceJSON `json:"absence"`
 }
 
 type scheduleDayJSON struct {
-	Date    string              `json:"date"`
-	Weekday int                 `json:"weekday"`
-	Classes []scheduleClassJSON `json:"classes"`
+	Date       string              `json:"date"`
+	Weekday    int                 `json:"weekday"`
+	NonWorking *string             `json:"nonWorking"`
+	Classes    []scheduleClassJSON `json:"classes"`
 }
 
 type scheduleOverrideJSON struct {
@@ -188,6 +197,7 @@ type scheduleEventJSON struct {
 	Action     string    `json:"action"`
 	BlockID    *string   `json:"blockId"`
 	OverrideID *string   `json:"overrideId"`
+	AbsenceID  *string   `json:"absenceId"`
 	Date       *string   `json:"date"`
 	Reason     string    `json:"reason"`
 	Summary    string    `json:"summary"`
@@ -231,7 +241,7 @@ func (h *ScheduleHandler) Day(w http.ResponseWriter, r *http.Request) {
 		writeConnectError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, toDayJSON(d))
+	writeJSON(w, http.StatusOK, toDayJSON(d, callerHolds(r, permScheduleWrite)))
 }
 
 type scheduleBlockRequest struct {
@@ -445,7 +455,7 @@ func (h *ScheduleHandler) Events(w http.ResponseWriter, r *http.Request) {
 	for _, e := range evs {
 		ev := scheduleEventJSON{
 			ID: e.ID, At: e.At, ActorID: e.By.UserID, ActorName: e.By.Name, Action: e.Action,
-			BlockID: optional(e.BlockID), OverrideID: optional(e.OverrideID), Reason: e.Reason, Summary: e.Summary,
+			BlockID: optional(e.BlockID), OverrideID: optional(e.OverrideID), AbsenceID: optional(e.AbsenceID), Reason: e.Reason, Summary: e.Summary,
 		}
 		if !e.Date.IsZero() {
 			ev.Date = optional(formatDate(e.Date))
@@ -530,7 +540,8 @@ func (h *ScheduleHandler) OwnDay(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	d.Classes = mine
-	writeJSON(w, http.StatusOK, toDayJSON(d))
+	// "Mi horario" says only "Ausente": never the kind nor the note.
+	writeJSON(w, http.StatusOK, toDayJSON(d, false))
 }
 
 // callerTeacher is the teacher record linked to the caller, or noTeacherID.
@@ -658,20 +669,30 @@ func toOverrideJSON(o client.ScheduleOverride) scheduleOverrideJSON {
 	}
 }
 
-func toDayJSON(d client.ScheduleDay) scheduleDayJSON {
-	out := scheduleDayJSON{Date: formatDate(d.Date), Weekday: d.Weekday, Classes: make([]scheduleClassJSON, 0, len(d.Classes))}
+// toDayJSON renders a date's classes; private says whether the caller may
+// read an absence's kind and note (schedule:write).
+func toDayJSON(d client.ScheduleDay, private bool) scheduleDayJSON {
+	out := scheduleDayJSON{Date: formatDate(d.Date), Weekday: d.Weekday, NonWorking: optional(d.NonWorking), Classes: make([]scheduleClassJSON, 0, len(d.Classes))}
 	for _, c := range d.Classes {
-		cj := scheduleClassJSON{
-			BlockID: c.Block.ID, GroupID: c.Block.GroupID, SubjectID: c.Block.SubjectID, TeacherID: c.TeacherID,
-			StartsAt: formatClock(c.StartsAt), EndsAt: formatClock(c.EndsAt), Status: c.Status,
-			BaseTeacherID: c.Block.TeacherID, BaseStartsAt: formatClock(c.Block.StartsAt), BaseEndsAt: formatClock(c.Block.EndsAt),
-		}
-		if c.Override != nil {
-			cj.OverrideID, cj.Reason = optional(c.Override.ID), optional(c.Override.Reason)
-		}
-		out.Classes = append(out.Classes, cj)
+		out.Classes = append(out.Classes, toClassJSON(c, private))
 	}
 	return out
+}
+
+func toClassJSON(c client.ScheduledClass, private bool) scheduleClassJSON {
+	cj := scheduleClassJSON{
+		BlockID: c.Block.ID, GroupID: c.Block.GroupID, SubjectID: c.Block.SubjectID, TeacherID: c.TeacherID,
+		StartsAt: formatClock(c.StartsAt), EndsAt: formatClock(c.EndsAt), Status: c.Status,
+		BaseTeacherID: c.Block.TeacherID, BaseStartsAt: formatClock(c.Block.StartsAt), BaseEndsAt: formatClock(c.Block.EndsAt),
+	}
+	if c.Override != nil {
+		cj.OverrideID, cj.Reason = optional(c.Override.ID), optional(c.Override.Reason)
+	}
+	if c.Absence != nil {
+		a := toAbsenceJSON(*c.Absence, private)
+		cj.Absence = &a
+	}
+	return cj
 }
 
 func toBoardJSON(b client.ScheduleBoard) scheduleBoardJSON {

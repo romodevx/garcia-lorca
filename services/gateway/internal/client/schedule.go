@@ -81,13 +81,17 @@ type ScheduledClass struct {
 	EndsAt    int
 	Status    string
 	Override  *ScheduleOverride
+	// Absence is why an "uncovered" class has nobody (T19).
+	Absence *TeacherAbsence
 }
 
-// ScheduleDay is the effective timetable of a date.
+// ScheduleDay is the effective timetable of a date; NonWorking is the
+// school-calendar label closing it ("" on a school day).
 type ScheduleDay struct {
-	Date    time.Time
-	Weekday int
-	Classes []ScheduledClass
+	Date       time.Time
+	Weekday    int
+	NonWorking string
+	Classes    []ScheduledClass
 }
 
 // ScheduleBoard is a cycle's base timetable with the catalog it is drawn with.
@@ -132,7 +136,8 @@ type ScheduleEvent struct {
 	Action     string
 	BlockID    string
 	OverrideID string
-	Date       time.Time // zero unless about a date-specific change
+	AbsenceID  string
+	Date       time.Time // zero unless about a date-specific change or an absence
 	Reason     string
 	Summary    string
 }
@@ -184,19 +189,27 @@ func (c *ConfigClient) GetScheduleDay(ctx context.Context, cycleID string, date 
 	if err != nil {
 		return ScheduleDay{}, err
 	}
-	d := ScheduleDay{Date: res.Msg.GetDate().AsTime().UTC(), Weekday: int(res.Msg.GetWeekday())}
+	d := ScheduleDay{Date: res.Msg.GetDate().AsTime().UTC(), Weekday: int(res.Msg.GetWeekday()), NonWorking: res.Msg.GetNonWorking()}
 	for _, pc := range res.Msg.GetClasses() {
-		cl := ScheduledClass{
-			Block: toScheduleBlock(pc.GetBlock()), TeacherID: pc.GetTeacherId(), Status: pc.GetStatus(),
-			StartsAt: int(pc.GetStartsAt()), EndsAt: int(pc.GetEndsAt()),
-		}
-		if pc.GetOverride() != nil {
-			o := toScheduleOverride(pc.GetOverride())
-			cl.Override = &o
-		}
-		d.Classes = append(d.Classes, cl)
+		d.Classes = append(d.Classes, toScheduledClass(pc))
 	}
 	return d, nil
+}
+
+func toScheduledClass(pc *configv1.ScheduledClass) ScheduledClass {
+	cl := ScheduledClass{
+		Block: toScheduleBlock(pc.GetBlock()), TeacherID: pc.GetTeacherId(), Status: pc.GetStatus(),
+		StartsAt: int(pc.GetStartsAt()), EndsAt: int(pc.GetEndsAt()),
+	}
+	if pc.GetOverride() != nil {
+		o := toScheduleOverride(pc.GetOverride())
+		cl.Override = &o
+	}
+	if pc.GetAbsence() != nil {
+		a := toTeacherAbsence(pc.GetAbsence())
+		cl.Absence = &a
+	}
+	return cl
 }
 
 // CreateScheduleBlock adds a class to the base timetable.
@@ -292,7 +305,7 @@ func (c *ConfigClient) ListScheduleEvents(ctx context.Context, cycleID string, l
 	for _, e := range res.Msg.GetEvents() {
 		ev := ScheduleEvent{
 			ID: e.GetId(), At: e.GetAt().AsTime().UTC(), By: ScheduleActor{UserID: e.GetBy().GetUserId(), Name: e.GetBy().GetName()},
-			Action: e.GetAction(), BlockID: e.GetBlockId(), OverrideID: e.GetOverrideId(), Reason: e.GetReason(), Summary: e.GetSummary(),
+			Action: e.GetAction(), BlockID: e.GetBlockId(), OverrideID: e.GetOverrideId(), AbsenceID: e.GetAbsenceId(), Reason: e.GetReason(), Summary: e.GetSummary(),
 		}
 		if e.GetDate() != nil {
 			ev.Date = e.GetDate().AsTime().UTC()
