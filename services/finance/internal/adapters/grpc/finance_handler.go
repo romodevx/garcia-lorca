@@ -39,6 +39,8 @@ type FinanceHandler struct {
 	expenses *usecase.ExpenseService
 	// activities is T17's (WithActivities); nil leaves those RPCs Unimplemented.
 	activities *usecase.ActivityService
+	// scholarships is T18's (WithScholarships); nil leaves those RPCs Unimplemented.
+	scholarships *usecase.ScholarshipService
 }
 
 // NewFinanceHandler wires the handler to the finance + health use cases.
@@ -391,6 +393,7 @@ func (h *FinanceHandler) ExpectedToday(ctx context.Context, req *connect.Request
 		DiscountCents:      expected.DiscountCents,
 		AnnualBalanceCents: expected.AnnualBalanceCents,
 		Lines:              toProtoExpectedLines(expected.Lines),
+		ScholarshipCents:   expected.ScholarshipCents,
 	}), nil
 }
 
@@ -400,7 +403,7 @@ func toProtoExpectedLines(lines []usecase.ExpectedLine) []*financev1.ExpectedLin
 		out = append(out, &financev1.ExpectedLine{
 			ChargeId: l.ChargeID, Description: l.Description, DueDate: l.DueDate.Format(time.DateOnly),
 			OwedCents: l.OwedCents, SurchargeCents: l.SurchargeCents, DiscountCents: l.DiscountCents,
-			TotalCents: l.TotalCents, Due: l.Due,
+			TotalCents: l.TotalCents, Due: l.Due, ScholarshipCents: l.ScholarshipCents,
 		})
 	}
 	return out
@@ -527,6 +530,7 @@ func (h *FinanceHandler) GetDepositReceipt(ctx context.Context, req *connect.Req
 		lines = append(lines, &financev1.ReceiptLine{
 			ChargeId: l.ChargeID, Description: l.Description, AmountCents: l.AmountCents,
 			Surcharge: l.Surcharge, DiscountCents: l.DiscountCents,
+			ScholarshipCents: l.ScholarshipCents, ScholarshipName: l.ScholarshipName,
 		})
 	}
 	return connect.NewResponse(&financev1.GetDepositReceiptResponse{
@@ -731,20 +735,22 @@ func toProtoCharges(cs []ports.ChargeWithPaid) []*financev1.Charge {
 func toProtoCharge(cwp ports.ChargeWithPaid) *financev1.Charge {
 	c := cwp.Charge
 	return &financev1.Charge{
-		Id:             c.ID(),
-		TenantId:       c.TenantID(),
-		StudentId:      c.StudentID(),
-		CycleId:        c.CycleID(),
-		ConceptId:      c.ConceptID(),
-		Description:    c.Description(),
-		AmountCents:    c.Amount().Int64(),
-		DiscountCents:  c.Discount().Int64(),
-		DueDate:        c.DueDate().Format(dueDateLayout),
-		StartsOn:       formatPlanDate(c.StartsOn()),
-		ExternalRef:    c.ExternalRef(),
-		Status:         c.Status(),
-		PaidCents:      cwp.PaidCents,
-		RemainingCents: max(0, c.Effective().Int64()-cwp.PaidCents),
+		Id:               c.ID(),
+		TenantId:         c.TenantID(),
+		StudentId:        c.StudentID(),
+		CycleId:          c.CycleID(),
+		ConceptId:        c.ConceptID(),
+		Description:      c.Description(),
+		AmountCents:      c.Amount().Int64(),
+		DiscountCents:    c.Discount().Int64(),
+		DueDate:          c.DueDate().Format(dueDateLayout),
+		StartsOn:         formatPlanDate(c.StartsOn()),
+		ExternalRef:      c.ExternalRef(),
+		Status:           c.Status(),
+		PaidCents:        cwp.PaidCents,
+		RemainingCents:   max(0, c.Effective().Int64()-cwp.PaidCents),
+		ScholarshipCents: c.Scholarship().Int64(),
+		ScholarshipId:    c.ScholarshipID(),
 	}
 }
 

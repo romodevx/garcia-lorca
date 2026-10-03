@@ -204,6 +204,20 @@ func (f *fakeRepo) paidFor(chargeID string) int64 {
 	return total
 }
 
+// withPaid pairs a charge with what was collected, and what of it was paid
+// by its due date (T18) — as the repository's withPaidTotals does.
+func (f *fakeRepo) withPaid(c domain.Charge) ports.ChargeWithPaid {
+	due := c.DueDate().UTC()
+	cutoff := time.Date(due.Year(), due.Month(), due.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, 1)
+	var byDue int64
+	for _, p := range f.payments[c.ID()] {
+		if p.PaidAt().Before(cutoff) {
+			byDue += p.Amount().Int64()
+		}
+	}
+	return ports.ChargeWithPaid{Charge: c, PaidCents: f.paidFor(c.ID()), PaidByDueCents: byDue}
+}
+
 func (f *fakeRepo) hasChargeKey(key string) bool {
 	for _, existing := range f.charges {
 		if chargeKey(existing) == key {
@@ -367,7 +381,7 @@ func (f *fakeRepo) ListCharges(_ context.Context, studentID, cycleID string) ([]
 		if cycleID != "" && c.CycleID() != cycleID {
 			continue
 		}
-		out = append(out, ports.ChargeWithPaid{Charge: c, PaidCents: f.paidFor(c.ID())})
+		out = append(out, f.withPaid(c))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Charge.ID() < out[j].Charge.ID() })
 	return out, nil
@@ -475,7 +489,7 @@ func (f *fakeRepo) RegisterDeposit(
 		if c.StudentID() != d.StudentID() || c.Status() == domain.StatusCancelled {
 			continue
 		}
-		open = append(open, ports.ChargeWithPaid{Charge: c, PaidCents: f.paidFor(c.ID())})
+		open = append(open, f.withPaid(c))
 	}
 	sort.Slice(open, func(i, j int) bool {
 		if !open[i].Charge.DueDate().Equal(open[j].Charge.DueDate()) {
@@ -497,6 +511,10 @@ func (f *fakeRepo) RegisterDeposit(
 		f.charges[c.ID()] = c
 	}
 	for _, c := range write.Discounted {
+		f.charges[c.ID()] = c
+	}
+	// The scholarship part is written after the discount, carrying both.
+	for _, c := range write.Scholarships {
 		f.charges[c.ID()] = c
 	}
 	for _, fee := range write.Surcharges {
@@ -718,6 +736,15 @@ func (f *fakeRepo) release(d domain.Deposit, resetEarned bool) error {
 				}
 				c = cleared
 			}
+			// As the repository: a scholarship part stays only while what is
+			// left still settles the charge (T18).
+			if c.Scholarship() > 0 && f.paidFor(chargeID) < c.Effective().Int64() {
+				cleared, err := c.WithScholarship("", 0, f.paidFor(chargeID))
+				if err != nil {
+					return err
+				}
+				c = cleared
+			}
 			f.charges[chargeID] = c.WithStatus(f.paidFor(chargeID))
 		}
 		// As the repository does: the daily surcharges this deposit wrote go
@@ -830,7 +857,7 @@ func (f *fakeRepo) listOverdueFrom(cycleID string, today time.Time) ([]ports.Cha
 		if c.Effective().Int64()-paid <= 0 {
 			continue
 		}
-		out = append(out, ports.ChargeWithPaid{Charge: c, PaidCents: paid})
+		out = append(out, f.withPaid(c))
 	}
 	// (due_date, id) — the same total order the real query uses, so a cursor
 	// walk over this fake means what it means in production.

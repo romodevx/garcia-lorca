@@ -90,7 +90,7 @@ fi
 # Not a strict bound — bin packing on lumpy input cannot promise one. This only
 # catches an assignment that ignores weight entirely (e.g. plain round-robin
 # over an alphabetical list), which is what makes sharding cost more than it saves.
-bal=$(MODULES="./services/iam ./services/finance ./services/comms ./services/uniforms ./services/students ./services/attendance ./services/grades ./services/gateway ./services/config ./pkg ./gen/go ./services/billing ./services/docs ./services/scholarships" \
+bal=$(MODULES="./services/iam ./services/finance ./services/comms ./services/uniforms ./services/students ./services/attendance ./services/grades ./services/gateway ./services/config ./pkg ./gen/go ./services/billing ./services/docs" \
       SHARDS=4 sh "$SCRIPT" 2>/dev/null | jq '[.[].weight] | (max / (min + 1))' 2>/dev/null)
 if [ -n "$bal" ] && [ "$(printf '%s' "$bal" | cut -d. -f1)" -le 1 ]; then
   ok "shards are balanced by measured weight (max/min ratio $bal)"

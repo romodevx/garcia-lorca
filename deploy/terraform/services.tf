@@ -8,7 +8,7 @@
 #                        billed per request). High concurrency packs requests.
 #
 # The full service set is: gateway, iam, students, finance, billing, grades,
-# scholarships, attendance, docs, comms, uniforms. Only gateway + iam + students
+# attendance, docs, comms, uniforms (scholarships live in finance, ADR 0022). Only gateway + iam + students
 # are instantiated below as canonical examples; the rest follow the same module
 # call with the scale-to-zero profile (copy the "students" block, change name).
 
@@ -121,7 +121,7 @@ locals {
     # assignments (M14), and uniforms is a real Clean-Architecture service with
     # its own migrations since M12 — not a stub. There is deliberately NO
     # `tuition` entry: M15 rides on module_finance (FLAGS.md).
-    ENABLED_MODULES = "iam,gateway,students,config,grades,finance,attendance,comms,teachers,uniforms,expenses,schedule,activities"
+    ENABLED_MODULES = "iam,gateway,students,config,grades,finance,attendance,comms,teachers,uniforms,expenses,schedule,activities,scholarships"
     # CORS allow-list for clients that call the gateway cross-origin. The web app
     # does not: it proxies same-origin. This is a plain variable rather than
     # module.web.uri on purpose — see var.web_origin for the dependency cycle.
@@ -309,8 +309,9 @@ module "iam" {
 
 # ---- SCALE-TO-ZERO internal services --------------------------------------
 # The 8 REAL services are: gateway, iam (warm above) + students, config,
-# finance, grades, attendance, comms (scale-to-zero below). The 4 stub services
-# (billing, scholarships, docs, uniforms) are NOT deployed. All internal
+# finance, grades, attendance, comms (scale-to-zero below). The stub services
+# (billing, docs, uniforms) are NOT deployed; scholarships live in finance
+# (ADR 0022). All internal
 # services share the same profile: min=0, cpu_idle=true, internal-only ingress,
 # capped max. See deploy/COST-AND-DEPLOY.md §C3.
 module "students" {

@@ -185,6 +185,24 @@ service FinanceService {
   rpc UnenrollFromActivity(UnenrollFromActivityRequest) returns (UnenrollFromActivityResponse);
   rpc ChangeActivityOption(ChangeActivityOptionRequest) returns (ChangeActivityOptionResponse);
 
+  // --- scholarships (T18, ADR 0022) ---
+  // Becas: a percent off, a fixed amount off or a fixed amount to pay, on the
+  // inscription, the tuition, catalog concepts and activities. What one takes
+  // off a charge is worked out on every read and payment, never stored until
+  // the charge is settled under it.
+  rpc ListScholarships(ListScholarshipsRequest) returns (ListScholarshipsResponse);
+  rpc GetScholarship(GetScholarshipRequest) returns (GetScholarshipResponse);
+  rpc CreateScholarship(CreateScholarshipRequest) returns (CreateScholarshipResponse);
+  // UpdateScholarship replaces its terms; what it already settled keeps them.
+  rpc UpdateScholarship(UpdateScholarshipRequest) returns (UpdateScholarshipResponse);
+  // ListScholarshipTargets is what a scholarship can apply to today.
+  rpc ListScholarshipTargets(ListScholarshipTargetsRequest) returns (ListScholarshipTargetsResponse);
+  // ListScholarshipHolders is who holds one now, with their overlaps.
+  rpc ListScholarshipHolders(ListScholarshipHoldersRequest) returns (ListScholarshipHoldersResponse);
+  rpc AssignScholarship(AssignScholarshipRequest) returns (AssignScholarshipResponse);
+  // UnassignScholarship gives the pupils' pending charges their price back.
+  rpc UnassignScholarship(UnassignScholarshipRequest) returns (UnassignScholarshipResponse);
+
   // --- tuition (M15: what each level costs, and the monthly run) ---
   // UpsertTuitionPlan sets (or replaces) the tuition table for one level of one
   // cycle. Keyed by (cycle, level): a school raises tuition each year, and the
@@ -296,6 +314,11 @@ message Charge {
   // starts_on is the first day the charge opens to the family (YYYY-MM-DD,
   // T5). Empty is open from the day it was issued.
   string starts_on = 14;
+  // scholarship_cents is the scholarship's part (T18): written when the charge
+  // was settled under it, or worked out today on a read. remaining_cents is
+  // already net of it.
+  int64 scholarship_cents = 15;
+  string scholarship_id = 16;
 }
 
 // Payment is one amount applied to a charge. `method` is one of:
@@ -1085,6 +1108,9 @@ message ExpectedTodayResponse {
   // The same, concept by concept, oldest due date first (task 8). The lines
   // marked due add up to amount_cents.
   repeated ExpectedLine lines = 5;
+  // What scholarships take off the lines asked for (T18), already out of
+  // amount_cents.
+  int64 scholarship_cents = 6;
 }
 
 // ExpectedLine is one charge still owed, as of the day asked about.
@@ -1097,6 +1123,8 @@ message ExpectedLine {
   int64 discount_cents = 6;
   int64 total_cents = 7;
   bool due = 8;
+  // The scholarship's part that day (T18), already out of owed_cents.
+  int64 scholarship_cents = 9;
 }
 
 // DrainOutboxRequest asks for the waiting events to be published.
@@ -1123,8 +1151,11 @@ message ReceiptLine {
   int64 amount_cents = 3;
   // surcharge marks a late fee, printed as such.
   bool surcharge = 4;
-  // discount_cents is the charge's discount (pronto pago, beca), shown beside it.
+  // discount_cents is the charge's discount (pronto pago, level), shown beside it.
   int64 discount_cents = 5;
+  // The scholarship's part and its name (T18), shown beside it.
+  int64 scholarship_cents = 6;
+  string scholarship_name = 7;
 }
 
 message GetDepositReceiptResponse {
@@ -1652,4 +1683,113 @@ message ChangeActivityOptionRequest {
 
 message ChangeActivityOptionResponse {
   ActivityEnrollment enrollment = 1;
+}
+
+// --- scholarships (T18) -----------------------------------------------------
+
+// ScholarshipInput is what create and update take. kind: percent | fixed_off |
+// fixed_price. value: basis points for a percent (1–10000), cents otherwise.
+// targets: "enrollment" | "tuition" | "concept:<id>" | "activity:<id>".
+message ScholarshipInput {
+  string name = 1;
+  string kind = 2;
+  int64 value = 3;
+  repeated string targets = 4;
+  bool active = 5;
+}
+
+message Scholarship {
+  string id = 1;
+  string name = 2;
+  string kind = 3;
+  int64 value = 4;
+  repeated string targets = 5;
+  bool active = 6;
+  int32 assigned_count = 7;
+}
+
+// ScholarshipTarget is one thing a scholarship can apply to. group:
+// enrollment | tuition | concept | activity.
+message ScholarshipTarget {
+  string key = 1;
+  string label = 2;
+  string group = 3;
+}
+
+message ScholarshipRef {
+  string id = 1;
+  string name = 2;
+}
+
+// ScholarshipHolder is a pupil holding one, with the other scholarships they
+// hold that share a target with it (they do not stack).
+message ScholarshipHolder {
+  string student_id = 1;
+  string starts_on = 2;
+  repeated ScholarshipRef overlaps = 3;
+}
+
+message ListScholarshipsRequest {
+  bool include_inactive = 1;
+}
+
+message ListScholarshipsResponse {
+  repeated Scholarship scholarships = 1;
+}
+
+message GetScholarshipRequest {
+  string id = 1;
+}
+
+message GetScholarshipResponse {
+  Scholarship scholarship = 1;
+}
+
+message CreateScholarshipRequest {
+  ScholarshipInput scholarship = 1;
+}
+
+message CreateScholarshipResponse {
+  Scholarship scholarship = 1;
+}
+
+message UpdateScholarshipRequest {
+  string id = 1;
+  ScholarshipInput scholarship = 2;
+}
+
+message UpdateScholarshipResponse {
+  Scholarship scholarship = 1;
+}
+
+message ListScholarshipTargetsRequest {}
+
+message ListScholarshipTargetsResponse {
+  repeated ScholarshipTarget targets = 1;
+}
+
+message ListScholarshipHoldersRequest {
+  string scholarship_id = 1;
+}
+
+message ListScholarshipHoldersResponse {
+  repeated ScholarshipHolder holders = 1;
+}
+
+message AssignScholarshipRequest {
+  string scholarship_id = 1;
+  repeated string student_ids = 2;
+}
+
+message AssignScholarshipResponse {
+  repeated ScholarshipHolder holders = 1;
+}
+
+message UnassignScholarshipRequest {
+  string scholarship_id = 1;
+  repeated string student_ids = 2;
+}
+
+message UnassignScholarshipResponse {
+  int32 removed = 1;
 }

@@ -55,7 +55,6 @@ weight_for() {
     ./gen/go)                echo  77 ;;
     ./services/billing)      echo  54 ;;
     ./services/docs)         echo  52 ;;
-    ./services/scholarships) echo  48 ;;
     # Unknown module: assume the most expensive one we have ever measured.
     # Guessing cheap would let a new service pile onto an already-full shard and
     # set the wall clock for everyone; guessing expensive only costs a little

@@ -59,8 +59,10 @@ export interface Charge {
   status: ChargeStatus;
   /** Server-derived from the charge's payments — never sent by the client. */
   paidCents: number;
-  /** Server-derived (amount − discount − paid) — never sent by the client. */
+  /** Server-derived (amount − discount − scholarship − paid) — never sent by the client. */
   remainingCents: number;
+  /** What a scholarship takes off it (T18). Absent from a gateway older than T18. */
+  scholarshipCents?: number;
 }
 
 /**
@@ -229,10 +231,17 @@ export interface ExpectedLine {
   surchargeCents: number;
   /** The early-payment reward settling it that day earns. */
   discountCents: number;
+  /**
+   * What a scholarship takes off that day (T18), ALREADY out of owedCents;
+   * 0 when none applies or it was lost by paying after the due date.
+   */
+  scholarshipCents: number;
   totalCents: number;
   /** Asked for that day: due, or falling due later that month. */
   due: boolean;
 }
+
+type WireExpectedLine = Omit<ExpectedLine, "scholarshipCents"> & { scholarshipCents?: number };
 
 export interface PreviewDepositInput {
   studentId: string;
@@ -644,13 +653,17 @@ export async function previewDeposit(baseURL: string, input: PreviewDepositInput
  */
 export async function getExpected(baseURL: string, studentId: string, on = ""): Promise<Expected> {
   const query = on === "" ? "" : `&on=${encodeURIComponent(on)}`;
-  const res = await getJSON<Partial<Expected>>(baseURL, `/expected?studentId=${encodeURIComponent(studentId)}${query}`);
+  const res = await getJSON<Partial<Omit<Expected, "lines">> & { lines?: WireExpectedLine[] }>(
+    baseURL,
+    `/expected?studentId=${encodeURIComponent(studentId)}${query}`,
+  );
   return {
     amountCents: res.amountCents ?? 0,
     surchargeCents: res.surchargeCents ?? 0,
     discountCents: res.discountCents ?? 0,
     annualBalanceCents: res.annualBalanceCents ?? 0,
-    lines: res.lines ?? [],
+    // A gateway older than T18 sends no scholarshipCents: that is no scholarship.
+    lines: (res.lines ?? []).map((l) => ({ ...l, scholarshipCents: l.scholarshipCents ?? 0 })),
   };
 }
 

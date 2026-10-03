@@ -296,6 +296,12 @@ func toDomainCharge(m chargeModel, paidCents int64) (domain.Charge, error) {
 			return domain.Charge{}, err
 		}
 	}
+	if m.ScholarshipCents > 0 && m.ScholarshipID != nil {
+		c, err = c.WithScholarship(*m.ScholarshipID, m.ScholarshipCents, paidCents)
+		if err != nil {
+			return domain.Charge{}, err
+		}
+	}
 	if m.ExternalRef != "" && m.CycleID != nil {
 		c, err = c.WithExternalRef(m.ExternalRef)
 		if err != nil {
@@ -325,30 +331,35 @@ func chargeOf(m chargeModel) (domain.Charge, error) {
 }
 
 // cycleColumn is the cycle as the column stores it: NULL when there is none.
-func cycleColumn(cycleID string) *string {
-	if cycleID == "" {
+func cycleColumn(cycleID string) *string { return optionalString(cycleID) }
+
+// optionalString is a nullable text column: NULL for "".
+func optionalString(s string) *string {
+	if s == "" {
 		return nil
 	}
-	return &cycleID
+	return &s
 }
 
 // fromDomainCharge projects a domain Charge into its GORM row for insert.
 // CreatedAt/UpdatedAt are left zero so the DB assigns them via DEFAULT now().
 func fromDomainCharge(c domain.Charge) chargeModel {
 	return chargeModel{
-		ID:             c.ID(),
-		TenantID:       c.TenantID(),
-		StudentID:      c.StudentID(),
-		CycleID:        cycleColumn(c.CycleID()),
-		ConceptID:      c.ConceptID(),
-		Description:    c.Description(),
-		AmountCents:    c.Amount().Int64(),
-		DiscountCents:  c.Discount().Int64(),
-		DiscountReason: c.DiscountReason(),
-		DueDate:        c.DueDate(),
-		StartsOn:       optionalDate(c.StartsOn()),
-		Status:         c.Status(),
-		ExternalRef:    c.ExternalRef(),
+		ID:               c.ID(),
+		TenantID:         c.TenantID(),
+		StudentID:        c.StudentID(),
+		CycleID:          cycleColumn(c.CycleID()),
+		ConceptID:        c.ConceptID(),
+		Description:      c.Description(),
+		AmountCents:      c.Amount().Int64(),
+		DiscountCents:    c.Discount().Int64(),
+		DiscountReason:   c.DiscountReason(),
+		ScholarshipCents: c.Scholarship().Int64(),
+		ScholarshipID:    optionalString(c.ScholarshipID()),
+		DueDate:          c.DueDate(),
+		StartsOn:         optionalDate(c.StartsOn()),
+		Status:           c.Status(),
+		ExternalRef:      c.ExternalRef(),
 	}
 }
 

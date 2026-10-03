@@ -86,3 +86,23 @@ func TestLongTextWrapsOnThePage(t *testing.T) {
 		t.Errorf("the legend's last word is missing; it reads:\n%s", text)
 	}
 }
+
+// T18: the PDF says which scholarship and how much, line by line and in total.
+func TestThePDFItemizesTheScholarship(t *testing.T) {
+	r := receipt.Receipt{
+		Kind: receipt.KindPayment, Folio: "P-2026-000046", PaidOn: "2026-09-03", Buyer: "Camila Zamora Sánchez",
+		Lines: []receipt.Line{{Description: "Colegiatura septiembre 2026", AmountCents: 150000,
+			ScholarshipCents: 150000, ScholarshipName: "Hermanos"}},
+		ScholarshipCents: 150000, TotalCents: 150000, Method: "Efectivo",
+	}
+	doc, err := receipt.PDF(r)
+	if err != nil {
+		t.Fatalf("PDF: %v", err)
+	}
+	text := textOf(t, doc)
+	for _, want := range []string{"Beca Hermanos", "Becas aplicadas", "$1,500.00"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the PDF does not say %q; it reads:\n%s", want, text)
+		}
+	}
+}

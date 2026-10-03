@@ -74,6 +74,26 @@ describe("AccountScreen (the backend's ledger, T7)", () => {
     expect(screen.getByText("Saldo $2,200.00")).toBeTruthy();
   });
 
+  // T18: the family's beca is a line of its own under the month, read as a
+  // credit (it lowers the balance), with the scholarship's name.
+  it("shows a scholarship as its own credit line", async () => {
+    mockFetch({
+      movements: [
+        line("charge", "2026-09-10", "Colegiatura septiembre", 300000, 300000),
+        line("scholarship", "2026-09-10", "Beca Hermanos · Colegiatura septiembre", 150000, 150000),
+      ],
+      totals: { ...ZERO, chargedCents: 300000, discountCents: 150000, balanceCents: 150000 },
+      dueTodayCents: 150000,
+      asOf: "2026-09-03",
+    });
+
+    await renderWithProviders(<AccountScreen />);
+
+    await waitFor(() => expect(screen.getByText("Beca Hermanos · Colegiatura septiembre")).toBeTruthy());
+    expect(screen.getByLabelText("Movimiento Beca Hermanos · Colegiatura septiembre")).toBeTruthy();
+    expect(screen.getAllByText(/Beca · /).length).toBeGreaterThan(0);
+  });
+
   // T8: a credit note is its own line, named once — not "Nota de crédito · … · credit_note".
   it("names a credit note in words, once", async () => {
     mockFetch({

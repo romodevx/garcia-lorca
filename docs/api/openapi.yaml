@@ -55,6 +55,19 @@ tags:
       other debt, and several activities add up. Behind `module_activities`
       (and `module_finance`); reads `activities:read`, writes
       `activities:write`.
+  - name: scholarships
+    description: >
+      T18 — Becas, computed by finance (ADR 0022). A scholarship is a percent
+      off, a fixed amount off, or a fixed amount to pay, applied to any of:
+      the inscription, the monthly tuition, specific concepts of the catalog,
+      and activities. It is worked out when a debt is READ or PAID (the
+      counter, the statement, the parents' app, the receipts): base price →
+      level discount → scholarship → early payment. It holds only while the
+      charge is paid by its own due date; paid later, the charge is owed at
+      full price with the normal surcharge. Several scholarships on one
+      charge do not stack: the one most favourable to the family applies.
+      Behind `module_scholarships` (and `module_finance`); reads
+      `scholarships:read`, writes `scholarships:write`.
   - name: expenses
     description: >
       T10 — Egresos: expenses, categories, receipts, the period's money and
@@ -3475,6 +3488,14 @@ paths:
                         owedCents: { type: integer, format: int64, example: 320000 }
                         surchargeCents: { type: integer, format: int64, example: 30000 }
                         discountCents: { type: integer, format: int64, example: 0 }
+                        scholarshipCents:
+                          type: integer
+                          format: int64
+                          example: 160000
+                          description: >
+                            The scholarship that day takes off (T18), already
+                            out of owedCents; 0 when none applies, or when it
+                            was lost by paying after the due date.
                         totalCents: { type: integer, format: int64, example: 350000 }
                         due: { type: boolean, description: "Asked for that day: due, or falling due later that month — and already open (T5)." }
         '400': { $ref: '#/components/responses/BadRequest' }
@@ -3688,8 +3709,8 @@ paths:
 
         Movements: `charge`, `surcharge` (written down, or `accrued` — earned
         by the daily rule up to today and not yet written; it counts, it is
-        what the counter would collect), `discount`, `scholarship` (reserved
-        for T18), `payment` (one line per deposit — money as it arrived, with
+        what the counter would collect), `discount`, `scholarship` (what a
+        scholarship takes off the charge, T18), `payment` (one line per deposit — money as it arrived, with
         its folio and method — plus payments made straight against a charge),
         `credit_note` (reserved for T8). Cancelled charges, and surcharges of a
         cancelled month, are not movements.
@@ -4572,6 +4593,262 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ActivityEnrollment' }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
+  /api/v1/scholarships:
+    get:
+      tags: [scholarships]
+      summary: The school's scholarships
+      description: >
+        Every scholarship with what it applies to and how many pupils hold it
+        today, by name. Inactive ones only when asked. Requires
+        `scholarships:read`.
+      operationId: listScholarships
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: includeInactive
+          in: query
+          required: false
+          schema: { type: boolean }
+      responses:
+        '200':
+          description: The scholarships.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [scholarships]
+                properties:
+                  scholarships:
+                    type: array
+                    items: { $ref: '#/components/schemas/Scholarship' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+    post:
+      tags: [scholarships]
+      summary: Create a scholarship
+      description: >
+        A name the school already uses (ignoring case and accents) is 409.
+        `value` is basis points for `percent` (1–10000; 5000 = 50 %), cents
+        off for `fixed_off` (≥ 1) and the cents to pay for `fixed_price`
+        (≥ 0). At least one target. Requires `scholarships:write`.
+      operationId: createScholarship
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ScholarshipInput' }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Scholarship' }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409':
+          description: The name is taken.
+          content:
+            text/plain:
+              schema: { type: string }
+
+  /api/v1/scholarships/targets:
+    get:
+      tags: [scholarships]
+      summary: What a scholarship can apply to
+      description: >
+        The inscription, the monthly tuition, the active concepts of the
+        catalog the school charges (its own concepts and the plan's fees) and
+        the active activities, read from what exists today. Requires
+        `scholarships:read`.
+      operationId: listScholarshipTargets
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200':
+          description: The targets.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [targets]
+                properties:
+                  targets:
+                    type: array
+                    items: { $ref: '#/components/schemas/ScholarshipTarget' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
+  /api/v1/scholarships/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [scholarships]
+      summary: One scholarship
+      description: Requires `scholarships:read`.
+      operationId: getScholarship
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200':
+          description: The scholarship.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Scholarship' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+    put:
+      tags: [scholarships]
+      summary: Edit a scholarship
+      description: >
+        Replaces its fields. Charges still pending take the new terms; charges
+        already paid — with money, or settled by the scholarship itself by
+        their due date — keep the scholarship they were settled with.
+        Deactivating it works like removing every pupil. Same validation as
+        create. Requires `scholarships:write`.
+      operationId: updateScholarship
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ScholarshipInput' }
+      responses:
+        '200':
+          description: The scholarship as stored.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Scholarship' }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409':
+          description: The name is taken.
+          content:
+            text/plain:
+              schema: { type: string }
+
+  /api/v1/scholarships/{id}/students:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [scholarships]
+      summary: Who holds it
+      description: >
+        The pupils holding the scholarship today, each with the other
+        scholarships they hold that share a target with this one (they do
+        not stack: the most favourable applies). Requires `scholarships:read`.
+      operationId: listScholarshipStudents
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200':
+          description: The holders.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [students]
+                properties:
+                  students:
+                    type: array
+                    items: { $ref: '#/components/schemas/ScholarshipHolder' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+    post:
+      tags: [scholarships]
+      summary: Give it to pupils
+      description: >
+        Up to 200 pupils at once; one who already holds it is left as is. It
+        applies at once to every charge of theirs it targets that is still
+        pending (paid ones never change). The scholarship must be active.
+        Returns the new holders with their overlaps. Requires
+        `scholarships:write`.
+      operationId: assignScholarship
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [studentIds]
+              properties:
+                studentIds:
+                  type: array
+                  minItems: 1
+                  maxItems: 200
+                  items: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The pupils who now hold it because of this request.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [students]
+                properties:
+                  students:
+                    type: array
+                    items: { $ref: '#/components/schemas/ScholarshipHolder' }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409':
+          description: The scholarship is inactive.
+          content:
+            text/plain:
+              schema: { type: string }
+
+  /api/v1/scholarships/{id}/students/remove:
+    post:
+      tags: [scholarships]
+      summary: Take it away from pupils
+      description: >
+        Up to 200 pupils. Their pending charges go back to full price; charges
+        already paid, or settled by the scholarship by their due date, keep
+        it. A pupil who does not hold it is ignored. Requires
+        `scholarships:write`.
+      operationId: unassignScholarship
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/CsrfToken' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [studentIds]
+              properties:
+                studentIds:
+                  type: array
+                  minItems: 1
+                  maxItems: 200
+                  items: { type: string, format: uuid }
+      responses:
+        '200':
+          description: How many pupils no longer hold it.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [removed]
+                properties:
+                  removed: { type: integer, example: 2 }
         '400': { $ref: '#/components/responses/PlainBadRequest' }
         '401': { $ref: '#/components/responses/PlainUnauthorized' }
         '403': { $ref: '#/components/responses/PlainForbidden' }
@@ -7184,8 +7461,8 @@ components:
           enum: [charge, surcharge, discount, scholarship, payment, credit_note]
           description: >
             charge and surcharge raise the balance; discount, scholarship,
-            payment and credit_note lower it. scholarship (T18) and
-            credit_note (T8) are reserved: no line carries them yet.
+            payment and credit_note lower it. scholarship (T18) is the part a
+            scholarship takes off a charge, described "Beca <name> · <charge>".
         date:
           type: string
           format: date
@@ -7428,6 +7705,73 @@ components:
         optionId: { type: string, format: uuid }
         startsOn: { type: string, format: date, example: '2026-10-02' }
         endsOn: { type: [string, 'null'], format: date, example: null }
+
+    ScholarshipInput:
+      type: object
+      required: [name, kind, value, targets]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120, example: Beca hermanos }
+        kind:
+          type: string
+          enum: [percent, fixed_off, fixed_price]
+          description: >
+            percent: a share of the price off; fixed_off: a fixed amount off
+            (never below zero); fixed_price: the family pays this amount (never
+            more than the price).
+        value:
+          type: integer
+          format: int64
+          minimum: 0
+          description: >
+            percent: basis points, 1–10000 (5000 = 50 %). fixed_off: cents
+            off, ≥ 1. fixed_price: cents to pay, ≥ 0.
+          example: 5000
+        targets:
+          type: array
+          minItems: 1
+          maxItems: 50
+          uniqueItems: true
+          description: >
+            What it applies to: `enrollment`, `tuition`, `concept:<conceptId>`,
+            `activity:<activityId>` (see /scholarships/targets).
+          items:
+            type: string
+            pattern: '^(enrollment|tuition|(concept|activity):[0-9a-fA-F-]{36})$'
+          example: [tuition, enrollment]
+        active: { type: boolean, example: true }
+
+    Scholarship:
+      allOf:
+        - $ref: '#/components/schemas/ScholarshipInput'
+        - type: object
+          required: [id, active, assignedCount]
+          properties:
+            id: { type: string, format: uuid }
+            assignedCount: { type: integer, example: 14 }
+
+    ScholarshipTarget:
+      type: object
+      required: [key, label, group]
+      properties:
+        key: { type: string, example: 'concept:7d1c2a4e-5b6f-4c3d-8e9f-0a1b2c3d4e5f' }
+        label: { type: string, example: Cuota de materiales }
+        group: { type: string, enum: [enrollment, tuition, concept, activity] }
+
+    ScholarshipHolder:
+      type: object
+      required: [studentId, startsOn, overlaps]
+      properties:
+        studentId: { type: string, format: uuid }
+        startsOn: { type: string, format: date, example: '2026-10-02' }
+        overlaps:
+          type: array
+          description: Other scholarships of this pupil sharing a target with this one.
+          items:
+            type: object
+            required: [scholarshipId, name]
+            properties:
+              scholarshipId: { type: string, format: uuid }
+              name: { type: string, example: Beca excelencia }
 
     ExpenseCategory:
       type: object

@@ -54,7 +54,10 @@ export const modules: ModuleTile[] = [
   { id: "documentos", title: "Documentos", sub: "Constancias y reglamento", icon: "document", tint: "forest", hidden: true },
   { id: "uniformes", title: "Uniformes", sub: "Tienda y tallas", icon: "shirt", tint: "lime" },
   { id: "facturas", title: "Facturas", sub: "CFDI y recibos", icon: "receipt", tint: "orange" },
-  { id: "becas", title: "Becas", sub: "Estado de tu beca", icon: "cap", tint: "purple" },
+  // Hidden: since T18 a family's beca shows where it matters — as a "Beca" line
+  // on each charge of the account statement. This tile's content is a mock
+  // (no family endpoint for the beca itself), so it stays unreachable.
+  { id: "becas", title: "Becas", sub: "Estado de tu beca", icon: "cap", tint: "purple", hidden: true },
 ];
 
 export const reasons: ExcuseReason[] = [

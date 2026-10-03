@@ -183,3 +183,23 @@ func TestEveryLinesDiscountCounts(t *testing.T) {
 		t.Errorf("discounts = %d, want the surcharge line's 5000", got.DiscountCents)
 	}
 }
+
+// T18: a month paid under a scholarship prints it, with its name, and the
+// receipt's totals carry it apart from the discounts.
+func TestAScholarshipIsItemized(t *testing.T) {
+	f := fakeSources{deposit: client.DepositReceipt{
+		Deposit: client.Deposit{ID: "dep-5", StudentID: "stu-1", AmountCents: 140000, Method: "cash", PaidAt: "2026-09-03T00:00:00Z", Folio: "P-2026-000046"},
+		Lines: []client.ReceiptLine{{Description: "Colegiatura septiembre 2026", AmountCents: 140000, DiscountCents: 20000,
+			ScholarshipCents: 140000, ScholarshipName: "Hermanos"}},
+	}}
+	got, err := builder(f).Payment(context.Background(), "dep-5")
+	if err != nil {
+		t.Fatalf("Payment: %v", err)
+	}
+	if l := got.Lines[0]; l.ScholarshipCents != 140000 || l.ScholarshipName != "Hermanos" || l.DiscountCents != 20000 {
+		t.Fatalf("line = %+v", l)
+	}
+	if got.ScholarshipCents != 140000 || got.DiscountCents != 20000 {
+		t.Errorf("totals: scholarships %d discounts %d", got.ScholarshipCents, got.DiscountCents)
+	}
+}

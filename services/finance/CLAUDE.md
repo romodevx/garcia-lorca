@@ -119,6 +119,26 @@ ledger operations run in a single transaction (Unit of Work).
   the tuition's daily/monthly surcharge rules SKIP `activity:` refs
   (`accruedSurcharges`, `deriveSurcharge`, `accrueLateFees`).
 
+## T18 — becas (ADR 0022)
+- `Scholarship` (kind `percent|fixed_off|fixed_price`, value bp|cents, targets
+  `enrollment|tuition|concept:<id>|activity:<id>`, active) +
+  `ScholarshipHolding` (pupil, starts/ends). Tables `scholarships`,
+  `scholarship_students` (0026); `charges.scholarship_cents|scholarship_id`,
+  CHECK discount + scholarship ≤ amount. `Effective() = amount − discount −
+  scholarship`.
+- ONE rule, `domain.ApplyScholarship`, called by every path that prices a debt
+  through `usecase.scholarshipPricer`: base → discount on the charge (level) →
+  best scholarship (no stacking) → pronto pago (unchanged eligibility). Deadline
+  = the charge's due date; after it only if `PaidByDueCents` ≥ scholarship price,
+  else full price + normal surcharge. Part paid: `owed = max(0, price − paid)`.
+- Read-time only, until settled: the deposit writes the part on charges its
+  money settles (`DepositWrite.Scholarships`); unassign/edit first freezes what
+  was settled (`FreezeSettledScholarships`); `releaseDeposit` takes the part back
+  when the charge is no longer settled (T9 corrections re-price on the corrected
+  date). The ladder never re-prices a charge with a written part.
+- `ListCharges`, `ListOverdue`, the monthly late-fee run, the statement
+  (`scholarship` movement) and receipts (`ScholarshipCents/Name`) all price it.
+
 ## Events
 - **Consumed: `StudentEnrolled`** (student-events → `finance-student-events`).
   It charges the pupil's inscription the moment they take a place in a group,
@@ -139,7 +159,7 @@ via `set_config(..., true)` (SET LOCAL semantics) inside the transaction.
 Policies filter on `current_setting('app.current_tenant')`.
 
 ## Out of scope (Phase 7b / later)
-Scholarships (M08) ledger integration; CONTPAQi XML export (S02 — `ExportContpaqi`
+CONTPAQi XML export (S02 — `ExportContpaqi`
 is a stub returning Unimplemented); scheduled `DebtOverdue` emission;
 monthly-recurring bulk; `received_by` cashier attribution + discount-reason audit
 (needs cashier auth); refunds/reversing entries.

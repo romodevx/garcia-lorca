@@ -633,6 +633,18 @@ func (s *FinanceService) accrueLateFees(
 	if err != nil {
 		return nil, err
 	}
+	// A month its scholarship settled in time is not late (T18).
+	ids, err := s.conceptIDs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	pricer, err := s.pricerFor(ctx, studentsOf("", overdue), ids)
+	if err != nil {
+		return nil, err
+	}
+	if overdue, err = stillOwed(pricer, overdue, asOf); err != nil {
+		return nil, err
+	}
 	planOfStudent := make(map[string]domain.TuitionPlan, len(enrollments))
 	for _, enr := range enrollments {
 		if plan, ok := planByLevel[levelOfGroup[enr.GroupID]]; ok {

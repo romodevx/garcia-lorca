@@ -15,7 +15,6 @@ use (
 	./services/gateway
 	./services/grades
 	./services/iam
-	./services/scholarships
 	./services/students
 	./services/uniforms
 )

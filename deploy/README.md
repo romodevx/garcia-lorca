@@ -129,7 +129,7 @@ except the two hot-path services.
 | Service                                                              | min-instances | CPU allocation       | Why                              |
 | -------------------------------------------------------------------- | ------------- | -------------------- | -------------------------------- |
 | `web`, `gateway`, `iam`, `students`, `config`, `finance`, `grades`, `attendance`, `comms`, `uniforms` | **0 (scale-to-zero)** | per-request | pay only while serving |
-| `billing`, `scholarships`, `docs` | not deployed | — | stubs: no implementation, flags off |
+| `billing`, `docs` | not deployed | — | stubs: no implementation, flags off (scholarships live in finance, ADR 0022) |
 
 **dev runs everything at zero, and that is enforced, not intended.**
 `modules/cloud_run` has a precondition that FAILS the apply if any service asks

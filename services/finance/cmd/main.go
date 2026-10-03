@@ -262,8 +262,12 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 	// run learns of them here and enrolling charges what is already due.
 	svc.WithActivities(repo)
 	activities := usecase.NewActivityService(repo, studentsClient, svc, newID, time.Now)
+	// T18: scholarships. Every read and payment prices them (ADR 0022); the
+	// service only manages them and who holds them.
+	svc.WithScholarships(repo)
+	scholarships := usecase.NewScholarshipService(repo, svc, repo, repo, studentsClient, tenantID, newID, time.Now)
 	handler := grpcadapter.NewFinanceHandler(svc, health).WithLevelArchive(levels).WithExpenses(expenses).
-		WithActivities(activities)
+		WithActivities(activities).WithScholarships(scholarships)
 	consumer := pubsubadapter.NewConsumer(svc, log)
 
 	mux := http.NewServeMux()

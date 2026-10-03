@@ -89,3 +89,14 @@ describe("PERMISSION_CATALOG — Actividades (T17)", () => {
     expect(GRANTABLE_PERMISSIONS).toContain("activities:write");
   });
 });
+
+describe("PERMISSION_CATALOG — Becas (T18)", () => {
+  it("groups reading and assigning under Becas", () => {
+    const group = PERMISSION_CATALOG.find((g) => g.resource === "Becas");
+    expect(group?.permissions.map((p) => [p.value, p.label])).toEqual([
+      ["scholarships:read", "Ver becas"],
+      ["scholarships:write", "Crear, editar y asignar becas"],
+    ]);
+    expect(GRANTABLE_PERMISSIONS).toContain("scholarships:write");
+  });
+});

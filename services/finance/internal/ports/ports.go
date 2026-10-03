@@ -33,6 +33,10 @@ type LoosePayment struct {
 type ChargeWithPaid struct {
 	Charge    domain.Charge
 	PaidCents int64
+	// PaidByDueCents is the part of PaidCents paid on or before the charge's
+	// due date (T18): what decides whether a scholarship was kept by paying in
+	// time (domain.ApplyScholarship). Set by the list reads that price debts.
+	PaidByDueCents int64
 }
 
 // StudentRef is the finance-owned view of a students record: identity and
@@ -203,6 +207,11 @@ type DepositWrite struct {
 	// early-payment reward, granted only where the money actually settles the
 	// month. They are written before the allocations that assume the new amount.
 	Discounted []domain.Charge
+	// Scholarships are charges this deposit settles under a scholarship (T18):
+	// the scholarship's part is WRITTEN now, after Discounted and before the
+	// allocations, so a later change to the scholarship never rewrites a paid
+	// charge. Each carries the charge as settled (discount and part).
+	Scholarships []domain.Charge
 	// Allocations are the payments, each naming the charge it lands on.
 	Allocations []domain.Payment
 	// UnallocatedCents is the family's credit: money beyond what they owed.
@@ -229,6 +238,11 @@ type ReceiptLine struct {
 	Surcharge bool
 	// DiscountCents is the charge's discount, printed beside it.
 	DiscountCents int64
+	// ScholarshipCents is the scholarship's part of the charge (T18), printed
+	// beside it with the scholarship's name; like the discount, only on the
+	// payment that settled the charge.
+	ScholarshipCents int64
+	ScholarshipName  string
 }
 
 // DepositReceipt is a deposit and what it paid, for its receipt.

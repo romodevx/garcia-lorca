@@ -17,6 +17,7 @@ describe("el mapa de rutas", () => {
     ["/egresos", { screen: "expenses" }],
     ["/horarios", { screen: "schedule" }],
     ["/actividades", { screen: "activities" }],
+    ["/becas", { screen: "scholarships" }],
     ["/avisos", { screen: "announcements" }],
     ["/configuracion", { screen: "config" }],
     ["/administracion", { screen: "admin" }],

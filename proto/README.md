@@ -16,8 +16,9 @@ regenerated in CI; any manual edit there will be blown away on the next generate
 proto/garcialorca/<domain>/v1/<domain>.proto   package garcialorca.<domain>.v1
 ```
 
-One module rooted at `proto/`. Domains: `iam`, `students`, `finance`,
-`scholarships`, `docs`, `attendance`, `grades`, `uniforms`, `comms`, `billing`.
+One module rooted at `proto/`. Domains: `iam`, `students`, `finance`, `docs`,
+`attendance`, `grades`, `uniforms`, `comms`, `billing`. Scholarships (becas) are
+part of `finance` (ADR 0022); their old stub package was retired.
 
 `go_package` is **not** declared in the `.proto` files — buf **managed mode**
 injects the prefix `github.com/garcia-lorca/gen/go` (see `buf.yaml` / `buf.gen.yaml`).

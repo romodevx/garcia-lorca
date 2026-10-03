@@ -47,7 +47,16 @@ type Charge struct {
 	// the system gives by itself: a family asking why a month is cheaper than
 	// the price list deserves an answer that outlives whoever applied it.
 	discountReason string
-	dueDate        time.Time
+	// scholarship is the part a scholarship takes off (T18, ADR 0022), kept
+	// apart from discount because a month may carry both: the level's discount
+	// and, on the price left, the family's scholarship. Read time works it out
+	// (ApplyScholarship) and leaves it here in memory; it is WRITTEN only when
+	// the charge is settled under it, and from then on it is history that a
+	// later change to the scholarship never rewrites.
+	scholarship Cents
+	// scholarshipID names the scholarship behind that part.
+	scholarshipID string
+	dueDate       time.Time
 	// startsOn is the first day the family is shown the charge and asked for
 	// it (T5). Zero is open from the day it was issued. See WithStartsOn.
 	startsOn time.Time
@@ -139,9 +148,9 @@ func validateDiscount(amount Cents, discountCents int64) (Cents, error) {
 }
 
 // Effective is what the student actually owes: the gross amount less the
-// discount. Non-negative by construction, since the discount is capped at the
-// amount.
-func (c Charge) Effective() Cents { return c.amount - c.discount }
+// discount and the scholarship. Non-negative by construction, since the two
+// together are capped at the amount.
+func (c Charge) Effective() Cents { return c.amount - c.discount - c.scholarship }
 
 // DeriveStatus computes the status this charge would have given the total paid
 // against it. Pure: it neither mutates the receiver nor reads a clock.
@@ -169,6 +178,9 @@ func (c Charge) DeriveStatus(paidCents int64) string {
 func (c Charge) WithDiscount(discountCents int64, paidCents int64, reason string) (Charge, error) {
 	discount, err := validateDiscount(c.amount, discountCents)
 	if err != nil {
+		return Charge{}, err
+	}
+	if err := fitsBeside(c.amount, discount, c.scholarship); err != nil {
 		return Charge{}, err
 	}
 	c.discount = discount
@@ -298,6 +310,9 @@ func (c Charge) WithAmount(amountCents int64) (Charge, error) {
 	if _, err := validateDiscount(amount, c.discount.Int64()); err != nil {
 		return Charge{}, err
 	}
+	if err := fitsBeside(amount, c.discount, c.scholarship); err != nil {
+		return Charge{}, err
+	}
 	c.amount = amount
 	return c, nil
 }
@@ -320,6 +335,38 @@ func (c Charge) CancelIfUnpaid(paidCents int64) (Charge, error) {
 	return c.Cancel()
 }
 
+// fitsBeside checks that a discount and a scholarship, together, do not take
+// more than the amount off: the charge would owe negative money.
+func fitsBeside(amount, discount, scholarship Cents) error {
+	if discount+scholarship > amount {
+		return glerrors.New(glerrors.KindInvalid, "discount and scholarship cannot exceed amount")
+	}
+	return nil
+}
+
+// WithScholarship returns a copy carrying a scholarship's part, with the
+// status re-derived from paidCents. A part needs the scholarship it comes from;
+// together with the discount it may not exceed the amount. Zero clears it.
+func (c Charge) WithScholarship(scholarshipID string, cents int64, paidCents int64) (Charge, error) {
+	part, err := NewCents(cents)
+	if err != nil {
+		return Charge{}, err
+	}
+	id := strings.TrimSpace(scholarshipID)
+	if part > 0 && id == "" {
+		return Charge{}, glerrors.New(glerrors.KindInvalid, "a scholarship part needs its scholarship")
+	}
+	if err := fitsBeside(c.amount, c.discount, part); err != nil {
+		return Charge{}, err
+	}
+	if part == 0 {
+		id = ""
+	}
+	c.scholarship, c.scholarshipID = part, id
+	c.status = c.DeriveStatus(paidCents)
+	return c, nil
+}
+
 // Accessors.
 func (c Charge) ID() string          { return c.id }
 func (c Charge) TenantID() string    { return c.tenantID }
@@ -329,7 +376,11 @@ func (c Charge) ConceptID() string   { return c.conceptID }
 func (c Charge) Description() string { return c.description }
 func (c Charge) Amount() Cents       { return c.amount }
 
-func (c Charge) Discount() Cents     { return c.discount }
+func (c Charge) Discount() Cents    { return c.discount }
+func (c Charge) Scholarship() Cents { return c.scholarship }
+func (c Charge) ScholarshipID() string {
+	return c.scholarshipID
+}
 func (c Charge) DueDate() time.Time  { return c.dueDate }
 func (c Charge) Status() string      { return c.status }
 func (c Charge) ExternalRef() string { return c.externalRef }

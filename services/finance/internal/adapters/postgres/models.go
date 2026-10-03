@@ -96,8 +96,12 @@ type chargeModel struct {
 	DiscountCents int64   `gorm:"column:discount_cents"`
 	// Why the discount exists. Empty on the ones given before there was
 	// anywhere to record it, which is the truth about them.
-	DiscountReason string    `gorm:"column:discount_reason"`
-	DueDate        time.Time `gorm:"column:due_date"`
+	DiscountReason string `gorm:"column:discount_reason"`
+	// ScholarshipCents/ScholarshipID are the scholarship's part, written when
+	// the charge was settled under it (T18, migration 0026).
+	ScholarshipCents int64     `gorm:"column:scholarship_cents"`
+	ScholarshipID    *string   `gorm:"column:scholarship_id"`
+	DueDate          time.Time `gorm:"column:due_date"`
 	// StartsOn is the first day the charge opens to the family (T5, migration
 	// 0020). NULL is open from issue — every charge written before it existed.
 	StartsOn *time.Time `gorm:"column:starts_on"`
@@ -352,3 +356,34 @@ type activityEnrollmentModel struct {
 }
 
 func (activityEnrollmentModel) TableName() string { return "activity_enrollments" }
+
+// scholarshipModel is the GORM row for `scholarships` (T18, migration 0026).
+// Targets is JSONB ["enrollment" | "tuition" | "concept:<id>" | "activity:<id>"].
+type scholarshipModel struct {
+	ID        string    `gorm:"column:id;primaryKey"`
+	TenantID  string    `gorm:"column:tenant_id"`
+	Name      string    `gorm:"column:name"`
+	Kind      string    `gorm:"column:kind"`
+	Value     int64     `gorm:"column:value"`
+	Targets   []byte    `gorm:"column:targets;type:jsonb"`
+	Active    bool      `gorm:"column:active"`
+	CreatedAt time.Time `gorm:"column:created_at;default:now()"`
+	UpdatedAt time.Time `gorm:"column:updated_at;default:now()"`
+}
+
+func (scholarshipModel) TableName() string { return "scholarships" }
+
+// scholarshipHoldingModel is the GORM row for `scholarship_students`. EndsOn
+// NULL is a holding still open.
+type scholarshipHoldingModel struct {
+	ID            string     `gorm:"column:id;primaryKey"`
+	TenantID      string     `gorm:"column:tenant_id"`
+	ScholarshipID string     `gorm:"column:scholarship_id"`
+	StudentID     string     `gorm:"column:student_id"`
+	StartsOn      time.Time  `gorm:"column:starts_on"`
+	EndsOn        *time.Time `gorm:"column:ends_on"`
+	CreatedAt     time.Time  `gorm:"column:created_at;default:now()"`
+	UpdatedAt     time.Time  `gorm:"column:updated_at;default:now()"`
+}
+
+func (scholarshipHoldingModel) TableName() string { return "scholarship_students" }

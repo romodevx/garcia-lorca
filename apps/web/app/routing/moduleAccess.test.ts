@@ -22,6 +22,7 @@ describe("moduleIdOfView", () => {
     [{ screen: "uniforms" }, "uniforms"],
     [{ screen: "schedule" }, "schedule"],
     [{ screen: "activities" }, "activities"],
+    [{ screen: "scholarships" }, "scholarships"],
     [{ screen: "admin" }, "admin"],
     [{ screen: "module", moduleId: "reports" }, "reports"],
     [{ screen: "dashboard" }, undefined],

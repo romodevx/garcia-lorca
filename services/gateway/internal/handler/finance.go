@@ -206,22 +206,26 @@ type chargeResponse struct {
 	// PaidCents and RemainingCents are derived server-side, never client input.
 	PaidCents      int64 `json:"paidCents"`
 	RemainingCents int64 `json:"remainingCents"`
+	// ScholarshipCents is the scholarship's part (T18), already out of
+	// RemainingCents.
+	ScholarshipCents int64 `json:"scholarshipCents"`
 }
 
 func toChargeResponse(c client.Charge) chargeResponse {
 	return chargeResponse{
-		ID:             c.ID,
-		StudentID:      c.StudentID,
-		CycleID:        c.CycleID,
-		ConceptID:      c.ConceptID,
-		Description:    c.Description,
-		AmountCents:    c.AmountCents,
-		DiscountCents:  c.DiscountCents,
-		DueDate:        c.DueDate,
-		StartsOn:       c.StartsOn,
-		Status:         c.Status,
-		PaidCents:      c.PaidCents,
-		RemainingCents: c.RemainingCents,
+		ID:               c.ID,
+		StudentID:        c.StudentID,
+		CycleID:          c.CycleID,
+		ConceptID:        c.ConceptID,
+		Description:      c.Description,
+		AmountCents:      c.AmountCents,
+		DiscountCents:    c.DiscountCents,
+		DueDate:          c.DueDate,
+		StartsOn:         c.StartsOn,
+		Status:           c.Status,
+		PaidCents:        c.PaidCents,
+		RemainingCents:   c.RemainingCents,
+		ScholarshipCents: c.ScholarshipCents,
 	}
 }
 

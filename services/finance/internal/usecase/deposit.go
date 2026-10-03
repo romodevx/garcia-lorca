@@ -196,19 +196,25 @@ func (s *FinanceService) prepareDeposit(ctx context.Context, in DepositInput) (d
 		return domain.Deposit{}, nil, err
 	}
 	deposit = deposit.WithReceiver(in.Receiver)
+	pricer, err := s.pricerFor(ctx, []string{in.StudentID},
+		systemConceptIDs{tuition: tuition.ID(), enrolment: enrolment.ID(), lateFee: lateFee.ID()})
+	if err != nil {
+		return domain.Deposit{}, nil, err
+	}
 	return deposit, &depositPlanner{
-		svc:         s,
-		deposit:     deposit,
-		tuition:     plan,
-		policy:      plan.Policy(),
-		calendar:    calendar,
-		lateFeeID:   lateFee.ID(),
-		tuitionID:   tuition.ID(),
-		enrolmentID: enrolment.ID(),
-		paidOn:      when,
-		description: lateFeeConceptName,
-		grantEarly:  in.GrantEarlyPayment,
-		chosen:      chosenSet(in.ChargeIDs),
+		scholarships: pricer,
+		svc:          s,
+		deposit:      deposit,
+		tuition:      plan,
+		policy:       plan.Policy(),
+		calendar:     calendar,
+		lateFeeID:    lateFee.ID(),
+		tuitionID:    tuition.ID(),
+		enrolmentID:  enrolment.ID(),
+		paidOn:       when,
+		description:  lateFeeConceptName,
+		grantEarly:   in.GrantEarlyPayment,
+		chosen:       chosenSet(in.ChargeIDs),
 	}, nil
 }
 
@@ -299,6 +305,9 @@ type Expected struct {
 	AmountCents    int64
 	SurchargeCents int64
 	DiscountCents  int64
+	// ScholarshipCents is what scholarships take off the lines asked for
+	// (T18); already out of AmountCents.
+	ScholarshipCents int64
 	// AnnualBalanceCents is the whole year still owed. Shown beside the expected
 	// figure so nobody confuses "what is due today" with "what is left".
 	AnnualBalanceCents int64
@@ -321,7 +330,10 @@ type ExpectedLine struct {
 	SurchargeCents int64
 	// DiscountCents is the early-payment reward settling it that day earns.
 	DiscountCents int64
-	TotalCents    int64
+	// ScholarshipCents is the scholarship's part that day (T18), already out
+	// of OwedCents; 0 when none applies or it was lost by paying late.
+	ScholarshipCents int64
+	TotalCents       int64
 	// Due is whether the charge is asked for that day (see expectedBy).
 	Due bool
 }
@@ -358,7 +370,12 @@ func (s *FinanceService) ExpectedToday(ctx context.Context, studentID string, on
 	if err != nil {
 		return Expected{}, err
 	}
-	return expectedFrom(charges, plan, calendar, lateFee.ID(), tuition.ID(), enrolment.ID(), when, s.now(), true)
+	pricer, err := s.pricerFor(ctx, []string{studentID},
+		systemConceptIDs{tuition: tuition.ID(), enrolment: enrolment.ID(), lateFee: lateFee.ID()})
+	if err != nil {
+		return Expected{}, err
+	}
+	return expectedFrom(charges, plan, calendar, lateFee.ID(), tuition.ID(), enrolment.ID(), when, s.now(), true, pricer)
 }
 
 // expectedFrom is the arithmetic of "what is due today", with NO I/O.
@@ -374,8 +391,16 @@ func expectedFrom(
 	lateFeeID, tuitionID, enrolmentID string,
 	when, now time.Time,
 	withLines bool,
+	scholarships *scholarshipPricer,
 ) (Expected, error) {
 	policy := plan.Policy()
+	// Every charge as a payment on `when` would find it: with its scholarship
+	// (T18). The surcharge rule reads these — a month the scholarship settled
+	// in time owes nothing and earns nothing.
+	priced, err := scholarships.priceAll(charges, when)
+	if err != nil {
+		return Expected{}, err
+	}
 
 	var out Expected
 	// A surcharge whose month was cancelled is owed by nobody: a deposit never
@@ -386,7 +411,7 @@ func expectedFrom(
 			cancelled[c.Charge.ID()] = true
 		}
 	}
-	accrued := accruedSurcharges(charges, policy, calendar, lateFeeID, when)
+	accrued := accruedSurcharges(priced, policy, calendar, lateFeeID, when)
 	// unpaidFees is the part of a charge's written-down surcharges still owed,
 	// so its line can carry it (task 8).
 	unpaidFees := map[string]int64{}
@@ -404,10 +429,11 @@ func expectedFrom(
 		lines = map[string]*ExpectedLine{}
 	}
 
-	for _, c := range charges {
-		if c.Charge.Status() == domain.StatusCancelled {
+	for i, raw := range charges {
+		if raw.Charge.Status() == domain.StatusCancelled {
 			continue
 		}
+		c := priced[i]
 		if owed(c) <= 0 {
 			// A month already paid whose surcharge is still open is still owed:
 			// its line carries the surcharge, so it can be chosen and the due
@@ -425,12 +451,17 @@ func expectedFrom(
 		// transaction — see ladderPrice.
 		// Quoted as paying it in full on `when` would price it — the same rule
 		// the deposit applies when the money settles the line (task 7).
-		settled, change, err := inscriptionPaidOn(c, plan, enrolmentID, when, now)
+		// The ladder prices the charge as stored; the scholarship comes off
+		// the price the ladder gives.
+		settled, change, err := inscriptionPaidOn(raw, plan, enrolmentID, when, now)
 		if err != nil {
 			return Expected{}, err
 		}
 		if change != priceUnchanged {
-			c.Charge = settled
+			raw.Charge = settled
+			if c, err = scholarships.price(raw, when); err != nil {
+				return Expected{}, err
+			}
 		}
 		isFee := c.Charge.ConceptID() == lateFeeID
 		if parent, ok := feeParent(c.Charge.ExternalRef()); isFee && ok && cancelled[parent] {
@@ -442,7 +473,8 @@ func expectedFrom(
 		// own line, chosen and paid like any other (partition makes it one).
 		var line *ExpectedLine
 		if _, ridesOnMonth := feeParent(c.Charge.ExternalRef()); !isFee || !ridesOnMonth {
-			line = &ExpectedLine{ChargeID: c.Charge.ID(), Description: c.Charge.Description(), DueDate: c.Charge.DueDate(), OwedCents: owed(c)}
+			line = &ExpectedLine{ChargeID: c.Charge.ID(), Description: c.Charge.Description(), DueDate: c.Charge.DueDate(),
+				OwedCents: owed(c), ScholarshipCents: c.Charge.Scholarship().Int64()}
 			if lines != nil {
 				lines[c.Charge.ID()] = line
 			}
@@ -469,6 +501,7 @@ func expectedFrom(
 			continue
 		}
 		line.Due = true
+		out.ScholarshipCents += line.ScholarshipCents
 		line.SurchargeCents += unpaidFees[c.Charge.ID()]
 		// What the daily rule has earned and nobody has written down yet.
 		if pending := accrued[c.Charge.ID()]; pending > 0 {
@@ -699,6 +732,16 @@ type depositPlanner struct {
 	grantEarly bool
 	// chosen restricts the split to these charges; nil means every charge.
 	chosen map[string]bool
+	// scholarships prices each charge on the payment's date (T18); nil prices
+	// none.
+	scholarships *scholarshipPricer
+}
+
+// pendingScholarship is a charge priced with a scholarship this deposit may
+// settle, and what it owed before the money came in.
+type pendingScholarship struct {
+	charge domain.Charge
+	due    int64
 }
 
 // repriceInscription is the ladder applied at the counter: what this line of the
@@ -880,6 +923,9 @@ func (p *depositPlanner) plan(open []ports.ChargeWithPaid) (ports.DepositWrite, 
 		fresh      []domain.Charge
 		discounted []domain.Charge
 		repriced   []domain.Charge
+		// becas are the charges priced with a scholarship on the payment's
+		// date; those the money settles get it written (T18).
+		becas []pendingScholarship
 	)
 	// budget walks alongside the items so the early-payment reward is only given
 	// where the money in hand actually settles that month. Granting it on a part
@@ -900,8 +946,15 @@ func (p *depositPlanner) plan(open []ports.ChargeWithPaid) (ports.DepositWrite, 
 		if err != nil {
 			return ports.DepositWrite{}, err
 		}
+		// Whether the money settles it is asked at the price it would pay,
+		// scholarship included (T18).
+		settledPriced, err := p.scholarships.price(ports.ChargeWithPaid{
+			Charge: settled, PaidCents: c.PaidCents, PaidByDueCents: c.PaidByDueCents}, p.paidOn)
+		if err != nil {
+			return ports.DepositWrite{}, err
+		}
 		switch {
-		case change != priceUnchanged && budget >= settled.Effective().Int64():
+		case change != priceUnchanged && budget >= settledPriced.Charge.Effective().Int64():
 			// This payment settles the line at the price of its date.
 			switch change {
 			case priceRaised:
@@ -921,14 +974,23 @@ func (p *depositPlanner) plan(open []ports.ChargeWithPaid) (ports.DepositWrite, 
 			}
 		}
 
-		charge, due := c.Charge, owed(c)
-		reduced, discountable, err := p.earlyPayment(c, budget)
+		// The scholarship on the price the ladder left, then early payment on
+		// what the scholarship left (ADR 0022).
+		priced, err := p.scholarships.price(c, p.paidOn)
+		if err != nil {
+			return ports.DepositWrite{}, err
+		}
+		charge, due := priced.Charge, owed(priced)
+		reduced, discountable, err := p.earlyPayment(priced, budget)
 		if err != nil {
 			return ports.DepositWrite{}, err
 		}
 		if discountable {
 			discounted = append(discounted, reduced)
 			charge, due = reduced, reduced.Effective().Int64()-c.PaidCents
+		}
+		if charge.ScholarshipID() != "" && c.Charge.ScholarshipID() == "" {
+			becas = append(becas, pendingScholarship{charge: charge, due: due})
 		}
 		items = append(items, domain.Payable{
 			ChargeID:  charge.ID(),
@@ -952,7 +1014,8 @@ func (p *depositPlanner) plan(open []ports.ChargeWithPaid) (ports.DepositWrite, 
 			})
 			budget -= min(budget, max(0, owed(fee)))
 		}
-		fee, ok, ferr := p.deriveSurcharge(c, feesByCharge[c.Charge.ID()])
+		// Priced: a month its scholarship settled in time earns no surcharge.
+		fee, ok, ferr := p.deriveSurcharge(priced, feesByCharge[c.Charge.ID()])
 		if ferr != nil {
 			return ports.DepositWrite{}, ferr
 		}
@@ -971,6 +1034,7 @@ func (p *depositPlanner) plan(open []ports.ChargeWithPaid) (ports.DepositWrite, 
 
 	allocations, unallocated := domain.Allocate(p.deposit.Amount().Int64(), items)
 	fresh = append(fresh, settledWithoutFee(feeOwedBy, allocations)...)
+	scholarships := settledScholarships(becas, allocations)
 
 	for _, a := range allocations {
 		if fee, isNew := newFees[a.ChargeID]; isNew && !written(fresh, fee.ID()) {
@@ -999,6 +1063,7 @@ func (p *depositPlanner) plan(open []ports.ChargeWithPaid) (ports.DepositWrite, 
 		Repriced:         repriced,
 		Surcharges:       fresh,
 		Discounted:       discounted,
+		Scholarships:     scholarships,
 		Allocations:      payments,
 		UnallocatedCents: unallocated,
 	}, nil
@@ -1027,6 +1092,25 @@ func settledWithoutFee(derived []derivedFee, allocations []domain.Allocation) []
 		// parentDue <= 0: the reward alone closed the month, no money needed.
 		if paid[d.parentID] >= d.parentDue {
 			out = append(out, d.fee)
+		}
+	}
+	return out
+}
+
+// settledScholarships are the charges this deposit's money settles under a
+// scholarship: their part is written now (T18). Money must reach the charge —
+// a month the scholarship alone leaves owing nothing is settled by its due date,
+// not by an unrelated payment months before (FreezeSettledScholarships), so a
+// scholarship taken away before then still gives it back its price.
+func settledScholarships(becas []pendingScholarship, allocations []domain.Allocation) []domain.Charge {
+	paid := make(map[string]int64, len(allocations))
+	for _, a := range allocations {
+		paid[a.ChargeID] += a.AmountCents
+	}
+	var out []domain.Charge
+	for _, b := range becas {
+		if got := paid[b.charge.ID()]; got > 0 && got >= b.due {
+			out = append(out, b.charge)
 		}
 	}
 	return out

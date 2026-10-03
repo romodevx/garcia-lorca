@@ -29,6 +29,9 @@ type Line struct {
 	AmountCents   int64  `json:"amountCents"`
 	Surcharge     bool   `json:"surcharge,omitempty"`
 	DiscountCents int64  `json:"discountCents,omitempty"`
+	// The scholarship's part of the concept and its name (T18).
+	ScholarshipCents int64  `json:"scholarshipCents,omitempty"`
+	ScholarshipName  string `json:"scholarshipName,omitempty"`
 }
 
 // Receipt is everything a printed receipt says, already in the office's words.
@@ -44,8 +47,10 @@ type Receipt struct {
 	// money no concept claimed (their credit).
 	SurchargeCents int64 `json:"surchargeCents"`
 	DiscountCents  int64 `json:"discountCents"`
-	CreditCents    int64 `json:"creditCents"`
-	TotalCents     int64 `json:"totalCents"`
+	// ScholarshipCents is what scholarships took off the concepts paid (T18).
+	ScholarshipCents int64 `json:"scholarshipCents"`
+	CreditCents      int64 `json:"creditCents"`
+	TotalCents       int64 `json:"totalCents"`
 	// Method is how it was paid, in words: the one method, or every method
 	// joined with " + " when several were combined (T8).
 	Method    string `json:"method"`
@@ -165,9 +170,11 @@ func (b *Builder) Payment(ctx context.Context, depositID string) (Receipt, error
 	r.Tenders = tenderLines(tenders)
 	r.Method = methodsLabel(r.Tenders)
 	for _, l := range got.Lines {
-		r.Lines = append(r.Lines, Line{Description: l.Description, AmountCents: l.AmountCents, Surcharge: l.Surcharge, DiscountCents: l.DiscountCents})
+		r.Lines = append(r.Lines, Line{Description: l.Description, AmountCents: l.AmountCents, Surcharge: l.Surcharge,
+			DiscountCents: l.DiscountCents, ScholarshipCents: l.ScholarshipCents, ScholarshipName: l.ScholarshipName})
 		// Every line's discount counts, so the lines and the totals agree.
 		r.DiscountCents += l.DiscountCents
+		r.ScholarshipCents += l.ScholarshipCents
 		if l.Surcharge {
 			r.SurchargeCents += l.AmountCents
 		}

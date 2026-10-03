@@ -761,6 +761,28 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("POST /api/v1/activities/{id}/enrollments/end", activitiesWrite(activitiesH.Unenroll))
 	mux.Handle("PUT /api/v1/activities/{id}/enrollments/{studentId}", activitiesWrite(activitiesH.ChangeOption))
 
+	// T18 — Becas: scholarships (percent, fixed amount off, fixed amount to
+	// pay) on the inscription, the tuition, catalog concepts and activities,
+	// and the pupils holding each. Behind module_finance AND
+	// module_scholarships (default OFF). Reads answer to scholarships:read,
+	// writes (create/edit, give, take away) to scholarships:write (iam 0030:
+	// owner by default, delegable). What one takes off a charge is finance's,
+	// worked out on every read and payment (ADR 0022).
+	scholarshipsH := handler.NewScholarshipsHandler(financeClient)
+	scholarshipsModule := func(perm string, h http.HandlerFunc) http.Handler {
+		return guard.Protect("finance", guard.Protect("scholarships", requireAuthChanged(middleware.RequirePermission(perm)(h))))
+	}
+	scholarshipsRead := func(h http.HandlerFunc) http.Handler { return scholarshipsModule("scholarships:read", h) }
+	scholarshipsWrite := func(h http.HandlerFunc) http.Handler { return scholarshipsModule("scholarships:write", h) }
+	mux.Handle("GET /api/v1/scholarships", scholarshipsRead(scholarshipsH.List))
+	mux.Handle("POST /api/v1/scholarships", scholarshipsWrite(scholarshipsH.Create))
+	mux.Handle("GET /api/v1/scholarships/targets", scholarshipsRead(scholarshipsH.Targets))
+	mux.Handle("GET /api/v1/scholarships/{id}", scholarshipsRead(scholarshipsH.Get))
+	mux.Handle("PUT /api/v1/scholarships/{id}", scholarshipsWrite(scholarshipsH.Update))
+	mux.Handle("GET /api/v1/scholarships/{id}/students", scholarshipsRead(scholarshipsH.Holders))
+	mux.Handle("POST /api/v1/scholarships/{id}/students", scholarshipsWrite(scholarshipsH.Assign))
+	mux.Handle("POST /api/v1/scholarships/{id}/students/remove", scholarshipsWrite(scholarshipsH.Unassign))
+
 	// M06 attendance (daily pass list): flag-guarded, authenticated + rotation-
 	// enforced, permission-gated. Saving a group·day is the only write
 	// (attendance:write) — it reconciles the whole day, so it also erases marks;

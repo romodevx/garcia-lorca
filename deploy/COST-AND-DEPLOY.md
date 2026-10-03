@@ -30,7 +30,8 @@ now enforced by a precondition in `modules/cloud_run`, not by remembering.
 **Ten Cloud Run services, all scale-to-zero:** `web`, `gateway`, `iam`,
 `students`, `config`, `finance`, `grades`, `attendance`, `comms`, `uniforms`.
 
-**Three stubs, NOT deployed:** `billing`, `scholarships`, `docs`.
+**Two stubs, NOT deployed:** `billing`, `docs`. (`scholarships` was a stub
+until T18 moved becas into finance, ADR 0022.)
 
 `uniforms` is emphatically not a stub — 35 Go files, its own migrations and
 ADRs 0007-0010.
@@ -85,7 +86,7 @@ Deployment model:
 | Remote state | GCS backend, bucket+prefix at init (per-env isolatable) | `versions.tf:11-16` |
 
 **Real services to deploy (8):** gateway, iam, students, config, finance, grades, attendance, comms.
-**Stubs — do NOT deploy (4):** billing, scholarships, docs, uniforms (health-only shells, flags OFF).
+**Stubs — do NOT deploy (3):** billing, docs, uniforms (health-only shells, flags OFF). Scholarships live in finance (ADR 0022).
 
 ---
 
@@ -168,7 +169,7 @@ The Terraform is multi-env-ready: per-env `project_id`, `billing_account_id`, SA
 ### Top 5 cost levers — checklist
 - [ ] gateway + iam → `min_instances=0`, `cpu_idle=true` in dev (**~$95-100/mo — the big one**)
 - [ ] Cloud SQL → `db-f1-micro`, PITR off, 2-3 backups, ZONAL (~$18/mo)
-- [ ] Deploy only the 8 real services; skip billing/docs/uniforms/scholarships
+- [ ] Deploy only the 8 real services; skip billing/docs/uniforms
 - [ ] Artifact Registry cleanup policy + drop E2_HIGHCPU_8 Cloud Build machine in dev
 - [ ] max-instances caps (gateway=1) + budget alert ~$30
 

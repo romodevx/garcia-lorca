@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/garcia-lorca/services/finance/internal/domain"
@@ -58,7 +59,12 @@ func (s *FinanceService) statement(ctx context.Context, studentID string, family
 		return Statement{}, err
 	}
 
-	movements, err := chargeMovements(account.Charges, terms, inPlay, now, family)
+	// The ledger prices each charge itself (ladder, then scholarship), from
+	// the charges as stored.
+	if err := s.learnNames(ctx, terms.scholarships, account.raw); err != nil {
+		return Statement{}, err
+	}
+	movements, err := chargeMovements(account.raw, terms, inPlay, now, family)
 	if err != nil {
 		return Statement{}, err
 	}
@@ -97,7 +103,11 @@ func chargeMovements(
 			cancelled[c.Charge.ID()] = true
 		}
 	}
-	accrued := accruedSurcharges(charges, terms.plan.Policy(), terms.calendar, terms.lateFeeID, now)
+	priced, err := terms.scholarships.priceAll(charges, now)
+	if err != nil {
+		return nil, err
+	}
+	accrued := accruedSurcharges(priced, terms.plan.Policy(), terms.calendar, terms.lateFeeID, now)
 	asOf := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 	out := make([]domain.Movement, 0, len(charges))
 	for _, c := range charges {
@@ -120,25 +130,38 @@ func chargeMovements(
 			kind = domain.MovementSurcharge
 		}
 		if owed(c) > 0 {
-			priced, change, err := inscriptionPaidOn(c, terms.plan, terms.enrolmentID, now, now)
+			laddered, change, err := inscriptionPaidOn(c, terms.plan, terms.enrolmentID, now, now)
 			if err != nil {
 				return nil, err
 			}
 			if change != priceUnchanged {
-				ch = priced
+				ch = laddered
 			}
 		}
+		// The scholarship comes off the price the ladder left (T18).
+		withBeca, err := terms.scholarships.price(ports.ChargeWithPaid{
+			Charge: ch, PaidCents: c.PaidCents, PaidByDueCents: c.PaidByDueCents}, now)
+		if err != nil {
+			return nil, err
+		}
+		ch = withBeca.Charge
 		notYetDue := !inPlay(c)
 		out = append(out, domain.Movement{
 			Kind: kind, Date: ch.DueDate(), Description: ch.Description(),
 			AmountCents: ch.Amount().Int64(), ChargeID: ch.ID(), NotYetDue: notYetDue,
 		})
 		if d := ch.Discount().Int64(); d > 0 {
-			// T18 maps the scholarship's reason to MovementScholarship here.
 			out = append(out, domain.Movement{
 				Kind: domain.MovementDiscount, Date: ch.DueDate(),
 				Description: discountLabel(ch.DiscountReason(), family) + " · " + ch.Description(),
 				AmountCents: d, ChargeID: ch.ID(), NotYetDue: notYetDue,
+			})
+		}
+		if b := ch.Scholarship().Int64(); b > 0 {
+			out = append(out, domain.Movement{
+				Kind: domain.MovementScholarship, Date: ch.DueDate(),
+				Description: scholarshipLabel(terms.scholarships.name(ch.ScholarshipID())) + " · " + ch.Description(),
+				AmountCents: b, ChargeID: ch.ID(), NotYetDue: notYetDue,
 			})
 		}
 		if pending := accrued[ch.ID()]; pending > 0 {
@@ -226,6 +249,19 @@ func loosePaymentMovements(payments []domain.Payment, charges []ports.ChargeWith
 		})
 	}
 	return out
+}
+
+// scholarshipLabel is how a scholarship's line reads: "Beca <name>".
+// A name that already says so ("Beca hermanos") is not said twice.
+func scholarshipLabel(name string) string {
+	switch {
+	case name == "":
+		return "Beca"
+	case strings.HasPrefix(strings.ToLower(name), "beca"):
+		return name
+	default:
+		return "Beca " + name
+	}
 }
 
 // discountLabel names a discount reason the way the office says it. A reason

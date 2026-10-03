@@ -6,6 +6,7 @@ import {
   createConcept,
   generateCharges,
   getAccount,
+  getExpected,
   getIncome,
   getOverdue,
   listCharges,
@@ -416,5 +417,21 @@ describe("getIncome · credit notes (tarea 8)", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ lines: [], totalCents: 100000, creditNoteCents: 50000 })));
     const income = await getIncome(BASE, "2026-10-01", "2026-10-31");
     expect(income).toEqual({ lines: [], totalCents: 100000, creditNoteCents: 50000 });
+  });
+});
+
+describe("getExpected · scholarships (T18)", () => {
+  const line = { chargeId: "ch1", description: "Colegiatura septiembre", dueDate: "2026-09-10", owedCents: 160000, surchargeCents: 0, discountCents: 0, totalCents: 160000, due: true };
+
+  it("carries what the scholarship takes off each line", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ amountCents: 160000, lines: [{ ...line, scholarshipCents: 160000 }] })));
+    const got = await getExpected(BASE, "st1");
+    expect(got.lines[0]?.scholarshipCents).toBe(160000);
+  });
+
+  it("a gateway older than T18 reads as no scholarship, never undefined", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ amountCents: 160000, lines: [line] })));
+    const got = await getExpected(BASE, "st1");
+    expect(got.lines[0]?.scholarshipCents).toBe(0);
   });
 });

@@ -964,7 +964,8 @@ func TestGetDepositReceipt(t *testing.T) {
 	f.repo.receipt = &ports.DepositReceipt{
 		Deposit: d.WithFolio("P-2026-000042"),
 		Lines: []ports.ReceiptLine{
-			{ChargeID: "ch-1", Description: "Colegiatura septiembre 2026", AmountCents: 310000, DiscountCents: 10000},
+			{ChargeID: "ch-1", Description: "Colegiatura septiembre 2026", AmountCents: 310000, DiscountCents: 10000,
+				ScholarshipCents: 150000, ScholarshipName: "Hermanos"},
 			{ChargeID: "fee-1", Description: "Recargo · Colegiatura septiembre 2026", AmountCents: 30000, Surcharge: true},
 		},
 		UnallocatedCents: 10000,
@@ -980,8 +981,8 @@ func TestGetDepositReceipt(t *testing.T) {
 	if l := got.GetLines()[1]; !l.GetSurcharge() || l.GetAmountCents() != 30000 {
 		t.Errorf("fee line = %+v, want the surcharge flag and 30000", l)
 	}
-	if l := got.GetLines()[0]; l.GetDiscountCents() != 10000 {
-		t.Errorf("month line = %+v, want its 10000 discount", l)
+	if l := got.GetLines()[0]; l.GetDiscountCents() != 10000 || l.GetScholarshipCents() != 150000 || l.GetScholarshipName() != "Hermanos" {
+		t.Errorf("month line = %+v, want its 10000 discount and the Hermanos scholarship of 150000", l)
 	}
 }
 

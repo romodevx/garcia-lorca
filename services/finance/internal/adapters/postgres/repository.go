@@ -247,7 +247,7 @@ func (r *Repository) RescheduleUnpaid(ctx context.Context, items []ports.ChargeR
 				// Still owing. The subquery is the same tenant-bound view the
 				// policy allows, so RLS still applies to it.
 				Where("(SELECT COALESCE(SUM(p.amount_cents), 0) FROM payments p WHERE p.charge_id = charges.id) " +
-					"< charges.amount_cents - charges.discount_cents").
+					"< charges.amount_cents - charges.discount_cents - charges.scholarship_cents").
 				Updates(map[string]any{"due_date": w.due, "starts_on": starts, "updated_at": gorm.Expr("now()")})
 			if res.Error != nil {
 				return glerrors.Wrap(glerrors.KindInternal, "moving a deadline", res.Error)
@@ -453,6 +453,8 @@ func (r *Repository) RepriceUnpaid(ctx context.Context, items []ports.ChargeRepr
 				// rolling back every other pupil's price and failing the nightly
 				// run wholesale over one scholarship.
 				Where("discount_cents = 0").
+				// Nor a scholarship's part written when it was settled (T18).
+				Where("scholarship_cents = 0").
 				// Nothing collected. The subquery is the same tenant-bound view
 				// the policy allows, so RLS still applies to it.
 				Where("NOT EXISTS (SELECT 1 FROM payments p WHERE p.charge_id = charges.id)").
@@ -920,30 +922,37 @@ func withPaidTotals(tx *gorm.DB, rows []chargeModel) ([]ports.ChargeWithPaid, er
 	}
 
 	type chargePaid struct {
-		ChargeID string `gorm:"column:charge_id"`
-		Paid     int64  `gorm:"column:paid"`
+		ChargeID  string `gorm:"column:charge_id"`
+		Paid      int64  `gorm:"column:paid"`
+		PaidByDue int64  `gorm:"column:paid_by_due"`
 	}
+	// paid_by_due is what was paid on or before the due date, the UTC day like
+	// every finance date: what decides whether a scholarship was kept (T18).
 	var sums []chargePaid
-	if err := tx.Model(&paymentModel{}).
-		Select("charge_id, COALESCE(SUM(amount_cents), 0) AS paid").
-		Where("charge_id IN ?", ids).
-		Group("charge_id").
+	if err := tx.Raw(`SELECT p.charge_id,
+	                         COALESCE(SUM(p.amount_cents), 0) AS paid,
+	                         COALESCE(SUM(p.amount_cents) FILTER (
+	                             WHERE (p.paid_at AT TIME ZONE 'UTC')::date <= c.due_date), 0) AS paid_by_due
+	                    FROM payments p
+	                    JOIN charges c ON c.id = p.charge_id
+	                   WHERE p.charge_id IN ?
+	                   GROUP BY p.charge_id`, ids).
 		Scan(&sums).Error; err != nil {
 		return nil, glerrors.Wrap(glerrors.KindInternal, "summing payments", err)
 	}
-	paidByCharge := make(map[string]int64, len(sums))
+	paidByCharge := make(map[string]chargePaid, len(sums))
 	for _, s := range sums {
-		paidByCharge[s.ChargeID] = s.Paid
+		paidByCharge[s.ChargeID] = s
 	}
 
 	out := make([]ports.ChargeWithPaid, 0, len(rows))
 	for _, m := range rows {
-		paid := paidByCharge[m.ID]
-		charge, err := toDomainCharge(m, paid)
+		sum := paidByCharge[m.ID]
+		charge, err := toDomainCharge(m, sum.Paid)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, ports.ChargeWithPaid{Charge: charge, PaidCents: paid})
+		out = append(out, ports.ChargeWithPaid{Charge: charge, PaidCents: sum.Paid, PaidByDueCents: sum.PaidByDue})
 	}
 	return out, nil
 }
@@ -1238,6 +1247,19 @@ func (r *Repository) storeDeposit(
 		}
 	}
 
+	// The scholarship's part of each charge this money settles under one
+	// (T18): written now, so a later change to the scholarship never rewrites a
+	// paid charge. After the discounts, before the allocations it explains.
+	for _, c := range write.Scholarships {
+		if err := tx.Model(&chargeModel{}).Where("id = ?", c.ID()).Updates(map[string]any{
+			"scholarship_cents": c.Scholarship().Int64(),
+			"scholarship_id":    optionalString(c.ScholarshipID()),
+			"updated_at":        gorm.Expr("now()"),
+		}).Error; err != nil {
+			return ports.DepositRecord{}, glerrors.Wrap(glerrors.KindInternal, "writing a scholarship", err)
+		}
+	}
+
 	for _, fee := range write.Surcharges {
 		model := fromDomainCharge(fee)
 		if err := tx.Create(&model).Error; err != nil {
@@ -1246,7 +1268,7 @@ func (r *Repository) storeDeposit(
 	}
 
 	settled, err := applyAllocations(tx, d, write.Allocations,
-		replaceCharges(replaceCharges(open, write.Repriced), write.Discounted), write.Surcharges)
+		replaceCharges(replaceCharges(replaceCharges(open, write.Repriced), write.Discounted), write.Scholarships), write.Surcharges)
 	if err != nil {
 		return ports.DepositRecord{}, err
 	}
@@ -1550,19 +1572,25 @@ func (r *Repository) DepositReceipt(ctx context.Context, id string) (ports.Depos
 			ExternalRef   string
 			Kind          string
 			DiscountCents int64
+			// The scholarship's part (T18), on the same settling payment.
+			ScholarshipCents int64
+			ScholarshipName  string
 		}
 		// A charge's discount is realized by the payment that settles it: only
 		// the last payment captured on a paid charge shows it, so a charge paid
 		// in two deposits does not read its discount twice.
 		if err := tx.Raw(`SELECT p.charge_id, c.description, p.amount_cents, c.external_ref, cc.kind,
-		                         CASE WHEN c.status = ? AND p.id = (
-		                                  SELECT p2.id FROM payments p2
-		                                   WHERE p2.charge_id = c.id
-		                                   ORDER BY p2.created_at DESC, p2.id DESC LIMIT 1)
-		                              THEN c.discount_cents ELSE 0 END AS discount_cents
+		                         CASE WHEN settles THEN c.discount_cents ELSE 0 END AS discount_cents,
+		                         CASE WHEN settles THEN c.scholarship_cents ELSE 0 END AS scholarship_cents,
+		                         CASE WHEN settles THEN COALESCE(s.name, '') ELSE '' END AS scholarship_name
 		                    FROM payments p
 		                    JOIN charges c ON c.id = p.charge_id
 		                    JOIN charge_concepts cc ON cc.id = c.concept_id
+		                    LEFT JOIN scholarships s ON s.id = c.scholarship_id
+		                    CROSS JOIN LATERAL (SELECT c.status = ? AND p.id = (
+		                                  SELECT p2.id FROM payments p2
+		                                   WHERE p2.charge_id = c.id
+		                                   ORDER BY p2.created_at DESC, p2.id DESC LIMIT 1) AS settles) last
 		                   WHERE p.deposit_id = ?
 		                   ORDER BY c.due_date, p.id`, domain.StatusPaid, id).Scan(&rows).Error; err != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "reading the deposit's receipt", err)
@@ -1579,13 +1607,18 @@ func (r *Repository) DepositReceipt(ctx context.Context, id string) (ports.Depos
 			if i, seen := at[row.ChargeID]; seen {
 				out.Lines[i].AmountCents += row.AmountCents
 				out.Lines[i].DiscountCents = max(out.Lines[i].DiscountCents, row.DiscountCents)
+				if row.ScholarshipCents > out.Lines[i].ScholarshipCents {
+					out.Lines[i].ScholarshipCents, out.Lines[i].ScholarshipName = row.ScholarshipCents, row.ScholarshipName
+				}
 				continue
 			}
 			at[row.ChargeID] = len(out.Lines)
 			out.Lines = append(out.Lines, ports.ReceiptLine{
 				ChargeID: row.ChargeID, Description: row.Description, AmountCents: row.AmountCents,
-				Surcharge:     row.Kind == domain.KindLateFee || domain.IsFeeRef(row.ExternalRef),
-				DiscountCents: row.DiscountCents,
+				Surcharge:        row.Kind == domain.KindLateFee || domain.IsFeeRef(row.ExternalRef),
+				DiscountCents:    row.DiscountCents,
+				ScholarshipCents: row.ScholarshipCents,
+				ScholarshipName:  row.ScholarshipName,
 			})
 		}
 		// A voided or superseded deposit's money is gone or moved: no credit.
@@ -1862,6 +1895,13 @@ func releaseDeposit(tx *gorm.DB, d domain.Deposit, resetEarned bool) (map[string
 		if takeBack {
 			row.DiscountCents, row.DiscountReason = 0, ""
 			updates["discount_cents"], updates["discount_reason"] = int64(0), ""
+		}
+		// A scholarship's part stays only while what is left still settles the
+		// charge (T18): released, the rule decides again — on a correction, on
+		// the corrected date.
+		if row.ScholarshipCents > 0 && remaining < row.AmountCents-row.DiscountCents-row.ScholarshipCents {
+			row.ScholarshipCents, row.ScholarshipID = 0, nil
+			updates["scholarship_cents"], updates["scholarship_id"] = int64(0), nil
 		}
 		charge, err := toDomainCharge(row, remaining)
 		if err != nil {
