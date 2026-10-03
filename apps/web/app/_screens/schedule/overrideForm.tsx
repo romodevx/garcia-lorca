@@ -81,11 +81,12 @@ export function useOverrideForm(block: ScheduleBlock, board: ScheduleBoard, toda
   };
 }
 
-export async function saveOverride(form: OverrideForm, block: ScheduleBlock): Promise<string | null> {
+export async function saveOverride(form: OverrideForm, block: ScheduleBlock, replaceOverrideId?: string): Promise<string | null> {
   const v = form.valid();
   if (v === null) return null;
   await createOverride(API_URL, {
     blockId: block.id, date: v.date, kind: v.kind, reason: v.reason.trim(),
+    ...(replaceOverrideId !== undefined ? { replaceOverrideId } : {}),
     ...(v.kind === "substitute" ? { teacherId: v.teacherId } : {}),
     ...(v.kind === "swap" ? { swapBlockId: v.swapBlockId } : {}),
   });

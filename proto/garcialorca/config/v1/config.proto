@@ -1423,6 +1423,9 @@ message CreateScheduleOverrideRequest {
   string swap_block_id = 5;
   string reason = 6;
   ScheduleActor actor = 7;
+  // replace_override_id replaces, in the same step, a substitute or a
+  // cancellation of the same class that date (T19: the substitute is absent).
+  string replace_override_id = 8;
 }
 
 message CreateScheduleOverrideResponse {
@@ -1534,6 +1537,9 @@ message UpdateTeacherAbsenceResponse {
 message CancelTeacherAbsenceRequest {
   string id = 1;
   ScheduleActor actor = 2;
+  // caller_teacher_id is the teacher record linked to the caller ("" for
+  // none): nobody cancels their own absence (SCHEDULE_ABSENCE_OWN).
+  string caller_teacher_id = 3;
 }
 
 message CancelTeacherAbsenceResponse {

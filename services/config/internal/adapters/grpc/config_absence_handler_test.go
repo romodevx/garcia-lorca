@@ -38,8 +38,8 @@ func (s *stubSchedule) UpdateAbsence(_ context.Context, id string, in usecase.Ab
 	return usecase.AbsenceResult{Absence: stubAbsence(in, by), Uncovered: 1}, s.err
 }
 
-func (s *stubSchedule) CancelAbsence(_ context.Context, id string, by domain.Actor) (domain.TeacherAbsence, error) {
-	s.gotID, s.gotActor = id, by
+func (s *stubSchedule) CancelAbsence(_ context.Context, id string, by domain.Actor, callerTeacherID string) (domain.TeacherAbsence, error) {
+	s.gotID, s.gotActor, s.gotCaller = id, by, callerTeacherID
 	a := stubAbsence(usecase.AbsenceInput{TeacherID: "t-ana", Kind: domain.AbsenceSick, StartsOn: absMon, EndsOn: absMon, AllDay: true}, by)
 	c, _ := a.Cancel(by, absMon)
 	return c, s.err
@@ -92,8 +92,9 @@ func TestTeacherAbsenceRPCs(t *testing.T) {
 	assert.True(t, upd.Msg.GetAbsence().GetAllDay())
 	assert.Equal(t, int32(1), upd.Msg.GetUncoveredCount())
 
-	cancelled, err := h.CancelTeacherAbsence(ctx(), connect.NewRequest(&configv1.CancelTeacherAbsenceRequest{Id: "abs1", Actor: actor}))
+	cancelled, err := h.CancelTeacherAbsence(ctx(), connect.NewRequest(&configv1.CancelTeacherAbsenceRequest{Id: "abs1", Actor: actor, CallerTeacherId: "t-zoe"}))
 	require.NoError(t, err)
+	assert.Equal(t, "t-zoe", stub.gotCaller)
 	assert.NotNil(t, cancelled.Msg.GetAbsence().GetCancelledAt())
 	assert.Equal(t, "Directora", cancelled.Msg.GetAbsence().GetCancelledBy().GetName())
 

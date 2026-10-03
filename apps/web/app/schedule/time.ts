@@ -218,3 +218,8 @@ export function spanishDate(iso: string): string {
   const { day, month } = dayAndMonth(iso);
   return `${DAY_NAMES[weekdayOf(iso)] ?? ""} ${day} de ${month}`;
 }
+
+/** The school week a date belongs to: its own Monday, or next Monday on a weekend. */
+export function schoolWeekOf(iso: string): string {
+  return weekdayOf(iso) > SCHOOL_DAYS ? addDays(mondayOf(iso), DAYS_PER_WEEK) : mondayOf(iso);
+}

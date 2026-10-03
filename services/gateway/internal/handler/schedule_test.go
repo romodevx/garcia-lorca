@@ -53,13 +53,14 @@ type fakeScheduleSvc struct {
 	teachers                 []client.Teacher
 	err                      error
 	// T19
-	absIn       client.TeacherAbsenceInput
-	absID       string
-	absQuery    client.TeacherAbsenceQuery
-	uncFrom     time.Time
-	uncTo       time.Time
-	nonWorking  string
-	absentClass bool
+	absIn        client.TeacherAbsenceInput
+	absID        string
+	absQuery     client.TeacherAbsenceQuery
+	uncFrom      time.Time
+	uncTo        time.Time
+	nonWorking   string
+	absentClass  bool
+	cancelCaller string
 }
 
 func scBlockResult() client.ScheduleBlock {

@@ -70,6 +70,8 @@ type ScheduleOverrideInput struct {
 	TeacherID   string
 	SwapBlockID string
 	Reason      string
+	// ReplaceOverrideID replaces a substitute or cancellation of the class that date (T19).
+	ReplaceOverrideID string
 }
 
 // ScheduledClass is a class as it happens on a date; Override is nil when the
@@ -246,7 +248,7 @@ func (c *ConfigClient) DeleteScheduleBlock(ctx context.Context, id, reason strin
 func (c *ConfigClient) CreateScheduleOverride(ctx context.Context, in ScheduleOverrideInput, by ScheduleActor) (ScheduleOverride, error) {
 	res, err := c.rpc.CreateScheduleOverride(ctx, connect.NewRequest(&configv1.CreateScheduleOverrideRequest{
 		BlockId: in.BlockID, Date: timestamppb.New(in.Date), Kind: in.Kind, TeacherId: in.TeacherID,
-		SwapBlockId: in.SwapBlockID, Reason: in.Reason, Actor: toProtoScheduleActor(by),
+		SwapBlockId: in.SwapBlockID, Reason: in.Reason, Actor: toProtoScheduleActor(by), ReplaceOverrideId: in.ReplaceOverrideID,
 	}))
 	if err != nil {
 		return ScheduleOverride{}, err

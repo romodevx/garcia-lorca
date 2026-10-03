@@ -77,6 +77,10 @@ export function AbsenceDrawer(props: AbsenceDrawerProps): ReactElement {
   const [endsAtError, setEndsAtError] = useState<string | undefined>(undefined);
   const required = useRequired(["teacherId", "startsOn", "endsOn", ...(v.allDay ? [] : ["startsAt", "endsAt"])]);
   const set = (patch: Partial<Values>): void => setValues((prev) => ({ ...prev, ...patch }));
+  // Judged when leaving the field (dates) or choosing (hours) — never on a keystroke.
+  const judgeDates = (): void => setEndsOnError(v.startsOn !== "" && v.endsOn !== "" && v.endsOn < v.startsOn ? "La fecha final no puede ser antes de la inicial" : undefined);
+  const judgeHours = (startsAt: string, endsAt: string): void =>
+    setEndsAtError(startsAt !== "" && endsAt !== "" && toMinutes(endsAt) <= toMinutes(startsAt) ? "La hora final debe ser después de la inicial" : undefined);
 
   const valid = (): boolean => {
     const filled = required.check({ teacherId: v.teacherId, startsOn: v.startsOn, endsOn: v.endsOn, startsAt: v.startsAt, endsAt: v.endsAt });
@@ -146,7 +150,7 @@ export function AbsenceDrawer(props: AbsenceDrawerProps): ReactElement {
           <DateField label="Desde el" required value={v.startsOn} error={required.errors.startsOn} onClearError={() => required.clear("startsOn")}
             onChange={(startsOn) => set({ startsOn, endsOn: v.endsOn === "" || v.endsOn < startsOn ? startsOn : v.endsOn })} />
           <DateField label="Hasta el" required value={v.endsOn} error={required.errors.endsOn ?? endsOnError}
-            onClearError={() => { required.clear("endsOn"); setEndsOnError(undefined); }} onChange={(endsOn) => set({ endsOn })} />
+            onClearError={() => { required.clear("endsOn"); setEndsOnError(undefined); }} onChange={(endsOn) => set({ endsOn })} onBlur={judgeDates} />
         </div>
         <label style={{ display: "flex", alignItems: "center", gap: 10, minHeight: 44, fontSize: 15, fontWeight: 600, color: "var(--text)", cursor: "pointer" }}>
           <input type="checkbox" checked={v.allDay} onChange={(e) => set({ allDay: e.target.checked })} style={{ width: 20, height: 20 }} />
@@ -155,10 +159,10 @@ export function AbsenceDrawer(props: AbsenceDrawerProps): ReactElement {
         {!v.allDay && (
           <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 140px), 1fr))" }}>
             <SelectField label="Desde la hora" required value={v.startsAt} error={required.errors.startsAt}
-              onClearError={() => required.clear("startsAt")} onChange={(startsAt) => set({ startsAt })} options={HOURS}
+              onClearError={() => required.clear("startsAt")} onChange={(startsAt) => { set({ startsAt }); judgeHours(startsAt, v.endsAt); }} options={HOURS}
               help="Cada día de esas fechas; por ejemplo, una cita médica de 08:00 a 10:00." />
             <SelectField label="Hasta la hora" required value={v.endsAt} error={required.errors.endsAt ?? endsAtError}
-              onClearError={() => { required.clear("endsAt"); setEndsAtError(undefined); }} onChange={(endsAt) => set({ endsAt })} options={HOURS} />
+              onClearError={() => { required.clear("endsAt"); setEndsAtError(undefined); }} onChange={(endsAt) => { set({ endsAt }); judgeHours(v.startsAt, endsAt); }} options={HOURS} />
           </div>
         )}
         <TextArea label="Nota" value={v.note} rows={3} onChange={(note) => set({ note: note.slice(0, NOTE_MAX) })}

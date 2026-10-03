@@ -202,7 +202,7 @@ func TestUpdateAndCancelAbsenceKeepTheRecordAndTheHistory(t *testing.T) {
 	_, err = s.UpdateAbsence(ctx, created.Absence.ID(), in, director)
 	assert.Equal(t, glerrors.KindInvalid, glerrors.KindOf(err), "the teacher of an absence does not change")
 
-	cancelled, err := s.CancelAbsence(ctx, created.Absence.ID(), director)
+	cancelled, err := s.CancelAbsence(ctx, created.Absence.ID(), director, "")
 	require.NoError(t, err)
 	assert.False(t, cancelled.Active())
 	assert.Equal(t, domain.ActionAbsenceCanceled, f.events[0].Action)
@@ -210,7 +210,7 @@ func TestUpdateAndCancelAbsenceKeepTheRecordAndTheHistory(t *testing.T) {
 	_, stillThere := f.absences[created.Absence.ID()]
 	assert.True(t, stillThere, "never deleted")
 
-	_, err = s.CancelAbsence(ctx, created.Absence.ID(), director)
+	_, err = s.CancelAbsence(ctx, created.Absence.ID(), director, "")
 	assert.Equal(t, domain.CodeAbsenceCancelled, codeOf(err))
 	_, err = s.UpdateAbsence(ctx, created.Absence.ID(), fullDay(tAna, mon5, mon5), director)
 	assert.Equal(t, domain.CodeAbsenceCancelled, codeOf(err))
@@ -230,7 +230,7 @@ func TestAbsencesListsByDatesAndTeacher(t *testing.T) {
 	require.NoError(t, err)
 	_, err = s.CreateAbsence(ctx, fullDay(tLuis, wed7, wed7), director)
 	require.NoError(t, err)
-	_, err = s.CancelAbsence(ctx, ana.Absence.ID(), director)
+	_, err = s.CancelAbsence(ctx, ana.Absence.ID(), director, "")
 	require.NoError(t, err)
 
 	got, err := s.Absences(ctx, usecase.AbsenceQuery{CycleID: sCycle, From: mon5, To: wed7})
@@ -369,4 +369,59 @@ func TestCreateOverrideRefusesANonWorkingDay(t *testing.T) {
 	_, err := s.CreateOverride(context.Background(), usecase.OverrideInput{BlockID: music.ID(), Date: mon5, Kind: domain.OverrideCancel, Reason: "x"}, director)
 	assert.Equal(t, domain.CodeScheduleDateNonWorking, codeOf(err))
 	assert.Equal(t, "El 5 de octubre de 2026 no hay clases (Independencia)", glerrors.SafeMessage(err))
+}
+
+// Review T19: a cover that became absent leaves the class uncovered; covering
+// it again REPLACES that change in one step (never a dead end).
+func TestCoveringAClassWhoseSubstituteIsAbsentReplacesTheChange(t *testing.T) {
+	f, mon, _, _ := anaWeek(t)
+	s := newScheduleService(f, duringCycle())
+	ctx := context.Background()
+	first, err := s.CreateOverride(ctx, usecase.OverrideInput{BlockID: mon.ID(), Date: mon5, Kind: domain.OverrideSubstitute, TeacherID: tZoe, Reason: "cita"}, director)
+	require.NoError(t, err)
+	_, err = s.CreateAbsence(ctx, fullDay(tZoe, mon5, mon5), director)
+	require.NoError(t, err)
+
+	_, err = s.CreateOverride(ctx, usecase.OverrideInput{BlockID: mon.ID(), Date: mon5, Kind: domain.OverrideSubstitute, TeacherID: tEva, Reason: "Zoe falta"}, director)
+	assert.Equal(t, domain.CodeScheduleBlockTaken, codeOf(err), "without saying what it replaces")
+
+	second, err := s.CreateOverride(ctx, usecase.OverrideInput{BlockID: mon.ID(), Date: mon5, Kind: domain.OverrideSubstitute, TeacherID: tEva,
+		Reason: "Zoe falta", ReplaceOverrideID: first.ID()}, director)
+	require.NoError(t, err)
+	_, stillThere := f.overrides[first.ID()]
+	assert.False(t, stillThere, "the old change is gone")
+	assert.Equal(t, tEva, f.overrides[second.ID()].TeacherID())
+	assert.Equal(t, domain.ActionOverrideCreated, f.events[0].Action)
+	assert.Equal(t, domain.ActionOverrideDeleted, f.events[1].Action, "the replaced change goes to the history too")
+
+	day, err := s.Day(ctx, sCycle, mon5, "")
+	require.NoError(t, err)
+	for _, c := range day.Classes {
+		assert.NotEqual(t, domain.ClassUncovered, c.Status)
+	}
+}
+
+func TestReplacingRefusesASwapOrAnotherClassesChange(t *testing.T) {
+	f, mon, _, music := anaWeek(t)
+	s := newScheduleService(f, duringCycle())
+	ctx := context.Background()
+	swap, err := s.CreateOverride(ctx, usecase.OverrideInput{BlockID: mon.ID(), Date: mon5, Kind: domain.OverrideSwap, SwapBlockID: music.ID(), Reason: "x"}, director)
+	require.NoError(t, err)
+	_, err = s.CreateOverride(ctx, usecase.OverrideInput{BlockID: mon.ID(), Date: mon5, Kind: domain.OverrideCancel, Reason: "y", ReplaceOverrideID: swap.ID()}, director)
+	assert.Equal(t, domain.CodeScheduleBlockTaken, codeOf(err))
+	assert.Contains(t, glerrors.SafeMessage(err), "intercambio")
+	_, err = s.CreateOverride(ctx, usecase.OverrideInput{BlockID: mon.ID(), Date: mon5, Kind: domain.OverrideCancel, Reason: "y", ReplaceOverrideID: "nope"}, director)
+	assert.Equal(t, domain.CodeScheduleBlockTaken, codeOf(err))
+}
+
+func TestATeacherCannotCancelTheirOwnAbsence(t *testing.T) {
+	f, _, _, _ := anaWeek(t)
+	s := newScheduleService(f, duringCycle())
+	ctx := context.Background()
+	a, err := s.CreateAbsence(ctx, fullDay(tAna, mon5, mon5), director)
+	require.NoError(t, err)
+	_, err = s.CancelAbsence(ctx, a.Absence.ID(), director, tAna)
+	assert.Equal(t, domain.CodeAbsenceOwn, codeOf(err))
+	assert.Equal(t, glerrors.KindForbidden, glerrors.KindOf(err))
+	assert.True(t, f.absences[a.Absence.ID()].Active())
 }

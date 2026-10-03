@@ -41,7 +41,7 @@ func (s *stubAbsences) UpdateTeacherAbsence(_ context.Context, req *connect.Requ
 
 func (s *stubAbsences) CancelTeacherAbsence(_ context.Context, req *connect.Request[configv1.CancelTeacherAbsenceRequest]) (*connect.Response[configv1.CancelTeacherAbsenceResponse], error) {
 	a := protoAbsence()
-	a.CancelledAt, a.CancelledBy = timestamppb.New(mon5), req.Msg.GetActor()
+	a.CancelledAt, a.CancelledBy, a.Note = timestamppb.New(mon5), req.Msg.GetActor(), req.Msg.GetCallerTeacherId()
 	return connect.NewResponse(&configv1.CancelTeacherAbsenceResponse{Absence: a}), nil
 }
 
@@ -84,10 +84,11 @@ func TestConfigClientTeacherAbsences(t *testing.T) {
 	assert.Equal(t, "abs1", stub.gotUpdate.GetId())
 	assert.True(t, stub.gotUpdate.GetAbsence().GetAllDay())
 
-	cancelled, err := c.CancelTeacherAbsence(ctx, "abs1", by)
+	cancelled, err := c.CancelTeacherAbsence(ctx, "abs1", by, "t9")
 	require.NoError(t, err)
 	assert.Equal(t, mon5, cancelled.CancelledAt)
 	assert.Equal(t, "Directora", cancelled.CancelledBy.Name)
+	assert.Equal(t, "t9", cancelled.Note, "the caller's teacher travels to config")
 
 	list, err := c.ListTeacherAbsences(ctx, client.TeacherAbsenceQuery{CycleID: "c1", TeacherID: "t1", From: mon5, To: mon5, IncludeCancelled: true})
 	require.NoError(t, err)

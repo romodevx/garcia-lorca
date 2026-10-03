@@ -56,7 +56,7 @@ type ScheduleService interface {
 	// T19 — teacher absences.
 	CreateTeacherAbsence(ctx context.Context, in client.TeacherAbsenceInput, by client.ScheduleActor) (client.TeacherAbsenceSaved, error)
 	UpdateTeacherAbsence(ctx context.Context, id string, in client.TeacherAbsenceInput, by client.ScheduleActor) (client.TeacherAbsenceSaved, error)
-	CancelTeacherAbsence(ctx context.Context, id string, by client.ScheduleActor) (client.TeacherAbsence, error)
+	CancelTeacherAbsence(ctx context.Context, id string, by client.ScheduleActor, callerTeacherID string) (client.TeacherAbsence, error)
 	ListTeacherAbsences(ctx context.Context, q client.TeacherAbsenceQuery) ([]client.TeacherAbsence, error)
 	ListUncoveredClasses(ctx context.Context, cycleID string, from, to time.Time) ([]client.UncoveredClass, error)
 	// The teacher's own timetable resolves the caller's teacher record and the
@@ -308,6 +308,8 @@ type scheduleOverrideRequest struct {
 	TeacherID   string `json:"teacherId"`
 	SwapBlockID string `json:"swapBlockId"`
 	Reason      string `json:"reason"`
+	// ReplaceOverrideID: a substitute or cancellation of the class that date to replace (T19).
+	ReplaceOverrideID string `json:"replaceOverrideId"`
 }
 
 // CreateOverride handles POST /api/v1/schedule/overrides.
@@ -315,6 +317,7 @@ func (h *ScheduleHandler) CreateOverride(w http.ResponseWriter, r *http.Request)
 	var req scheduleOverrideRequest
 	if err := decodeJSONBody(w, r, &req); err != nil || !uuidShape.MatchString(req.BlockID) || !overrideKinds[req.Kind] ||
 		(req.TeacherID != "" && !uuidShape.MatchString(req.TeacherID)) || (req.SwapBlockID != "" && !uuidShape.MatchString(req.SwapBlockID)) ||
+		(req.ReplaceOverrideID != "" && !uuidShape.MatchString(req.ReplaceOverrideID)) ||
 		utf8.RuneCountInString(req.Reason) > maxScheduleReasonLen {
 		http.Error(w, `invalid request body (want {"blockId","date","kind":"substitute|swap|cancel","teacherId"?,"swapBlockId"?,"reason"})`, http.StatusBadRequest)
 		return
@@ -326,7 +329,7 @@ func (h *ScheduleHandler) CreateOverride(w http.ResponseWriter, r *http.Request)
 	}
 	o, err := h.svc.CreateScheduleOverride(r.Context(), client.ScheduleOverrideInput{
 		BlockID: strings.ToLower(req.BlockID), Date: date, Kind: req.Kind, TeacherID: strings.ToLower(req.TeacherID),
-		SwapBlockID: strings.ToLower(req.SwapBlockID), Reason: req.Reason,
+		SwapBlockID: strings.ToLower(req.SwapBlockID), Reason: req.Reason, ReplaceOverrideID: strings.ToLower(req.ReplaceOverrideID),
 	}, h.actor(r))
 	if err != nil {
 		writeConnectError(w, err)

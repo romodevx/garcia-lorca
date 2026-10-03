@@ -33,6 +33,7 @@ type stubSchedule struct {
 	gotAbsence      usecase.AbsenceInput
 	gotAbsenceQuery usecase.AbsenceQuery
 	gotID           string
+	gotCaller       string
 	gotFrom, gotTo  time.Time
 	nonWorking      string
 	event           domain.ScheduleEvent
@@ -171,9 +172,10 @@ func TestScheduleBoardDayOverridesAndAvailability(t *testing.T) {
 
 	o, err := h.CreateScheduleOverride(ctx(), connect.NewRequest(&configv1.CreateScheduleOverrideRequest{
 		BlockId: "b1", Date: timestamppb.New(mon), Kind: "substitute", TeacherId: "t-eva", Reason: "tarde",
-		Actor: &configv1.ScheduleActor{UserId: "u", Name: "D"},
+		Actor: &configv1.ScheduleActor{UserId: "u", Name: "D"}, ReplaceOverrideId: "o-old",
 	}))
 	require.NoError(t, err)
+	assert.Equal(t, "o-old", stub.gotOverride.ReplaceOverrideID)
 	assert.Equal(t, domain.OverrideSubstitute, stub.gotOverride.Kind)
 	assert.Equal(t, "D", o.Msg.GetOverride().GetCreatedBy().GetName())
 

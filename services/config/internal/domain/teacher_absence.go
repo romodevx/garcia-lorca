@@ -136,7 +136,7 @@ func (a *TeacherAbsence) apply(c AbsenceChanges) error {
 	if to.Before(from) {
 		return refusal(glerrors.KindInvalid, CodeAbsenceDatesInvalid, "La fecha final no puede ser antes de la inicial")
 	}
-	if int(to.Sub(from).Hours()/24)+1 > MaxAbsenceDays {
+	if DaysInclusive(from, to) > MaxAbsenceDays {
 		return refusal(glerrors.KindInvalid, CodeAbsenceDatesInvalid, "Una ausencia dura a lo más un año; revisa las fechas")
 	}
 	note := strings.TrimSpace(c.Note)
@@ -151,6 +151,13 @@ func (a *TeacherAbsence) apply(c AbsenceChanges) error {
 	a.kind, a.startsOn, a.endsOn, a.span, a.note = c.Kind, from, to, span, note
 	return nil
 }
+
+// DaysInclusive counts the calendar dates from..to, both included.
+func DaysInclusive(from, to time.Time) int {
+	return int(calendarDate(to).Sub(calendarDate(from)).Hours()/hoursPerDay) + 1
+}
+
+const hoursPerDay = 24
 
 // Edit returns the absence with c applied; a cancelled absence is not edited.
 func (a TeacherAbsence) Edit(c AbsenceChanges, at time.Time) (TeacherAbsence, error) {

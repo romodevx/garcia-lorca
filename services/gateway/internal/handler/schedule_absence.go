@@ -22,6 +22,7 @@ const (
 	maxAbsenceNoteLen = 500 // mirrors config's domain.MaxAbsenceNoteLen
 	maxAbsenceListDay = 366 // a list read spans at most a school year
 	codeAbsenceOwn    = "SCHEDULE_ABSENCE_OWN"
+	hoursPerDay       = 24
 )
 
 var absenceKinds = map[string]bool{"sick": true, "vacation": true, "personal": true, "other": true}
@@ -93,7 +94,7 @@ func (h *ScheduleHandler) Absences(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if int(to.Sub(from).Hours()/24)+1 > maxAbsenceListDay {
+	if int(to.Sub(from).Hours()/hoursPerDay)+1 > maxAbsenceListDay { // both are midnight UTC: whole days
 		http.Error(w, "from and to are at most a year apart", http.StatusBadRequest)
 		return
 	}
@@ -155,7 +156,12 @@ func (h *ScheduleHandler) CancelAbsence(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	a, err := h.svc.CancelTeacherAbsence(r.Context(), id, h.actor(r))
+	// config refuses cancelling the caller's own absence (SCHEDULE_ABSENCE_OWN).
+	own, ok := h.callerTeacher(w, r)
+	if !ok {
+		return
+	}
+	a, err := h.svc.CancelTeacherAbsence(r.Context(), id, h.actor(r), own)
 	if err != nil {
 		writeConnectError(w, err)
 		return

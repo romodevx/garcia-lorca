@@ -54,14 +54,18 @@ type BlockInput struct {
 	Reason       string
 }
 
-// OverrideInput is a change of one class on one date.
+// OverrideInput is a change of one class on one date. ReplaceOverrideID
+// names a change of the same class that date (a substitute or a cancellation,
+// never a swap) to replace in the same step — T19: the substitute became
+// absent and the class needs another one.
 type OverrideInput struct {
-	BlockID     string
-	Date        time.Time
-	Kind        domain.OverrideKind
-	TeacherID   string
-	SwapBlockID string
-	Reason      string
+	BlockID           string
+	Date              time.Time
+	Kind              domain.OverrideKind
+	TeacherID         string
+	SwapBlockID       string
+	Reason            string
+	ReplaceOverrideID string
 }
 
 // AvailabilityQuery asks who is free for a class of GroupID/SubjectID between
@@ -151,16 +155,16 @@ func (s *ScheduleService) Day(ctx context.Context, cycleID string, date time.Tim
 	}
 	date = asDate(date)
 	day := ScheduleDay{Date: date, Weekday: domain.WeekdayOf(date)}
-	if day.Weekday > domain.LastSchoolDay || date.Before(cycle.StartsOn()) || date.After(cycle.EndsOn()) {
-		return day, nil
-	}
-	t, err := s.loadTimetable(ctx, cycle, date, date)
+	t, err := s.loadCalendar(ctx, cycle)
 	if err != nil {
 		return ScheduleDay{}, err
 	}
 	if open, closed := t.schoolDay(date); !open {
 		day.NonWorking = closed
 		return day, nil
+	}
+	if err := s.loadClasses(ctx, &t, date, date); err != nil {
+		return ScheduleDay{}, err
 	}
 	for _, c := range t.on(date) {
 		if teacherID == "" || c.TeacherID == teacherID || c.Block.TeacherID() == teacherID {
@@ -288,15 +292,12 @@ func (s *ScheduleService) CreateOverride(ctx context.Context, in OverrideInput, 
 		return domain.ScheduleOverride{}, err
 	}
 	date := asDate(in.Date)
-	if err := checkOverrideDate(cat.Cycle, b, date); err != nil {
-		return domain.ScheduleOverride{}, err
-	}
-	periods, err := s.repo.ListNonWorkingPeriods(ctx, b.CycleID())
+	calendar, err := s.loadCalendar(ctx, cat.Cycle)
 	if err != nil {
 		return domain.ScheduleOverride{}, err
 	}
-	if label, closed := domain.NonWorkingLabel(periods, date); closed {
-		return domain.ScheduleOverride{}, domain.NonWorkingDateError(date, label)
+	if err := checkOverrideDate(calendar, b, date); err != nil {
+		return domain.ScheduleOverride{}, err
 	}
 	if in.Kind == domain.OverrideSubstitute {
 		if err := checkSubstitute(cat, b, in.TeacherID); err != nil {
@@ -326,6 +327,10 @@ func (s *ScheduleService) CreateOverride(ctx context.Context, in OverrideInput, 
 		if err != nil {
 			return err
 		}
+		sameDay, replaced, err := withoutReplaced(sameDay, b, in.ReplaceOverrideID)
+		if err != nil {
+			return err
+		}
 		for _, other := range sameDay {
 			if other.Touches(b.ID()) || (partner != nil && other.Touches(partner.ID())) {
 				return refusal(glerrors.KindConflict, domain.CodeScheduleBlockTaken,
@@ -341,6 +346,15 @@ func (s *ScheduleService) CreateOverride(ctx context.Context, in OverrideInput, 
 		}
 		if err := refuseAbsentInClass(tx, blocks, append(sameDay, o), date, o, names); err != nil {
 			return err
+		}
+		if replaced != nil {
+			if err := tx.DeleteOverride(replaced.ID()); err != nil {
+				return err
+			}
+			if err := tx.AppendEvent(s.event(b.CycleID(), by, domain.ActionOverrideDeleted, b.ID(), replaced.ID(), date, o.Reason(),
+				"Reemplazado — "+domain.OverrideSummary(*replaced, b, nil, names))); err != nil {
+				return err
+			}
 		}
 		if err := tx.InsertOverride(o); err != nil {
 			return err
@@ -456,12 +470,15 @@ func (s *ScheduleService) AvailableTeachers(ctx context.Context, q AvailabilityQ
 				cover = b.TeacherID()
 			}
 		}
-		t, err := s.loadTimetable(ctx, cat.Cycle, date, date)
+		t, err := s.loadCalendar(ctx, cat.Cycle)
 		if err != nil {
 			return nil, err
 		}
 		if open, _ := t.schoolDay(date); !open {
 			return []domain.AvailableTeacher{}, nil
+		}
+		if err := s.loadClasses(ctx, &t, date, date); err != nil {
+			return nil, err
 		}
 		day = domain.EffectiveDay(t.blocks, t.overrides, date)
 		// An absent teacher is no substitute (T19).
@@ -703,13 +720,20 @@ func (s *ScheduleService) swapPartner(tx ports.ScheduleTx, b domain.ScheduleBloc
 	return &p, nil
 }
 
-func checkOverrideDate(c domain.Cycle, b domain.ScheduleBlock, date time.Time) error {
+// checkOverrideDate is every rule on a date-specific change's date: inside
+// the cycle, on the class's weekday, and a day the school calendar does not
+// close (T19, ADR 0032).
+func checkOverrideDate(t dayTimetable, b domain.ScheduleBlock, date time.Time) error {
+	c := t.cycle
 	if date.Before(c.StartsOn()) || date.After(c.EndsOn()) {
 		return refusal(glerrors.KindInvalid, domain.CodeScheduleDateOutsideCycle, "La fecha queda fuera del ciclo")
 	}
 	if domain.WeekdayOf(date) != b.Weekday() {
 		return refusal(glerrors.KindInvalid, domain.CodeScheduleDateWrongWeekday,
 			"La clase es los "+domain.WeekdayName(b.Weekday())+" y el "+domain.FormatSpanishDate(date)+" no lo es")
+	}
+	if open, closed := t.schoolDay(date); !open {
+		return domain.NonWorkingDateError(date, closed)
 	}
 	return nil
 }
@@ -739,6 +763,32 @@ func clashFreeDay(blocks []domain.ScheduleBlock, overrides []domain.ScheduleOver
 		other = a
 	}
 	return domain.ClashError(kind, other, names)
+}
+
+// withoutReplaced takes the change replaceID out of sameDay: it must be a
+// substitute or a cancellation of b that date (a swap moves two classes and is
+// undone on its own).
+func withoutReplaced(sameDay []domain.ScheduleOverride, b domain.ScheduleBlock, replaceID string) ([]domain.ScheduleOverride, *domain.ScheduleOverride, error) {
+	if replaceID == "" {
+		return sameDay, nil, nil
+	}
+	rest := make([]domain.ScheduleOverride, 0, len(sameDay))
+	var replaced *domain.ScheduleOverride
+	for i := range sameDay {
+		if sameDay[i].ID() == replaceID {
+			replaced = &sameDay[i]
+			continue
+		}
+		rest = append(rest, sameDay[i])
+	}
+	if replaced == nil || replaced.BlockID() != b.ID() {
+		return nil, nil, refusal(glerrors.KindConflict, domain.CodeScheduleBlockTaken, "Ese cambio ya no está en esta clase ese día; recarga el horario")
+	}
+	if replaced.Kind() == domain.OverrideSwap {
+		return nil, nil, refusal(glerrors.KindConflict, domain.CodeScheduleBlockTaken,
+			"Esa clase tiene un intercambio ese día; deshaz el intercambio primero")
+	}
+	return rest, replaced, nil
 }
 
 // refuseAbsentInClass refuses o when, on date, it puts a teacher in a class

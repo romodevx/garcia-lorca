@@ -89,8 +89,9 @@ func (c *ConfigClient) UpdateTeacherAbsence(ctx context.Context, id string, in T
 }
 
 // CancelTeacherAbsence cancels an absence (never deleted).
-func (c *ConfigClient) CancelTeacherAbsence(ctx context.Context, id string, by ScheduleActor) (TeacherAbsence, error) {
-	res, err := c.rpc.CancelTeacherAbsence(ctx, connect.NewRequest(&configv1.CancelTeacherAbsenceRequest{Id: id, Actor: toProtoScheduleActor(by)}))
+// callerTeacherID is the caller's own teacher record: config refuses their own absence.
+func (c *ConfigClient) CancelTeacherAbsence(ctx context.Context, id string, by ScheduleActor, callerTeacherID string) (TeacherAbsence, error) {
+	res, err := c.rpc.CancelTeacherAbsence(ctx, connect.NewRequest(&configv1.CancelTeacherAbsenceRequest{Id: id, Actor: toProtoScheduleActor(by), CallerTeacherId: callerTeacherID}))
 	if err != nil {
 		return TeacherAbsence{}, err
 	}

@@ -45,8 +45,8 @@ export interface TeachersScreenProps {
   canListUsers?: boolean;
   /** schedule:write with Horarios on (T19): each row offers "Registrar ausencia". */
   canRegisterAbsence?: boolean;
-  /** "Cubrir ahora" after saving an absence: Horarios, on "Por cubrir". */
-  onCoverClasses?: () => void;
+  /** "Cubrir ahora" after saving an absence: Horarios, on "Por cubrir" for its dates. */
+  onCoverClasses?: (absence: { startsOn: string; endsOn: string }) => void;
 }
 
 /**
@@ -159,7 +159,8 @@ export function TeachersScreen({ onBack, onOpenLoad, canGrantAccess = false, can
       {rosterError !== undefined && <Note>{rosterError}</Note>}
       {absenceSaved !== null && (
         <div style={{ marginBottom: 18 }}>
-          <AbsenceNotice count={absenceSaved.uncoveredCount} onCover={onCoverClasses} onDismiss={() => setAbsenceSaved(null)} />
+          <AbsenceNotice count={absenceSaved.uncoveredCount} onDismiss={() => setAbsenceSaved(null)}
+            onCover={onCoverClasses === undefined ? undefined : () => onCoverClasses(absenceSaved.absence)} />
         </div>
       )}
       {catalogueClosed && (

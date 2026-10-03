@@ -11,7 +11,7 @@ import { useUndoableRemoval } from "../../_design/useUndoableRemoval";
 import { API_URL } from "../../api-url";
 import { deleteBlock, listUncovered, type ScheduleBoard, type ScheduleBlock } from "../../schedule/api";
 import { filterBlocks, indexBoard, NO_WEEK_FILTER, type WeekFilter } from "../../schedule/catalog";
-import { fridayOf, gridBounds, mondayOf, nowInSchoolZone } from "../../schedule/time";
+import { fridayOf, gridBounds, nowInSchoolZone, schoolWeekOf } from "../../schedule/time";
 import { BlockDrawer, type DrawerTarget } from "./BlockDrawer";
 import { GridSettings } from "./GridSettings";
 import { EmptyState } from "./parts";
@@ -145,7 +145,7 @@ function useUncoveredWeek(board: ScheduleBoard, mode: ScheduleMode, today: strin
   setMonday: (monday: string) => void;
   blocks: ReadonlySet<string>;
 } {
-  const [monday, setMonday] = useState(() => mondayOf(today));
+  const [monday, setMonday] = useState(() => schoolWeekOf(today));
   const [blocks, setBlocks] = useState<ReadonlySet<string>>(new Set());
   useEffect(() => {
     if (mode !== "manage") return;

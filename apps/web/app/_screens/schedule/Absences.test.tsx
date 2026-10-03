@@ -232,12 +232,42 @@ describe("Ausencias — en la semana y en «ahora» (T19)", () => {
   });
 });
 
-describe("Ausencias — la entrada por URL (T19)", () => {
-  it("/horarios?vista=por-cubrir opens on «Por cubrir»", async () => {
-    window.history.pushState({}, "", "/horarios?vista=por-cubrir");
-    const { ScheduleEntry } = await import("./ScheduleEntry");
-    render(<ScheduleEntry enabled permissions={["schedule:read", "schedule:write"]} onBack={() => undefined} />);
+describe("Ausencias — «Cubrir ahora» desde Docentes (review T19)", () => {
+  it("opens «Por cubrir» on the week of the absence, even in the past", async () => {
+    render(<ScheduleScreen onBack={() => undefined} mode="manage" canWrite now={MONDAY_0810} focus={{ startsOn: "2026-09-29", endsOn: "2026-09-30" }} />);
     expect(await screen.findByRole("tab", { name: "Por cubrir" })).toHaveAttribute("aria-selected", "true");
-    window.history.pushState({}, "", "/");
+    await waitFor(() => expect(m.listUncovered).toHaveBeenCalledWith(expect.any(String), sampleBoard().cycle.id, "2026-09-28", "2026-10-02"));
+  });
+});
+
+describe("Ausencias — una suplencia cuyo suplente falta (review T19)", () => {
+  it("covers it again by REPLACING the change, never a dead end", async () => {
+    const OLD = "80000000-0000-4000-8000-000000000009";
+    m.listUncovered.mockResolvedValue([{ date: "2026-10-05", class: { ...uncoveredMate(anaAway({ teacherId: LUIS })), teacherId: LUIS, overrideId: OLD } }]);
+    const EVA = "50000000-0000-4000-8000-000000000003";
+    m.getBoard.mockResolvedValue(sampleBoard({ teachers: [...sampleBoard().teachers, { id: EVA, firstName: "Eva", lastName: "Soto" }] }));
+    m.listAvailableTeachers.mockResolvedValue([{ teacherId: EVA, firstName: "Eva", lastName: "Soto", match: "subject" }]);
+    m.createOverride.mockResolvedValue(undefined);
+    const user = renderManager();
+    await user.click(await screen.findByRole("tab", { name: "Por cubrir" }));
+    const list = await screen.findByRole("list", { name: "Clases por cubrir" });
+    await user.click(within(list).getByRole("button", { name: /Asignar suplente/ }));
+    const dialog = screen.getByRole("dialog", { name: /Asignar suplente/ });
+    expect(dialog).toHaveTextContent("Reemplaza el cambio que ya tenía ese día");
+    await waitFor(() => expect(within(dialog).getByRole("option", { name: "Eva Soto" })).toBeInTheDocument());
+    await user.selectOptions(within(dialog).getByLabelText(/^Suplente/), EVA);
+    await user.click(within(dialog).getByRole("button", { name: "Asignar suplente" }));
+    await waitFor(() => expect(m.createOverride).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ replaceOverrideId: OLD, teacherId: EVA })));
+  });
+});
+
+describe("Ausencias — validar al salir del campo (review T19)", () => {
+  it("says the end date is before the start when leaving the field", async () => {
+    const user = renderManager();
+    const dialog = await openAbsenceDrawer(user);
+    const until = within(dialog).getByLabelText(/^Hasta el/);
+    fireEvent.change(until, { target: { value: "2026-10-01" } });
+    fireEvent.blur(until);
+    expect(within(dialog).getByText(/no puede ser antes/)).toBeInTheDocument();
   });
 });

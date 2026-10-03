@@ -10,7 +10,7 @@ import { Toast } from "../../_design/Toast";
 import { API_URL } from "../../api-url";
 import { cancelAbsence, listAbsences, listUncovered, type ScheduleBoard, type TeacherAbsence, type UncoveredClass } from "../../schedule/api";
 import { indexBoard, type ScheduleIndex } from "../../schedule/catalog";
-import { addDays, fridayOf, mondayOf, spanishDate, weekLabel } from "../../schedule/time";
+import { addDays, fridayOf, schoolWeekOf, spanishDate, weekLabel } from "../../schedule/time";
 import { ABSENCE_KIND_LABEL } from "./AbsenceDrawer";
 import { CoverDrawer } from "./CoverDrawer";
 import { card, chipOption, EmptyState, StatusBadge } from "./parts";
@@ -20,6 +20,15 @@ const WEEK = 7;
 
 /** "today": one date; "week": Monday–Friday of `monday`. */
 export type UncoveredRange = { kind: "today" } | { kind: "week"; monday: string };
+
+/**
+ * Where "Cubrir ahora" lands for an absence: today when it is exactly today,
+ * otherwise the school week of its first date — past or future, the classes
+ * the notice just counted are the ones on screen.
+ */
+export function rangeForAbsence(a: { startsOn: string; endsOn: string }, today: string): UncoveredRange {
+  return a.startsOn === today && a.endsOn === today ? { kind: "today" } : { kind: "week", monday: schoolWeekOf(a.startsOn) };
+}
 
 export interface UncoveredViewProps {
   board: ScheduleBoard;
@@ -154,7 +163,7 @@ export function UncoveredView({ board, canWrite, today, range, onRange, version,
 
       {covering !== null && coverBlock !== undefined && (
         <CoverDrawer board={board} index={index} block={coverBlock} date={covering.date} absentTeacherId={covering.class.teacherId}
-          onClose={() => setCovering(null)} onSaved={reread} />
+          replaceOverrideId={covering.class.overrideId} onClose={() => setCovering(null)} onSaved={reread} />
       )}
       {cancelling !== null && (
         <ConfirmDialog title={`Cancelar la ausencia de ${index.teacherName(cancelling.teacherId)}`} confirmLabel="Cancelar ausencia"
@@ -168,7 +177,7 @@ export function UncoveredView({ board, canWrite, today, range, onRange, version,
 }
 
 function RangePicker({ range, onRange, today }: { range: UncoveredRange; onRange: (r: UncoveredRange) => void; today: string }): ReactElement {
-  const thisWeek = mondayOf(today);
+  const thisWeek = schoolWeekOf(today);
   const chosen = range.kind === "today" ? "today" : range.monday === thisWeek ? "week" : "";
   return (
     <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>

@@ -234,6 +234,8 @@ export function AppShell(): ReactElement {
   const expensesEnabled = useFlag("module_expenses") && financeEnabled;
   // T16: Horarios. Its timetable lives in config, so both flags must be on.
   const scheduleEnabled = useFlag("module_schedule") && configEnabled;
+  // T19: "Cubrir ahora" in Docentes opens Horarios on "Por cubrir" for the absence's dates.
+  const [scheduleFocus, setScheduleFocus] = useState<{ startsOn: string; endsOn: string } | undefined>(undefined);
   // T17: Actividades. Its charges live in finance, so both flags must be on.
   const activitiesEnabled = useFlag("module_activities") && financeEnabled;
   // T18: Becas. Finance computes them on every charge, so both flags must be on.
@@ -530,6 +532,7 @@ export function AppShell(): ReactElement {
       return;
     }
     if (id === "schedule") {
+      setScheduleFocus(undefined);
       go({ screen: "schedule" });
       return;
     }
@@ -724,7 +727,7 @@ export function AppShell(): ReactElement {
           <TeachersScreen onBack={home} onOpenLoad={openTeacherLoad} canGrantAccess={canGrantTeacherAccess(principal?.permissions)} canListUsers={canListUsers(principal?.permissions)}
             // T19: absences live in Horarios — offered only with it on and schedule:write (UX; the gateway decides).
             canRegisterAbsence={scheduleEnabled && (principal?.permissions ?? []).includes("schedule:write")}
-            onCoverClasses={() => router.push(`${viewToPath({ screen: "schedule" })}?vista=por-cubrir`)} />
+            onCoverClasses={(absence) => { setScheduleFocus(absence); go({ screen: "schedule" }); }} />
         ) : (
           // Flag OFF: never render the roster; show the friendly stub so
           // navigation never dead-ends. (Backend 404 is authoritative.)
@@ -760,7 +763,7 @@ export function AppShell(): ReactElement {
         ))}
       {view.screen === "schedule" && (
         // Flag OFF renders the friendly stub (inside ScheduleEntry). Backend 404 is authoritative.
-        <ScheduleEntry enabled={scheduleEnabled} permissions={principal?.permissions} onBack={home} />
+        <ScheduleEntry enabled={scheduleEnabled} permissions={principal?.permissions} onBack={home} focus={scheduleFocus} />
       )}
       {view.screen === "activities" &&
         (activitiesEnabled ? (

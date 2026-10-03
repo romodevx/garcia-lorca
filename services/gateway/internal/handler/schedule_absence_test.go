@@ -31,8 +31,8 @@ func (f *fakeScheduleSvc) UpdateTeacherAbsence(_ context.Context, id string, in 
 	return client.TeacherAbsenceSaved{Absence: scAbsenceResult(), Uncovered: 1}, f.err
 }
 
-func (f *fakeScheduleSvc) CancelTeacherAbsence(_ context.Context, id string, by client.ScheduleActor) (client.TeacherAbsence, error) {
-	f.absID, f.actor = id, by
+func (f *fakeScheduleSvc) CancelTeacherAbsence(_ context.Context, id string, by client.ScheduleActor, callerTeacherID string) (client.TeacherAbsence, error) {
+	f.absID, f.actor, f.cancelCaller = id, by, callerTeacherID
 	a := scAbsenceResult()
 	a.CancelledAt, a.CancelledBy = scMon, by
 	return a, f.err
@@ -130,6 +130,14 @@ func TestUpdateAndCancelAbsence(t *testing.T) {
 	a := decode(t, rec)["absence"].(map[string]any)
 	assert.Equal(t, true, a["cancelled"])
 	assert.Equal(t, "Directora Ruiz", a["cancelledByName"])
+
+	assert.Equal(t, "00000000-0000-0000-0000-000000000000", f.cancelCaller, "no teacher record: config is told none")
+
+	f.teachers = []client.Teacher{{ID: scTeacher, UserID: "u-ana"}}
+	r = asCaller(http.MethodPost, "/api/v1/schedule/absences/"+scAbsence+"/cancel", "", "u-ana", "schedule:write")
+	r.SetPathValue("id", scAbsence)
+	require.Equal(t, http.StatusOK, serve(h.CancelAbsence, r).Code)
+	assert.Equal(t, scTeacher, f.cancelCaller, "config refuses the caller's own absence")
 
 	r = asCaller(http.MethodPost, "/api/v1/schedule/absences/x/cancel", "", "u-dir", "schedule:write")
 	r.SetPathValue("id", "x")
@@ -254,4 +262,15 @@ func TestAbsenceContract(t *testing.T) {
 	}
 	sort.Strings(keys)
 	assert.Equal(t, []string{"allDay", "cancelled", "cycleId", "endsAt", "endsOn", "id", "startsAt", "startsOn", "teacherId"}, keys)
+}
+
+func TestCreateOverrideForwardsWhatItReplaces(t *testing.T) {
+	h, f := newScheduleH()
+	rec := serve(h.CreateOverride, scheduleReq(http.MethodPost, "/api/v1/schedule/overrides",
+		`{"blockId":"`+scBlock+`","date":"2026-10-05","kind":"substitute","teacherId":"`+scTeacher+`","reason":"x","replaceOverrideId":"`+scOvr+`"}`))
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+	assert.Equal(t, scOvr, f.ovrIn.ReplaceOverrideID)
+	rec = serve(h.CreateOverride, scheduleReq(http.MethodPost, "/api/v1/schedule/overrides",
+		`{"blockId":"`+scBlock+`","date":"2026-10-05","kind":"cancel","reason":"x","replaceOverrideId":"bad"}`))
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }

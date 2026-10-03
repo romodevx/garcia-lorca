@@ -29,7 +29,7 @@ type ScheduleService interface {
 	// T19 — teacher absences.
 	CreateAbsence(ctx context.Context, in usecase.AbsenceInput, by domain.Actor) (usecase.AbsenceResult, error)
 	UpdateAbsence(ctx context.Context, id string, in usecase.AbsenceInput, by domain.Actor) (usecase.AbsenceResult, error)
-	CancelAbsence(ctx context.Context, id string, by domain.Actor) (domain.TeacherAbsence, error)
+	CancelAbsence(ctx context.Context, id string, by domain.Actor, callerTeacherID string) (domain.TeacherAbsence, error)
 	Absences(ctx context.Context, q usecase.AbsenceQuery) ([]domain.TeacherAbsence, error)
 	Uncovered(ctx context.Context, cycleID string, from, to time.Time) ([]usecase.UncoveredClass, error)
 }
@@ -123,7 +123,7 @@ func (h *ConfigHandler) CreateScheduleOverride(ctx context.Context, req *connect
 	}
 	o, err := h.schedule.CreateOverride(ctx, usecase.OverrideInput{
 		BlockID: m.GetBlockId(), Date: m.GetDate().AsTime().UTC(), Kind: domain.OverrideKind(m.GetKind()),
-		TeacherID: m.GetTeacherId(), SwapBlockID: m.GetSwapBlockId(), Reason: m.GetReason(),
+		TeacherID: m.GetTeacherId(), SwapBlockID: m.GetSwapBlockId(), Reason: m.GetReason(), ReplaceOverrideID: m.GetReplaceOverrideId(),
 	}, toActor(m.GetActor()))
 	if err != nil {
 		return nil, connectErr(err)

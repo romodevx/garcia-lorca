@@ -7,12 +7,12 @@ import { Icon } from "../../_design/Icon";
 import { Page } from "../../_design/Page";
 import { SelectField } from "../../_design/form";
 import type { AbsenceSaved, TeacherAbsence } from "../../schedule/api";
-import { mondayOf, nowInSchoolZone } from "../../schedule/time";
+import { nowInSchoolZone } from "../../schedule/time";
 import { AbsenceDrawer, AbsenceNotice } from "./AbsenceDrawer";
 import { HistoryPanel } from "./HistoryPanel";
 import { NowView } from "./NowView";
 import { Tabs } from "./parts";
-import { UncoveredView, type UncoveredRange } from "./UncoveredView";
+import { rangeForAbsence, UncoveredView, type UncoveredRange } from "./UncoveredView";
 import { sourceFor, useScheduleBoard, type ScheduleMode } from "./useScheduleBoard";
 import { WeekView } from "./WeekView";
 
@@ -28,8 +28,8 @@ export interface ScheduleScreenProps {
   canWrite: boolean;
   /** The instant "now" means; injected by tests. */
   now?: Date;
-  /** The tab to open on ("Por cubrir" from a saved absence elsewhere). */
-  initialTab?: TabId;
+  /** An absence saved elsewhere (Docentes, "Cubrir ahora"): open on "Por cubrir", on its dates. */
+  focus?: { startsOn: string; endsOn: string };
 }
 
 /**
@@ -37,15 +37,15 @@ export interface ScheduleScreenProps {
  * a 5-minute grid), what is happening right now, and who changed what. In
  * "teacher" mode it is the caller's own timetable, read-only.
  */
-export function ScheduleScreen({ onBack, mode, canWrite, now, initialTab }: ScheduleScreenProps): ReactElement {
+export function ScheduleScreen({ onBack, mode, canWrite, now, focus }: ScheduleScreenProps): ReactElement {
   const [source] = useState(() => sourceFor(mode));
   const [cycleId, setCycleId] = useState<string | undefined>(undefined);
   const { board, failure, reload } = useScheduleBoard(source, cycleId);
   const manages = mode === "manage";
-  const [tab, setTab] = useState<TabId>(manages && initialTab !== undefined ? initialTab : "week");
+  const [tab, setTab] = useState<TabId>(manages && focus !== undefined ? "uncovered" : "week");
   const editable = manages && canWrite;
   const today = nowInSchoolZone(now).date;
-  const [range, setRange] = useState<UncoveredRange>(() => (initialTab === "uncovered" ? { kind: "week", monday: mondayOf(today) } : { kind: "today" }));
+  const [range, setRange] = useState<UncoveredRange>(() => (focus !== undefined ? rangeForAbsence(focus, today) : { kind: "today" }));
   const [absenceTarget, setAbsenceTarget] = useState<AbsenceTarget>(null);
   const [saved, setSaved] = useState<AbsenceSaved | null>(null);
   // Bumped on every absence saved: the week and "Por cubrir" read again.
@@ -63,11 +63,10 @@ export function ScheduleScreen({ onBack, mode, canWrite, now, initialTab }: Sche
     setAbsenceVersion((n) => n + 1);
   };
 
-  // "Cubrir ahora": the uncovered classes of the absence's first week.
+  // "Cubrir ahora": the uncovered classes of the absence's dates.
   const coverNow = (): void => {
     if (saved === null) return;
-    const start = saved.absence.startsOn < today ? today : saved.absence.startsOn;
-    setRange(saved.absence.startsOn === saved.absence.endsOn && start === today ? { kind: "today" } : { kind: "week", monday: mondayOf(start) });
+    setRange(rangeForAbsence(saved.absence, today));
     setTab("uncovered");
     setSaved(null);
   };

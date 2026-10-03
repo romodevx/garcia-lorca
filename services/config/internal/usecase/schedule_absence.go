@@ -141,11 +141,15 @@ func (s *ScheduleService) UpdateAbsence(ctx context.Context, id string, in Absen
 }
 
 // CancelAbsence cancels an absence: its classes are no longer uncovered. The
-// record stays, stamped with who cancelled it and when.
-func (s *ScheduleService) CancelAbsence(ctx context.Context, id string, by domain.Actor) (domain.TeacherAbsence, error) {
+// record stays, stamped with who cancelled it and when. callerTeacherID is the
+// teacher record of whoever cancels ("" for none): nobody cancels their own.
+func (s *ScheduleService) CancelAbsence(ctx context.Context, id string, by domain.Actor, callerTeacherID string) (domain.TeacherAbsence, error) {
 	found, err := s.repo.GetTeacherAbsence(ctx, id)
 	if err != nil {
 		return domain.TeacherAbsence{}, err
+	}
+	if callerTeacherID != "" && callerTeacherID == found.TeacherID() {
+		return domain.TeacherAbsence{}, refusal(glerrors.KindForbidden, domain.CodeAbsenceOwn, "No puedes cancelar tu propia ausencia; pídeselo a la dirección")
 	}
 	cat, err := s.repo.LoadScheduleCatalog(ctx, found.CycleID())
 	if err != nil {
@@ -199,7 +203,7 @@ func (s *ScheduleService) Uncovered(ctx context.Context, cycleID string, from, t
 	if err != nil {
 		return nil, err
 	}
-	if int(to.Sub(from).Hours()/24)+1 > MaxUncoveredDays {
+	if domain.DaysInclusive(from, to) > MaxUncoveredDays {
 		return nil, glerrors.New(glerrors.KindInvalid, "El rango de fechas es de a lo más un mes")
 	}
 	cycle, err := s.repo.GetCycle(ctx, cycleID)
@@ -220,20 +224,24 @@ type dayTimetable struct {
 	periods   []domain.NonWorkingPeriod
 }
 
-func (s *ScheduleService) loadTimetable(ctx context.Context, cycle domain.Cycle, from, to time.Time) (dayTimetable, error) {
-	t := dayTimetable{cycle: cycle}
+// loadCalendar reads what decides whether a date has classes (the cycle and
+// its closed periods) — enough for schoolDay, before any class is read.
+func (s *ScheduleService) loadCalendar(ctx context.Context, cycle domain.Cycle) (dayTimetable, error) {
+	periods, err := s.repo.ListNonWorkingPeriods(ctx, cycle.ID())
+	return dayTimetable{cycle: cycle, periods: periods}, err
+}
+
+// loadClasses adds the classes, changes and absences of from..to to t.
+func (s *ScheduleService) loadClasses(ctx context.Context, t *dayTimetable, from, to time.Time) error {
 	var err error
-	if t.blocks, err = s.repo.ListScheduleBlocks(ctx, cycle.ID()); err != nil {
-		return t, err
+	if t.blocks, err = s.repo.ListScheduleBlocks(ctx, t.cycle.ID()); err != nil {
+		return err
 	}
-	if t.overrides, err = s.repo.ListScheduleOverrides(ctx, cycle.ID(), from, to); err != nil {
-		return t, err
+	if t.overrides, err = s.repo.ListScheduleOverrides(ctx, t.cycle.ID(), from, to); err != nil {
+		return err
 	}
-	if t.absences, err = s.repo.ListTeacherAbsences(ctx, cycle.ID(), from, to); err != nil {
-		return t, err
-	}
-	t.periods, err = s.repo.ListNonWorkingPeriods(ctx, cycle.ID())
-	return t, err
+	t.absences, err = s.repo.ListTeacherAbsences(ctx, t.cycle.ID(), from, to)
+	return err
 }
 
 // schoolDay reports whether date has classes: a weekday of the cycle that the
@@ -254,8 +262,11 @@ func (t dayTimetable) on(date time.Time) []domain.ScheduledClass {
 }
 
 func (s *ScheduleService) uncoveredBetween(ctx context.Context, cycle domain.Cycle, from, to time.Time) ([]UncoveredClass, error) {
-	t, err := s.loadTimetable(ctx, cycle, from, to)
+	t, err := s.loadCalendar(ctx, cycle)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.loadClasses(ctx, &t, from, to); err != nil {
 		return nil, err
 	}
 	out := []UncoveredClass{}

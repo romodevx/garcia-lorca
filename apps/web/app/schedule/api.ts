@@ -152,6 +152,8 @@ export interface OverrideInput {
   teacherId?: string;
   swapBlockId?: string;
   reason: string;
+  /** T19: a substitute or cancellation of the same class that date to replace (its substitute is absent). */
+  replaceOverrideId?: string;
 }
 
 export interface AvailableTeacher {

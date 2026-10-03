@@ -57,7 +57,7 @@ func (h *ConfigHandler) CancelTeacherAbsence(ctx context.Context, req *connect.R
 	if h.schedule == nil {
 		return nil, errScheduleUnwired
 	}
-	a, err := h.schedule.CancelAbsence(ctx, req.Msg.GetId(), toActor(req.Msg.GetActor()))
+	a, err := h.schedule.CancelAbsence(ctx, req.Msg.GetId(), toActor(req.Msg.GetActor()), req.Msg.GetCallerTeacherId())
 	if err != nil {
 		return nil, connectErr(err)
 	}

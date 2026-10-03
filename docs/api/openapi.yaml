@@ -4360,7 +4360,7 @@ paths:
       description: >
         Changes the kind, dates, hours or note of an ACTIVE absence (409
         `SCHEDULE_ABSENCE_CANCELLED` otherwise); the teacher never changes
-        (`teacherId` must be the absence's or omitted). Same rules as
+        (`teacherId` is required and must be the absence's). Same rules as
         registering it; the change goes to the history. Requires
         `schedule:write`.
       operationId: updateTeacherAbsence
@@ -4393,7 +4393,8 @@ paths:
       description: >
         The teacher's classes are no longer uncovered on its dates. The record
         stays, with who cancelled it and when; the cancellation goes to the
-        history. Cancelling twice is 409 `SCHEDULE_ABSENCE_CANCELLED`.
+        history. Cancelling twice is 409 `SCHEDULE_ABSENCE_CANCELLED`; a
+        teacher cannot cancel their own absence (403 `SCHEDULE_ABSENCE_OWN`).
         Requires `schedule:write`.
       operationId: cancelTeacherAbsence
       security: [{ sessionCookie: [] }]
@@ -4409,7 +4410,14 @@ paths:
                 properties:
                   absence: { $ref: '#/components/schemas/TeacherAbsence' }
         '401': { $ref: '#/components/responses/PlainUnauthorized' }
-        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '403':
+          description: Without `schedule:write`, or SCHEDULE_ABSENCE_OWN (the caller is that teacher).
+          headers:
+            X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
+          content:
+            text/plain:
+              schema: { type: string }
+              example: No puedes cancelar tu propia ausencia; pídeselo a la dirección
         '404': { $ref: '#/components/responses/PlainNotFound' }
         '409': { $ref: '#/components/responses/ScheduleConflict' }
 
@@ -6695,6 +6703,13 @@ components:
         teacherId: { type: string, format: uuid, description: The substitute (kind substitute). }
         swapBlockId: { type: string, format: uuid, description: The other class of the same group (kind swap). }
         reason: { type: string, minLength: 1, maxLength: 200 }
+        replaceOverrideId:
+          type: string
+          format: uuid
+          description: >
+            T19 — a substitute or cancellation of the SAME class that date to
+            replace in the same step (the substitute is now absent). A swap is
+            never replaced (409 SCHEDULE_BLOCK_TAKEN: undo it first).
     ScheduleOverride:
       type: object
       required: [id, cycleId, blockId, date, kind, teacherId, swapBlockId, reason, createdBy, createdByName, createdAt]

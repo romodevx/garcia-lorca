@@ -7,6 +7,7 @@ import {
   layoutColumns,
   mondayOf,
   nextDateOnWeekday,
+  schoolWeekOf,
   nowInSchoolZone,
   rowOf,
   runningAt,
@@ -193,5 +194,13 @@ describe("week helpers (T19)", () => {
 
   it("writes a date the way people read it", () => {
     expect(spanishDate("2026-10-05")).toBe("lunes 5 de octubre");
+  });
+});
+
+describe("schoolWeekOf (review T19)", () => {
+  it("is the date's week on a school day and NEXT week on a weekend", () => {
+    expect(schoolWeekOf("2026-10-07")).toBe("2026-10-05");
+    expect(schoolWeekOf("2026-10-10")).toBe("2026-10-12");
+    expect(schoolWeekOf("2026-10-11")).toBe("2026-10-12");
   });
 });

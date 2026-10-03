@@ -112,7 +112,7 @@ export function NowView({ board, source, canWrite, now }: NowViewProps): ReactEl
       {day !== null && classes.length > 0 && <DayList classes={classes} index={index} onUndo={canWrite ? undo : undefined} />}
       {covering !== null && coverBlock !== undefined && (
         <CoverDrawer board={board} index={index} block={coverBlock} date={date} absentTeacherId={covering.teacherId}
-          onClose={() => setCovering(null)}
+          replaceOverrideId={covering.overrideId} onClose={() => setCovering(null)}
           onSaved={(message) => { setCovering(null); setToast(message); setReads((n) => n + 1); }} />
       )}
       {toast !== undefined && <Toast>{toast}</Toast>}

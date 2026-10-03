@@ -17,6 +17,8 @@ export interface CoverDrawerProps {
   date: string;
   /** Who is away: the reason is prefilled with it. */
   absentTeacherId: string;
+  /** The change the class already has that date (its substitute is the one away): replaced in the same step. */
+  replaceOverrideId?: string | null;
   onClose: () => void;
   onSaved: (message: string) => void;
 }
@@ -27,7 +29,7 @@ export interface CoverDrawerProps {
  * free teachers (absent ones never listed) one choice away. Cancelling the
  * class that day covers it too.
  */
-export function CoverDrawer({ board, index, block, date, absentTeacherId, onClose, onSaved }: CoverDrawerProps): ReactElement {
+export function CoverDrawer({ board, index, block, date, absentTeacherId, replaceOverrideId, onClose, onSaved }: CoverDrawerProps): ReactElement {
   const form = useOverrideForm(block, board, date, true, { reason: `Ausencia de ${index.teacherName(absentTeacherId)}` });
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
@@ -37,7 +39,7 @@ export function CoverDrawer({ board, index, block, date, absentTeacherId, onClos
     setError(undefined);
     setPending(true);
     try {
-      const message = await saveOverride(form, block);
+      const message = await saveOverride(form, block, replaceOverrideId ?? undefined);
       if (message !== null) onSaved(form.values.kind === "substitute" ? "Suplente asignado" : message);
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo guardar.");
@@ -57,7 +59,14 @@ export function CoverDrawer({ board, index, block, date, absentTeacherId, onClos
       onClose={onClose}
       onSubmit={() => void submit()}
     >
-      <OverrideFields form={form} block={block} board={board} index={index} />
+      <div style={{ display: "grid", gap: 14, gridTemplateColumns: "minmax(0, 1fr)" }}>
+        {replaceOverrideId != null && (
+          <p style={{ margin: 0, padding: "10px 14px", borderRadius: "var(--r-md)", background: "var(--warn-bg)", color: "var(--warn-fg)", fontSize: 14 }}>
+            Reemplaza el cambio que ya tenía ese día: quien la cubría también falta.
+          </p>
+        )}
+        <OverrideFields form={form} block={block} board={board} index={index} />
+      </div>
     </SlideOver>
   );
 }
