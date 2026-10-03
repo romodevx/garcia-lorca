@@ -34,9 +34,13 @@ const MATCH_ORDER: readonly TeacherMatch[] = ["subject", "grade", "other"];
 
 const dayName = (weekday: number): string => (WEEKDAYS.find((d) => d.weekday === weekday)?.label ?? "").toLocaleLowerCase("es-MX");
 
-/** `open`: the section is on screen — only then is it worth asking who is free. */
-export function useOverrideForm(block: ScheduleBlock, board: ScheduleBoard, today: string, open: boolean): OverrideForm {
-  const [values, setValues] = useState<Values>({ date: nextDateOnWeekday(today, block.weekday), kind: "substitute", teacherId: "", swapBlockId: "", reason: "" });
+/**
+ * `open`: the section is on screen — only then is it worth asking who is free.
+ * `initial` prefills what the caller already knows (T19: covering an absence
+ * already knows why).
+ */
+export function useOverrideForm(block: ScheduleBlock, board: ScheduleBoard, today: string, open: boolean, initial: Partial<Values> = {}): OverrideForm {
+  const [values, setValues] = useState<Values>(() => ({ date: nextDateOnWeekday(today, block.weekday), kind: "substitute", teacherId: "", swapBlockId: "", reason: "", ...initial }));
   const [dateError, setDateError] = useState<string | undefined>(undefined);
   const [available, setAvailable] = useState<AvailableTeacher[] | null>(null);
   const extra = values.kind === "substitute" ? ["teacherId"] : values.kind === "swap" ? ["swapBlockId"] : [];

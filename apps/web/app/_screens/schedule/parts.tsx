@@ -32,6 +32,7 @@ export const STATUS_LABEL: Record<ClassStatus, string> = {
   substitute: "Suplencia",
   swapped: "Intercambio",
   cancelled: "Cancelada",
+  uncovered: "Sin cubrir",
 };
 
 const STATUS_TONE: Record<ClassStatus, { bg: string; fg: string }> = {
@@ -39,6 +40,7 @@ const STATUS_TONE: Record<ClassStatus, { bg: string; fg: string }> = {
   substitute: { bg: "var(--warn-bg)", fg: "var(--warn-fg)" },
   swapped: { bg: "color-mix(in oklab, var(--purple) 16%, var(--surface))", fg: "var(--purple)" },
   cancelled: { bg: "var(--bad-bg)", fg: "var(--bad-fg)" },
+  uncovered: { bg: "var(--bad-fg)", fg: "#fff" },
 };
 
 /** The status pill (dot + label); nothing for a class as planned. */

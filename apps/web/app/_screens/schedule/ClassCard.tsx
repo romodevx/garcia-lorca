@@ -8,9 +8,11 @@ import type { ScheduleClass } from "../../schedule/api";
 import type { ScheduleIndex } from "../../schedule/catalog";
 import { subjectColor } from "../../schedule/time";
 import { card, StatusBadge } from "./parts";
+import { absentLine } from "./UncoveredView";
 
-/** "Ana Ruiz", or "Suplente: Luis Pérez (en lugar de Ana Ruiz)". */
+/** "Ana Ruiz", "Suplente: Luis Pérez (en lugar de Ana Ruiz)" or "Ana Ruiz · Ausente". */
 function teacherLine(c: ScheduleClass, index: ScheduleIndex): string {
+  if (c.status === "uncovered") return absentLine(index, c.teacherId, c.absence);
   if (c.status === "substitute") return `Suplente: ${index.teacherName(c.teacherId)} (en lugar de ${index.teacherName(c.baseTeacherId)})`;
   return index.teacherName(c.teacherId);
 }
@@ -24,12 +26,15 @@ function timeLine(c: ScheduleClass): string {
 export interface ClassCardProps {
   cls: ScheduleClass;
   index: ScheduleIndex;
+  /** Writers: cover an uncovered class (T19). */
+  onCover?: (cls: ScheduleClass) => void;
 }
 
 /** One class happening at the chosen instant. */
-export function ClassCard({ cls, index }: ClassCardProps): ReactElement {
+export function ClassCard({ cls, index, onCover }: ClassCardProps): ReactElement {
   const subject = index.subjectName(cls.subjectId);
-  const color = COLOR[subjectColor(subject)].v;
+  const uncovered = cls.status === "uncovered";
+  const color = uncovered ? "var(--bad-fg)" : COLOR[subjectColor(subject)].v;
   const cancelled = cls.status === "cancelled";
   return (
     <article data-testid="now-card" style={{ ...card, padding: "16px 18px", borderLeft: `6px solid ${color}`, display: "grid", gap: 6, minWidth: 0, opacity: cancelled ? 0.75 : 1 }}>
@@ -41,6 +46,12 @@ export function ClassCard({ cls, index }: ClassCardProps): ReactElement {
       <span style={{ color: "var(--text-muted)", fontSize: 14.5 }}>{teacherLine(cls, index)}</span>
       <span style={{ color: "var(--text-faint)", fontSize: 13.5, fontVariantNumeric: "tabular-nums" }}>{timeLine(cls)}</span>
       {cls.reason !== null && cls.reason !== "" && <span style={{ color: "var(--text-muted)", fontSize: 13 }}>Motivo: {cls.reason}</span>}
+      {uncovered && onCover !== undefined && (
+        <Btn kind="outline" onClick={() => onCover(cls)} style={{ height: 44, fontSize: 14, justifySelf: "start" }}
+          aria-label={`Asignar suplente a ${subject}, ${index.groupLabel(cls.groupId)}, ${cls.startsAt}`}>
+          Asignar suplente
+        </Btn>
+      )}
     </article>
   );
 }

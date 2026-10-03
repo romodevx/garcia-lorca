@@ -26,6 +26,9 @@ import {
   type TeacherAccessResult,
   type TeachingAssignment,
 } from "../../teachers/api";
+import type { AbsenceSaved } from "../../schedule/api";
+import { nowInSchoolZone } from "../../schedule/time";
+import { AbsenceDrawer, AbsenceNotice } from "../schedule/AbsenceDrawer";
 import { AssignmentsPanel } from "./AssignmentsPanel";
 import { TeachersPanel } from "./TeachersPanel";
 
@@ -40,6 +43,10 @@ export interface TeachersScreenProps {
   canGrantAccess?: boolean;
   /** users:read: the roster can say whether each linked login is active, invited or suspended. */
   canListUsers?: boolean;
+  /** schedule:write with Horarios on (T19): each row offers "Registrar ausencia". */
+  canRegisterAbsence?: boolean;
+  /** "Cubrir ahora" after saving an absence: Horarios, on "Por cubrir". */
+  onCoverClasses?: () => void;
 }
 
 /**
@@ -57,12 +64,14 @@ export interface TeachersScreenProps {
  * sentence saying so rather than three empty dropdowns that read like a school
  * with no groups.
  */
-export function TeachersScreen({ onBack, onOpenLoad, canGrantAccess = false, canListUsers = false }: TeachersScreenProps): ReactElement {
+export function TeachersScreen({ onBack, onOpenLoad, canGrantAccess = false, canListUsers = false, canRegisterAbsence = false, onCoverClasses }: TeachersScreenProps): ReactElement {
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [accountStatuses, setAccountStatuses] = useState<ReadonlyMap<string, UserStatus> | undefined>(undefined);
   const [cycles, setCycles] = useState<Cycle[]>([]);
   const [catalogueClosed, setCatalogueClosed] = useState(false);
   const [rosterError, setRosterError] = useState<string | undefined>(undefined);
+  const [absenceFor, setAbsenceFor] = useState<string | undefined>(undefined);
+  const [absenceSaved, setAbsenceSaved] = useState<AbsenceSaved | null>(null);
 
   useEffect(() => {
     listTeachers(API_URL)
@@ -148,6 +157,11 @@ export function TeachersScreen({ onBack, onOpenLoad, canGrantAccess = false, can
       </div>
 
       {rosterError !== undefined && <Note>{rosterError}</Note>}
+      {absenceSaved !== null && (
+        <div style={{ marginBottom: 18 }}>
+          <AbsenceNotice count={absenceSaved.uncoveredCount} onCover={onCoverClasses} onDismiss={() => setAbsenceSaved(null)} />
+        </div>
+      )}
       {catalogueClosed && (
         <Note>
           No tienes acceso al catálogo académico; pide a la dirección el permiso de Configuración para ver nombres y asignar materias.
@@ -162,6 +176,7 @@ export function TeachersScreen({ onBack, onOpenLoad, canGrantAccess = false, can
           onOpenLoad={catalogueClosed ? undefined : onOpenLoad}
           onGrantAccess={canGrantAccess ? handleGrantAccess : undefined}
           accountStatuses={accountStatuses}
+          onRegisterAbsence={canRegisterAbsence ? setAbsenceFor : undefined}
         />
         {!catalogueClosed && (
           <AssignmentsPanel
@@ -174,6 +189,12 @@ export function TeachersScreen({ onBack, onOpenLoad, canGrantAccess = false, can
           />
         )}
       </div>
+      {absenceFor !== undefined && (
+        // No cycle named: config takes the cycle whose dates contain the absence.
+        <AbsenceDrawer teachers={teachers} teacherId={absenceFor} today={nowInSchoolZone().date}
+          onClose={() => setAbsenceFor(undefined)}
+          onSaved={(saved) => { setAbsenceFor(undefined); setAbsenceSaved(saved); }} />
+      )}
     </Page>
   );
 }

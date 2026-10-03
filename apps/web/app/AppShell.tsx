@@ -721,7 +721,10 @@ export function AppShell(): ReactElement {
         ))}
       {view.screen === "teachers" &&
         (teachersEnabled ? (
-          <TeachersScreen onBack={home} onOpenLoad={openTeacherLoad} canGrantAccess={canGrantTeacherAccess(principal?.permissions)} canListUsers={canListUsers(principal?.permissions)} />
+          <TeachersScreen onBack={home} onOpenLoad={openTeacherLoad} canGrantAccess={canGrantTeacherAccess(principal?.permissions)} canListUsers={canListUsers(principal?.permissions)}
+            // T19: absences live in Horarios — offered only with it on and schedule:write (UX; the gateway decides).
+            canRegisterAbsence={scheduleEnabled && (principal?.permissions ?? []).includes("schedule:write")}
+            onCoverClasses={() => router.push(`${viewToPath({ screen: "schedule" })}?vista=por-cubrir`)} />
         ) : (
           // Flag OFF: never render the roster; show the friendly stub so
           // navigation never dead-ends. (Backend 404 is authoritative.)

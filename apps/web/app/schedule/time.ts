@@ -177,3 +177,44 @@ export function runningAt<T extends { startsAt: string; endsAt: string }>(classe
   const t = toMinutes(time);
   return classes.filter((c) => toMinutes(c.startsAt) <= t && t < toMinutes(c.endsAt));
 }
+
+// --- weeks (T19) ----------------------------------------------------------------
+
+const MONTHS = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+const DAY_NAMES = ["", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"];
+const SCHOOL_DAYS = 5;
+
+/** `iso` moved by `days` (negative goes back). */
+export function addDays(iso: string, days: number): string {
+  return new Date(utcDay(iso) + days * MS_PER_DAY).toISOString().slice(0, 10);
+}
+
+/** The Monday of `iso`'s week. */
+export function mondayOf(iso: string): string {
+  return addDays(iso, 1 - weekdayOf(iso));
+}
+
+/** The Friday of the school week starting on `monday`. */
+export function fridayOf(monday: string): string {
+  return addDays(monday, SCHOOL_DAYS - 1);
+}
+
+function dayAndMonth(iso: string): { day: number; month: string } {
+  const [, m, d] = iso.split("-").map(Number);
+  return { day: d ?? 1, month: MONTHS[(m ?? 1) - 1] ?? "" };
+}
+
+/** "Semana del 5 al 9 de octubre" (the month twice when the week crosses it). */
+export function weekLabel(monday: string): string {
+  const from = dayAndMonth(monday);
+  const to = dayAndMonth(fridayOf(monday));
+  return from.month === to.month
+    ? `Semana del ${from.day} al ${to.day} de ${to.month}`
+    : `Semana del ${from.day} de ${from.month} al ${to.day} de ${to.month}`;
+}
+
+/** "lunes 5 de octubre". */
+export function spanishDate(iso: string): string {
+  const { day, month } = dayAndMonth(iso);
+  return `${DAY_NAMES[weekdayOf(iso)] ?? ""} ${day} de ${month}`;
+}

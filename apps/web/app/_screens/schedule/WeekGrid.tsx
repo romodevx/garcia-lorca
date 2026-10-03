@@ -27,6 +27,8 @@ export interface WeekGridProps {
   onSlot?: (weekday: number, minute: number) => void;
   /** Writers: a class was clicked. Without it, classes are read-only. */
   onOpen?: (block: ScheduleBlock) => void;
+  /** Classes whose teacher is absent that week and nobody covers (T19): painted red, "Sin cubrir". */
+  uncovered?: ReadonlySet<string>;
 }
 
 /**
@@ -34,7 +36,7 @@ export interface WeekGridProps {
  * overlap in one column (several groups of a grade) sit side by side. On a
  * phone the grid scrolls sideways INSIDE its own box; the page never does.
  */
-export function WeekGrid({ blocks, index, grid, onSlot, onOpen }: WeekGridProps): ReactElement {
+export function WeekGrid({ blocks, index, grid, onSlot, onOpen, uncovered }: WeekGridProps): ReactElement {
   const height = px(grid.end - grid.start);
   const hours: number[] = [];
   for (let h = Math.ceil(grid.start / HOUR) * HOUR; h <= grid.end; h += HOUR) hours.push(h);
@@ -65,7 +67,8 @@ export function WeekGrid({ blocks, index, grid, onSlot, onOpen }: WeekGridProps)
             <div key={d.weekday} style={{ position: "relative", height, borderLeft: "1px solid var(--border)", backgroundImage: "linear-gradient(to bottom, var(--border) 0 1px, transparent 1px)", backgroundSize: `100% ${px(HOUR)}px`, backgroundPosition: `0 ${firstLine}px` }}>
               {onSlot !== undefined && <SlotButtons weekday={d.weekday} label={d.label} grid={grid} hours={hours} onSlot={onSlot} />}
               {dayBlocks.map((b) => (
-                <ClassBlock key={b.id} block={b} index={index} grid={grid} place={placed.get(b.id) ?? { column: 0, columns: 1 }} onOpen={onOpen} />
+                <ClassBlock key={b.id} block={b} index={index} grid={grid} place={placed.get(b.id) ?? { column: 0, columns: 1 }} onOpen={onOpen}
+                  uncovered={uncovered?.has(b.id) === true} />
               ))}
             </div>
           );
@@ -101,11 +104,11 @@ function SlotButtons({ weekday, label, grid, hours, onSlot }: { weekday: number;
   );
 }
 
-function ClassBlock({ block, index, grid, place, onOpen }: { block: ScheduleBlock; index: ScheduleIndex; grid: { start: number }; place: { column: number; columns: number }; onOpen?: (block: ScheduleBlock) => void }): ReactElement {
+function ClassBlock({ block, index, grid, place, onOpen, uncovered }: { block: ScheduleBlock; index: ScheduleIndex; grid: { start: number }; place: { column: number; columns: number }; onOpen?: (block: ScheduleBlock) => void; uncovered: boolean }): ReactElement {
   const start = toMinutes(block.startsAt);
   const end = toMinutes(block.endsAt);
   const subject = index.subjectName(block.subjectId);
-  const color = COLOR[subjectColor(subject)].v;
+  const color = uncovered ? "var(--bad-fg)" : COLOR[subjectColor(subject)].v;
   const style: CSSProperties = {
     position: "absolute",
     top: px(start - grid.start) + 1,
@@ -128,9 +131,10 @@ function ClassBlock({ block, index, grid, place, onOpen }: { block: ScheduleBloc
       <strong style={{ display: "block", fontSize: 12.5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{subject}</strong>
       <span style={{ display: "block", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{index.groupLabel(block.groupId)} · {index.teacherName(block.teacherId)}</span>
       <span style={{ display: "block", color: "var(--text-muted)", fontVariantNumeric: "tabular-nums" }}>{block.startsAt}–{block.endsAt}</span>
+      {uncovered && <span style={{ display: "block", color: "var(--bad-fg)", fontWeight: 800 }}>Sin cubrir</span>}
     </>
   );
-  const label = blockLabel(index, block);
+  const label = uncovered ? `${blockLabel(index, block)}, sin cubrir` : blockLabel(index, block);
   if (onOpen === undefined) {
     return <div data-testid="schedule-block" role="note" aria-label={label} style={style}>{body}</div>;
   }
