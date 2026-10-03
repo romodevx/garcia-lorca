@@ -117,7 +117,10 @@ function ClassBlock({ block, index, grid, place, onOpen, uncovered }: { block: S
     width: `calc(${100 / place.columns}% - 6px)`,
     padding: "4px 7px",
     borderRadius: 10,
-    borderLeft: `4px solid ${color}`,
+    // Longhands only: a shorthand next to them warns on a re-render that changes the colour (QA T19).
+    borderStyle: "none none none solid",
+    borderWidth: "0 0 0 4px",
+    borderColor: color,
     background: `color-mix(in oklab, ${color} 16%, var(--surface))`,
     color: "var(--text)",
     textAlign: "left",
@@ -130,8 +133,10 @@ function ClassBlock({ block, index, grid, place, onOpen, uncovered }: { block: S
     <>
       <strong style={{ display: "block", fontSize: 12.5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{subject}</strong>
       <span style={{ display: "block", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{index.groupLabel(block.groupId)} · {index.teacherName(block.teacherId)}</span>
-      <span style={{ display: "block", color: "var(--text-muted)", fontVariantNumeric: "tabular-nums" }}>{block.startsAt}–{block.endsAt}</span>
-      {uncovered && <span style={{ display: "block", color: "var(--bad-fg)", fontWeight: 800 }}>Sin cubrir</span>}
+      {/* "Sin cubrir" rides the time line: a 50-minute block has room for three lines only (QA T19). */}
+      <span style={{ display: "block", color: uncovered ? "var(--bad-fg)" : "var(--text-muted)", fontWeight: uncovered ? 800 : undefined, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+        {uncovered ? `${block.startsAt}–${block.endsAt} · Sin cubrir` : `${block.startsAt}–${block.endsAt}`}
+      </span>
     </>
   );
   const label = uncovered ? `${blockLabel(index, block)}, sin cubrir` : blockLabel(index, block);
@@ -139,7 +144,7 @@ function ClassBlock({ block, index, grid, place, onOpen, uncovered }: { block: S
     return <div data-testid="schedule-block" role="note" aria-label={label} style={style}>{body}</div>;
   }
   return (
-    <button type="button" data-testid="schedule-block" aria-label={label} onClick={() => onOpen(block)} style={{ ...style, cursor: "pointer", border: "none", borderLeft: style.borderLeft }}>
+    <button type="button" data-testid="schedule-block" aria-label={label} onClick={() => onOpen(block)} style={{ ...style, cursor: "pointer" }}>
       {body}
     </button>
   );
