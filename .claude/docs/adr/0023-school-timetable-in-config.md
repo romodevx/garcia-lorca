@@ -70,6 +70,8 @@
   the database's). Acceptable: the class has no teacher any more.
 - Non-working days (school calendar) are not consulted: a change can be
   recorded on a holiday. The "now" view is driven by the date picked.
+  **Amended by ADR 0032 (T19):** a closed day now has no classes and a
+  change on it is refused (`SCHEDULE_DATE_NON_WORKING`).
 - A level's grid is not re-checked when changed; the calendar widens itself
   to show any class outside it.
 - Removing a class takes its changes ahead along (FK cascade); the removal is
