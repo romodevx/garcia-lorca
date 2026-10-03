@@ -271,3 +271,12 @@ Respuestas vigentes:
   esperar CI + GitGuardian → squash merge → borrar rama.
 - Dependencias: T3→T4→T17→T18; T13→T16; T14→T15; T8→T9→T10; T7 antes de T18 (desglose de beca).
 - App de padres: los cambios llegan a las familias con un nuevo build/OTA de EAS (fuera del merge).
+
+## 9. T19 (añadida 2026-10-02) · Ausencias de profesores en horarios
+
+Aprobada por el dueño con las respuestas por defecto: ausencias de día completo con opción de rango
+horario; las registran owner y `schedule:write` (el profesor no); tipo y nota visibles solo para
+`schedule:write` (los demás ven "Ausente"); sin aviso a padres; sin comprobante adjunto. Sin asistencia
+del profesor. Efectos: clases del ausente "Sin cubrir" en calendario y "Ahora", vista "Clases por
+cubrir", sugerencias y suplencias excluyen ausentes, aviso al guardar con N clases afectadas; además
+validar días inhábiles al registrar cambios de un día (pendiente de T16).
