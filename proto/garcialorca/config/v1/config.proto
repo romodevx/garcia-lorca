@@ -207,6 +207,21 @@ service ConfigService {
   rpc SetScheduleGrid(SetScheduleGridRequest) returns (SetScheduleGridResponse);
   // ListScheduleEvents is the timetable's history, newest first.
   rpc ListScheduleEvents(ListScheduleEventsRequest) returns (ListScheduleEventsResponse);
+  // T19 — teacher absences in the timetable (ADR 0032). An absence turns the
+  // teacher's classes "uncovered" on its dates until a substitute or a
+  // cancellation covers them. Never deleted: cancelled in place.
+  // CreateTeacherAbsence registers one; the response counts the classes it
+  // leaves uncovered (school days only).
+  rpc CreateTeacherAbsence(CreateTeacherAbsenceRequest) returns (CreateTeacherAbsenceResponse);
+  // UpdateTeacherAbsence changes an active absence (never its teacher).
+  rpc UpdateTeacherAbsence(UpdateTeacherAbsenceRequest) returns (UpdateTeacherAbsenceResponse);
+  // CancelTeacherAbsence cancels an absence, keeping the record.
+  rpc CancelTeacherAbsence(CancelTeacherAbsenceRequest) returns (CancelTeacherAbsenceResponse);
+  // ListTeacherAbsences lists a cycle's absences touching from..to.
+  rpc ListTeacherAbsences(ListTeacherAbsencesRequest) returns (ListTeacherAbsencesResponse);
+  // ListUncoveredClasses lists, date by date (at most 31 days), the classes
+  // nobody gives because their teacher is absent.
+  rpc ListUncoveredClasses(ListUncoveredClassesRequest) returns (ListUncoveredClassesResponse);
 
   // --- level deletion (ADR 0021) ---
   // PreviewLevelDeletion resolves a level's structure across ALL cycles (the
@@ -1299,9 +1314,11 @@ message ScheduledClass {
   string teacher_id = 2;
   int32 starts_at = 3;
   int32 ends_at = 4;
-  // status: "regular" | "substitute" | "swapped" | "cancelled".
+  // status: "regular" | "substitute" | "swapped" | "cancelled" | "uncovered".
   string status = 5;
   ScheduleOverride override = 6;
+  // absence is set when status is "uncovered": why nobody gives the class.
+  TeacherAbsence absence = 7;
 }
 
 // ScheduleEvent is one entry of the timetable's history.
@@ -1317,6 +1334,8 @@ message ScheduleEvent {
   google.protobuf.Timestamp date = 8;
   string reason = 9;
   string summary = 10;
+  // absence_id is set for entries about a teacher absence (T19).
+  string absence_id = 11;
 }
 
 // AvailableTeacher is a teacher free in a slot; match: "subject" | "grade" | "other".
@@ -1354,6 +1373,9 @@ message GetScheduleDayResponse {
   google.protobuf.Timestamp date = 1;
   int32 weekday = 2;
   repeated ScheduledClass classes = 3;
+  // non_working is the school-calendar label closing the date ("" on a
+  // school day); a closed date has no classes.
+  string non_working = 4;
 }
 
 // ScheduleBlockInput places a teaching assignment; reason is required once
@@ -1401,6 +1423,9 @@ message CreateScheduleOverrideRequest {
   string swap_block_id = 5;
   string reason = 6;
   ScheduleActor actor = 7;
+  // replace_override_id replaces, in the same step, a substitute or a
+  // cancellation of the same class that date (T19: the substitute is absent).
+  string replace_override_id = 8;
 }
 
 message CreateScheduleOverrideResponse {
@@ -1449,4 +1474,102 @@ message ListScheduleEventsRequest {
 
 message ListScheduleEventsResponse {
   repeated ScheduleEvent events = 1;
+}
+
+// TeacherAbsence is a teacher away on starts_on..ends_on (both inclusive),
+// all day or during [start_minute, end_minute) of each date (T19). kind:
+// "sick" | "vacation" | "personal" | "other"; kind and note are for
+// schedule:write holders only (the gateway shapes them away for the rest).
+message TeacherAbsence {
+  string id = 1;
+  string cycle_id = 2;
+  string teacher_id = 3;
+  string kind = 4;
+  google.protobuf.Timestamp starts_on = 5;
+  google.protobuf.Timestamp ends_on = 6;
+  bool all_day = 7;
+  int32 start_minute = 8;
+  int32 end_minute = 9;
+  string note = 10;
+  ScheduleActor created_by = 11;
+  google.protobuf.Timestamp created_at = 12;
+  google.protobuf.Timestamp updated_at = 13;
+  // cancelled_at is unset while the absence is active.
+  google.protobuf.Timestamp cancelled_at = 14;
+  ScheduleActor cancelled_by = 15;
+}
+
+// TeacherAbsenceInput: an empty cycle_id means the cycle containing
+// starts_on; all_day ignores the minutes.
+message TeacherAbsenceInput {
+  string cycle_id = 1;
+  string teacher_id = 2;
+  string kind = 3;
+  google.protobuf.Timestamp starts_on = 4;
+  google.protobuf.Timestamp ends_on = 5;
+  bool all_day = 6;
+  int32 start_minute = 7;
+  int32 end_minute = 8;
+  string note = 9;
+}
+
+message CreateTeacherAbsenceRequest {
+  TeacherAbsenceInput absence = 1;
+  ScheduleActor actor = 2;
+}
+
+message CreateTeacherAbsenceResponse {
+  TeacherAbsence absence = 1;
+  int32 uncovered_count = 2;
+}
+
+message UpdateTeacherAbsenceRequest {
+  string id = 1;
+  TeacherAbsenceInput absence = 2;
+  ScheduleActor actor = 3;
+}
+
+message UpdateTeacherAbsenceResponse {
+  TeacherAbsence absence = 1;
+  int32 uncovered_count = 2;
+}
+
+message CancelTeacherAbsenceRequest {
+  string id = 1;
+  ScheduleActor actor = 2;
+  // caller_teacher_id is the teacher record linked to the caller ("" for
+  // none): nobody cancels their own absence (SCHEDULE_ABSENCE_OWN).
+  string caller_teacher_id = 3;
+}
+
+message CancelTeacherAbsenceResponse {
+  TeacherAbsence absence = 1;
+}
+
+message ListTeacherAbsencesRequest {
+  string cycle_id = 1;
+  string teacher_id = 2;
+  google.protobuf.Timestamp from = 3;
+  google.protobuf.Timestamp to = 4;
+  bool include_cancelled = 5;
+}
+
+message ListTeacherAbsencesResponse {
+  repeated TeacherAbsence absences = 1;
+}
+
+message ListUncoveredClassesRequest {
+  string cycle_id = 1;
+  google.protobuf.Timestamp from = 2;
+  google.protobuf.Timestamp to = 3;
+}
+
+// UncoveredClass is a class nobody gives on date.
+message UncoveredClass {
+  google.protobuf.Timestamp date = 1;
+  ScheduledClass scheduled_class = 2;
+}
+
+message ListUncoveredClassesResponse {
+  repeated UncoveredClass classes = 1;
 }

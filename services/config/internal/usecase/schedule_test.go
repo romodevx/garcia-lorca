@@ -25,6 +25,8 @@ type fakeSchedule struct {
 	overrides map[string]domain.ScheduleOverride
 	events    []domain.ScheduleEvent
 	grids     map[string]domain.ScheduleGrid
+	absences  map[string]domain.TeacherAbsence
+	periods   []domain.NonWorkingPeriod
 	txs       int
 }
 
@@ -95,6 +97,7 @@ func newFakeSchedule(t *testing.T) *fakeSchedule {
 		blocks:    map[string]domain.ScheduleBlock{},
 		overrides: map[string]domain.ScheduleOverride{},
 		grids:     map[string]domain.ScheduleGrid{},
+		absences:  map[string]domain.TeacherAbsence{},
 	}
 }
 

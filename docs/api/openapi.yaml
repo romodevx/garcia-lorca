@@ -4266,6 +4266,200 @@ paths:
         '403': { $ref: '#/components/responses/PlainForbidden' }
         '404': { $ref: '#/components/responses/PlainNotFound' }
 
+  /api/v1/schedule/absences:
+    get:
+      tags: [schedule]
+      summary: Teacher absences touching a date range (T19)
+      description: >
+        The cycle's teacher absences whose dates touch `from`..`to` (at most a
+        year apart), of `teacherId` when given; cancelled ones only with
+        `includeCancelled=true`. PRIVACY: `kind`, `note` and who registered
+        or cancelled it are returned ONLY to callers holding `schedule:write`;
+        everyone else gets the dates and hours (the screen says "Ausente").
+        Requires `schedule:read`.
+      operationId: listTeacherAbsences
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: cycleId, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: from, in: query, required: true, schema: { type: string, format: date } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date } }
+        - { name: teacherId, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: includeCancelled, in: query, required: false, schema: { type: boolean, default: false } }
+      responses:
+        '200':
+          description: The absences, by start date.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [absences]
+                properties:
+                  absences:
+                    type: array
+                    items: { $ref: '#/components/schemas/TeacherAbsence' }
+        '400':
+          description: A malformed `cycleId`, `teacherId` or date range.
+          content:
+            text/plain:
+              schema: { type: string }
+              example: cycleId, from and to (YYYY-MM-DD) are required
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+    post:
+      tags: [schedule]
+      summary: Register a teacher's absence (T19)
+      description: >
+        A teacher away on `startsOn`..`endsOn` (both inclusive, inside one
+        cycle — 400 `SCHEDULE_DATE_OUTSIDE_CYCLE`), the whole day
+        (`allDay: true`) or between `startsAt` and `endsAt` of each of those
+        dates (5-minute steps). `kind`: sick (Incapacidad), vacation
+        (Vacaciones), personal (Asunto personal), other (Otro). Two active
+        absences of one teacher never overlap (409
+        `SCHEDULE_ABSENCE_OVERLAP`). A teacher cannot register their own
+        absence (403 `SCHEDULE_ABSENCE_OWN`). On every date it covers, the
+        teacher's classes show `status: uncovered` until a substitute is
+        assigned or the class is cancelled for that date.
+        `uncoveredCount` is how many classes are left uncovered on its
+        school days right now ("Quedan N clases sin cubrir"). The history
+        records it without the kind or the note. Requires `schedule:write`.
+      operationId: createTeacherAbsence
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TeacherAbsenceInput' }
+            example: { cycleId: 6f1c2b8e-0000-4000-8000-000000000001, teacherId: 6f1c2b8e-0000-4000-8000-000000000021, kind: personal, startsOn: '2026-10-05', endsOn: '2026-10-05', allDay: false, startsAt: '08:00', endsAt: '10:00', note: Cita médica }
+      responses:
+        '201':
+          description: The absence and the classes it leaves uncovered.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TeacherAbsenceSaved' }
+        '400': { $ref: '#/components/responses/ScheduleBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403':
+          description: Without `schedule:write`, or SCHEDULE_ABSENCE_OWN (the caller is that teacher).
+          headers:
+            X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
+          content:
+            text/plain:
+              schema: { type: string }
+              example: No puedes registrar tu propia ausencia
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409': { $ref: '#/components/responses/ScheduleConflict' }
+
+  /api/v1/schedule/absences/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    put:
+      tags: [schedule]
+      summary: Change an absence (T19)
+      description: >
+        Changes the kind, dates, hours or note of an ACTIVE absence (409
+        `SCHEDULE_ABSENCE_CANCELLED` otherwise); the teacher never changes
+        (`teacherId` is required and must be the absence's). Same rules as
+        registering it; the change goes to the history. Requires
+        `schedule:write`.
+      operationId: updateTeacherAbsence
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TeacherAbsenceInput' }
+            example: { teacherId: 6f1c2b8e-0000-4000-8000-000000000021, kind: sick, startsOn: '2026-10-05', endsOn: '2026-10-07', allDay: true }
+      responses:
+        '200':
+          description: The absence and the classes it leaves uncovered.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TeacherAbsenceSaved' }
+        '400': { $ref: '#/components/responses/ScheduleBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409': { $ref: '#/components/responses/ScheduleConflict' }
+
+  /api/v1/schedule/absences/{id}/cancel:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [schedule]
+      summary: Cancel an absence — never deleted (T19)
+      description: >
+        The teacher's classes are no longer uncovered on its dates. The record
+        stays, with who cancelled it and when; the cancellation goes to the
+        history. Cancelling twice is 409 `SCHEDULE_ABSENCE_CANCELLED`; a
+        teacher cannot cancel their own absence (403 `SCHEDULE_ABSENCE_OWN`).
+        Requires `schedule:write`.
+      operationId: cancelTeacherAbsence
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      responses:
+        '200':
+          description: The cancelled absence.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [absence]
+                properties:
+                  absence: { $ref: '#/components/schemas/TeacherAbsence' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403':
+          description: Without `schedule:write`, or SCHEDULE_ABSENCE_OWN (the caller is that teacher).
+          headers:
+            X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
+          content:
+            text/plain:
+              schema: { type: string }
+              example: No puedes cancelar tu propia ausencia; pídeselo a la dirección
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409': { $ref: '#/components/responses/ScheduleConflict' }
+
+  /api/v1/schedule/uncovered:
+    get:
+      tags: [schedule]
+      summary: Classes nobody gives because their teacher is absent ("Clases por cubrir", T19)
+      description: >
+        Date by date between `from` and `to` (at most 31 days), the classes
+        whose teacher — or substitute — is absent and that have no substitute
+        nor cancellation for that date. Weekends, dates outside the cycle and
+        the school calendar's non-working days have none. Each class carries
+        its absence, shaped like everywhere else (`kind`/`note` only for
+        `schedule:write`). Requires `schedule:read`.
+      operationId: listUncoveredClasses
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: cycleId, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: from, in: query, required: true, schema: { type: string, format: date } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: The uncovered classes, by date then start time.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [classes]
+                properties:
+                  classes:
+                    type: array
+                    items: { $ref: '#/components/schemas/UncoveredClass' }
+        '400':
+          description: A malformed `cycleId` or date range (more than 31 days).
+          content:
+            text/plain:
+              schema: { type: string }
+              example: El rango de fechas es de a lo más un mes
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
   /api/v1/teaching/schedule:
     get:
       tags: [schedule]
@@ -6104,7 +6298,10 @@ components:
         SCHEDULE_DATE_OUTSIDE_CYCLE, SCHEDULE_DATE_WRONG_WEEKDAY,
         SCHEDULE_SWAP_INVALID, SCHEDULE_SUBSTITUTE_INVALID,
         SCHEDULE_ASSIGNMENT_INVALID (not one of the cycle's teaching
-        assignments), SCHEDULE_GRID_INVALID. A malformed body is a plain 400.
+        assignments), SCHEDULE_GRID_INVALID, SCHEDULE_DATE_NON_WORKING (a
+        change on a day the school calendar closes), and for absences (T19)
+        SCHEDULE_ABSENCE_KIND_INVALID, SCHEDULE_ABSENCE_DATES_INVALID,
+        SCHEDULE_ABSENCE_NOTE_TOO_LONG. A malformed body is a plain 400.
       headers:
         X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
       content:
@@ -6119,7 +6316,9 @@ components:
         SCHEDULE_BLOCK_TAKEN (the class already has a change that date);
         SCHEDULE_BLOCK_HAS_OVERRIDES (move it after removing its future
         changes); SCHEDULE_CHANGED (another editor won a race — reload);
-        LEVEL_BEING_DELETED.
+        LEVEL_BEING_DELETED; and (T19) SCHEDULE_TEACHER_ABSENT (the change
+        would put an absent teacher in class), SCHEDULE_ABSENCE_OVERLAP,
+        SCHEDULE_ABSENCE_CANCELLED.
       headers:
         X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
       content:
@@ -6463,10 +6662,11 @@ components:
         reason: { type: string, maxLength: 200, description: Required once the cycle has started. }
     ScheduleDay:
       type: object
-      required: [date, weekday, classes]
+      required: [date, weekday, nonWorking, classes]
       properties:
         date: { type: string, format: date }
         weekday: { type: integer, minimum: 1, maximum: 7, description: '1 = Monday … 7 = Sunday (6 and 7 have no classes).' }
+        nonWorking: { type: [string, 'null'], description: 'The school-calendar period closing the date (a closed date has no classes); null on a school day.', example: Independencia }
         classes:
           type: array
           description: By start time, then group.
@@ -6474,7 +6674,7 @@ components:
     ScheduleClass:
       type: object
       description: A class as it happens on a date.
-      required: [blockId, groupId, subjectId, teacherId, startsAt, endsAt, status, baseTeacherId, baseStartsAt, baseEndsAt, overrideId, reason]
+      required: [blockId, groupId, subjectId, teacherId, startsAt, endsAt, status, baseTeacherId, baseStartsAt, baseEndsAt, overrideId, reason, absence]
       properties:
         blockId: { type: string, format: uuid }
         groupId: { type: string, format: uuid }
@@ -6482,12 +6682,17 @@ components:
         teacherId: { type: string, format: uuid, description: Who gives it that day. }
         startsAt: { type: string, example: '09:00' }
         endsAt: { type: string, example: '09:50' }
-        status: { type: string, enum: [regular, substitute, swapped, cancelled] }
+        status: { type: string, enum: [regular, substitute, swapped, cancelled, uncovered], description: 'uncovered: its teacher is absent and nobody covers it yet ("Sin cubrir", T19).' }
         baseTeacherId: { type: string, format: uuid }
         baseStartsAt: { type: string, example: '08:00' }
         baseEndsAt: { type: string, example: '08:50' }
         overrideId: { type: [string, 'null'], format: uuid }
         reason: { type: [string, 'null'] }
+        absence:
+          description: Set when `status` is `uncovered`.
+          oneOf:
+            - { $ref: '#/components/schemas/TeacherAbsence' }
+            - { type: 'null' }
     ScheduleOverrideInput:
       type: object
       required: [blockId, date, kind, reason]
@@ -6498,6 +6703,13 @@ components:
         teacherId: { type: string, format: uuid, description: The substitute (kind substitute). }
         swapBlockId: { type: string, format: uuid, description: The other class of the same group (kind swap). }
         reason: { type: string, minLength: 1, maxLength: 200 }
+        replaceOverrideId:
+          type: string
+          format: uuid
+          description: >
+            T19 — a substitute or cancellation of the SAME class that date to
+            replace in the same step (the substitute is now absent). A swap is
+            never replaced (409 SCHEDULE_BLOCK_TAKEN: undo it first).
     ScheduleOverride:
       type: object
       required: [id, cycleId, blockId, date, kind, teacherId, swapBlockId, reason, createdBy, createdByName, createdAt]
@@ -6523,18 +6735,68 @@ components:
         match: { type: string, enum: [subject, grade, other], description: Teaches that subject / teaches in that grade / anybody free. }
     ScheduleEvent:
       type: object
-      required: [id, at, actorId, actorName, action, blockId, overrideId, date, reason, summary]
+      required: [id, at, actorId, actorName, action, blockId, overrideId, absenceId, date, reason, summary]
       properties:
         id: { type: string, format: uuid }
         at: { type: string, format: date-time }
         actorId: { type: string }
         actorName: { type: string }
-        action: { type: string, enum: [block_created, block_updated, block_deleted, override_created, override_deleted] }
+        action: { type: string, enum: [block_created, block_updated, block_deleted, override_created, override_deleted, absence_created, absence_updated, absence_cancelled] }
         blockId: { type: [string, 'null'], format: uuid }
         overrideId: { type: [string, 'null'], format: uuid }
-        date: { type: [string, 'null'], format: date, description: The date a change applies to (overrides only). }
+        absenceId: { type: [string, 'null'], format: uuid }
+        date: { type: [string, 'null'], format: date, description: "The date a change applies to (overrides), or an absence's first date." }
         reason: { type: string }
         summary: { type: string, example: 'Suplencia el 2026-10-05: Música, 3.º A, lunes 08:00–08:50 — Luis Pérez en lugar de Ana Ruiz' }
+    TeacherAbsenceInput:
+      type: object
+      required: [teacherId, kind, startsOn, endsOn, allDay]
+      properties:
+        cycleId: { type: string, format: uuid, description: Omitted — the cycle whose dates contain `startsOn`. }
+        teacherId: { type: string, format: uuid }
+        kind: { type: string, enum: [sick, vacation, personal, other] }
+        startsOn: { type: string, format: date }
+        endsOn: { type: string, format: date, description: Inclusive. }
+        allDay: { type: boolean }
+        startsAt: { type: string, pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$', example: '08:00', description: Required unless `allDay`. }
+        endsAt: { type: string, pattern: '^([01][0-9]|2[0-4]):[0-5][0-9]$', example: '10:00', description: Required unless `allDay`; exclusive. }
+        note: { type: string, maxLength: 500 }
+    TeacherAbsence:
+      type: object
+      description: >
+        A teacher away on `startsOn`..`endsOn`, all day or between `startsAt`
+        and `endsAt` of each date. `kind`, `note`, `createdByName`,
+        `createdAt` and `cancelledByName` are present ONLY for callers holding
+        `schedule:write`.
+      required: [id, cycleId, teacherId, startsOn, endsOn, allDay, startsAt, endsAt, cancelled]
+      properties:
+        id: { type: string, format: uuid }
+        cycleId: { type: string, format: uuid }
+        teacherId: { type: string, format: uuid }
+        startsOn: { type: string, format: date }
+        endsOn: { type: string, format: date }
+        allDay: { type: boolean }
+        startsAt: { type: [string, 'null'], example: '08:00' }
+        endsAt: { type: [string, 'null'], example: '10:00' }
+        cancelled: { type: boolean }
+        kind: { type: string, enum: [sick, vacation, personal, other] }
+        note: { type: string }
+        createdByName: { type: string, example: Directora Ruiz }
+        createdAt: { type: string, format: date-time }
+        cancelledAt: { type: string, format: date-time }
+        cancelledByName: { type: string }
+    TeacherAbsenceSaved:
+      type: object
+      required: [absence, uncoveredCount]
+      properties:
+        absence: { $ref: '#/components/schemas/TeacherAbsence' }
+        uncoveredCount: { type: integer, minimum: 0, description: Classes left uncovered on its school days ("Quedan N clases sin cubrir"). }
+    UncoveredClass:
+      type: object
+      required: [date, class]
+      properties:
+        date: { type: string, format: date }
+        class: { $ref: '#/components/schemas/ScheduleClass' }
     GradePeriod:
       type: object
       required: [termId, termName, ordinal, levelId, levelName, startsOn, endsOn, status, version, progress]

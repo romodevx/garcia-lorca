@@ -6,10 +6,11 @@ import { DateField, SelectField } from "../../_design/form";
 import { ChipRow } from "../../_design/students/StudentFilters";
 import { Toast } from "../../_design/Toast";
 import { API_URL } from "../../api-url";
-import { deleteOverride, type ScheduleBoard, type ScheduleDay } from "../../schedule/api";
+import { deleteOverride, type ScheduleBoard, type ScheduleClass, type ScheduleDay } from "../../schedule/api";
 import { indexBoard } from "../../schedule/catalog";
 import { nowInSchoolZone, runningAt, timeOptions } from "../../schedule/time";
 import { ClassCard, DayList } from "./ClassCard";
+import { CoverDrawer } from "./CoverDrawer";
 import { chipOption, EmptyState } from "./parts";
 import type { ScheduleSource } from "./useScheduleBoard";
 
@@ -39,6 +40,8 @@ export function NowView({ board, source, canWrite, now }: NowViewProps): ReactEl
   const [failure, setFailure] = useState<string | undefined>(undefined);
   const [reads, setReads] = useState(0);
   const [toast, setToast] = useState<string | undefined>(undefined);
+  const [covering, setCovering] = useState<ScheduleClass | null>(null);
+  const coverBlock = covering === null ? undefined : board.blocks.find((b) => b.id === covering.blockId);
 
   useEffect(() => {
     if (date === "") return;
@@ -96,16 +99,22 @@ export function NowView({ board, source, canWrite, now }: NowViewProps): ReactEl
 
       <section aria-label={`Clases a las ${time}`} style={{ display: "grid", gap: 12 }}>
         <h2 style={{ fontSize: 18, fontWeight: 700, color: "var(--text)" }}>A las {time}</h2>
-        {day !== null && running.length === 0 && <EmptyState>No hay clases a esta hora</EmptyState>}
+        {day !== null && day.nonWorking !== null && <EmptyState>Día inhábil: {day.nonWorking}. No hay clases.</EmptyState>}
+        {day !== null && day.nonWorking === null && running.length === 0 && <EmptyState>No hay clases a esta hora</EmptyState>}
         {running.length > 0 && (
           // auto-fill: one column on a phone, two or three on a tablet, more on a monitor.
           <div style={{ display: "grid", gap: 14, gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 250px), 1fr))" }}>
-            {running.map((c) => <ClassCard key={c.blockId} cls={c} index={index} />)}
+            {running.map((c) => <ClassCard key={c.blockId} cls={c} index={index} onCover={canWrite ? setCovering : undefined} />)}
           </div>
         )}
       </section>
 
       {day !== null && classes.length > 0 && <DayList classes={classes} index={index} onUndo={canWrite ? undo : undefined} />}
+      {covering !== null && coverBlock !== undefined && (
+        <CoverDrawer board={board} index={index} block={coverBlock} date={date} absentTeacherId={covering.teacherId}
+          replaceOverrideId={covering.overrideId} onClose={() => setCovering(null)}
+          onSaved={(message) => { setCovering(null); setToast(message); setReads((n) => n + 1); }} />
+      )}
       {toast !== undefined && <Toast>{toast}</Toast>}
     </div>
   );

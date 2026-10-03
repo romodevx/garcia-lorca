@@ -52,6 +52,15 @@ type fakeScheduleSvc struct {
 	eventsLimit              int
 	teachers                 []client.Teacher
 	err                      error
+	// T19
+	absIn        client.TeacherAbsenceInput
+	absID        string
+	absQuery     client.TeacherAbsenceQuery
+	uncFrom      time.Time
+	uncTo        time.Time
+	nonWorking   string
+	absentClass  bool
+	cancelCaller string
 }
 
 func scBlockResult() client.ScheduleBlock {
@@ -80,10 +89,15 @@ func (f *fakeScheduleSvc) GetScheduleDay(_ context.Context, cycleID string, date
 	f.dayDate, f.dayTeacher = date, teacherID
 	o := client.ScheduleOverride{ID: scOvr, CycleID: cycleID, BlockID: scBlock, Date: date, Kind: "substitute", TeacherID: "t2", Reason: "tarde",
 		CreatedBy: client.ScheduleActor{UserID: "u", Name: "D"}, CreatedAt: scMon}
-	return client.ScheduleDay{Date: date, Weekday: 1, Classes: []client.ScheduledClass{
+	day := client.ScheduleDay{Date: date, Weekday: 1, NonWorking: f.nonWorking, Classes: []client.ScheduledClass{
 		{Block: scBlockResult(), TeacherID: "t2", StartsAt: 480, EndsAt: 530, Status: "substitute", Override: &o},
 		{Block: scBlockResult(), TeacherID: scTeacher, StartsAt: 530, EndsAt: 580, Status: "regular"},
-	}}, f.err
+	}}
+	if f.absentClass {
+		a := scAbsenceResult()
+		day.Classes[1].Status, day.Classes[1].Absence = "uncovered", &a
+	}
+	return day, f.err
 }
 
 func (f *fakeScheduleSvc) CreateScheduleBlock(_ context.Context, in client.ScheduleBlockInput, by client.ScheduleActor) (client.ScheduleBlock, error) {

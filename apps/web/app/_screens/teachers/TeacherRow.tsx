@@ -22,12 +22,14 @@ export interface TeacherRowProps {
   /** Absent when this principal may not give access (teachers:write + users:write). */
   onGrantAccess?: () => void;
   onOpenLoad?: () => void;
+  /** schedule:write with Horarios on (T19): register this teacher's absence. */
+  onRegisterAbsence?: () => void;
 }
 
 const ROW_BUTTON = { minHeight: 44, padding: "0 14px", borderRadius: "var(--r-pill)", border: "1.5px solid var(--forest)", color: "var(--forest)", fontWeight: 600, fontSize: 13.5, cursor: "pointer" } as const;
 
 /** One roster row: who, whether they can sign in, and what can be done about it. */
-export function TeacherRow({ teacher, access, granting, error, inviteUrl, sendError, confirmation, onConfirmReuse, onCancelReuse, onGrantAccess, onOpenLoad }: TeacherRowProps): ReactElement {
+export function TeacherRow({ teacher, access, granting, error, inviteUrl, sendError, confirmation, onConfirmReuse, onCancelReuse, onGrantAccess, onOpenLoad, onRegisterAbsence }: TeacherRowProps): ReactElement {
   const name = `${teacher.firstName} ${teacher.lastName}`;
   const action = ACTION[access];
   const offerAccess = onGrantAccess !== undefined && action !== undefined && confirmation === undefined;
@@ -49,6 +51,11 @@ export function TeacherRow({ teacher, access, granting, error, inviteUrl, sendEr
           {onOpenLoad !== undefined && (
             <button type="button" onClick={onOpenLoad} aria-label={`Carga académica de ${name}`} style={ROW_BUTTON}>
               Carga académica
+            </button>
+          )}
+          {onRegisterAbsence !== undefined && (
+            <button type="button" onClick={onRegisterAbsence} aria-label={`Registrar ausencia de ${name}`} style={ROW_BUTTON}>
+              Registrar ausencia
             </button>
           )}
         </span>

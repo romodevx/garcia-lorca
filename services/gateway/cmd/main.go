@@ -702,6 +702,13 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("POST /api/v1/schedule/overrides", scheduleWrite(scheduleH.CreateOverride))
 	mux.Handle("DELETE /api/v1/schedule/overrides/{id}", scheduleWrite(scheduleH.DeleteOverride))
 	mux.Handle("PUT /api/v1/schedule/settings/{levelId}", scheduleWrite(scheduleH.PutSettings))
+	// T19 — teacher absences (ADR 0032): same permissions; the handler shapes
+	// an absence's kind and note away from callers without schedule:write.
+	mux.Handle("GET /api/v1/schedule/absences", scheduleRead(scheduleH.Absences))
+	mux.Handle("GET /api/v1/schedule/uncovered", scheduleRead(scheduleH.Uncovered))
+	mux.Handle("POST /api/v1/schedule/absences", scheduleWrite(scheduleH.CreateAbsence))
+	mux.Handle("PUT /api/v1/schedule/absences/{id}", scheduleWrite(scheduleH.UpdateAbsence))
+	mux.Handle("POST /api/v1/schedule/absences/{id}/cancel", scheduleWrite(scheduleH.CancelAbsence))
 	mux.Handle("GET /api/v1/teaching/schedule", scheduleModule("teaching:read", scheduleH.OwnBoard))
 	mux.Handle("GET /api/v1/teaching/schedule/day", scheduleModule("teaching:read", scheduleH.OwnDay))
 

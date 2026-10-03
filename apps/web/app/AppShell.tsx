@@ -16,6 +16,7 @@ import { canEditTeachingLoad, canGrantTeacherAccess, canListUsers } from "./teac
 import { UniformsScreen } from "./_screens/uniforms/UniformsScreen";
 import { ExpensesScreen } from "./_screens/expenses/ExpensesScreen";
 import { ScheduleEntry } from "./_screens/schedule/ScheduleEntry";
+import { requestCoverFocus } from "./schedule/coverFocus";
 import { ActivitiesScreen } from "./_screens/activities/ActivitiesScreen";
 import { ScholarshipsScreen } from "./_screens/scholarships/ScholarshipsScreen";
 import type { CutAccess } from "./_screens/finance/CashCutClosing";
@@ -721,7 +722,10 @@ export function AppShell(): ReactElement {
         ))}
       {view.screen === "teachers" &&
         (teachersEnabled ? (
-          <TeachersScreen onBack={home} onOpenLoad={openTeacherLoad} canGrantAccess={canGrantTeacherAccess(principal?.permissions)} canListUsers={canListUsers(principal?.permissions)} />
+          <TeachersScreen onBack={home} onOpenLoad={openTeacherLoad} canGrantAccess={canGrantTeacherAccess(principal?.permissions)} canListUsers={canListUsers(principal?.permissions)}
+            // T19: absences live in Horarios — offered only with it on and schedule:write (UX; the gateway decides).
+            canRegisterAbsence={scheduleEnabled && (principal?.permissions ?? []).includes("schedule:write")}
+            onCoverClasses={(absence) => { requestCoverFocus(absence); go({ screen: "schedule" }); }} />
         ) : (
           // Flag OFF: never render the roster; show the friendly stub so
           // navigation never dead-ends. (Backend 404 is authoritative.)

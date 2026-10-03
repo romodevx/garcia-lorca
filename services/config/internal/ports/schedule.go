@@ -30,6 +30,9 @@ type ScheduleCatalog struct {
 //   - ListScheduleBlocks / ListScheduleOverrides read outside any lock (the
 //     screen's reads); ListScheduleOverrides returns the cycle's changes with
 //     from <= date <= to.
+//   - GetTeacherAbsence: KindNotFound when absent. ListTeacherAbsences returns
+//     the cycle's absences (cancelled ones too) touching from..to.
+//   - ListNonWorkingPeriods is the cycle's school calendar (closed days).
 //   - RunScheduleTx runs fn in ONE transaction holding the cycle's timetable
 //     lock (a transaction-scoped advisory lock): every timetable write of the
 //     cycle is serialised, so the checks fn makes on the effective timetable
@@ -47,6 +50,9 @@ type ScheduleRepository interface {
 	ListScheduleOverrides(ctx context.Context, cycleID string, from, to time.Time) ([]domain.ScheduleOverride, error)
 	ListScheduleEvents(ctx context.Context, cycleID string, limit int) ([]domain.ScheduleEvent, error)
 	SaveScheduleGrid(ctx context.Context, g domain.ScheduleGrid) error
+	GetTeacherAbsence(ctx context.Context, id string) (domain.TeacherAbsence, error)
+	ListTeacherAbsences(ctx context.Context, cycleID string, from, to time.Time) ([]domain.TeacherAbsence, error)
+	ListNonWorkingPeriods(ctx context.Context, cycleID string) ([]domain.NonWorkingPeriod, error)
 	RunScheduleTx(ctx context.Context, cycleID string, fn func(ScheduleTx) error) error
 }
 
@@ -56,6 +62,8 @@ type ScheduleRepository interface {
 //   - OverridesFrom returns the cycle's changes dated on or after from;
 //     OverridesOn, those of one date.
 //   - DeleteBlock removes the class and (FK cascade) its changes.
+//   - GetAbsence: KindNotFound when absent. ActiveAbsences returns the cycle's
+//     active absences touching from..to.
 type ScheduleTx interface {
 	Blocks(cycleID string) ([]domain.ScheduleBlock, error)
 	OverridesFrom(cycleID string, from time.Time) ([]domain.ScheduleOverride, error)
@@ -68,4 +76,8 @@ type ScheduleTx interface {
 	InsertOverride(o domain.ScheduleOverride) error
 	DeleteOverride(id string) error
 	AppendEvent(e domain.ScheduleEvent) error
+	GetAbsence(id string) (domain.TeacherAbsence, error)
+	ActiveAbsences(cycleID string, from, to time.Time) ([]domain.TeacherAbsence, error)
+	InsertAbsence(a domain.TeacherAbsence) error
+	UpdateAbsence(a domain.TeacherAbsence) error
 }

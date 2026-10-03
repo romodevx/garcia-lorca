@@ -1,9 +1,10 @@
 "use client";
 
-import type { ReactElement } from "react";
+import { useState, type ReactElement } from "react";
 
 import { MODULES, type ModuleDef } from "../../_design/data";
 import { ModulePlaceholder } from "../ModulePlaceholder";
+import { takeCoverFocus, type CoverFocus } from "../../schedule/coverFocus";
 import { ScheduleScreen } from "./ScheduleScreen";
 
 export interface ScheduleEntryProps {
@@ -19,6 +20,8 @@ export interface ScheduleEntryProps {
  * their own week, read-only. Flag off: the friendly stub, never the surface.
  */
 export function ScheduleEntry({ enabled, permissions, onBack }: ScheduleEntryProps): ReactElement {
+  // "Cubrir ahora" from Docentes (T19): taken once, on mount.
+  const [focus] = useState<CoverFocus | undefined>(takeCoverFocus);
   if (!enabled) return <ModulePlaceholder m={MODULES.find((m) => m.id === "schedule") as ModuleDef} onBack={onBack} />;
   const perms = permissions ?? [];
   const manages = perms.includes("schedule:read");
@@ -27,6 +30,7 @@ export function ScheduleEntry({ enabled, permissions, onBack }: ScheduleEntryPro
       onBack={onBack}
       mode={manages ? "manage" : "teacher"}
       canWrite={manages && perms.includes("schedule:write")}
+      focus={focus}
     />
   );
 }

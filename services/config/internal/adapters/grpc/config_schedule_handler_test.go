@@ -29,6 +29,14 @@ type stubSchedule struct {
 	gotTeacher  string
 	err         error
 	block       domain.ScheduleBlock
+	// T19
+	gotAbsence      usecase.AbsenceInput
+	gotAbsenceQuery usecase.AbsenceQuery
+	gotID           string
+	gotCaller       string
+	gotFrom, gotTo  time.Time
+	nonWorking      string
+	event           domain.ScheduleEvent
 }
 
 func (s *stubSchedule) Board(_ context.Context, _, teacherID string) (usecase.ScheduleBoard, error) {
@@ -46,7 +54,7 @@ func (s *stubSchedule) Day(_ context.Context, _ string, date time.Time, _ string
 		domain.Actor{UserID: "u", Name: "D"}, date)
 	c := domain.RegularClass(s.block)
 	c.TeacherID, c.Status, c.Override = "t-eva", domain.ClassSubstitute, &o
-	return usecase.ScheduleDay{Date: date, Weekday: domain.WeekdayOf(date), Classes: []domain.ScheduledClass{c}}, s.err
+	return usecase.ScheduleDay{Date: date, Weekday: domain.WeekdayOf(date), NonWorking: s.nonWorking, Classes: []domain.ScheduledClass{c}}, s.err
 }
 
 func (s *stubSchedule) CreateBlock(_ context.Context, in usecase.BlockInput, by domain.Actor) (domain.ScheduleBlock, error) {
@@ -88,6 +96,9 @@ func (s *stubSchedule) SetGrid(_ context.Context, levelID string, start, end int
 }
 
 func (s *stubSchedule) Events(context.Context, string, int) ([]domain.ScheduleEvent, error) {
+	if s.event.ID != "" {
+		return []domain.ScheduleEvent{s.event}, s.err
+	}
 	return []domain.ScheduleEvent{{ID: "e1", CycleID: "c1", Action: domain.ActionOverrideCreated, Summary: "Suplencia",
 		Date: time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC), By: domain.Actor{UserID: "u", Name: "D"}}}, s.err
 }
@@ -161,9 +172,10 @@ func TestScheduleBoardDayOverridesAndAvailability(t *testing.T) {
 
 	o, err := h.CreateScheduleOverride(ctx(), connect.NewRequest(&configv1.CreateScheduleOverrideRequest{
 		BlockId: "b1", Date: timestamppb.New(mon), Kind: "substitute", TeacherId: "t-eva", Reason: "tarde",
-		Actor: &configv1.ScheduleActor{UserId: "u", Name: "D"},
+		Actor: &configv1.ScheduleActor{UserId: "u", Name: "D"}, ReplaceOverrideId: "o-old",
 	}))
 	require.NoError(t, err)
+	assert.Equal(t, "o-old", stub.gotOverride.ReplaceOverrideID)
 	assert.Equal(t, domain.OverrideSubstitute, stub.gotOverride.Kind)
 	assert.Equal(t, "D", o.Msg.GetOverride().GetCreatedBy().GetName())
 

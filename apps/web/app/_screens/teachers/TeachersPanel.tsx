@@ -33,6 +33,8 @@ export interface TeachersPanelProps {
    * nothing: its state is not known, so no claim is made about it.
    */
   accountStatuses?: ReadonlyMap<string, UserStatus>;
+  /** Register a teacher's absence (T19). Absent without schedule:write or with Horarios off. */
+  onRegisterAbsence?: (teacherId: string) => void;
 }
 
 /**
@@ -40,7 +42,7 @@ export interface TeachersPanelProps {
  * acceso al sistema" on the row creates it and fills `userId`. Dumb panel —
  * data and the async writes come from the screen.
  */
-export function TeachersPanel({ teachers, onCreate, onOpenLoad, onGrantAccess, accountStatuses }: TeachersPanelProps): ReactElement {
+export function TeachersPanel({ teachers, onCreate, onOpenLoad, onGrantAccess, accountStatuses, onRegisterAbsence }: TeachersPanelProps): ReactElement {
   const access = useTeacherAccess(onGrantAccess, accountStatuses);
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
@@ -91,6 +93,7 @@ export function TeachersPanel({ teachers, onCreate, onOpenLoad, onGrantAccess, a
               onCancelReuse={() => access.cancelReuse(t.id)}
               onGrantAccess={onGrantAccess === undefined ? undefined : () => void access.grant(t)}
               onOpenLoad={onOpenLoad === undefined ? undefined : () => onOpenLoad(t.id)}
+              onRegisterAbsence={onRegisterAbsence === undefined ? undefined : () => onRegisterAbsence(t.id)}
             />
           ))}
         </ul>

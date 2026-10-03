@@ -80,6 +80,7 @@ type scheduleEventModel struct {
 	Action     string     `gorm:"column:action"`
 	BlockID    *string    `gorm:"column:block_id"`
 	OverrideID *string    `gorm:"column:override_id"`
+	AbsenceID  *string    `gorm:"column:absence_id"`
 	OnDate     *time.Time `gorm:"column:on_date;type:date"`
 	Reason     string     `gorm:"column:reason"`
 	Summary    string     `gorm:"column:summary"`
@@ -274,7 +275,7 @@ func (r *Repository) ListScheduleEvents(ctx context.Context, cycleID string, lim
 			e := domain.ScheduleEvent{
 				ID: m.ID, TenantID: m.TenantID, CycleID: m.CycleID, At: m.At.UTC(),
 				By: domain.Actor{UserID: m.ActorID, Name: m.ActorName}, Action: domain.ScheduleAction(m.Action),
-				BlockID: deref(m.BlockID), OverrideID: deref(m.OverrideID), Reason: m.Reason, Summary: m.Summary,
+				BlockID: deref(m.BlockID), OverrideID: deref(m.OverrideID), AbsenceID: deref(m.AbsenceID), Reason: m.Reason, Summary: m.Summary,
 			}
 			if m.OnDate != nil {
 				e.Date = m.OnDate.UTC()
@@ -383,7 +384,7 @@ func (s scheduleTx) DeleteOverride(id string) error {
 func (s scheduleTx) AppendEvent(e domain.ScheduleEvent) error {
 	m := scheduleEventModel{
 		ID: e.ID, TenantID: e.TenantID, CycleID: e.CycleID, At: e.At, ActorID: e.By.UserID, ActorName: e.By.Name,
-		Action: string(e.Action), BlockID: nullable(e.BlockID), OverrideID: nullable(e.OverrideID),
+		Action: string(e.Action), BlockID: nullable(e.BlockID), OverrideID: nullable(e.OverrideID), AbsenceID: nullable(e.AbsenceID),
 		Reason: e.Reason, Summary: e.Summary,
 	}
 	if !e.Date.IsZero() {

@@ -35,8 +35,8 @@ beforeEach(() => {
   m.getBoard.mockResolvedValue(sampleBoard());
   m.getOwnBoard.mockResolvedValue(sampleBoard());
   m.listEvents.mockResolvedValue([]);
-  m.getDay.mockResolvedValue({ date: "2026-10-05", weekday: 1, classes: [] });
-  m.getOwnDay.mockResolvedValue({ date: "2026-10-05", weekday: 1, classes: [] });
+  m.getDay.mockResolvedValue({ date: "2026-10-05", weekday: 1, nonWorking: null, classes: [] });
+  m.getOwnDay.mockResolvedValue({ date: "2026-10-05", weekday: 1, nonWorking: null, classes: [] });
   m.listAvailableTeachers.mockResolvedValue([]);
 });
 afterEach(() => vi.clearAllMocks());
@@ -156,9 +156,9 @@ describe("Horarios — la semana (T16)", () => {
 describe("Horarios — ¿Qué está pasando ahora? (T16)", () => {
   it("shows the classes under way at that minute as cards, a substitute named as such", async () => {
     m.getDay.mockResolvedValue({
-      date: "2026-10-05", weekday: 1, classes: [
-        { blockId: BLOCK_MATE, groupId: G3A, subjectId: MATE, teacherId: LUIS, startsAt: "08:00", endsAt: "08:50", status: "substitute", baseTeacherId: ANA, baseStartsAt: "08:00", baseEndsAt: "08:50", overrideId: "80000000-0000-4000-8000-000000000001", reason: "Consulta" },
-        { blockId: "x", groupId: G3A, subjectId: MATE, teacherId: ANA, startsAt: "09:00", endsAt: "09:50", status: "regular", baseTeacherId: ANA, baseStartsAt: "09:00", baseEndsAt: "09:50", overrideId: null, reason: null },
+      date: "2026-10-05", weekday: 1, nonWorking: null, classes: [
+        { blockId: BLOCK_MATE, groupId: G3A, subjectId: MATE, teacherId: LUIS, startsAt: "08:00", endsAt: "08:50", status: "substitute", baseTeacherId: ANA, baseStartsAt: "08:00", baseEndsAt: "08:50", overrideId: "80000000-0000-4000-8000-000000000001", reason: "Consulta", absence: null },
+        { blockId: "x", groupId: G3A, subjectId: MATE, teacherId: ANA, startsAt: "09:00", endsAt: "09:50", status: "regular", baseTeacherId: ANA, baseStartsAt: "09:00", baseEndsAt: "09:50", overrideId: null, reason: null, absence: null },
       ],
     });
     const user = renderManager();
@@ -217,8 +217,8 @@ describe("Horarios — cambios reversibles (T16)", () => {
   it("undoes a date's change from the day list", async () => {
     m.deleteOverride.mockResolvedValue(undefined);
     m.getDay.mockResolvedValue({
-      date: "2026-10-05", weekday: 1, classes: [
-        { blockId: BLOCK_MATE, groupId: G3A, subjectId: MATE, teacherId: LUIS, startsAt: "08:00", endsAt: "08:50", status: "substitute", baseTeacherId: ANA, baseStartsAt: "08:00", baseEndsAt: "08:50", overrideId: "80000000-0000-4000-8000-000000000001", reason: "Consulta" },
+      date: "2026-10-05", weekday: 1, nonWorking: null, classes: [
+        { blockId: BLOCK_MATE, groupId: G3A, subjectId: MATE, teacherId: LUIS, startsAt: "08:00", endsAt: "08:50", status: "substitute", baseTeacherId: ANA, baseStartsAt: "08:00", baseEndsAt: "08:50", overrideId: "80000000-0000-4000-8000-000000000001", reason: "Consulta", absence: null },
       ],
     });
     const user = renderManager();
@@ -229,8 +229,8 @@ describe("Horarios — cambios reversibles (T16)", () => {
 
   it("a reader sees the day's changes but cannot undo them", async () => {
     m.getDay.mockResolvedValue({
-      date: "2026-10-05", weekday: 1, classes: [
-        { blockId: BLOCK_MATE, groupId: G3A, subjectId: MATE, teacherId: ANA, startsAt: "08:00", endsAt: "08:50", status: "cancelled", baseTeacherId: ANA, baseStartsAt: "08:00", baseEndsAt: "08:50", overrideId: "80000000-0000-4000-8000-000000000001", reason: "Junta" },
+      date: "2026-10-05", weekday: 1, nonWorking: null, classes: [
+        { blockId: BLOCK_MATE, groupId: G3A, subjectId: MATE, teacherId: ANA, startsAt: "08:00", endsAt: "08:50", status: "cancelled", baseTeacherId: ANA, baseStartsAt: "08:00", baseEndsAt: "08:50", overrideId: "80000000-0000-4000-8000-000000000001", reason: "Junta", absence: null },
       ],
     });
     const user = renderManager(false);

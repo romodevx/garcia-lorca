@@ -1,19 +1,24 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  addDays,
   defaultEnd,
   gridBounds,
   layoutColumns,
+  mondayOf,
   nextDateOnWeekday,
+  schoolWeekOf,
   nowInSchoolZone,
   rowOf,
   runningAt,
   snapToSlot,
+  spanishDate,
   subjectColor,
   timeOptions,
   toHHMM,
   toMinutes,
   weekdayOf,
+  weekLabel,
 } from "./time";
 
 describe("toMinutes / toHHMM", () => {
@@ -170,5 +175,32 @@ describe("runningAt", () => {
     const got = runningAt([cls("a", "08:00", "08:50"), cls("b", "08:50", "09:40"), cls("c", "07:00", "08:00")], "08:00");
     expect(got.map((c) => c.blockId)).toEqual(["a"]);
     expect(runningAt([cls("a", "08:00", "08:50"), cls("b", "08:50", "09:40")], "08:50").map((c) => c.blockId)).toEqual(["b"]);
+  });
+});
+
+describe("week helpers (T19)", () => {
+  it("finds the Monday of a date's week and adds days across months", () => {
+    expect(mondayOf("2026-10-07")).toBe("2026-10-05");
+    expect(mondayOf("2026-10-05")).toBe("2026-10-05");
+    expect(mondayOf("2026-10-11")).toBe("2026-10-05");
+    expect(addDays("2026-09-30", 2)).toBe("2026-10-02");
+    expect(addDays("2026-10-05", -7)).toBe("2026-09-28");
+  });
+
+  it("names a school week in Spanish", () => {
+    expect(weekLabel("2026-10-05")).toBe("Semana del 5 al 9 de octubre");
+    expect(weekLabel("2026-09-28")).toBe("Semana del 28 de septiembre al 2 de octubre");
+  });
+
+  it("writes a date the way people read it", () => {
+    expect(spanishDate("2026-10-05")).toBe("lunes 5 de octubre");
+  });
+});
+
+describe("schoolWeekOf (review T19)", () => {
+  it("is the date's week on a school day and NEXT week on a weekend", () => {
+    expect(schoolWeekOf("2026-10-07")).toBe("2026-10-05");
+    expect(schoolWeekOf("2026-10-10")).toBe("2026-10-12");
+    expect(schoolWeekOf("2026-10-11")).toBe("2026-10-12");
   });
 });

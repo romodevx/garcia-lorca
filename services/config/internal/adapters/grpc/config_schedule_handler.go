@@ -26,6 +26,12 @@ type ScheduleService interface {
 	AvailableTeachers(ctx context.Context, q usecase.AvailabilityQuery) ([]domain.AvailableTeacher, error)
 	SetGrid(ctx context.Context, levelID string, start, end int) (domain.ScheduleGrid, error)
 	Events(ctx context.Context, cycleID string, limit int) ([]domain.ScheduleEvent, error)
+	// T19 — teacher absences.
+	CreateAbsence(ctx context.Context, in usecase.AbsenceInput, by domain.Actor) (usecase.AbsenceResult, error)
+	UpdateAbsence(ctx context.Context, id string, in usecase.AbsenceInput, by domain.Actor) (usecase.AbsenceResult, error)
+	CancelAbsence(ctx context.Context, id string, by domain.Actor, callerTeacherID string) (domain.TeacherAbsence, error)
+	Absences(ctx context.Context, q usecase.AbsenceQuery) ([]domain.TeacherAbsence, error)
+	Uncovered(ctx context.Context, cycleID string, from, to time.Time) ([]usecase.UncoveredClass, error)
 }
 
 // errScheduleUnwired answers the timetable RPCs when the composition root did
@@ -67,7 +73,7 @@ func (h *ConfigHandler) GetScheduleDay(ctx context.Context, req *connect.Request
 		classes = append(classes, toProtoClass(c))
 	}
 	return connect.NewResponse(&configv1.GetScheduleDayResponse{
-		Date: timestamppb.New(d.Date), Weekday: int32(d.Weekday), Classes: classes, //nolint:gosec // 1..7
+		Date: timestamppb.New(d.Date), Weekday: int32(d.Weekday), Classes: classes, NonWorking: d.NonWorking, //nolint:gosec // 1..7
 	}), nil
 }
 
@@ -117,7 +123,7 @@ func (h *ConfigHandler) CreateScheduleOverride(ctx context.Context, req *connect
 	}
 	o, err := h.schedule.CreateOverride(ctx, usecase.OverrideInput{
 		BlockID: m.GetBlockId(), Date: m.GetDate().AsTime().UTC(), Kind: domain.OverrideKind(m.GetKind()),
-		TeacherID: m.GetTeacherId(), SwapBlockID: m.GetSwapBlockId(), Reason: m.GetReason(),
+		TeacherID: m.GetTeacherId(), SwapBlockID: m.GetSwapBlockId(), Reason: m.GetReason(), ReplaceOverrideID: m.GetReplaceOverrideId(),
 	}, toActor(m.GetActor()))
 	if err != nil {
 		return nil, connectErr(err)
@@ -185,7 +191,7 @@ func (h *ConfigHandler) ListScheduleEvents(ctx context.Context, req *connect.Req
 	for _, e := range evs {
 		pe := &configv1.ScheduleEvent{
 			Id: e.ID, CycleId: e.CycleID, At: timestamppb.New(e.At), By: toProtoActor(e.By), Action: string(e.Action),
-			BlockId: e.BlockID, OverrideId: e.OverrideID, Reason: e.Reason, Summary: e.Summary,
+			BlockId: e.BlockID, OverrideId: e.OverrideID, AbsenceId: e.AbsenceID, Reason: e.Reason, Summary: e.Summary,
 		}
 		if !e.Date.IsZero() {
 			pe.Date = timestamppb.New(e.Date)
@@ -239,6 +245,9 @@ func toProtoClass(c domain.ScheduledClass) *configv1.ScheduledClass {
 	}
 	if c.Override != nil {
 		pc.Override = toProtoOverride(*c.Override)
+	}
+	if c.Absence != nil {
+		pc.Absence = toProtoAbsence(*c.Absence)
 	}
 	return pc
 }

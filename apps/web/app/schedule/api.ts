@@ -11,12 +11,16 @@
  */
 import { authFetch } from "../auth/authFetch";
 
-export type ClassStatus = "regular" | "substitute" | "swapped" | "cancelled";
+export type ClassStatus = "regular" | "substitute" | "swapped" | "cancelled" | "uncovered";
 export type OverrideKind = "substitute" | "swap" | "cancel";
 export type TeacherMatch = "subject" | "grade" | "other";
-export type ScheduleAction = "block_created" | "block_updated" | "block_deleted" | "override_created" | "override_deleted";
+export type ScheduleAction =
+  | "block_created" | "block_updated" | "block_deleted" | "override_created" | "override_deleted"
+  | "absence_created" | "absence_updated" | "absence_cancelled";
+/** Incapacidad, Vacaciones, Asunto personal, Otro (T19). */
+export type AbsenceKind = "sick" | "vacation" | "personal" | "other";
 
-const CLASS_STATUSES: readonly ClassStatus[] = ["regular", "substitute", "swapped", "cancelled"];
+const CLASS_STATUSES: readonly ClassStatus[] = ["regular", "substitute", "swapped", "cancelled", "uncovered"];
 const MATCHES: readonly TeacherMatch[] = ["subject", "grade", "other"];
 
 export interface ScheduleCycle {
@@ -73,12 +77,63 @@ export interface ScheduleClass {
   baseEndsAt: string;
   overrideId: string | null;
   reason: string | null;
+  /** Why an "uncovered" class has nobody (T19); null otherwise. */
+  absence: TeacherAbsence | null;
 }
 
 export interface ScheduleDay {
   date: string;
   weekday: number;
+  /** The school-calendar period closing the date ("Independencia"); a closed date has no classes. */
+  nonWorking: string | null;
   classes: ScheduleClass[];
+}
+
+/**
+ * A teacher away on startsOn..endsOn (T19), all day or startsAt–endsAt of each
+ * date. `kind`, `note` and who registered it reach ONLY schedule:write holders
+ * (the gateway shapes them away): everybody else reads "Ausente".
+ */
+export interface TeacherAbsence {
+  id: string;
+  cycleId: string;
+  teacherId: string;
+  startsOn: string;
+  endsOn: string;
+  allDay: boolean;
+  startsAt: string | null;
+  endsAt: string | null;
+  cancelled: boolean;
+  kind?: AbsenceKind;
+  note?: string;
+  createdByName?: string;
+  createdAt?: string;
+  cancelledAt?: string;
+  cancelledByName?: string;
+}
+
+export interface AbsenceInput {
+  /** Omitted: the cycle whose dates contain startsOn. */
+  cycleId?: string;
+  teacherId: string;
+  kind: AbsenceKind;
+  startsOn: string;
+  endsOn: string;
+  allDay: boolean;
+  startsAt?: string;
+  endsAt?: string;
+  note?: string;
+}
+
+export interface AbsenceSaved {
+  absence: TeacherAbsence;
+  /** "Quedan N clases sin cubrir en esas fechas". */
+  uncoveredCount: number;
+}
+
+export interface UncoveredClass {
+  date: string;
+  class: ScheduleClass;
 }
 
 export interface BlockInput {
@@ -97,6 +152,8 @@ export interface OverrideInput {
   teacherId?: string;
   swapBlockId?: string;
   reason: string;
+  /** T19: a substitute or cancellation of the same class that date to replace (its substitute is absent). */
+  replaceOverrideId?: string;
 }
 
 export interface AvailableTeacher {
@@ -125,6 +182,7 @@ export interface ScheduleEvent {
   action: ScheduleAction;
   blockId: string | null;
   overrideId: string | null;
+  absenceId?: string | null;
   date: string | null;
   reason: string;
   summary: string;
@@ -209,12 +267,16 @@ const toBoard = (w: WireBoard): ScheduleBoard => ({
   blocks: w.blocks ?? [],
 });
 
-type WireDay = Omit<ScheduleDay, "classes"> & { classes?: (Omit<ScheduleClass, "status"> & { status: string })[] };
+type WireClass = Omit<ScheduleClass, "status" | "absence"> & { status: string; absence?: TeacherAbsence | null };
+type WireDay = Omit<ScheduleDay, "classes" | "nonWorking"> & { nonWorking?: string | null; classes?: WireClass[] };
+
+const toClass = (c: WireClass): ScheduleClass => ({ ...c, status: oneOf(CLASS_STATUSES, c.status, "regular"), absence: c.absence ?? null });
 
 const toDay = (w: WireDay): ScheduleDay => ({
   date: w.date,
   weekday: w.weekday,
-  classes: (w.classes ?? []).map((c) => ({ ...c, status: oneOf(CLASS_STATUSES, c.status, "regular") })),
+  nonWorking: w.nonWorking ?? null,
+  classes: (w.classes ?? []).map(toClass),
 });
 
 // --- endpoints -----------------------------------------------------------------
@@ -277,4 +339,36 @@ export async function putSettings(baseURL: string, levelId: string, grid: { grid
 /** Who changed what, when and why; newest first. */
 export async function listEvents(baseURL: string, cycleId: string): Promise<ScheduleEvent[]> {
   return (await read<{ events?: ScheduleEvent[] }>(baseURL, `/api/v1/schedule/events${query({ cycleId: checkedId(cycleId) })}`)).events ?? [];
+}
+
+// --- teacher absences (T19) ----------------------------------------------------
+
+/** Register an absence; the answer says how many classes it leaves uncovered. */
+export async function createAbsence(baseURL: string, input: AbsenceInput): Promise<AbsenceSaved> {
+  return send<AbsenceSaved>(baseURL, "/api/v1/schedule/absences", "POST", input);
+}
+
+/** Change an active absence (never its teacher). */
+export async function updateAbsence(baseURL: string, id: string, input: AbsenceInput): Promise<AbsenceSaved> {
+  return send<AbsenceSaved>(baseURL, `/api/v1/schedule/absences/${checkedId(id)}`, "PUT", input);
+}
+
+/** Cancel an absence: it is never deleted, the record and its history stay. */
+export async function cancelAbsence(baseURL: string, id: string): Promise<TeacherAbsence> {
+  return (await send<{ absence: TeacherAbsence }>(baseURL, `/api/v1/schedule/absences/${checkedId(id)}/cancel`, "POST", {})).absence;
+}
+
+/** The absences touching from..to (active ones unless includeCancelled). */
+export async function listAbsences(
+  baseURL: string,
+  q: { cycleId: string; from: string; to: string; teacherId?: string; includeCancelled?: boolean },
+): Promise<TeacherAbsence[]> {
+  const qs = query({ cycleId: checkedId(q.cycleId), from: q.from, to: q.to, teacherId: q.teacherId, includeCancelled: q.includeCancelled === true ? "true" : undefined });
+  return (await read<{ absences?: TeacherAbsence[] }>(baseURL, `/api/v1/schedule/absences${qs}`)).absences ?? [];
+}
+
+/** "Clases por cubrir": the classes nobody gives, date by date (at most 31 days). */
+export async function listUncovered(baseURL: string, cycleId: string, from: string, to: string): Promise<UncoveredClass[]> {
+  const got = await read<{ classes?: { date: string; class: WireClass }[] }>(baseURL, `/api/v1/schedule/uncovered${query({ cycleId: checkedId(cycleId), from, to })}`);
+  return (got.classes ?? []).map((u) => ({ date: u.date, class: toClass(u.class) }));
 }
