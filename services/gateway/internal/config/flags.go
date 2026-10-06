@@ -34,6 +34,9 @@ var AllModuleFlags = []string{
 	featureflag.Key("schedule"),
 	// T17: Actividades (extracurriculars and their charge, in finance).
 	featureflag.Key("activities"),
+	// Migrating students from the legacy system's Excel export
+	// (PLAN-student-import). Its routes also need module_students + module_config.
+	featureflag.Key("student_import"),
 }
 
 // ParseEnabledModules turns a comma-separated list of module names (or full

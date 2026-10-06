@@ -37,4 +37,24 @@ describe("FeatureGate", () => {
     );
     expect(screen.queryByText("grades UI")).not.toBeInTheDocument();
   });
+
+  it("gates the legacy student import on its own flag, OFF unless set", () => {
+    const { rerender } = render(
+      <FlagsProvider flags={{ module_students: true, module_config: true }}>
+        <FeatureGate flag="module_student_import">
+          <span>import UI</span>
+        </FeatureGate>
+      </FlagsProvider>
+    );
+    expect(screen.queryByText("import UI")).not.toBeInTheDocument();
+
+    rerender(
+      <FlagsProvider flags={{ module_student_import: true }}>
+        <FeatureGate flag="module_student_import">
+          <span>import UI</span>
+        </FeatureGate>
+      </FlagsProvider>
+    );
+    expect(screen.getByText("import UI")).toBeInTheDocument();
+  });
 });
