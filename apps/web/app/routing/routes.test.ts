@@ -20,6 +20,7 @@ describe("el mapa de rutas", () => {
     ["/becas", { screen: "scholarships" }],
     ["/avisos", { screen: "announcements" }],
     ["/configuracion", { screen: "config" }],
+    ["/configuracion/migrar-alumnos", { screen: "studentImport" }],
     ["/administracion", { screen: "admin" }],
     ["/modulo/reportes", { screen: "module", moduleId: "reportes" }],
     ["/alumnos/stu-1/editar", { screen: "studentEdit", studentId: "stu-1" }],

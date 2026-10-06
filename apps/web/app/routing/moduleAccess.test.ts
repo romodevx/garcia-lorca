@@ -19,6 +19,7 @@ describe("moduleIdOfView", () => {
     [{ screen: "teacherLoad", teacherId: "t1" }, "teachers"],
     [{ screen: "levelDelete", levelId: "l1" }, "settings"],
     [{ screen: "levelPeriods", levelId: "l1" }, "settings"],
+    [{ screen: "studentImport" }, "settings"],
     [{ screen: "uniforms" }, "uniforms"],
     [{ screen: "schedule" }, "schedule"],
     [{ screen: "activities" }, "activities"],
