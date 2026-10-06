@@ -35,3 +35,11 @@ func (r *Repository) RevisionsOf(ctx context.Context, noteID string) ([]domain.N
 func (r *Repository) ExecAsTenant(ctx context.Context, sql string) error {
 	return r.withTenant(ctx, func(tx *gorm.DB) error { return tx.Exec(sql).Error })
 }
+
+// CountAsTenant runs a COUNT query as the app role inside this tenant's
+// context, so a test can prove what RLS lets the tenant see.
+func (r *Repository) CountAsTenant(ctx context.Context, sql string, args ...any) (int64, error) {
+	var n int64
+	err := r.withTenant(ctx, func(tx *gorm.DB) error { return tx.Raw(sql, args...).Scan(&n).Error })
+	return n, err
+}
