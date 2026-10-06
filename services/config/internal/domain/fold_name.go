@@ -36,6 +36,13 @@ func FoldName(name string) string {
 	return b.String()
 }
 
+// CleanName tidies a name for storage: runs of ASCII whitespace become one
+// space and the ends are trimmed, case and accents kept. It uses FoldName's
+// notion of whitespace, so FoldName(CleanName(s)) == FoldName(s).
+func CleanName(name string) string {
+	return strings.Join(strings.FieldsFunc(name, isASCIISpace), " ")
+}
+
 func foldRune(r rune) rune {
 	if base, ok := foldedLetters[r]; ok {
 		return base

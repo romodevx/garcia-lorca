@@ -37,3 +37,24 @@ func TestFoldName(t *testing.T) {
 		})
 	}
 }
+
+// CleanName is how a level created from a spreadsheet is stored: whitespace
+// tidied, case and accents kept — and it never changes the folded key.
+func TestCleanName(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"  Educación   Básica ", "Educación Básica"},
+		{"PREPARATORIA\t\nBilingüe", "PREPARATORIA Bilingüe"},
+		{"Primaria", "Primaria"},
+		{" \t ", ""},
+		{"a b", "a b"},
+	}
+	for _, tt := range tests {
+		got := domain.CleanName(tt.in)
+		if got != tt.want {
+			t.Errorf("CleanName(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+		if domain.FoldName(got) != domain.FoldName(tt.in) {
+			t.Errorf("CleanName(%q) changed the folded key", tt.in)
+		}
+	}
+}
