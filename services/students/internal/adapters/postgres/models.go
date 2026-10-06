@@ -37,8 +37,13 @@ type studentModel struct {
 	AddressPostalCode   string     `gorm:"column:address_postal_code"`
 	AddressMunicipality string     `gorm:"column:address_municipality"`
 	AddressState        string     `gorm:"column:address_state"`
-	CreatedAt           time.Time
-	UpdatedAt           time.Time
+	// BankReference is the BBVA reference, NULL when none (migration 0019).
+	BankReference *string `gorm:"column:bank_reference"`
+	// ImportBatchID names the legacy import that brought the pupil; NULL for
+	// every pupil captured by hand (migration 0019).
+	ImportBatchID *string `gorm:"column:import_batch_id"`
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 func (studentModel) TableName() string { return "students" }
@@ -56,8 +61,10 @@ type enrollmentModel struct {
 	TermID     *string   `gorm:"column:term_id"`
 	Status     string    `gorm:"column:status"`
 	EnrolledAt time.Time `gorm:"column:enrolled_at"`
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	// Origin is manual|import (migration 0019, ADR 0033).
+	Origin    string `gorm:"column:origin"`
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 func (enrollmentModel) TableName() string { return "enrollments" }

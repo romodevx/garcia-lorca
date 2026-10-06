@@ -7,6 +7,10 @@ import (
 	glerrors "github.com/garcia-lorca/pkg/errors"
 )
 
+// ErrBankReferenceTaken is another pupil of the school already holding the
+// reference: a deposit must name exactly one pupil.
+var ErrBankReferenceTaken = glerrors.New(glerrors.KindConflict, "another student already has this bank reference")
+
 // maxBankReferenceDigits is the longest reference BBVA issues the school.
 const maxBankReferenceDigits = 20
 

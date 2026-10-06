@@ -23,6 +23,9 @@ var curpPattern = regexp.MustCompile(
 		`[A-Z]{2}[B-DF-HJ-NP-TV-Z]{3}[A-Z0-9][0-9]$`,
 )
 
+// ErrCURPTaken is another pupil of the school already holding the CURP.
+var ErrCURPTaken = glerrors.New(glerrors.KindConflict, "a student with this CURP already exists")
+
 // CURP is a normalized, validated Mexican national id value object, compared by
 // value and unique per tenant.
 type CURP string

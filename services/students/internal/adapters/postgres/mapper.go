@@ -44,6 +44,7 @@ func toDomain(m studentModel) (*domain.Student, error) {
 		GradeGroup:       m.GradeGroup,
 		GuardianName:     m.GuardianName,
 		Profile:          profile,
+		BankReference:    domain.BankReference(derefOrEmpty(m.BankReference)),
 	}, status)
 	s.AssignEnrollmentNumber(m.EnrollmentNumber)
 	return s, nil
@@ -112,6 +113,7 @@ func fromDomain(s *domain.Student) studentModel {
 		GradeGroup:       s.GradeGroup(),
 		GuardianName:     s.GuardianName(),
 		AdmissionStatus:  s.Status().String(),
+		BankReference:    nullableText(s.BankReference().String()),
 		Phones:           "[]",
 		// The only profile field captured at intake (T11); the rest is written
 		// by UpdateDetails from the file.
@@ -139,10 +141,15 @@ func enrollmentToDomain(m enrollmentModel) (domain.Enrollment, error) {
 	if m.TermID != nil {
 		term = *m.TermID
 	}
+	origin, err := domain.ParseEnrollmentOrigin(m.Origin)
+	if err != nil {
+		return domain.Enrollment{}, glerrors.Wrap(glerrors.KindInternal, "unknown enrollment origin in db", err)
+	}
 	e, err := domain.NewEnrollment(m.ID, m.TenantID, m.StudentID, m.CycleID, m.GroupID, term, status, m.EnrolledAt)
 	if err != nil {
 		return domain.Enrollment{}, err
 	}
+	e = e.WithOrigin(origin)
 	// A non-active enrollment is never written again after its status change
 	// (only an ACTIVE one can be transferred or withdrawn), so updated_at is the
 	// instant it ended. WithEndedAt ignores it for an active one.
@@ -166,6 +173,7 @@ func enrollmentFromDomain(e domain.Enrollment) enrollmentModel {
 		TermID:     term,
 		Status:     e.Status().String(),
 		EnrolledAt: e.EnrolledAt(),
+		Origin:     string(e.Origin()),
 	}
 }
 

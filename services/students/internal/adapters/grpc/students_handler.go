@@ -81,6 +81,7 @@ func (h *StudentsHandler) CreateApplicant(ctx context.Context, req *connect.Requ
 		GradeGroup:       m.GetGradeGroup(),
 		GuardianName:     m.GetGuardianName(),
 		BirthDate:        m.GetBirthDate(),
+		BankReference:    m.GetBankReference(),
 	})
 	if err != nil {
 		return nil, connectErr(err)
@@ -98,6 +99,7 @@ func (h *StudentsHandler) UpdateStudent(ctx context.Context, req *connect.Reques
 		MaternalLastName: m.GetMaternalLastName(),
 		CURP:             m.GetCurp(),
 		Profile:          toDomainProfileInput(m.GetProfile()),
+		BankReference:    m.BankReference, // nil keeps the stored one
 	})
 	if err != nil {
 		return nil, connectErr(err)
@@ -421,6 +423,7 @@ func toProtoStudent(s *domain.Student) *studentsv1.Student {
 		AdmissionStatus:  protoconv.ToProtoStatus(s.Status()),
 		Profile:          toProtoProfile(s.Profile()),
 		EnrollmentNumber: s.EnrollmentNumber(),
+		BankReference:    s.BankReference().String(),
 	}
 }
 
@@ -477,6 +480,7 @@ func toProtoEnrollment(e domain.Enrollment) *studentsv1.Enrollment {
 		Status:     protoconv.ToProtoEnrollmentStatus(e.Status()),
 		EnrolledAt: timestamppb.New(e.EnrolledAt()),
 		EndedAt:    optionalTimestamp(e.EndedAt()),
+		Origin:     string(e.Origin()),
 	}
 }
 
