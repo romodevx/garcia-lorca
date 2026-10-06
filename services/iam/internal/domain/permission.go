@@ -71,6 +71,12 @@ var ownerOnlyPermissions = map[string]struct{}{
 	// for good as far as the UI goes. Owner answer 4: the director alone.
 	// users:write — creating, suspending, editing roles — stays delegable.
 	"users:delete": {},
+	// Importing students from the legacy system (PLAN-student-import item 3)
+	// creates catalog rows and creates + enrolls students in bulk in one call:
+	// it COMPOSES config:write + students:create + students:enroll. Kept closed
+	// under composition like guardians:*, so no non-owner role can be handed a
+	// shortcut to all three at once.
+	"students:import": {},
 }
 
 // IsOwnerOnly reports whether raw is a tenant-wide sensitive read that only the
