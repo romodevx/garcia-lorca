@@ -85,6 +85,16 @@ service StudentsService {
   // and when every seat is taken — opening another group is a decision.
   rpc EnrollIntoGrade(EnrollIntoGradeRequest) returns (EnrollIntoGradeResponse);
 
+  // ImportStudents brings pupils over from the previous system (ADR 0033). Each
+  // row is its own transaction: the pupil is created already ENROLLED in the
+  // row's group, with an enrolment of origin "import" and NO StudentEnrolled
+  // event — the previous system collected their inscription, and finance skips
+  // imported enrolments. The cycle and level are derived from the group, never
+  // taken from the caller. A CURP the school already has is reported, not
+  // touched (O4). validate_only runs every check and writes nothing, so the
+  // preview and the commit walk the same path.
+  rpc ImportStudents(ImportStudentsRequest) returns (ImportStudentsResponse);
+
   // GetEnrollment fetches a single enrollment by id.
   rpc GetEnrollment(GetEnrollmentRequest) returns (GetEnrollmentResponse);
 
@@ -236,6 +246,9 @@ message Student {
   // still carry both surnames in last_name. Display order is always
   // "last_name maternal_last_name first_name".
   string maternal_last_name = 16;
+  // bank_reference is the pupil's BBVA payment reference — the "matrícula" of
+  // the previous system. Unique per school; empty when the pupil has none.
+  string bank_reference = 17;
 }
 
 // StudentProfile is what the office keeps up to date by hand.
@@ -269,6 +282,9 @@ message UpdateStudentRequest {
   string curp = 4;
   StudentProfile profile = 5;
   string maternal_last_name = 6;  // optional; see Student.maternal_last_name
+  // bank_reference: unset keeps the stored one (a client that does not know the
+  // field must not wipe it); "" clears it; any other value replaces it.
+  optional string bank_reference = 7;
 }
 
 message UpdateStudentResponse {
@@ -412,6 +428,7 @@ message CreateApplicantRequest {
   // today), so a pupil registered with it is greeted on their birthday without
   // a second visit to the file.
   string birth_date = 9;
+  string bank_reference = 10;  // optional; see Student.bank_reference
 }
 
 message CreateApplicantResponse {
@@ -526,6 +543,10 @@ message Enrollment {
   // ended_at is when the enrollment stopped being active (withdrawn or
   // transferred): its status-change instant. Unset while ACTIVE.
   google.protobuf.Timestamp ended_at = 9;
+  // origin is how the place was taken: "manual" (or empty, before it was
+  // recorded) or "import" (the legacy import). Finance bills no inscription to
+  // an imported enrolment, nor the fees due before it (ADR 0033).
+  string origin = 10;
 }
 
 // EnrollmentTransfer is a dated, reasoned record of a move between groups.
@@ -814,4 +835,56 @@ message PurgeLevelBatchRequest {
 
 message PurgeLevelBatchResponse {
   int64 purged_rows = 1;
+}
+
+// ImportStudentRow is one pupil of the previous system's spreadsheet, already
+// parsed and structured by the gateway. Domain rules are applied here, in
+// students: an invalid profile sub-field is dropped with a warning instead of
+// losing the row.
+message ImportStudentRow {
+  int32 row_number = 1;  // the spreadsheet row, echoed in the result
+  string curp = 2;
+  string first_name = 3;
+  string last_name = 4;           // paternal
+  string maternal_last_name = 5;  // optional
+  // group_id is the config group the pupil goes into. Empty is legal only with
+  // validate_only, for a group the import has not created yet.
+  string group_id = 6;
+  string bank_reference = 7;      // optional; digits only once trimmed
+  StudentProfile profile = 8;     // lenient: bad sub-fields become warnings
+}
+
+message ImportStudentsRequest {
+  repeated ImportStudentRow rows = 1;  // at most 1,000
+  bool validate_only = 2;
+  // batch_id groups the pupils of one import for audit (a uuid the gateway
+  // mints per commit). Ignored with validate_only.
+  string batch_id = 3;
+}
+
+enum ImportRowOutcome {
+  IMPORT_ROW_OUTCOME_UNSPECIFIED = 0;
+  IMPORT_ROW_OUTCOME_IMPORTED = 1;          // created (or, validating, would be)
+  IMPORT_ROW_OUTCOME_ALREADY_EXISTS = 2;    // the school has this CURP (O4)
+  IMPORT_ROW_OUTCOME_ALREADY_IMPORTED = 3;  // ...already placed in this very group
+  IMPORT_ROW_OUTCOME_REJECTED = 4;          // see reason
+}
+
+message ImportRowResult {
+  int32 row_number = 1;
+  ImportRowOutcome outcome = 2;
+  string student_id = 3;         // set when IMPORTED (commit) or ALREADY_*
+  string enrollment_number = 4;  // the matrícula given, when IMPORTED (commit)
+  // warnings are stable codes the client words: "bank_reference_taken",
+  // "bank_reference_invalid", "phone_invalid", "email_invalid",
+  // "birth_date_invalid", "state_unknown", "postal_code_invalid",
+  // "address_truncated".
+  repeated string warnings = 5;
+  // reason is a stable code when REJECTED: "curp_invalid", "curp_duplicated",
+  // "name_required", "group_not_found", "group_full".
+  string reason = 6;
+}
+
+message ImportStudentsResponse {
+  repeated ImportRowResult results = 1;  // one per row, in request order
 }
