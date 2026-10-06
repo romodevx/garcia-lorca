@@ -151,6 +151,31 @@ describe("step 2 — choices re-preview", () => {
   });
 });
 
+describe("step 2 — answers arriving out of order", () => {
+  // Two quick choices start two previews; if the older answer lands last it
+  // must not repaint the screen with a plan the office already changed.
+  it("keeps the answer of the latest choice", async () => {
+    api.previewStudentImport.mockResolvedValueOnce(UNRESOLVED);
+    let older: (r: importApi.StudentImportResult) => void = () => undefined;
+    let newer: (r: importApi.StudentImportResult) => void = () => undefined;
+    const { user } = renderScreen();
+    await upload(user);
+    const card = await screen.findByRole("region", { name: "Elige a dónde van los alumnos de «Preparatoria»" });
+
+    api.previewStudentImport.mockReturnValueOnce(new Promise((resolve) => { older = resolve; }));
+    await user.click(within(card).getByRole("button", { name: "Bachillerato" }));
+    api.previewStudentImport.mockReturnValueOnce(new Promise((resolve) => { newer = resolve; }));
+    await user.click(within(card).getByRole("button", { name: "+ Crear nivel nuevo «Preparatoria»" }));
+
+    newer(MATCHED);
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Elige a dónde van los alumnos de «Preparatoria»" })).not.toBeInTheDocument());
+    older(UNRESOLVED);
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(screen.queryByRole("region", { name: "Elige a dónde van los alumnos de «Preparatoria»" })).not.toBeInTheDocument();
+  });
+});
+
 describe("step 3 — the commit", () => {
   it("commits the same file with the planHash, then shows the result and the report", async () => {
     let finish: (r: importApi.StudentImportResult) => void = () => undefined;

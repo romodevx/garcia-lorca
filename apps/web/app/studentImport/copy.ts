@@ -14,6 +14,7 @@ export const REASON_TEXT: Readonly<Record<string, string>> = {
   grade_invalid: "Grado no reconocido",
   group_invalid: "Grupo no reconocido",
   level_missing: "Sin escolaridad en el archivo",
+  level_invalid: "Nombre de nivel demasiado largo",
   name_unreadable: "No se pudo leer el nombre",
   level_unresolved: "Falta elegir el nivel",
   not_answered: "El sistema no respondió por esta fila",
@@ -84,6 +85,8 @@ export function failureText(err: unknown): string {
       return TOO_LARGE;
     case "PREVIEW_STALE":
       return STALE_PREVIEW;
+    case "IMPORT_IN_PROGRESS":
+      return "Ya hay una importación en curso para la escuela. Espera a que termine y vuelve a intentarlo.";
     case "LEVELS_UNRESOLVED":
       return "Falta elegir a dónde van algunos niveles.";
     default:

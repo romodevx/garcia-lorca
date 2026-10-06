@@ -31,7 +31,7 @@ describe("reasonText", () => {
 
   it("words every code the gateway, students and config can send", () => {
     const codes = [
-      "status_withdrawn", "status_unknown", "grade_invalid", "group_invalid", "level_missing", "name_unreadable",
+      "status_withdrawn", "status_unknown", "grade_invalid", "group_invalid", "level_missing", "level_invalid", "name_unreadable",
       "level_unresolved", "not_answered", "level_not_found", "level_being_deleted", "invalid_placement",
       "already_exists", "already_imported", "curp_invalid", "curp_duplicated", "name_required", "group_not_found", "group_full",
       "birth_date_from_curp", "birth_date_invalid", "surnames_curp_mismatch", "surnames_ambiguous", "name_without_comma",
@@ -64,6 +64,7 @@ describe("failureText", () => {
     [err(400, "FILE_MISSING_COLUMN", "CURP"), "Al archivo le falta la columna «CURP». Usa el reporte tal como lo exporta el sistema anterior."],
     [err(413, "FILE_TOO_LARGE"), "El archivo pasa de 1,000 filas o 2 MB. Sepáralo por nivel."],
     [err(409, "PREVIEW_STALE"), "Algo cambió desde la vista previa; revísala de nuevo."],
+    [err(409, "IMPORT_IN_PROGRESS"), "Ya hay una importación en curso para la escuela. Espera a que termine y vuelve a intentarlo."],
   ])("words a coded refusal as the plan says", (error, text) => {
     expect(failureText(error)).toBe(text);
   });

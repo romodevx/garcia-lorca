@@ -51,14 +51,22 @@ export function useStudentImport(baseURL: string, onNoCycle: () => void) {
     setError(failureText(err));
   }, [onNoCycle]);
 
+  // Each choice starts a preview; only the latest one's answer may paint the
+  // screen, or an older answer arriving last would show a plan the office has
+  // already changed (and its stale hash would fail the commit).
+  const latest = useRef(0);
+
   const runPreview = useCallback(async (): Promise<void> => {
     const body = request();
     if (body === undefined) return;
+    const mine = ++latest.current;
     try {
-      setPreview(await previewStudentImport(baseURL, body));
+      const answer = await previewStudentImport(baseURL, body);
+      if (mine !== latest.current) return;
+      setPreview(answer);
       setPhase("preview");
     } catch (err) {
-      refused(err);
+      if (mine === latest.current) refused(err);
     }
   }, [baseURL, refused]);
 
