@@ -107,6 +107,13 @@ tags:
       `module_config`); reads `schedule:read`, writes `schedule:write`; the
       teacher's own timetable under `/api/v1/teaching/schedule` needs
       `teaching:read`.
+  - name: student-import
+    description: >
+      ADR 0033 — migrating pupils from the school's previous system, one .xlsx
+      per level. The preview writes nothing; the commit re-sends the same file
+      and the preview's `planHash`, and writes only what the preview showed.
+      Behind `module_students`, `module_config` and `module_student_import`
+      (404 when any is off) and the owner-only `students:import`.
   - name: config-evaluation-periods
     description: >
       T14 — the evaluation periods (trimesters, bimesters…) of each GRADE in a
@@ -2665,6 +2672,93 @@ paths:
               examples:
                 closed: { value: El periodo está cerrado; reábrelo para cambiar sus meses }
                 otherTerm: { value: Ese mes ya pertenece a otro periodo del nivel }
+
+  /api/v1/imports/students/preview:
+    post:
+      tags: [student-import]
+      summary: Preview a legacy student file (ADR 0033)
+      description: >
+        Reads the first sheet (columns by header; "Estado" twice = the pupil's
+        status, then the address's state), decides every row, resolves each
+        level of the file (an existing level of the same name ignoring case,
+        accents and spacing; the office's choice in `levels`; otherwise
+        `unresolved` — a level is never created unless `create` is chosen), and
+        asks config (dry run) and students (validate only) what the commit would
+        do. Writes nothing. Requires `students:import`.
+      operationId: previewStudentImport
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StudentImportRequest' }
+            example:
+              fileName: Bachillerato.xlsx
+              fileBase64: UEsDBBQABgAIAAAAIQ...
+              levels: { Preparatoria: { levelId: 6f1c0e2a-0000-4000-8000-000000000001 } }
+      responses:
+        '200':
+          description: What the commit would do, row by row.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StudentImportResult' }
+        '400': { $ref: '#/components/responses/StudentImportFileError' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409':
+          description: "`NO_ACTIVE_CYCLE`: create and activate a cycle first."
+          content:
+            text/plain:
+              schema: { type: string }
+              example: there is no active school cycle
+        '413': { $ref: '#/components/responses/StudentImportTooLarge' }
+
+  /api/v1/imports/students/commit:
+    post:
+      tags: [student-import]
+      summary: Import the pupils of a previewed legacy file (ADR 0033)
+      description: >
+        Plans the file again and refuses when the result differs from the
+        preview the office approved (409 `PREVIEW_STALE`) or a level is still
+        unresolved (422 `LEVELS_UNRESOLVED`). Then creates the missing
+        level/grade/group (one transaction in config) and each pupil in its own
+        transaction in students: ENROLLED, enrolment origin `import`, no
+        inscription charge, tuition and fees from the import month. A commit cut
+        halfway is finished by sending the same file again: what went in reads
+        `already`. Requires `students:import`.
+      operationId: commitStudentImport
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StudentImportRequest' }
+      responses:
+        '200':
+          description: What was written, row by row, under `batchId`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StudentImportResult' }
+        '400': { $ref: '#/components/responses/StudentImportFileError' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409':
+          description: "`NO_ACTIVE_CYCLE`, or `PREVIEW_STALE`: something changed since the preview."
+          content:
+            text/plain:
+              schema: { type: string }
+              example: the preview changed; review it again
+        '413': { $ref: '#/components/responses/StudentImportTooLarge' }
+        '422':
+          description: "`LEVELS_UNRESOLVED`: names the levels still without a destination."
+          content:
+            text/plain:
+              schema: { type: string }
+              example: "choose where these levels go: Preparatoria"
 
   /api/v1/config/evaluation-periods:
     get:
@@ -6523,6 +6617,21 @@ components:
         text/plain:
           schema: { type: string }
           example: items[0].groupId must be a group id
+    StudentImportFileError:
+      description: >
+        The file cannot be read: `FILE_NOT_XLSX`, `FILE_EMPTY` or
+        `FILE_MISSING_COLUMN` (the body names the column). The code travels in
+        the error-code header.
+      content:
+        text/plain:
+          schema: { type: string }
+          example: CURP
+    StudentImportTooLarge:
+      description: "`FILE_TOO_LARGE`: over 2 MB or 1,000 rows."
+      content:
+        text/plain:
+          schema: { type: string }
+          example: the file is too large
     PlainUnauthorized:
       description: No session, or it expired.
       content:
@@ -6545,6 +6654,91 @@ components:
           example: teaching assignment not found
 
   schemas:
+    StudentImportRequest:
+      type: object
+      required: [fileBase64]
+      properties:
+        fileName: { type: string, example: Primaria.xlsx }
+        fileBase64: { type: string, format: byte, description: The .xlsx, base64 (≤ 2 MB decoded). }
+        levels:
+          type: object
+          description: Where each level of the file goes, keyed by the file's name for it.
+          additionalProperties:
+            type: object
+            properties:
+              levelId: { type: string, format: uuid }
+              create: { type: boolean }
+        capacities:
+          type: object
+          description: Capacity of each group the import creates, keyed `level|ordinal(2 digits)|group`.
+          additionalProperties: { type: integer, minimum: 1 }
+          example: { "Primaria|01|A": 30 }
+        planHash: { type: string, description: The preview's planHash; required by the commit. }
+    StudentImportResult:
+      type: object
+      required: [cycle, levels, placements, rows, summary, unresolved, planHash]
+      properties:
+        cycle:
+          type: object
+          required: [id, name]
+          properties:
+            id: { type: string, format: uuid }
+            name: { type: string, example: 2026-2027 }
+        levels:
+          type: array
+          items:
+            type: object
+            required: [fileName, status, students, noTuition]
+            properties:
+              fileName: { type: string, example: Preparatoria }
+              status: { type: string, enum: [matched, chosen, create, unresolved] }
+              levelId: { type: string, format: uuid }
+              levelName: { type: string, example: Bachillerato }
+              students: { type: integer, example: 30 }
+              noTuition: { type: boolean, description: The level has no active tuition table in the cycle — no colegiatura will be billed. }
+        placements:
+          type: array
+          items:
+            type: object
+            required: [key, level, grade, group, students, capacity, levelCreated, gradeCreated, groupCreated]
+            properties:
+              key: { type: string, example: "Primaria|01|A" }
+              level: { type: string }
+              grade: { type: string, example: 1° }
+              group: { type: string, example: A }
+              students: { type: integer }
+              capacity: { type: integer }
+              levelCreated: { type: boolean }
+              gradeCreated: { type: boolean }
+              groupCreated: { type: boolean }
+              error: { type: string, enum: [level_not_found, level_being_deleted, invalid_placement] }
+        rows:
+          type: array
+          items:
+            type: object
+            required: [row, name, curp, destination, status]
+            properties:
+              row: { type: integer, description: The spreadsheet row (the header is 1). }
+              name: { type: string }
+              curp: { type: string }
+              destination: { type: string, example: Primaria · 3° · A }
+              status: { type: string, enum: [new, warning, already, skipped, pending] }
+              reason: { type: string, example: status_withdrawn }
+              warnings: { type: array, items: { type: string }, example: [bank_reference_invalid] }
+              enrollmentNumber: { type: string, example: 2026-00042 }
+        summary:
+          type: object
+          required: [total, new, warnings, already, skipped, pending]
+          properties:
+            total: { type: integer }
+            new: { type: integer }
+            warnings: { type: integer, description: A subset of new. }
+            already: { type: integer }
+            skipped: { type: integer }
+            pending: { type: integer }
+        unresolved: { type: array, items: { type: string }, example: [Preparatoria] }
+        planHash: { type: string }
+        batchId: { type: string, format: uuid, description: Set by the commit. }
     ScheduleBoard:
       type: object
       description: The base timetable of a cycle and the catalog to draw it (T16).
