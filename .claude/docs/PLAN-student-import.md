@@ -133,7 +133,7 @@ finance: RunBilling / EnsureEnrollmentCharge / inscriptionMoves: origin='import'
 
 ### Cambios por capa (orden del flujo de módulo; TDD en cada paso: test rojo → verde → refactor)
 
-1. **ADR 0029**: importación de alumnos y `enrollments.origin`. Es una frontera entre servicios (students ↔ finance).
+1. **ADR 0033**: importación de alumnos y `enrollments.origin`. Es una frontera entre servicios (students ↔ finance).
 2. **Contratos**:
    - `students.v1`: `Student.bank_reference = 17`, `CreateApplicantRequest.bank_reference = 10`, `UpdateStudentRequest` con `optional string bank_reference = 7` (si no viene, se conserva); `Enrollment.origin = 10`; RPC `ImportStudents{group rows, validate_only, batch_id}` con resultado por fila.
    - `config.v1`: `EnsurePlacements{cycle_id, placements[{level_id|new_level_name, ordinal, group_name, capacity}], dry_run}`.

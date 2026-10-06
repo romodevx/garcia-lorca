@@ -448,3 +448,27 @@ func (p TuitionPlan) FeeInstallments(cycleStart time.Time) []FeeInstallment {
 	}
 	return out
 }
+
+// FeeInstallmentsFrom is the part of the fees a pupil who joined on joinedOn
+// owes, under the same rule InstallmentsFrom applies to the tuition: the months
+// before they joined are not theirs, and the month they join is, due no earlier
+// than the day they arrived. A zero joinedOn, or one not after the cycle start,
+// is the whole list.
+func (p TuitionPlan) FeeInstallmentsFrom(cycleStart, joinedOn time.Time) []FeeInstallment {
+	all := p.FeeInstallments(cycleStart)
+	if joinedOn.IsZero() || !joinedOn.After(cycleStart) {
+		return all
+	}
+	joinedMonth := monthIndex(joinedOn)
+	out := make([]FeeInstallment, 0, len(all))
+	for _, item := range all {
+		if monthIndex(item.DueOn) < joinedMonth {
+			continue
+		}
+		if monthIndex(item.DueOn) == joinedMonth && item.DueOn.Before(joinedOn) {
+			item.DueOn = joinedOn
+		}
+		out = append(out, item)
+	}
+	return out
+}

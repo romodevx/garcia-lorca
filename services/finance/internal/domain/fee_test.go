@@ -175,3 +175,41 @@ func TestAnUnsetInscriptionDateIsZero(t *testing.T) {
 		t.Fatal("an unset inscription deadline must read as unset")
 	}
 }
+
+// A pupil brought over from the previous system in October already settled
+// August and September there. The fees of the months before they joined are not
+// theirs here; the month they join is, but not late: its deadline moves to the
+// day they joined, inside the same month so the charge's reference holds.
+func TestFeeInstallmentsFromSkipsTheMonthsBeforeTheJoinDate(t *testing.T) {
+	plan := planWithFees(t, domain.Fee{Name: "Materiales", AmountCents: 300000, Months: []int{8, 9, 10, 11}})
+	cycleStart := time.Date(2026, time.August, 1, 0, 0, 0, 0, time.UTC)
+	joined := time.Date(2026, time.October, 20, 0, 0, 0, 0, time.UTC)
+
+	got := plan.FeeInstallmentsFrom(cycleStart, joined)
+
+	if len(got) != 2 {
+		t.Fatalf("want the October and November parts, got %d", len(got))
+	}
+	if got[0].DueOn != joined {
+		t.Errorf("October part due %s, want the join day %s", got[0].DueOn.Format(time.DateOnly), joined.Format(time.DateOnly))
+	}
+	if got[1].DueOn.Month() != time.November || got[1].DueOn.Day() != 10 {
+		t.Errorf("November part due %s, want 2026-11-10", got[1].DueOn.Format(time.DateOnly))
+	}
+	if got[0].Part != 3 || got[0].Of != 4 {
+		t.Errorf("October part labelled %d de %d, want 3 de 4", got[0].Part, got[0].Of)
+	}
+}
+
+// Nobody recorded a join date, or they joined when the year opened: the whole
+// list, exactly as FeeInstallments gives it.
+func TestFeeInstallmentsFromWithoutALaterJoinIsTheWholeList(t *testing.T) {
+	plan := planWithFees(t, domain.Fee{Name: "Materiales", AmountCents: 300000, Months: []int{8, 9, 10}})
+	cycleStart := time.Date(2026, time.August, 1, 0, 0, 0, 0, time.UTC)
+
+	for name, joined := range map[string]time.Time{"zero": {}, "at start": cycleStart} {
+		if got := plan.FeeInstallmentsFrom(cycleStart, joined); len(got) != 3 {
+			t.Errorf("%s: got %d parts, want 3", name, len(got))
+		}
+	}
+}

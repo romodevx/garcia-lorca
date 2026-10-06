@@ -117,6 +117,7 @@ func toRef(e *studentsv1.Enrollment) ports.EnrollmentRef {
 		// and an epoch join date would put every pupil before every cycle — the
 		// same answer as zero here, but by accident rather than on purpose.
 		EnrolledAt: enrolledAt(e.GetEnrolledAt()),
+		Origin:     e.GetOrigin(),
 	}
 }
 

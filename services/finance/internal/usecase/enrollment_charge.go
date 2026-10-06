@@ -42,6 +42,10 @@ func (s *FinanceService) EnsureEnrollmentCharge(ctx context.Context, cycleID, st
 	var joinedOn time.Time
 	for _, e := range enrollments {
 		if e.StudentID == studentID && e.Status == enrolmentStatusActive {
+			if e.Imported() {
+				// Inscribed by the previous system (ADR 0033): nothing to bill.
+				return false, nil
+			}
 			groupID, joinedOn = e.GroupID, e.EnrolledAt
 			break
 		}
