@@ -145,6 +145,12 @@ const ICON_PATHS = {
       <path d="M4.5 19.5h15" />
     </g>
   ),
+  upload: (
+    <g>
+      <path d="M12 15V3M7.5 7.5 12 3l4.5 4.5" />
+      <path d="M4.5 19.5h15" />
+    </g>
+  ),
   mail: (
     <g>
       <rect x="3" y="5" width="18" height="14" rx="2" />

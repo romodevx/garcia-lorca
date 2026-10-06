@@ -99,9 +99,12 @@ export function catalogTree(placements: readonly ImportPlacement[]): CatalogTree
   return { counts, levels };
 }
 
-/** The school's names for the levels this file goes to (the button and the result say them). */
+/**
+ * The names of the levels this file goes to (the button and the result say
+ * them): the school's name once chosen, the file's own while still unresolved.
+ */
 export function destinationNames(result: Pick<StudentImportResult, "levels">): string[] {
-  return result.levels.filter((l) => l.status !== "unresolved").map((l) => l.levelName ?? l.fileName);
+  return result.levels.map((l) => l.levelName ?? l.fileName);
 }
 
 /** Rows students never answered: the commit was cut halfway. */

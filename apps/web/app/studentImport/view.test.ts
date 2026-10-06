@@ -83,7 +83,7 @@ describe("catalogTree", () => {
 });
 
 describe("destinationNames", () => {
-  it("lists the school's names for the levels the file goes to, without unresolved ones", () => {
+  it("lists the school's names for the levels the file goes to; an unresolved one by the file's name", () => {
     const result = {
       levels: [
         { fileName: "Preparatoria", status: "chosen", levelName: "Bachillerato", students: 30, noTuition: false },
@@ -92,7 +92,7 @@ describe("destinationNames", () => {
         { fileName: "Otro", status: "unresolved", students: 2, noTuition: false },
       ],
     } as Pick<StudentImportResult, "levels">;
-    expect(destinationNames(result)).toEqual(["Bachillerato", "Primaria", "Kinder"]);
+    expect(destinationNames(result)).toEqual(["Bachillerato", "Primaria", "Kinder", "Otro"]);
   });
 });
 

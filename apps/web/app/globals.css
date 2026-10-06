@@ -668,3 +668,29 @@ input { font-family: var(--font-ui); }
   .students-room-inline { display: block; }
   .students-name { white-space: normal !important; }
 }
+
+/* ============================================================
+   Migrar alumnos: la tabla de la vista previa (ADR 0033). Seis
+   columnas no caben en un teléfono: por debajo de 640px cada fila
+   es una tarjeta — el alumno arriba, cada dato con su etiqueta.
+   `!important` sólo donde el borde vive en línea.
+   ============================================================ */
+@media (max-width: 640px) {
+  .import-table thead { display: none; }
+  .import-table tr {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    column-gap: 12px;
+    border-top: 1px solid var(--border);
+    padding: 6px 0;
+  }
+  .import-table th[scope="row"] { order: -1; flex-basis: 100%; padding-bottom: 0 !important; border-top: none !important; }
+  .import-table td { border-top: none !important; padding: 4px 6px !important; }
+  .import-table td[data-label]::before {
+    content: attr(data-label) " ";
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-muted);
+  }
+}
