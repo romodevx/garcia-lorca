@@ -22,9 +22,9 @@ describe("Stepper", () => {
 
   it("paints the current step in the tone it is given", () => {
     const { rerender } = render(<Stepper steps={STEPS} current="upload" tone="red" />);
-    expect(screen.getAllByRole("listitem")[0].style.border).toContain("var(--red)");
+    expect(screen.getAllByRole("listitem")[0]?.style.border).toContain("var(--red)");
 
     rerender(<Stepper steps={STEPS} current="upload" tone="forest" />);
-    expect(screen.getAllByRole("listitem")[0].style.border).toContain("var(--forest)");
+    expect(screen.getAllByRole("listitem")[0]?.style.border).toContain("var(--forest)");
   });
 });
