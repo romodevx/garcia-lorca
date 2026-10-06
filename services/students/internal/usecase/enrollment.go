@@ -64,11 +64,8 @@ func (s *EnrollmentService) Enroll(ctx context.Context, studentID, groupID, term
 		return domain.Enrollment{}, err // KindNotFound propagates
 	}
 
-	grp, err := s.catalog.GroupByID(ctx, groupID)
+	grp, err := groupOf(ctx, s.catalog, groupID)
 	if err != nil {
-		if glerrors.KindOf(err) == glerrors.KindNotFound {
-			return domain.Enrollment{}, glerrors.New(glerrors.KindInvalid, "group not found")
-		}
 		return domain.Enrollment{}, err
 	}
 	cycleID := grp.CycleID // DERIVED from the group — never a client argument.
@@ -216,11 +213,8 @@ func (s *EnrollmentService) Transfer(ctx context.Context, enrollmentID, toGroupI
 		return domain.Enrollment{}, glerrors.New(glerrors.KindInvalid, "enrollment is not active")
 	}
 
-	toGrp, err := s.catalog.GroupByID(ctx, toGroupID)
+	toGrp, err := groupOf(ctx, s.catalog, toGroupID)
 	if err != nil {
-		if glerrors.KindOf(err) == glerrors.KindNotFound {
-			return domain.Enrollment{}, glerrors.New(glerrors.KindInvalid, "group not found")
-		}
 		return domain.Enrollment{}, err
 	}
 	if toGrp.CycleID != enr.CycleID() {
@@ -267,11 +261,8 @@ func (s *EnrollmentService) Transfer(ctx context.Context, enrollmentID, toGroupI
 // level id (migration 0007 could not link it) has nothing to compare against
 // and otherwise passes.
 func (s *EnrollmentService) requireSameLevel(ctx context.Context, student *domain.Student, gradeLevelID string) error {
-	got, err := s.catalog.LevelOfGrade(ctx, gradeLevelID)
+	got, err := levelOfGrade(ctx, s.catalog, gradeLevelID)
 	if err != nil {
-		if glerrors.KindOf(err) == glerrors.KindNotFound {
-			return glerrors.New(glerrors.KindInvalid, "ese grado no existe")
-		}
 		return err
 	}
 	want := student.Level().ID()
@@ -280,6 +271,28 @@ func (s *EnrollmentService) requireSameLevel(ctx context.Context, student *domai
 			"ese grupo es de otro nivel: el alumno está en "+student.Level().Name())
 	}
 	return nil
+}
+
+// groupOf resolves a group against config. A group config does not know is the
+// caller's mistake (KindInvalid "group not found"); any other failure is
+// config's and propagates unchanged.
+func groupOf(ctx context.Context, catalog ports.CatalogValidator, groupID string) (ports.GroupRef, error) {
+	grp, err := catalog.GroupByID(ctx, groupID)
+	if glerrors.KindOf(err) == glerrors.KindNotFound {
+		return ports.GroupRef{}, glerrors.New(glerrors.KindInvalid, "group not found")
+	}
+	return grp, err
+}
+
+// levelOfGrade resolves the config level a grade belongs to. The lookup also
+// refuses a level whose deletion is running (LEVEL_BEING_DELETED, ADR 0021). A
+// grade config does not know is KindInvalid.
+func levelOfGrade(ctx context.Context, catalog ports.CatalogValidator, gradeLevelID string) (string, error) {
+	level, err := catalog.LevelOfGrade(ctx, gradeLevelID)
+	if glerrors.KindOf(err) == glerrors.KindNotFound {
+		return "", glerrors.New(glerrors.KindInvalid, "ese grado no existe")
+	}
+	return level, err
 }
 
 // Withdraw terminates an active enrollment. Withdrawing a non-active enrollment
