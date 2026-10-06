@@ -26,6 +26,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_students_bank_reference
     WHERE bank_reference IS NOT NULL;
 
 ALTER TABLE enrollments ADD COLUMN IF NOT EXISTS origin text NOT NULL DEFAULT 'manual';
+-- Re-runnable: a second run must not fail on the constraint the first added.
+ALTER TABLE enrollments DROP CONSTRAINT IF EXISTS enrollments_origin_ck;
 ALTER TABLE enrollments ADD CONSTRAINT enrollments_origin_ck CHECK (origin IN ('manual', 'import'));
 
 COMMIT;

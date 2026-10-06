@@ -387,7 +387,11 @@ func (s *ImportService) settleRace(ctx context.Context, curp domain.CURP, groupI
 	if err != nil {
 		return err
 	}
-	settleExisting(result, existing[curp.String()], groupID)
+	pupil, ok := existing[curp.String()]
+	if !ok {
+		return fmt.Errorf("import: CURP %s reported taken but not found", curp.String()[:4]+"…")
+	}
+	settleExisting(result, pupil, groupID)
 	return nil
 }
 

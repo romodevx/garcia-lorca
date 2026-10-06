@@ -353,23 +353,31 @@ func (p TuitionPlan) Installments(cycleStart time.Time) []DueInstallment {
 // A zero joinedOn is every pupil enrolled before the join date was recorded at
 // all. They get the whole year, exactly as they do today.
 func (p TuitionPlan) InstallmentsFrom(cycleStart, joinedOn time.Time) []DueInstallment {
-	all := p.Installments(cycleStart)
+	return fromJoin(p.Installments(cycleStart), cycleStart, joinedOn,
+		func(i DueInstallment) time.Time { return i.DueOn },
+		func(i *DueInstallment, due time.Time) { i.DueOn = due })
+}
+
+// fromJoin keeps the items a pupil who joined on joinedOn owes: none from the
+// months before, and every one of their own month — EVERY one, not just the
+// first: a year split "diciembre a la mitad" has two payments in one month, and
+// the second left on the plan's day was overdue the moment they enrolled — due
+// no earlier than the day they arrived. A zero joinedOn, or one not after the
+// cycle start, is the whole list. Shared by tuition and fees so the two can
+// never drift apart.
+func fromJoin[T any](all []T, cycleStart, joinedOn time.Time, due func(T) time.Time, setDue func(*T, time.Time)) []T {
 	if joinedOn.IsZero() || !joinedOn.After(cycleStart) {
 		return all
 	}
-
 	joinedMonth := monthIndex(joinedOn)
-	out := make([]DueInstallment, 0, len(all))
+	out := make([]T, 0, len(all))
 	for _, item := range all {
-		if monthIndex(item.DueOn) < joinedMonth {
+		on := due(item)
+		if monthIndex(on) < joinedMonth {
 			continue
 		}
-		if monthIndex(item.DueOn) == joinedMonth && item.DueOn.Before(joinedOn) {
-			// EVERY payment of their own month, not just the first: a year split
-			// "diciembre a la mitad" has two payments in one month, and the
-			// second one left on the plan's day was overdue the moment they
-			// enrolled.
-			item.DueOn = joinedOn
+		if monthIndex(on) == joinedMonth && on.Before(joinedOn) {
+			setDue(&item, joinedOn)
 		}
 		out = append(out, item)
 	}
@@ -455,20 +463,7 @@ func (p TuitionPlan) FeeInstallments(cycleStart time.Time) []FeeInstallment {
 // than the day they arrived. A zero joinedOn, or one not after the cycle start,
 // is the whole list.
 func (p TuitionPlan) FeeInstallmentsFrom(cycleStart, joinedOn time.Time) []FeeInstallment {
-	all := p.FeeInstallments(cycleStart)
-	if joinedOn.IsZero() || !joinedOn.After(cycleStart) {
-		return all
-	}
-	joinedMonth := monthIndex(joinedOn)
-	out := make([]FeeInstallment, 0, len(all))
-	for _, item := range all {
-		if monthIndex(item.DueOn) < joinedMonth {
-			continue
-		}
-		if monthIndex(item.DueOn) == joinedMonth && item.DueOn.Before(joinedOn) {
-			item.DueOn = joinedOn
-		}
-		out = append(out, item)
-	}
-	return out
+	return fromJoin(p.FeeInstallments(cycleStart), cycleStart, joinedOn,
+		func(i FeeInstallment) time.Time { return i.DueOn },
+		func(i *FeeInstallment, due time.Time) { i.DueOn = due })
 }

@@ -428,6 +428,16 @@ func TestImportACURPTakenMeanwhileIsAlreadyExists(t *testing.T) {
 	}
 }
 
+// A CURP reported taken that cannot then be read back is not "ya estaba": it
+// names no pupil. The request fails loudly instead of answering a blank row.
+func TestImportACURPTakenButNotFoundIsAnError(t *testing.T) {
+	f := newImportFixture(t)
+	f.repo.interrupt[importCURP] = func() error { return fmt.Errorf("%w: race", domain.ErrCURPTaken) }
+	if _, err := f.svc.ImportStudents(context.Background(), []usecase.ImportRow{row(1, importCURP)}, false, importBatch); err == nil {
+		t.Fatal("want an error when the winning pupil cannot be found")
+	}
+}
+
 func TestImportRefusesTheWholeRequest(t *testing.T) {
 	t.Run("more than 1,000 rows", func(t *testing.T) {
 		f := newImportFixture(t)
