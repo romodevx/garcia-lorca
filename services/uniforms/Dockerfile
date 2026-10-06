@@ -3,7 +3,7 @@
 #   docker build -f services/uniforms/Dockerfile -t uniforms .
 
 # ---- builder --------------------------------------------------------------
-FROM golang:1.25-bookworm AS builder
+FROM golang:1.25.13-bookworm AS builder
 
 ENV CGO_ENABLED=0 GOOS=linux
 

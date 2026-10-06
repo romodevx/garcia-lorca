@@ -3,7 +3,7 @@
 #   docker build -f services/config/Dockerfile -t config .
 
 # ---- builder --------------------------------------------------------------
-FROM golang:1.25-bookworm AS builder
+FROM golang:1.25.13-bookworm AS builder
 
 ENV CGO_ENABLED=0 GOOS=linux
 
