@@ -28,6 +28,8 @@ type Student struct {
 	// enrollmentNumber is the matrícula (task 13): <year>-<five digits>, one
 	// run per school and year, given when the pupil is first stored.
 	enrollmentNumber string
+	// bankReference is the BBVA deposit reference (ADR 0033); empty if none.
+	bankReference BankReference
 }
 
 // AssignEnrollmentNumber records the matrícula the store gave the pupil.
@@ -54,6 +56,8 @@ type NewApplicantParams struct {
 	// Profile is the file's editable half (birth date, contact, address). A new
 	// applicant may arrive with its birth date (T11); the rest starts empty.
 	Profile Profile
+	// BankReference is optional: the zero value is a pupil without one.
+	BankReference BankReference
 }
 
 // AdmissionChangedEvent is emitted on every admission transition (maps to the
@@ -101,7 +105,27 @@ func NewApplicant(p NewApplicantParams) (*Student, error) {
 		guardianName:     strings.TrimSpace(p.GuardianName),
 		status:           AdmissionPending,
 		profile:          p.Profile,
+		bankReference:    p.BankReference,
 	}, nil
+}
+
+// NewImported creates a pupil brought from the previous system (ADR 0033).
+// They were already enrolled — and paid — there, so they enter enrolled. The
+// machine is walked (pending → accepted → enrolled), not jumped, so the rules
+// stay in one place; the events are discarded on purpose: an import announces
+// nothing (no StudentEnrolled, no AdmissionStatusChanged).
+func NewImported(p NewApplicantParams) (*Student, error) {
+	s, err := NewApplicant(p)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := s.Accept(); err != nil {
+		return nil, err
+	}
+	if _, _, err := s.Enroll(""); err != nil {
+		return nil, err
+	}
+	return s, nil
 }
 
 // Rehydrate rebuilds a Student from persisted state (used by the repository; it
@@ -111,7 +135,7 @@ func Rehydrate(p NewApplicantParams, status AdmissionStatus) *Student {
 		id: p.ID, tenantID: p.TenantID, curp: p.CURP,
 		firstName: p.FirstName, lastName: p.LastName, maternalLastName: p.MaternalLastName, level: p.Level,
 		gradeGroup: p.GradeGroup, guardianName: p.GuardianName, status: status,
-		profile: p.Profile,
+		profile: p.Profile, bankReference: p.BankReference,
 	}
 }
 
@@ -176,6 +200,13 @@ func (s *Student) GradeGroup() string       { return s.gradeGroup }
 func (s *Student) GuardianName() string     { return s.guardianName }
 func (s *Student) Status() AdmissionStatus  { return s.status }
 func (s *Student) Profile() Profile         { return s.profile }
+
+// BankReference is the pupil's BBVA reference; zero when none.
+func (s *Student) BankReference() BankReference { return s.bankReference }
+
+// ChangeBankReference sets (or, with the zero value, clears) the reference.
+// Uniqueness per school is the store's to enforce.
+func (s *Student) ChangeBankReference(ref BankReference) { s.bankReference = ref }
 
 // UpdateDetails corrects the file: names, CURP and the profile. The level and
 // the group are NOT here — a group changes by transfer, which keeps its history
