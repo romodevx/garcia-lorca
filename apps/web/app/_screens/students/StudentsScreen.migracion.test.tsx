@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -43,6 +43,21 @@ describe("StudentsScreen — the way into Migrar alumnos (ADR 0033)", () => {
     await user.click(await screen.findByRole("button", { name: "¿Vienes de otro sistema?" }));
 
     expect(onOpenImport).toHaveBeenCalled();
+  });
+
+  it("finds a pupil by the BBVA reference the migration brought", async () => {
+    const pupil = (id: string, first: string, bankReference: string): studentsApi.Student => ({
+      id, curp: `CURP${id}`, firstName: first, lastName: "Prueba", level: "", levelId: "", gradeGroup: "", guardianName: "", admissionStatus: "enrolled", bankReference,
+    });
+    students.listStudents.mockResolvedValue([pupil("1", "Regina", "231076"), pupil("2", "Diego", "998877")]);
+    const user = userEvent.setup();
+    render(<StudentsScreen onBack={() => {}} />);
+    await screen.findByText("Prueba Diego");
+
+    await user.type(screen.getByLabelText("Buscar"), "231076");
+
+    await waitFor(() => expect(screen.queryByText("Prueba Diego")).toBeNull());
+    expect(screen.getByText("Prueba Regina")).toBeInTheDocument();
   });
 
   it("offers nothing without the permission and flag (no callback given)", async () => {

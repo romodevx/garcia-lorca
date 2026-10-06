@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { birthDateError, phoneDigits, phoneError, postalCodeError } from "./profileRules";
+import { bankReferenceError, birthDateError, phoneDigits, phoneError, postalCodeError } from "./profileRules";
 
 describe("profile rules", () => {
   it.each([
@@ -29,5 +29,16 @@ describe("profile rules", () => {
     expect(birthDateError("2026-09-25", "2026-09-24")).toBe("La fecha de nacimiento no puede ser futura.");
     expect(birthDateError("2026-09-24", "2026-09-24")).toBeUndefined();
     expect(birthDateError("2019-03-12", "2026-09-24")).toBeUndefined();
+  });
+
+  it.each([
+    ["231076", undefined],
+    ["", undefined],
+    ["12345678901234567890", undefined],
+    ["123456789012345678901", "Sólo dígitos, hasta 20."],
+    ["S/R", "Sólo dígitos, hasta 20."],
+    ["23 1076", "Sólo dígitos, hasta 20."],
+  ])("BBVA reference %s", (raw, want) => {
+    expect(bankReferenceError(raw)).toBe(want);
   });
 });

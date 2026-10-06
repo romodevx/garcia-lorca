@@ -900,7 +900,7 @@ export function StudentsScreen({ onBack, onEdit, canWriteNotes = false, canVoidA
         maternalLastName: s.maternalLastName,
         ...p,
         student: s,
-        searchText: [s.curp, s.guardianName],
+        searchText: [s.curp, s.guardianName, s.bankReference ?? ""],
         levelName: nameOf.get(p.levelId) ?? levelOf(s),
         // Placed: this cycle's classroom, or honestly none. Not yet known: the file's letter.
         room: placementReady ? (labelOf.get(p.groupId) ?? NO_GROUP) : groupOf(s),
@@ -1033,7 +1033,7 @@ export function StudentsScreen({ onBack, onEdit, canWriteNotes = false, canVoidA
         <StudentFilters
           filter={filter}
           selectable
-          searchHint="Buscar alumno, CURP o tutor…"
+          searchHint="Buscar alumno, CURP, tutor o referencia BBVA…"
           extraActive={tab !== "all"}
           onClear={() => setTab("all")}
           leading={

@@ -19,6 +19,13 @@ export function postalCodeError(raw: string): string | undefined {
   return POSTAL_CODE.test(raw.trim()) ? undefined : "El código postal lleva 5 dígitos.";
 }
 
+/** The BBVA reference (ADR 0033): 1–20 digits, or empty for "none". */
+const BANK_REFERENCE = /^[0-9]{0,20}$/;
+
+export function bankReferenceError(raw: string): string | undefined {
+  return BANK_REFERENCE.test(raw) ? undefined : "Sólo dígitos, hasta 20.";
+}
+
 /** Both ISO dates (aaaa-mm-dd), so comparing the strings compares the days. */
 export function birthDateError(value: string, today: string): string | undefined {
   return value > today ? "La fecha de nacimiento no puede ser futura." : undefined;
