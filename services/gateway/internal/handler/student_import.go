@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
@@ -10,11 +11,14 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/garcia-lorca/services/gateway/internal/client"
 	"github.com/garcia-lorca/services/gateway/internal/legacyimport"
+	"github.com/garcia-lorca/services/gateway/internal/middleware"
 )
 
 // --- legacy student import (ADR 0033) -----------------------------------------
@@ -52,16 +56,30 @@ type ImportPricing interface {
 }
 
 // StudentImportDeps wires the handler. Pricing may be nil (no warning then).
+//
+// WriteBudget is the whole commit route's time, set as ITS write deadline: the
+// server-wide write timeout is too short for re-planning plus writing a large
+// file, and a commit that outlives the deadline lands while the office sees a
+// dropped connection instead of the result.
 type StudentImportDeps struct {
-	Catalog       ImportCatalog
-	Roster        ImportRoster
-	Pricing       ImportPricing
-	NewID         func() string
-	CommitTimeout time.Duration
+	Catalog     ImportCatalog
+	Roster      ImportRoster
+	Pricing     ImportPricing
+	NewID       func() string
+	WriteBudget time.Duration
 }
 
 // StudentImportHandler serves /api/v1/imports/students/{preview,commit}.
-type StudentImportHandler struct{ d StudentImportDeps }
+//
+// running holds the schools with a commit in flight on this instance: one
+// import at a time per school, so two tabs cannot write the same file side by
+// side. It is instance-local; the gateway runs a single instance today, and a
+// second one would still be safe for the data (CURP uniqueness turns the
+// loser's rows into "ya estaba") — only slower.
+type StudentImportHandler struct {
+	d       StudentImportDeps
+	running sync.Map
+}
 
 // NewStudentImportHandler builds the handler.
 func NewStudentImportHandler(d StudentImportDeps) *StudentImportHandler {
@@ -76,6 +94,7 @@ const (
 	codeFileMissingColumn = "FILE_MISSING_COLUMN"
 	codeNoActiveCycle     = "NO_ACTIVE_CYCLE"
 	codeLevelsUnresolved  = "LEVELS_UNRESOLVED"
+	codeImportInProgress  = "IMPORT_IN_PROGRESS"
 )
 
 // Level resolution states.
@@ -100,8 +119,16 @@ const (
 // pupils it receives, never so small the next enrolment finds it full.
 const defaultGroupCapacity = 30
 
+// maxGroupCapacity bounds a capacity typed in the preview: a classroom, not a
+// number that wraps when it is sent as int32.
+const maxGroupCapacity = 500
+
 // maxImportBody bounds the JSON request: a 2 MB file is ~2.7 MB in base64.
 const maxImportBody = 4 << 20
+
+// commitAnswerMargin is kept back from the route's deadline for writing the
+// answer after the detached commit returns.
+const commitAnswerMargin = 3 * time.Second
 
 type levelChoice struct {
 	LevelID string `json:"levelId,omitempty"`
@@ -180,6 +207,7 @@ type importResponse struct {
 type importRun struct {
 	resp       importResponse
 	planned    legacyimport.Planned
+	fileDigest string                      // sha256 of the uploaded bytes: the plan approves THIS file
 	keys       []legacyimport.PlacementKey // in the order sent to config
 	inputs     []client.PlacementInput
 	placements map[legacyimport.PlacementKey]client.PlacementResult
@@ -202,6 +230,10 @@ func (h *StudentImportHandler) Preview(w http.ResponseWriter, r *http.Request) {
 // Commit: POST /api/v1/imports/students/commit — writes what the preview
 // showed, or nothing (409 PREVIEW_STALE, 422 LEVELS_UNRESOLVED).
 func (h *StudentImportHandler) Commit(w http.ResponseWriter, r *http.Request) {
+	deadline := time.Now().Add(h.d.WriteBudget)
+	if err := http.NewResponseController(w).SetWriteDeadline(deadline); err != nil && !errors.Is(err, http.ErrNotSupported) {
+		slog.WarnContext(r.Context(), "student import: cannot extend the write deadline", "err", err)
+	}
 	req, ok := decodeImport(w, r)
 	if !ok {
 		return
@@ -219,8 +251,14 @@ func (h *StudentImportHandler) Commit(w http.ResponseWriter, r *http.Request) {
 			"choose where these levels go: "+strings.Join(run.resp.Unresolved, ", "))
 		return
 	}
+	who, _ := middleware.PrincipalFrom(r.Context())
+	if _, busy := h.running.LoadOrStore(who.TenantID, struct{}{}); busy {
+		writeCodedError(w, http.StatusConflict, codeImportInProgress, "another import is running for this school")
+		return
+	}
+	defer h.running.Delete(who.TenantID)
 	// Detached: a closed tab must not stop an import halfway through a level.
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), h.d.CommitTimeout)
+	ctx, cancel := context.WithDeadline(context.WithoutCancel(r.Context()), deadline.Add(-commitAnswerMargin))
 	defer cancel()
 	batch := h.d.NewID()
 	resp, err := h.write(ctx, run, batch)
@@ -228,7 +266,9 @@ func (h *StudentImportHandler) Commit(w http.ResponseWriter, r *http.Request) {
 		writeConnectError(w, err)
 		return
 	}
-	slog.InfoContext(ctx, "student import committed", "batch", batch, "rows", resp.Summary.Total,
+	// Who waived these pupils' inscription, and when: the batch id is on every
+	// pupil it created (students.import_batch_id).
+	slog.InfoContext(ctx, "student import committed", "batch", batch, "by", who.UserID, "rows", resp.Summary.Total,
 		"new", resp.Summary.New, "already", resp.Summary.Already, "skipped", resp.Summary.Skipped)
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -250,11 +290,11 @@ func decodeImport(w http.ResponseWriter, r *http.Request) (importRequest, bool) 
 
 // plan runs the whole preview. On failure it has already answered.
 func (h *StudentImportHandler) plan(w http.ResponseWriter, ctx context.Context, req importRequest) (importRun, bool) {
-	rows, ok := parseUpload(w, req.FileBase64)
+	rows, digest, ok := parseUpload(w, req.FileBase64)
 	if !ok {
 		return importRun{}, false
 	}
-	run := importRun{planned: legacyimport.Plan(rows)}
+	run := importRun{planned: legacyimport.Plan(rows), fileDigest: digest}
 	cycle, err := h.activeCycle(ctx)
 	if err != nil {
 		writeConnectError(w, err)
@@ -279,21 +319,23 @@ func (h *StudentImportHandler) plan(w http.ResponseWriter, ctx context.Context, 
 		return importRun{}, false
 	}
 	run.resp.Rows, run.resp.Summary = h.rows(&run, results)
-	run.resp.PlanHash = planHash(run.resp)
+	run.resp.PlanHash = planHash(run.resp, run.fileDigest)
 	return run, true
 }
 
-func parseUpload(w http.ResponseWriter, encoded string) ([]legacyimport.Row, bool) {
+func parseUpload(w http.ResponseWriter, encoded string) ([]legacyimport.Row, string, bool) {
 	raw, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
 		writeCodedError(w, http.StatusBadRequest, codeFileNotXLSX, "the file is not an .xlsx workbook")
-		return nil, false
+		return nil, "", false
 	}
+	sum := sha256.Sum256(raw)
+	digest := hex.EncodeToString(sum[:])
 	rows, err := legacyimport.Parse(strings.NewReader(string(raw)), legacyimport.DefaultLimits)
 	var missing legacyimport.MissingColumnError
 	switch {
 	case err == nil:
-		return rows, true
+		return rows, digest, true
 	case errors.As(err, &missing):
 		writeCodedError(w, http.StatusBadRequest, codeFileMissingColumn, missing.Column)
 	case errors.Is(err, legacyimport.ErrEmpty):
@@ -303,7 +345,7 @@ func parseUpload(w http.ResponseWriter, encoded string) ([]legacyimport.Row, boo
 	default:
 		writeCodedError(w, http.StatusBadRequest, codeFileNotXLSX, "the file is not an .xlsx workbook")
 	}
-	return nil, false
+	return nil, "", false
 }
 
 func (h *StudentImportHandler) activeCycle(ctx context.Context) (client.CycleResult, error) {
@@ -593,9 +635,11 @@ func (h *StudentImportHandler) write(ctx context.Context, run importRun, batch s
 		if len(results) != len(keys) {
 			return importResponse{}, fmt.Errorf("student import: config answered %d placements for %d", len(results), len(keys))
 		}
+		run.adoptRealPlacements(keys, results)
 		for i, key := range keys {
 			groups[key] = results[i].GroupID
 		}
+		resp.Placements = run.resp.Placements
 	}
 	results, err := h.judgeRows(ctx, &run, groups, false, batch)
 	if err != nil {
@@ -606,10 +650,29 @@ func (h *StudentImportHandler) write(ctx context.Context, run importRun, batch s
 	return resp, nil
 }
 
-// planHash fingerprints what the office approves: the cycle, where each level
-// goes, what each placement creates and each row's fate. Warnings are left out
-// — they do not change what is written.
-func planHash(r importResponse) string {
+// adoptRealPlacements replaces the dry run's answer with what config actually
+// did: a level deleted meanwhile is an error the rows must carry, and what
+// already existed by then was adopted, not created.
+func (run *importRun) adoptRealPlacements(keys []legacyimport.PlacementKey, results []client.PlacementResult) {
+	at := make(map[string]int, len(run.resp.Placements))
+	for i, p := range run.resp.Placements {
+		at[p.Key] = i
+	}
+	for i, key := range keys {
+		p := results[i]
+		run.placements[key] = p
+		shown := &run.resp.Placements[at[placementKey(key)]]
+		shown.Capacity, shown.Error = p.Capacity, p.Error
+		shown.LevelCreated, shown.GradeCreated, shown.GroupCreated = p.LevelCreated, p.GradeCreated, p.GroupCreated
+	}
+}
+
+// planHash fingerprints what the office approves: THIS file (its bytes), the
+// cycle, where each level goes, what each placement creates and each row's
+// fate. Warnings and the tuition advice are left out — they do not change what
+// is written, and finance answering at preview but not at commit must not read
+// as a changed plan.
+func planHash(r importResponse, fileDigest string) string {
 	type rowFate struct {
 		Row                 int
 		Status, Reason, Dst string
@@ -618,12 +681,19 @@ func planHash(r importResponse) string {
 	for _, row := range r.Rows {
 		fates = append(fates, rowFate{row.Row, row.Status, row.Reason, row.Destination})
 	}
+	levels := make([]importLevel, len(r.Levels))
+	for i, l := range r.Levels {
+		l.NoTuition = false
+		levels[i] = l
+	}
+	// Marshal cannot fail: every field is a string, int, bool or slice of them.
 	raw, _ := json.Marshal(struct {
+		File       string
 		Cycle      string
 		Levels     []importLevel
 		Placements []importPlacement
 		Rows       []rowFate
-	}{r.Cycle.ID, r.Levels, r.Placements, fates})
+	}{fileDigest, r.Cycle.ID, levels, r.Placements, fates})
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:])
 }
@@ -634,11 +704,9 @@ func sortedPlacements(m map[legacyimport.PlacementKey]int) []legacyimport.Placem
 		keys = append(keys, k)
 	}
 	// Deterministic order, so the same file always hashes the same.
-	for i := 1; i < len(keys); i++ {
-		for j := i; j > 0 && placementKey(keys[j]) < placementKey(keys[j-1]); j-- {
-			keys[j], keys[j-1] = keys[j-1], keys[j]
-		}
-	}
+	slices.SortFunc(keys, func(a, b legacyimport.PlacementKey) int {
+		return cmp.Compare(placementKey(a), placementKey(b))
+	})
 	return keys
 }
 
@@ -648,7 +716,7 @@ func placementKey(k legacyimport.PlacementKey) string {
 
 func capacityFor(requested map[string]int, key legacyimport.PlacementKey, pupils int) int {
 	if c, ok := requested[placementKey(key)]; ok && c >= pupils && c > 0 {
-		return c
+		return min(c, maxGroupCapacity)
 	}
 	return max(pupils, defaultGroupCapacity)
 }

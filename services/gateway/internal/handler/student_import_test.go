@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -13,6 +14,7 @@ import (
 	"github.com/xuri/excelize/v2"
 
 	"github.com/garcia-lorca/services/gateway/internal/client"
+	"github.com/garcia-lorca/services/gateway/internal/legacyimport"
 )
 
 // --- fakes -----------------------------------------------------------------
@@ -21,6 +23,9 @@ type fakeImportCatalog struct {
 	cycles     []client.CycleResult
 	levels     []client.LevelResult
 	placements []placementCall
+	// commitError makes the real (not dry) call answer this code for every
+	// placement, as config does when a level started being deleted meanwhile.
+	commitError string
 }
 
 type placementCall struct {
@@ -47,6 +52,11 @@ func (f *fakeImportCatalog) EnsurePlacements(_ context.Context, cycleID string, 
 			GradeName: "1°", Capacity: p.Capacity, GroupCreated: true, GradeCreated: true}
 		if p.LevelID == "" {
 			r.LevelCreated = true
+		}
+		if !dry && f.commitError != "" {
+			r.Error, r.GroupCreated, r.GradeCreated, r.LevelCreated = f.commitError, false, false, false
+			out = append(out, r)
+			continue
 		}
 		if !dry {
 			if r.LevelID == "" {
@@ -85,10 +95,13 @@ func (f *fakeImportRoster) ImportStudents(_ context.Context, rows []client.Impor
 	return out, nil
 }
 
-type fakeImportPricing struct{ plans []client.TuitionPlan }
+type fakeImportPricing struct {
+	plans []client.TuitionPlan
+	err   error
+}
 
-func (f fakeImportPricing) ListTuitionPlans(context.Context, string) ([]client.TuitionPlan, error) {
-	return f.plans, nil
+func (f *fakeImportPricing) ListTuitionPlans(context.Context, string) ([]client.TuitionPlan, error) {
+	return f.plans, f.err
 }
 
 // --- fixture ----------------------------------------------------------------
@@ -122,6 +135,7 @@ type importFixture struct {
 	h       *StudentImportHandler
 	catalog *fakeImportCatalog
 	roster  *fakeImportRoster
+	pricing *fakeImportPricing
 }
 
 func newImportFixture() importFixture {
@@ -130,13 +144,13 @@ func newImportFixture() importFixture {
 		levels: []client.LevelResult{{ID: "lv-pri", Name: "Primaria"}, {ID: "lv-bach", Name: "Bachillerato"}},
 	}
 	roster := &fakeImportRoster{}
+	pricing := &fakeImportPricing{plans: []client.TuitionPlan{{LevelID: "lv-pri", Active: true}}}
 	h := NewStudentImportHandler(StudentImportDeps{
-		Catalog: catalog, Roster: roster,
-		Pricing:       fakeImportPricing{plans: []client.TuitionPlan{{LevelID: "lv-pri", Active: true}}},
-		NewID:         func() string { return "batch-1" },
-		CommitTimeout: time.Minute,
+		Catalog: catalog, Roster: roster, Pricing: pricing,
+		NewID:       func() string { return "batch-1" },
+		WriteBudget: 2 * time.Minute,
 	})
-	return importFixture{h, catalog, roster}
+	return importFixture{h, catalog, roster, pricing}
 }
 
 func post(t *testing.T, fn http.HandlerFunc, body any) *httptest.ResponseRecorder {
@@ -334,5 +348,155 @@ func TestCommitImportsWhatThePreviewShowed(t *testing.T) {
 	}
 	if got.Summary.New != 1 || got.Summary.Skipped != 1 || got.Rows[0].EnrollmentNumber != "2026-00001" || got.BatchID != "batch-1" {
 		t.Errorf("result = %+v", got)
+	}
+}
+
+// --- review fixes ------------------------------------------------------------
+
+// deadlineRecorder lets the test see the write deadline the handler asks for
+// (http.ResponseController looks for this method).
+type deadlineRecorder struct {
+	*httptest.ResponseRecorder
+	deadline time.Time
+}
+
+func (d *deadlineRecorder) SetWriteDeadline(t time.Time) error { d.deadline = t; return nil }
+
+// The commit re-plans before writing, so the server-wide 30 s write timeout is
+// not its budget: the route sets its own deadline first, and the detached
+// commit stays inside it.
+func TestCommitSetsItsOwnWriteDeadline(t *testing.T) {
+	f := newImportFixture()
+	req := importRequest{FileBase64: importFile(t, pupil("Primaria", "A", "Activo", "AAMI210219MJCLLRA0"))}
+	req.PlanHash = decodePreview(t, post(t, f.h.Preview, req)).PlanHash
+	raw, _ := json.Marshal(req)
+	rec := &deadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
+	before := time.Now()
+
+	f.h.Commit(rec, httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(raw)))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if rec.deadline.Before(before.Add(2*time.Minute-time.Second)) || rec.deadline.After(time.Now().Add(2*time.Minute)) {
+		t.Errorf("write deadline = %s from now, want the route's 2m budget", rec.deadline.Sub(before))
+	}
+}
+
+// What the office approved is the FILE, not only its layout: a different file
+// with the same rows in the same places must not ride the old hash.
+func TestCommitRefusesAnotherFileWithTheSameLayout(t *testing.T) {
+	f := newImportFixture()
+	a := importRequest{FileBase64: importFile(t, pupil("Primaria", "A", "Activo", "AAMI210219MJCLLRA0"))}
+	hash := decodePreview(t, post(t, f.h.Preview, a)).PlanHash
+	other := pupil("Primaria", "A", "Activo", "AAMI210219MJCLLRA0")
+	other[1] = "OTRO APELLIDO, OTRO NOMBRE"
+
+	rec := post(t, f.h.Commit, importRequest{FileBase64: importFile(t, other), PlanHash: hash})
+
+	if rec.Code != http.StatusConflict || rec.Header().Get(errorCodeHeader) != codePreviewStale {
+		t.Errorf("status %d code %q, want 409 PREVIEW_STALE", rec.Code, rec.Header().Get(errorCodeHeader))
+	}
+}
+
+// The tuition warning is advice: finance going quiet between preview and
+// commit must not make the plan look changed.
+func TestCommitIgnoresTuitionAdviceThatDrifted(t *testing.T) {
+	f := newImportFixture()
+	req := importRequest{FileBase64: importFile(t, pupil("Primaria", "A", "Activo", "AAMI210219MJCLLRA0"))}
+	req.PlanHash = decodePreview(t, post(t, f.h.Preview, req)).PlanHash
+	f.pricing.err = errors.New("finance timed out")
+
+	rec := post(t, f.h.Commit, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d (%s), want the commit to go through", rec.Code, rec.Header().Get(errorCodeHeader))
+	}
+}
+
+// A placement that fails for real (the level started being deleted after the
+// preview) is reported as such, and its rows say why.
+func TestCommitReportsAPlacementThatFailedForReal(t *testing.T) {
+	f := newImportFixture()
+	req := importRequest{FileBase64: importFile(t, pupil("Primaria", "A", "Activo", "AAMI210219MJCLLRA0"))}
+	req.PlanHash = decodePreview(t, post(t, f.h.Preview, req)).PlanHash
+	f.catalog.commitError = "level_being_deleted"
+
+	got := decodePreview(t, post(t, f.h.Commit, req))
+
+	if got.Placements[0].Error != "level_being_deleted" || got.Placements[0].GroupCreated {
+		t.Errorf("placement = %+v, want the real error and nothing created", got.Placements[0])
+	}
+	if got.Rows[0].Status != rowSkipped || got.Rows[0].Reason != "level_being_deleted" {
+		t.Errorf("row = %+v", got.Rows[0])
+	}
+	for _, c := range f.roster.calls {
+		if !c.validate {
+			t.Error("rows of a failed placement were written")
+		}
+	}
+}
+
+// blockingRoster holds the real (not validating) call until released, so a
+// second commit can arrive while the first is writing.
+type blockingRoster struct {
+	fakeImportRoster
+	entered, release chan struct{}
+}
+
+func (b *blockingRoster) ImportStudents(ctx context.Context, rows []client.ImportRowInput, validate bool, batch string) ([]client.ImportRowResult, error) {
+	if !validate {
+		b.entered <- struct{}{}
+		<-b.release
+	}
+	return b.fakeImportRoster.ImportStudents(ctx, rows, validate, batch)
+}
+
+// Two tabs pressing Importar at once must not run two commits side by side
+// against the same school: the second is told one is already running.
+func TestCommitRunsOneImportAtATime(t *testing.T) {
+	f := newImportFixture()
+	roster := &blockingRoster{entered: make(chan struct{}, 2), release: make(chan struct{})}
+	f.h.d.Roster = roster
+	req := importRequest{FileBase64: importFile(t, pupil("Primaria", "A", "Activo", "AAMI210219MJCLLRA0"))}
+	req.PlanHash = decodePreview(t, post(t, f.h.Preview, req)).PlanHash
+
+	done := make(chan *httptest.ResponseRecorder)
+	go func() { done <- post(t, f.h.Commit, req) }()
+	<-roster.entered
+
+	second := post(t, f.h.Commit, req)
+	close(roster.release)
+	first := <-done
+
+	if second.Code != http.StatusConflict || second.Header().Get(errorCodeHeader) != codeImportInProgress {
+		t.Errorf("second commit: status %d code %q, want 409 %s", second.Code, second.Header().Get(errorCodeHeader), codeImportInProgress)
+	}
+	if first.Code != http.StatusOK {
+		t.Errorf("first commit: status %d", first.Code)
+	}
+	if third := post(t, f.h.Commit, req); third.Code != http.StatusOK {
+		t.Errorf("after the first ended, a commit must run again: status %d", third.Code)
+	}
+}
+
+// A capacity typed in the preview is bounded: never below the pupils the group
+// receives, never past what a classroom holds (and int32 on the wire).
+func TestCapacityIsBounded(t *testing.T) {
+	key := legacyimport.PlacementKey{Level: "Primaria", Ordinal: 1, Group: "A"}
+	k := placementKey(key)
+	for name, tc := range map[string]struct{ asked, pupils, want int }{
+		"default":            {0, 10, defaultGroupCapacity},
+		"asked within range": {40, 10, 40},
+		"below the pupils":   {5, 10, defaultGroupCapacity},
+		"absurd":             {1 << 33, 10, maxGroupCapacity},
+	} {
+		asked := map[string]int{}
+		if tc.asked != 0 {
+			asked[k] = tc.asked
+		}
+		if got := capacityFor(asked, key, tc.pupils); got != tc.want {
+			t.Errorf("%s: capacity = %d, want %d", name, got, tc.want)
+		}
 	}
 }

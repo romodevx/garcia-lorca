@@ -2,6 +2,7 @@ package legacyimport
 
 import (
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -30,12 +31,14 @@ func TestPlanSkipsWhatIsNotToBeImported(t *testing.T) {
 		r    Row
 		skip string
 	}{
-		"baja":               {row(2, "A B, C", "Primaria", "1", "A", "Baja", "", "AAMI210219MJCLLRA0"), SkipWithdrawn},
-		"unknown status":     {row(2, "A B, C", "Primaria", "1", "A", "Egresado", "", "AAMI210219MJCLLRA0"), SkipStatusUnknown},
-		"grade not a number": {row(2, "A B, C", "Primaria", "primero", "A", "Activo", "", "AAMI210219MJCLLRA0"), SkipGradeInvalid},
-		"no group":           {row(2, "A B, C", "Primaria", "1", "", "Activo", "", "AAMI210219MJCLLRA0"), SkipGroupInvalid},
-		"no level":           {row(2, "A B, C", "", "1", "A", "Activo", "", "AAMI210219MJCLLRA0"), SkipLevelMissing},
-		"no surname":         {row(2, ", C", "Primaria", "1", "A", "Activo", "", "AAMI210219MJCLLRA0"), SkipNameUnreadable},
+		"baja":                {row(2, "A B, C", "Primaria", "1", "A", "Baja", "", "AAMI210219MJCLLRA0"), SkipWithdrawn},
+		"unknown status":      {row(2, "A B, C", "Primaria", "1", "A", "Egresado", "", "AAMI210219MJCLLRA0"), SkipStatusUnknown},
+		"grade not a number":  {row(2, "A B, C", "Primaria", "primero", "A", "Activo", "", "AAMI210219MJCLLRA0"), SkipGradeInvalid},
+		"no group":            {row(2, "A B, C", "Primaria", "1", "", "Activo", "", "AAMI210219MJCLLRA0"), SkipGroupInvalid},
+		"no level":            {row(2, "A B, C", "", "1", "A", "Activo", "", "AAMI210219MJCLLRA0"), SkipLevelMissing},
+		"grade past twelve":   {row(2, "A B, C", "Primaria", "99999", "A", "Activo", "", "AAMI210219MJCLLRA0"), SkipGradeInvalid},
+		"level name too long": {row(2, "A B, C", strings.Repeat("N", 61), "1", "A", "Activo", "", "AAMI210219MJCLLRA0"), SkipLevelInvalid},
+		"no surname":          {row(2, ", C", "Primaria", "1", "A", "Activo", "", "AAMI210219MJCLLRA0"), SkipNameUnreadable},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {

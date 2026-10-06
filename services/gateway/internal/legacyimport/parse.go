@@ -28,8 +28,11 @@ type Limits struct {
 // times over while keeping one commit inside the gateway's write timeout.
 var DefaultLimits = Limits{MaxRows: 1000, MaxBytes: 2 << 20}
 
-// Decompression caps: a 2 MB upload that inflates past these is a zip bomb,
-// not a school's student list.
+// Decompression caps. unzipSizeLimit is the zip-bomb cap: an archive whose
+// entries inflate past it is refused (Go's zip reader enforces the declared
+// sizes). unzipXMLSizeLimit only decides how much of a sheet is kept in memory
+// before excelize spills it to a temp file — on Cloud Run that is memory too,
+// which is why both are small.
 const (
 	unzipSizeLimit    = 20 << 20
 	unzipXMLSizeLimit = 10 << 20

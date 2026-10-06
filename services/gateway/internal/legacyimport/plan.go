@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Skip reasons: rows the import leaves out, as stable codes the screen words.
@@ -13,6 +14,7 @@ const (
 	SkipGradeInvalid   = "grade_invalid"
 	SkipGroupInvalid   = "group_invalid"
 	SkipLevelMissing   = "level_missing"
+	SkipLevelInvalid   = "level_invalid" // a level name past maxLevelName
 	SkipNameUnreadable = "name_unreadable"
 )
 
@@ -26,6 +28,8 @@ const (
 	statusActive    = "activo"
 	statusWithdrawn = "baja"
 	maxGroupLen     = 10
+	maxGrade        = 12 // no Mexican level runs past twelve grades
+	maxLevelName    = 60
 	curpLen         = 18
 )
 
@@ -107,8 +111,12 @@ func candidate(r Row) Candidate {
 		c.Skip = SkipLevelMissing
 		return c
 	}
+	if utf8.RuneCountInString(r.LevelName) > maxLevelName {
+		c.Skip = SkipLevelInvalid
+		return c
+	}
 	ordinal, err := strconv.Atoi(strings.TrimSpace(r.Grade))
-	if err != nil || ordinal < 1 {
+	if err != nil || ordinal < 1 || ordinal > maxGrade {
 		c.Skip = SkipGradeInvalid
 		return c
 	}

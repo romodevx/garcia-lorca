@@ -34,10 +34,11 @@ const (
 	readTimeout       = 30 * time.Second
 	writeTimeout      = 30 * time.Second
 	idleTimeout       = 120 * time.Second
-	// studentImportCommitTimeout bounds a detached import commit: it outlives
-	// a closed tab but stays inside the write timeout, so the office gets the
-	// result of what it started (1,000 pupils, one transaction each).
-	studentImportCommitTimeout = 25 * time.Second
+	// studentImportWriteBudget is the import commit route's own write deadline
+	// (set per request; the server-wide writeTimeout is too short to re-plan and
+	// write 1,000 pupils, one transaction each). The detached commit ends a few
+	// seconds before it, so the office always gets the result it started.
+	studentImportWriteBudget = 2 * time.Minute
 )
 
 func main() {
@@ -465,7 +466,7 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	// iam: it composes config:write + students:create + students:enroll).
 	studentImportH := handler.NewStudentImportHandler(handler.StudentImportDeps{
 		Catalog: configClient, Roster: studentsClient, Pricing: financeClient,
-		NewID: handler.NewBatchID, CommitTimeout: studentImportCommitTimeout,
+		NewID: handler.NewBatchID, WriteBudget: studentImportWriteBudget,
 	})
 	studentImport := func(h http.Handler) http.Handler {
 		return guard.Protect("students", guard.Protect("config", guard.Protect("student_import",
