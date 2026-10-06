@@ -20,6 +20,7 @@ export type View =
   | { screen: "announcements" }
   | { screen: "payments" }
   | { screen: "config" }
+  | { screen: "studentImport" }
   | { screen: "students" }
   | { screen: "grades" }
   | { screen: "attendance" }
@@ -59,6 +60,8 @@ const BY_SCREEN = {
   announcements: "/avisos",
   payments: "/pagos",
   config: "/configuracion",
+  /** Migrar alumnos from the previous system (ADR 0033). */
+  studentImport: "/configuracion/migrar-alumnos",
   students: "/alumnos",
   grades: "/calificaciones",
   attendance: "/asistencia",

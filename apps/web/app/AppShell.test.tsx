@@ -823,3 +823,64 @@ describe("los periodos de un nivel (T14)", () => {
     expect(screen.queryByRole("heading", { name: /^Periodos de evaluación/ })).toBeNull();
   });
 });
+
+describe("migrar alumnos (ADR 0033)", () => {
+  const IMPORTER_ME = { ...OWNER_ME, permissions: [...OWNER_ME.permissions, "students:import"] };
+  const ALL_ON = { module_config: true, module_students: true, module_student_import: true };
+
+  it("tiene su propia dirección con el flag encendido y students:import", async () => {
+    resetFakeRouter("/configuracion/migrar-alumnos");
+    mockMe.mockResolvedValue(IMPORTER_ME);
+    render(
+      <Providers flags={ALL_ON}>
+        <AppShell />
+      </Providers>
+    );
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Migrar alumnos" })).toBeInTheDocument();
+  });
+
+  it("sin students:import, la dirección pinta Configuración y ninguna entrada", async () => {
+    resetFakeRouter("/configuracion/migrar-alumnos");
+    mockMe.mockResolvedValue(OWNER_ME);
+    render(
+      <Providers flags={ALL_ON}>
+        <AppShell />
+      </Providers>
+    );
+
+    expect(await screen.findByRole("heading", { name: "Configuración académica" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Migrar alumnos" })).toBeNull();
+  });
+
+  it("con el flag apagado tampoco aparece, aunque tenga el permiso", async () => {
+    resetFakeRouter("/configuracion/migrar-alumnos");
+    mockMe.mockResolvedValue(IMPORTER_ME);
+    render(
+      <Providers flags={{ module_config: true, module_students: true }}>
+        <AppShell />
+      </Providers>
+    );
+
+    expect(await screen.findByRole("heading", { name: "Configuración académica" })).toBeInTheDocument();
+    await waitFor(() => expect(mockMe).toHaveBeenCalled());
+    expect(screen.queryByRole("button", { name: "Migrar alumnos" })).toBeNull();
+  });
+
+  it("Configuración lleva a la migración por su botón", async () => {
+    resetFakeRouter("/configuracion");
+    mockMe.mockResolvedValue(IMPORTER_ME);
+    const user = userEvent.setup();
+    render(
+      <Providers flags={ALL_ON}>
+        <AppShell />
+      </Providers>
+    );
+
+    const [first] = await screen.findAllByRole("button", { name: "Migrar alumnos" });
+    if (first !== undefined) await user.click(first);
+
+    expect(fakePath()).toBe("/configuracion/migrar-alumnos");
+    expect(await screen.findByRole("heading", { level: 1, name: "Migrar alumnos" })).toBeInTheDocument();
+  });
+});

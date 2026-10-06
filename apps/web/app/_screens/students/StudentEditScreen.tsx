@@ -44,7 +44,7 @@ import {
   type StudentPhone,
 } from "../../students/api";
 import { resizeToJpeg } from "../../students/photoResize";
-import { birthDateError, MEXICAN_STATES, phoneDigits, phoneError, postalCodeError } from "../../students/profileRules";
+import { bankReferenceError, birthDateError, MEXICAN_STATES, phoneDigits, phoneError, postalCodeError } from "../../students/profileRules";
 import { ContactsPanel } from "./ContactsPanel";
 import { StudentNotesPanel } from "../../_design/students/StudentNotesPanel";
 import { useStudentNotes } from "../../_design/students/useStudentNotes";
@@ -140,6 +140,7 @@ export function StudentEditScreen({ studentId, userId, permissions, onBack, toda
   const [lastName, setLastName] = useState("");
   const [maternalLastName, setMaternalLastName] = useState("");
   const [curp, setCurp] = useState("");
+  const [bankReference, setBankReference] = useState("");
   const [birthDate, setBirthDate] = useState("");
   const [sex, setSex] = useState<Sex>("");
   const [email, setEmail] = useState("");
@@ -166,6 +167,7 @@ export function StudentEditScreen({ studentId, userId, permissions, onBack, toda
     () => ({
       birthDate: (value: string) => birthDateError(value, day),
       postalCode: postalCodeError,
+      bankReference: bankReferenceError,
       phone0: phoneError,
       phone1: phoneError,
       phone2: phoneError,
@@ -185,6 +187,7 @@ export function StudentEditScreen({ studentId, userId, permissions, onBack, toda
         setLastName(st.lastName);
         setMaternalLastName(st.maternalLastName ?? "");
         setCurp(st.curp);
+        setBankReference(st.bankReference ?? "");
         setBirthDate(p?.birthDate ?? "");
         setSex(p?.sex ?? "");
         setEmail(p?.email ?? "");
@@ -214,11 +217,12 @@ export function StudentEditScreen({ studentId, userId, permissions, onBack, toda
     (): Record<string, string> => ({
       birthDate,
       postalCode: address.postalCode,
+      bankReference,
       phone0: phones[0]?.number ?? "",
       phone1: phones[1]?.number ?? "",
       phone2: phones[2]?.number ?? "",
     }),
-    [birthDate, address.postalCode, phones],
+    [birthDate, address.postalCode, bankReference, phones],
   );
 
   const medicalChanged =
@@ -254,6 +258,8 @@ export function StudentEditScreen({ studentId, userId, permissions, onBack, toda
             .map((ph) => ({ kind: ph.kind, number: phoneDigits(ph.number) })),
           address,
         },
+        // Sent only when it changed: absent keeps the stored one, "" clears it.
+        ...(bankReference !== (student.bankReference ?? "") ? { bankReference } : {}),
       });
       setStudent(updated);
       await savePhoto();
@@ -354,6 +360,17 @@ export function StudentEditScreen({ studentId, userId, permissions, onBack, toda
             error={format.errors.birthDate}
           />
           <SelectField label="Sexo" value={sex} onChange={(v) => setSex(v as Sex)} options={SEX_OPTIONS} />
+          <TextField
+            label="Referencia BBVA"
+            value={bankReference}
+            onChange={(v) => {
+              setBankReference(v);
+              format.onChange("bankReference", v, {});
+            }}
+            onBlur={() => format.onBlur("bankReference", bankReference, {})}
+            error={format.errors.bankReference}
+            help="La referencia con la que la familia paga en BBVA. Sólo dígitos, hasta 20. Déjala vacía si no tiene."
+          />
           {student.enrollmentNumber !== undefined && student.enrollmentNumber !== "" && (
             <div>
               <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)" }}>Matrícula</span>

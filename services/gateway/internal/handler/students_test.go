@@ -581,3 +581,36 @@ func TestUpdateStudentWithoutTheMaternalFieldKeepsIt(t *testing.T) {
 		t.Errorf("forwarded maternal = %q (read %q), want the stored Ríos", svc.gotUpdate.MaternalLastName, svc.gotGetID)
 	}
 }
+
+// ADR 0033: the BBVA reference is shown on the file and edited there. A PUT
+// without the field forwards "not sent" (nil), so students keeps the stored one.
+func TestStudentsAnswerAndForwardTheBankReference(t *testing.T) {
+	svc := &fakeCreator{res: client.StudentResult{ID: "stu-1", FirstName: "Ana", LastName: "Herrera", BankReference: "231076"}}
+	h := handler.NewStudentsHandler(svc)
+
+	put := func(body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPut, "/api/v1/students/stu-1", strings.NewReader(body))
+		req.SetPathValue("id", "stu-1")
+		rec := httptest.NewRecorder()
+		h.Update(rec, req)
+		return rec
+	}
+
+	rec := put(`{"firstName":"Ana","lastName":"Herrera","curp":"HEGA050312MDFRNN08","profile":{},"bankReference":"999"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if svc.gotUpdate.BankReference == nil || *svc.gotUpdate.BankReference != "999" {
+		t.Errorf("forwarded bank reference = %v, want 999", svc.gotUpdate.BankReference)
+	}
+	var out map[string]any
+	_ = json.NewDecoder(rec.Body).Decode(&out)
+	if out["bankReference"] != "231076" {
+		t.Errorf("body bankReference = %v, want the stored 231076", out["bankReference"])
+	}
+
+	put(`{"firstName":"Ana","lastName":"Herrera","curp":"HEGA050312MDFRNN08","profile":{}}`)
+	if svc.gotUpdate.BankReference != nil {
+		t.Errorf("a PUT without the field forwarded %q; it must forward nil (keep)", *svc.gotUpdate.BankReference)
+	}
+}

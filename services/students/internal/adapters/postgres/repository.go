@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -58,15 +59,7 @@ func (r *Repository) Create(ctx context.Context, s *domain.Student) error {
 		}
 		model.EnrollmentNumber = number
 		if err := tx.Create(&model).Error; err != nil {
-			if violates(err, enrollmentNumberUniqueConstraint) {
-				// The counter is behind the stored numbers: a fault to fix,
-				// never "that CURP already exists".
-				return glerrors.Wrap(glerrors.KindInternal, "the matrícula counter is behind its numbers", err)
-			}
-			if isUniqueViolation(err) {
-				return glerrors.Wrap(glerrors.KindConflict, "a student with this CURP already exists", err)
-			}
-			return glerrors.Wrap(glerrors.KindInternal, "creating student", err)
+			return translateStudentWriteErr(err, "creating student")
 		}
 		s.AssignEnrollmentNumber(number)
 		return nil
@@ -131,18 +124,12 @@ func (r *Repository) UpdateDetails(ctx context.Context, s *domain.Student) error
 	cols["last_name"] = s.LastName()
 	cols["maternal_last_name"] = nullableText(s.MaternalLastName())
 	cols["curp"] = s.CURP().String()
+	cols["bank_reference"] = nullableText(s.BankReference().String())
 	cols["updated_at"] = gorm.Expr("now()")
 	return r.withTenant(ctx, func(tx *gorm.DB) error {
 		res := tx.Model(&studentModel{}).Where("id = ?", s.ID()).Updates(cols)
 		if res.Error != nil {
-			var pgErr *pgconn.PgError
-			if errors.As(res.Error, &pgErr) && pgErr.Code == uniqueViolation {
-				return glerrors.Wrap(glerrors.KindConflict, "a student with this CURP already exists", res.Error)
-			}
-			if errors.As(res.Error, &pgErr) && pgErr.Code == checkViolation {
-				return glerrors.Wrap(glerrors.KindInvalid, "a value is not allowed", res.Error)
-			}
-			return glerrors.Wrap(glerrors.KindInternal, "updating student details", res.Error)
+			return translateStudentWriteErr(res.Error, "updating student details")
 		}
 		if res.RowsAffected == 0 {
 			return glerrors.ErrNotFound
@@ -307,9 +294,40 @@ const (
 	leapDay  = 29
 )
 
-// enrollmentNumberUniqueConstraint is students' UNIQUE (tenant_id,
-// enrollment_number) (migration 0013).
-const enrollmentNumberUniqueConstraint = "students_enrollment_number_unique"
+// The UNIQUE constraints of `students`. A unique violation is told apart by
+// its constraint name: each one means something different to the school.
+const (
+	// enrollmentNumberUniqueConstraint is UNIQUE (tenant_id, enrollment_number)
+	// (migration 0013).
+	enrollmentNumberUniqueConstraint = "students_enrollment_number_unique"
+	// curpUniqueConstraint is the inline UNIQUE (tenant_id, curp) (0001).
+	curpUniqueConstraint = "students_tenant_id_curp_key"
+	// bankReferenceUniqueIndex is the partial unique index of 0019.
+	bankReferenceUniqueIndex = "uq_students_bank_reference"
+)
+
+// translateStudentWriteErr maps a failed insert/update of `students` to a
+// domain error by the constraint it broke. The domain sentinels stay in the
+// chain (errors.Is) and the driver error follows them for the logs.
+func translateStudentWriteErr(err error, doing string) error {
+	switch {
+	case violates(err, bankReferenceUniqueIndex):
+		return fmt.Errorf("%w: %w", domain.ErrBankReferenceTaken, err)
+	case violates(err, curpUniqueConstraint):
+		return fmt.Errorf("%w: %w", domain.ErrCURPTaken, err)
+	case violates(err, enrollmentNumberUniqueConstraint):
+		// The counter is behind the stored numbers: a fault to fix, never
+		// "that CURP already exists".
+		return glerrors.Wrap(glerrors.KindInternal, "the matrícula counter is behind its numbers", err)
+	case isUniqueViolation(err):
+		return glerrors.Wrap(glerrors.KindConflict, "a student with these values already exists", err)
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == checkViolation {
+		return glerrors.Wrap(glerrors.KindInvalid, "a value is not allowed", err)
+	}
+	return glerrors.Wrap(glerrors.KindInternal, doing, err)
+}
 
 // violates reports whether err is a unique violation of the named constraint.
 func violates(err error, constraint string) bool {

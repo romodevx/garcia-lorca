@@ -41,6 +41,8 @@ export interface Student {
   profile?: StudentProfile;
   /** The matrícula, <year>-<five digits> (task 13). Absent from older gateways. */
   enrollmentNumber?: string;
+  /** The BBVA payment reference (ADR 0033); "" or absent when the pupil has none. */
+  bankReference?: string;
 }
 
 /** "" means not captured. */
@@ -403,6 +405,8 @@ export interface UpdateStudentInput {
   maternalLastName?: string;
   curp: string;
   profile: StudentProfile;
+  /** Absent keeps the stored reference; "" clears it (ADR 0033). Digits only, ≤ 20. */
+  bankReference?: string;
 }
 
 function studentPath(baseURL: string, studentId: string, rest = ""): string {

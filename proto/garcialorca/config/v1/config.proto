@@ -113,6 +113,14 @@ service ConfigService {
   // ListGroups lists the groups of a cycle (scoped by cycle_id, optional grade_level_id).
   rpc ListGroups(ListGroupsRequest) returns (ListGroupsResponse);
 
+  // EnsurePlacements finds or creates, in ONE transaction, the level → grade →
+  // group of each placement in a cycle (legacy student import, ADR 0033). A
+  // level is matched by its folded name (case, accents and spacing ignored), a
+  // grade by its ordinal within the level, a group by its name within the grade
+  // and cycle — so nothing is ever created twice, even by two imports at once.
+  // dry_run reports what WOULD be created and writes nothing.
+  rpc EnsurePlacements(EnsurePlacementsRequest) returns (EnsurePlacementsResponse);
+
   // --- school calendar (M16) ---
   // CreateNonWorkingPeriod adds a holiday, vacation or suspension to a cycle.
   rpc CreateNonWorkingPeriod(CreateNonWorkingPeriodRequest) returns (CreateNonWorkingPeriodResponse);
@@ -1572,4 +1580,43 @@ message UncoveredClass {
 
 message ListUncoveredClassesResponse {
   repeated UncoveredClass classes = 1;
+}
+
+// PlacementRequest is one (level, grade, group) an import needs.
+message PlacementRequest {
+  // level_id names an existing level; otherwise new_level_name is matched by
+  // its folded name and created only when no level matches.
+  string level_id = 1;
+  string new_level_name = 2;
+  int32 grade_ordinal = 3;   // 1..n; a created grade is named "<n>°"
+  string group_name = 4;     // trimmed and upper-cased ("A")
+  int32 capacity = 5;        // used only when the group is created; >= 1
+}
+
+message EnsurePlacementsRequest {
+  string cycle_id = 1;
+  repeated PlacementRequest placements = 2;  // at most 200
+  bool dry_run = 3;
+}
+
+// Placement answers one PlacementRequest, in order. With dry_run the ids of
+// what would be created are empty.
+message Placement {
+  string level_id = 1;
+  string level_name = 2;
+  bool level_created = 3;
+  string grade_level_id = 4;
+  string grade_name = 5;
+  bool grade_created = 6;
+  string group_id = 7;
+  string group_name = 8;
+  bool group_created = 9;
+  int32 capacity = 10;       // the group's capacity after the call
+  // error is a stable code when this placement cannot be honoured:
+  // "level_not_found", "level_being_deleted", "invalid_placement".
+  string error = 11;
+}
+
+message EnsurePlacementsResponse {
+  repeated Placement placements = 1;
 }

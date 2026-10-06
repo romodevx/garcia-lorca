@@ -38,6 +38,13 @@ drift).
 Both go to the single per-domain topic **`student-events`** (mirrors finance's
 `payment-events`), proto-marshaled, with `type` + `tenant_id` attributes.
 
+The legacy import (`ImportStudents`, ADR 0033) publishes **neither**: the
+`ImportService` has no publisher. Its pupils enter ENROLLED and their
+enrollments carry `origin = 'import'`, which is what finance reads to never bill
+their inscription. One transaction per pupil; group capacity is not counted
+(the import sizes its groups in config first). Permission (`students:import`)
+and flags are enforced by the gateway.
+
 > TRANSPORT: `cmd/main.go` currently wires a dev-only logging publisher (`devBus`,
 > metadata only — no PII). The Cloud Pub/Sub adapter lands with the first
 > consumer (comms, M10); the `ports.EventPublisher` port stays unchanged when it

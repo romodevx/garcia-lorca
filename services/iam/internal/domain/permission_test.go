@@ -131,6 +131,11 @@ func TestIsOwnerOnly(t *testing.T) {
 		// T2: deleting a user account is the director's decision alone (owner
 		// answer 4). users:write (create, suspend, edit roles) stays delegable.
 		{"users:delete", true},
+		// Student import (plan item 3): one call creates catalog rows and
+		// creates + enrolls students in bulk — it composes config:write,
+		// students:create and students:enroll, so it stays the owner's alone.
+		{"students:import", true},
+		{" Students:Import ", true},
 		// T9 (owner answer 6): correcting payments is delegable.
 		{"payments:edit", false},
 		// T10 (owner answer 7): the Egresos module is delegable.

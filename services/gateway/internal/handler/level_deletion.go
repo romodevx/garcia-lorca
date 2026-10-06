@@ -802,6 +802,9 @@ func mergeReports(reports []client.LevelRestoreReport) restoreResponse {
 	return restoreResponse{Restored: shown(restored), Skipped: skipped}
 }
 
+// NewBatchID mints a random (v4) uuid for a saga or an import batch.
+func NewBatchID() string { return newBatchID() }
+
 // newBatchID mints a random (v4) uuid for a saga.
 func newBatchID() string {
 	var b [16]byte

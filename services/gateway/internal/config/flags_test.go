@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/garcia-lorca/services/gateway/internal/config"
@@ -37,11 +38,12 @@ func TestParseEnabledModulesAcceptsFullKeys(t *testing.T) {
 }
 
 func TestAllModuleFlagsCoversRegistry(t *testing.T) {
-	// FLAGS.md registers 18 module flags; the enumeration must match so
+	// FLAGS.md registers 19 module flags; the enumeration must match so
 	// GET /features reports every module. (M14 added module_teachers; task 13,
-	// module_student_card; T10, module_expenses; T16, module_schedule; T17, module_activities.)
-	if len(config.AllModuleFlags) != 18 {
-		t.Errorf("AllModuleFlags has %d entries, want 18", len(config.AllModuleFlags))
+	// module_student_card; T10, module_expenses; T16, module_schedule; T17,
+	// module_activities; the legacy student import, module_student_import.)
+	if len(config.AllModuleFlags) != 19 {
+		t.Errorf("AllModuleFlags has %d entries, want 19", len(config.AllModuleFlags))
 	}
 	seen := map[string]bool{}
 	for _, k := range config.AllModuleFlags {
@@ -52,5 +54,21 @@ func TestAllModuleFlagsCoversRegistry(t *testing.T) {
 	}
 	if !seen["module_students"] || !seen["module_iam"] {
 		t.Errorf("expected core module keys present: %v", config.AllModuleFlags)
+	}
+}
+
+// The legacy student import (PLAN-student-import) ships behind its own flag:
+// GET /features must report it, and it is default-deny — enabling students and
+// config does NOT enable the import; only listing student_import does.
+func TestStudentImportFlagIsRegisteredAndDefaultOff(t *testing.T) {
+	const key = "module_student_import"
+	if !slices.Contains(config.AllModuleFlags, key) {
+		t.Fatalf("AllModuleFlags does not report %q: /features would hide the import", key)
+	}
+	if config.ParseEnabledModules("students,config")[key] {
+		t.Errorf("%q must stay OFF unless listed explicitly", key)
+	}
+	if !config.ParseEnabledModules("students,config,student_import")[key] {
+		t.Errorf("listing student_import must enable %q", key)
 	}
 }

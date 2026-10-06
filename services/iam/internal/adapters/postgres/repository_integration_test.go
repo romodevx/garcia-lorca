@@ -643,6 +643,9 @@ func TestSeededRolesHoldTheirPermissions(t *testing.T) {
 			"activities:read", "activities:write",
 			// T18: the Becas module (0030), delegable.
 			"scholarships:read", "scholarships:write",
+			// Student import (0031): owner-only, composes config:write +
+			// students:create + students:enroll.
+			"students:import",
 		}},
 		// Task 9: the cashier. Reads the counter, takes money, finds pupils.
 		{"cobranza", []string{"students:read", "students:list", "collections:read", "payments:write"}},
@@ -764,6 +767,27 @@ func TestSeededRolesHoldTheirPermissions(t *testing.T) {
 		}
 		if n != 1 {
 			t.Errorf("owner holds grades:close %d times, want exactly once", n)
+		}
+	})
+
+	// Student import: 0031 is idempotent — re-running it never duplicates
+	// students:import on the owner.
+	t.Run("re-running 0031 grants students:import exactly once", func(t *testing.T) {
+		sql, err := os.ReadFile(filepath.Join(migrationsDir, "0031_students_import_permission.sql"))
+		if err != nil {
+			t.Fatalf("read migration: %v", err)
+		}
+		if err := superDB.Exec(string(sql)).Error; err != nil {
+			t.Fatalf("re-run 0031: %v", err)
+		}
+		var n int
+		if err := superDB.Raw(
+			`SELECT count(*) FROM roles, unnest(permissions) p WHERE tenant_id = ? AND id = '00000000-0000-0000-0000-0000000000a1' AND p = 'students:import'`,
+			seedTenant).Scan(&n).Error; err != nil {
+			t.Fatalf("count: %v", err)
+		}
+		if n != 1 {
+			t.Errorf("owner holds students:import %d times, want exactly once", n)
 		}
 	})
 

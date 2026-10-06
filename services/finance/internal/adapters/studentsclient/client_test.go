@@ -119,3 +119,17 @@ func TestAdmissionStatusString(t *testing.T) {
 		})
 	}
 }
+
+// The import's mark must survive the trip: losing it bills every imported
+// pupil an inscription the previous system already collected (ADR 0033).
+func TestToRefCarriesTheEnrollmentOrigin(t *testing.T) {
+	for _, origin := range []string{"", "manual", "import"} {
+		got := toRef(&studentsv1.Enrollment{Id: "e1", Origin: origin})
+		if got.Origin != origin {
+			t.Errorf("origin %q came back as %q", origin, got.Origin)
+		}
+	}
+	if !toRef(&studentsv1.Enrollment{Origin: "import"}).Imported() {
+		t.Error("an import enrolment must read as imported")
+	}
+}

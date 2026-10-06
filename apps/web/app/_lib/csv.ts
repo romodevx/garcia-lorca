@@ -46,7 +46,14 @@ export function downloadCsv(filename: string, csv: string): void {
   URL.revokeObjectURL(href);
 }
 
-function escapeCell(value: string): string {
+// A cell starting with one of these is a formula to Excel (OWASP CSV
+// injection). Plain signed numbers ("-150.00") are left alone: they are money.
+const FORMULA_START = /^[=+\-@\t\r]/;
+const SIGNED_NUMBER = /^[+-]?\d+(\.\d+)?$/;
+
+function escapeCell(raw: string): string {
+  // The apostrophe is Excel's own "this is text" mark: shown nowhere, run never.
+  const value = FORMULA_START.test(raw) && !SIGNED_NUMBER.test(raw) ? `'${raw}` : raw;
   if (/^0\d+$/.test(value)) {
     // Excel's own escape hatch for "this is text, not a number".
     return `="${value}"`;

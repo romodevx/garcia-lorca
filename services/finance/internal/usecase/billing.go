@@ -243,7 +243,8 @@ func (s *FinanceService) wantedInscriptions(
 ) ([]domain.Charge, error) {
 	var out []domain.Charge
 	for _, enr := range enrollments {
-		if enr.Status != enrolmentStatusActive {
+		// An imported pupil was inscribed by the previous system (ADR 0033).
+		if enr.Status != enrolmentStatusActive || enr.Imported() {
 			continue
 		}
 		plan, ok := planByLevel[levelOfGroup[enr.GroupID]]
@@ -418,7 +419,7 @@ func (s *FinanceService) RunBilling(ctx context.Context, cycleID, asOfDate strin
 		// not added into the month's tuition on purpose: a family that owes
 		// $4,000 in September is owed an explanation of the $800, and a tuition
 		// row that no longer matches the tabulador is one nobody can reconcile.
-		for _, item := range plan.FeeInstallments(cycle.StartsOn) {
+		for _, item := range feesOwed(plan, cycle.StartsOn, enr) {
 			charge, err := s.buildCharge(chargeSpec{
 				studentID:   enr.StudentID,
 				cycleID:     cycleID,
@@ -882,4 +883,15 @@ func resolveAsOf(raw string, now func() time.Time) (time.Time, error) {
 		return time.Time{}, glerrors.New(glerrors.KindInvalid, "the date must be YYYY-MM-DD")
 	}
 	return parsed, nil
+}
+
+// feesOwed is the fee list a pupil owes. Everybody enrolled by hand owes the
+// whole list, as before; a pupil brought over by the legacy import owes only
+// what falls due from the month they arrived — the previous system collected
+// the rest (owner decision O8, ADR 0033).
+func feesOwed(plan domain.TuitionPlan, cycleStart time.Time, enr ports.EnrollmentRef) []domain.FeeInstallment {
+	if enr.Imported() {
+		return plan.FeeInstallmentsFrom(cycleStart, enr.EnrolledAt)
+	}
+	return plan.FeeInstallments(cycleStart)
 }

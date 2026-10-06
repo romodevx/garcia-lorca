@@ -73,7 +73,19 @@ type EnrollmentRef struct {
 	// Zero for every enrolment recorded before finance started reading it, which
 	// the run treats as "was already there" — the whole year, exactly as today.
 	EnrolledAt time.Time
+	// Origin says how the place was taken: by hand ("manual", or empty for
+	// every enrolment recorded before students sent it) or by the migration
+	// from the previous system (EnrollmentOriginImport). An imported pupil was
+	// already inscribed there: this cycle's inscription is not theirs, and
+	// neither are the fees that fell due before they arrived (ADR 0033).
+	Origin string
 }
+
+// EnrollmentOriginImport marks an enrolment the legacy import created.
+const EnrollmentOriginImport = "import"
+
+// Imported reports whether the place came from the legacy import.
+func (e EnrollmentRef) Imported() bool { return e.Origin == EnrollmentOriginImport }
 
 // StudentReader validates student references against the students bounded
 // context (by RPC). It is a consumer-defined seam: the use case depends on this

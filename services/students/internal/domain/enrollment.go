@@ -63,6 +63,45 @@ type Enrollment struct {
 	status     EnrollmentStatus
 	enrolledAt time.Time
 	endedAt    time.Time // zero while active
+	origin     EnrollmentOrigin
+}
+
+// EnrollmentOrigin says how a placement was made. Finance reads it: an
+// imported pupil was enrolled and paid in the previous system, so their
+// inscription is never billed here (ADR 0033).
+type EnrollmentOrigin string
+
+// The origins an enrollment may have.
+const (
+	EnrollmentOriginManual EnrollmentOrigin = "manual"
+	EnrollmentOriginImport EnrollmentOrigin = "import"
+)
+
+// ParseEnrollmentOrigin resolves a stored origin; empty is manual (every
+// placement made before the column existed).
+func ParseEnrollmentOrigin(raw string) (EnrollmentOrigin, error) {
+	switch o := EnrollmentOrigin(strings.ToLower(strings.TrimSpace(raw))); o {
+	case "", EnrollmentOriginManual:
+		return EnrollmentOriginManual, nil
+	case EnrollmentOriginImport:
+		return o, nil
+	default:
+		return "", glerrors.New(glerrors.KindInvalid, "unknown enrollment origin: "+raw)
+	}
+}
+
+// WithOrigin returns the enrollment marked with how it was made.
+func (e Enrollment) WithOrigin(o EnrollmentOrigin) Enrollment {
+	e.origin = o
+	return e
+}
+
+// Origin is how the placement was made; manual unless marked otherwise.
+func (e Enrollment) Origin() EnrollmentOrigin {
+	if e.origin == "" {
+		return EnrollmentOriginManual
+	}
+	return e.origin
 }
 
 // NewEnrollment builds a validated Enrollment. All identity references except

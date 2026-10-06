@@ -24,6 +24,8 @@ import { FinanceScreen } from "./_screens/finance/FinanceScreen";
 import { Catalog } from "./_screens/config/Catalog";
 import { LevelDeleteScreen } from "./_screens/config/levelDeletion/LevelDeleteScreen";
 import { LevelPeriodsScreen } from "./_screens/config/periods/LevelPeriodsScreen";
+import { StudentImportScreen } from "./_screens/studentImport/StudentImportScreen";
+import { canImportStudents } from "./studentImport/file";
 import { clearLevelNotice, leaveLevelNotice, peekLevelNotice } from "./_screens/config/levelDeletion/pendingNotice";
 import { canDeleteLevels, canWriteConfig } from "./config/permissions";
 import { canDeleteUsers } from "./admin/permissions";
@@ -239,6 +241,9 @@ export function AppShell(): ReactElement {
   const activitiesEnabled = useFlag("module_activities") && financeEnabled;
   // T18: Becas. Finance computes them on every charge, so both flags must be on.
   const scholarshipsEnabled = useFlag("module_scholarships") && financeEnabled;
+  // ADR 0033: Migrar alumnos writes the catalog (config) and the pupils
+  // (students), so all three flags must be on — the gateway demands the same.
+  const studentImportEnabled = useFlag("module_student_import") && configEnabled && studentsEnabled;
 
   /**
    * Arranque: las cookies de sesión son HttpOnly (el JavaScript no las ve), así
@@ -481,6 +486,9 @@ export function AppShell(): ReactElement {
   // answers reads with config:read and edits with config:write.
   const openLevelPeriods = (levelId: string): void => go({ screen: "levelPeriods", levelId });
   const mayWriteConfig = canWriteConfig(principal?.permissions);
+  // Owner-only (students:import). UX only: the gateway refuses without it.
+  const mayImportStudents = studentImportEnabled && canImportStudents(principal?.permissions);
+  const openStudentImport = mayImportStudents ? (): void => go({ screen: "studentImport" }) : undefined;
   // What a finished deletion tells Configuración; it belongs to that one visit.
   // Next remounts this shell on the route change, so the sentence travels in
   // pendingNotice (module scope) and the new shell picks it up once.
@@ -488,7 +496,7 @@ export function AppShell(): ReactElement {
   useEffect(() => {
     if (peekLevelNotice() !== undefined) clearLevelNotice();
   }, []);
-  const onConfigScreens = view.screen === "config" || view.screen === "levelDelete" || view.screen === "levelPeriods";
+  const onConfigScreens = view.screen === "config" || view.screen === "levelDelete" || view.screen === "levelPeriods" || view.screen === "studentImport";
   useEffect(() => {
     if (!onConfigScreens) setConfigNotice(undefined);
   }, [onConfigScreens]);
@@ -665,11 +673,19 @@ export function AppShell(): ReactElement {
       {view.screen === "levelPeriods" && configEnabled && (
         <LevelPeriodsScreen key={view.levelId} levelId={view.levelId} canWrite={mayWriteConfig} onBack={() => go({ screen: "config" })} />
       )}
+      {view.screen === "studentImport" && mayImportStudents && (
+        <StudentImportScreen
+          onBack={() => go({ screen: "config" })}
+          onOpenTuition={() => go({ screen: "config" })}
+          onViewStudents={(levelId) => router.push(levelId === undefined ? "/alumnos" : `/alumnos?nivel=${encodeURIComponent(levelId)}`)}
+        />
+      )}
       {(view.screen === "config" ||
         (view.screen === "levelDelete" && !(configEnabled && mayDeleteLevels)) ||
-        (view.screen === "levelPeriods" && !configEnabled)) &&
+        (view.screen === "levelPeriods" && !configEnabled) ||
+        (view.screen === "studentImport" && !mayImportStudents)) &&
         (configEnabled ? (
-          <Catalog onBack={home} canDeleteLevels={mayDeleteLevels} onDeleteLevel={openLevelDelete} onOpenLevelPeriods={openLevelPeriods} notice={configNotice} />
+          <Catalog onBack={home} canDeleteLevels={mayDeleteLevels} onDeleteLevel={openLevelDelete} onOpenLevelPeriods={openLevelPeriods} onOpenStudentImport={openStudentImport} notice={configNotice} />
         ) : (
           // Flag OFF: never render the catalog; show the friendly stub so
           // navigation never dead-ends. (Backend 404 is authoritative.)
@@ -698,6 +714,7 @@ export function AppShell(): ReactElement {
             canRevokeCard={cardEnabled && canEditStudents}
             canReadStatement={financeEnabled && (principal?.permissions?.some((p) => p === "finance:read" || p === "collections:read") === true)}
             canCorrectPayments={canCorrectPayments}
+            onOpenImport={openStudentImport}
           />
         ) : (
           // Flag OFF: never render the enrollment surface; show the friendly stub

@@ -165,6 +165,9 @@ type UpdateDetailsInput struct {
 	MaternalLastName string
 	CURP             string
 	Profile          domain.ProfileInput
+	// BankReference is the BBVA reference (ADR 0033): nil keeps the stored
+	// one, "" clears it, anything else replaces it.
+	BankReference *string
 }
 
 // UpdateDetails validates and persists a correction of the pupil's file. A CURP
@@ -184,6 +187,13 @@ func (s *StudentService) UpdateDetails(ctx context.Context, in UpdateDetailsInpu
 	}
 	if err := student.UpdateDetails(in.FirstName, in.LastName, in.MaternalLastName, curp, profile); err != nil {
 		return nil, err
+	}
+	if in.BankReference != nil {
+		ref, err := domain.NewBankReference(*in.BankReference)
+		if err != nil {
+			return nil, err
+		}
+		student.ChangeBankReference(ref)
 	}
 	if err := s.repo.UpdateDetails(ctx, student); err != nil {
 		return nil, err
@@ -205,12 +215,18 @@ type CreateApplicantInput struct {
 	GuardianName     string
 	// BirthDate is optional at intake (T11): ISO "2019-03-12", or empty.
 	BirthDate string
+	// BankReference is the optional BBVA reference (ADR 0033).
+	BankReference string
 }
 
 // CreateApplicant validates the input, builds a pending applicant, and persists
 // it. A duplicate CURP (per tenant) surfaces as KindConflict from the repo.
 func (s *StudentService) CreateApplicant(ctx context.Context, in CreateApplicantInput) (*domain.Student, error) {
 	curp, err := domain.NewCURP(in.CURP)
+	if err != nil {
+		return nil, err
+	}
+	bankRef, err := domain.NewBankReference(in.BankReference)
 	if err != nil {
 		return nil, err
 	}
@@ -235,6 +251,7 @@ func (s *StudentService) CreateApplicant(ctx context.Context, in CreateApplicant
 		GradeGroup:       in.GradeGroup,
 		GuardianName:     in.GuardianName,
 		Profile:          profile,
+		BankReference:    bankRef,
 	})
 	if err != nil {
 		return nil, err

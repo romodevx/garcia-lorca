@@ -754,6 +754,11 @@ export interface StudentsScreenProps {
   canReadStatement?: boolean;
   /** payments:edit: may correct a payment from the statement (T9). */
   canCorrectPayments?: boolean;
+  /**
+   * Opens Migrar alumnos (ADR 0033) from the empty roll. Given only with
+   * module_student_import on and students:import held.
+   */
+  onOpenImport?: () => void;
 }
 
 /** What the school reads in Excel, in the order the table shows it. */
@@ -768,7 +773,7 @@ const EXPORT_COLUMNS: readonly CsvColumn<Row>[] = [
   { label: "Estado", value: (r) => statusOf(r.student.admissionStatus).label },
 ];
 
-export function StudentsScreen({ onBack, onEdit, canWriteNotes = false, canVoidAnyNote = false, userId = "", canVerifyCard = false, canRevokeCard = false, canReadStatement = false, canCorrectPayments = false }: StudentsScreenProps): ReactElement {
+export function StudentsScreen({ onBack, onEdit, canWriteNotes = false, canVoidAnyNote = false, userId = "", canVerifyCard = false, canRevokeCard = false, canReadStatement = false, canCorrectPayments = false, onOpenImport }: StudentsScreenProps): ReactElement {
   const [verifying, setVerifying] = useState(false);
   const [students, setStudents] = useState<Student[]>([]);
   const [cycles, setCycles] = useState<Cycle[]>([]);
@@ -895,7 +900,7 @@ export function StudentsScreen({ onBack, onEdit, canWriteNotes = false, canVoidA
         maternalLastName: s.maternalLastName,
         ...p,
         student: s,
-        searchText: [s.curp, s.guardianName],
+        searchText: [s.curp, s.guardianName, s.bankReference ?? ""],
         levelName: nameOf.get(p.levelId) ?? levelOf(s),
         // Placed: this cycle's classroom, or honestly none. Not yet known: the file's letter.
         room: placementReady ? (labelOf.get(p.groupId) ?? NO_GROUP) : groupOf(s),
@@ -1028,7 +1033,7 @@ export function StudentsScreen({ onBack, onEdit, canWriteNotes = false, canVoidA
         <StudentFilters
           filter={filter}
           selectable
-          searchHint="Buscar alumno, CURP o tutor…"
+          searchHint="Buscar alumno, CURP, tutor o referencia BBVA…"
           extraActive={tab !== "all"}
           onClear={() => setTab("all")}
           leading={
@@ -1098,6 +1103,11 @@ export function StudentsScreen({ onBack, onEdit, canWriteNotes = false, canVoidA
               <div style={{ display: "flex", gap: 12, justifyContent: "center", marginTop: 22 }}>
                 <Btn kind="ghost" onClick={clear}>Limpiar filtros</Btn><Btn icon="plus" onClick={() => setAdd(true)}>Nuevo alumno</Btn>
               </div>
+              {students.length === 0 && onOpenImport !== undefined && (
+                <button type="button" onClick={onOpenImport} style={{ marginTop: 14, minHeight: 44, color: "var(--forest)", fontWeight: 700, fontSize: 15, textDecoration: "underline" }}>
+                  ¿Vienes de otro sistema?
+                </button>
+              )}
             </div>
           ) : (
             paged.map((row, i) => (

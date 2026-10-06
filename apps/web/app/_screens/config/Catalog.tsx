@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
+import { Btn } from "../../_design/Controls";
 import { Icon } from "../../_design/Icon";
 import { Page } from "../../_design/Page";
 import { Toast } from "../../_design/Toast";
@@ -42,6 +43,7 @@ import { SubjectsPanel } from "./SubjectsPanel";
 import { EmptyHint, ErrorAlert } from "./parts";
 import { TermsPanel } from "./TermsPanel";
 import { LevelPeriodsEntry } from "./periods/LevelPeriodsEntry";
+import { StudentImportEntry } from "../studentImport/StudentImportEntry";
 import { useLevelTerms } from "./useLevelTerms";
 
 import { API_URL } from "../../api-url";
@@ -61,6 +63,11 @@ export interface CatalogProps {
   notice?: string;
   /** Opens the evaluation periods page of one level, grade by grade (T14). */
   onOpenLevelPeriods?: (levelId: string) => void;
+  /**
+   * Opens Migrar alumnos (ADR 0033). Given only with module_student_import on
+   * and students:import held; absent, neither way in is shown.
+   */
+  onOpenStudentImport?: () => void;
 }
 
 /**
@@ -71,7 +78,7 @@ export interface CatalogProps {
  * gateway (behind the flag + config:read/write) is the security boundary; this
  * screen is UX only.
  */
-export function Catalog({ onBack, canDeleteLevels = false, onDeleteLevel, notice, onOpenLevelPeriods }: CatalogProps): ReactElement {
+export function Catalog({ onBack, canDeleteLevels = false, onDeleteLevel, notice, onOpenLevelPeriods, onOpenStudentImport }: CatalogProps): ReactElement {
   const [cycles, setCycles] = useState<Cycle[]>([]);
   const [levels, setLevels] = useState<Level[]>([]);
   const [gradeLevels, setGradeLevels] = useState<GradeLevel[]>([]);
@@ -244,7 +251,7 @@ export function Catalog({ onBack, canDeleteLevels = false, onDeleteLevel, notice
       )}
 
       {!pricing && (
-      <div className="fade-up" style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 24 }}>
+      <div className="fade-up" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 16, marginBottom: 24 }}>
         <div style={{ width: 56, height: 56, borderRadius: 18, display: "grid", placeItems: "center", background: "var(--forest)", color: "#fff", boxShadow: "0 6px 16px color-mix(in oklab, var(--forest) 38%, transparent)" }}>
           <Icon name="settings" size={30} />
         </div>
@@ -252,6 +259,11 @@ export function Catalog({ onBack, canDeleteLevels = false, onDeleteLevel, notice
           <h1 style={{ fontSize: 30, fontWeight: 800, color: "var(--text)" }}>Configuración académica</h1>
           <p style={{ color: "var(--text-muted)", fontSize: 15, marginTop: 3 }}>Ciclos, niveles, grados, materias, grupos y periodos</p>
         </div>
+        {onOpenStudentImport !== undefined && (
+          <div style={{ marginLeft: "auto" }}>
+            <Btn kind="ghost" icon="upload" onClick={onOpenStudentImport}>Migrar alumnos</Btn>
+          </div>
+        )}
       </div>
       )}
 
@@ -276,6 +288,7 @@ export function Catalog({ onBack, canDeleteLevels = false, onDeleteLevel, notice
           {!pricing && (
             <CycleBar cycles={cycles} selectedCycleId={selectedCycleId} onSelect={setSelectedCycleId} onCreate={handleCreateCycle} onActivate={handleActivateCycle} />
           )}
+          {!pricing && onOpenStudentImport !== undefined && <StudentImportEntry onOpen={onOpenStudentImport} />}
 
           {/*
             The money screen for the academic catalogue. It reads and writes
