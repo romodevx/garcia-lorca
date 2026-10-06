@@ -79,20 +79,44 @@ func profileFromRow(m studentModel) (domain.Profile, error) {
 	}), nil
 }
 
-// profileColumns projects a profile onto its columns, for insert and update.
-func profileColumns(p domain.Profile) (map[string]any, error) {
+// phonesJSON encodes a profile's phones as the `phones` JSON array.
+func phonesJSON(p domain.Profile) (string, error) {
 	rows := make([]phoneRow, 0, len(p.Phones()))
 	for _, ph := range p.Phones() {
 		rows = append(rows, phoneRow{Kind: string(ph.Kind), Number: ph.Number})
 	}
 	phones, err := json.Marshal(rows)
 	if err != nil {
-		return nil, glerrors.Wrap(glerrors.KindInternal, "encoding phones", err)
+		return "", glerrors.Wrap(glerrors.KindInternal, "encoding phones", err)
+	}
+	return string(phones), nil
+}
+
+// withProfile fills a row's profile columns, for an insert that carries the
+// whole file (the legacy import).
+func withProfile(m studentModel, p domain.Profile) (studentModel, error) {
+	phones, err := phonesJSON(p)
+	if err != nil {
+		return studentModel{}, err
+	}
+	a := p.Address()
+	m.BirthDate, m.Sex, m.Email, m.Phones = birthDateOrNil(p.BirthDate()), string(p.Sex()), p.Email(), phones
+	m.AddressStreet, m.AddressExtNumber, m.AddressIntNumber = a.Street, a.ExtNumber, a.IntNumber
+	m.AddressNeighborhood, m.AddressPostalCode = a.Neighborhood, a.PostalCode
+	m.AddressMunicipality, m.AddressState = a.Municipality, a.State
+	return m, nil
+}
+
+// profileColumns projects a profile onto its columns, for insert and update.
+func profileColumns(p domain.Profile) (map[string]any, error) {
+	phones, err := phonesJSON(p)
+	if err != nil {
+		return nil, err
 	}
 	born := birthDateOrNil(p.BirthDate())
 	a := p.Address()
 	return map[string]any{
-		"birth_date": born, "sex": string(p.Sex()), "email": p.Email(), "phones": string(phones),
+		"birth_date": born, "sex": string(p.Sex()), "email": p.Email(), "phones": phones,
 		"address_street": a.Street, "address_ext_number": a.ExtNumber, "address_int_number": a.IntNumber,
 		"address_neighborhood": a.Neighborhood, "address_postal_code": a.PostalCode,
 		"address_municipality": a.Municipality, "address_state": a.State,
