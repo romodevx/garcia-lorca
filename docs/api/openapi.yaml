@@ -1043,6 +1043,7 @@ paths:
                 maternalLastName: { type: string, example: "BYRON", description: "Maternal surname; optional (empty = not captured)." }
                 curp: { type: string, minLength: 18, maxLength: 18, example: "LOAA190312MDFVDA01" }
                 profile: { $ref: '#/components/schemas/StudentProfile' }
+                bankReference: { type: string, pattern: '^[0-9]{0,20}$', example: "231076", description: "BBVA payment reference (ADR 0033), unique per school. Absent keeps the stored one; empty clears it." }
       responses:
         '200':
           description: The corrected pupil, profile included.
@@ -7472,6 +7473,7 @@ components:
         gradeGroup: { type: string, example: "4° A" }
         guardianName: { type: string }
         admissionStatus: { type: string, enum: [pending, accepted, enrolled, rejected, withdrawn] }
+        bankReference: { type: string, example: "231076", description: "BBVA payment reference (ADR 0033); empty when the pupil has none." }
         profile: { $ref: '#/components/schemas/StudentProfile' }
 
     MedicalRecord:

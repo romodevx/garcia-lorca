@@ -58,6 +58,8 @@ type studentResponse struct {
 	AdmissionStatus  string `json:"admissionStatus"`
 	// EnrollmentNumber is the matrícula (task 13).
 	EnrollmentNumber string `json:"enrollmentNumber,omitempty"`
+	// BankReference is the BBVA payment reference (ADR 0033); "" when none.
+	BankReference string `json:"bankReference"`
 	// Nil in lists: a picker needs names, not every pupil's address and phones.
 	Profile *client.StudentProfile `json:"profile,omitempty"`
 }
@@ -75,6 +77,7 @@ func toStudentResponse(s client.StudentResult) studentResponse {
 		GuardianName:     s.GuardianName,
 		AdmissionStatus:  s.AdmissionStatus,
 		EnrollmentNumber: s.EnrollmentNumber,
+		BankReference:    s.BankReference,
 		Profile:          &s.Profile,
 	}
 }
@@ -94,6 +97,8 @@ type updateStudentRequest struct {
 	MaternalLastName *string               `json:"maternalLastName"`
 	CURP             string                `json:"curp"`
 	Profile          client.StudentProfile `json:"profile"`
+	// BankReference is a pointer: absent keeps the stored reference.
+	BankReference *string `json:"bankReference"`
 }
 
 // Update handles PUT /api/v1/students/{id}: corrects the pupil's file (names,
@@ -113,6 +118,7 @@ func (h *StudentsHandler) Update(w http.ResponseWriter, r *http.Request) {
 	res, err := h.svc.UpdateStudent(r.Context(), client.UpdateStudentInput{
 		ID: r.PathValue("id"), FirstName: req.FirstName, LastName: req.LastName,
 		MaternalLastName: maternal, CURP: req.CURP, Profile: req.Profile,
+		BankReference: req.BankReference,
 	})
 	if err != nil {
 		writeConnectError(w, err)

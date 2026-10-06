@@ -53,6 +53,8 @@ type StudentResult struct {
 	Profile          StudentProfile
 	// EnrollmentNumber is the matrícula, <year>-<five digits> (task 13).
 	EnrollmentNumber string
+	// BankReference is the pupil's BBVA payment reference (ADR 0033).
+	BankReference string
 }
 
 // NameParts are the pieces studentname orders by.
@@ -99,6 +101,8 @@ type UpdateStudentInput struct {
 	MaternalLastName string
 	CURP             string
 	Profile          StudentProfile
+	// BankReference: nil keeps the stored one; "" clears it (ADR 0033).
+	BankReference *string
 }
 
 // Enrollment is the edge's view of a student's placement in a group of a cycle,
@@ -581,6 +585,7 @@ func toStudentResult(s *studentsv1.Student) StudentResult {
 		GuardianName:     s.GetGuardianName(),
 		AdmissionStatus:  admissionName(s.GetAdmissionStatus()),
 		EnrollmentNumber: s.GetEnrollmentNumber(),
+		BankReference:    s.GetBankReference(),
 		Profile:          fromProtoProfile(s.GetProfile()),
 	}
 }
@@ -679,7 +684,7 @@ func (c *StudentsClient) DeleteStudentPhoto(ctx context.Context, studentID strin
 func (c *StudentsClient) UpdateStudent(ctx context.Context, in UpdateStudentInput) (StudentResult, error) {
 	res, err := c.rpc.UpdateStudent(ctx, connect.NewRequest(&studentsv1.UpdateStudentRequest{
 		Id: in.ID, FirstName: in.FirstName, LastName: in.LastName, MaternalLastName: in.MaternalLastName, Curp: in.CURP,
-		Profile: toProtoProfile(in.Profile),
+		Profile: toProtoProfile(in.Profile), BankReference: in.BankReference,
 	}))
 	if err != nil {
 		return StudentResult{}, err
