@@ -101,8 +101,10 @@ func buildMux(log *slog.Logger) (*http.ServeMux, error) {
 		return nil, err
 	}
 	schedule := usecase.NewScheduleService(repo, tenantID, func() string { return uuid.NewString() }, time.Now, loc)
+	// The legacy student import's find-or-create catalog (ADR 0033).
+	placements := usecase.NewPlacementService(repo, tenantID, func() string { return uuid.NewString() })
 	handler := grpcadapter.NewConfigHandler(catalog, health).WithLevelDeletion(trash).WithEvaluationPeriods(periods).
-		WithSchedule(schedule)
+		WithSchedule(schedule).WithPlacements(placements)
 
 	mux := http.NewServeMux()
 	path, h := configv1connect.NewConfigServiceHandler(handler, connect.WithRecover(recoverFn))

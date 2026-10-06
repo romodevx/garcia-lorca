@@ -31,6 +31,8 @@ type ConfigHandler struct {
 	periods *usecase.EvaluationPeriodService
 	// schedule is the timetable (T16); see WithSchedule.
 	schedule ScheduleService
+	// placements is the legacy import's catalog (ADR 0033); see WithPlacements.
+	placements PlacementService
 }
 
 // WithLevelDeletion wires the level trash (ADR 0021). The composition root
