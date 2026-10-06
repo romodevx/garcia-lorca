@@ -256,8 +256,11 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 	// the gateway's hourly sweep (always warm, unlike this scale-to-zero
 	// service) through PurgeLevelBatch, on config's restorable_until.
 	levels := usecase.NewLevelArchiveService(repo, time.Now)
+	// The legacy import (ADR 0033): no publisher on purpose — an import
+	// announces nothing, and its enrollments carry origin=import for finance.
+	imports := usecase.NewImportService(repo, catalog, catalog, tenantID, newID, time.Now)
 	handler := grpcadapter.NewStudentsHandler(svc, enroll, guardians, health).
-		WithNotes(notes).WithCards(cards).WithLevelArchive(levels)
+		WithNotes(notes).WithCards(cards).WithLevelArchive(levels).WithImports(imports)
 
 	mux := http.NewServeMux()
 	path, h := studentsv1connect.NewStudentsServiceHandler(handler, connect.WithRecover(recoverFn))
