@@ -34,6 +34,10 @@ const (
 	readTimeout       = 30 * time.Second
 	writeTimeout      = 30 * time.Second
 	idleTimeout       = 120 * time.Second
+	// studentImportCommitTimeout bounds a detached import commit: it outlives
+	// a closed tab but stays inside the write timeout, so the office gets the
+	// result of what it started (1,000 pupils, one transaction each).
+	studentImportCommitTimeout = 25 * time.Second
 )
 
 func main() {
@@ -454,6 +458,21 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("POST /api/v1/config/levels/{id}/delete", levelsDelete(reauthLimiter.Middleware(http.HandlerFunc(levelDeletionH.Delete))))
 	mux.Handle("GET /api/v1/config/level-trash", levelsDelete(http.HandlerFunc(levelDeletionH.Trash)))
 	mux.Handle("POST /api/v1/config/level-trash/{batchId}/restore", levelsDelete(http.HandlerFunc(levelDeletionH.Restore)))
+
+	// ADR 0033 the legacy student import: it writes the catalog AND the roll,
+	// so it lives under module_students, module_config and its own
+	// module_student_import, and answers only to students:import (owner-only in
+	// iam: it composes config:write + students:create + students:enroll).
+	studentImportH := handler.NewStudentImportHandler(handler.StudentImportDeps{
+		Catalog: configClient, Roster: studentsClient, Pricing: financeClient,
+		NewID: handler.NewBatchID, CommitTimeout: studentImportCommitTimeout,
+	})
+	studentImport := func(h http.Handler) http.Handler {
+		return guard.Protect("students", guard.Protect("config", guard.Protect("student_import",
+			requireAuthChanged(middleware.RequirePermission("students:import")(h)))))
+	}
+	mux.Handle("POST /api/v1/imports/students/preview", studentImport(http.HandlerFunc(studentImportH.Preview)))
+	mux.Handle("POST /api/v1/imports/students/commit", studentImport(http.HandlerFunc(studentImportH.Commit)))
 
 	// M14 teachers (staff roster + who teaches what): the same config service
 	// answers these, but they are a MODULE of their own now, so they carry their
