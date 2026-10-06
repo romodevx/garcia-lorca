@@ -42,6 +42,22 @@ func TestConfigFoldNameFolds(t *testing.T) {
 	}
 }
 
+// The Go fold (used to match in dry_run) and the SQL fold (the unique index)
+// must agree on every input, or a preview would promise a level the commit
+// then reuses — or the reverse.
+func TestFoldNameMatchesTheSQLFold(t *testing.T) {
+	db := appDB(t)
+	for _, in := range []string{
+		"Preparatoria", " PREPARATORIA ", "Educación   Básica", "ÁÉÍÓÚÜÑ áéíóúüñ",
+		"Primaria\t\n Bilingüe\r\v\f", "1° Kínder-B", "Àà Çç", "a b", " \t ", "",
+	} {
+		sql := scalar[string](t, db, "SELECT config_fold_name(?)", in)
+		if got := domain.FoldName(in); got != sql {
+			t.Errorf("FoldName(%q) = %q, SQL fold = %q", in, got, sql)
+		}
+	}
+}
+
 // "PREPARATORIA" after "Preparatoria" is the same level: the folded name is
 // unique per school, so an import can never create it twice.
 func TestALevelNameIsUniqueOnceFolded(t *testing.T) {
