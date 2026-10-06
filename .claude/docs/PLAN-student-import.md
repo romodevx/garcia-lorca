@@ -35,7 +35,8 @@ reporte por fila.
 | O6 | Nivel, grado y grupo **se buscan antes de crearse** y se reutilizan; nunca se duplican. |
 | O7 | Para más correos o contactos se usan los **contactos** que ya existen (`AddContact`). La importación no crea contactos porque el Excel no trae nombre de tutor. |
 | O9 | Si **no hay ciclo activo** (por ejemplo, la primera carga), la pantalla **pide crear el ciclo primero**, en el mismo flujo (paso 0). |
-| O8 | *(pendiente en la compuerta)* Cuotas extra del ciclo que vencieron antes de la importación: se cobran desde el mes de importación en adelante, o todas. |
+| O8 | Cuotas extra: solo las que vencen **desde el mes de importación** en adelante (igual que la colegiatura). |
+| O10 | Datos reales: se construye y ensaya en **local**; el entorno definitivo de los datos reales se decide antes del día de migración (no en dev). |
 
 ### Formato del archivo (verificado sobre los 5 archivos reales)
 
