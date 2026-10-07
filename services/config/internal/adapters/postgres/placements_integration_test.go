@@ -5,6 +5,7 @@ package postgres_test
 import (
 	"context"
 	"errors"
+	"runtime"
 	"sync"
 	"testing"
 
@@ -369,5 +370,127 @@ func TestEnsurePlacementsIsPerTenant(t *testing.T) {
 		[]usecase.PlacementRequest{{LevelID: gotA[0].LevelID, GradeOrdinal: 1, GroupName: "A", Capacity: 30}}, true)
 	if err != nil || byID[0].Error != usecase.PlacementLevelNotFound {
 		t.Errorf("tenant B naming tenant A's level must be level_not_found: %+v, %v", byID, err)
+	}
+}
+
+// The interleaving the CI caught: import A has inserted a level and not yet
+// committed; import B inserts the same name and waits on A's row; A commits.
+// levels has TWO unique keys — the original (tenant, name) and the folded one —
+// so B must yield to whichever it trips over and return A's level, never fail
+// with "duplicate key".
+func TestInsertLevelYieldsToALevelCommittedMeanwhile(t *testing.T) {
+	ctx := context.Background()
+	s := newPlacementSchool(t, tenantA)
+	other := pgadapter.NewRepository(appDB(t), tenantA)
+	name := "Racing Nivel " + s.cycleID[:8]
+	newLevel := func() domain.Level {
+		l, err := domain.NewLevel(uuid.NewString(), tenantA, name, "", domain.GranularityCycle)
+		if err != nil {
+			t.Fatalf("NewLevel: %v", err)
+		}
+		return l
+	}
+
+	inserted, release := make(chan string), make(chan struct{})
+	errA := make(chan error, 1)
+	go func() {
+		errA <- s.repo.InPlacementTx(ctx, func(tx ports.PlacementTx) error {
+			l, _, err := tx.InsertLevel(newLevel())
+			if err != nil {
+				return err
+			}
+			inserted <- l.ID()
+			<-release
+			return nil
+		})
+	}()
+	idA := <-inserted
+
+	type answer struct {
+		level   domain.Level
+		created bool
+		err     error
+	}
+	gotB := make(chan answer, 1)
+	go func() {
+		var a answer
+		a.err = other.InPlacementTx(ctx, func(tx ports.PlacementTx) error {
+			var err error
+			a.level, a.created, err = tx.InsertLevel(newLevel())
+			return err
+		})
+		gotB <- a
+	}()
+	waitForALockWaiter(t)
+	close(release)
+
+	if err := <-errA; err != nil {
+		t.Fatalf("import A: %v", err)
+	}
+	b := <-gotB
+	if b.err != nil {
+		t.Fatalf("import B failed instead of yielding: %v", b.err)
+	}
+	if b.created || b.level.ID() != idA {
+		t.Errorf("import B = (%s, created %v), want A's level %s", b.level.ID(), b.created, idA)
+	}
+}
+
+// waitForALockWaiter returns once some backend is waiting on a row lock — the
+// second insert blocked behind the first — so the test never relies on timing.
+func waitForALockWaiter(t *testing.T) {
+	t.Helper()
+	for range 500 {
+		var n int64
+		if err := superDB(t).Raw("SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock'").Scan(&n).Error; err != nil {
+			t.Fatalf("pg_stat_activity: %v", err)
+		}
+		if n > 0 {
+			return
+		}
+		runtime.Gosched()
+	}
+	t.Fatal("the second insert never waited on the first")
+}
+
+// The interleaving CI caught cannot be paused on: both inserts pass ON
+// CONFLICT's pre-check before either writes, and the second then trips over
+// levels' OTHER unique key, (tenant_id, name), which a targeted ON CONFLICT does
+// not absorb. Many callers released at once make it happen; none may fail.
+func TestInsertLevelNeverFailsUnderAStampede(t *testing.T) {
+	const callers, rounds = 8, 20
+	ctx := context.Background()
+	repo := pgadapter.NewRepository(appDB(t), tenantA) // one pool, as in production
+	for round := range rounds {
+		name := "Stampede " + uuid.NewString()[:8]
+		start := make(chan struct{})
+		errs := make(chan error, callers)
+		var wg sync.WaitGroup
+		for range callers {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				errs <- repo.InPlacementTx(ctx, func(tx ports.PlacementTx) error {
+					l, err := domain.NewLevel(uuid.NewString(), tenantA, name, "", domain.GranularityCycle)
+					if err != nil {
+						return err
+					}
+					_, _, err = tx.InsertLevel(l)
+					return err
+				})
+			}()
+		}
+		close(start)
+		wg.Wait()
+		close(errs)
+		for err := range errs {
+			if err != nil {
+				t.Fatalf("round %d: a concurrent insert failed instead of yielding: %v", round, err)
+			}
+		}
+		if n := levelsNamed(t, tenantA, name); n != 1 {
+			t.Fatalf("round %d: levels = %d, want 1", round, n)
+		}
 	}
 }
