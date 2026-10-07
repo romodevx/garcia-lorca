@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -498,5 +499,82 @@ func TestCapacityIsBounded(t *testing.T) {
 		if got := capacityFor(asked, key, tc.pupils); got != tc.want {
 			t.Errorf("%s: capacity = %d, want %d", name, got, tc.want)
 		}
+	}
+}
+
+// slowRoster takes `per` for every real (not validating) call, like students
+// far from its database, and records how many rows each call carried.
+type slowRoster struct {
+	fakeImportRoster
+	per    time.Duration
+	chunks []int
+}
+
+func (s *slowRoster) ImportStudents(ctx context.Context, rows []client.ImportRowInput, validate bool, batch string) ([]client.ImportRowResult, error) {
+	if !validate {
+		s.chunks = append(s.chunks, len(rows))
+		select {
+		case <-time.After(s.per):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return s.fakeImportRoster.ImportStudents(ctx, rows, validate, batch)
+}
+
+// A file too big for the time left is written in chunks and stops cleanly:
+// the office gets what went in and which rows are still to do — re-uploading
+// the same file finishes them — instead of a 500 that loses the whole answer.
+func TestCommitStopsBetweenChunksWhenTimeRunsOut(t *testing.T) {
+	f := newImportFixture()
+	roster := &slowRoster{per: 300 * time.Millisecond}
+	f.h.d.Roster = roster
+	f.h.d.WriteBudget = commitAnswerMargin + 700*time.Millisecond
+	var rows [][]any
+	for i := 0; i < 3*importChunk; i++ {
+		curp := fmt.Sprintf("AAMI21%04dMJCLLRA0", i%10000)
+		rows = append(rows, pupil("Primaria", "A", "Activo", curp[:6]+fmt.Sprintf("%02d%02d", 1+i%12, 1+i%28)+curp[10:]))
+	}
+	req := importRequest{FileBase64: importFile(t, rows...)}
+	req.PlanHash = decodePreview(t, post(t, f.h.Preview, req)).PlanHash
+
+	got := decodePreview(t, post(t, f.h.Commit, req))
+
+	if len(roster.chunks) == 0 || roster.chunks[0] != importChunk {
+		t.Fatalf("chunks = %v, want chunks of %d", roster.chunks, importChunk)
+	}
+	if len(roster.chunks) >= 3 {
+		t.Fatalf("chunks = %v: it kept sending after the time ran out", roster.chunks)
+	}
+	if got.Summary.New == 0 || got.Summary.New >= 3*importChunk {
+		t.Errorf("summary = %+v, want some but not all imported", got.Summary)
+	}
+	var unanswered int
+	for _, r := range got.Rows {
+		if r.Reason == reasonNotAnswered {
+			unanswered++
+		}
+	}
+	if unanswered+got.Summary.New != 3*importChunk {
+		t.Errorf("imported %d + not answered %d, want every row accounted for (%d)", got.Summary.New, unanswered, 3*importChunk)
+	}
+}
+
+// The preview re-reads the whole file and asks config and students about every
+// group and row; far from the database that outlives the server's 30 s write
+// timeout, so it gets the same route deadline as the commit.
+func TestPreviewSetsItsOwnWriteDeadline(t *testing.T) {
+	f := newImportFixture()
+	raw, _ := json.Marshal(importRequest{FileBase64: importFile(t, pupil("Primaria", "A", "Activo", "AAMI210219MJCLLRA0"))})
+	rec := &deadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
+	before := time.Now()
+
+	f.h.Preview(rec, httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(raw)))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if rec.deadline.Before(before.Add(2*time.Minute - time.Second)) {
+		t.Errorf("write deadline = %s from now, want the route's 2m budget", rec.deadline.Sub(before))
 	}
 }

@@ -61,3 +61,27 @@ cobrado ~570 inscripciones que el colegio ya cobró.
 - **One commit at a time per school** (409 `IMPORT_IN_PROGRESS`), its own write
   deadline (2 min), and a plan hash that includes the file's bytes, so a commit
   writes exactly the file the office previewed.
+
+## Load test (2026-10-06/07)
+
+Synthetic 1,000-pupil file against a throwaway database on the dev Cloud SQL
+instance (`db-f1-micro`), services run locally through cloud-sql-proxy — so
+every query paid a ~85 ms Mexico→us-central1 round trip. Measured:
+
+- Preview of 1,000 rows on an empty school: 2.5–3.6 s. With its 24 groups
+  already created: ~37 s, ≈ 410 round trips (students checks each group with
+  config: 3 RPCs per group). Validation lookups are batched (`IN (…)`).
+- Commit: ~0.58 s per pupil ≈ 7 round trips (tx, CURP, reference, matrícula,
+  pupil, enrolment, commit). The single-call commit wrote 128 of 1,000 and then
+  answered a 500 that lost even those.
+- In region (Cloud Run ↔ Cloud SQL, ~1–2 ms per round trip) the same counts give
+  ~1 s for the preview and ~15–25 s for 1,000 pupils — inside the 2-minute
+  route budget. Not measured in region; the first real import in dev is that
+  measurement.
+
+Fixes from it: the commit writes in chunks of 50 and stops between chunks when
+time runs out (unanswered rows come back `not_answered`; re-uploading the same
+file finishes them); the preview has the same route deadline as the commit; and
+`pkg/gormlog` stops slow-query logs from writing CURPs (they did, in every
+service). Optional later: batch students' group checks (one config call per
+import instead of three per group).
