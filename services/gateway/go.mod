@@ -9,8 +9,8 @@ require (
 	github.com/signintech/gopdf v0.38.1
 	github.com/stretchr/testify v1.11.1
 	github.com/xuri/excelize/v2 v2.11.0
-	golang.org/x/sync v0.21.0
-	golang.org/x/text v0.39.0
+	golang.org/x/sync v0.22.0
+	golang.org/x/text v0.41.0
 	google.golang.org/protobuf v1.36.11
 	gopkg.in/yaml.v3 v3.0.1
 )
