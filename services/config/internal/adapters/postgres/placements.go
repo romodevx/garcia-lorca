@@ -15,10 +15,6 @@ import (
 // Compile-time proof the adapter satisfies the placement port.
 var _ ports.PlacementStore = (*Repository)(nil)
 
-// levelFoldedNameTarget is the arbiter of a level's find-or-create: the unique
-// expression index of migration 0019, (tenant_id, config_fold_name(name)).
-var levelFoldedNameTarget = []clause.Column{{Name: "tenant_id"}, {Name: "config_fold_name(name)", Raw: true}}
-
 // shareLock is SELECT … FOR SHARE: it conflicts with the UPDATE that begins a
 // level deletion (status → 'deleting'), so a level the import resolved stays
 // as it was read until the import commits; it does not conflict with other
@@ -75,12 +71,16 @@ func (p placementTx) lockLevel(where string, args ...any) (domain.Level, bool, e
 	return l, err == nil, err
 }
 
-// InsertLevel is INSERT … ON CONFLICT (tenant_id, config_fold_name(name)) DO
-// NOTHING. When another transaction holds or committed the same folded name
-// the insert waits for it, does nothing, and the committed level is returned.
+// InsertLevel is INSERT … ON CONFLICT DO NOTHING with NO target. levels has two
+// unique keys — the original (tenant_id, name) and the folded one of migration
+// 0019 — and a targeted ON CONFLICT only absorbs its own: two imports that both
+// passed the pre-check would then fail on the other with "duplicate key"
+// (caught by CI, reproduced by TestInsertLevelNeverFailsUnderAStampede). An
+// exact duplicate is also a folded one, so whichever key fires, the level is
+// then found by its folded name and returned.
 func (p placementTx) InsertLevel(l domain.Level) (domain.Level, bool, error) {
 	m := fromDomainLevel(l)
-	res := p.db.Clauses(clause.OnConflict{Columns: levelFoldedNameTarget, DoNothing: true}).Create(&m)
+	res := p.db.Clauses(clause.OnConflict{DoNothing: true}).Create(&m)
 	if res.Error != nil {
 		return domain.Level{}, false, translateCreateErr(res.Error, "creating level", "a level with this name already exists")
 	}

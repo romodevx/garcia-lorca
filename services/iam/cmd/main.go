@@ -12,6 +12,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	stdlog "log"
 	"log/slog"
 	"net/http"
 	"os"
@@ -24,11 +25,11 @@ import (
 	"golang.org/x/net/http2/h2c"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
-	gormlogger "gorm.io/gorm/logger"
 
 	"github.com/garcia-lorca/gen/go/garcialorca/iam/v1/iamv1connect"
 	"github.com/garcia-lorca/pkg/dbdsn"
 	"github.com/garcia-lorca/pkg/dbpool"
+	"github.com/garcia-lorca/pkg/gormlog"
 	"github.com/garcia-lorca/pkg/logger"
 	"github.com/garcia-lorca/services/iam/internal/adapters/bcrypt"
 	"github.com/garcia-lorca/services/iam/internal/adapters/googleid"
@@ -185,7 +186,7 @@ func openDB() (*gorm.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{Logger: gormlogger.Default.LogMode(gormlogger.Warn)})
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{Logger: gormlog.New(stdlog.New(os.Stdout, "\r\n", stdlog.LstdFlags))})
 	if err != nil {
 		return nil, err
 	}

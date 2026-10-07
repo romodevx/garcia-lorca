@@ -36,7 +36,13 @@ beforeEach(() => {
   config.listLevels.mockResolvedValue(LEVELS);
   api.previewStudentImport.mockResolvedValue(MATCHED);
 });
-afterEach(() => vi.clearAllMocks());
+// clearAllMocks keeps queued mockReturnValueOnce answers; a test that fails
+// before consuming one would hand it to the next test. Reset the import API.
+afterEach(() => {
+  vi.clearAllMocks();
+  api.previewStudentImport.mockReset();
+  api.commitStudentImport.mockReset();
+});
 
 function renderScreen() {
   const props = { onBack: vi.fn(), onOpenTuition: vi.fn(), onViewStudents: vi.fn(), today: "2026-10-06" };
@@ -145,7 +151,7 @@ describe("step 2 — choices re-preview", () => {
     await upload(user);
 
     const card = await screen.findByRole("region", { name: "Elige a dónde van los alumnos de «Preparatoria»" });
-    await user.click(within(card).getByRole("button", { name: "Bachillerato" }));
+    await user.click(await within(card).findByRole("button", { name: "Bachillerato" }));
 
     await waitFor(() => expect(api.previewStudentImport).toHaveBeenLastCalledWith(expect.any(String), expect.objectContaining({ levels: { Preparatoria: { levelId: "l-bach" } } })));
   });
@@ -163,7 +169,7 @@ describe("step 2 — answers arriving out of order", () => {
     const card = await screen.findByRole("region", { name: "Elige a dónde van los alumnos de «Preparatoria»" });
 
     api.previewStudentImport.mockReturnValueOnce(new Promise((resolve) => { older = resolve; }));
-    await user.click(within(card).getByRole("button", { name: "Bachillerato" }));
+    await user.click(await within(card).findByRole("button", { name: "Bachillerato" }));
     api.previewStudentImport.mockReturnValueOnce(new Promise((resolve) => { newer = resolve; }));
     await user.click(within(card).getByRole("button", { name: "+ Crear nivel nuevo «Preparatoria»" }));
 

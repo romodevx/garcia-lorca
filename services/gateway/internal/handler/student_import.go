@@ -126,6 +126,13 @@ const maxGroupCapacity = 500
 // maxImportBody bounds the JSON request: a 2 MB file is ~2.7 MB in base64.
 const maxImportBody = 4 << 20
 
+// importChunk is how many pupils one call to students carries on a commit.
+const importChunk = 50
+
+// reasonNotAnswered marks a row students never answered (the commit ran out of
+// time first); uploading the same file again settles it.
+const reasonNotAnswered = "not_answered"
+
 // commitAnswerMargin is kept back from the route's deadline for writing the
 // answer after the detached commit returns.
 const commitAnswerMargin = 3 * time.Second
@@ -216,6 +223,7 @@ type importRun struct {
 
 // Preview: POST /api/v1/imports/students/preview — writes nothing.
 func (h *StudentImportHandler) Preview(w http.ResponseWriter, r *http.Request) {
+	h.extendWriteDeadline(w, r)
 	req, ok := decodeImport(w, r)
 	if !ok {
 		return
@@ -230,10 +238,7 @@ func (h *StudentImportHandler) Preview(w http.ResponseWriter, r *http.Request) {
 // Commit: POST /api/v1/imports/students/commit — writes what the preview
 // showed, or nothing (409 PREVIEW_STALE, 422 LEVELS_UNRESOLVED).
 func (h *StudentImportHandler) Commit(w http.ResponseWriter, r *http.Request) {
-	deadline := time.Now().Add(h.d.WriteBudget)
-	if err := http.NewResponseController(w).SetWriteDeadline(deadline); err != nil && !errors.Is(err, http.ErrNotSupported) {
-		slog.WarnContext(r.Context(), "student import: cannot extend the write deadline", "err", err)
-	}
+	deadline := h.extendWriteDeadline(w, r)
 	req, ok := decodeImport(w, r)
 	if !ok {
 		return
@@ -271,6 +276,18 @@ func (h *StudentImportHandler) Commit(w http.ResponseWriter, r *http.Request) {
 	slog.InfoContext(ctx, "student import committed", "batch", batch, "by", who.UserID, "rows", resp.Summary.Total,
 		"new", resp.Summary.New, "already", resp.Summary.Already, "skipped", resp.Summary.Skipped)
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// extendWriteDeadline gives this route its own write deadline (WriteBudget):
+// both the preview and the commit read the whole file and ask config and
+// students about every group and row, which outlives the server-wide write
+// timeout on a large file or a slow database. It returns the deadline set.
+func (h *StudentImportHandler) extendWriteDeadline(w http.ResponseWriter, r *http.Request) time.Time {
+	deadline := time.Now().Add(h.d.WriteBudget)
+	if err := http.NewResponseController(w).SetWriteDeadline(deadline); err != nil && !errors.Is(err, http.ErrNotSupported) {
+		slog.WarnContext(r.Context(), "student import: cannot extend the write deadline", "err", err)
+	}
+	return deadline
 }
 
 func decodeImport(w http.ResponseWriter, r *http.Request) (importRequest, bool) {
@@ -495,14 +512,53 @@ func (h *StudentImportHandler) judgeRows(ctx context.Context, run *importRun,
 	if len(rows) == 0 {
 		return out, nil
 	}
-	results, err := h.d.Roster.ImportStudents(ctx, rows, validate, batch)
-	if err != nil {
-		return nil, err
+	if validate {
+		results, err := h.d.Roster.ImportStudents(ctx, rows, true, batch)
+		if err != nil {
+			return nil, err
+		}
+		record(out, results)
+		return out, nil
 	}
+	return out, h.writeInChunks(ctx, rows, batch, out)
+}
+
+// writeInChunks sends the pupils to students importChunk at a time and stops
+// starting chunks when the time left would not fit another one. Every pupil is
+// its own transaction in students, so what was written stays written; the rows
+// never answered come back as "not_answered", and uploading the same file again
+// finishes them ("ya estaba" for the rest). Far from its database a pupil costs
+// several round trips: the load test against Cloud SQL from outside the region
+// wrote 128 of 1,000 before the old single call hit its deadline and answered a
+// 500 that lost even those.
+func (h *StudentImportHandler) writeInChunks(ctx context.Context, rows []client.ImportRowInput, batch string, out map[int]client.ImportRowResult) error {
+	deadline, bounded := ctx.Deadline()
+	var slowest time.Duration
+	for start := 0; start < len(rows); start += importChunk {
+		if bounded && start > 0 && time.Until(deadline) < 2*slowest {
+			slog.WarnContext(ctx, "student import: out of time, stopping between chunks", "written", start, "rows", len(rows))
+			return nil
+		}
+		began := time.Now()
+		results, err := h.d.Roster.ImportStudents(ctx, rows[start:min(start+importChunk, len(rows))], false, batch)
+		if err != nil {
+			if start > 0 && ctx.Err() != nil {
+				// The chunk in flight may be partly written; its rows read as
+				// unanswered and the next upload settles them.
+				return nil
+			}
+			return err
+		}
+		record(out, results)
+		slowest = max(slowest, time.Since(began))
+	}
+	return nil
+}
+
+func record(out map[int]client.ImportRowResult, results []client.ImportRowResult) {
 	for _, r := range results {
 		out[r.RowNumber] = r
 	}
-	return out, nil
 }
 
 // sendable is a candidate students should judge: not skipped here, its level
@@ -558,7 +614,7 @@ func (h *StudentImportHandler) rows(run *importRun, results map[int]client.Impor
 		case !sendable:
 			row.Status, row.Reason = rowSkipped, run.placements[key].Error
 		case !judged:
-			row.Status, row.Reason = rowSkipped, "not_answered"
+			row.Status, row.Reason = rowSkipped, reasonNotAnswered
 		default:
 			row.Warnings = append(row.Warnings, res.Warnings...)
 			row.EnrollmentNumber = res.EnrollmentNumber
