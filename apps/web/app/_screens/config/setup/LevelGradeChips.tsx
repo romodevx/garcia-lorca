@@ -26,7 +26,7 @@ export interface LevelGradeChipsProps {
 const rowStyle: CSSProperties = { display: "flex", flexWrap: "wrap", gap: 8 };
 const legendStyle: CSSProperties = { fontSize: 13, fontWeight: 600, color: "var(--text-muted)", marginBottom: 6 };
 const pillStyle: CSSProperties = {
-  marginLeft: 8,
+  marginLeft: 4, // plus the spoken separator's space, ~8px as before
   padding: "2px 8px",
   borderRadius: "var(--r-pill)",
   background: "var(--surface-3)",
@@ -66,6 +66,15 @@ function ChipGroup({ label, children }: { label: string; children: ReactElement[
   );
 }
 
+/** Read by screen readers between the grade and its count, never seen ("1º, 1 grupo"). */
+const spokenOnlyStyle: CSSProperties = { position: "absolute", width: 1, height: 1, overflow: "hidden", clipPath: "inset(50%)", whiteSpace: "nowrap" };
+
 function Pill({ text }: { text: string | undefined }): ReactElement | null {
-  return text === undefined ? null : <span style={pillStyle}>{text}</span>;
+  if (text === undefined) return null;
+  return (
+    <>
+      <span style={spokenOnlyStyle}>,</span>{" "}
+      <span style={pillStyle}>{text}</span>
+    </>
+  );
 }

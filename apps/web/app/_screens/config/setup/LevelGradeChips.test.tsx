@@ -41,7 +41,9 @@ describe("LevelGradeChips", () => {
     );
 
     const grades = within(screen.getByRole("group", { name: "Grado" })).getAllByRole("button");
-    expect(grades.map((g) => g.textContent)).toEqual(["1° PRIMARIA1 grupo", "2° PRIMARIAsin grupos"]);
+    // QA: the name read "1ºsin grupos"; a screen reader needs the pause between grade and count.
+    expect(grades.map((g) => g.textContent)).toEqual(["1° PRIMARIA, 1 grupo", "2° PRIMARIA, sin grupos"]);
+    expect(screen.getByRole("button", { name: "1° PRIMARIA, 1 grupo" })).toBeInTheDocument();
     expect(grades[0]).toHaveAttribute("aria-pressed", "true");
     await user.click(grades[1] as HTMLElement);
     expect(onSelectGrade).toHaveBeenCalledWith("g2");
