@@ -12,7 +12,7 @@ describe("StepFrame (§1.2, §1.3)", () => {
   it("says where the step stands and what it is for, and has no title of its own", () => {
     render(<StepFrame step={stepView("levels")} onGo={() => {}}><p>cuerpo</p></StepFrame>);
     expect(screen.getByText("Paso 3 de 8")).toBeInTheDocument();
-    expect(screen.getByText("Lo que ofrece el colegio y sus grados.")).toBeInTheDocument();
+    expect(screen.getByText("Los niveles que ofrece el colegio y los grados de cada uno.")).toBeInTheDocument();
     expect(screen.getByText("cuerpo")).toBeInTheDocument();
     expect(screen.queryByRole("heading")).toBeNull();
   });

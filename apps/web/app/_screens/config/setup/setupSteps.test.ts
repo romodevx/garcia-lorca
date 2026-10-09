@@ -50,14 +50,14 @@ const step = (input: SetupInput, id: StepId) => {
 describe("STEPS registry", () => {
   it("lists the eight steps in order with their titles and purposes (§1.1, §1.2)", () => {
     expect(STEPS.map((s) => [s.number, s.id, s.title, s.purpose])).toEqual([
-      [1, "profile", "Datos del colegio", "Salen en cada comprobante."],
+      [1, "profile", "Datos del colegio", "Lo que imprime cada comprobante."],
       [2, "cycle", "Ciclo escolar", "El ciclo decide fechas, periodos y cobros."],
-      [3, "levels", "Niveles y grados", "Lo que ofrece el colegio y sus grados."],
+      [3, "levels", "Niveles y grados", "Los niveles que ofrece el colegio y los grados de cada uno."],
       [4, "terms", "Periodos", "Cómo se parte el año para calificar."],
-      [5, "subjects", "Materias", "Materias por grado."],
+      [5, "subjects", "Materias", "Las materias de cada grado."],
       [6, "groups", "Grupos", "Cada grado necesita al menos un grupo para inscribir alumnos."],
-      [7, "tuition", "Colegiaturas", "Precio por nivel en el ciclo."],
-      [8, "calendar", "Calendario", "Días sin clases y actividades. Opcional."],
+      [7, "tuition", "Colegiaturas", "Lo que cuesta cada nivel en este ciclo."],
+      [8, "calendar", "Calendario", "Días sin clases y actividades. Es opcional."],
     ]);
   });
 
@@ -106,17 +106,17 @@ describe("deriveSteps: pending lines (§1.2)", () => {
     ["profile without a name", { profile: ready({ name: "  " }) }, "profile", "Los comprobantes salen sin nombre"],
     ["no cycle at all", { cycles: [], selectedCycleId: undefined }, "cycle", "Sin ciclo activo"],
     ["only a draft cycle", { cycles: [DRAFT], selectedCycleId: "c27" }, "cycle", "Sin ciclo activo"],
-    ["the selected cycle is a draft", { selectedCycleId: "c27" }, "cycle", "Borrador · 2026–2027 es el ciclo en curso"],
-    ["the selected cycle is closed", { cycles: [CLOSED, ACTIVE], selectedCycleId: "c25" }, "cycle", "Cerrado · 2026–2027 es el ciclo en curso"],
+    ["the selected cycle is a draft", { selectedCycleId: "c27" }, "cycle", "Borrador · en curso: 2026–2027"],
+    ["the selected cycle is closed", { cycles: [CLOSED, ACTIVE], selectedCycleId: "c25" }, "cycle", "Cerrado · en curso: 2026–2027"],
     ["one level without grades", { grades: ready([P1]) }, "levels", "Faltan grados en Secundaria"],
     ["two levels without grades", { levels: [PRIM, SEC, PREE], grades: ready([P1]) }, "levels", "Faltan grados en Secundaria y 1 más"],
-    ["one level without terms", { terms: ready([term("prim")]) }, "terms", "Falta en Secundaria"],
-    ["two levels without terms", { terms: ready([]) }, "terms", "Falta en Primaria y 1 más"],
-    ["one grade without groups", { groups: ready([group("p1"), group("s1")]) }, "groups", "Falta en 2º de Secundaria"],
-    ["three grades without groups", { groups: ready([]) }, "groups", "Falta en 1º de Primaria y 2 más"],
+    ["one level without terms", { terms: ready([term("prim")]) }, "terms", "Sin periodos en Secundaria"],
+    ["two levels without terms", { terms: ready([]) }, "terms", "Sin periodos en Primaria y 1 más"],
+    ["one grade without groups", { groups: ready([group("p1"), group("s1")]) }, "groups", "Sin grupos en 2º de Secundaria"],
+    ["three grades without groups", { groups: ready([]) }, "groups", "Sin grupos en 1º de Primaria y 2 más"],
     ["no level priced", { plans: ready([]) }, "tuition", "Ningún nivel tiene precio"],
-    ["one level unpriced", { plans: ready([plan("prim")]) }, "tuition", "Falta Secundaria"],
-    ["two levels unpriced", { levels: [PRIM, SEC, PREE], plans: ready([plan("prim")]) }, "tuition", "Falta Secundaria y 1 más"],
+    ["one level unpriced", { plans: ready([plan("prim")]) }, "tuition", "Sin precio en Secundaria"],
+    ["two levels unpriced", { levels: [PRIM, SEC, PREE], plans: ready([plan("prim")]) }, "tuition", "Sin precio en Secundaria y 1 más"],
     ["no closed days", { closedDays: ready(0) }, "calendar", "Opcional"],
   ];
 
@@ -132,21 +132,21 @@ describe("deriveSteps: an empty collection is never done", () => {
 
   it.each<[StepId, string]>([
     ["levels", "Sin niveles"],
-    ["terms", "Primero agrega un nivel."],
-    ["groups", "Primero agrega un nivel."],
-    ["tuition", "Primero agrega un nivel."],
+    ["terms", "Primero agrega un nivel"],
+    ["groups", "Primero agrega un nivel"],
+    ["tuition", "Primero agrega un nivel"],
   ])("no levels ⇒ %s pending (%j)", (id, line) => {
     expect(step(noLevels, id)).toMatchObject({ status: "pending", line });
   });
 
   it("levels but no grades at all ⇒ Grupos pending", () => {
     const input: SetupInput = { ...complete(), grades: ready([]), groups: ready([]) };
-    expect(step(input, "groups")).toMatchObject({ status: "pending", line: "Primero agrega un grado." });
+    expect(step(input, "groups")).toMatchObject({ status: "pending", line: "Primero agrega un grado" });
   });
 
   it.each<StepId>(["terms", "groups", "tuition"])("no selected cycle ⇒ %s pending, whatever its read says", (id) => {
     const input: SetupInput = { ...complete(), cycles: [], selectedCycleId: undefined, terms: LOADING, groups: FAILED, plans: LOADING };
-    expect(step(input, id)).toMatchObject({ status: "pending", line: "Primero crea el ciclo escolar." });
+    expect(step(input, id)).toMatchObject({ status: "pending", line: "Primero crea el ciclo escolar" });
   });
 
   it("no selected cycle ⇒ Calendario stays optional", () => {

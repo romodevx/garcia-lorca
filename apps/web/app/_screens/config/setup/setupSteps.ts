@@ -28,14 +28,14 @@ export interface StepDef {
 }
 
 export const STEPS: readonly StepDef[] = [
-  { id: "profile", number: 1, title: "Datos del colegio", purpose: "Salen en cada comprobante.", measurable: true, ownPrimary: "whenEmpty" },
+  { id: "profile", number: 1, title: "Datos del colegio", purpose: "Lo que imprime cada comprobante.", measurable: true, ownPrimary: "whenEmpty" },
   { id: "cycle", number: 2, title: "Ciclo escolar", purpose: "El ciclo decide fechas, periodos y cobros.", measurable: true, ownPrimary: "whenEmpty" },
-  { id: "levels", number: 3, title: "Niveles y grados", purpose: "Lo que ofrece el colegio y sus grados.", measurable: true, ownPrimary: "always" },
+  { id: "levels", number: 3, title: "Niveles y grados", purpose: "Los niveles que ofrece el colegio y los grados de cada uno.", measurable: true, ownPrimary: "always" },
   { id: "terms", number: 4, title: "Periodos", purpose: "Cómo se parte el año para calificar.", measurable: true, ownPrimary: "whenEmpty" },
-  { id: "subjects", number: 5, title: "Materias", purpose: "Materias por grado.", measurable: false, ownPrimary: "always" },
+  { id: "subjects", number: 5, title: "Materias", purpose: "Las materias de cada grado.", measurable: false, ownPrimary: "always" },
   { id: "groups", number: 6, title: "Grupos", purpose: "Cada grado necesita al menos un grupo para inscribir alumnos.", measurable: true, ownPrimary: "never" },
-  { id: "tuition", number: 7, title: "Colegiaturas", purpose: "Precio por nivel en el ciclo.", measurable: true, ownPrimary: "never" },
-  { id: "calendar", number: 8, title: "Calendario", purpose: "Días sin clases y actividades. Opcional.", measurable: false, ownPrimary: "never" },
+  { id: "tuition", number: 7, title: "Colegiaturas", purpose: "Lo que cuesta cada nivel en este ciclo.", measurable: true, ownPrimary: "never" },
+  { id: "calendar", number: 8, title: "Calendario", purpose: "Días sin clases y actividades. Es opcional.", measurable: false, ownPrimary: "never" },
 ];
 
 /** The step that opens when nothing is pending: the one edited the most. */
@@ -99,15 +99,15 @@ interface Mark {
 
 const LOADING_MARK: Mark = { status: "loading", line: "Revisando…" };
 const UNKNOWN_MARK: Mark = { status: "unknown" };
-const NO_CYCLE: Mark = { status: "pending", line: "Primero crea el ciclo escolar." };
-const NO_LEVELS: Mark = { status: "pending", line: "Primero agrega un nivel." };
+const NO_CYCLE: Mark = { status: "pending", line: "Primero crea el ciclo escolar" };
+const NO_LEVELS: Mark = { status: "pending", line: "Primero agrega un nivel" };
 
 const done = (line: string): Mark => ({ status: "done", line });
 const pending = (line: string): Mark => ({ status: "pending", line });
 
 const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
 
-/** "Falta en Secundaria" / "Falta en Primaria y 2 más". */
+/** "Sin grupos en Secundaria" / "Sin grupos en Primaria y 2 más". */
 function missingLine(prefix: string, names: string[]): string {
   const rest = names.length - 1;
   return rest > 0 ? `${prefix} ${names[0]} y ${rest} más` : `${prefix} ${names[0]}`;
@@ -131,7 +131,7 @@ function cycleMark(input: SetupInput): Mark {
   if (selected?.status === "active") return done(`${selected.name} · activo`);
   const active = input.cycles.find((c) => c.status === "active");
   if (selected === undefined || active === undefined) return pending("Sin ciclo activo");
-  return pending(`${statusLabel[selected.status]} · ${active.name} es el ciclo en curso`);
+  return pending(`${statusLabel[selected.status]} · en curso: ${active.name}`);
 }
 
 function levelsMark(input: SetupInput): Mark {
@@ -154,7 +154,7 @@ function prerequisite(input: SetupInput): Mark | undefined {
 function termsMark(input: SetupInput): Mark {
   return prerequisite(input) ?? fromRead(input.terms, (terms) => {
     const missing = input.levels.filter((l) => !terms.some((t) => t.levelId === l.id)).map((l) => l.name);
-    if (missing.length > 0) return pending(missingLine("Falta en", missing));
+    if (missing.length > 0) return pending(missingLine("Sin periodos en", missing));
     return done(`${plural(input.levels.length, "nivel", "niveles")} con periodos`);
   });
 }
@@ -174,10 +174,10 @@ function groupsMark(input: SetupInput): Mark {
   if (blocked !== undefined) return blocked;
   return fromRead(input.grades, (grades) => {
     const known = orderedGrades(input.levels, grades);
-    if (known.length === 0) return pending("Primero agrega un grado.");
+    if (known.length === 0) return pending("Primero agrega un grado");
     return fromRead(input.groups, (groups) => {
       const missing = known.filter(({ grade }) => !groups.some((g) => g.gradeLevelId === grade.id));
-      if (missing.length > 0) return pending(missingLine("Falta en", missing.map(({ grade, level }) => `${grade.name} de ${level.name}`)));
+      if (missing.length > 0) return pending(missingLine("Sin grupos en", missing.map(({ grade, level }) => `${grade.name} de ${level.name}`)));
       return done(plural(groups.length, "grupo", "grupos"));
     });
   });
@@ -187,7 +187,7 @@ function tuitionMark(input: SetupInput): Mark {
   return prerequisite(input) ?? fromRead(input.plans, (plans) => {
     const missing = input.levels.filter((l) => !plans.some((p) => p.levelId === l.id)).map((l) => l.name);
     if (missing.length === input.levels.length) return pending("Ningún nivel tiene precio");
-    if (missing.length > 0) return pending(missingLine("Falta", missing));
+    if (missing.length > 0) return pending(missingLine("Sin precio en", missing));
     return done(`${plural(input.levels.length, "nivel", "niveles")} con precio`);
   });
 }

@@ -221,7 +221,7 @@ describe("CatalogSetup — each state of a step (§4.3)", () => {
     renderSetup();
     await settled();
     expect(stepButton("Datos del colegio").querySelector("[data-mark='done']")).not.toBeNull();
-    expect(stepButton("Colegiaturas")).toHaveTextContent("Falta SECUNDARIA");
+    expect(stepButton("Colegiaturas")).toHaveTextContent("Sin precio en SECUNDARIA");
   });
 
   it.each(["Periodos", "Materias", "Grupos", "Colegiaturas", "Calendario"])("%s without a cycle points at step 2", async (title) => {

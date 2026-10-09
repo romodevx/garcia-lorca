@@ -43,9 +43,9 @@ describe("SetupStepList — the list (§1.1, §1.7)", () => {
   });
 
   it("shows each step's line, and keeps the full text in title for when it is cut (§1.6)", () => {
-    renderSteps({ steps: stepViews({ groups: { line: "Falta en 2° de SECUNDARIA" } }) });
-    expect(stepButton(/^Grupos/)).toHaveTextContent("Falta en 2° de SECUNDARIA");
-    expect(stepButton(/^Grupos/)).toHaveAttribute("title", "Grupos · Falta en 2° de SECUNDARIA");
+    renderSteps({ steps: stepViews({ groups: { line: "Sin grupos en 2° de SECUNDARIA" } }) });
+    expect(stepButton(/^Grupos/)).toHaveTextContent("Sin grupos en 2° de SECUNDARIA");
+    expect(stepButton(/^Grupos/)).toHaveAttribute("title", "Grupos · Sin grupos en 2° de SECUNDARIA");
   });
 });
 
