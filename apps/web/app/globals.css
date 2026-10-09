@@ -728,8 +728,10 @@ input { font-family: var(--font-ui); }
 /* Tamaños de pantalla de la puesta en marcha (§1.6). Los mismos números viven en
    setup/layout.ts (NARROW_MAX_PX = 899, COMPACT_MAX_PX = 1199). */
 html:has(.setup-mobilebar) {
-  /* El alto de la barra superior (TopBar: 78px; 64px en teléfono) y el de la
-     barra "Paso N de 8": lo que un campo enfocado nunca debe quedar debajo. */
+  /* El alto de la barra superior y el de la barra "Paso N de 8": lo que un
+     campo enfocado nunca debe quedar debajo. TopBar fija su alto (78px) en
+     línea, y eso le gana al @media que lo baja a 64px: en teléfono también
+     mide 78. */
   --setup-topbar-h: 78px;
   --setup-bar-h: 48px;
   --setup-bar-gap: 12px;
@@ -776,9 +778,6 @@ html:has(.setup-mobilebar) {
     color: var(--text-muted);
   }
   .tuition-stack td:first-child::before { content: none; }
-}
-@media (max-width: 768px) {
-  html:has(.setup-mobilebar) { --setup-topbar-h: 64px; }
 }
 
 /* Movimiento de la puesta en marcha (§1.7): sólo dos momentos. Cada transform
