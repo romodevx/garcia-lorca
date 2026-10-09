@@ -62,7 +62,10 @@ export function SetupStepBar({ openId, cardTitle, list }: SetupStepBarProps): Re
   };
 
   // Choosing a row closes the list; the open step then takes focus (§1.7).
-  const onClickCapture = (event: MouseEvent<HTMLDivElement>): void => {
+  // Bubble, never capture: browsers flush React between the capture and bubble
+  // listeners of a real tap, so closing in capture unmounts the row before its
+  // own onClick runs, and the step never opens.
+  const onClick = (event: MouseEvent<HTMLDivElement>): void => {
     if (event.target instanceof Element && event.target.closest("button") !== null) setExpanded(false);
   };
 
@@ -73,7 +76,7 @@ export function SetupStepBar({ openId, cardTitle, list }: SetupStepBarProps): Re
         <Icon name="chevron" size={18} style={{ transform: expanded ? "rotate(-90deg)" : "rotate(90deg)" }} />
       </button>
       {expanded && (
-        <div id={panelId} className="setup-mobilebar-panel" style={panelStyle} onClickCapture={onClickCapture}>
+        <div id={panelId} className="setup-mobilebar-panel" style={panelStyle} onClick={onClick}>
           {list}
         </div>
       )}

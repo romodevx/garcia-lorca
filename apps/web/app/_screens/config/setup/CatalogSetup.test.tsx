@@ -1,4 +1,5 @@
 import { act, screen, waitFor, within } from "@testing-library/react";
+import { flushSync } from "react-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as configApi from "../../../config/api";
@@ -330,6 +331,22 @@ describe("CatalogSetup — screen sizes (§1.6)", () => {
     const bar = await screen.findByRole("button", { name: "Paso 6 de 8 · Grupos" });
     expect(bar).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByRole("navigation")).toBeNull();
+  });
+
+  it("a step chosen from the bar opens, the menu closes and focus lands on the step's h2 (§1.6, §1.7)", async () => {
+    viewport(390);
+    const { user } = renderSetup();
+    const bar = await screen.findByRole("button", { name: "Paso 6 de 8 · Grupos" });
+    await user.click(bar);
+    const row = within(screen.getByRole("navigation")).getByRole("button", { name: /^Ciclo escolar/ });
+    // A real tap: browsers run a microtask checkpoint between React's root
+    // capture and bubble listeners, so updates queued in capture commit first.
+    row.addEventListener("click", () => flushSync(() => {}));
+
+    await user.click(row);
+
+    expect(screen.getByRole("button", { name: "Paso 2 de 8 · Ciclo escolar" })).toHaveAttribute("aria-expanded", "false");
+    expect(await screen.findByRole("heading", { level: 2, name: "Ciclo escolar" })).toHaveFocus();
   });
 
   it("between 900 and 1199 px keeps the list and opens the months as Lista", async () => {
