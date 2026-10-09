@@ -314,12 +314,26 @@ describe("CatalogSetup — what the old view never does", () => {
   });
 });
 
-/** A viewport this wide, as matchMedia answers `(max-width: Npx)` queries. */
-function viewport(width: number): void {
+/**
+ * A viewport this wide, as matchMedia answers `(max-width: Npx)` queries.
+ * Returns a resize: the new width, then a "change" to every listening query.
+ */
+function viewport(initialWidth: number): (width: number) => void {
+  let width = initialWidth;
+  const listeners = new Set<() => void>();
   vi.stubGlobal("matchMedia", (query: string) => {
     const max = Number(/max-width:\s*(\d+)px/.exec(query)?.[1] ?? Infinity);
-    return { matches: width <= max, media: query, addEventListener: () => {}, removeEventListener: () => {} };
+    return {
+      get matches() { return width <= max; },
+      media: query,
+      addEventListener: (_: string, listener: () => void) => listeners.add(listener),
+      removeEventListener: (_: string, listener: () => void) => listeners.delete(listener),
+    };
   });
+  return (next: number) => {
+    width = next;
+    act(() => listeners.forEach((listener) => listener()));
+  };
 }
 
 describe("CatalogSetup — screen sizes (§1.6)", () => {
@@ -357,6 +371,34 @@ describe("CatalogSetup — screen sizes (§1.6)", () => {
     const terms = stepRegion("Periodos");
     await user.click(within(terms).getByRole("button", { name: "PRIMARIA" }));
     expect(await within(terms).findByRole("button", { name: "Lista", pressed: true })).toBeVisible();
+  });
+
+  it("a window narrowed to 1024 px switches the months to Lista, with no sideways scroll", async () => {
+    const resize = viewport(1440);
+    window.sessionStorage.setItem(STORAGE_KEY, "terms");
+    const { user } = renderSetup();
+    await settled();
+    const terms = stepRegion("Periodos");
+    await user.click(within(terms).getByRole("button", { name: "PRIMARIA" }));
+    expect(await within(terms).findByRole("button", { name: "Tabla", pressed: true })).toBeVisible();
+
+    resize(1024);
+
+    expect(within(terms).getByRole("button", { name: "Lista", pressed: true })).toBeVisible();
+  });
+
+  it("a view the user picked stays picked when the window changes size", async () => {
+    const resize = viewport(1440);
+    window.sessionStorage.setItem(STORAGE_KEY, "terms");
+    const { user } = renderSetup();
+    await settled();
+    const terms = stepRegion("Periodos");
+    await user.click(within(terms).getByRole("button", { name: "PRIMARIA" }));
+    await user.click(await within(terms).findByRole("button", { name: "Lista" }));
+
+    resize(1300);
+
+    expect(within(terms).getByRole("button", { name: "Lista", pressed: true })).toBeVisible();
   });
 
   it("from 1200 px the months open as Tabla", async () => {

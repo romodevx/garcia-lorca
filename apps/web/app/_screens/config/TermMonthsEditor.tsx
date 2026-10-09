@@ -43,9 +43,11 @@ function cellStyle(on: boolean): CSSProperties {
  * toggle chips, for a phone or a screen reader.
  */
 export function TermMonthsEditor({ terms, months, assignment, error, onTap }: TermMonthsEditorProps): ReactElement {
-  // A compact setup step has no room for the grid: it opens as the list, never scrolling sideways (§1.6).
+  // A compact setup step has no room for the grid: it shows the list, never scrolling sideways (§1.6).
+  // Derived on every render, so a window resized after mount follows; the user's pick wins once made.
   const { compact } = useSetupPresentation();
-  const [view, setView] = useState<View>(compact ? "list" : "grid");
+  const [picked, setView] = useState<View | undefined>(undefined);
+  const view: View = picked ?? (compact ? "list" : "grid");
   const chips = monthChips(months);
   const has = (termId: string, month: string): boolean => assignment[termId]?.includes(month) === true;
   const free = new Set(unassignedMonths(months, assignment));
