@@ -773,3 +773,31 @@ html:has(.setup-mobilebar) {
 @media (max-width: 768px) {
   html:has(.setup-mobilebar) { --setup-topbar-h: 64px; }
 }
+
+/* Movimiento de la puesta en marcha (§1.7): sólo dos momentos. Cada transform
+   TERMINA en `none`: si quedara uno, el paso abierto sería el contenedor de todo
+   lo `position: fixed` que lleve dentro. `backwards` y no `both`: al acabar no
+   queda ningún estilo de la animación pegado. */
+@keyframes setupStepIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes setupFade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes setupCheckIn {
+  from { transform: scale(.8); }
+  to { transform: none; }
+}
+/* Corre cada vez que el paso deja de estar `hidden` (display:none reinicia la animación). */
+.setup-step-body { animation: setupStepIn 160ms ease-out backwards; }
+.setup-check-in {
+  animation: setupCheckIn 180ms ease-out backwards;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+@media (prefers-reduced-motion: reduce) {
+  .setup-step-body { animation-name: setupFade; }
+  .setup-check-in { animation: none; }
+}
