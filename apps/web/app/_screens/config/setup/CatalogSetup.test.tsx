@@ -329,6 +329,19 @@ describe("CatalogSetup — the status follows the work (§4.2)", () => {
   });
 });
 
+describe("CatalogSetup — the remembered step (§1.4)", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("reads this session's remembered step once (N3)", async () => {
+    window.sessionStorage.setItem(STORAGE_KEY, "terms");
+    const getItem = vi.spyOn(Storage.prototype, "getItem");
+    renderSetup();
+    await settled();
+    expect(getItem.mock.calls.filter(([key]) => key === STORAGE_KEY)).toHaveLength(1);
+    expect(stepButton("Periodos")).toHaveAttribute("aria-current", "step");
+  });
+});
+
 describe("CatalogSetup — what the old view never does", () => {
   it("only the setup view reads every grade, term and group (§4.1)", async () => {
     renderSetup();

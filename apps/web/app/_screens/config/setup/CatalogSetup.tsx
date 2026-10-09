@@ -47,7 +47,7 @@ export function CatalogSetup({ onBack, canDeleteLevels = false, onDeleteLevel, n
   const [stored] = useState(readStoredStep);
   const view = deriveSteps(setupInput(state, status), stored ?? null);
   const loaded = !state.load.loading && state.load.error === undefined;
-  const nav = useOpenStep(view.initialStepId, loaded && view.settled);
+  const nav = useOpenStep(view.initialStepId, loaded && view.settled, stored);
   const narrow = useMaxWidth(NARROW_MAX_PX);
   const compact = useMaxWidth(COMPACT_MAX_PX);
   const pricing = state.pricing.active;

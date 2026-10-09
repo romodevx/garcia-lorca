@@ -44,12 +44,13 @@ export interface OpenStep {
 }
 
 /**
- * Which step is open. A step this session already opened reopens at once;
+ * Which step is open. A step this session already opened (`storedStepId`, read
+ * once by the caller with `readStoredStep`) reopens at once;
  * otherwise the step is decided ONCE, when the status reads have settled, and
  * never moves on its own after that or after the user picked one (§1.4).
  */
-export function useOpenStep(initialStepId: StepId, settled: boolean): OpenStep {
-  const [openId, setOpenId] = useState<OpenTarget | undefined>(readStoredStep);
+export function useOpenStep(initialStepId: StepId, settled: boolean, storedStepId: StepId | undefined): OpenStep {
+  const [openId, setOpenId] = useState<OpenTarget | undefined>(storedStepId);
   const [focusRequest, setFocusRequest] = useState(0);
   const [announcement, setAnnouncement] = useState("");
 
