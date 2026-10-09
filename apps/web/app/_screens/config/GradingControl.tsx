@@ -8,7 +8,7 @@ import { NumberField, useFocusFirstInvalid } from "../../_design/form";
 import { ConfigError, type Level, type LevelGrading } from "../../config/api";
 import { DEFAULT_GRADING, fromDraft, gradingErrors, toDraft, type GradingDraft, type GradingErrors, type GradingField } from "./gradingDraft";
 import { ErrorAlert, RadioGroup } from "./parts";
-import { useSecondaryInSetup } from "./setup/SetupPresentation";
+import { useSecondaryInSetup } from "./SetupPresentation";
 import { useSerialGrading } from "./useSerialGrading";
 
 const TOAST_MS = 2600;

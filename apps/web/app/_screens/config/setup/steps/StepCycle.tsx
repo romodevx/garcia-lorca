@@ -3,7 +3,7 @@
 import type { ReactElement } from "react";
 
 import { CycleBar } from "../../CycleBar";
-import type { CyclesSlice } from "../useCatalogState";
+import type { CyclesSlice } from "../../useCatalogState";
 import type { SetupActions } from "../useSetupActions";
 import { StepFrame, type StepSlot } from "../StepFrame";
 

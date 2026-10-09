@@ -5,7 +5,7 @@ import { useState, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
 import type { Level } from "../../config/api";
 import { ErrorAlert, SelectChip } from "./parts";
-import { useSecondaryInSetup } from "./setup/SetupPresentation";
+import { useSecondaryInSetup } from "./SetupPresentation";
 
 export interface CopyMonthsInlineProps {
   /** The levels that can receive the layout (the current one excluded). */

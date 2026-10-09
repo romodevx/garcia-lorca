@@ -6,7 +6,7 @@ import { SlideOver } from "../../_design/SlideOver";
 import { ConfigError, type Cycle, type CreateCycleInput } from "../../config/api";
 import { DateField, TextField, useRequired } from "../../_design/form";
 import { EmptyHint, ErrorAlert, Section, SelectChip } from "./parts";
-import { useSetupPresentation } from "./setup/SetupPresentation";
+import { useSetupPresentation } from "./SetupPresentation";
 
 export interface CycleBarProps {
   cycles: readonly Cycle[];

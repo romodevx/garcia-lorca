@@ -7,7 +7,7 @@ import { EmptyHint, ErrorAlert } from "../../parts";
 import { LevelPeriodsEntry } from "../../periods/LevelPeriodsEntry";
 import { TermsPanel } from "../../TermsPanel";
 import { LevelGradeChips } from "../LevelGradeChips";
-import type { LevelsSlice, TermsSlice } from "../useCatalogState";
+import type { LevelsSlice, TermsSlice } from "../../useCatalogState";
 import type { SetupActions } from "../useSetupActions";
 import { StepFrame, type StepSlot } from "../StepFrame";
 import { Prerequisite, needFor } from "./Prerequisite";

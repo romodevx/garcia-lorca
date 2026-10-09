@@ -14,7 +14,7 @@ import { StepProfile } from "./steps/StepProfile";
 import { StepSubjects } from "./steps/StepSubjects";
 import { StepTerms } from "./steps/StepTerms";
 import { StepTuition } from "./steps/StepTuition";
-import type { CatalogState } from "./useCatalogState";
+import type { CatalogState } from "../useCatalogState";
 import type { SetupActions } from "./useSetupActions";
 import type { SetupStatus } from "./useSetupStatus";
 

@@ -4,7 +4,7 @@ import type { CSSProperties, ReactElement } from "react";
 
 import { Btn } from "../../../_design/Controls";
 import type { Level } from "../../../config/api";
-import { useSecondaryInSetup, useSetupPresentation } from "../setup/SetupPresentation";
+import { useSecondaryInSetup, useSetupPresentation } from "../SetupPresentation";
 
 const rowStyle: CSSProperties = { display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 14 };
 

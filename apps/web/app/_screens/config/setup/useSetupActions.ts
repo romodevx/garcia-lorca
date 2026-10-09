@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 
 import type { CopyTermMonthsInput, CreateCycleInput, CreateGradeLevelInput, CreateGroupInput, CreateLevelInput, CreateTermInput, Term } from "../../../config/api";
-import type { CatalogState } from "./useCatalogState";
+import type { CatalogState } from "../useCatalogState";
 import type { RefreshKind } from "./useSetupStatus";
 
 /**

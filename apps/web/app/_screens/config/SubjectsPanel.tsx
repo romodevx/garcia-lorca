@@ -20,7 +20,7 @@ import {
   type SubjectsInGrades,
 } from "../../config/api";
 import { EmptyHint, ErrorAlert, Section, SelectChip } from "./parts";
-import { useSetupPresentation } from "./setup/SetupPresentation";
+import { useSetupPresentation } from "./SetupPresentation";
 
 export interface SubjectsPanelProps {
   level: Level;

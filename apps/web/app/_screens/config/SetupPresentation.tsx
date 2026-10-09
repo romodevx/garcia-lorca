@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useMemo, type ReactElement, type ReactNode } from "react";
 
-import type { BtnKind } from "../../../_design/Controls";
+import type { BtnKind } from "../../_design/Controls";
 
 /**
  * How the catalog panels present themselves (PLAN-redesign-configuracion §5).

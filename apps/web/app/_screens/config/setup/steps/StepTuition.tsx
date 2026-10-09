@@ -5,7 +5,7 @@ import type { ReactElement } from "react";
 import type { Level } from "../../../../config/api";
 import type { TuitionPlan } from "../../../../finance/api";
 import { TuitionPanel } from "../../TuitionPanel";
-import type { CyclesSlice, PricingSlice } from "../useCatalogState";
+import type { CyclesSlice, PricingSlice } from "../../useCatalogState";
 import { StepFrame, type StepSlot } from "../StepFrame";
 import { Prerequisite } from "./Prerequisite";
 

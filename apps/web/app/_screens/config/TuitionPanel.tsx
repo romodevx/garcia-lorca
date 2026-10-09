@@ -8,7 +8,7 @@ import { listTuitionPlans, runBilling, type BillingRun, type TuitionPlan } from 
 import { EmptyHint, ErrorAlert, Section } from "./parts";
 import { MONTH_NAMES, centsToPesos, inscriptionTotals } from "./tuition-math";
 import { TuitionPage } from "./TuitionPage";
-import { useSecondaryInSetup, useSetupPresentation } from "./setup/SetupPresentation";
+import { useSecondaryInSetup, useSetupPresentation } from "./SetupPresentation";
 import { useLatest } from "./useLatest";
 
 import { API_URL } from "../../api-url";

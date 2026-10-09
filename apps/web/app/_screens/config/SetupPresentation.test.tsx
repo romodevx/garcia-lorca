@@ -3,28 +3,28 @@ import userEvent from "@testing-library/user-event";
 import type { ReactElement, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import * as configApi from "../../../config/api";
-import type { GradeLevel, Level } from "../../../config/api";
-import * as financeApi from "../../../finance/api";
-import { CalendarPanel } from "../CalendarPanel";
-import { CopyMonthsInline } from "../CopyMonthsInline";
-import { CycleBar } from "../CycleBar";
-import { GradeLevelsPanel } from "../GradeLevelsPanel";
-import { LevelsPanel } from "../LevelsPanel";
-import { Section } from "../parts";
-import { LevelPeriodsEntry } from "../periods/LevelPeriodsEntry";
-import { SubjectsPanel } from "../SubjectsPanel";
-import { TermMonthsEditor } from "../TermMonthsEditor";
-import { TuitionPanel } from "../TuitionPanel";
+import * as configApi from "../../config/api";
+import type { GradeLevel, Level } from "../../config/api";
+import * as financeApi from "../../finance/api";
+import { CalendarPanel } from "./CalendarPanel";
+import { CopyMonthsInline } from "./CopyMonthsInline";
+import { CycleBar } from "./CycleBar";
+import { GradeLevelsPanel } from "./GradeLevelsPanel";
+import { LevelsPanel } from "./LevelsPanel";
+import { Section } from "./parts";
+import { LevelPeriodsEntry } from "./periods/LevelPeriodsEntry";
+import { SubjectsPanel } from "./SubjectsPanel";
+import { TermMonthsEditor } from "./TermMonthsEditor";
+import { TuitionPanel } from "./TuitionPanel";
 import { SetupPresentationProvider, useSetupPresentation } from "./SetupPresentation";
 
-vi.mock("../../../config/api", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../../config/api")>()),
+vi.mock("../../config/api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../config/api")>()),
   listSubjects: vi.fn(),
   listNonWorkingPeriods: vi.fn(),
   listSchoolEvents: vi.fn(),
 }));
-vi.mock("../../../finance/api", () => ({
+vi.mock("../../finance/api", () => ({
   listTuitionPlans: vi.fn(),
   upsertTuitionPlan: vi.fn(),
   runBilling: vi.fn(),

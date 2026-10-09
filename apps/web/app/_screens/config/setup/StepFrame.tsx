@@ -3,7 +3,7 @@
 import type { CSSProperties, ReactElement, ReactNode } from "react";
 
 import { Btn } from "../../../_design/Controls";
-import { UnderStepTitle } from "./SetupPresentation";
+import { UnderStepTitle } from "../SetupPresentation";
 import { QUIET_TEXT } from "./setupColors";
 import { STEPS, type StepDef, type StepId, type StepView } from "./setupSteps";
 

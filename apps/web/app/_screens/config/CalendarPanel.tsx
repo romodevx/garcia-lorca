@@ -18,7 +18,7 @@ import {
   type SchoolEvent,
 } from "../../config/api";
 import { EmptyHint, ErrorAlert, Section } from "./parts";
-import { useSetupPresentation } from "./setup/SetupPresentation";
+import { useSetupPresentation } from "./SetupPresentation";
 import { useLatest } from "./useLatest";
 
 import { API_URL } from "../../api-url";

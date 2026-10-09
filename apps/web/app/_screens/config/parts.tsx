@@ -2,7 +2,7 @@
 
 import type { CSSProperties, ReactElement, ReactNode } from "react";
 
-import { useSetupPresentation } from "./setup/SetupPresentation";
+import { useSetupPresentation } from "./SetupPresentation";
 
 /**
  * Presentational primitives shared by the catalog panels. Kept dumb (no data

@@ -6,7 +6,7 @@ import type { Cycle } from "../../../../config/api";
 import { EmptyHint } from "../../parts";
 import { SubjectsPanel } from "../../SubjectsPanel";
 import { LevelGradeChips } from "../LevelGradeChips";
-import type { GradesSlice, LevelsSlice } from "../useCatalogState";
+import type { GradesSlice, LevelsSlice } from "../../useCatalogState";
 import { StepFrame, type StepSlot } from "../StepFrame";
 import { Prerequisite, needFor } from "./Prerequisite";
 

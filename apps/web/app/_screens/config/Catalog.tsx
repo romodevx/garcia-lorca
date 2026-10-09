@@ -18,7 +18,7 @@ import { EmptyHint, ErrorAlert } from "./parts";
 import { TermsPanel } from "./TermsPanel";
 import { LevelPeriodsEntry } from "./periods/LevelPeriodsEntry";
 import { StudentImportEntry } from "../studentImport/StudentImportEntry";
-import { useCatalogState } from "./setup/useCatalogState";
+import { useCatalogState } from "./useCatalogState";
 
 export interface CatalogProps {
   onBack: () => void;

@@ -5,7 +5,7 @@ import { useMemo, useState, type ReactElement } from "react";
 import { InlineCreateRow } from "../../_design/InlineCreateRow";
 import type { CreateGradeLevelInput, GradeLevel, Level } from "../../config/api";
 import { EmptyHint, ErrorAlert, Section, SelectChip } from "./parts";
-import { useSetupPresentation } from "./setup/SetupPresentation";
+import { useSetupPresentation } from "./SetupPresentation";
 
 export interface GradeLevelsPanelProps {
   level: Level;

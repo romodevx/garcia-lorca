@@ -7,7 +7,7 @@ import { GroupsPanel } from "../../GroupsPanel";
 import { EmptyHint } from "../../parts";
 import { LevelGradeChips } from "../LevelGradeChips";
 import type { StatusRead } from "../setupSteps";
-import type { GradesSlice, GroupsSlice, LevelsSlice } from "../useCatalogState";
+import type { GradesSlice, GroupsSlice, LevelsSlice } from "../../useCatalogState";
 import type { SetupActions } from "../useSetupActions";
 import { StepFrame, type StepSlot } from "../StepFrame";
 import { Prerequisite, needFor } from "./Prerequisite";

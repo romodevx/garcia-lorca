@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { API_URL } from "../../../api-url";
-import type { AttendanceMode } from "../../../attendance/sheet";
+import { API_URL } from "../../api-url";
+import type { AttendanceMode } from "../../attendance/sheet";
 import {
   activateCycle,
   copyTermMonths,
@@ -28,8 +28,8 @@ import {
   type Level,
   type LevelGrading,
   type Term,
-} from "../../../config/api";
-import { useLevelTerms, type LevelTerms } from "../useLevelTerms";
+} from "../../config/api";
+import { useLevelTerms, type LevelTerms } from "./useLevelTerms";
 
 /** How long a notice left by another screen stays up. */
 const NOTICE_MS = 8_000;

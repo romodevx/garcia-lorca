@@ -264,6 +264,12 @@ decisión de producto (§10 P10).
 
 Nuevos, en `apps/web/app/_screens/config/setup/`:
 
+> **Ajuste tras la revisión de código (S3, 2026-10-09):** `useCatalogState.ts` y
+> `SetupPresentation.tsx` viven en `_screens/config/`, no en `setup/`: los usan la vista
+> vieja y los paneles compartidos, y `setup/` debe poder borrarse sin romperlos. La
+> dependencia va de `setup/` hacia `config/`, nunca al revés
+> (`dependencyDirection.test.ts`). La única entrada a `setup/` es `AppShell`.
+
 - `useCatalogState.ts`: **extracción** del estado, los efectos y los handlers de
   `Catalog.tsx`. Devuelve grupos (`cycles`, `levels`, `grades`, `groups`, `pricing`,
   `notice`), no una bolsa de 20 campos.

@@ -7,7 +7,7 @@ import type { Term } from "../../config/api";
 import { unassignedMonths, type MonthAssignment } from "../../config/termMonths";
 import { monthChips, type MonthChip } from "../../_lib/monthChips";
 import { ErrorAlert, SelectChip } from "./parts";
-import { useSetupPresentation } from "./setup/SetupPresentation";
+import { useSetupPresentation } from "./SetupPresentation";
 
 export interface TermMonthsEditorProps {
   terms: readonly Term[];

@@ -4,7 +4,7 @@ import type { ReactElement } from "react";
 
 import { GradeLevelsPanel } from "../../GradeLevelsPanel";
 import { LevelSettings, LevelsPanel } from "../../LevelsPanel";
-import type { GradesSlice, LevelsSlice } from "../useCatalogState";
+import type { GradesSlice, LevelsSlice } from "../../useCatalogState";
 import type { SetupActions } from "../useSetupActions";
 import { StepFrame, type StepSlot } from "../StepFrame";
 

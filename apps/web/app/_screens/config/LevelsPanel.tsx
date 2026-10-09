@@ -10,7 +10,7 @@ import { TextField } from "../../_design/form";
 import { AttendanceModeControl } from "./AttendanceModeControl";
 import { GradingControl } from "./GradingControl";
 import { EmptyHint, RadioGroup, Section, SelectChip } from "./parts";
-import { useSetupPresentation } from "./setup/SetupPresentation";
+import { useSetupPresentation } from "./SetupPresentation";
 
 export interface LevelsPanelProps {
   levels: readonly Level[];
