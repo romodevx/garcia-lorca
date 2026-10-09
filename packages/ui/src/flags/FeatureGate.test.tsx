@@ -57,4 +57,24 @@ describe("FeatureGate", () => {
     );
     expect(screen.getByText("import UI")).toBeInTheDocument();
   });
+
+  it("gates the Configuración setup view on its own flag, OFF while only module_config is on", () => {
+    const { rerender } = render(
+      <FlagsProvider flags={{ module_config: true }}>
+        <FeatureGate flag="module_config_setup">
+          <span>setup view</span>
+        </FeatureGate>
+      </FlagsProvider>
+    );
+    expect(screen.queryByText("setup view")).not.toBeInTheDocument();
+
+    rerender(
+      <FlagsProvider flags={{ module_config: true, module_config_setup: true }}>
+        <FeatureGate flag="module_config_setup">
+          <span>setup view</span>
+        </FeatureGate>
+      </FlagsProvider>
+    );
+    expect(screen.getByText("setup view")).toBeInTheDocument();
+  });
 });

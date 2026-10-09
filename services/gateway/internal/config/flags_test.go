@@ -38,12 +38,13 @@ func TestParseEnabledModulesAcceptsFullKeys(t *testing.T) {
 }
 
 func TestAllModuleFlagsCoversRegistry(t *testing.T) {
-	// FLAGS.md registers 19 module flags; the enumeration must match so
+	// FLAGS.md registers 20 module flags; the enumeration must match so
 	// GET /features reports every module. (M14 added module_teachers; task 13,
 	// module_student_card; T10, module_expenses; T16, module_schedule; T17,
-	// module_activities; the legacy student import, module_student_import.)
-	if len(config.AllModuleFlags) != 19 {
-		t.Errorf("AllModuleFlags has %d entries, want 19", len(config.AllModuleFlags))
+	// module_activities; the legacy student import, module_student_import; the
+	// Configuración setup view, module_config_setup.)
+	if len(config.AllModuleFlags) != 20 {
+		t.Errorf("AllModuleFlags has %d entries, want 20", len(config.AllModuleFlags))
 	}
 	seen := map[string]bool{}
 	for _, k := range config.AllModuleFlags {
@@ -70,5 +71,31 @@ func TestStudentImportFlagIsRegisteredAndDefaultOff(t *testing.T) {
 	}
 	if !config.ParseEnabledModules("students,config,student_import")[key] {
 		t.Errorf("listing student_import must enable %q", key)
+	}
+}
+
+// Flags that only switch a presentation (no routes of their own) still reach
+// the frontend through GET /features, and stay OFF unless listed explicitly:
+// enabling the module they dress up does not enable them.
+func TestPresentationFlagsAreRegisteredAndDefaultOff(t *testing.T) {
+	tests := []struct {
+		key      string
+		baseline string
+		enabling string
+	}{
+		{key: "module_config_setup", baseline: "config", enabling: "config,config_setup"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.key, func(t *testing.T) {
+			if !slices.Contains(config.AllModuleFlags, tt.key) {
+				t.Fatalf("AllModuleFlags does not report %q: /features would hide it", tt.key)
+			}
+			if config.ParseEnabledModules(tt.baseline)[tt.key] {
+				t.Errorf("%q must stay OFF unless listed explicitly", tt.key)
+			}
+			if !config.ParseEnabledModules(tt.enabling)[tt.key] {
+				t.Errorf("listing it must enable %q", tt.key)
+			}
+		})
 	}
 }
