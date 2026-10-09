@@ -8,6 +8,7 @@ import type { GradeLevel, Level } from "../../../config/api";
 import * as financeApi from "../../../finance/api";
 import { CalendarPanel } from "../CalendarPanel";
 import { CopyMonthsInline } from "../CopyMonthsInline";
+import { CycleBar } from "../CycleBar";
 import { GradeLevelsPanel } from "../GradeLevelsPanel";
 import { LevelsPanel } from "../LevelsPanel";
 import { Section } from "../parts";
@@ -84,6 +85,36 @@ describe("Section", () => {
     expect(section?.style.background).toBe("");
     expect(screen.getByText("De 1°")).toBeInTheDocument();
   });
+
+  it("lets a step move focus to its h2 inside a setup step, and leaves the old view's h2 alone (§1.7)", () => {
+    const { unmount } = render(<Section title="Grupos">x</Section>);
+    expect(screen.getByRole("heading", { level: 2, name: "Grupos" })).not.toHaveAttribute("tabindex");
+    unmount();
+
+    inSetup(<Section title="Grupos">x</Section>);
+    expect(screen.getByRole("heading", { level: 2, name: "Grupos" })).toHaveAttribute("tabindex", "-1");
+  });
+});
+
+describe("CycleBar in a setup step", () => {
+  const DRAFT = { ...CYCLE, id: "c2", name: "2027-2028", status: "draft" as const };
+  const props = { onSelect: () => {}, onCreate: noop, onActivate: noop };
+
+  it("keeps Nuevo ciclo lime while there is no cycle yet (§1.3)", () => {
+    inSetup(<CycleBar {...props} cycles={[]} selectedCycleId={undefined} />);
+    expect(isLime(screen.getByRole("button", { name: "Nuevo ciclo" }))).toBe(true);
+  });
+
+  it("steps Nuevo ciclo down once a cycle exists, so the step never has two limes (§1.3)", () => {
+    inSetup(<CycleBar {...props} cycles={[CYCLE, DRAFT]} selectedCycleId="c2" />);
+    expect(isLime(screen.getByRole("button", { name: "Nuevo ciclo" }))).toBe(false);
+    expect(isLime(screen.getByRole("button", { name: "Activar ciclo 2027-2028" }))).toBe(false);
+  });
+
+  it("keeps Nuevo ciclo lime without the provider", () => {
+    render(<CycleBar {...props} cycles={[CYCLE]} selectedCycleId="c1" />);
+    expect(isLime(screen.getByRole("button", { name: "Nuevo ciclo" }))).toBe(true);
+  });
 });
 
 describe("LevelsPanel in a setup step", () => {
@@ -136,6 +167,21 @@ describe("GradeLevelsPanel in a setup step", () => {
 });
 
 describe("Periodos (step 4) in a setup step", () => {
+  it("draws Periodos por grado bare inside the step, with no card of its own", () => {
+    inSetup(<LevelPeriodsEntry level={PRIMARIA} onOpen={() => {}} />);
+    const entry = screen.getByRole("region", { name: "Periodos de evaluación por grado" });
+    expect(entry.style.boxShadow).toBe("");
+    expect(entry.style.border).toBe("");
+    expect(entry.style.background).toBe("");
+  });
+
+  it("keeps the Periodos por grado card without the provider", () => {
+    render(<LevelPeriodsEntry level={PRIMARIA} onOpen={() => {}} />);
+    const entry = screen.getByRole("region", { name: "Periodos de evaluación por grado" });
+    expect(entry.style.boxShadow).not.toBe("");
+    expect(entry.style.border).not.toBe("");
+  });
+
   it("steps Periodos por grado down to outline (§1.3)", () => {
     inSetup(<LevelPeriodsEntry level={PRIMARIA} onOpen={() => {}} />);
     expect(isLime(screen.getByRole("button", { name: "Periodos por grado de PRIMARIA" }))).toBe(false);

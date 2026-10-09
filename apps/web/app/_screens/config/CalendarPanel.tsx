@@ -270,9 +270,10 @@ export function CalendarPanel({ cycle, onLoaded }: CalendarPanelProps): ReactEle
           message={`Se quitó ${dayRemoval.latest.label}`}
           onUndo={() => {
             const devueltos = dayRemoval.undo() ?? [];
-            setPeriods((prev) =>
-              [...prev, ...devueltos].sort((a, b) => a.startsOn.localeCompare(b.startsOn)),
-            );
+            const restored = [...periods, ...devueltos].sort((a, b) => a.startsOn.localeCompare(b.startsOn));
+            setPeriods(restored);
+            // Notify-only, like the reads: the count is back without asking the server again.
+            notify.current?.(cycle.id, restored.length);
           }}
         />
       )}

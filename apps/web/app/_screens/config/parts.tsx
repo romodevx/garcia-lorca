@@ -40,7 +40,8 @@ export function Section({
   return (
     <section style={inSetup ? undefined : cardStyle}>
       <header style={{ marginBottom: 16 }}>
-        <h2 style={{ fontSize: 18, fontWeight: 700, color: "var(--text)" }}>{title}</h2>
+        {/* In a step the h2 is the step's title: opening the step moves focus to it (§1.7). */}
+        <h2 tabIndex={inSetup ? -1 : undefined} style={{ fontSize: 18, fontWeight: 700, color: "var(--text)" }}>{title}</h2>
         {subtitle !== undefined && <p style={{ fontSize: 13.5, color: "var(--text-muted)", marginTop: 2 }}>{subtitle}</p>}
       </header>
       {children}

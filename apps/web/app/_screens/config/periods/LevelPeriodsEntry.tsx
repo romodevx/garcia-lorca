@@ -1,10 +1,15 @@
 "use client";
 
-import type { ReactElement } from "react";
+import type { CSSProperties, ReactElement } from "react";
 
 import { Btn } from "../../../_design/Controls";
 import type { Level } from "../../../config/api";
-import { useSecondaryInSetup } from "../setup/SetupPresentation";
+import { useSecondaryInSetup, useSetupPresentation } from "../setup/SetupPresentation";
+
+const rowStyle: CSSProperties = { display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 14 };
+
+/** The old view's card; inside a setup step the open step is the card. */
+const cardStyle: CSSProperties = { ...rowStyle, padding: "16px 20px", borderRadius: "var(--r-xl)", background: "var(--surface)", border: "1px solid var(--border)", boxShadow: "var(--shadow-card)" };
 
 /**
  * The way into a level's evaluation periods page from Configuración: each
@@ -12,11 +17,9 @@ import { useSecondaryInSetup } from "../setup/SetupPresentation";
  */
 export function LevelPeriodsEntry({ level, onOpen }: { level: Level; onOpen: (levelId: string) => void }): ReactElement {
   const openKind = useSecondaryInSetup();
+  const { inSetup } = useSetupPresentation();
   return (
-    <section
-      aria-label="Periodos de evaluación por grado"
-      style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 14, padding: "16px 20px", borderRadius: "var(--r-xl)", background: "var(--surface)", border: "1px solid var(--border)", boxShadow: "var(--shadow-card)" }}
-    >
+    <section aria-label="Periodos de evaluación por grado" style={inSetup ? rowStyle : cardStyle}>
       <div style={{ minWidth: 0 }}>
         <h3 style={{ fontSize: 17, fontWeight: 700, color: "var(--text)" }}>Periodos de evaluación por grado</h3>
         <p style={{ fontSize: 14, color: "var(--text-muted)", marginTop: 2 }}>
