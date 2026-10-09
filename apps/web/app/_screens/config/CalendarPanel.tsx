@@ -18,6 +18,7 @@ import {
   type SchoolEvent,
 } from "../../config/api";
 import { EmptyHint, ErrorAlert, Section } from "./parts";
+import { useLatest } from "./useLatest";
 
 import { API_URL } from "../../api-url";
 
@@ -39,6 +40,11 @@ const KIND_OPTIONS: readonly { value: NonWorkingKind; label: string }[] = [
 
 export interface CalendarPanelProps {
   cycle: Cycle;
+  /**
+   * Notify-only: how many closed days the cycle has after each read of them, or
+   * "failed". The setup view marks its step with it instead of reading twice.
+   */
+  onLoaded?: (cycleId: string, closedDays: number | "failed") => void;
 }
 
 const rowStyle = {
@@ -58,7 +64,7 @@ const removeStyle = {
   cursor: "pointer",
 } as const;
 
-export function CalendarPanel({ cycle }: CalendarPanelProps): ReactElement {
+export function CalendarPanel({ cycle, onLoaded }: CalendarPanelProps): ReactElement {
   const [periods, setPeriods] = useState<NonWorkingPeriod[]>([]);
   const [events, setEvents] = useState<SchoolEvent[]>([]);
   const [error, setError] = useState<string | undefined>(undefined);
@@ -86,14 +92,24 @@ export function CalendarPanel({ cycle }: CalendarPanelProps): ReactElement {
   pendingDays.current = dayRemoval.pending;
   pendingEvents.current = eventRemoval.pending;
 
+  const notify = useLatest(onLoaded);
+
   const reload = useCallback(() => {
-    listNonWorkingPeriods(API_URL, cycle.id)
-      .then((rows) => setPeriods(rows.filter((r) => !pendingDays.current.some((p) => p.id === r.id))))
-      .catch(() => setError("No pudimos cargar el calendario."));
+    const cycleId = cycle.id;
+    listNonWorkingPeriods(API_URL, cycleId)
+      .then((rows) => {
+        const shown = rows.filter((r) => !pendingDays.current.some((p) => p.id === r.id));
+        setPeriods(shown);
+        notify.current?.(cycleId, shown.length);
+      })
+      .catch(() => {
+        setError("No pudimos cargar el calendario.");
+        notify.current?.(cycleId, "failed");
+      });
     listSchoolEvents(API_URL, cycle.id)
       .then((rows) => setEvents(rows.filter((r) => !pendingEvents.current.some((p) => p.id === r.id))))
       .catch(() => setError("No pudimos cargar la agenda."));
-  }, [cycle.id]);
+  }, [cycle.id, notify]);
 
   useEffect(reload, [reload]);
 

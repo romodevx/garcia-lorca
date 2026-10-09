@@ -15,6 +15,7 @@ import {
 import { API_URL } from "../../api-url";
 import { ConfigError, getSchoolProfile, saveSchoolProfile, type SchoolProfile } from "../../config/api";
 import { ErrorAlert, Section } from "./parts";
+import { useLatest } from "./useLatest";
 
 const EMPTY: SchoolProfile = { name: "", legalName: "", rfc: "", cct: "", address: "", phone: "", legend: "" };
 
@@ -28,21 +29,38 @@ const RULES: Readonly<Record<string, FormatRule>> = {
 
 const REQUIRED = ["name"] as const;
 
+export interface SchoolProfilePanelProps {
+  /**
+   * Notify-only: the profile once read (empty when the school has none yet) and
+   * again after each save, or "failed". The setup view marks its step with it
+   * instead of reading the profile twice.
+   */
+  onLoaded?: (profile: SchoolProfile | "failed") => void;
+}
+
 /**
  * Datos del colegio (task 12): what every receipt prints about the school. One
  * set per school, so it is a summary with "Editar", and a drawer with its seven
  * fields (the forms rule: 5–8 fields is a drawer).
  */
-export function SchoolProfilePanel(): ReactElement {
+export function SchoolProfilePanel({ onLoaded }: SchoolProfilePanelProps = {}): ReactElement {
   const [profile, setProfile] = useState<SchoolProfile | undefined>(undefined);
   const [loadError, setLoadError] = useState<string | undefined>(undefined);
   const [editing, setEditing] = useState(false);
+  const notify = useLatest(onLoaded);
 
   useEffect(() => {
     getSchoolProfile(API_URL)
-      .then((read) => setProfile(read.found ? read.profile : EMPTY))
-      .catch(() => setLoadError("No se pudieron leer los datos del colegio."));
-  }, []);
+      .then((read) => {
+        const loaded = read.found ? read.profile : EMPTY;
+        setProfile(loaded);
+        notify.current?.(loaded);
+      })
+      .catch(() => {
+        setLoadError("No se pudieron leer los datos del colegio.");
+        notify.current?.("failed");
+      });
+  }, [notify]);
 
   const filled = profile !== undefined && profile.name !== "";
   return (
@@ -74,6 +92,7 @@ export function SchoolProfilePanel(): ReactElement {
           onSaved={(saved) => {
             setProfile(saved);
             setEditing(false);
+            notify.current?.(saved);
           }}
         />
       )}

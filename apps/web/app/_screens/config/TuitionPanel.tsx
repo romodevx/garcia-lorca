@@ -8,6 +8,7 @@ import { listTuitionPlans, runBilling, type BillingRun, type TuitionPlan } from 
 import { EmptyHint, ErrorAlert, Section } from "./parts";
 import { MONTH_NAMES, centsToPesos, inscriptionTotals } from "./tuition-math";
 import { TuitionPage } from "./TuitionPage";
+import { useLatest } from "./useLatest";
 
 import { API_URL } from "../../api-url";
 
@@ -44,6 +45,12 @@ export interface TuitionPanelProps {
    */
   pricingLevelId?: string | undefined;
   onPrice?: ((levelId: string | undefined) => void) | undefined;
+  /**
+   * Notify-only: the cycle's plans after each reload (entry, "Generar cargos",
+   * a saved tabulador), or "failed". The setup view marks its step with it
+   * instead of reading the plans twice.
+   */
+  onPlansLoaded?: (cycleId: string, plans: TuitionPlan[] | "failed") => void;
 }
 
 const cell = { padding: "10px 8px" } as const;
@@ -70,6 +77,7 @@ export function TuitionPanel({
   previousCycle,
   pricingLevelId,
   onPrice,
+  onPlansLoaded,
 }: TuitionPanelProps): ReactElement {
   const [plans, setPlans] = useState<TuitionPlan[]>([]);
   // Los del ciclo anterior existen sólo para ofrecer "copiar de". Se piden una
@@ -86,14 +94,30 @@ export function TuitionPanel({
   const [error, setError] = useState<string | undefined>(undefined);
   const [running, setRunning] = useState(false);
 
+  const notify = useLatest(onPlansLoaded);
+  /*
+   * The panel outlives a cycle switch, so an answer can arrive for a cycle that
+   * is no longer on screen. Only the current cycle's answer is kept: switching
+   * years with a read in flight used to paint the old year's prices last.
+   */
+  const activeCycleId = useLatest(cycle.id);
+
   const reload = useCallback(() => {
-    listTuitionPlans(API_URL, cycle.id)
+    const cycleId = cycle.id;
+    const active = (): boolean => activeCycleId.current === cycleId;
+    listTuitionPlans(API_URL, cycleId)
       .then((rows) => {
+        if (!active()) return;
         setPlans(rows);
         setLoaded(true);
+        notify.current?.(cycleId, rows);
       })
-      .catch(() => setError("No pudimos cargar los tabuladores."));
-  }, [cycle.id]);
+      .catch(() => {
+        if (!active()) return;
+        setError("No pudimos cargar los tabuladores.");
+        notify.current?.(cycleId, "failed");
+      });
+  }, [cycle.id, activeCycleId, notify]);
 
   useEffect(reload, [reload]);
 
