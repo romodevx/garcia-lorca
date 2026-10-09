@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { Cycle, GradeLevel, Group, Level, Term } from "../../../config/api";
+import { cycleMonths } from "../../../config/termMonths";
 import { STEPS, deriveSteps, type SetupInput, type StatusRead, type StepId, type StepStatus } from "./setupSteps";
 
 const LOADING = { kind: "loading" } as const;
@@ -21,9 +22,18 @@ const P1 = grade("p1", "prim", "1º", 1);
 const S1 = grade("s1", "sec", "1º", 1);
 const S2 = grade("s2", "sec", "2º", 2);
 
-const term = (levelId: string): Term => ({ id: `t-${levelId}`, cycleId: "c26", levelId, name: "1er trimestre", ordinal: 1, startsOn: "", endsOn: "" });
+/** Every month of the active cycle: Ago 2026 … Jul 2027. */
+const ALL_MONTHS = cycleMonths(ACTIVE.startsOn, ACTIVE.endsOn);
+/** A level's only term, grading every month of the cycle unless told otherwise. */
+const term = (levelId: string, months: string[] = ALL_MONTHS): Term => ({ id: `t-${levelId}`, cycleId: "c26", levelId, name: "1er trimestre", ordinal: 1, startsOn: "", endsOn: "", months });
 const group = (gradeLevelId: string): Group => ({ id: `g-${gradeLevelId}`, cycleId: "c26", gradeLevelId, name: "A", capacity: 30 });
 const plan = (levelId: string) => ({ levelId });
+
+/** The draft cycle's terms, covering its own months. */
+const draftTerms = (): Pick<SetupInput, "terms"> => {
+  const months = cycleMonths(DRAFT.startsOn, DRAFT.endsOn);
+  return { terms: ready([term("prim", months), term("sec", months)]) };
+};
 
 /** A school with everything measurable done, for the active cycle. */
 function complete(): SetupInput {
@@ -112,6 +122,9 @@ describe("deriveSteps: pending lines (§1.2)", () => {
     ["two levels without grades", { levels: [PRIM, SEC, PREE], grades: ready([P1]) }, "levels", "Faltan grados en Secundaria y 1 más"],
     ["one level without terms", { terms: ready([term("prim")]) }, "terms", "Sin periodos en Secundaria"],
     ["two levels without terms", { terms: ready([]) }, "terms", "Sin periodos en Primaria y 1 más"],
+    ["a level whose terms leave a month out", { terms: ready([term("prim"), term("sec", ALL_MONTHS.slice(1))]) }, "terms", "Meses sin periodo en Secundaria"],
+    ["levels whose terms have no months", { terms: ready([term("prim", []), term("sec", [])]) }, "terms", "Meses sin periodo en Primaria y 1 más"],
+    ["terms from a gateway that sends no months", { terms: ready([{ ...term("prim"), months: undefined }, term("sec")]) }, "terms", "Meses sin periodo en Primaria"],
     ["one grade without groups", { groups: ready([group("p1"), group("s1")]) }, "groups", "Sin grupos en 2º de Secundaria"],
     ["three grades without groups", { groups: ready([]) }, "groups", "Sin grupos en 1º de Primaria y 2 más"],
     ["no level priced", { plans: ready([]) }, "tuition", "Ningún nivel tiene precio"],
@@ -206,8 +219,8 @@ describe("deriveSteps: header", () => {
     ["1 pending", { ...complete(), plans: ready([]) }, "Ciclo 2026–2027 · falta Colegiaturas"],
     ["2 pending", { ...complete(), groups: ready([]), plans: ready([]) }, "Ciclo 2026–2027 · faltan Grupos y Colegiaturas"],
     ["3+ pending", pendingAll, "Ciclo 2026–2027 · faltan Datos del colegio, Periodos y 2 más"],
-    ["a draft cycle", { ...complete(), selectedCycleId: "c27" }, "Ciclo 2027–2028 · borrador"],
-    ["a draft cycle with gaps", { ...complete(), selectedCycleId: "c27", plans: ready([]) }, "Ciclo 2027–2028 · borrador · falta Colegiaturas"],
+    ["a draft cycle", { ...complete(), ...draftTerms(), selectedCycleId: "c27" }, "Ciclo 2027–2028 · borrador"],
+    ["a draft cycle with gaps", { ...complete(), ...draftTerms(), selectedCycleId: "c27", plans: ready([]) }, "Ciclo 2027–2028 · borrador · falta Colegiaturas"],
     ["no cycle", { ...complete(), cycles: [], selectedCycleId: undefined }, "Sin ciclo escolar · faltan Periodos, Grupos y 1 más"],
   ])("%s", (_name, input, subtitle) => {
     expect(deriveSteps(input, null).subtitle).toBe(subtitle);

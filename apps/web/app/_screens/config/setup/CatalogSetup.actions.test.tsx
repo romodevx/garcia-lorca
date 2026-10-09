@@ -9,6 +9,7 @@ import {
   DRAFT,
   HOLIDAY,
   T1,
+  T9,
   TRASHED,
   freshSchool,
   installSchool,
@@ -184,6 +185,7 @@ describe("Paso 3 · Niveles y grados (A33–A42)", () => {
 
 describe("Paso 4 · Periodos (A43–A48)", () => {
   it("A43/A44 · switches the view and saves a tapped month through setTermMonths", async () => {
+    installSchool(freshSchool({ terms: [{ ...T1, months: [] }, T9] }));
     const { user } = renderSetup();
     await settled();
     await pickLevel(user, "PRIMARIA");
@@ -205,7 +207,8 @@ describe("Paso 4 · Periodos (A43–A48)", () => {
 
     await waitFor(() => expect(config.createTerm).toHaveBeenCalledTimes(3));
     expect(config.createTerm).toHaveBeenCalledWith(API, expect.objectContaining({ cycleId: "c1", levelId: "l2", ordinal: 1 }));
-    await waitFor(() => expect(stepButton("Periodos")).toHaveTextContent("2 niveles con periodos"));
+    // The new terms grade no month yet: the step moves on from "Sin periodos" but is not done.
+    await waitFor(() => expect(stepButton("Periodos")).toHaveTextContent("Meses sin periodo en SECUNDARIA"));
   });
 
   it("A46 · Copiar meses goes through copyTermMonths", async () => {

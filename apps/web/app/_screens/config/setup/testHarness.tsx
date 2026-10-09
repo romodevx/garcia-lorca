@@ -4,6 +4,7 @@ import { expect, vi } from "vitest";
 
 import * as configApi from "../../../config/api";
 import type { Cycle, GradeLevel, Group, Level, LevelTrashItem, NonWorkingPeriod, SchoolEvent, Subject, Term } from "../../../config/api";
+import { cycleMonths } from "../../../config/termMonths";
 import * as financeApi from "../../../finance/api";
 import type { TuitionPlan } from "../../../finance/api";
 import type { CatalogProps } from "../Catalog";
@@ -23,7 +24,8 @@ export const SECUNDARIA: Level = { id: "l2", name: "SECUNDARIA", sepCode: "", en
 export const G1: GradeLevel = { id: "g1", levelId: "l1", name: "1° PRIMARIA", ordinal: 1 };
 export const G2: GradeLevel = { id: "g2", levelId: "l1", name: "2° PRIMARIA", ordinal: 2 };
 export const G9: GradeLevel = { id: "g9", levelId: "l2", name: "1° SECUNDARIA", ordinal: 1 };
-export const T1: Term = { id: "t1", cycleId: "c1", levelId: "l1", name: "1.er trimestre", ordinal: 1, startsOn: "2026-08-01", endsOn: "2026-11-30", months: [] };
+/** A level's one term, grading every month of ACTIVE: step 4 counts it done. */
+export const T1: Term = { id: "t1", cycleId: "c1", levelId: "l1", name: "1.er trimestre", ordinal: 1, startsOn: "2026-08-01", endsOn: "2026-11-30", months: cycleMonths(ACTIVE.startsOn, ACTIVE.endsOn) };
 export const T9: Term = { ...T1, id: "t9", levelId: "l2" };
 export const GROUP_A: Group = { id: "gr1", cycleId: "c1", gradeLevelId: "g1", name: "A", capacity: 30 };
 export const PLAN: TuitionPlan = {

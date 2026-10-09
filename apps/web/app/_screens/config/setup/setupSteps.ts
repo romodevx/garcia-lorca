@@ -1,4 +1,5 @@
 import type { Cycle, GradeLevel, Group, Level, SchoolProfile, Term } from "../../../config/api";
+import { cycleMonths } from "../../../config/termMonths";
 import type { TuitionPlan } from "../../../finance/api";
 
 /*
@@ -151,10 +152,25 @@ function prerequisite(input: SetupInput): Mark | undefined {
   return undefined;
 }
 
+/**
+ * Whether the level's terms leave a month of the cycle ungraded — what the
+ * panel flags in amber as "Sin periodo: …". A term from an older gateway
+ * carries no months and counts as none.
+ */
+function leavesMonthsOut(levelTerms: Term[], months: readonly string[]): boolean {
+  const taken = new Set(levelTerms.flatMap((t) => t.months ?? []));
+  return months.some((m) => !taken.has(m));
+}
+
+/** Done means what the panel calls complete: every level has terms, and they cover every month. */
 function termsMark(input: SetupInput): Mark {
   return prerequisite(input) ?? fromRead(input.terms, (terms) => {
     const missing = input.levels.filter((l) => !terms.some((t) => t.levelId === l.id)).map((l) => l.name);
     if (missing.length > 0) return pending(missingLine("Sin periodos en", missing));
+    const cycle = input.cycles.find((c) => c.id === input.selectedCycleId);
+    const months = cycle === undefined ? [] : cycleMonths(cycle.startsOn, cycle.endsOn);
+    const uncovered = input.levels.filter((l) => leavesMonthsOut(terms.filter((t) => t.levelId === l.id), months)).map((l) => l.name);
+    if (uncovered.length > 0) return pending(missingLine("Meses sin periodo en", uncovered));
     return done(`${plural(input.levels.length, "nivel", "niveles")} con periodos`);
   });
 }
