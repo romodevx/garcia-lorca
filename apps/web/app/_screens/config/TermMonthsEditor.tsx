@@ -7,6 +7,7 @@ import type { Term } from "../../config/api";
 import { unassignedMonths, type MonthAssignment } from "../../config/termMonths";
 import { monthChips, type MonthChip } from "../../_lib/monthChips";
 import { ErrorAlert, SelectChip } from "./parts";
+import { useSetupPresentation } from "./setup/SetupPresentation";
 
 export interface TermMonthsEditorProps {
   terms: readonly Term[];
@@ -42,7 +43,9 @@ function cellStyle(on: boolean): CSSProperties {
  * toggle chips, for a phone or a screen reader.
  */
 export function TermMonthsEditor({ terms, months, assignment, error, onTap }: TermMonthsEditorProps): ReactElement {
-  const [view, setView] = useState<View>("grid");
+  // A compact setup step has no room for the grid: it opens as the list, never scrolling sideways (§1.6).
+  const { compact } = useSetupPresentation();
+  const [view, setView] = useState<View>(compact ? "list" : "grid");
   const chips = monthChips(months);
   const has = (termId: string, month: string): boolean => assignment[termId]?.includes(month) === true;
   const free = new Set(unassignedMonths(months, assignment));

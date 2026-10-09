@@ -8,7 +8,7 @@ import { listTuitionPlans, runBilling, type BillingRun, type TuitionPlan } from 
 import { EmptyHint, ErrorAlert, Section } from "./parts";
 import { MONTH_NAMES, centsToPesos, inscriptionTotals } from "./tuition-math";
 import { TuitionPage } from "./TuitionPage";
-import { useSecondaryInSetup } from "./setup/SetupPresentation";
+import { useSecondaryInSetup, useSetupPresentation } from "./setup/SetupPresentation";
 import { useLatest } from "./useLatest";
 
 import { API_URL } from "../../api-url";
@@ -95,6 +95,10 @@ export function TuitionPanel({
   const [error, setError] = useState<string | undefined>(undefined);
   const [running, setRunning] = useState(false);
   const generateKind = useSecondaryInSetup();
+  // Inside a setup step a narrow screen stacks each level's row (globals.css .tuition-stack),
+  // every cell carrying its column's name, so "Definir" never runs off the side (#23).
+  const { inSetup } = useSetupPresentation();
+  const label = (column: string): string | undefined => (inSetup ? column : undefined);
 
   const notify = useLatest(onPlansLoaded);
   /*
@@ -175,7 +179,7 @@ export function TuitionPanel({
         <EmptyHint>Registra los niveles del colegio para poder ponerles precio.</EmptyHint>
       ) : (
         <div style={{ overflowX: "auto", contain: "inline-size", marginBottom: 16 }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <table className={inSetup ? "tuition-stack" : undefined} style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr style={{ textAlign: "left", fontSize: 12.5, color: "var(--text-muted)" }}>
                 <th style={cell}>Nivel</th>
@@ -192,7 +196,7 @@ export function TuitionPanel({
                 const plan = planFor(level.id);
                 return (
                   <tr key={level.id} style={{ borderTop: "1px solid var(--border)", fontSize: 14 }}>
-                    <td style={{ ...cell, fontWeight: 600 }}>{level.name}</td>
+                    <td data-label={label("Nivel")} style={{ ...cell, fontWeight: 600 }}>{level.name}</td>
                     {plan === undefined ? (
                       <td style={{ ...cell, color: "var(--text-faint)" }} colSpan={5}>
                         {loaded ? "Sin tabulador · este nivel no se cobra" : "Cargando…"}
@@ -215,13 +219,13 @@ export function TuitionPanel({
                           quien se inscribe en cuanto abre el periodo, que es el
                           número que el colegio publica.
                         */}
-                        <td style={cell}>${centsToPesos(inscriptionShown(plan))}</td>
-                        <td style={cell}>${centsToPesos(plan.monthlyCents)}</td>
-                        <td style={cell}>
+                        <td data-label={label("Inscripción")} style={cell}>${centsToPesos(inscriptionShown(plan))}</td>
+                        <td data-label={label("Mensualidad")} style={cell}>${centsToPesos(plan.monthlyCents)}</td>
+                        <td data-label={label("Mensualidades")} style={cell}>
                           {plan.months} desde {MONTH_NAMES[plan.firstBilledMonth - 1]}
                         </td>
-                        <td style={cell}>día {plan.dueDay}</td>
-                        <td style={cell}>
+                        <td data-label={label("Día límite")} style={cell}>día {plan.dueDay}</td>
+                        <td data-label={label("Recargo")} style={cell}>
                           {plan.policy.dailyMode
                             ? `$${centsToPesos(plan.policy.lateFeeDailyCents)} / día`
                             : plan.lateFeeCents === 0 ? "—" : `$${centsToPesos(plan.lateFeeCents)}`}

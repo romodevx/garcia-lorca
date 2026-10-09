@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, type ReactElement, type ReactNode } from "react";
+import { createContext, useContext, useMemo, type ReactElement, type ReactNode } from "react";
 
 import type { BtnKind } from "../../../_design/Controls";
 
@@ -15,15 +15,17 @@ import type { BtnKind } from "../../../_design/Controls";
 export interface SetupPresentation {
   /** True inside a setup step. */
   inSetup: boolean;
+  /** A setup step on a mid-size screen (§1.6): the months grid would not fit, so it opens as a list. */
+  compact: boolean;
 }
 
-const OLD_VIEW: SetupPresentation = { inSetup: false };
-const SETUP_VIEW: SetupPresentation = { inSetup: true };
+const OLD_VIEW: SetupPresentation = { inSetup: false, compact: false };
 
 const SetupPresentationContext = createContext<SetupPresentation>(OLD_VIEW);
 
-export function SetupPresentationProvider({ children }: { children: ReactNode }): ReactElement {
-  return <SetupPresentationContext.Provider value={SETUP_VIEW}>{children}</SetupPresentationContext.Provider>;
+export function SetupPresentationProvider({ compact = false, children }: { compact?: boolean; children: ReactNode }): ReactElement {
+  const value = useMemo(() => ({ inSetup: true, compact }), [compact]);
+  return <SetupPresentationContext.Provider value={value}>{children}</SetupPresentationContext.Provider>;
 }
 
 export function useSetupPresentation(): SetupPresentation {

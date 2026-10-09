@@ -14,6 +14,7 @@ import { LevelsPanel } from "../LevelsPanel";
 import { Section } from "../parts";
 import { LevelPeriodsEntry } from "../periods/LevelPeriodsEntry";
 import { SubjectsPanel } from "../SubjectsPanel";
+import { TermMonthsEditor } from "../TermMonthsEditor";
 import { TuitionPanel } from "../TuitionPanel";
 import { SetupPresentationProvider, useSetupPresentation } from "./SetupPresentation";
 
@@ -246,5 +247,40 @@ describe("CalendarPanel in a setup step", () => {
     render(<CalendarPanel cycle={CYCLE} />);
     expect(await screen.findByText("Actividades")).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Actividades" })).toBeNull();
+  });
+});
+
+describe("narrower screens inside a setup step (§1.6)", () => {
+  const TERM = { id: "t1", cycleId: "c1", levelId: "l1", name: "1.er trimestre", ordinal: 1, startsOn: "2026-08-01", endsOn: "2026-11-30", months: [] };
+  const editor = <TermMonthsEditor terms={[TERM]} months={["2026-08", "2026-09"]} assignment={{}} error={undefined} onTap={() => {}} />;
+
+  it("opens the months as Lista when the step is compact, keeping Tabla one tap away", () => {
+    render(<SetupPresentationProvider compact>{editor}</SetupPresentationProvider>);
+    expect(screen.getByRole("button", { name: "Lista" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Tabla" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.queryByRole("table")).toBeNull();
+  });
+
+  it("keeps Tabla first on a wide step and in the old view", () => {
+    const { unmount } = inSetup(editor);
+    expect(screen.getByRole("button", { name: "Tabla" })).toHaveAttribute("aria-pressed", "true");
+    unmount();
+    render(editor);
+    expect(screen.getByRole("button", { name: "Tabla" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("lets the tuition table stack its rows in the setup view only, each cell saying what it is", async () => {
+    finance.listTuitionPlans.mockResolvedValue([]);
+    const { unmount } = inSetup(<TuitionPanel cycle={CYCLE} levels={[PRIMARIA]} />);
+    await waitFor(() => expect(screen.getByText("Sin tabulador · este nivel no se cobra")).toBeInTheDocument());
+    const table = screen.getByRole("table");
+    expect(table).toHaveClass("tuition-stack");
+    expect(screen.getByRole("cell", { name: "PRIMARIA" })).toHaveAttribute("data-label", "Nivel");
+    unmount();
+
+    render(<TuitionPanel cycle={CYCLE} levels={[PRIMARIA]} />);
+    await waitFor(() => expect(screen.getByText("Sin tabulador · este nivel no se cobra")).toBeInTheDocument());
+    expect(screen.getByRole("table")).not.toHaveClass("tuition-stack");
+    expect(screen.getByRole("cell", { name: "PRIMARIA" })).not.toHaveAttribute("data-label");
   });
 });

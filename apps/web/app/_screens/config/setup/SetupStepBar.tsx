@@ -73,7 +73,7 @@ export function SetupStepBar({ openId, cardTitle, list }: SetupStepBarProps): Re
         <Icon name="chevron" size={18} style={{ transform: expanded ? "rotate(-90deg)" : "rotate(90deg)" }} />
       </button>
       {expanded && (
-        <div id={panelId} style={panelStyle} onClickCapture={onClickCapture}>
+        <div id={panelId} className="setup-mobilebar-panel" style={panelStyle} onClickCapture={onClickCapture}>
           {list}
         </div>
       )}

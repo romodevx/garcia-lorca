@@ -9,7 +9,7 @@ import { SetupHeader } from "./SetupHeader";
 import { SetupPanes } from "./SetupPanes";
 import { SetupPresentationProvider } from "./SetupPresentation";
 import { SetupStepList } from "./SetupStepList";
-import { NARROW_MAX_PX, useMaxWidth } from "./layout";
+import { COMPACT_MAX_PX, NARROW_MAX_PX, useMaxWidth } from "./layout";
 import { deriveSteps, type SetupInput } from "./setupSteps";
 import { useCatalogState, type CatalogState } from "./useCatalogState";
 import { readStoredStep, useOpenStep } from "./useOpenStep";
@@ -49,6 +49,7 @@ export function CatalogSetup({ onBack, canDeleteLevels = false, onDeleteLevel, n
   const loaded = !state.load.loading && state.load.error === undefined;
   const nav = useOpenStep(view.initialStepId, loaded && view.settled);
   const narrow = useMaxWidth(NARROW_MAX_PX);
+  const compact = useMaxWidth(COMPACT_MAX_PX);
   const pricing = state.pricing.active;
   const main = useRef<HTMLDivElement>(null);
 
@@ -64,7 +65,7 @@ export function CatalogSetup({ onBack, canDeleteLevels = false, onDeleteLevel, n
       {state.load.loading && <p className="fade-up" style={{ color: "var(--text-muted)", fontSize: 15 }}>Cargando catálogo…</p>}
       {state.load.error !== undefined && <p role="alert" className="fade-up" style={{ color: "var(--bad-fg)", fontSize: 15 }}>{state.load.error}</p>}
       {loaded && (
-        <SetupPresentationProvider>
+        <SetupPresentationProvider compact={compact}>
           <div className={pricing ? "setup-layout setup-layout-solo" : "setup-layout"}>
             {!pricing && (
               <SetupStepList steps={view.steps} cardTitle={view.cardTitle} openId={nav.openId} onOpen={nav.open} onOpenStudentImport={onOpenStudentImport} showTrash={canDeleteLevels} narrow={narrow} />

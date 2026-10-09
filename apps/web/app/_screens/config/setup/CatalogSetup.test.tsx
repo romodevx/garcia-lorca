@@ -312,3 +312,43 @@ describe("CatalogSetup — what the old view never does", () => {
     expect(config.listGroups).toHaveBeenCalledWith(expect.any(String), "c1");
   });
 });
+
+/** A viewport this wide, as matchMedia answers `(max-width: Npx)` queries. */
+function viewport(width: number): void {
+  vi.stubGlobal("matchMedia", (query: string) => {
+    const max = Number(/max-width:\s*(\d+)px/.exec(query)?.[1] ?? Infinity);
+    return { matches: width <= max, media: query, addEventListener: () => {}, removeEventListener: () => {} };
+  });
+}
+
+describe("CatalogSetup — screen sizes (§1.6)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("below 900 px folds the list into the 'Paso N de 8' bar", async () => {
+    viewport(820);
+    renderSetup();
+    const bar = await screen.findByRole("button", { name: "Paso 6 de 8 · Grupos" });
+    expect(bar).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("navigation")).toBeNull();
+  });
+
+  it("between 900 and 1199 px keeps the list and opens the months as Lista", async () => {
+    viewport(1024);
+    window.sessionStorage.setItem(STORAGE_KEY, "terms");
+    const { user } = renderSetup();
+    await settled();
+    const terms = stepRegion("Periodos");
+    await user.click(within(terms).getByRole("button", { name: "PRIMARIA" }));
+    expect(await within(terms).findByRole("button", { name: "Lista", pressed: true })).toBeVisible();
+  });
+
+  it("from 1200 px the months open as Tabla", async () => {
+    viewport(1440);
+    window.sessionStorage.setItem(STORAGE_KEY, "terms");
+    const { user } = renderSetup();
+    await settled();
+    const terms = stepRegion("Periodos");
+    await user.click(within(terms).getByRole("button", { name: "PRIMARIA" }));
+    expect(await within(terms).findByRole("button", { name: "Tabla", pressed: true })).toBeVisible();
+  });
+});

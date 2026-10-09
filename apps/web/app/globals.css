@@ -717,3 +717,59 @@ input { font-family: var(--font-ui); }
   gap: 28px;
   align-items: start;
 }
+
+/* Tamaños de pantalla de la puesta en marcha (§1.6). Los mismos números viven en
+   setup/layout.ts (NARROW_MAX_PX = 899, COMPACT_MAX_PX = 1199). */
+html:has(.setup-mobilebar) {
+  /* El alto de la barra superior (TopBar: 78px; 64px en teléfono) y el de la
+     barra "Paso N de 8": lo que un campo enfocado nunca debe quedar debajo. */
+  --setup-topbar-h: 78px;
+  --setup-bar-h: 48px;
+  --setup-bar-gap: 12px;
+  scroll-padding-top: calc(var(--setup-topbar-h) + var(--setup-bar-h) + var(--setup-bar-gap));
+}
+
+/* 900–1199: la lista se angosta y cada renglón se corta con elipsis (el texto
+   completo queda en `title`); el paso 3 apila Niveles sobre Grados. */
+@media (min-width: 900px) and (max-width: 1199px) {
+  .setup-layout { grid-template-columns: 260px minmax(0, 1fr); }
+  .setup-step-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+}
+@media (max-width: 1199px) {
+  .setup-pair { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* < 900: una columna. La barra "Paso N de 8" queda pegada bajo la barra
+   superior, y el desplazamiento al enfocar deja libre el alto de las dos
+   (WCAG 2.2 · 2.4.11). Colegiaturas apila cada nivel en su propia tarjeta
+   para que "Definir" no se salga de lado (#23). */
+@media (max-width: 899px) {
+  .setup-layout { grid-template-columns: minmax(0, 1fr); }
+  .setup-mobilebar {
+    position: sticky;
+    top: var(--setup-topbar-h);
+    z-index: 20;
+  }
+  .setup-mobilebar-panel { max-height: 70vh; overflow-y: auto; }
+  .tuition-stack thead { display: none; }
+  .tuition-stack tr {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    column-gap: 14px;
+    padding: 8px 0;
+  }
+  .tuition-stack td { padding: 4px 6px !important; }
+  .tuition-stack td:first-child { flex-basis: 100%; }
+  .tuition-stack td:last-child { margin-left: auto; }
+  .tuition-stack td[data-label]::before {
+    content: attr(data-label) " ";
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-muted);
+  }
+  .tuition-stack td:first-child::before { content: none; }
+}
+@media (max-width: 768px) {
+  html:has(.setup-mobilebar) { --setup-topbar-h: 64px; }
+}
