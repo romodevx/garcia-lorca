@@ -302,6 +302,10 @@ Tocados:
   leen el contexto de presentación (§1.3, §1.8).
 - `SchoolProfilePanel`, `TuitionPanel`, `CalendarPanel`: los callbacks de §4.1, opcionales y
   solo de aviso. `TuitionPanel` además gana su protección `active` en la recarga.
+  **Es un cambio de comportamiento aprobado que también alcanza a la vista vieja**: una
+  respuesta tardía del ciclo anterior ya no se pinta bajo el ciclo nuevo. Queda anotado en
+  `behavior.md` ("Cambios de comportamiento aprobados"). `CalendarPanel` **no** recibe la
+  misma protección en este trabajo: sería una propuesta aparte.
 - `_design/Toast.tsx`, `UndoToast`: portal a `document.body` (§3.2).
 - `packages/ui/src/flags/types.ts`: `"module_config_setup"` en `FlagKey`.
 - `services/gateway/internal/config/flags.go`: `module_config_setup` en `AllModuleFlags`.
