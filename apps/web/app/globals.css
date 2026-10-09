@@ -694,3 +694,26 @@ input { font-family: var(--font-ui); }
     color: var(--text-muted);
   }
 }
+
+/* ============================================================
+   Configuración académica · Puesta en marcha (module_config_setup).
+   La lista de pasos a la izquierda y el paso abierto a la derecha.
+   La rejilla vive aquí y no en línea: un estilo en línea le gana a
+   cualquier @media, y los tamaños de pantalla (§1.6) la cambian.
+   ============================================================ */
+.setup-layout {
+  display: grid;
+  grid-template-columns: 330px minmax(0, 1fr);
+  gap: 22px;
+  align-items: start;
+}
+/* Capturando precios: la página del tabulador ocupa todo el ancho. */
+.setup-layout-solo { grid-template-columns: minmax(0, 1fr); }
+.setup-main { display: grid; min-width: 0; }
+/* Paso 3: niveles a la izquierda, los grados del elegido a la derecha. */
+.setup-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 28px;
+  align-items: start;
+}

@@ -1,0 +1,41 @@
+"use client";
+
+import type { ReactElement } from "react";
+
+import { GradeLevelsPanel } from "../../GradeLevelsPanel";
+import { LevelsPanel } from "../../LevelsPanel";
+import type { GradesSlice, LevelsSlice } from "../useCatalogState";
+import type { SetupActions } from "../useSetupActions";
+import { StepFrame, type StepSlot } from "../StepFrame";
+
+export interface StepLevelsProps {
+  slot: StepSlot;
+  levels: LevelsSlice;
+  grades: GradesSlice;
+  actions: SetupActions;
+  /** Given only to the owner (levels:delete), exactly as the old view does (A37). */
+  onDeleteLevel?: (levelId: string) => void;
+}
+
+/** Step 3 · Niveles y grados: levels on the left, the selected level's grades on the right. */
+export function StepLevels({ slot, levels, grades, actions, onDeleteLevel }: StepLevelsProps): ReactElement {
+  const selected = levels.selected;
+  return (
+    <StepFrame {...slot}>
+      <div className="setup-pair">
+        <LevelsPanel
+          levels={levels.list}
+          selectedLevelId={levels.selectedId}
+          onSelect={levels.select}
+          onCreate={actions.createLevel}
+          onSetAttendanceMode={levels.setAttendanceMode}
+          onSetGrading={levels.setGrading}
+          onDelete={onDeleteLevel}
+        />
+        {selected !== undefined && (
+          <GradeLevelsPanel key={selected.id} level={selected} gradeLevels={grades.list} selectedGradeLevelId={grades.selectedId} onSelect={grades.select} onCreate={actions.createGrade} />
+        )}
+      </div>
+    </StepFrame>
+  );
+}
