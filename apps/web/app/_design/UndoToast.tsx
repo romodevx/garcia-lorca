@@ -2,6 +2,7 @@
 
 import type { ReactElement } from "react";
 
+import { BodyPortal } from "./BodyPortal";
 import { Icon } from "./Icon";
 
 /**
@@ -22,6 +23,9 @@ import { Icon } from "./Icon";
  * pendiente —quitar dos cosas seguidas perdía el borrado de la primera— y el
  * efecto colgaba de un `onCommit` escrito en línea, así que cualquier repintado
  * del panel reiniciaba los ocho segundos.
+ *
+ * Se pinta en `document.body` (portal): dentro de un panel escondido el
+ * Deshacer desaparecería mientras el plazo sigue corriendo y confirma.
  */
 export interface UndoToastProps {
   message: string;
@@ -31,51 +35,53 @@ export interface UndoToastProps {
 
 export function UndoToast({ message, onUndo }: UndoToastProps): ReactElement {
   return (
-    <div
-      // `status` y no `alert`: se anuncia, pero no interrumpe ni roba el foco de
-      // donde la persona está trabajando.
-      role="status"
-      style={{
-        position: "fixed",
-        bottom: 28,
-        left: "50%",
-        transform: "translateX(-50%)",
-        zIndex: 80,
-        display: "flex",
-        alignItems: "center",
-        gap: 14,
-        padding: "12px 14px 12px 22px",
-        borderRadius: "var(--r-pill)",
-        background: "var(--text)",
-        color: "var(--surface)",
-        fontWeight: 600,
-        fontSize: 15,
-        boxShadow: "var(--shadow-pop)",
-        animation: "pop .25s var(--ease) both",
-      }}
-    >
-      <Icon name="check" size={20} stroke={2.6} />
-      {message}
-      <button
-        type="button"
-        onClick={onUndo}
+    <BodyPortal>
+      <div
+        // `status` y no `alert`: se anuncia, pero no interrumpe ni roba el foco de
+        // donde la persona está trabajando.
+        role="status"
         style={{
-          display: "inline-flex",
+          position: "fixed",
+          bottom: 28,
+          left: "50%",
+          transform: "translateX(-50%)",
+          zIndex: 80,
+          display: "flex",
           alignItems: "center",
-          height: 38,
-          padding: "0 18px",
+          gap: 14,
+          padding: "12px 14px 12px 22px",
           borderRadius: "var(--r-pill)",
-          background: "var(--lime)",
-          color: "#16311A",
-          fontFamily: "var(--font-display)",
-          fontWeight: 700,
-          fontSize: 14.5,
-          cursor: "pointer",
-          border: "none",
+          background: "var(--text)",
+          color: "var(--surface)",
+          fontWeight: 600,
+          fontSize: 15,
+          boxShadow: "var(--shadow-pop)",
+          animation: "pop .25s var(--ease) both",
         }}
       >
-        Deshacer
-      </button>
-    </div>
+        <Icon name="check" size={20} stroke={2.6} />
+        {message}
+        <button
+          type="button"
+          onClick={onUndo}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            height: 38,
+            padding: "0 18px",
+            borderRadius: "var(--r-pill)",
+            background: "var(--lime)",
+            color: "#16311A",
+            fontFamily: "var(--font-display)",
+            fontWeight: 700,
+            fontSize: 14.5,
+            cursor: "pointer",
+            border: "none",
+          }}
+        >
+          Deshacer
+        </button>
+      </div>
+    </BodyPortal>
   );
 }

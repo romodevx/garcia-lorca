@@ -24,4 +24,20 @@ describe("UndoToast", () => {
 
     expect(screen.getByRole("status")).toHaveTextContent("Se quitó INDEPENDENCIA");
   });
+
+  // Painted inside a panel, a hidden setup step would hide its Deshacer while
+  // the eight seconds still run and commit. In document.body it stays reachable,
+  // and no transformed ancestor can re-anchor its position: fixed.
+  it("vive en document.body, fuera del panel que lo pinta", () => {
+    const { container } = render(
+      <section hidden>
+        <UndoToast message="Se quitó INDEPENDENCIA" onUndo={vi.fn()} />
+      </section>,
+    );
+
+    const toast = screen.getByRole("status");
+    expect(toast.parentElement).toBe(document.body);
+    expect(container.contains(toast)).toBe(false);
+    expect(toast).toBeVisible();
+  });
 });
