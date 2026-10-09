@@ -4,6 +4,7 @@ import { useState, type CSSProperties, type ReactElement } from "react";
 
 import { Icon } from "../../../_design/Icon";
 import { SetupStepBar } from "./SetupStepBar";
+import { PENDING_TEXT, QUIET_TEXT } from "./setupColors";
 import type { StepId, StepStatus, StepView } from "./setupSteps";
 
 /*
@@ -105,7 +106,7 @@ const rowStyle = (open: boolean): CSSProperties => ({
 });
 
 /** The sub-line's colour: what is missing reads as a warning, the rest is quiet. */
-const LINE_COLOR: Partial<Record<StepStatus, string>> = { pending: "var(--warn-fg)" };
+const LINE_COLOR: Partial<Record<StepStatus, string>> = { pending: PENDING_TEXT };
 
 function StepRow({ step, open, animateCheck, onOpen }: { step: StepView; open: boolean; animateCheck: boolean; onOpen: () => void }): ReactElement {
   const full = step.line === undefined ? step.title : `${step.title} · ${step.line}`;
@@ -166,7 +167,7 @@ function Tools({ onOpenStudentImport, showTrash, trashOpen, onOpenTrash }: Tools
           <Icon name="upload" size={18} />
           <span style={{ display: "grid" }}>
             Migrar alumnos del sistema anterior
-            <span style={{ fontSize: 13, fontWeight: 500, color: "var(--text-faint)" }}>Necesita niveles, grados y grupos.</span>
+            <span style={{ fontSize: 13, fontWeight: 500, color: QUIET_TEXT }}>Necesita niveles, grados y grupos.</span>
           </span>
         </button>
       )}

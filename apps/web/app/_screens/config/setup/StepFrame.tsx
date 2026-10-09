@@ -4,6 +4,7 @@ import type { CSSProperties, ReactElement, ReactNode } from "react";
 
 import { Btn } from "../../../_design/Controls";
 import { UnderStepTitle } from "./SetupPresentation";
+import { QUIET_TEXT } from "./setupColors";
 import { STEPS, type StepDef, type StepId, type StepView } from "./setupSteps";
 
 /*
@@ -50,7 +51,7 @@ const eyebrowStyle: CSSProperties = {
   fontWeight: 700,
   letterSpacing: ".06em",
   textTransform: "uppercase",
-  color: "var(--text-faint)",
+  color: QUIET_TEXT,
 };
 
 const footStyle: CSSProperties = {

@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { SetupStepList, type SetupStepListProps } from "./SetupStepList";
+import { PENDING_TEXT } from "./setupColors";
 import { stepViews } from "./stepFixtures";
 
 function renderSteps(props: Partial<SetupStepListProps> = {}): SetupStepListProps {
@@ -86,7 +87,7 @@ describe("SetupStepList — each status (§4.3)", () => {
     renderSteps({ steps: stepViews({ tuition: { line: "Ningún nivel tiene precio" } }) });
     const line = stepButton(/^Colegiaturas/).querySelector<HTMLElement>("[data-line]");
     expect(line).toHaveTextContent("Ningún nivel tiene precio");
-    expect(line?.style.color).toBe("var(--warn-fg)");
+    expect(line?.style.color).toBe(PENDING_TEXT);
   });
 
   it("the open step gets the lime circle", () => {
