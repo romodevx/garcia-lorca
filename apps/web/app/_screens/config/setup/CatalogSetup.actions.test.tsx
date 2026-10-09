@@ -105,16 +105,47 @@ describe("Paso 2 · Ciclo escolar (A7–A11)", () => {
     await waitFor(() => expect(config.createCycle).toHaveBeenCalledWith(API, { name: "2028-2029", startsOn: "2028-08-01", endsOn: "2029-06-30" }));
   });
 
-  it("A11 · Activar ciclo goes through activateCycle and refreshes every status read", async () => {
+  it("A8 · a new cycle's status is read for the new cycle only, never the one it replaced (N1)", async () => {
+    const { user } = renderSetup();
+    await settled();
+    const step = await openStep(user, "Ciclo escolar");
+    await user.click(within(step).getByRole("button", { name: "Nuevo ciclo" }));
+    const drawer = screen.getByRole("dialog", { name: "Nuevo ciclo escolar" });
+    await user.type(within(drawer).getByLabelText("Nombre del ciclo"), "2028-2029");
+    fireEvent.change(within(drawer).getByLabelText("Inicia"), { target: { value: "2028-08-01" } });
+    fireEvent.change(within(drawer).getByLabelText("Termina"), { target: { value: "2029-06-30" } });
+    config.listTerms.mockClear();
+    config.listGroups.mockClear();
+    config.listGradeLevels.mockClear();
+    await user.click(within(drawer).getByRole("button", { name: "Crear ciclo" }));
+
+    const made = await waitFor(() => {
+      const id = config.createCycle.mock.results[0]?.value as Promise<{ id: string }> | undefined;
+      expect(id).toBeDefined();
+      return id!;
+    });
+    const { id } = await made;
+    await waitFor(() => expect(config.listTerms).toHaveBeenCalledWith(API, id));
+    expect(config.listTerms).not.toHaveBeenCalledWith(API, ACTIVE.id);
+    expect(config.listGroups).not.toHaveBeenCalledWith(API, ACTIVE.id);
+    expect(config.listGradeLevels).not.toHaveBeenCalledWith(API);
+  });
+
+  it("A11 · Activar ciclo goes through activateCycle and re-reads the cycle's terms and groups, not the grades (N1)", async () => {
     const { user } = renderSetup();
     await settled();
     const step = await openStep(user, "Ciclo escolar");
     await user.click(within(step).getByRole("button", { name: "2027-2028 · Borrador" }));
+    await waitFor(() => expect(config.listGroups).toHaveBeenCalledWith(API, "c2"));
     config.listGradeLevels.mockClear();
+    config.listTerms.mockClear();
+    config.listGroups.mockClear();
     await user.click(within(step).getByRole("button", { name: "Activar ciclo 2027-2028" }));
 
     await waitFor(() => expect(config.activateCycle).toHaveBeenCalledWith(API, "c2"));
-    await waitFor(() => expect(config.listGradeLevels).toHaveBeenCalledWith(API));
+    await waitFor(() => expect(config.listTerms).toHaveBeenCalledWith(API, "c2"));
+    await waitFor(() => expect(config.listGroups).toHaveBeenCalledWith(API, "c2"));
+    expect(config.listGradeLevels).not.toHaveBeenCalledWith(API);
   });
 });
 

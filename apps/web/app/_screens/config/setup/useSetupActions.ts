@@ -36,8 +36,14 @@ export function useSetupActions(state: CatalogState, refresh: (kind: RefreshKind
   const { create: createLevel, reload: reloadLevels } = state.levels;
   return useMemo(
     () => ({
-      createCycle: thenRefresh(cycles.create, () => refresh("all")),
-      activateCycle: thenRefresh(cycles.activate, () => refresh("all")),
+      // Creating selects the new cycle, and the status reads follow the selected cycle's
+      // key on their own. A refresh here would still hold the OLD cycle: wasted reads.
+      createCycle: cycles.create,
+      // Grades do not depend on the cycle; its terms and groups are re-read.
+      activateCycle: thenRefresh(cycles.activate, () => {
+        refresh("terms");
+        refresh("groups");
+      }),
       createLevel: thenRefresh(createLevel, () => refresh("grades")),
       createGrade: thenRefresh(grades.create, () => refresh("grades")),
       createTerm: thenRefresh(terms.create, () => refresh("terms")),
