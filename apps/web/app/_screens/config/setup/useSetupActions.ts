@@ -43,9 +43,10 @@ export function useSetupActions(state: CatalogState, refresh: (kind: RefreshKind
       createTerm: thenRefresh(terms.create, () => refresh("terms")),
       copyMonths: thenRefresh(terms.copyMonths, () => refresh("terms")),
       createGroup: thenRefresh(groups.create, () => refresh("groups")),
+      // A restore brings the level back with its grades, terms and groups: every read is stale.
       restoredLevel: () => {
         reloadLevels();
-        refresh("grades");
+        refresh("all");
       },
     }),
     [cycles.create, cycles.activate, createLevel, reloadLevels, grades.create, terms.create, terms.copyMonths, groups.create, refresh],

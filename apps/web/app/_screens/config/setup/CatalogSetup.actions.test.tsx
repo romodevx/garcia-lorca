@@ -431,11 +431,16 @@ describe("Herramientas · Papelera (A54–A56)", () => {
     expect(config.restoreLevel).not.toHaveBeenCalled();
 
     config.listGradeLevels.mockClear();
+    config.listTerms.mockClear();
+    config.listGroups.mockClear();
     await user.click(within(trash).getByRole("button", { name: "Restaurar MATERNAL" }));
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Restaurar nivel" }));
     await waitFor(() => expect(config.restoreLevel).toHaveBeenCalledWith(API, "b1"));
     await waitFor(() => expect(config.listLevels).toHaveBeenCalledTimes(2));
     expect(config.listGradeLevels).toHaveBeenCalledWith(API);
+    // The restore brings the level's terms and groups back too (S1).
+    expect(config.listTerms).toHaveBeenCalledWith(API, ACTIVE.id);
+    expect(config.listGroups).toHaveBeenCalledWith(API, ACTIVE.id);
   });
 });
 
