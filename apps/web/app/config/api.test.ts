@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  activateCycle,
+  createSchoolEvent,
+  deleteSchoolEvent,
+  listSchoolEvents,
   updateLevelAttendanceMode,
   updateLevelGrading,
   ConfigError,
@@ -524,5 +528,89 @@ describe("evaluation periods (T14)", () => {
     const [url, init] = lastCall(fetchMock);
     expect(url).toBe("http://gw/api/v1/config/evaluation-periods/copy");
     expect(JSON.parse(init.body as string)).toEqual({ cycleId: "c1", fromGradeLevelId: "g1", toGradeLevelIds: ["g2"] });
+  });
+});
+
+/*
+ * Characterization (2026-10-09), before the Configuración académica redesign:
+ * the endpoints the screen used without a test of their own (behavior.md, item 22).
+ */
+describe("activateCycle (characterization)", () => {
+  it("POSTs an empty body to /cycles/{id}/activate with credentials and returns the cycle", async () => {
+    const activated = { id: "c 2", name: "2027-2028", status: "active", startsOn: "2027-08-01", endsOn: "2028-06-30" };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(activated));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await activateCycle(BASE, "c 2");
+
+    expect(res).toEqual(activated);
+    const [url, init] = lastCall(fetchMock);
+    expect(url).toBe("http://gw/api/v1/config/cycles/c%202/activate");
+    expect(init.method).toBe("POST");
+    expect(init.credentials).toBe("include");
+    expect(JSON.parse(init.body as string)).toEqual({});
+  });
+
+  it("throws a ConfigError carrying the status on refusal", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("", { status: 403 })));
+    await expect(activateCycle(BASE, "c1")).rejects.toMatchObject({ name: "ConfigError", status: 403 });
+  });
+});
+
+describe("school events (characterization)", () => {
+  it("listSchoolEvents GETs /events?cycleId= with credentials and unwraps { events }", async () => {
+    const ev = { id: "e1", cycleId: "c1", title: "FESTIVAL", description: "", startsOn: "2026-11-20", endsOn: "2026-11-20" };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ events: [ev] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(await listSchoolEvents(BASE, "c1")).toEqual([ev]);
+    const [url, init] = lastCall(fetchMock);
+    expect(url).toBe("http://gw/api/v1/config/events?cycleId=c1");
+    expect(init.credentials).toBe("include");
+  });
+
+  it("listSchoolEvents reads a missing key as an empty agenda", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({})));
+    expect(await listSchoolEvents(BASE, "c1")).toEqual([]);
+  });
+
+  it("createSchoolEvent POSTs to /events, defaulting description and omitting an empty end date and scope", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ id: "e1" }, 201));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createSchoolEvent(BASE, { cycleId: "c1", title: "FESTIVAL", startsOn: "2026-11-20", endsOn: "", levelId: "", groupId: "" });
+
+    const [url, init] = lastCall(fetchMock);
+    expect(url).toBe("http://gw/api/v1/config/events");
+    expect(init.method).toBe("POST");
+    expect(init.credentials).toBe("include");
+    expect(JSON.parse(init.body as string)).toEqual({ cycleId: "c1", title: "FESTIVAL", description: "", startsOn: "2026-11-20" });
+  });
+
+  it("createSchoolEvent sends the end date and one scope when given", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ id: "e1" }, 201));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createSchoolEvent(BASE, { cycleId: "c1", title: "EXÁMENES", description: "x", startsOn: "2026-12-07", endsOn: "2026-12-11", levelId: "l1" });
+
+    const [, init] = lastCall(fetchMock);
+    expect(JSON.parse(init.body as string)).toEqual({
+      cycleId: "c1", title: "EXÁMENES", description: "x", startsOn: "2026-12-07", endsOn: "2026-12-11", levelId: "l1",
+    });
+  });
+
+  it("deleteSchoolEvent DELETEs /events/{id} with credentials and throws on refusal", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await deleteSchoolEvent(BASE, "e1");
+
+    const [url, init] = lastCall(fetchMock);
+    expect(url).toBe("http://gw/api/v1/config/events/e1");
+    expect(init.method).toBe("DELETE");
+    expect(init.credentials).toBe("include");
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("", { status: 404 })));
+    await expect(deleteSchoolEvent(BASE, "e1")).rejects.toMatchObject({ name: "ConfigError", status: 404 });
   });
 });
