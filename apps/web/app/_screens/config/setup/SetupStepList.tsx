@@ -128,7 +128,7 @@ const MARK_SIZE = 30;
 
 function markStyle(status: StepStatus, open: boolean): CSSProperties {
   const done = status === "done";
-  const base: CSSProperties = { width: MARK_SIZE, height: MARK_SIZE, flexShrink: 0, borderRadius: "50%", display: "grid", placeItems: "center", fontWeight: 800, fontSize: 13.5, border: "2px solid var(--border-strong)", background: "var(--surface)", color: "var(--text-muted)" };
+  const base: CSSProperties = { width: MARK_SIZE, height: MARK_SIZE, flexShrink: 0, borderRadius: "50%", display: "grid", placeItems: "center", fontWeight: 800, fontSize: 13.5, borderWidth: 2, borderStyle: "solid", borderColor: "var(--border-strong)", background: "var(--surface)", color: "var(--text-muted)" };
   if (open) return { ...base, borderColor: "var(--lime)", background: "var(--lime)", color: "var(--primary-ink)" };
   if (done) return { ...base, borderColor: "var(--forest)", background: "var(--forest)", color: "#fff" };
   if (status === "loading") return { ...base, color: "var(--text-faint)", borderColor: "var(--border)" };

@@ -9,18 +9,20 @@ import { stepView } from "./stepFixtures";
 const isLime = (el: HTMLElement): boolean => el.style.background === "var(--primary)";
 
 describe("StepFrame (§1.2, §1.3)", () => {
-  it("says where the step stands and what it is for, and has no title of its own", () => {
+  it("says where the step stands and leaves title and purpose to the panel's own heading", () => {
     render(<StepFrame step={stepView("levels")} onGo={() => {}}><p>cuerpo</p></StepFrame>);
     expect(screen.getByText("Paso 3 de 8")).toBeInTheDocument();
-    expect(screen.getByText("Los niveles que ofrece el colegio y los grados de cada uno.")).toBeInTheDocument();
     expect(screen.getByText("cuerpo")).toBeInTheDocument();
     expect(screen.queryByRole("heading")).toBeNull();
+    // The panel's subtitle already says what the step is for; saying it twice was QA's first finding.
+    expect(screen.queryByText("Los niveles que ofrece el colegio y los grados de cada uno.")).toBeNull();
   });
 
-  it("titles the step itself only when its body has no panel to do it", () => {
+  it("titles the step and says what it is for only when its body has no panel to do it", () => {
     render(<StepFrame step={stepView("terms")} ownHeading onGo={() => {}}>x</StepFrame>);
     const heading = screen.getByRole("heading", { level: 2, name: "Periodos" });
     expect(heading).toHaveAttribute("tabindex", "-1");
+    expect(screen.getByText(stepView("terms").purpose)).toBeInTheDocument();
   });
 
   it("goes back and forward by the neighbours' names", async () => {

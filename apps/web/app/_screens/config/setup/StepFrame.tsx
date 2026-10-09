@@ -7,8 +7,8 @@ import { STEPS, type StepDef, type StepId, type StepView } from "./setupSteps";
 
 /*
  * The open step's frame (PLAN-redesign-configuracion §1.2–§1.3): "Paso N de 8",
- * the purpose line, the body, and the footer back/next. It has no title of its
- * own — the panel's h2 is the step's title — unless the body has no panel yet.
+ * the body, and the footer back/next. It has no title or purpose line of its
+ * own — the panel's h2 and subtitle are those — unless the body has no panel yet.
  */
 
 /** What every step receives to sit in the right column. */
@@ -84,12 +84,15 @@ function StepIntro({ step, ownHeading }: { step: StepView; ownHeading: boolean }
   return (
     <div style={{ marginBottom: 18 }}>
       <p style={eyebrowStyle}>Paso {step.number} de {STEPS.length}</p>
+      {/* With a panel, its own h2 and subtitle already title the step and say what it is for. */}
       {ownHeading && (
-        <h2 tabIndex={-1} style={{ fontSize: 18, fontWeight: 700, color: "var(--text)", marginTop: 4 }}>
-          {step.title}
-        </h2>
+        <>
+          <h2 tabIndex={-1} style={{ fontSize: 18, fontWeight: 700, color: "var(--text)", marginTop: 4 }}>
+            {step.title}
+          </h2>
+          <p style={{ fontSize: 14.5, color: "var(--text-muted)", marginTop: 4 }}>{step.purpose}</p>
+        </>
       )}
-      <p style={{ fontSize: 14.5, color: "var(--text-muted)", marginTop: 4 }}>{step.purpose}</p>
     </div>
   );
 }

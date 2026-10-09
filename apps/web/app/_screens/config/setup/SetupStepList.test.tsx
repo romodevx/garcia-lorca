@@ -50,6 +50,16 @@ describe("SetupStepList — the list (§1.1, §1.7)", () => {
 });
 
 describe("SetupStepList — each status (§4.3)", () => {
+  it("changes a mark's colour without mixing border shorthand and longhand (React warns on rerender)", () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const props: SetupStepListProps = { steps: stepViews(), cardTitle: "Puesta en marcha", openId: "groups", onOpen: vi.fn(), showTrash: false, narrow: false };
+    const { rerender } = render(<SetupStepList {...props} />);
+    rerender(<SetupStepList {...props} steps={stepViews({ profile: { status: "done", line: "GARCÍA LORCA" } })} openId="profile" />);
+    rerender(<SetupStepList {...props} steps={stepViews({ terms: { status: "loading", line: "Revisando…" } })} openId="terms" />);
+    expect(errors.mock.calls.flat().join(" ")).not.toMatch(/shorthand/);
+    errors.mockRestore();
+  });
+
   it("a done step shows a check and its line", () => {
     renderSteps({ steps: stepViews({ profile: { status: "done", line: "GARCÍA LORCA" } }) });
     const step = stepButton(/^Datos del colegio/);
