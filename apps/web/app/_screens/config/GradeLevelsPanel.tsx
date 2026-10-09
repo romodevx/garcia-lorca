@@ -5,6 +5,7 @@ import { useMemo, useState, type ReactElement } from "react";
 import { InlineCreateRow } from "../../_design/InlineCreateRow";
 import type { CreateGradeLevelInput, GradeLevel, Level } from "../../config/api";
 import { EmptyHint, ErrorAlert, Section, SelectChip } from "./parts";
+import { useSetupPresentation } from "./setup/SetupPresentation";
 
 export interface GradeLevelsPanelProps {
   level: Level;
@@ -38,6 +39,8 @@ export function GradeLevelsPanel({
   onCreate,
 }: GradeLevelsPanelProps): ReactElement {
   const [error, setError] = useState<string | undefined>(undefined);
+  // Inside a setup step a grade chip is its name alone: "1. 1°" said the order twice (§1.8 #12).
+  const { inSetup } = useSetupPresentation();
 
   // Identidad estable: `InlineCreateRow` la observa para poner al día la celda
   // que nadie tocó, y un objeto nuevo en cada render la reescribiría siempre.
@@ -52,7 +55,7 @@ export function GradeLevelsPanel({
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
           {gradeLevels.map((g) => (
             <SelectChip key={g.id} selected={g.id === selectedGradeLevelId} onClick={() => onSelect(g.id)}>
-              {g.ordinal}. {g.name}
+              {inSetup ? g.name : <>{g.ordinal}. {g.name}</>}
             </SelectChip>
           ))}
         </div>

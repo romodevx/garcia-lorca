@@ -18,6 +18,7 @@ import {
   type SchoolEvent,
 } from "../../config/api";
 import { EmptyHint, ErrorAlert, Section } from "./parts";
+import { useSetupPresentation } from "./setup/SetupPresentation";
 import { useLatest } from "./useLatest";
 
 import { API_URL } from "../../api-url";
@@ -218,7 +219,7 @@ export function CalendarPanel({ cycle, onLoaded }: CalendarPanelProps): ReactEle
       </div>
 
       <div style={{ borderTop: "1px solid var(--border)", marginTop: 22, paddingTop: 18 }}>
-        <p style={{ fontSize: 15, fontWeight: 700, color: "var(--text)" }}>Actividades</p>
+        <ActivitiesHeading />
         <p style={{ fontSize: 13, color: "var(--text-faint)", marginTop: 2, marginBottom: 12 }}>
           Lo que hace la escuela: juntas, festivales, semanas de exámenes.
           A diferencia de los días cerrados, <b>no mueven fechas de pago</b>.
@@ -289,4 +290,12 @@ export function CalendarPanel({ cycle, onLoaded }: CalendarPanelProps): ReactEle
       )}
     </Section>
   );
+}
+
+const activitiesHeadingStyle = { fontSize: 15, fontWeight: 700, color: "var(--text)" } as const;
+
+/** Inside a setup step the panel's own title is the step's h2, so Actividades is its h3 (#14). */
+function ActivitiesHeading(): ReactElement {
+  const { inSetup } = useSetupPresentation();
+  return inSetup ? <h3 style={activitiesHeadingStyle}>Actividades</h3> : <p style={activitiesHeadingStyle}>Actividades</p>;
 }

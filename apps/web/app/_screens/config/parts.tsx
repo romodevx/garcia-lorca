@@ -2,6 +2,8 @@
 
 import type { CSSProperties, ReactElement, ReactNode } from "react";
 
+import { useSetupPresentation } from "./setup/SetupPresentation";
+
 /**
  * Presentational primitives shared by the catalog panels. Kept dumb (no data
  * fetching) so each panel stays small and the design system (CSS tokens) is the
@@ -16,6 +18,15 @@ const labelStyle: CSSProperties = {
   marginBottom: 6,
 };
 
+const cardStyle: CSSProperties = {
+  background: "var(--surface)",
+  border: "1px solid var(--border)",
+  borderRadius: "var(--r-xl)",
+  boxShadow: "var(--shadow-card)",
+  padding: "20px 22px",
+};
+
+/** A panel: a card with its h2 title. Inside a setup step it is bare — the open step is the card. */
 export function Section({
   title,
   subtitle,
@@ -25,16 +36,9 @@ export function Section({
   subtitle?: string;
   children: ReactNode;
 }): ReactElement {
+  const { inSetup } = useSetupPresentation();
   return (
-    <section
-      style={{
-        background: "var(--surface)",
-        border: "1px solid var(--border)",
-        borderRadius: "var(--r-xl)",
-        boxShadow: "var(--shadow-card)",
-        padding: "20px 22px",
-      }}
-    >
+    <section style={inSetup ? undefined : cardStyle}>
       <header style={{ marginBottom: 16 }}>
         <h2 style={{ fontSize: 18, fontWeight: 700, color: "var(--text)" }}>{title}</h2>
         {subtitle !== undefined && <p style={{ fontSize: 13.5, color: "var(--text-muted)", marginTop: 2 }}>{subtitle}</p>}

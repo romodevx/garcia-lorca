@@ -8,6 +8,7 @@ import { listTuitionPlans, runBilling, type BillingRun, type TuitionPlan } from 
 import { EmptyHint, ErrorAlert, Section } from "./parts";
 import { MONTH_NAMES, centsToPesos, inscriptionTotals } from "./tuition-math";
 import { TuitionPage } from "./TuitionPage";
+import { useSecondaryInSetup } from "./setup/SetupPresentation";
 import { useLatest } from "./useLatest";
 
 import { API_URL } from "../../api-url";
@@ -93,6 +94,7 @@ export function TuitionPanel({
   const [run, setRun] = useState<BillingRun | null>(null);
   const [error, setError] = useState<string | undefined>(undefined);
   const [running, setRunning] = useState(false);
+  const generateKind = useSecondaryInSetup();
 
   const notify = useLatest(onPlansLoaded);
   /*
@@ -243,7 +245,7 @@ export function TuitionPanel({
       )}
 
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-        <Btn icon="check" onClick={() => void generate()} disabled={running}>
+        <Btn icon="check" kind={generateKind} onClick={() => void generate()} disabled={running}>
           {running ? "Generando…" : "Generar cargos del mes"}
         </Btn>
         <span style={{ fontSize: 13, color: "var(--text-muted)" }}>

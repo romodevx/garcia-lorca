@@ -20,6 +20,7 @@ import {
   type SubjectsInGrades,
 } from "../../config/api";
 import { EmptyHint, ErrorAlert, Section, SelectChip } from "./parts";
+import { useSetupPresentation } from "./setup/SetupPresentation";
 
 export interface SubjectsPanelProps {
   level: Level;
@@ -190,6 +191,9 @@ function NewSubjectForm({ grades, selectedGradeLevelId, onCreated }: NewSubjectF
     picked ?? new Set(selectedGradeLevelId !== undefined ? [selectedGradeLevelId] : grades.map((g) => g.id));
   const [nameError, setNameError] = useState<string | undefined>(undefined);
   const [gradeError, setGradeError] = useState<string | undefined>(undefined);
+  // The chips decide WHERE the subject is created (A49): inside a setup step the
+  // legend says so, since the level and grade chips above it only filter (§1.8 #11).
+  const gradesLegend = useSetupPresentation().inSetup ? "En qué grados" : "Grados";
   const [failure, setFailure] = useState<string | undefined>(undefined);
   const saving = useRef(false);
   const formRef = useRef<HTMLFormElement>(null);
@@ -243,7 +247,7 @@ function NewSubjectForm({ grades, selectedGradeLevelId, onCreated }: NewSubjectF
         help="Como aparecerá en la boleta. Se crea una en cada grado que elijas."
       />
       <fieldset style={{ border: "none", padding: 0, margin: 0, minWidth: 0 }}>
-        <legend style={{ fontSize: 13, fontWeight: 600, color: "var(--text-muted)", marginBottom: 6 }}>Grados</legend>
+        <legend style={{ fontSize: 13, fontWeight: 600, color: "var(--text-muted)", marginBottom: 6 }}>{gradesLegend}</legend>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
           <SelectChip selected={all} onClick={() => { setPicked(new Set(all ? [] : grades.map((g) => g.id))); setGradeError(undefined); }}>
             Todos los grados
