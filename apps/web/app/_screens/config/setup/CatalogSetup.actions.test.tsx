@@ -142,6 +142,23 @@ describe("Paso 3 · Niveles y grados (A33–A42)", () => {
     await waitFor(() => expect(config.updateLevelGrading).toHaveBeenLastCalledWith(API, "l1", { enabled: false, min: 5, max: 10, decimals: 1, passing: 6 }));
   });
 
+  it("puts the level chips and Nuevo nivel first, then the grades, then the level's settings (N6)", async () => {
+    const { user } = renderSetup({ canDeleteLevels: true, onDeleteLevel: vi.fn() });
+    await settled();
+    await pickLevel(user, "SECUNDARIA");
+    const step = stepRegion("Niveles y grados");
+    const inOrder = [
+      within(step).getByRole("button", { name: "SECUNDARIA" }),
+      within(step).getByRole("button", { name: "Nuevo nivel" }),
+      await within(step).findByRole("heading", { name: "Grados de SECUNDARIA" }),
+      within(step).getByRole("group", { name: "Asistencia de SECUNDARIA" }),
+      within(step).getByRole("button", { name: "Eliminar nivel SECUNDARIA" }),
+    ];
+    inOrder.slice(1).forEach((el, i) => {
+      expect(inOrder[i]!.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+  });
+
   it("A37 · Eliminar nivel opens the deletion page, only for the owner", async () => {
     const onDeleteLevel = vi.fn();
     const { user } = renderSetup({ canDeleteLevels: true, onDeleteLevel });

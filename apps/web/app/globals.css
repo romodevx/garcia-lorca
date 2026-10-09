@@ -717,6 +717,13 @@ input { font-family: var(--font-ui); }
   gap: 28px;
   align-items: start;
 }
+/* Los ajustes del nivel elegido van debajo de los dos, a todo lo ancho. */
+.setup-pair-full {
+  grid-column: 1 / -1;
+  min-width: 0;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
 
 /* Tamaños de pantalla de la puesta en marcha (§1.6). Los mismos números viven en
    setup/layout.ts (NARROW_MAX_PX = 899, COMPACT_MAX_PX = 1199). */

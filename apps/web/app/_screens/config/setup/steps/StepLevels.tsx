@@ -3,7 +3,7 @@
 import type { ReactElement } from "react";
 
 import { GradeLevelsPanel } from "../../GradeLevelsPanel";
-import { LevelsPanel } from "../../LevelsPanel";
+import { LevelSettings, LevelsPanel } from "../../LevelsPanel";
 import type { GradesSlice, LevelsSlice } from "../useCatalogState";
 import type { SetupActions } from "../useSetupActions";
 import { StepFrame, type StepSlot } from "../StepFrame";
@@ -17,7 +17,11 @@ export interface StepLevelsProps {
   onDeleteLevel?: (levelId: string) => void;
 }
 
-/** Step 3 · Niveles y grados: levels on the left, the selected level's grades on the right. */
+/**
+ * Step 3 · Niveles y grados. The step's own work first — the level chips with
+ * Nuevo nivel, and the selected level's grades — then that level's settings,
+ * which are edited far less often (N6). The old view keeps them under the chips.
+ */
 export function StepLevels({ slot, levels, grades, actions, onDeleteLevel }: StepLevelsProps): ReactElement {
   const selected = levels.selected;
   return (
@@ -31,9 +35,15 @@ export function StepLevels({ slot, levels, grades, actions, onDeleteLevel }: Ste
           onSetAttendanceMode={levels.setAttendanceMode}
           onSetGrading={levels.setGrading}
           onDelete={onDeleteLevel}
+          showLevelSettings={false}
         />
         {selected !== undefined && (
           <GradeLevelsPanel key={selected.id} level={selected} gradeLevels={grades.list} selectedGradeLevelId={grades.selectedId} onSelect={grades.select} onCreate={actions.createGrade} />
+        )}
+        {selected !== undefined && (
+          <div className="setup-pair-full">
+            <LevelSettings level={selected} onSetAttendanceMode={levels.setAttendanceMode} onSetGrading={levels.setGrading} onDelete={onDeleteLevel} />
+          </div>
         )}
       </div>
     </StepFrame>

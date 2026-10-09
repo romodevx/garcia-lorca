@@ -23,6 +23,11 @@ export interface LevelsPanelProps {
   onSetGrading: (levelId: string, grading: LevelGrading) => Promise<void>;
   /** Opens the deletion of a level. Absent = the principal may not (levels:delete). */
   onDelete?: (levelId: string) => void;
+  /**
+   * Whether the selected level's settings sit under the chips (the old view).
+   * The setup step draws them itself, after the grades, with `LevelSettings`.
+   */
+  showLevelSettings?: boolean;
 }
 
 const GRANULARITY_OPTIONS = [
@@ -51,7 +56,7 @@ function levelChipLabel(level: Level, inSetup: boolean): string {
  * Now the panel is the list, and creating opens the same drawer a new pupil
  * does.
  */
-export function LevelsPanel({ levels, selectedLevelId, onSelect, onCreate, onSetAttendanceMode, onSetGrading, onDelete }: LevelsPanelProps): ReactElement {
+export function LevelsPanel({ levels, selectedLevelId, onSelect, onCreate, onSetAttendanceMode, onSetGrading, onDelete, showLevelSettings = true }: LevelsPanelProps): ReactElement {
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
   const [sepCode, setSepCode] = useState("");
@@ -117,12 +122,8 @@ export function LevelsPanel({ levels, selectedLevelId, onSelect, onCreate, onSet
         <EmptyHint>Aún no hay niveles. Agrega el primero.</EmptyHint>
       )}
 
-      {selectedLevel !== undefined && (
-        <>
-          <AttendanceModeControl key={selectedLevel.id} level={selectedLevel} onChange={onSetAttendanceMode} />
-          <GradingControl key={`grading-${selectedLevel.id}`} level={selectedLevel} onChange={onSetGrading} />
-          {onDelete !== undefined && <DeleteLevelButton level={selectedLevel} onDelete={onDelete} asText={inSetup} />}
-        </>
+      {showLevelSettings && selectedLevel !== undefined && (
+        <LevelSettings level={selectedLevel} onSetAttendanceMode={onSetAttendanceMode} onSetGrading={onSetGrading} onDelete={onDelete} />
       )}
 
       <Btn icon="plus" onClick={() => { setError(undefined); setCreating(true); }}>Nuevo nivel</Btn>
@@ -151,6 +152,25 @@ export function LevelsPanel({ levels, selectedLevelId, onSelect, onCreate, onSet
         </SlideOver>
       )}
     </Section>
+  );
+}
+
+export interface LevelSettingsProps {
+  level: Level;
+  onSetAttendanceMode: LevelsPanelProps["onSetAttendanceMode"];
+  onSetGrading: LevelsPanelProps["onSetGrading"];
+  onDelete?: LevelsPanelProps["onDelete"];
+}
+
+/** The selected level's own settings: attendance, grading and, for the owner, Eliminar nivel. */
+export function LevelSettings({ level, onSetAttendanceMode, onSetGrading, onDelete }: LevelSettingsProps): ReactElement {
+  const { inSetup } = useSetupPresentation();
+  return (
+    <>
+      <AttendanceModeControl key={level.id} level={level} onChange={onSetAttendanceMode} />
+      <GradingControl key={`grading-${level.id}`} level={level} onChange={onSetGrading} />
+      {onDelete !== undefined && <DeleteLevelButton level={level} onDelete={onDelete} asText={inSetup} />}
+    </>
   );
 }
 
