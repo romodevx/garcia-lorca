@@ -36,17 +36,26 @@ export function Section({
   subtitle?: string;
   children: ReactNode;
 }): ReactElement {
-  const { inSetup } = useSetupPresentation();
+  const { inSetup, stepTitle } = useSetupPresentation();
   return (
     <section style={inSetup ? undefined : cardStyle}>
       <header style={{ marginBottom: 16 }}>
-        {/* In a step the h2 is the step's title: opening the step moves focus to it (§1.7). */}
-        <h2 tabIndex={inSetup ? -1 : undefined} style={{ fontSize: 18, fontWeight: 700, color: "var(--text)" }}>{title}</h2>
+        <SectionTitle title={title} inSetup={inSetup} stepTitle={stepTitle} />
         {subtitle !== undefined && <p style={{ fontSize: 13.5, color: "var(--text-muted)", marginTop: 2 }}>{subtitle}</p>}
       </header>
       {children}
     </section>
   );
+}
+
+function SectionTitle({ title, inSetup, stepTitle }: { title: string; inSetup: boolean; stepTitle?: string }): ReactElement | null {
+  // In a step the h2 is the step's title: opening the step moves focus to it (§1.7).
+  if (stepTitle === undefined) {
+    return <h2 tabIndex={inSetup ? -1 : undefined} style={{ fontSize: 18, fontWeight: 700, color: "var(--text)" }}>{title}</h2>;
+  }
+  // The step frame already drew that h2 above the chips: this is a sub-heading, if it adds anything.
+  if (title === stepTitle) return null;
+  return <h3 style={{ fontSize: 16, fontWeight: 700, color: "var(--text)" }}>{title}</h3>;
 }
 
 /*

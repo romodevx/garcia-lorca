@@ -3,12 +3,15 @@
 import type { CSSProperties, ReactElement, ReactNode } from "react";
 
 import { Btn } from "../../../_design/Controls";
+import { UnderStepTitle } from "./SetupPresentation";
 import { STEPS, type StepDef, type StepId, type StepView } from "./setupSteps";
 
 /*
  * The open step's frame (PLAN-redesign-configuracion §1.2–§1.3): "Paso N de 8",
  * the body, and the footer back/next. It has no title or purpose line of its
- * own — the panel's h2 and subtitle are those — unless the body has no panel yet.
+ * own — the panel's h2 and subtitle are those — unless the body has no panel
+ * yet, or chips sit above the panel: then the frame draws the h2 and the
+ * panel's title drops to a sub-heading, so the title never moves.
  */
 
 /** What every step receives to sit in the right column. */
@@ -73,7 +76,7 @@ export function StepFrame({ step, tool = false, hidden = false, chrome = true, o
       {/* The body keeps the same place in the tree with or without chrome (§3.3). */}
       <div className={chrome ? "setup-step-body" : undefined} style={chrome ? bodyStyle : undefined}>
         {framed !== undefined && <StepIntro step={framed} ownHeading={ownHeading} />}
-        {children}
+        {framed !== undefined && ownHeading ? <UnderStepTitle title={framed.title}>{children}</UnderStepTitle> : children}
       </div>
       {framed !== undefined && <StepFoot step={framed} onGo={onGo} />}
     </section>

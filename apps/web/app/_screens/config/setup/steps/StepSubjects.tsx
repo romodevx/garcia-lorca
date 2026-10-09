@@ -25,7 +25,7 @@ export function StepSubjects({ slot, cycle, levels, grades }: StepSubjectsProps)
   const need = needFor(cycle, levels.list);
   const level = levels.selected;
   return (
-    <StepFrame {...slot} ownHeading={need !== undefined || level === undefined}>
+    <StepFrame {...slot} ownHeading>
       {need !== undefined && <Prerequisite need={need} onGo={slot.onGo} />}
       {need === undefined && <LevelGradeChips levels={levels.list} selectedLevelId={levels.selectedId} onSelectLevel={levels.select} />}
       {need === undefined && level === undefined && <EmptyHint>Elige un nivel para ver sus materias.</EmptyHint>}

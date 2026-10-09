@@ -257,6 +257,31 @@ describe("CatalogSetup — each state of a step (§4.3)", () => {
     },
   );
 
+  it.each([
+    ["Periodos", "Cómo se parte el año para calificar.", "Periodos de SECUNDARIA"],
+    ["Materias", "Las materias de cada grado.", undefined],
+    ["Grupos", "Cada grado necesita al menos un grupo para inscribir alumnos.", undefined],
+  ])("%s keeps its title and purpose above the chips once a level is picked", async (title, purpose, subheading) => {
+    const { user } = renderSetup();
+    await settled();
+    const region = await openStep(user, title);
+    await user.click(within(region).getByRole("button", { name: "SECUNDARIA" }));
+    if (title === "Grupos") await user.click(within(within(region).getByRole("group", { name: "Grado" })).getByRole("button", { name: /^1°/ }));
+
+    const headings = await waitFor(() => {
+      const found = within(region).getAllByRole("heading");
+      expect(found.length).toBeGreaterThan(0);
+      return found;
+    });
+    const h2 = within(region).getByRole("heading", { level: 2 });
+    expect(h2).toHaveTextContent(title);
+    expect(headings[0]).toBe(h2);
+    expect(within(region).getByText(purpose)).toBeVisible();
+    const chips = within(region).getByRole("group", { name: "Nivel" });
+    expect(h2.compareDocumentPosition(chips) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    if (subheading !== undefined) expect(await within(region).findByRole("heading", { level: 3, name: subheading })).toBeVisible();
+  });
+
   it("Grupos without a grade offers level and grade chips, with each grade's count", async () => {
     const { user } = renderSetup();
     await settled();

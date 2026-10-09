@@ -17,6 +17,12 @@ export interface SetupPresentation {
   inSetup: boolean;
   /** A setup step on a mid-size screen (§1.6): the months grid would not fit, so it opens as a list. */
   compact: boolean;
+  /**
+   * Set when the step frame already titles the step with its own h2, above the
+   * chips: a panel's title then becomes a sub-heading, and is dropped when it
+   * only repeats the step's name.
+   */
+  stepTitle?: string;
 }
 
 const OLD_VIEW: SetupPresentation = { inSetup: false, compact: false };
@@ -25,6 +31,13 @@ const SetupPresentationContext = createContext<SetupPresentation>(OLD_VIEW);
 
 export function SetupPresentationProvider({ compact = false, children }: { compact?: boolean; children: ReactNode }): ReactElement {
   const value = useMemo(() => ({ inSetup: true, compact }), [compact]);
+  return <SetupPresentationContext.Provider value={value}>{children}</SetupPresentationContext.Provider>;
+}
+
+/** Panels inside a step whose frame draws the h2 (§5 StepFrame): their titles drop a level. */
+export function UnderStepTitle({ title, children }: { title: string; children: ReactNode }): ReactElement {
+  const outer = useContext(SetupPresentationContext);
+  const value = useMemo(() => ({ ...outer, stepTitle: title }), [outer, title]);
   return <SetupPresentationContext.Provider value={value}>{children}</SetupPresentationContext.Provider>;
 }
 

@@ -39,7 +39,7 @@ export function StepGroups({ slot, cycle, levels, grades, groups, cycleGroups, a
   const grade = grades.selected;
   const noGrades = levels.selected !== undefined && grades.list.length === 0;
   return (
-    <StepFrame {...slot} ownHeading={need !== undefined || grade === undefined}>
+    <StepFrame {...slot} ownHeading>
       {need !== undefined && <Prerequisite need={need} onGo={slot.onGo} />}
       {need === undefined && (
         <LevelGradeChips

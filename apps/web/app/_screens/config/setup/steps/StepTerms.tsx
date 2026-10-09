@@ -25,9 +25,9 @@ export interface StepTermsProps {
 export function StepTerms({ slot, cycle, levels, terms, actions, onOpenLevelPeriods }: StepTermsProps): ReactElement {
   const need = needFor(cycle, levels.list);
   const level = levels.selected;
-  const panelShown = need === undefined && level !== undefined && terms.load.kind === "ready";
+  // The level chips sit above the panel: the frame keeps the title on top either way.
   return (
-    <StepFrame {...slot} ownHeading={!panelShown}>
+    <StepFrame {...slot} ownHeading>
       {need !== undefined && <Prerequisite need={need} onGo={slot.onGo} />}
       {need === undefined && cycle !== undefined && (
         <>
