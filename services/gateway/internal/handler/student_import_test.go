@@ -208,22 +208,23 @@ func TestPreviewWritesNothingAndReportsEveryRow(t *testing.T) {
 	}
 }
 
-// A level the school does not have is never created silently: the office must
-// say where its pupils go.
-func TestPreviewLeavesAnUnknownLevelUnresolved(t *testing.T) {
+// A level the school does not have is created on its own, like its grades and
+// groups: the office is never asked where its pupils go.
+func TestPreviewCreatesALevelTheSchoolDoesNotHave(t *testing.T) {
 	f := newImportFixture()
 	file := importFile(t, pupil("Preparatoria", "A", "Activo", "AAMI210219MJCLLRA0"))
 
 	got := decodePreview(t, post(t, f.h.Preview, importRequest{FileBase64: file}))
 
-	if got.Levels[0].Status != levelUnresolved || len(got.Unresolved) != 1 || got.Unresolved[0] != "Preparatoria" {
-		t.Fatalf("levels = %+v unresolved %v", got.Levels, got.Unresolved)
+	if got.Levels[0].Status != levelCreate || got.Levels[0].LevelName != "Preparatoria" || len(got.Unresolved) != 0 {
+		t.Fatalf("levels = %+v unresolved %v, want Preparatoria created", got.Levels, got.Unresolved)
 	}
-	if got.Rows[0].Status != rowPending || got.Rows[0].Reason != "level_unresolved" {
-		t.Errorf("row = %+v", got.Rows[0])
+	if got.Rows[0].Status != rowNew {
+		t.Errorf("row = %+v, want new", got.Rows[0])
 	}
-	if len(f.roster.calls) != 0 {
-		t.Errorf("rows of an unresolved level were sent to students: %+v", f.roster.calls)
+	in := f.catalog.placements[0].in
+	if len(in) != 1 || in[0].LevelID != "" || in[0].NewLevelName != "Preparatoria" {
+		t.Errorf("placements = %+v, want Preparatoria asked to be created", in)
 	}
 }
 
@@ -312,15 +313,19 @@ func TestCommitRefusesAStalePreview(t *testing.T) {
 	}
 }
 
-func TestCommitRefusesUnresolvedLevels(t *testing.T) {
+func TestCommitCreatesALevelTheSchoolDoesNotHave(t *testing.T) {
 	f := newImportFixture()
-	file := importFile(t, pupil("Preparatoria", "A", "Activo", "AAMI210219MJCLLRA0"))
-	preview := decodePreview(t, post(t, f.h.Preview, importRequest{FileBase64: file}))
+	req := importRequest{FileBase64: importFile(t, pupil("Preparatoria", "A", "Activo", "AAMI210219MJCLLRA0"))}
+	req.PlanHash = decodePreview(t, post(t, f.h.Preview, req)).PlanHash
 
-	rec := post(t, f.h.Commit, importRequest{FileBase64: file, PlanHash: preview.PlanHash})
+	rec := post(t, f.h.Commit, req)
 
-	if rec.Code != http.StatusUnprocessableEntity || rec.Header().Get(errorCodeHeader) != codeLevelsUnresolved {
-		t.Errorf("status %d code %q", rec.Code, rec.Header().Get(errorCodeHeader))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d code %q, want 200", rec.Code, rec.Header().Get(errorCodeHeader))
+	}
+	last := f.catalog.placements[len(f.catalog.placements)-1]
+	if last.dry || len(last.in) != 1 || last.in[0].NewLevelName != "Preparatoria" {
+		t.Errorf("commit placements = %+v, want a real call creating Preparatoria", last)
 	}
 }
 
