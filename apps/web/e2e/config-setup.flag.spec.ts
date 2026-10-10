@@ -66,9 +66,9 @@ test.describe.serial("Puesta en marcha (module_config_setup ON) from an empty sc
     await openStep(page, "Ciclo escolar");
     await page.getByRole("button", { name: "Nuevo ciclo" }).click();
     const drawer = page.getByRole("dialog", { name: "Nuevo ciclo escolar" });
-    await drawer.getByLabel("Nombre del ciclo").fill(cycle);
-    await drawer.getByLabel("Inicia").fill("2026-08-31");
-    await drawer.getByLabel("Termina").fill("2027-07-09");
+    await drawer.getByLabel("Nombre del ciclo", { exact: true }).fill(cycle);
+    await drawer.getByLabel("Inicia", { exact: true }).fill("2026-08-31");
+    await drawer.getByLabel("Termina", { exact: true }).fill("2027-07-09");
     await drawer.getByRole("button", { name: "Crear ciclo" }).click();
     await page.getByRole("button", { name: `Activar ciclo ${cycle}` }).click();
     await expect(step(page, "Ciclo escolar")).toContainText("activo");
@@ -79,20 +79,35 @@ test.describe.serial("Puesta en marcha (module_config_setup ON) from an empty sc
     await openStep(page, "Niveles y grados");
     await page.getByRole("button", { name: "Nuevo nivel" }).click();
     const drawer = page.getByRole("dialog", { name: "Nuevo nivel educativo" });
-    await drawer.getByLabel("Nombre del nivel").fill(level);
+    await drawer.getByLabel("Nombre del nivel", { exact: true }).fill(level);
     await drawer.getByRole("button", { name: "Crear nivel" }).click();
     await page.getByRole("button", { name: "Nuevo grado" }).click();
-    await page.getByLabel("Nombre del grado").fill(grade);
+    await page.getByLabel("Nombre del grado", { exact: true }).fill(grade);
     await page.keyboard.press("Enter");
     await expect(step(page, "Niveles y grados")).toContainText("1 nivel · 1 grado");
     await expect(step(page, "Niveles y grados")).toHaveAttribute("aria-current", "step");
   });
 
-  test("step 4 · Crear trimestres turns the step done", async ({ page }) => {
+  test("step 4 · trimesters are done only once every month of the cycle has one", async ({ page }) => {
     await openSetup(page);
     await openStep(page, "Periodos");
     await page.getByRole("group", { name: "Nivel" }).getByRole("button", { name: level }).click();
     await page.getByRole("button", { name: "Crear trimestres" }).click();
+    // Trimesters are born with no months, and the panel flags every month in amber.
+    await expect(step(page, "Periodos")).toContainText(`Meses sin periodo en ${level}`);
+
+    // A term takes at most six months, so the school's twelve go four to each
+    // trimester, in order — one tap at a time, each saved before the next.
+    const firstRow = page.getByRole("button", { name: / en 1\.er trimestre$/ });
+    await expect(firstRow.first()).toBeVisible();
+    const months = (await firstRow.all()).length;
+    const trimesters = ["1.er trimestre", "2.º trimestre", "3.er trimestre"];
+    for (let i = 0; i < months; i++) {
+      const row = trimesters[Math.floor((i * trimesters.length) / months)] ?? "";
+      const cell = page.getByRole("button", { name: new RegExp(` en ${row.replace(".", "\\.")}$`) }).nth(i);
+      await cell.click();
+      await expect(cell).toHaveAttribute("aria-pressed", "true");
+    }
     await expect(step(page, "Periodos")).toContainText("1 nivel con periodos");
   });
 
