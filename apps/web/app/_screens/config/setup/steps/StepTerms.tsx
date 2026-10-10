@@ -52,7 +52,7 @@ function LevelTerms({ cycle, level, levels, terms, actions }: { cycle: Cycle; le
       levels={levels}
       terms={terms.load.terms}
       onCreate={actions.createTerm}
-      onSetMonths={terms.setMonths}
+      onSetMonths={actions.setMonths}
       onCopyMonths={actions.copyMonths}
     />
   );

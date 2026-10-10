@@ -3,6 +3,8 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as configApi from "../../../config/api";
+import type { Term } from "../../../config/api";
+import { cycleMonths } from "../../../config/termMonths";
 import * as financeApi from "../../../finance/api";
 import {
   ACTIVE,
@@ -243,6 +245,22 @@ describe("Paso 4 · Periodos (A43–A48)", () => {
 
     await user.click(within(step).getByRole("button", { name: "Lista" }));
     expect(within(step).getByRole("button", { name: "Lista" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("A43 · the tap that gives the last month a period turns the step done without a reload", async () => {
+    const months = cycleMonths(ACTIVE.startsOn, ACTIVE.endsOn);
+    const first: Term = { ...T1, months: months.slice(0, 6).filter((m) => m !== "2026-09") };
+    const second: Term = { ...T1, id: "t2", name: "2.º trimestre", ordinal: 2, months: months.slice(6) };
+    installSchool(freshSchool({ terms: [first, second, T9] }));
+    const { user } = renderSetup();
+    await settled();
+    await pickLevel(user, "PRIMARIA");
+    const step = await openStep(user, "Periodos");
+    await waitFor(() => expect(stepButton("Periodos")).toHaveTextContent("Meses sin periodo en PRIMARIA"));
+
+    await user.click(await within(step).findByRole("button", { name: "septiembre de 2026 en 1.er trimestre" }));
+
+    await waitFor(() => expect(stepButton("Periodos")).toHaveTextContent("2 niveles con periodos"));
   });
 
   it("A45 · Crear trimestres creates three terms through createTerm, and refreshes the terms read", async () => {

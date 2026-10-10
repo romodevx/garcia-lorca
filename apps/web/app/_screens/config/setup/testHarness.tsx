@@ -106,7 +106,11 @@ function installWrites(s: FakeSchool): void {
   c.updateLevelGrading.mockImplementation(async (_, id, grading) => ({ ...(s.levels.find((l) => l.id === id) ?? PRIMARIA), grading }));
   c.createGradeLevel.mockImplementation(async (_, input) => { const made: GradeLevel = { id: nextId("g"), ...input }; s.grades.push(made); return made; });
   c.createTerm.mockImplementation(async (_, input) => { const made: Term = { id: nextId("t"), months: [], ...input }; s.terms.push(made); return made; });
-  c.setTermMonths.mockImplementation(async (_, id, months) => ({ ...(s.terms.find((t) => t.id === id) ?? T1), months: [...months] }));
+  c.setTermMonths.mockImplementation(async (_, id, months) => {
+    const saved: Term = { ...(s.terms.find((t) => t.id === id) ?? T1), months: [...months] };
+    s.terms = s.terms.map((t) => (t.id === id ? saved : t));
+    return saved;
+  });
   c.copyTermMonths.mockImplementation(async () => []);
   c.createGroup.mockImplementation(async (_, input) => { const made: Group = { id: nextId("gr"), ...input }; s.groups.push(made); return made; });
   c.createSubjectInGrades.mockImplementation(async (_, name, ids) => ({ created: ids.map((gradeLevelId) => ({ id: nextId("s"), gradeLevelId, name })), existing: [], failed: [] }));
