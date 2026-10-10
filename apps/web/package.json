@@ -13,7 +13,8 @@
     "e2e": "playwright test --project=chromium --project=mobile --project=responsive",
     "e2e:ui": "playwright test --ui",
     "e2e:report": "playwright show-report",
-    "e2e:demo": "playwright test --project=demo"
+    "e2e:demo": "playwright test --project=demo",
+    "e2e:config-setup": "playwright test --project=config-setup"
   },
   "dependencies": {
     "@garcia-lorca/api-client": "workspace:*",

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactElement } from "react";
+import { useState, type CSSProperties, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
 import { Icon } from "../../_design/Icon";
 import { SlideOver } from "../../_design/SlideOver";
@@ -10,6 +10,7 @@ import { TextField } from "../../_design/form";
 import { AttendanceModeControl } from "./AttendanceModeControl";
 import { GradingControl } from "./GradingControl";
 import { EmptyHint, RadioGroup, Section, SelectChip } from "./parts";
+import { useSetupPresentation } from "./SetupPresentation";
 
 export interface LevelsPanelProps {
   levels: readonly Level[];
@@ -22,6 +23,11 @@ export interface LevelsPanelProps {
   onSetGrading: (levelId: string, grading: LevelGrading) => Promise<void>;
   /** Opens the deletion of a level. Absent = the principal may not (levels:delete). */
   onDelete?: (levelId: string) => void;
+  /**
+   * Whether the selected level's settings sit under the chips (the old view).
+   * The setup step draws them itself, after the grades, with `LevelSettings`.
+   */
+  showLevelSettings?: boolean;
 }
 
 const GRANULARITY_OPTIONS = [
@@ -32,6 +38,17 @@ const GRANULARITY_OPTIONS = [
 const GRANULARITY_LABEL: Record<string, string> = { cycle: "por ciclo", term: "por periodo" };
 
 /**
+ * "PRIMARIA · por ciclo". Inside a setup step only the unusual case is said
+ * ("· por periodo"): a chip row that repeats "por ciclo" on every level reads as
+ * noise (§1.8 #12).
+ */
+function levelChipLabel(level: Level, inSetup: boolean): string {
+  const granularity = GRANULARITY_LABEL[level.enrollmentGranularity] ?? level.enrollmentGranularity;
+  if (inSetup && level.enrollmentGranularity === "cycle") return level.name;
+  return `${level.name} · ${granularity}`;
+}
+
+/**
  * The school's levels: maternal, kínder, primaria…
  *
  * Choosing one and creating one are different acts, and the screen used to do
@@ -39,7 +56,7 @@ const GRANULARITY_LABEL: Record<string, string> = { cycle: "por ciclo", term: "p
  * Now the panel is the list, and creating opens the same drawer a new pupil
  * does.
  */
-export function LevelsPanel({ levels, selectedLevelId, onSelect, onCreate, onSetAttendanceMode, onSetGrading, onDelete }: LevelsPanelProps): ReactElement {
+export function LevelsPanel({ levels, selectedLevelId, onSelect, onCreate, onSetAttendanceMode, onSetGrading, onDelete, showLevelSettings = true }: LevelsPanelProps): ReactElement {
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
   const [sepCode, setSepCode] = useState("");
@@ -47,6 +64,7 @@ export function LevelsPanel({ levels, selectedLevelId, onSelect, onCreate, onSet
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
   const selectedLevel = levels.find((l) => l.id === selectedLevelId);
+  const { inSetup } = useSetupPresentation();
 
   /**
    * `andNew` deja el cajón abierto y listo para el siguiente.
@@ -96,7 +114,7 @@ export function LevelsPanel({ levels, selectedLevelId, onSelect, onCreate, onSet
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
           {levels.map((l) => (
             <SelectChip key={l.id} selected={l.id === selectedLevelId} onClick={() => onSelect(l.id)}>
-              {l.name} · {GRANULARITY_LABEL[l.enrollmentGranularity] ?? l.enrollmentGranularity}
+              {levelChipLabel(l, inSetup)}
             </SelectChip>
           ))}
         </div>
@@ -104,12 +122,8 @@ export function LevelsPanel({ levels, selectedLevelId, onSelect, onCreate, onSet
         <EmptyHint>Aún no hay niveles. Agrega el primero.</EmptyHint>
       )}
 
-      {selectedLevel !== undefined && (
-        <>
-          <AttendanceModeControl key={selectedLevel.id} level={selectedLevel} onChange={onSetAttendanceMode} />
-          <GradingControl key={`grading-${selectedLevel.id}`} level={selectedLevel} onChange={onSetGrading} />
-          {onDelete !== undefined && <DeleteLevelButton level={selectedLevel} onDelete={onDelete} />}
-        </>
+      {showLevelSettings && selectedLevel !== undefined && (
+        <LevelSettings level={selectedLevel} onSetAttendanceMode={onSetAttendanceMode} onSetGrading={onSetGrading} onDelete={onDelete} />
       )}
 
       <Btn icon="plus" onClick={() => { setError(undefined); setCreating(true); }}>Nuevo nivel</Btn>
@@ -141,21 +155,48 @@ export function LevelsPanel({ levels, selectedLevelId, onSelect, onCreate, onSet
   );
 }
 
+export interface LevelSettingsProps {
+  level: Level;
+  onSetAttendanceMode: LevelsPanelProps["onSetAttendanceMode"];
+  onSetGrading: LevelsPanelProps["onSetGrading"];
+  onDelete?: LevelsPanelProps["onDelete"];
+}
+
+/** The selected level's own settings: attendance, grading and, for the owner, Eliminar nivel. */
+export function LevelSettings({ level, onSetAttendanceMode, onSetGrading, onDelete }: LevelSettingsProps): ReactElement {
+  const { inSetup } = useSetupPresentation();
+  return (
+    <>
+      <AttendanceModeControl key={level.id} level={level} onChange={onSetAttendanceMode} />
+      <GradingControl key={`grading-${level.id}`} level={level} onChange={onSetGrading} />
+      {onDelete !== undefined && <DeleteLevelButton level={level} onDelete={onDelete} asText={inSetup} />}
+    </>
+  );
+}
+
+const deletePillStyle: CSSProperties = {
+  display: "inline-flex", alignItems: "center", gap: 8, minHeight: 44, padding: "0 16px", borderRadius: "var(--r-pill)",
+  border: "1.5px solid var(--red)", background: "transparent", color: "var(--bad-fg)", fontWeight: 600, fontSize: 14.5,
+};
+
+/** Inside a setup step: red text, ruled off from Guardar calificación and Nuevo nivel (#10). */
+const deleteTextStyle: CSSProperties = {
+  display: "inline-flex", alignItems: "center", gap: 8, minHeight: 44, padding: 0,
+  border: "none", background: "transparent", color: "var(--bad-fg)", fontWeight: 600, fontSize: 14.5, cursor: "pointer",
+};
+
 /**
  * A secondary action in the danger colour — never the screen's primary. It only
  * opens the three-step page; nothing is deleted from here.
  */
-function DeleteLevelButton({ level, onDelete }: { level: Level; onDelete: (levelId: string) => void }): ReactElement {
+function DeleteLevelButton({ level, onDelete, asText }: { level: Level; onDelete: (levelId: string) => void; asText: boolean }): ReactElement {
   return (
-    <div style={{ margin: "4px 0 16px" }}>
+    <div style={asText ? { margin: "4px 0 16px", paddingTop: 8, borderTop: "1px solid var(--border)" } : { margin: "4px 0 16px" }}>
       <button
         type="button"
         onClick={() => onDelete(level.id)}
         aria-label={`Eliminar nivel ${level.name}`}
-        style={{
-          display: "inline-flex", alignItems: "center", gap: 8, minHeight: 44, padding: "0 16px", borderRadius: "var(--r-pill)",
-          border: "1.5px solid var(--red)", background: "transparent", color: "var(--bad-fg)", fontWeight: 600, fontSize: 14.5,
-        }}
+        style={asText ? deleteTextStyle : deletePillStyle}
       >
         <Icon name="warning" size={18} />
         Eliminar nivel

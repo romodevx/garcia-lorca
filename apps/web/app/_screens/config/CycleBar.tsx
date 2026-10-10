@@ -6,6 +6,7 @@ import { SlideOver } from "../../_design/SlideOver";
 import { ConfigError, type Cycle, type CreateCycleInput } from "../../config/api";
 import { DateField, TextField, useRequired } from "../../_design/form";
 import { EmptyHint, ErrorAlert, Section, SelectChip } from "./parts";
+import { useSetupPresentation } from "./SetupPresentation";
 
 export interface CycleBarProps {
   cycles: readonly Cycle[];
@@ -62,6 +63,10 @@ export function CycleBar({ cycles, selectedCycleId, onSelect, onCreate, onActiva
   const [activating, setActivating] = useState(false);
 
   const selected = cycles.find((c) => c.id === selectedCycleId);
+  // Inside a setup step "Nuevo ciclo" is the step's lime only while there is no
+  // cycle yet; after that "Siguiente" is, and one step never shows two (§1.3).
+  const { inSetup } = useSetupPresentation();
+  const newCycleKind = inSetup && cycles.length > 0 ? "outline" : "primary";
 
   const activate = async (): Promise<void> => {
     if (selected === undefined) {
@@ -112,7 +117,7 @@ export function CycleBar({ cycles, selectedCycleId, onSelect, onCreate, onActiva
       )}
 
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-        <Btn icon="plus" onClick={() => { setError(undefined); setCreating(true); }}>Nuevo ciclo</Btn>
+        <Btn icon="plus" kind={newCycleKind} onClick={() => { setError(undefined); setCreating(true); }}>Nuevo ciclo</Btn>
         {selected !== undefined && selected.status !== "active" && (
           <Btn kind="ghost" icon="check" onClick={() => void activate()} disabled={activating}>
             {activating ? "Activando…" : `Activar ciclo ${selected.name}`}

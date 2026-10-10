@@ -122,7 +122,9 @@ services:
       # student_import (legacy Excel migration, ADR 0033) is ON since its gates
       # passed (PR #95/#96); it needs students + config ON too, and the caller
       # needs students:import (owner-only).
-      ENABLED_MODULES: "iam,gateway,students,config,teachers,grades,finance,attendance,comms,uniforms,expenses,schedule,activities,scholarships,student_import"
+      # Overridable from the shell for local QA of an OFF flag, e.g.
+      # ENABLED_MODULES=<this list>,config_setup docker compose up -d gateway
+      ENABLED_MODULES: "${ENABLED_MODULES:-iam,gateway,students,config,teachers,grades,finance,attendance,comms,uniforms,expenses,schedule,activities,scholarships,student_import}"
       # Browser origin(s) allowed to call the gateway cross-origin with cookies.
       # Tracks WEB_HOST_PORT so a remapped web port stays permitted.
       WEB_ORIGIN: "http://localhost:${WEB_HOST_PORT:-3000}"

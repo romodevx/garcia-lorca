@@ -8,6 +8,7 @@ import { NumberField, useFocusFirstInvalid } from "../../_design/form";
 import { ConfigError, type Level, type LevelGrading } from "../../config/api";
 import { DEFAULT_GRADING, fromDraft, gradingErrors, toDraft, type GradingDraft, type GradingErrors, type GradingField } from "./gradingDraft";
 import { ErrorAlert, RadioGroup } from "./parts";
+import { useSecondaryInSetup } from "./SetupPresentation";
 import { useSerialGrading } from "./useSerialGrading";
 
 const TOAST_MS = 2600;
@@ -36,6 +37,7 @@ export interface GradingControlProps {
  */
 export function GradingControl({ level, onChange }: GradingControlProps): ReactElement {
   const initial = level.grading ?? DEFAULT_GRADING;
+  const saveKind = useSecondaryInSetup();
   const [draft, setDraft] = useState<GradingDraft>(() => toDraft(initial));
   const [errors, setErrors] = useState<GradingErrors>({});
   const [failure, setFailure] = useState<string | undefined>(undefined);
@@ -105,7 +107,7 @@ export function GradingControl({ level, onChange }: GradingControlProps): ReactE
           <RadioGroup legend="Decimales" options={DECIMAL_OPTIONS} value={draft.decimals as (typeof DECIMAL_OPTIONS)[number]["value"]} onChange={(v) => edit("decimals", v)} />
           <NumberField label="Mínimo aprobatorio" value={draft.passing} onChange={(v) => edit("passing", v)} onBlur={() => check("passing")} error={errors.passing} help="Debajo de esta calificación el alumno reprueba el mes." />
           <div>
-            <Btn type="submit" icon="check">Guardar calificación</Btn>
+            <Btn type="submit" icon="check" kind={saveKind}>Guardar calificación</Btn>
           </div>
         </form>
       )}

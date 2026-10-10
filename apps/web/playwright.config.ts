@@ -61,6 +61,8 @@ export default defineConfig({
         // Tienen su propio viewport y su propio proyecto.
         /responsive\.spec\.ts/,
         /drawer\.spec\.ts/,
+        // Su propio proyecto: fuerza module_config_setup y vacía la base al empezar.
+        /config-setup\.flag\.spec\.ts/,
       ],
     },
     // The storeroom is worked from a phone, standing between the shelves, so the
@@ -73,6 +75,15 @@ export default defineConfig({
       name: "responsive",
       use: { ...devices["Desktop Chrome"] },
       testMatch: /(responsive|drawer)\.spec\.ts/,
+    },
+    // Configuración académica as "Puesta en marcha" (module_config_setup ON).
+    // Its own project because it forces the flag in the browser and empties the
+    // database in its own beforeAll; never part of `e2e`, run it with
+    // `pnpm e2e:config-setup`. It WIPES the local database.
+    {
+      name: "config-setup",
+      use: { ...devices["Desktop Chrome"] },
+      testMatch: /config-setup\.flag\.spec\.ts/,
     },
     // READ-ONLY, and run against a SEEDED database rather than an empty one. It
     // is the check you want an hour before a demo: not "can the system be built

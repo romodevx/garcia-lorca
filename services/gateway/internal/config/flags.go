@@ -37,6 +37,10 @@ var AllModuleFlags = []string{
 	// Migrating students from the legacy system's Excel export
 	// (PLAN-student-import). Its routes also need module_students + module_config.
 	featureflag.Key("student_import"),
+	// The Configuración académica setup view ("Ruta de arranque",
+	// PLAN-redesign-configuracion). Presentation only: it guards no route; the
+	// boundary stays module_config + config:read/write.
+	featureflag.Key("config_setup"),
 }
 
 // ParseEnabledModules turns a comma-separated list of module names (or full

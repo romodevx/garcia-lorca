@@ -5,6 +5,7 @@ import { useState, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
 import type { Level } from "../../config/api";
 import { ErrorAlert, SelectChip } from "./parts";
+import { useSecondaryInSetup } from "./SetupPresentation";
 
 export interface CopyMonthsInlineProps {
   /** The levels that can receive the layout (the current one excluded). */
@@ -24,6 +25,7 @@ export function CopyMonthsInline({ targets, onCopy }: CopyMonthsInlineProps): Re
   const [chosen, setChosen] = useState<ReadonlySet<string>>(new Set());
   const [error, setError] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
+  const copyKind = useSecondaryInSetup();
 
   const toggle = (id: string): void => {
     setError(undefined);
@@ -62,7 +64,7 @@ export function CopyMonthsInline({ targets, onCopy }: CopyMonthsInlineProps): Re
         {targets.map((l) => <SelectChip key={l.id} selected={chosen.has(l.id)} onClick={() => toggle(l.id)}>{l.name}</SelectChip>)}
       </div>
       <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-        <Btn icon="check" onClick={() => void copy()} style={{ height: 44 }}>{busy ? "Copiando…" : "Copiar meses"}</Btn>
+        <Btn icon="check" kind={copyKind} onClick={() => void copy()} style={{ height: 44 }}>{busy ? "Copiando…" : "Copiar meses"}</Btn>
         <button type="button" onClick={() => setOpen(false)} style={{ minHeight: 44, color: "var(--text-muted)", fontWeight: 600, cursor: "pointer" }}>Cancelar</button>
       </div>
       {error !== undefined && <ErrorAlert message={error} />}

@@ -50,3 +50,23 @@ func TestFeaturesAllOffByDefault(t *testing.T) {
 		}
 	}
 }
+
+// The Configuración setup view (module_config_setup) is reported, and OFF while
+// only module_config is enabled.
+func TestFeaturesReportsConfigSetupOff(t *testing.T) {
+	h := handler.NewFeaturesHandler(featureflag.NewInMemory(config.ParseEnabledModules("config")))
+	rec := httptest.NewRecorder()
+	h.Features(rec, httptest.NewRequest(http.MethodGet, "/api/v1/features", nil))
+
+	var got map[string]bool
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	enabled, reported := got["module_config_setup"]
+	if !reported {
+		t.Fatalf("/features does not report module_config_setup: %v", got)
+	}
+	if enabled {
+		t.Errorf("module_config_setup must be false by default")
+	}
+}

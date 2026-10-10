@@ -22,6 +22,7 @@ import { ScholarshipsScreen } from "./_screens/scholarships/ScholarshipsScreen";
 import type { CutAccess } from "./_screens/finance/CashCutClosing";
 import { FinanceScreen } from "./_screens/finance/FinanceScreen";
 import { Catalog } from "./_screens/config/Catalog";
+import { CatalogSetup } from "./_screens/config/setup/CatalogSetup";
 import { LevelDeleteScreen } from "./_screens/config/levelDeletion/LevelDeleteScreen";
 import { LevelPeriodsScreen } from "./_screens/config/periods/LevelPeriodsScreen";
 import { StudentImportScreen } from "./_screens/studentImport/StudentImportScreen";
@@ -217,6 +218,8 @@ export function AppShell(): ReactElement {
   // The academic-catalog surface is gated by module_config (UX-only; the gateway
   // is the boundary). The "settings" module (Configuración) opens this catalog.
   const configEnabled = useFlag("module_config");
+  // Presentation only: which view of /configuracion (PLAN-redesign-configuracion).
+  const configSetupView = useFlag("module_config_setup");
   // The enrollment surface is gated by module_students (UX-only; the gateway is
   // the boundary). The "students" module (Estudiantes) opens this surface.
   const studentsEnabled = useFlag("module_students");
@@ -685,7 +688,11 @@ export function AppShell(): ReactElement {
         (view.screen === "levelPeriods" && !configEnabled) ||
         (view.screen === "studentImport" && !mayImportStudents)) &&
         (configEnabled ? (
-          <Catalog onBack={home} canDeleteLevels={mayDeleteLevels} onDeleteLevel={openLevelDelete} onOpenLevelPeriods={openLevelPeriods} onOpenStudentImport={openStudentImport} notice={configNotice} />
+          configSetupView ? (
+            <CatalogSetup onBack={home} canDeleteLevels={mayDeleteLevels} onDeleteLevel={openLevelDelete} onOpenLevelPeriods={openLevelPeriods} onOpenStudentImport={openStudentImport} notice={configNotice} />
+          ) : (
+            <Catalog onBack={home} canDeleteLevels={mayDeleteLevels} onDeleteLevel={openLevelDelete} onOpenLevelPeriods={openLevelPeriods} onOpenStudentImport={openStudentImport} notice={configNotice} />
+          )
         ) : (
           // Flag OFF: never render the catalog; show the friendly stub so
           // navigation never dead-ends. (Backend 404 is authoritative.)

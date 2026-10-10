@@ -2,6 +2,8 @@
 
 import type { CSSProperties, ReactElement, ReactNode } from "react";
 
+import { useSetupPresentation } from "./SetupPresentation";
+
 /**
  * Presentational primitives shared by the catalog panels. Kept dumb (no data
  * fetching) so each panel stays small and the design system (CSS tokens) is the
@@ -16,6 +18,15 @@ const labelStyle: CSSProperties = {
   marginBottom: 6,
 };
 
+const cardStyle: CSSProperties = {
+  background: "var(--surface)",
+  border: "1px solid var(--border)",
+  borderRadius: "var(--r-xl)",
+  boxShadow: "var(--shadow-card)",
+  padding: "20px 22px",
+};
+
+/** A panel: a card with its h2 title. Inside a setup step it is bare — the open step is the card. */
 export function Section({
   title,
   subtitle,
@@ -25,23 +36,26 @@ export function Section({
   subtitle?: string;
   children: ReactNode;
 }): ReactElement {
+  const { inSetup, stepTitle } = useSetupPresentation();
   return (
-    <section
-      style={{
-        background: "var(--surface)",
-        border: "1px solid var(--border)",
-        borderRadius: "var(--r-xl)",
-        boxShadow: "var(--shadow-card)",
-        padding: "20px 22px",
-      }}
-    >
+    <section style={inSetup ? undefined : cardStyle}>
       <header style={{ marginBottom: 16 }}>
-        <h2 style={{ fontSize: 18, fontWeight: 700, color: "var(--text)" }}>{title}</h2>
+        <SectionTitle title={title} inSetup={inSetup} stepTitle={stepTitle} />
         {subtitle !== undefined && <p style={{ fontSize: 13.5, color: "var(--text-muted)", marginTop: 2 }}>{subtitle}</p>}
       </header>
       {children}
     </section>
   );
+}
+
+function SectionTitle({ title, inSetup, stepTitle }: { title: string; inSetup: boolean; stepTitle?: string }): ReactElement | null {
+  // In a step the h2 is the step's title: opening the step moves focus to it (§1.7).
+  if (stepTitle === undefined) {
+    return <h2 tabIndex={inSetup ? -1 : undefined} style={{ fontSize: 18, fontWeight: 700, color: "var(--text)" }}>{title}</h2>;
+  }
+  // The step frame already drew that h2 above the chips: this is a sub-heading, if it adds anything.
+  if (title === stepTitle) return null;
+  return <h3 style={{ fontSize: 16, fontWeight: 700, color: "var(--text)" }}>{title}</h3>;
 }
 
 /*

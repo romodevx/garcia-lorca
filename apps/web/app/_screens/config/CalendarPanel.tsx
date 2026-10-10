@@ -18,6 +18,8 @@ import {
   type SchoolEvent,
 } from "../../config/api";
 import { EmptyHint, ErrorAlert, Section } from "./parts";
+import { useSetupPresentation } from "./SetupPresentation";
+import { useLatest } from "./useLatest";
 
 import { API_URL } from "../../api-url";
 
@@ -39,6 +41,11 @@ const KIND_OPTIONS: readonly { value: NonWorkingKind; label: string }[] = [
 
 export interface CalendarPanelProps {
   cycle: Cycle;
+  /**
+   * Notify-only: how many closed days the cycle has after each read of them, or
+   * "failed". The setup view marks its step with it instead of reading twice.
+   */
+  onLoaded?: (cycleId: string, closedDays: number | "failed") => void;
 }
 
 const rowStyle = {
@@ -58,7 +65,7 @@ const removeStyle = {
   cursor: "pointer",
 } as const;
 
-export function CalendarPanel({ cycle }: CalendarPanelProps): ReactElement {
+export function CalendarPanel({ cycle, onLoaded }: CalendarPanelProps): ReactElement {
   const [periods, setPeriods] = useState<NonWorkingPeriod[]>([]);
   const [events, setEvents] = useState<SchoolEvent[]>([]);
   const [error, setError] = useState<string | undefined>(undefined);
@@ -86,14 +93,24 @@ export function CalendarPanel({ cycle }: CalendarPanelProps): ReactElement {
   pendingDays.current = dayRemoval.pending;
   pendingEvents.current = eventRemoval.pending;
 
+  const notify = useLatest(onLoaded);
+
   const reload = useCallback(() => {
-    listNonWorkingPeriods(API_URL, cycle.id)
-      .then((rows) => setPeriods(rows.filter((r) => !pendingDays.current.some((p) => p.id === r.id))))
-      .catch(() => setError("No pudimos cargar el calendario."));
+    const cycleId = cycle.id;
+    listNonWorkingPeriods(API_URL, cycleId)
+      .then((rows) => {
+        const shown = rows.filter((r) => !pendingDays.current.some((p) => p.id === r.id));
+        setPeriods(shown);
+        notify.current?.(cycleId, shown.length);
+      })
+      .catch(() => {
+        setError("No pudimos cargar el calendario.");
+        notify.current?.(cycleId, "failed");
+      });
     listSchoolEvents(API_URL, cycle.id)
       .then((rows) => setEvents(rows.filter((r) => !pendingEvents.current.some((p) => p.id === r.id))))
       .catch(() => setError("No pudimos cargar la agenda."));
-  }, [cycle.id]);
+  }, [cycle.id, notify]);
 
   useEffect(reload, [reload]);
 
@@ -202,7 +219,7 @@ export function CalendarPanel({ cycle }: CalendarPanelProps): ReactElement {
       </div>
 
       <div style={{ borderTop: "1px solid var(--border)", marginTop: 22, paddingTop: 18 }}>
-        <p style={{ fontSize: 15, fontWeight: 700, color: "var(--text)" }}>Actividades</p>
+        <ActivitiesHeading />
         <p style={{ fontSize: 13, color: "var(--text-faint)", marginTop: 2, marginBottom: 12 }}>
           Lo que hace la escuela: juntas, festivales, semanas de exámenes.
           A diferencia de los días cerrados, <b>no mueven fechas de pago</b>.
@@ -253,9 +270,10 @@ export function CalendarPanel({ cycle }: CalendarPanelProps): ReactElement {
           message={`Se quitó ${dayRemoval.latest.label}`}
           onUndo={() => {
             const devueltos = dayRemoval.undo() ?? [];
-            setPeriods((prev) =>
-              [...prev, ...devueltos].sort((a, b) => a.startsOn.localeCompare(b.startsOn)),
-            );
+            const restored = [...periods, ...devueltos].sort((a, b) => a.startsOn.localeCompare(b.startsOn));
+            setPeriods(restored);
+            // Notify-only, like the reads: the count is back without asking the server again.
+            notify.current?.(cycle.id, restored.length);
           }}
         />
       )}
@@ -273,4 +291,12 @@ export function CalendarPanel({ cycle }: CalendarPanelProps): ReactElement {
       )}
     </Section>
   );
+}
+
+const activitiesHeadingStyle = { fontSize: 15, fontWeight: 700, color: "var(--text)" } as const;
+
+/** Inside a setup step the panel's own title is the step's h2, so Actividades is its h3 (#14). */
+function ActivitiesHeading(): ReactElement {
+  const { inSetup } = useSetupPresentation();
+  return inSetup ? <h3 style={activitiesHeadingStyle}>Actividades</h3> : <p style={activitiesHeadingStyle}>Actividades</p>;
 }
