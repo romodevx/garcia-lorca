@@ -449,3 +449,37 @@ describe("CatalogSetup — screen sizes (§1.6)", () => {
     expect(await within(terms).findByRole("button", { name: "Tabla", pressed: true })).toBeVisible();
   });
 });
+
+// Owner report 2026-10-10: after an import, picking a grade in step 3 showed
+// nothing, and its subtitle promised "sus materias y grupos". The groups live
+// in step 6; step 3 now names them and takes you there with the grade picked.
+describe("CatalogSetup — a grade picked in step 3 shows its groups", () => {
+  it("names the grade's groups and opens Grupos on that grade", async () => {
+    installSchool(freshSchool({ groups: [GROUP_A, { ...GROUP_A, id: "gr1b", name: "B" }] }));
+    const { user } = renderSetup();
+    await settled();
+    const levels = await openStep(user, "Niveles y grados");
+    await user.click(within(levels).getByRole("button", { name: "PRIMARIA" }));
+    await user.click(within(levels).getByRole("button", { name: "1° PRIMARIA" }));
+
+    expect(within(levels).queryByText(/materias y grupos/)).toBeNull();
+    expect(within(levels).getByText("Grupos de 1° PRIMARIA: A · B")).toBeVisible();
+    await user.click(within(levels).getByRole("button", { name: "Editar grupos de 1° PRIMARIA" }));
+
+    expect(stepButton("Grupos")).toHaveAttribute("aria-current", "step");
+    const groups = stepRegion("Grupos");
+    expect(within(groups).getByRole("button", { name: /^1° PRIMARIA/, pressed: true })).toBeInTheDocument();
+  });
+
+  it("says when the grade has no groups yet, and the way to create them", async () => {
+    const { user } = renderSetup();
+    await settled();
+    const levels = await openStep(user, "Niveles y grados");
+    await user.click(within(levels).getByRole("button", { name: "PRIMARIA" }));
+    await user.click(within(levels).getByRole("button", { name: "2° PRIMARIA" }));
+
+    expect(within(levels).getByText("2° PRIMARIA aún no tiene grupos.")).toBeVisible();
+    await user.click(within(levels).getByRole("button", { name: "Crear grupos de 2° PRIMARIA" }));
+    expect(stepButton("Grupos")).toHaveAttribute("aria-current", "step");
+  });
+});
