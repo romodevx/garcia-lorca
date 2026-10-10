@@ -44,7 +44,7 @@ export function SetupPanes({ steps, openId, onOpen, state, status, actions, canD
     <>
       {!pricing && <StepProfile slot={slot("profile")} onLoaded={status.onProfileLoaded} />}
       {!pricing && <StepCycle slot={slot("cycle")} cycles={state.cycles} actions={actions} />}
-      {!pricing && <StepLevels slot={slot("levels")} levels={state.levels} grades={state.grades} actions={actions} onDeleteLevel={canDeleteLevels ? onDeleteLevel : undefined} />}
+      {!pricing && <StepLevels slot={slot("levels")} levels={state.levels} grades={state.grades} cycleGroups={status.groups} actions={actions} onDeleteLevel={canDeleteLevels ? onDeleteLevel : undefined} />}
       {!pricing && <StepTerms slot={slot("terms")} cycle={cycle} levels={state.levels} terms={state.terms} actions={actions} onOpenLevelPeriods={onOpenLevelPeriods} />}
       {!pricing && <StepSubjects slot={slot("subjects")} cycle={cycle} levels={state.levels} grades={state.grades} />}
       {!pricing && <StepGroups slot={slot("groups")} cycle={cycle} levels={state.levels} grades={state.grades} groups={state.groups} cycleGroups={status.groups} actions={actions} />}

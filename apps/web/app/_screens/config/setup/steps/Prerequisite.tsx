@@ -26,7 +26,8 @@ export function needFor(cycle: Cycle | undefined, levels: readonly Level[]): Nee
   return undefined;
 }
 
-const linkStyle = { minHeight: 44, color: "var(--forest)", fontWeight: 600, fontSize: 14.5, textDecoration: "underline", cursor: "pointer" } as const;
+/** The quiet "go to that step" link: a step jump, never a second lime. */
+export const linkStyle = { minHeight: 44, color: "var(--forest)", fontWeight: 600, fontSize: 14.5, textDecoration: "underline", cursor: "pointer" } as const;
 
 export function Prerequisite({ need, onGo }: { need: Need; onGo: (id: StepId) => void }): ReactElement {
   const { text, step } = NEEDS[need];

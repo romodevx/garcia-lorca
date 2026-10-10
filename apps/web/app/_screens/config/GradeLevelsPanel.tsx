@@ -50,7 +50,7 @@ export function GradeLevelsPanel({
   );
 
   return (
-    <Section title={`Grados de ${level.name}`} subtitle="Elige uno para sus materias y grupos, o agrega otro.">
+    <Section title={`Grados de ${level.name}`} subtitle={inSetup ? "Elige uno para ver sus grupos, o agrega otro." : "Elige uno para sus materias y grupos, o agrega otro."}>
       {gradeLevels.length > 0 ? (
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
           {gradeLevels.map((g) => (

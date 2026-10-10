@@ -4,14 +4,19 @@ import type { ReactElement } from "react";
 
 import { GradeLevelsPanel } from "../../GradeLevelsPanel";
 import { LevelSettings, LevelsPanel } from "../../LevelsPanel";
+import type { Group } from "../../../../config/api";
 import type { GradesSlice, LevelsSlice } from "../../useCatalogState";
+import type { StatusRead } from "../setupSteps";
 import type { SetupActions } from "../useSetupActions";
 import { StepFrame, type StepSlot } from "../StepFrame";
+import { GradeGroups } from "./GradeGroups";
 
 export interface StepLevelsProps {
   slot: StepSlot;
   levels: LevelsSlice;
   grades: GradesSlice;
+  /** Every group of the cycle (the status read): the picked grade's groups. */
+  cycleGroups: StatusRead<Group[]>;
   actions: SetupActions;
   /** Given only to the owner (levels:delete), exactly as the old view does (A37). */
   onDeleteLevel?: (levelId: string) => void;
@@ -22,7 +27,7 @@ export interface StepLevelsProps {
  * Nuevo nivel, and the selected level's grades — then that level's settings,
  * which are edited far less often (N6). The old view keeps them under the chips.
  */
-export function StepLevels({ slot, levels, grades, actions, onDeleteLevel }: StepLevelsProps): ReactElement {
+export function StepLevels({ slot, levels, grades, cycleGroups, actions, onDeleteLevel }: StepLevelsProps): ReactElement {
   const selected = levels.selected;
   return (
     <StepFrame {...slot}>
@@ -38,7 +43,10 @@ export function StepLevels({ slot, levels, grades, actions, onDeleteLevel }: Ste
           showLevelSettings={false}
         />
         {selected !== undefined && (
-          <GradeLevelsPanel key={selected.id} level={selected} gradeLevels={grades.list} selectedGradeLevelId={grades.selectedId} onSelect={grades.select} onCreate={actions.createGrade} />
+          <div>
+            <GradeLevelsPanel key={selected.id} level={selected} gradeLevels={grades.list} selectedGradeLevelId={grades.selectedId} onSelect={grades.select} onCreate={actions.createGrade} />
+            {grades.selected !== undefined && <GradeGroups grade={grades.selected} cycleGroups={cycleGroups} onGo={slot.onGo} />}
+          </div>
         )}
         {selected !== undefined && (
           <div className="setup-pair-full">
