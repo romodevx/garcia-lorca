@@ -93,16 +93,16 @@ concurrency:
 
 env:
   # Pinned toolchains. buf matches cloudbuild's bufbuild/buf:1.50.0 image and
-  # deploy/README.md's ">= 1.50" prerequisite; Go 1.25.x is required by the
+  # deploy/README.md's ">= 1.50" prerequisite; Go 1.26.x is required by the
   # pre-shared-env checklist (item 1) for a clean govulncheck.
   BUF_VERSION: "1.50.0"
-  GO_VERSION: "1.25.x"
+  GO_VERSION: "1.26.x"
   NODE_VERSION: "22"
   # THE ONLY vulnerability scan in the pipeline now. Cloud Build used to run a
   # second one on the same commit; that copy is gone (T10), so there is no twin
   # to keep this equal to any more — and no way for two versions to disagree.
-  # v1.7.0 is the newest that runs on Go 1.25: v1.8.0 requires 1.26, which is
-  # exactly what broke the deploy on 2026-09-10 when the pin was `@latest`.
+  # Pinned: `@latest` needing a newer Go than GO_VERSION is exactly what broke
+  # the deploy on 2026-09-10. v1.7.0 runs on Go 1.26.
   GOVULNCHECK_VERSION: "v1.7.0"
   # Pinned for the same reason govulncheck is. `@latest` moving under us has
   # already cost this repo one broken deploy; security.md says pin versions.
