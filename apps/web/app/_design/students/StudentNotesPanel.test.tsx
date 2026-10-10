@@ -224,14 +224,16 @@ describe("StudentNotesPanel", () => {
   // Timers stop while a laptop sleeps: the button can outlive the window on a
   // page that just woke up. The click itself re-checks, so it never starts a
   // void the server would refuse.
+  // The click is synchronous on purpose: userEvent spreads a click over several
+  // ticks, and any re-render in between reads the moved clock and takes the
+  // button away first (seen on a loaded CI runner).
   it("refuses a click that comes after the cutoff, whatever the screen still shows", async () => {
-    const user = userEvent.setup();
     let clock = WRITTEN + 60_000;
     renderPanel({ now: () => clock });
     await screen.findByText("Llegó con fiebre");
     const button = screen.getByRole("button", { name: "Anular nota" });
     clock = WRITTEN + 20 * 60_000; // no timer ran: the machine was asleep
-    await user.click(button);
+    fireEvent.click(button);
 
     expect(screen.getByText("Llegó con fiebre")).toBeInTheDocument();
     expect(screen.queryByText("Se anuló la nota")).not.toBeInTheDocument();
