@@ -9,13 +9,13 @@
 #   docker build -f services/<name>/Dockerfile -t <name> .
 #
 # Design choices:
-#   - golang:1.25-bookworm builder -> distroless/static-debian12:nonroot runtime
+#   - golang:1.26-bookworm builder -> distroless/static-debian12:nonroot runtime
 #   - CGO_ENABLED=0, -trimpath, -ldflags="-s -w"  (small, static, reproducible)
 #   - runs as nonroot (uid 65532); no shell / package manager in the final image
 #   - listens on $PORT (Cloud Run convention)
 
 # ---- builder --------------------------------------------------------------
-FROM golang:1.25.13-bookworm AS builder
+FROM golang:1.26.9-bookworm AS builder
 
 ENV CGO_ENABLED=0 GOOS=linux
 WORKDIR /src
