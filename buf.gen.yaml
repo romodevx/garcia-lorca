@@ -1,6 +1,9 @@
 # buf v2 code generation — remote plugins only (no local protoc/plugins to install).
 # Go + Connect-Go -> gen/go ; Protobuf-ES + Connect-Query (ES) -> gen/ts.
 # Regenerate with `buf generate`. gen/ is gitignored; never edit it by hand.
+# Plugin versions are PINNED: an unpinned connectrpc/go jumped to v2 on the BSR
+# and CI generated code importing connect/v2, which gen/go/go.mod (v1) lacks.
+# Bump a pin together with the runtime it needs (gen/go/go.mod, api-client).
 version: v2
 managed:
   enabled: true
@@ -9,21 +12,21 @@ managed:
       value: github.com/garcia-lorca/gen/go
 plugins:
   # ---- Go ----
-  - remote: buf.build/protocolbuffers/go
+  - remote: buf.build/protocolbuffers/go:v1.36.12
     out: gen/go
     opt:
       - paths=source_relative
-  - remote: buf.build/connectrpc/go
+  - remote: buf.build/connectrpc/go:v1.20.0
     out: gen/go
     opt:
       - paths=source_relative
 
   # ---- TypeScript ----
-  - remote: buf.build/bufbuild/es
+  - remote: buf.build/bufbuild/es:v2.16.0
     out: gen/ts
     opt:
       - target=ts
-  - remote: buf.build/connectrpc/query-es
+  - remote: buf.build/connectrpc/query-es:v2.3.1
     out: gen/ts
     opt:
       - target=ts

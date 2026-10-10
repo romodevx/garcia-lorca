@@ -27,7 +27,7 @@ deploy/
 | `gcloud`    | latest         | GCP auth, Cloud Run deploys     |
 | `terraform` | >= 1.7.0       | provision infrastructure        |
 | `buf`       | >= 1.50        | proto lint + codegen            |
-| `go`        | 1.25.x         | build/test services             |
+| `go`        | 1.26.x         | build/test services             |
 | `node`      | 22.x + npm     | frontend build (Turborepo)      |
 | `docker`    | latest         | container images                |
 
