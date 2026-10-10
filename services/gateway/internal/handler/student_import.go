@@ -101,7 +101,7 @@ const (
 const (
 	levelMatched    = "matched"    // the file's name is a level the school has
 	levelChosen     = "chosen"     // the office sent it to an existing level
-	levelCreate     = "create"     // the office asked to create it
+	levelCreate     = "create"     // new to the school, or the office asked to create it
 	levelUnresolved = "unresolved" // nobody has decided yet
 )
 
@@ -379,7 +379,8 @@ func (h *StudentImportHandler) activeCycle(ctx context.Context) (client.CycleRes
 }
 
 // resolveLevels decides where each level of the file goes: the office's
-// choice, else an existing level of the same folded name, else nobody.
+// choice, else an existing level of the same folded name, else a new level with
+// the file's name — created on its own, like the grades and groups under it.
 func (h *StudentImportHandler) resolveLevels(ctx context.Context, req importRequest, run *importRun) error {
 	levels, err := h.d.Catalog.ListLevels(ctx)
 	if err != nil {
@@ -410,6 +411,8 @@ func (h *StudentImportHandler) resolveLevels(ctx context.Context, req importRequ
 		default:
 			if match, ok := byFold[foldName(name)]; ok {
 				lv.Status, lv.LevelID, lv.LevelName = levelMatched, match.ID, match.Name
+			} else {
+				lv.Status, lv.LevelName = levelCreate, name
 			}
 		}
 		if lv.Status != levelUnresolved && priced != nil && !priced[lv.LevelID] {

@@ -60,7 +60,7 @@ Celular, Dirección, Dirección 2, Estado (domicilio), Ciudad/Municipio, Código
 - **Tarjetas** que cuadran con el total de filas del archivo: Nuevos · Con avisos (es un subconjunto: "280 se importan · 12 con avisos") · Ya estaban · No se importan.
 - **Mapeo de nivel.** Cada "Escolaridad" del archivo:
   - Si coincide con un nivel existente (sin importar mayúsculas, acentos ni espacios) → se asigna ese nivel y se puede cambiar.
-  - Si **no coincide** → **no hay opción por defecto**. Sale una tarjeta "Elige a dónde van los alumnos de «Preparatoria»" con chips de los niveles existentes y "+ Crear nivel nuevo «Preparatoria»".
+  - Si **no coincide** → **se crea solo**, igual que sus grados y grupos ("Se creará el nivel «Preparatoria»"). Con "Cambiar" se puede mandar a un nivel existente. *(Corregido 09-oct a pedido del dueño: la versión anterior pedía elegir y no seguía su regla.)*
   - Si al pulsar Importar falta resolver alguna tarjeta, el foco salta a ella (el botón principal nunca se desactiva).
   - Cada cambio de mapeo vuelve a pedir la vista previa.
 - **Avisos por nivel.** "Sin tabulador en el ciclo activo: no se cobrará colegiatura hasta que lo captures", con enlace a Colegiaturas. Lo mismo para periodos de evaluación y asignaturas.
@@ -197,7 +197,7 @@ El gateway nunca registra filas, CURPs ni domicilios en los logs; solo conteos.
 | 12 | Eng | Commit re-envía archivo + planHash (409 si cambió) | Mecánica | P5 | Cloud Run con varias instancias: sin token en memoria | Token en memoria |
 | 13 | Eng | excelize con límites y ≤1,000 filas | Mecánica | P1 | UnzipSizeLimit por defecto 16 GB; WriteTimeout 30 s | 2,000 filas |
 | 14 | Eng | Separación de apellidos validada con la CURP (algoritmo arriba) | Mecánica | P1 | Apellidos compuestos | Primer token = paterno |
-| 15 | Diseño | Nivel sin coincidencia SIN destino por defecto | Mecánica | P1 | Crear "Preparatoria" en silencio duplica Bachillerato | Crear por defecto |
+| 15 | Dueño (09-oct) | Nivel sin coincidencia **se crea solo** (revierte la decisión de diseño "sin destino por defecto") | Dueño | — | Regla del dueño: nivel, grado y grupo se crean en automático; "Cambiar" sigue disponible | Pedir elegir |
 | 16 | Diseño | 4 estados (Nuevo/Con avisos/Ya estaba/No se importa) | Mecánica | P5 | Volver a subir no debe parecer error | ✓/⚠/✗ |
 | 17 | Diseño | Un archivo a la vez | Gusto | P5 | Lotes chicos y mapeo por archivo | Los 5 juntos |
 | 18 | CEO+Diseño | Aviso por nivel sin tabulador/periodos | Mecánica | P1 | `billing.go:378-383` lo salta sin avisar | — |
