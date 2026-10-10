@@ -17,6 +17,8 @@ export interface SetupActions {
   createLevel: (input: CreateLevelInput) => Promise<void>;
   createGrade: (input: CreateGradeLevelInput) => Promise<void>;
   createTerm: (input: CreateTermInput) => Promise<void>;
+  /** A tapped month: it can be the one that completes the step, or the one that undoes it. */
+  setMonths: (termId: string, months: readonly string[]) => Promise<Term>;
   copyMonths: (input: CopyTermMonthsInput) => Promise<Term[]>;
   createGroup: (input: CreateGroupInput) => Promise<void>;
   /** A level came back from the Papelera. */
@@ -47,6 +49,7 @@ export function useSetupActions(state: CatalogState, refresh: (kind: RefreshKind
       createLevel: thenRefresh(createLevel, () => refresh("grades")),
       createGrade: thenRefresh(grades.create, () => refresh("grades")),
       createTerm: thenRefresh(terms.create, () => refresh("terms")),
+      setMonths: thenRefresh(terms.setMonths, () => refresh("terms")),
       copyMonths: thenRefresh(terms.copyMonths, () => refresh("terms")),
       createGroup: thenRefresh(groups.create, () => refresh("groups")),
       // A restore brings the level back with its grades, terms and groups: every read is stale.
@@ -55,6 +58,6 @@ export function useSetupActions(state: CatalogState, refresh: (kind: RefreshKind
         refresh("all");
       },
     }),
-    [cycles.create, cycles.activate, createLevel, reloadLevels, grades.create, terms.create, terms.copyMonths, groups.create, refresh],
+    [cycles.create, cycles.activate, createLevel, reloadLevels, grades.create, terms.create, terms.setMonths, terms.copyMonths, groups.create, refresh],
   );
 }
