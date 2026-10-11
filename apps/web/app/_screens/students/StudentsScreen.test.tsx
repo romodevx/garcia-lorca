@@ -286,6 +286,13 @@ describe("opened from a shortcut", () => {
     await waitFor(() => expect(screen.getByRole("searchbox", { name: "Buscar" })).toHaveFocus());
   });
 
+  it("never opens the drawer for a role that cannot create pupils", async () => {
+    requestIntent("students", "new");
+    render(<StudentsScreen onBack={() => {}} canCreate={false} />);
+    await screen.findByText("Cruz Valentina");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
   it("a plain visit opens neither", async () => {
     render(<StudentsScreen onBack={() => {}} />);
     await screen.findByText("Cruz Valentina");

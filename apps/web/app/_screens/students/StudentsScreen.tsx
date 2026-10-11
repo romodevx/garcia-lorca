@@ -739,6 +739,12 @@ function StudentSheet({
 
 export interface StudentsScreenProps {
   onBack: () => void;
+  /**
+   * students:create. Gates the "Nuevo alumno" shortcut's drawer (UX only: the
+   * gateway refuses the write without it). Defaults to true, as the screen's
+   * own "Nuevo alumno" buttons have always been offered to every reader.
+   */
+  canCreate?: boolean;
   /** Opens a pupil's edit page. Absent when the caller cannot edit files. */
   onEdit?: (studentId: string) => void;
   /** students:notes_write: the quick-add offers a first note, and the list's notes modal writes and edits (T6). */
@@ -774,7 +780,7 @@ const EXPORT_COLUMNS: readonly CsvColumn<Row>[] = [
   { label: "Estado", value: (r) => statusOf(r.student.admissionStatus).label },
 ];
 
-export function StudentsScreen({ onBack, onEdit, canWriteNotes = false, canVoidAnyNote = false, userId = "", canVerifyCard = false, canRevokeCard = false, canReadStatement = false, canCorrectPayments = false, onOpenImport }: StudentsScreenProps): ReactElement {
+export function StudentsScreen({ onBack, canCreate = true, onEdit, canWriteNotes = false, canVoidAnyNote = false, userId = "", canVerifyCard = false, canRevokeCard = false, canReadStatement = false, canCorrectPayments = false, onOpenImport }: StudentsScreenProps): ReactElement {
   const [verifying, setVerifying] = useState(false);
   const [students, setStudents] = useState<Student[]>([]);
   const [cycles, setCycles] = useState<Cycle[]>([]);
@@ -796,7 +802,7 @@ export function StudentsScreen({ onBack, onEdit, canWriteNotes = false, canVoidA
   const [placement, setPlacement] = useState<PlacementState>("loading");
   const [rollVersion, setRollVersion] = useState(0);
   const intent = useIntent("students");
-  const [add, setAdd] = useState(intent === "new");
+  const [add, setAdd] = useState(intent === "new" && canCreate);
   const [sheet, setSheet] = useState<Student | null>(null);
   // The pupil whose notes are open from the list (T6), without the edit page.
   const [notesOf, setNotesOf] = useState<Student | null>(null);

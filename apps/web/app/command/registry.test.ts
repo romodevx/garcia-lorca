@@ -178,6 +178,10 @@ describe("buildCommandRegistry", () => {
       expect(buildCommandRegistry(allOn, t).find((c) => c.id === "scholarships.create")?.title).toBe("Nueva beca");
     });
 
+    it("offers \"Ver existencias\" to every reader of Inventario, as the tab is", () => {
+      expect(route("uniforms.quick", ["uniforms:orders"])).toBe("module:uniforms:inventory");
+    });
+
     it("hides a write shortcut from a role that can only read the module", () => {
       expect(route("expenses.create", ["expenses:read"])).toBeUndefined();
       expect(route("expenses.nav", ["expenses:read"])).toBe("module:expenses");
@@ -190,7 +194,6 @@ describe("buildCommandRegistry", () => {
       ["schedule.create", ["schedule:read"], ["schedule:read", "schedule:write"]],
       ["activities.create", ["activities:read"], ["activities:read", "activities:write"]],
       ["scholarships.create", ["scholarships:read"], ["scholarships:read", "scholarships:write"]],
-      ["uniforms.quick", ["uniforms:orders"], ["uniforms:orders", "uniforms:stock"]],
     ])("%s needs its write permission", (id, without, withIt) => {
       expect(route(id, without)).toBeUndefined();
       expect(route(id, withIt)).toBeDefined();

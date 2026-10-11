@@ -28,7 +28,7 @@ import { csvName, downloadCsv, toCsv, type CsvColumn } from "../../_lib/csv";
 import { matchesSearch } from "../../_design/textSearch";
 import { compareStudentNames, formatStudentName } from "../../_design/students/studentName";
 
-/** One key per payment attempt. Mirrors PaymentPanel, which had it right. */
+/** One key per payment attempt: a retried submit is the same payment, never a second one. */
 function newAttemptKey(): string {
   return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }

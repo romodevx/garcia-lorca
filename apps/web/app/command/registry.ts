@@ -67,7 +67,7 @@ export const ACTIONS: readonly ActionSpec[] = [
   { moduleId: "scholarships", kind: "create", titleKey: "create.scholarship", aliasKey: "alias.scholarship", intent: "new", requires: ["scholarships:write"] },
   { moduleId: "documents", kind: "create", titleKey: "create.document", aliasKey: "alias.document" },
   { moduleId: "uniforms", kind: "create", titleKey: "create.uniform", aliasKey: "alias.uniform" },
-  { moduleId: "uniforms", kind: "quick", titleKey: "quick.inventory", aliasKey: "alias.inventory", intent: "inventory", requires: ["uniforms:stock"] },
+  { moduleId: "uniforms", kind: "quick", titleKey: "quick.inventory", aliasKey: "alias.inventory", intent: "inventory" },
   { moduleId: "billing", kind: "create", titleKey: "create.invoice", aliasKey: "alias.invoice" },
   // Academic-catalog (module_config) surfaced under the "settings" module.
   { moduleId: "settings", kind: "create", key: "cycle", titleKey: "create.cycle", aliasKey: "alias.cycle" },
