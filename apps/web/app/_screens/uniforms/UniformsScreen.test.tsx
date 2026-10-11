@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { clearIntent, requestIntent } from "../../routing/pendingIntent";
 import { UniformsScreen } from "./UniformsScreen";
 import { parseSizes, sizesMessage } from "./CatalogPanel";
 import { toRows } from "./OrdersPanel";
@@ -676,5 +677,19 @@ describe("the till · nota de crédito + pago combinado (tarea 8)", () => {
 
     expect(await screen.findByText("La suma de las formas de pago debe ser igual al monto a pagar.")).toBeInTheDocument();
     expect(fetchMock.mock.calls.some((c) => String(c[0]).includes("/counter-sale"))).toBe(false);
+  });
+});
+
+// Redesign F1: "Ver existencias" from ⌘K or the home lands ON the tab.
+describe("opened from a shortcut", () => {
+  afterEach(clearIntent);
+
+  it("opens on Existencias", async () => {
+    stubCatalogue([jumper]);
+    requestIntent("uniforms", "inventory");
+    render(<UniformsScreen onBack={() => {}} permissions={ALL} />);
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: "Existencias" })).toHaveAttribute("aria-selected", "true");
+    });
   });
 });

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as financeApi from "../../finance/api";
 import * as configApi from "../../config/api";
 import * as studentsApi from "../../students/api";
+import { clearIntent, requestIntent } from "../../routing/pendingIntent";
 import { FinanceScreen } from "./FinanceScreen";
 
 vi.mock("../../finance/api", () => ({
@@ -407,5 +408,19 @@ describe("PayDrawer · nota de crédito + pago combinado (tarea 8)", () => {
 
     expect(await within(dialog).findByText("La suma de las formas de pago debe ser igual al monto a pagar.")).toBeInTheDocument();
     expect(finance.registerPayment).not.toHaveBeenCalled();
+  });
+});
+
+// Redesign F1: "Ver cargos vencidos" from ⌘K or the home lands ON the tab.
+describe("opened from a shortcut", () => {
+  afterEach(clearIntent);
+
+  it("opens on Vencidos, listing only the overdue charges", async () => {
+    finance.getOverdue.mockResolvedValue([charge("ch1", "s1", 100000)]);
+    requestIntent("finance", "overdue");
+    render(<FinanceScreen onBack={() => {}} />);
+    expect(await screen.findByText("Cruz Valentina")).toBeInTheDocument();
+    expect(screen.queryByText("Sánchez Mateo")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Vencidos/ })).toHaveAttribute("aria-pressed", "true");
   });
 });

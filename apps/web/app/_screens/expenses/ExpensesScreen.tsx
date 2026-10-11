@@ -12,6 +12,7 @@ import { formatCents } from "../../_lib/money";
 import { localISODate } from "../../_lib/localDate";
 import { StatCards } from "../uniforms/parts";
 import { CategoriesPanel } from "./CategoriesPanel";
+import { useIntent } from "../../routing/pendingIntent";
 import { ExpenseDrawer, METHOD_LABEL } from "./ExpenseDrawer";
 import { monthLabel, monthRange, shiftMonth } from "./period";
 import { ReportsPanel } from "./ReportsPanel";
@@ -49,7 +50,8 @@ export function ExpensesScreen({ onBack, permissions, today: injectedToday }: Ex
   const [expenses, setExpenses] = useState<Expense[] | null>(null);
   const [summary, setSummary] = useState<FinanceSummary | null>(null);
   const [failure, setFailure] = useState<string | undefined>(undefined);
-  const [drawer, setDrawer] = useState<{ expense?: Expense } | null>(null);
+  const intent = useIntent("expenses");
+  const [drawer, setDrawer] = useState<{ expense?: Expense } | null>(() => (intent === "new" && canWrite ? {} : null));
   const [toast, setToast] = useState<string | undefined>(undefined);
   const [reads, setReads] = useState(0);
   const range = useMemo(() => monthRange(month), [month]);

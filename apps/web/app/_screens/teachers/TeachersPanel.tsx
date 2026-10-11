@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent, type ReactElement } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
 import { Toast } from "../../_design/Toast";
 import type { UserStatus } from "../../admin/api";
@@ -35,6 +35,8 @@ export interface TeachersPanelProps {
   accountStatuses?: ReadonlyMap<string, UserStatus>;
   /** Register a teacher's absence (T19). Absent without schedule:write or with Horarios off. */
   onRegisterAbsence?: (teacherId: string) => void;
+  /** Start with the cursor on the new teacher's name ("Agregar profesor" shortcut). */
+  focusNew?: boolean;
 }
 
 /**
@@ -42,7 +44,13 @@ export interface TeachersPanelProps {
  * acceso al sistema" on the row creates it and fills `userId`. Dumb panel —
  * data and the async writes come from the screen.
  */
-export function TeachersPanel({ teachers, onCreate, onOpenLoad, onGrantAccess, accountStatuses, onRegisterAbsence }: TeachersPanelProps): ReactElement {
+export function TeachersPanel({ teachers, onCreate, onOpenLoad, onGrantAccess, accountStatuses, onRegisterAbsence, focusNew = false }: TeachersPanelProps): ReactElement {
+  const form = useRef<HTMLFormElement>(null);
+  // The fields are shared design-system inputs without autoFocus; the form's
+  // first input is the name. Scrolling it into view is the browser's focus().
+  useEffect(() => {
+    if (focusNew) form.current?.querySelector("input")?.focus();
+  }, [focusNew]);
   const access = useTeacherAccess(onGrantAccess, accountStatuses);
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
@@ -101,7 +109,7 @@ export function TeachersPanel({ teachers, onCreate, onOpenLoad, onGrantAccess, a
         <EmptyHint>Aún no hay profesores registrados.</EmptyHint>
       )}
 
-      <form aria-label="Agregar profesor" onSubmit={submit}>
+      <form ref={form} aria-label="Agregar profesor" onSubmit={submit}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
           <TextField label="Nombre" value={firstName} onChange={setFirstName} uppercase required error={required.errors.firstName} onClearError={() => required.clear("firstName")} help="Sólo los nombres de pila del docente, sin apellidos." />
           <TextField label="Apellidos" value={lastName} onChange={setLastName} uppercase required error={required.errors.lastName} onClearError={() => required.clear("lastName")} help="Los dos apellidos: primero el paterno, luego el materno." />

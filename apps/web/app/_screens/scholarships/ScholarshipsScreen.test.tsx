@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as api from "../../scholarships/api";
 import * as roster from "../../_design/students/useStudentRoster";
+import { clearIntent, requestIntent } from "../../routing/pendingIntent";
 import { ScholarshipsScreen } from "./ScholarshipsScreen";
 
 vi.mock("../../scholarships/api", async (importOriginal) => {
@@ -124,5 +125,23 @@ describe("ScholarshipsScreen (T18)", () => {
     m.listScholarships.mockResolvedValue([]);
     renderScreen();
     expect(await screen.findByText(/Todavía no hay becas/)).toBeInTheDocument();
+  });
+});
+
+// Redesign F1: "Nueva beca" from ⌘K or the home lands ON the drawer.
+describe("opened from a shortcut", () => {
+  afterEach(clearIntent);
+
+  it("opens the new-scholarship drawer", async () => {
+    requestIntent("scholarships", "new");
+    renderScreen();
+    expect(await screen.findByRole("dialog", { name: "Nueva beca" })).toBeInTheDocument();
+  });
+
+  it("never opens the drawer for a role that cannot write", async () => {
+    requestIntent("scholarships", "new");
+    renderScreen(["scholarships:read"]);
+    await screen.findAllByTestId("scholarship-row");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 });

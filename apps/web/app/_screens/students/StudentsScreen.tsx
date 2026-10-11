@@ -34,6 +34,7 @@ import { EMPTY_FILTER, filterFromParams, filterToParams, type FilterableStudent,
 import { placeStudents } from "../../_design/students/placement";
 import { StudentNotesDialog } from "../../_design/students/StudentNotesDialog";
 import { StudentStatementDrawer } from "../../_design/students/StudentStatementDrawer";
+import { useIntent } from "../../routing/pendingIntent";
 import { fold } from "@garcia-lorca/ui/command-core";
 
 /** The floating "Nuevo alumno": its height, its distance from the bottom, and
@@ -794,7 +795,8 @@ export function StudentsScreen({ onBack, onEdit, canWriteNotes = false, canVoidA
   const [enrollments, setEnrollments] = useState<Enrollment[]>([]);
   const [placement, setPlacement] = useState<PlacementState>("loading");
   const [rollVersion, setRollVersion] = useState(0);
-  const [add, setAdd] = useState(false);
+  const intent = useIntent("students");
+  const [add, setAdd] = useState(intent === "new");
   const [sheet, setSheet] = useState<Student | null>(null);
   // The pupil whose notes are open from the list (T6), without the edit page.
   const [notesOf, setNotesOf] = useState<Student | null>(null);
@@ -1034,6 +1036,7 @@ export function StudentsScreen({ onBack, onEdit, canWriteNotes = false, canVoidA
           filter={filter}
           selectable
           searchHint="Buscar alumno, CURP, tutor o referencia BBVA…"
+          focusSearch={intent === "search"}
           extraActive={tab !== "all"}
           onClear={() => setTab("all")}
           leading={

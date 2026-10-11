@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as adminApi from "../../admin/api";
 import * as configApi from "../../config/api";
 import * as teachersApi from "../../teachers/api";
+import { clearIntent, requestIntent } from "../../routing/pendingIntent";
 import { TeachersScreen } from "./TeachersScreen";
 
 // The screens read labelled groups (ISSUE-002); label them from the listGroups mock.
@@ -181,5 +182,23 @@ describe("the Docentes module — what each login is", () => {
     render(<TeachersScreen onBack={() => {}} onOpenLoad={vi.fn()} canGrantAccess canListUsers />);
 
     expect(await screen.findByText("Vinculado")).toBeInTheDocument();
+  });
+});
+
+// Redesign F1: "Agregar profesor" from ⌘K or the home lands ON the form's first field.
+describe("opened from a shortcut", () => {
+  afterEach(clearIntent);
+
+  it("puts the cursor on the new teacher's name", async () => {
+    requestIntent("teachers", "new");
+    render(<TeachersScreen onBack={() => {}} onOpenLoad={() => {}} />);
+    const form = await screen.findByRole("form", { name: "Agregar profesor" });
+    await waitFor(() => expect(within(form).getByLabelText(/Nombre/, CAMPO)).toHaveFocus());
+  });
+
+  it("a plain visit leaves the focus alone", async () => {
+    render(<TeachersScreen onBack={() => {}} onOpenLoad={() => {}} />);
+    const form = await screen.findByRole("form", { name: "Agregar profesor" });
+    expect(within(form).getByLabelText(/Nombre/, CAMPO)).not.toHaveFocus();
   });
 });
