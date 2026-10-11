@@ -131,3 +131,18 @@ test.describe("the command palette is visible", () => {
     await expect(page.locator("[cmdk-input]")).toBeHidden();
   });
 });
+
+// Redesign F1: a shortcut lands ON the flow. Until October 2026 the shell
+// dropped the intent and every shortcut opened the plain module — invisible to
+// jsdom, which never navigated a real remount.
+test.describe("a shortcut lands on the flow", () => {
+  test("\"Registrar egreso\" opens Egresos on the new-expense drawer", async ({ page }) => {
+    await signIn(page);
+    await openPalette(page);
+    await page.locator("[cmdk-input]").fill("Registrar egreso");
+    await page.keyboard.press("Enter");
+
+    await page.waitForURL("**/egresos");
+    await expect(page.getByRole("dialog")).toBeVisible();
+  });
+});

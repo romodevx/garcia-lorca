@@ -44,11 +44,12 @@ describe("CommandPaletteHost", () => {
     expect(screen.getByText("Crear alumno")).toBeInTheDocument();
   });
 
-  it("navigates to the module route on select (never mutates)", () => {
+  it("navigates to the command's route on select (never mutates)", () => {
     const onNavigate = vi.fn();
     withFlags(<Harness onNavigate={onNavigate} />, { module_students: true });
     fireEvent.click(screen.getByText("Crear alumno"));
-    expect(onNavigate).toHaveBeenCalledWith("module:students");
+    // Lands ON the new-student form, not just the module (redesign F1).
+    expect(onNavigate).toHaveBeenCalledWith("module:students:new");
   });
 
   it("persists a selected command's ID to recents (id only, no record data)", () => {

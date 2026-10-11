@@ -2,6 +2,7 @@ import type { Command, CommandKind } from "@garcia-lorca/ui/command-core";
 import type { FlagSet } from "@garcia-lorca/ui/flags";
 
 import { MODULES, moduleHasPerm, type ModuleDef } from "../_design/data";
+import type { IntentModule, IntentOf } from "../routing/pendingIntent";
 
 /**
  * Layer A command registry — the static half of the palette (nav + create +
@@ -24,35 +25,49 @@ import { MODULES, moduleHasPerm, type ModuleDef } from "../_design/data";
 /** Resolves a palette-namespace i18n key to a localized string. */
 export type Translate = (key: string) => string;
 
-interface ActionSpec {
-  readonly moduleId: string;
+interface ActionBase {
   readonly kind: Extract<CommandKind, "create" | "quick">;
   readonly titleKey: string;
   readonly aliasKey?: string;
   /** Disambiguator when a module registers several actions of the same kind. */
   readonly key?: string;
   /**
-   * Sub-intent appended to the module route (`module:finance:payment`) so the
-   * surface opens directly on that flow. Omitted ⇒ the module's default view.
+   * Permissions the action itself needs on top of the module's READ (a write
+   * shortcut is noise — and a promise the gateway breaks — for a read-only role).
    */
-  readonly intent?: string;
+  readonly requires?: readonly string[];
 }
+
+/**
+ * Optionally with a sub-intent appended to the route (`module:expenses:new`)
+ * so the surface opens ON that flow. Typed per module: an intent the
+ * destination screen does not understand does not compile.
+ */
+type ActionSpec = ActionBase &
+  ({ readonly moduleId: string; readonly intent?: undefined } | { [M in IntentModule]: { readonly moduleId: M; readonly intent: IntentOf[M] } }[IntentModule]);
 
 /** Curated create/quick actions (seed; each module extends this as it's built). */
 export const ACTIONS: readonly ActionSpec[] = [
-  { moduleId: "students", kind: "create", titleKey: "create.student", aliasKey: "alias.student" },
+  { moduleId: "students", kind: "create", titleKey: "create.student", aliasKey: "alias.student", intent: "new", requires: ["students:create"] },
+  { moduleId: "students", kind: "quick", titleKey: "quick.searchStudent", aliasKey: "alias.searchStudent", intent: "search" },
   // Enrollment surface (Phase 4) — fewest-clicks shortcuts into the students surface.
   { moduleId: "students", kind: "create", key: "enroll", titleKey: "create.enroll", aliasKey: "alias.enroll" },
   { moduleId: "students", kind: "create", key: "transfer", titleKey: "create.transfer", aliasKey: "alias.transfer" },
-  // Ventanilla shortcut (Phase 7) — lands on the payment form, not just the surface.
-  { moduleId: "finance", kind: "create", titleKey: "create.payment", aliasKey: "alias.payment", intent: "payment" },
+  { moduleId: "teachers", kind: "create", titleKey: "create.teacherRoster", aliasKey: "alias.teacherRoster", intent: "new", requires: ["teachers:write"] },
+  // The ventanilla lives in Registro de pagos; its search takes the focus on its own.
+  { moduleId: "payments", kind: "create", titleKey: "create.payment", aliasKey: "alias.payment" },
+  { moduleId: "finance", kind: "quick", titleKey: "quick.overdue", aliasKey: "alias.overdue", intent: "overdue" },
+  { moduleId: "expenses", kind: "create", titleKey: "create.expense", aliasKey: "alias.expense", intent: "new", requires: ["expenses:write"] },
+  { moduleId: "schedule", kind: "create", titleKey: "create.absence", aliasKey: "alias.absence", intent: "absence", requires: ["schedule:write"] },
+  { moduleId: "activities", kind: "create", titleKey: "create.activity", aliasKey: "alias.activity", intent: "new", requires: ["activities:write"] },
   { moduleId: "grades", kind: "create", titleKey: "create.evaluation", aliasKey: "alias.evaluation" },
   // Grade-capture surface (Phase 5) — fewest-clicks shortcut into the roster grid.
   { moduleId: "grades", kind: "create", key: "capture", titleKey: "create.captureGrades", aliasKey: "alias.captureGrades" },
   { moduleId: "announcements", kind: "create", titleKey: "create.announcement", aliasKey: "alias.announcement" },
-  { moduleId: "scholarships", kind: "create", titleKey: "create.scholarship", aliasKey: "alias.scholarship" },
+  { moduleId: "scholarships", kind: "create", titleKey: "create.scholarship", aliasKey: "alias.scholarship", intent: "new", requires: ["scholarships:write"] },
   { moduleId: "documents", kind: "create", titleKey: "create.document", aliasKey: "alias.document" },
   { moduleId: "uniforms", kind: "create", titleKey: "create.uniform", aliasKey: "alias.uniform" },
+  { moduleId: "uniforms", kind: "quick", titleKey: "quick.inventory", aliasKey: "alias.inventory", intent: "inventory", requires: ["uniforms:stock"] },
   { moduleId: "billing", kind: "create", titleKey: "create.invoice", aliasKey: "alias.invoice" },
   // Academic-catalog (module_config) surfaced under the "settings" module.
   { moduleId: "settings", kind: "create", key: "cycle", titleKey: "create.cycle", aliasKey: "alias.cycle" },
@@ -68,6 +83,12 @@ export const ACTIONS: readonly ActionSpec[] = [
 ];
 
 const moduleById = new Map<string, ModuleDef>(MODULES.map((m) => [m.id, m]));
+
+/** Whether the caller holds every permission the action requires (no set given ⇒ flag-only demo). */
+function holdsAll(required: readonly string[] | undefined, permissions: readonly string[] | undefined): boolean {
+  if (required === undefined || permissions === undefined) return true;
+  return required.every((p) => permissions.includes(p));
+}
 
 /** Split a comma-joined localized alias string into trimmed terms. */
 function parseAliases(value: string): string[] {
@@ -109,7 +130,7 @@ export function buildCommandRegistry(flags: FlagSet, t: Translate, permissions?:
 
   for (const action of ACTIONS) {
     const module = moduleById.get(action.moduleId);
-    if (module === undefined || !allowed(module)) continue;
+    if (module === undefined || !allowed(module) || !holdsAll(action.requires, permissions)) continue;
     commands.push({
       id: action.key !== undefined ? `${module.id}.${action.kind}.${action.key}` : `${module.id}.${action.kind}`,
       kind: action.kind,
