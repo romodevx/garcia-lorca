@@ -1,6 +1,6 @@
 # Plan — Rediseño del Inicio (opción C) + estilo "Captions adaptado" en toda la app
 
-Estado: **v2, con las dos revisiones aplicadas; espera aprobación del dueño** · 2026-10-10 · rama `feature/redesign-home` (desde `dev`)
+Estado: **v2 aprobado por el dueño el 2026-10-11; F1 construido (PR 1)** · 2026-10-10 · rama `feature/redesign-home` (desde `dev`)
 Vista previa aprobada: https://claude.ai/artifact/W1gxk8oLEgu8dCs9iusedw (dirección C + estilo Captions adaptado)
 Revisiones: `reviews/PLAN-redesign-home.design-review.md` (16 hallazgos) · `reviews/PLAN-redesign-home.eng-review.md` (16 hallazgos). Cada enmienda de abajo cita su hallazgo como **[D#]** (diseño) o **[E#]** (ingeniería).
 
@@ -266,4 +266,9 @@ Sin peek (D10; la tarjeta ya lleva ahí): Avisos, Asistencia, Calificaciones, Re
 
 - [x] `/plan-design-review` (16 hallazgos, aplicados)
 - [x] `/plan-eng-review` (16 hallazgos, aplicados)
-- [ ] **Aprobación del dueño** (checkpoint 2)
+- [x] **Aprobación del dueño** (checkpoint 2, 2026-10-11)
+- [x] F1 construido en `feature/home-intents` (PR 1). Desvíos del plan:
+  - Además de `Finance.tsx` se borraron los 11 archivos que solo él alcanzaba (`useFinance`, sus paneles —incluido `GeneratePanel`— y `totals`).
+  - Las 8 aserciones de `registry.test.ts:70-128` se dejaron: siguen siendo ciertas (esos comandos no tienen pantalla con intent). Cambiaron la de `:143` (cobro) y la de `CommandPaletteHost.test.tsx` ("Crear alumno" → `module:students:new`), y se agregaron 18 casos de intents y `requires`.
+  - ⌘K ganó 7 comandos nuevos (Buscar alumno, Agregar profesor, Ver cargos vencidos, Registrar egreso, Registrar ausencia, Nueva actividad, Ver existencias). `settings.create.teacher` ("Crear profesor" → Configuración) sigue fuera de alcance (§10).
+- [ ] F2a–F4 (PR 2)
