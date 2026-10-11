@@ -17,6 +17,7 @@ import { UniformsScreen } from "./_screens/uniforms/UniformsScreen";
 import { ExpensesScreen } from "./_screens/expenses/ExpensesScreen";
 import { ScheduleEntry } from "./_screens/schedule/ScheduleEntry";
 import { requestCoverFocus } from "./schedule/coverFocus";
+import { handOffIntent } from "./routing/pendingIntent";
 import { ActivitiesScreen } from "./_screens/activities/ActivitiesScreen";
 import { ScholarshipsScreen } from "./_screens/scholarships/ScholarshipsScreen";
 import type { CutAccess } from "./_screens/finance/CashCutClosing";
@@ -508,7 +509,10 @@ export function AppShell(): ReactElement {
     setConfigNotice(message);
     go({ screen: "config" });
   };
-  const open = useCallback((id: string, _intent?: string): void => {
+  // The intent outlives the navigation in module scope: the destination
+  // screen mounts after it and takes it once (routing/pendingIntent.ts).
+  const open = useCallback((id: string, intent?: string): void => {
+    handOffIntent(id, intent);
     if (id === "finance") {
       go({ screen: "finance" });
       return;
@@ -569,7 +573,7 @@ export function AppShell(): ReactElement {
   }, [go]);
 
   // Command Palette navigation: a command route is `module:<id>` plus an optional
-  // intent (`module:finance:payment` lands on the ventanilla form). Navigating IS
+  // intent (`module:expenses:new` lands on the new-expense drawer). Navigating IS
   // executing (the palette never mutates), so we just open the target surface.
   const navigate = useCallback(
     (route: string): void => {

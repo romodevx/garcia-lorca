@@ -317,7 +317,7 @@ describe("AppShell navigation flow", () => {
     expect(screen.getByRole("button", { name: "Entrar al sistema" })).toBeInTheDocument();
   });
 
-  it("opens the finance surface when the palette's 'Registrar pago' command is picked", async () => {
+  it("opens Registro de pagos when the palette's 'Registrar pago' command is picked", async () => {
     mockLogin.mockResolvedValue({ expiresIn: 900, mustChangePassword: false });
     const user = userEvent.setup();
     render(
@@ -329,12 +329,34 @@ describe("AppShell navigation flow", () => {
     await submitLogin(user);
     expect(await screen.findByRole("heading", { name: /Módulos/ })).toBeInTheDocument();
 
-    // Cmd+K → the "Registrar pago" shortcut routes to module:finance and opens
-    // the Finanzas surface (payments are now registered per charge from its table).
+    // Cmd+K → "Registrar pago" lands on the ventanilla. It used to open
+    // Finanzas, which only lists charges (redesign F1).
     fireEvent.keyDown(window, { key: "k", metaKey: true });
     await user.click(await screen.findByText("Registrar pago"));
 
+    expect(await screen.findByRole("heading", { name: "Registro de pagos" })).toBeInTheDocument();
+  });
+
+  // Redesign F1: the shell dropped the intent (`open(id, _intent)`), so every
+  // shortcut opened the plain module. The destination mounts after the
+  // navigation, so the intent has to outlive the click.
+  it("hands the shortcut's intent to the screen it opens", async () => {
+    mockLogin.mockResolvedValue({ expiresIn: 900, mustChangePassword: false });
+    const user = userEvent.setup();
+    render(
+      <Providers flags={{ module_finance: true }}>
+        <AppShell />
+      </Providers>
+    );
+
+    await submitLogin(user);
+    expect(await screen.findByRole("heading", { name: /Módulos/ })).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+    await user.click(await screen.findByText("Ver cargos vencidos"));
+
     expect(await screen.findByRole("heading", { name: "Finanzas" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Vencidos/ })).toHaveAttribute("aria-pressed", "true");
   });
 
   it("falls back to the placeholder when module_finance is OFF (UX gating)", async () => {
