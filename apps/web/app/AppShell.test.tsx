@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppShell } from "./AppShell";
+import { requestIntent } from "./routing/pendingIntent";
 import { authFetch } from "./auth/authFetch";
 import { HttpError } from "./auth/httpError";
 import { Providers, fakePath, fakeRouter, resetFakeRouter, useFakePathname } from "./test-utils";
@@ -357,6 +358,53 @@ describe("AppShell navigation flow", () => {
 
     expect(await screen.findByRole("heading", { name: "Finanzas" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Vencidos/ })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  // Review of PR 1: on Finanzas already, the same path does not remount the
+  // screen, so the shortcut did nothing — and stayed armed for a later visit.
+  it("a shortcut works while already on its own screen", async () => {
+    mockLogin.mockResolvedValue({ expiresIn: 900, mustChangePassword: false });
+    const user = userEvent.setup();
+    render(
+      <Providers flags={{ module_finance: true }}>
+        <AppShell />
+      </Providers>
+    );
+
+    await submitLogin(user);
+    expect(await screen.findByRole("heading", { name: /Módulos/ })).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+    // findAll: an earlier test may have left these in the palette's "Recientes".
+    await user.click((await screen.findAllByText("Finanzas"))[0]!);
+    expect(await screen.findByRole("heading", { name: "Finanzas" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Todos/ })).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+    await user.click((await screen.findAllByText("Ver cargos vencidos"))[0]!);
+
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Vencidos/ })).toHaveAttribute("aria-pressed", "true"));
+  });
+
+  it("an intent nobody took does not fire on a later visit", async () => {
+    mockLogin.mockResolvedValue({ expiresIn: 900, mustChangePassword: false });
+    mockMe.mockRejectedValueOnce(new Error("no session")).mockResolvedValue(OWNER_ME);
+    const user = userEvent.setup();
+    // Left armed, e.g. by a shortcut whose screen never mounted.
+    requestIntent("finance", "overdue");
+    render(
+      <Providers flags={{ module_finance: true }}>
+        <AppShell />
+      </Providers>
+    );
+
+    await submitLogin(user);
+    // Any deliberate navigation disarms it (here the logo, back to the
+    // dashboard); then the browser's forward button lands on Finanzas.
+    await user.click(await screen.findByRole("button", { name: "Inicio" }));
+    act(() => { fakeRouter.push("/finanzas"); });
+
+    expect(await screen.findByRole("heading", { name: "Finanzas" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Todos/ })).toHaveAttribute("aria-pressed", "true");
   });
 
   it("falls back to the placeholder when module_finance is OFF (UX gating)", async () => {

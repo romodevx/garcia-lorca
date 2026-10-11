@@ -73,8 +73,9 @@ export function toIntent(module: string, intent: string | undefined): Pending | 
  * one the screen understands, and otherwise disarms any leftover, so a plain
  * open is always a plain visit.
  */
-export function handOffIntent(module: string, intent: string | undefined): void {
+export function handOffIntent(module: string, intent: string | undefined): boolean {
   pending = toIntent(module, intent);
+  return pending !== undefined;
 }
 
 /** The screen's intent, taken once on mount (survives React's double render in dev). */

@@ -1,6 +1,8 @@
+import { render, screen } from "@testing-library/react";
+import { StrictMode, type ReactElement } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { clearIntent, handOffIntent, requestIntent, takeIntent, toIntent } from "./pendingIntent";
+import { clearIntent, handOffIntent, requestIntent, takeIntent, toIntent, useIntent } from "./pendingIntent";
 
 /**
  * The shortcut handoff (redesign F1). The shell remounts on every new path, so
@@ -70,6 +72,24 @@ describe("pendingIntent", () => {
       requestIntent("expenses", "new");
       handOffIntent("expenses", undefined);
       expect(takeIntent("expenses")).toBeUndefined();
+    });
+  });
+
+  describe("useIntent", () => {
+    function Probe(): ReactElement {
+      return <p>{useIntent("expenses") ?? "plain"}</p>;
+    }
+
+    // React calls a state initializer twice in development; the intent is taken
+    // by the first call, so the screen must keep THAT result, not the second's.
+    it("keeps the intent under StrictMode's double render", () => {
+      requestIntent("expenses", "new");
+      render(
+        <StrictMode>
+          <Probe />
+        </StrictMode>,
+      );
+      expect(screen.getByText("new")).toBeInTheDocument();
     });
   });
 });
