@@ -36,6 +36,15 @@ export interface KpiCard {
 
 const LOADING: KpiFace = { kind: "loading" };
 const payments = MODULES.find((m) => m.id === "payments");
+const settings = MODULES.find((m) => m.id === "settings");
+
+/**
+ * Whether the caller can actually open Configuración (§3.4): its card is
+ * visible AND its flag is on — with the flag off it lands on a placeholder.
+ */
+function opensSettings(permissions: readonly string[], flags: FlagSet): boolean {
+  return settings !== undefined && isModuleVisible(settings, permissions) && flags[settings.flag] === true;
+}
 
 function studentsFace(k: HomeKpis, permissions: readonly string[], flags: FlagSet): KpiFace {
   const s = k.students;
@@ -70,7 +79,7 @@ export function homeKpiCards(k: HomeKpis, permissions: readonly string[], flags:
   }
   if (!can("finance:read") || !can("config:read")) return cards;
 
-  const toConfig = can("config:read");
+  const toConfig = opensSettings(permissions, flags);
   const toPayments = payments !== undefined && isModuleVisible(payments, permissions);
   cards.push({
     id: "pending", labelKey: "kpi.pending.label", icon: "finance", color: "orange", opens: { id: "finance" },

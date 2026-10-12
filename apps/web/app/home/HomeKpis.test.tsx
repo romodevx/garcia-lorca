@@ -1,5 +1,6 @@
 import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { FlagSet } from "@garcia-lorca/ui/flags";
 import { describe, expect, it, vi } from "vitest";
 
 import { HomeKpis } from "./HomeKpis";
@@ -20,9 +21,9 @@ function kpis(over: Partial<Kpis> = {}): Kpis {
   return { students: { status: "ready", value: 412 }, cycle: ACTIVE, ledger: { status: "ready", value: LEDGER }, retryStudents: vi.fn(), retryLedger: vi.fn(), ...over };
 }
 
-function show(k: Kpis, permissions: readonly string[] = OWNER): ReturnType<typeof vi.fn> {
+function show(k: Kpis, permissions: readonly string[] = OWNER, flags: FlagSet = { module_students: true, module_config: true }): ReturnType<typeof vi.fn> {
   const onOpen = vi.fn();
-  renderHome(<HomeKpis kpis={k} permissions={permissions} onOpen={onOpen} />, true, { module_students: true });
+  renderHome(<HomeKpis kpis={k} permissions={permissions} onOpen={onOpen} />, true, flags);
   return onOpen;
 }
 
@@ -77,6 +78,14 @@ describe("HomeKpis", () => {
     expect(card("Por cobrar").textContent).not.toMatch(/\$/);
     await userEvent.click(within(card("Por cobrar")).getByRole("button", { name: "Ir a Configuración" }));
     expect(onOpen).toHaveBeenCalledWith("settings");
+  });
+
+  // Review M2 / §3.4: "Ir a Configuración →" only for a caller who can open
+  // it. With module_config off, settings lands on a placeholder.
+  it("no cycle, but Configuración is off: says so, offers no door to it", () => {
+    show(kpis({ cycle: undefined, ledger: { status: "noCycle" } as LedgerReading }), OWNER, { module_students: true });
+    expect(card("Por cobrar")).toHaveTextContent("Sin ciclo activo");
+    expect(screen.queryByRole("button", { name: "Ir a Configuración" })).not.toBeInTheDocument();
   });
 
   it("zero after a read that worked: the next step, and the card goes there", async () => {
