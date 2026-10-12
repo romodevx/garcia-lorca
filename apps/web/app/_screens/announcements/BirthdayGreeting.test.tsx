@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as commsApi from "../../comms/api";
-import { BirthdayGreeting, renderGreeting } from "./BirthdayGreeting";
+import { BIRTHDAY_HEADING_ID, BirthdayGreeting, renderGreeting } from "./BirthdayGreeting";
 
 vi.mock("../../comms/api", () => ({ getBirthdayTemplate: vi.fn(), updateBirthdayTemplate: vi.fn() }));
 const comms = vi.mocked(commsApi);
@@ -119,5 +119,34 @@ describe("BirthdayGreeting", () => {
     release();
     await screen.findByRole("status");
     expect(comms.updateBirthdayTemplate).toHaveBeenCalledTimes(1);
+  });
+});
+
+// D13: inside Avisos' folded panel the panel's summary carries the title, so
+// the greeting paints no card, star or heading of its own; nothing else changes.
+describe("BirthdayGreeting embedded", () => {
+  function renderEmbedded() {
+    return render(
+      <>
+        <h2 id={BIRTHDAY_HEADING_ID}>Felicitación de cumpleaños</h2>
+        <BirthdayGreeting embedded />
+      </>,
+    );
+  }
+
+  it("leaves the heading to whoever holds it and keeps the rest", async () => {
+    renderEmbedded();
+    expect(await screen.findByDisplayValue("¡Feliz cumpleaños, {nombre}!")).toBeInTheDocument();
+    expect(screen.getAllByRole("heading")).toHaveLength(1);
+    expect(screen.getByRole("form", { name: "Felicitación de cumpleaños" })).toBeInTheDocument();
+    expect(screen.getByText(/texto predeterminado/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Guardar felicitación" })).toBeInTheDocument();
+  });
+
+  it("while loading too", () => {
+    comms.getBirthdayTemplate.mockReturnValue(new Promise(() => {}));
+    renderEmbedded();
+    expect(screen.getByText("Cargando…")).toBeInTheDocument();
+    expect(screen.getAllByRole("heading")).toHaveLength(1);
   });
 });
