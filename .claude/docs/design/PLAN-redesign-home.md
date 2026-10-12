@@ -281,4 +281,5 @@ Sin peek (D10; la tarjeta ya lleva ahí): Avisos, Asistencia, Calificaciones, Re
   - El filtro por flag de un acceso mira solo el flag de su módulo, no las compuertas compuestas de AppShell (p. ej. Egresos también exige `module_finance`). La tarjeta tiene el mismo hueco hoy.
   - Saludo, fecha, "Nuevo aviso" y los avisos de permisos/sin módulos siguen en español fijo: se comparten con el inicio actual. El copy nuevo sí va por `home.*`.
   - B3: no se enfoca el título de Avisos. No era trivial (intent `compose` nuevo, foco en `TextField`, llave de remontaje en AppShell).
+  - `HomeNotices.tsx` (avisos de permisos no disponibles y sin módulos) sigue con estilos en línea. Hueco deliberado: se comparte con el inicio clásico, y la capa del look (`html[data-look="refresh"]`) no puede reestilizarlos porque un estilo en línea le gana. Pasarlos a clases queda para cuando se retire el inicio clásico.
 - [ ] F4 (PR 2)
