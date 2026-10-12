@@ -1,6 +1,6 @@
 # Plan — Rediseño de Avisos (variante C, "Destinatarios al lado")
 
-Estado: **v3, variante C, pendiente de aprobación** (el dueño cambió de A a C el 2026-10-12; se mantienen D3: columna 960 px, foco a la alerta = layout, BC1–BC7 fuera) · 2026-10-12 · rama `feature/redesign-avisos` (desde `dev`)
+Estado: **v3, variante C, APROBADO por el dueño el 2026-10-12 (D4: C tal cual, felicitación plegada abajo, sin vista previa)** (el dueño cambió de A a C el 2026-10-12; se mantienen D3: columna 960 px, foco a la alerta = layout, BC1–BC7 fuera) · 2026-10-12 · rama `feature/redesign-avisos` (desde `dev`)
 Insumos: `.gstack/redesign/avisos/behavior.md` (contrato) · `diagnosis.md` (P1–P14) ·
 `variants/variant-a.png` (elegida en D2) · `before/` (capturas).
 
