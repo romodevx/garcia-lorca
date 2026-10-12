@@ -6,7 +6,12 @@ import { formatCents as money } from "../_lib/money";
 import { Icon, type IconName } from "../_design/Icon";
 import { Page } from "../_design/Page";
 import { COLOR, type ColorKey } from "../_design/colors";
-import { MODULES, isModuleVisible, type ModuleDef, type UserProfile } from "../_design/data";
+import { MODULES, isModuleVisible, type ModuleDef } from "../_design/data";
+import { greetingFor, todayLabel } from "../home/greeting";
+import { HomeView } from "../home/HomeView";
+import { NoModules, PermissionsUnavailable } from "../home/HomeNotices";
+import { useRefreshedHome } from "../home/homeVariant";
+import type { HomeProps } from "../home/types";
 import { useHomeKpis, type Ledger } from "../home/useHomeKpis";
 
 const NO_LEDGER: Ledger = { pendingCents: 0, collectedCents: 0, withBalance: 0, charges: 0 };
@@ -97,115 +102,16 @@ function ModulesSkeleton(): ReactElement {
   );
 }
 
-// Shown when the caller's permissions could not be loaded.
-//
-// NOT the same as "you have no modules", and saying that would be a lie: the
-// system does not know what this person can do, which is a fault on our side.
-// The previous behaviour said nothing at all — it kept showing the loading
-// skeleton — and a session broken this way was indistinguishable from a slow
-// network for as long as anybody cared to wait.
-function PermissionsUnavailable({ onRetry }: { onRetry?: () => void }): ReactElement {
-  return (
-    <div
-      role="alert"
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        gap: 10,
-        padding: "48px 24px",
-        borderRadius: "var(--r-lg)",
-        background: "var(--surface)",
-        border: "1px dashed var(--bad-fg)",
-        color: "var(--text-muted)",
-        textAlign: "center"
-      }}
-    >
-      <Icon name="shield" size={30} stroke={2} />
-      <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 18, color: "var(--text)" }}>
-        No pudimos cargar tus permisos
-      </div>
-      <div style={{ fontSize: 13.5 }}>
-        Tu sesión está iniciada, pero el sistema no pudo comprobar qué puedes ver. No es que no tengas módulos.
-      </div>
-      {onRetry !== undefined && (
-        <button
-          onClick={onRetry}
-          style={{
-            marginTop: 6,
-            height: 40,
-            padding: "0 18px",
-            borderRadius: "var(--r-pill)",
-            fontSize: 14,
-            fontWeight: 600,
-            color: "var(--forest)",
-            background: "var(--surface-3)",
-            border: "1px solid var(--border)",
-            cursor: "pointer"
-          }}
-        >
-          Reintentar
-        </button>
-      )}
-    </div>
-  );
+export type DashboardProps = HomeProps;
+
+/** The home: today's, or the refreshed one when module_ui_refresh is on. */
+export function Dashboard(props: DashboardProps): ReactElement {
+  return useRefreshedHome() ? <HomeView {...props} /> : <ClassicDashboard {...props} />;
 }
 
-// Shown to a signed-in user whose permissions match no module at all.
-function NoModules(): ReactElement {
-  return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        gap: 10,
-        padding: "48px 24px",
-        borderRadius: "var(--r-lg)",
-        background: "var(--surface)",
-        border: "1px dashed var(--border)",
-        color: "var(--text-muted)",
-        textAlign: "center"
-      }}
-    >
-      <Icon name="shield" size={30} stroke={2} />
-      <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 18, color: "var(--text)" }}>
-        No tienes módulos asignados
-      </div>
-      <div style={{ fontSize: 13.5 }}>Solicita acceso a tu administrador para ver tus módulos aquí.</div>
-    </div>
-  );
-}
-
-export interface DashboardProps {
-  user: UserProfile;
-  onOpen: (id: string) => void;
-  /**
-   * The authenticated principal's READ permissions. Drives which module tiles
-   * and KPI shortcuts are visible. `undefined` until `me()` resolves — the grid
-   * shows a skeleton rather than flashing every module. UX-only; the gateway is
-   * the security boundary.
-   */
-  permissions?: readonly string[];
-  /**
-   * The permissions could not be loaded at all (the /me call failed).
-   *
-   * Distinct from `permissions === undefined`, and the distinction is the whole
-   * point: undefined alone rendered the loading skeleton, so a failed call
-   * looked exactly like a slow one and shimmered forever. The owner read that
-   * as "no hay módulos" and reported it as such (dev, 2026-09-07).
-   */
-  permissionsFailed?: boolean;
-  /** Retry loading them, so the only way out is not signing out again. */
-  onRetryPermissions?: () => void;
-  /** Injectable clock so the greeting/date are deterministic under test. */
-  now?: Date;
-}
-
-export function Dashboard({ user, onOpen, permissions, permissionsFailed = false, onRetryPermissions, now = new Date() }: DashboardProps): ReactElement {
-  const hour = now.getHours();
-  const greet = hour < 12 ? "Buenos días" : hour < 19 ? "Buenas tardes" : "Buenas noches";
-  const today = now.toLocaleDateString("es-MX", { weekday: "long", day: "numeric", month: "long" });
+function ClassicDashboard({ user, onOpen, permissions, permissionsFailed = false, onRetryPermissions, now = new Date() }: DashboardProps): ReactElement {
+  const greet = greetingFor(now);
+  const today = todayLabel(now);
 
   // Role-aware visibility: a tile/shortcut is shown IFF the principal holds the
   // module's READ permission. `undefined` means `me()` has not resolved yet.

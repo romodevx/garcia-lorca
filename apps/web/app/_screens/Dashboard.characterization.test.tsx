@@ -1,7 +1,8 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { USERS } from "../_design/data";
 import { DESKTOP, clearHovered, markHovered, styleTree } from "../_design/testing/declaredStyle";
+import { renderHome as renderUnder } from "../home/testing/renderHome";
 import { Dashboard } from "./Dashboard";
 
 vi.mock("../students/api", () => ({ listStudents: vi.fn().mockResolvedValue([]) }));
@@ -21,7 +22,8 @@ const PERMS = ["students:read", "finance:read", "attendance:read", "grades:read"
 const NOW = new Date("2026-06-12T09:00:00");
 
 function renderHome(): void {
-  render(<Dashboard user={USERS.admin} onOpen={() => {}} permissions={PERMS} now={NOW} />);
+  // The classic home: module_ui_refresh OFF.
+  renderUnder(<Dashboard user={USERS.admin} onOpen={() => {}} permissions={PERMS} now={NOW} />, false);
 }
 
 function cardOf(label: string): HTMLElement {
