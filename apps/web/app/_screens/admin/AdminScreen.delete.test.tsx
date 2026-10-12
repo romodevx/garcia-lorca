@@ -150,4 +150,47 @@ describe("AdminScreen · eliminar usuario", () => {
     expect(admin.deleteUser).toHaveBeenCalledTimes(2);
     expect(await screen.findByText(/Usuario eliminado · Maestra Rojas/)).toBeInTheDocument();
   });
+
+  // Bug 2026-10-12 (dev): the provider half failed EVERY time (missing grant),
+  // so the retry never succeeded, the dialog never closed, and the deleted row
+  // stayed in the list until a page reload. The row is gone the moment the
+  // account is blocked, so the list refreshes then.
+  it("refreshes the list as soon as the account is blocked, even if the provider is pending", async () => {
+    const user = userEvent.setup();
+    admin.deleteUser.mockRejectedValue(new adminApi.AdminError(500, "internal error", "DELETION_PENDING"));
+    renderAsOwner();
+    await screen.findByText("Maestra Rojas");
+    admin.listUsers.mockResolvedValue([
+      { id: "u1", email: "dir@gl.mx", displayName: "Director", status: "active", mustChangePassword: false, roleIds: ["r1"] },
+    ]);
+
+    await user.click(screen.getByRole("button", { name: "Eliminar a Maestra Rojas" }));
+    const dialog = await screen.findByRole("dialog", { name: "Eliminar usuario" });
+    await user.click(within(dialog).getByRole("button", { name: "Eliminar usuario" }));
+    await within(dialog).findByRole("alert");
+
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Eliminar a Maestra Rojas" })).not.toBeInTheDocument());
+  });
+
+  // A second pending in a row means retrying will not fix it: say so, and let
+  // the director close instead of pressing a button that can never work.
+  it("after a second pending, stops offering the retry and lets the dialog close", async () => {
+    const user = userEvent.setup();
+    admin.deleteUser.mockRejectedValue(new adminApi.AdminError(500, "internal error", "DELETION_PENDING"));
+    renderAsOwner();
+    await screen.findByText("Maestra Rojas");
+
+    await user.click(screen.getByRole("button", { name: "Eliminar a Maestra Rojas" }));
+    const dialog = await screen.findByRole("dialog", { name: "Eliminar usuario" });
+    await user.click(within(dialog).getByRole("button", { name: "Eliminar usuario" }));
+    await within(dialog).findByRole("alert");
+    await user.click(within(dialog).getByRole("button", { name: "Eliminar usuario" }));
+
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(/reintentar no lo resuelve/i);
+    expect(within(dialog).queryByRole("button", { name: "Eliminar usuario" })).not.toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Entendido" }));
+    expect(admin.deleteUser).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Eliminar usuario" })).not.toBeInTheDocument());
+    expect(await screen.findByText(/Usuario eliminado · Maestra Rojas/)).toBeInTheDocument();
+  });
 });
