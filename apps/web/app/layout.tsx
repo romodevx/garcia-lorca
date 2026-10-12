@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
-import { DM_Sans, Poppins } from "next/font/google";
+import { DM_Sans, Libre_Baskerville, Poppins } from "next/font/google";
 import { NextIntlClientProvider } from "next-intl";
 import { AppFlagsProvider } from "./flags-provider";
 import { buildMessages } from "./i18n/config";
@@ -30,6 +30,19 @@ const dmSans = DM_Sans({
   display: "swap"
 });
 
+/**
+ * The greeting's serif under the look refresh (module_ui_refresh, F2b), read by
+ * `--font-serif`. Not preloaded: with the look OFF nothing paints it, and a
+ * preload would make every user download it anyway.
+ */
+const libreBaskerville = Libre_Baskerville({
+  subsets: ["latin"],
+  weight: ["400"],
+  variable: "--font-libre-baskerville",
+  display: "swap",
+  preload: false
+});
+
 export const metadata: Metadata = {
   title: "Centro Educativo García Lorca — Sistema",
   description: "Sistema de Gestión Escolar García Lorca"
@@ -54,7 +67,7 @@ export default async function RootLayout({
     // children.
     <html
       lang={locale}
-      className={`${poppins.variable} ${dmSans.variable}`}
+      className={`${poppins.variable} ${dmSans.variable} ${libreBaskerville.variable}`}
       suppressHydrationWarning
     >
       <head>
