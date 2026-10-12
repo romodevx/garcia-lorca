@@ -3,6 +3,9 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { USERS } from "../_design/data";
+import { listCycles } from "../config/api";
+import { listCharges } from "../finance/api";
+import { listStudents } from "../students/api";
 import { HomeView } from "./HomeView";
 import { renderHome } from "./testing/renderHome";
 
@@ -56,6 +59,19 @@ describe("HomeView — areas (PLAN-redesign-home §3.1)", () => {
     expect(cardNames(region)).toEqual(["Asistencia", "Calificaciones", "Horarios"]);
     expect(screen.getAllByRole("region")).toHaveLength(1);
     expect(screen.queryByRole("heading", { name: "Académico" })).not.toBeInTheDocument();
+  });
+
+  // B6, pinned at the view (security gate on #105): the wiring, not just the hook.
+  it("a maestro's home reads no students, cycles or charges; the owner's does", async () => {
+    const reads = [listStudents, listCycles, listCharges].map((f) => vi.mocked(f));
+    reads.forEach((f) => f.mockClear());
+    show(MAESTRO, { user: USERS.teacher });
+    await screen.findByRole("region", { name: "Tus módulos" });
+    reads.forEach((f) => expect(f).not.toHaveBeenCalled());
+
+    // Control: the same render does read for the owner (charges wait for a cycle, and the mock has none).
+    show(OWNER);
+    await vi.waitFor(() => [listStudents, listCycles].forEach((f) => expect(f).toHaveBeenCalled()));
   });
 
   it("each card opens its module (B11) and is described by its verb-led line", async () => {
