@@ -144,6 +144,9 @@ function rowSuite(row: Row): void {
         // E9: proving the touch path needs the touch media query to really match.
         expect(await page.evaluate(() => matchMedia("(any-pointer: coarse)").matches)).toBe(true);
         await expect(more, "the ⋯ is always there on touch").toHaveCSS("opacity", "1");
+        // Closed means closed: `hidden` keeps the shortcuts off screen and out of Tab.
+        await expect(card.locator(".home-card__shortcut").first()).toBeHidden();
+        await expect(page.locator(".home-card__peek[hidden] .home-card__shortcut:visible")).toHaveCount(0);
         await more.tap();
       } else {
         await card.hover();
@@ -153,6 +156,10 @@ function rowSuite(row: Row): void {
       for (const s of await shortcuts.all()) await expect(s).toBeVisible();
       expect(await clippedText(shortcuts)).toEqual([]);
       await expect.poll(() => desbordeLateral(page)).toBeLessThanOrEqual(1);
+      if (row.touch) {
+        await more.tap();
+        await expect(shortcuts.first(), "a second tap on the ⋯ closes the peek").toBeHidden();
+      }
       if (!row.touch) {
         // The keyboard and a hybrid's ⋯ open the same peek inside the flow.
         await more.click();
