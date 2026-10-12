@@ -41,7 +41,7 @@ function keepEnterFromSubmitting(e: KeyboardEvent<HTMLInputElement>): void {
 function resultsNote(query: string, matches: number, total: number): string {
   if (query.trim() === "") return `${total} alumnos · escribe nombre o apellido`;
   if (matches === 0) return `Ningún alumno coincide con «${query.trim()}».`;
-  if (matches > MAX_RESULTS) return `Mostrando ${MAX_RESULTS} de ${matches}. Sigue escribiendo para ver los demás.`;
+  if (matches > MAX_RESULTS) return `${MAX_RESULTS} de ${matches}. Escribe más para acotar.`;
   return `${matches} de ${total} alumnos`;
 }
 

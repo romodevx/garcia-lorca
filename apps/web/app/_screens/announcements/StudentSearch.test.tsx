@@ -58,7 +58,7 @@ describe("StudentSearch", () => {
     render(<Harness students={many} />);
     await user.type(search(), "lopez");
     expect(screen.getAllByRole("button")).toHaveLength(8);
-    expect(screen.getByText("Mostrando 8 de 10. Sigue escribiendo para ver los demás.")).toBeInTheDocument();
+    expect(screen.getByText("8 de 10. Escribe más para acotar.")).toBeInTheDocument();
   });
 
   it("keeps the chosen pupil above the results, once, whatever is typed next", async () => {
