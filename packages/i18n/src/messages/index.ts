@@ -3,11 +3,13 @@ import enAttendance from "./en/attendance.json";
 import enAuth from "./en/auth.json";
 import enCommon from "./en/common.json";
 import enFinance from "./en/finance.json";
+import enHome from "./en/home.json";
 import enPalette from "./en/palette.json";
 import esAttendance from "./es/attendance.json";
 import esAuth from "./es/auth.json";
 import esCommon from "./es/common.json";
 import esFinance from "./es/finance.json";
+import esHome from "./es/home.json";
 import esPalette from "./es/palette.json";
 
 /**
@@ -24,13 +26,13 @@ import esPalette from "./es/palette.json";
  *   MessageKey = `common.${CommonKey}` | `auth.${AuthKey}`   (fully-qualified)
  */
 
-export const NAMESPACES = ["common", "auth", "palette", "finance", "attendance"] as const;
+export const NAMESPACES = ["common", "auth", "palette", "finance", "attendance", "home"] as const;
 export type Namespace = (typeof NAMESPACES)[number];
 
 /** All raw ICU catalogs, keyed by locale then namespace. `es` is the reference. */
 export const messages = {
-  es: { common: esCommon, auth: esAuth, palette: esPalette, finance: esFinance, attendance: esAttendance },
-  en: { common: enCommon, auth: enAuth, palette: enPalette, finance: enFinance, attendance: enAttendance },
+  es: { common: esCommon, auth: esAuth, palette: esPalette, finance: esFinance, attendance: esAttendance, home: esHome },
+  en: { common: enCommon, auth: enAuth, palette: enPalette, finance: enFinance, attendance: enAttendance, home: enHome },
 } as const satisfies Record<Locale, Record<Namespace, Record<string, string>>>;
 
 /** Literal key unions derived from the reference (`es`) catalogs. */
@@ -39,6 +41,7 @@ export type AuthKey = keyof typeof esAuth;
 export type PaletteKey = keyof typeof esPalette;
 export type FinanceKey = keyof typeof esFinance;
 export type AttendanceKey = keyof typeof esAttendance;
+export type HomeKey = keyof typeof esHome;
 
 /**
  * Per-namespace key lookup: `NamespaceKey<"auth">` = the auth catalog's keys.

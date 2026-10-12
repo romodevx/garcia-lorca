@@ -28,6 +28,7 @@ export {
   type AuthKey,
   type CommonKey,
   type FinanceKey,
+  type HomeKey,
   type MessageKey,
   type Namespace,
   type NamespaceKey,
