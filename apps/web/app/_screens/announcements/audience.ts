@@ -61,10 +61,12 @@ export function groupSections(groups: readonly LabelledGroup[], levels: readonly
   const levelName = new Map(levels.map((l) => [l.id, l.name]));
   const sections = new Map<string, TargetSection>();
   for (const g of sorted) {
-    const title = levelName.get(g.levelId ?? "") ?? OTHERS_TITLE;
-    const section = sections.get(title) ?? { key: g.levelId ?? OTHERS_TITLE, title, targets: [] };
+    // Keyed by level id, not name: two levels may be called the same.
+    const name = levelName.get(g.levelId ?? "");
+    const key = name === undefined || g.levelId === undefined ? OTHERS_TITLE : g.levelId;
+    const section = sections.get(key) ?? { key, title: name ?? OTHERS_TITLE, targets: [] };
     section.targets.push(toTarget(g));
-    sections.set(title, section);
+    sections.set(key, section);
   }
   const list = [...sections.values()];
   const onlyOthers = list.length === 1 && list[0]?.title === OTHERS_TITLE;

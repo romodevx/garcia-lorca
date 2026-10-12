@@ -37,6 +37,13 @@ describe("groupSections", () => {
     expect(sections[1]?.targets).toEqual([{ id: "x", label: "X", text: "X" }]);
   });
 
+  // Review nit 4: two levels may share a name; their groups must not merge.
+  it("keeps two levels with the same name apart", () => {
+    const twins = [level("m1", "Maternal"), level("m2", "Maternal")];
+    const groups = [group("a", "1°", "A", "m1", 1), group("b", "1°", "A", "m2", 1)];
+    expect(groupSections(groups, twins).map((s) => s.targets.map((t) => t.id))).toEqual([["a"], ["b"]]);
+  });
+
   it("is one untitled list when no group's level is known", () => {
     const bare: LabelledGroup[] = [
       { id: "b", cycleId: "c1", gradeLevelId: "g", name: "B", capacity: 30, label: "1° B" },
