@@ -71,6 +71,12 @@ export function groupSections(groups: readonly LabelledGroup[], levels: readonly
   return onlyOthers ? list.map((s) => ({ ...s, title: undefined })) : list;
 }
 
+/** The levels as one untitled list: they need no heading of their own. */
+export function levelSections(levels: readonly Level[]): TargetSection[] {
+  if (levels.length === 0) return [];
+  return [{ key: "levels", title: undefined, targets: levels.map((l) => ({ id: l.id, label: l.name, text: l.name })) }];
+}
+
 export interface AudienceCatalogue {
   groups: readonly LabelledGroup[];
   levels: readonly Level[];

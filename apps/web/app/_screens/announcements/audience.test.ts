@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { LabelledGroup, Level } from "../../config/api";
 import type { Student } from "../../students/api";
-import { groupSections, recipientNames, summarizeRecipients } from "./audience";
+import { groupSections, levelSections, recipientNames, summarizeRecipients } from "./audience";
 
 const level = (id: string, name: string): Level => ({ id, name, sepCode: id, enrollmentGranularity: "cycle" });
 const LEVELS = [level("pre", "Preescolar"), level("pri", "Primaria"), level("sec", "Secundaria")];
@@ -82,5 +82,23 @@ describe("summarizeRecipients", () => {
   it("shows up to three names and counts the rest", () => {
     expect(summarizeRecipients(["A", "B", "C"])).toEqual({ shown: ["A", "B", "C"], more: 0 });
     expect(summarizeRecipients(["A", "B", "C", "D", "E"])).toEqual({ shown: ["A", "B", "C"], more: 2 });
+  });
+});
+
+describe("levelSections", () => {
+  it("is one untitled list of the levels, in the catalogue's order", () => {
+    expect(levelSections(LEVELS)).toEqual([{
+      key: "levels",
+      title: undefined,
+      targets: [
+        { id: "pre", label: "Preescolar", text: "Preescolar" },
+        { id: "pri", label: "Primaria", text: "Primaria" },
+        { id: "sec", label: "Secundaria", text: "Secundaria" },
+      ],
+    }]);
+  });
+
+  it("has no sections without levels", () => {
+    expect(levelSections([])).toEqual([]);
   });
 });
