@@ -1371,7 +1371,9 @@ html:has(.setup-mobilebar) {
 
 /* A mouse: the peek rises over the DESCRIPTION only (title and icon stay),
    120ms after the pointer arrives and 80ms after it leaves. `hidden` stays
-   on: visibility keeps it out of Tab and of the accessibility tree. */
+   on, but hover makes it visible, so visibility alone does NOT keep it out of
+   Tab or the accessibility tree: HomeCard gives a closed peek aria-hidden and
+   tabindex=-1 shortcuts, leaving the preview as mouse-only decoration. */
 @media (hover: hover) and (pointer: fine) {
   .home-card:not(:hover):not(:focus-within) .home-card__more { opacity: 0; }
   .home-card__peek[hidden] {

@@ -53,6 +53,28 @@ describe("HomeView — card shortcuts (peek)", () => {
     expect(screen.queryByRole("button", { name: "Crear alumno" })).not.toBeInTheDocument();
   });
 
+  // Review I2: with a mouse, hovering a card previews a closed peek
+  // (globals.css lifts its `hidden`), so `hidden` alone cannot keep it out of
+  // Tab and of the accessibility tree: the ⋯ would say collapsed over a list a
+  // screen reader can walk. Closed, the preview is mouse-only decoration.
+  it("closed, the shortcuts are out of Tab and hidden from AT even if a hover preview shows them; a mouse click still works", async () => {
+    const onOpen = show();
+    const peek = peekOf("Estudiantes");
+    expect(peek).toHaveAttribute("aria-hidden", "true");
+    const shortcuts = within(peek).getAllByRole("button", { hidden: true });
+    for (const b of shortcuts) expect(b).toHaveAttribute("tabindex", "-1");
+    await userEvent.click(within(peek).getByRole("button", { name: "Buscar alumno", hidden: true }), { pointerEventsCheck: 0 });
+    expect(onOpen).toHaveBeenCalledWith("students", "search");
+  });
+
+  it("opened via the ⋯, the shortcuts are reachable again", async () => {
+    show();
+    await userEvent.click(more("Estudiantes"));
+    const peek = peekOf("Estudiantes");
+    expect(peek).not.toHaveAttribute("aria-hidden");
+    for (const b of within(peek).getAllByRole("button")) expect(b).not.toHaveAttribute("tabindex", "-1");
+  });
+
   it("the ⋯ opens it; a shortcut opens its module on its intent", async () => {
     const onOpen = show();
     await userEvent.click(more("Estudiantes"));

@@ -29,7 +29,10 @@ export interface HomeCardProps {
  * so a click anywhere opens the module; the description sits outside it and
  * describes it. The ⋯ discloses the shortcuts: two Tab stops per card, the
  * peek `hidden` while closed, Esc closes it and returns to the ⋯. The hover
- * peek is CSS only.
+ * peek is CSS only and lifts that `hidden` for a mouse, so a closed peek also
+ * carries aria-hidden and tabIndex=-1 on its shortcuts: the preview stays mouse
+ * decoration, out of Tab and of the accessibility tree, yet clickable (`inert`
+ * would block the click too) (review I2).
  */
 export function HomeCard({ module: m, shortcuts, peekOpen, onTogglePeek, onClosePeek, onOpen }: HomeCardProps): ReactElement {
   const t = useTranslations("home");
@@ -82,10 +85,21 @@ export function HomeCard({ module: m, shortcuts, peekOpen, onTogglePeek, onClose
           {t(`desc.${m.id}`)}
         </p>
         {hasPeek && (
-          <ul id={peekId} className="home-card__peek" hidden={!peekOpen} onKeyDown={moveFocusAmongShortcuts}>
+          <ul
+            id={peekId}
+            className="home-card__peek"
+            hidden={!peekOpen}
+            aria-hidden={peekOpen ? undefined : true}
+            onKeyDown={moveFocusAmongShortcuts}
+          >
             {shortcuts.map((s) => (
               <li key={s.intent}>
-                <button type="button" className="home-card__shortcut" onClick={() => onOpen(s.moduleId, s.intent)}>
+                <button
+                  type="button"
+                  className="home-card__shortcut"
+                  tabIndex={peekOpen ? undefined : -1}
+                  onClick={() => onOpen(s.moduleId, s.intent)}
+                >
                   {tp(s.titleKey)} <span aria-hidden>→</span>
                 </button>
               </li>
