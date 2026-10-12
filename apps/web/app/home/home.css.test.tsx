@@ -62,6 +62,13 @@ describe("refreshed home — layout (§4.2)", () => {
     expect(body && style(body).get("min-height")).toBe("calc(var(--peek-rows) * 2.75rem)");
   });
 
+  it("keeps a closed peek closed outside the hover media (F4)", () => {
+    // `.home-card__peek { display: flex }` is an author rule, so it beat the
+    // browser's own `[hidden] { display: none }`: on touch every peek was
+    // open, with its shortcuts in the Tab order.
+    expect(rule(".home-card__peek[hidden]").get("display")).toBe("none");
+  });
+
   it("fits the hover peek in that reserve: rows only, no padding, rule or gaps on top (F4)", () => {
     // The in-flow peek's 6px padding, 1px rule and 2px gaps made the hover
     // peek 9px taller than the body it covers, so it scrolled and cut its last

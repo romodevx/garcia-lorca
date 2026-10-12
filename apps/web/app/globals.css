@@ -1345,6 +1345,9 @@ html:has(.setup-mobilebar) {
   flex-direction: column;
   gap: 2px;
 }
+/* The display above is an author rule and beats the browser's [hidden]:
+   restate it, or a closed peek shows (and tabs) everywhere but the hover media. */
+.home-card__peek[hidden] { display: none; }
 .home-card__peek:not([hidden]) { animation: homePeekIn .2s var(--ease) both; }
 @keyframes homePeekIn { from { transform: translateY(4px); } to { transform: none; } }
 .home-card__shortcut {
