@@ -73,6 +73,15 @@ describe("StudentSearch", () => {
   });
 
   // D1: Enter in the search box never sends the announcement.
+  // Review nit 6: the chosen pupil is pinned, not hidden, so it still counts.
+  it("counts the chosen pupil among the matches", async () => {
+    const user = userEvent.setup();
+    render(<Harness students={[pupil("s1", "Sofía", "Cruz"), pupil("s2", "Mateo", "Cruz"), pupil("s3", "Ana", "Pérez")]} />);
+    await user.type(search(), "cruz");
+    await user.click(screen.getByRole("button", { name: "Cruz Sofía" }));
+    expect(screen.getByText("2 de 3 alumnos")).toBeInTheDocument();
+  });
+
   it("does not submit the form on Enter", async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn((e: { preventDefault: () => void }) => e.preventDefault());

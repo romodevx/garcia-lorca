@@ -55,7 +55,11 @@ export function StudentSearch({ students, picked, onToggle, loaded }: StudentSea
   const [query, setQuery] = useState("");
   const entries = useMemo(() => toEntries(students), [students]);
   const chosen = entries.find((e) => picked.includes(e.id));
-  const matches = query.trim() === "" ? [] : entries.filter((e) => e.id !== chosen?.id && matchesSearch(query, ...e.keys));
+  const searching = query.trim() !== "";
+  const matches = searching ? entries.filter((e) => e.id !== chosen?.id && matchesSearch(query, ...e.keys)) : [];
+  // The chosen pupil is pinned above, not dropped: it still counts as a match.
+  const chosenMatches = searching && chosen !== undefined && matchesSearch(query, ...chosen.keys);
+  const matchCount = matches.length + (chosenMatches ? 1 : 0);
 
   return (
     <div className="announce-search">
@@ -70,7 +74,7 @@ export function StudentSearch({ students, picked, onToggle, loaded }: StudentSea
         onKeyDown={keepEnterFromSubmitting}
       />
       {chosen !== undefined && <PupilRow entry={chosen} on onToggle={onToggle} />}
-      <SearchResults loaded={loaded} total={entries.length} query={query} matches={matches} onToggle={onToggle} />
+      <SearchResults loaded={loaded} total={entries.length} query={query} matches={matches} matchCount={matchCount} onToggle={onToggle} />
     </div>
   );
 }
@@ -80,10 +84,12 @@ interface SearchResultsProps {
   total: number;
   query: string;
   matches: PupilEntry[];
+  /** Every pupil the query matches, the pinned one included. */
+  matchCount: number;
   onToggle: (id: string) => void;
 }
 
-function SearchResults({ loaded, total, query, matches, onToggle }: SearchResultsProps): ReactElement {
+function SearchResults({ loaded, total, query, matches, matchCount, onToggle }: SearchResultsProps): ReactElement {
   if (!loaded) return <p className="announce-note">Cargando alumnos…</p>;
   if (total === 0) return <p className="announce-note">No encontramos alumnos.</p>;
   return (
@@ -91,7 +97,7 @@ function SearchResults({ loaded, total, query, matches, onToggle }: SearchResult
       <div className="announce-rows">
         {matches.slice(0, MAX_RESULTS).map((e) => <PupilRow key={e.id} entry={e} on={false} onToggle={onToggle} />)}
       </div>
-      <p className="announce-note" aria-live="polite">{resultsNote(query, matches.length, total)}</p>
+      <p className="announce-note" aria-live="polite">{resultsNote(query, matchCount, total)}</p>
     </>
   );
 }
