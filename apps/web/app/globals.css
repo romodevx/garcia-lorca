@@ -1014,3 +1014,152 @@ html:has(.setup-mobilebar) {
   .setup-step-body { animation-name: setupFade; }
   .setup-check-in { animation: none; }
 }
+
+/* ============================================================
+   LOOK REFRESH — "Captions adaptado" (module_ui_refresh, F2b)
+
+   PLAN-redesign-home §3.3. Everything here hangs from
+   html[data-look="refresh"]: without the attribute not one rule matches, and
+   the app is today's (look.off.characterization.test.tsx). The attribute is
+   set by <LookAttribute/> from the flag, and before the first paint by the
+   pre-paint script from `gl-look`.
+
+   A SCREEN look: printed receipts keep today's styles (no grain, no halo).
+
+   Lime rule (review D4): lime is for what is primary, what is selected and
+   the hover halo. Nothing else — a card's hover border takes the card's own
+   color, and the green wash at the top is forest, not lime.
+   ============================================================ */
+@media screen {
+  html[data-look="refresh"] {
+    --r-lg: 16px;
+    /* Cards rest flat on a hairline instead of a shadow (review D13). If the
+       school's projector loses them, --hair goes up to --border-strong. */
+    --shadow-card: none;
+    /* The capsule's distance from the window's edges. */
+    --topbar-float: 12px;
+    /* What a sticky bar covers at the top; 0 while the bar is static. */
+    --topbar-clearance: 0px;
+    /* Tinted icon squares: the color at 13% over the surface, and the glyph
+       pulled 40% toward the text so it holds 3:1 on that tint in both themes
+       (pure lime, yellow and orange on white, or forest and purple on dark,
+       fall to 1.4–2.8:1). */
+    --icon-tint: 13%;
+    --icon-ink-share: 60%;
+    /* The greeting's serif (F3 uses it, through .look-greeting). */
+    --font-serif: var(--font-libre-baskerville), Georgia, "Times New Roman", serif;
+  }
+
+  html[data-look="refresh"]:not([data-theme="dark"]) {
+    --bg: #FBFBF8;
+    --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23g)' opacity='.05'/%3E%3C/svg%3E");
+    --bg-grad: var(--grain), radial-gradient(1200px 560px at 50% -12%, #E6F2DC 0%, rgba(230,242,220,0) 62%);
+    --hair: #E2E9DF;
+    --halo: 0 14px 34px -12px color-mix(in oklab, var(--lime) 38%, transparent);
+    --topbar-bg: rgba(255,255,255,.64);
+    --focus-ring: var(--forest);
+  }
+
+  html[data-look="refresh"][data-theme="dark"] {
+    --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23g)' opacity='.07'/%3E%3C/svg%3E");
+    --bg-grad: var(--grain), radial-gradient(1200px 560px at 50% -12%, rgba(10,122,47,.24) 0%, rgba(10,122,47,0) 62%);
+    --hair: #1F3828;
+    /* Dark: .10 and always offset — a 0-offset lime glow on #07150D is the
+       dark-glow pattern the review ruled out. */
+    --halo: 0 14px 34px -12px rgba(122,196,0,.10);
+    --topbar-bg: rgba(14,32,22,.6);
+    --focus-ring: var(--lime);
+  }
+
+  /* ---- the floating top bar ---- */
+  html[data-look="refresh"] .topbar {
+    position: relative;
+    margin: var(--topbar-float) var(--topbar-float) 0;
+    border: 1px solid var(--hair);
+    border-radius: 28px;
+    -webkit-backdrop-filter: blur(28px) saturate(180%);
+    backdrop-filter: blur(28px) saturate(180%);
+  }
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    html[data-look="refresh"] .topbar {
+      background: var(--surface);
+    }
+  }
+  /* Sticky only where the window has height to spare: below 560px (a laptop
+     at 200% zoom) a bar that never scrolls away eats a fifth of the screen. */
+  @media (min-height: 560px) {
+    html[data-look="refresh"] {
+      --topbar-clearance: calc(var(--topbar-h) + var(--topbar-float));
+      /* WCAG 2.2 · 2.4.11: a focused field never lands under the bar. */
+      scroll-padding-top: calc(var(--topbar-h) + 16px);
+    }
+    html[data-look="refresh"] .topbar {
+      position: sticky;
+      top: var(--topbar-float);
+    }
+  }
+  /* Configuración's "Paso N de 8" bar (< 900px) sticks under the capsule. */
+  html[data-look="refresh"]:has(.setup-mobilebar) {
+    scroll-padding-top: calc(var(--topbar-clearance) + var(--setup-bar-h) + var(--setup-bar-gap));
+  }
+  @media (max-width: 899px) {
+    html[data-look="refresh"] .setup-mobilebar {
+      top: var(--topbar-clearance);
+    }
+  }
+
+  /* ---- cards: hairline at rest, halo + their own color on hover ---- */
+  html[data-look="refresh"] .module-card,
+  html[data-look="refresh"] .kpi-card {
+    border: 1px solid var(--hair);
+  }
+  html[data-look="refresh"] .module-card:hover {
+    border: 1px solid color-mix(in oklab, var(--mod-c) 45%, var(--hair));
+    box-shadow: var(--halo);
+  }
+  html[data-look="refresh"] .kpi-card:hover {
+    border: 1px solid color-mix(in oklab, var(--kpi-c) 45%, var(--hair));
+    box-shadow: var(--halo);
+  }
+
+  /* ---- tinted icon squares (home and the module headers) ---- */
+  html[data-look="refresh"] .module-header-icon,
+  html[data-look="refresh"] .module-card-icon {
+    background: color-mix(in oklab, var(--icon-c) var(--icon-tint), var(--surface));
+    color: color-mix(in oklab, var(--icon-c) var(--icon-ink-share), var(--text));
+    box-shadow: none;
+  }
+  html[data-look="refresh"] .kpi-card-icon {
+    background: color-mix(in oklab, var(--kpi-c) var(--icon-tint), var(--surface));
+    color: color-mix(in oklab, var(--kpi-c) var(--icon-ink-share), var(--text));
+  }
+  html[data-look="refresh"] .module-header-icon--neutral,
+  html[data-look="refresh"] .module-card--neutral .module-card-icon {
+    background: var(--surface-3);
+    color: var(--text-muted);
+  }
+
+  /* ---- focus ring (review D10): ≥ 3:1 on the surface and on the page ---- */
+  html[data-look="refresh"] :focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+  }
+
+  /* ---- the greeting (F3 puts the class on the home's h1, and only there) ---- */
+  html[data-look="refresh"] .look-greeting {
+    font-family: var(--font-serif);
+    font-weight: 400;
+    letter-spacing: -.01em;
+  }
+
+  /* Forced colors drop the halo and the hairline's color: a card would be
+     text floating on nothing. */
+  @media (forced-colors: active) {
+    html[data-look="refresh"] .module-card,
+    html[data-look="refresh"] .module-card:hover,
+    html[data-look="refresh"] .kpi-card,
+    html[data-look="refresh"] .kpi-card:hover {
+      border: 1px solid CanvasText;
+    }
+  }
+}
