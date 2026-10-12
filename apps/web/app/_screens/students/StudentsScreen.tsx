@@ -36,6 +36,7 @@ import { StudentNotesDialog } from "../../_design/students/StudentNotesDialog";
 import { StudentStatementDrawer } from "../../_design/students/StudentStatementDrawer";
 import { useIntent } from "../../routing/pendingIntent";
 import { fold } from "@garcia-lorca/ui/command-core";
+import { ModuleHeaderIcon } from "../../_design/ModuleHeaderIcon";
 
 /** The floating "Nuevo alumno": its height, its distance from the bottom, and
  * the breathing room the page leaves above it. */
@@ -1011,7 +1012,7 @@ export function StudentsScreen({ onBack, canCreate = true, onEdit, canWriteNotes
 
       <div className="fade-up" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 16, marginBottom: 24 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          <div style={{ width: 56, height: 56, borderRadius: 18, display: "grid", placeItems: "center", background: "var(--forest)", color: "#fff", boxShadow: "0 6px 16px color-mix(in oklab, var(--forest) 38%, transparent)" }}><Icon name="students" size={30} /></div>
+          <ModuleHeaderIcon icon="students" color="forest" shrinks />
           <div>
             <h1 style={{ fontSize: 30, fontWeight: 800, color: "var(--text)" }}>Estudiantes</h1>
             <p style={{ color: "var(--text-muted)", fontSize: 15, marginTop: 3 }}>{students.length} alumnos · Ciclo {cycleName}</p>

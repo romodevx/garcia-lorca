@@ -20,6 +20,7 @@ import { RosterPanel } from "./RosterPanel";
 import { StudentDirectoryPanel } from "./StudentDirectoryPanel";
 
 import { API_URL } from "../../api-url";
+import { ModuleHeaderIcon } from "../../_design/ModuleHeaderIcon";
 
 // Gateway base URL for the browser (public env; matches AppShell/compose).
 
@@ -88,9 +89,7 @@ export function Enrollment({ onBack }: EnrollmentProps): ReactElement {
       </button>
 
       <div className="fade-up" style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 24 }}>
-        <div style={{ width: 56, height: 56, borderRadius: 18, display: "grid", placeItems: "center", background: "var(--surface-3)", color: "var(--text-muted)" }}>
-          <Icon name="students" size={30} />
-        </div>
+        <ModuleHeaderIcon icon="students" color="neutral" shrinks />
         <div>
           <h1 style={{ fontSize: 30, fontWeight: 800, color: "var(--text)" }}>Inscripciones</h1>
           <p style={{ color: "var(--text-muted)", fontSize: 15, marginTop: 3 }}>Inscribe alumnos, consulta el roster y traslada entre grupos</p>

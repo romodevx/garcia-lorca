@@ -34,6 +34,7 @@ import { useIntent } from "../../routing/pendingIntent";
 import { TeachersPanel } from "./TeachersPanel";
 
 import { API_URL } from "../../api-url";
+import { ModuleHeaderIcon } from "../../_design/ModuleHeaderIcon";
 
 
 export interface TeachersScreenProps {
@@ -142,9 +143,7 @@ export function TeachersScreen({ onBack, onOpenLoad, canGrantAccess = false, can
       </button>
 
       <div className="fade-up" style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 24 }}>
-        <div style={{ width: 56, height: 56, borderRadius: 18, display: "grid", placeItems: "center", background: "var(--purple)", color: "#fff", boxShadow: "0 6px 16px color-mix(in oklab, var(--purple) 38%, transparent)" }}>
-          <Icon name="user" size={30} />
-        </div>
+        <ModuleHeaderIcon icon="user" color="purple" shrinks />
         <div>
           <h1 style={{ fontSize: 30, fontWeight: 800, color: "var(--text)" }}>Docentes</h1>
           <p style={{ color: "var(--text-muted)", fontSize: 15, marginTop: 3 }}>

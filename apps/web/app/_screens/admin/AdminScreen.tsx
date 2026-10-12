@@ -33,6 +33,7 @@ import { OwnerOnlyList } from "./parts";
 
 import { API_URL } from "../../api-url";
 import { matchesSearch } from "../../_design/textSearch";
+import { ModuleHeaderIcon } from "../../_design/ModuleHeaderIcon";
 
 const AV: ColorKey[] = ["lime", "forest", "orange", "purple", "yellow"];
 const fi: CSSProperties = { width: "100%", height: 50, padding: "0 16px", borderRadius: "var(--r-md)", border: "1.5px solid var(--border)", background: "var(--surface)", color: "var(--text)", fontSize: 15.5, outline: "none" };
@@ -222,7 +223,7 @@ export function AdminScreen({ onBack, canDeleteUsers = false, currentUserId }: A
 
       <div className="fade-up" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 16, marginBottom: 24 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          <div style={{ width: 56, height: 56, borderRadius: 18, display: "grid", placeItems: "center", background: "var(--forest)", color: "#fff", boxShadow: "0 6px 16px color-mix(in oklab, var(--forest) 38%, transparent)" }}><Icon name="shield" size={30} /></div>
+          <ModuleHeaderIcon icon="shield" color="forest" shrinks />
           <div><h1 style={{ fontSize: 30, fontWeight: 800, color: "var(--text)" }}>Administración</h1><p style={{ color: "var(--text-muted)", fontSize: 15, marginTop: 3 }}>Usuarios, roles y permisos</p></div>
         </div>
         <div style={{ display: "flex", gap: 12 }}>

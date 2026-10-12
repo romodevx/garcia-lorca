@@ -15,6 +15,7 @@ import { ActivitiesTable, type ActiveFilter } from "./ActivitiesTable";
 import { ActivityEnrollPage } from "./ActivityEnrollPage";
 import { ActivityFormPage } from "./ActivityFormPage";
 import { useToast } from "./useToast";
+import { ModuleHeaderIcon } from "../../_design/ModuleHeaderIcon";
 
 const FAB_HEIGHT = 60;
 const FAB_BOTTOM = 32;
@@ -91,9 +92,7 @@ export function ActivitiesScreen({ onBack, permissions, today: injectedToday }: 
       </button>
 
       <header style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 24, flexWrap: "wrap" }}>
-        <div style={{ width: 56, height: 56, borderRadius: 18, display: "grid", placeItems: "center", background: "var(--forest)", color: "#fff", boxShadow: "0 6px 16px color-mix(in oklab, var(--forest) 38%, transparent)", flexShrink: 0 }}>
-          <Icon name="star" size={30} />
-        </div>
+        <ModuleHeaderIcon icon="star" color="forest" />
         <div style={{ minWidth: 0, flex: 1 }}>
           <h1 style={{ fontSize: 30, fontWeight: 800, color: "var(--text)" }}>Actividades</h1>
           <p style={{ color: "var(--text-muted)", fontSize: 15, marginTop: 3 }}>Extracurriculares y su cobro</p>

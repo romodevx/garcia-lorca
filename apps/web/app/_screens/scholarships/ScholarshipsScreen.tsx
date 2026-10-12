@@ -14,6 +14,7 @@ import { StatCards } from "../uniforms/parts";
 import { ScholarshipAssignPage } from "./ScholarshipAssignPage";
 import { ScholarshipDrawer } from "./ScholarshipDrawer";
 import { ScholarshipsTable, type ActiveFilter } from "./ScholarshipsTable";
+import { ModuleHeaderIcon } from "../../_design/ModuleHeaderIcon";
 
 const FAB_HEIGHT = 60;
 const FAB_BOTTOM = 32;
@@ -88,9 +89,7 @@ export function ScholarshipsScreen({ onBack, permissions }: ScholarshipsScreenPr
       </button>
 
       <header style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 24, flexWrap: "wrap" }}>
-        <div style={{ width: 56, height: 56, borderRadius: 18, display: "grid", placeItems: "center", background: "var(--purple)", color: "#fff", boxShadow: "0 6px 16px color-mix(in oklab, var(--purple) 38%, transparent)", flexShrink: 0 }}>
-          <Icon name="scholarship" size={30} />
-        </div>
+        <ModuleHeaderIcon icon="scholarship" color="purple" />
         <div style={{ minWidth: 0, flex: 1 }}>
           <h1 style={{ fontSize: 30, fontWeight: 800, color: "var(--text)" }}>Becas</h1>
           <p style={{ color: "var(--text-muted)", fontSize: 15, marginTop: 3 }}>Becas y descuentos, y quién los tiene</p>

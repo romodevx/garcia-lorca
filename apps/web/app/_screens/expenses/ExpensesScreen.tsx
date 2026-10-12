@@ -16,6 +16,7 @@ import { useIntent } from "../../routing/pendingIntent";
 import { ExpenseDrawer, METHOD_LABEL } from "./ExpenseDrawer";
 import { monthLabel, monthRange, shiftMonth } from "./period";
 import { ReportsPanel } from "./ReportsPanel";
+import { ModuleHeaderIcon } from "../../_design/ModuleHeaderIcon";
 
 type TabId = "expenses" | "reports" | "categories";
 type StatusFilter = "active" | "cancelled";
@@ -121,9 +122,7 @@ export function ExpensesScreen({ onBack, permissions, today: injectedToday }: Ex
       </button>
 
       <header style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 24, flexWrap: "wrap" }}>
-        <div style={{ width: 56, height: 56, borderRadius: 18, display: "grid", placeItems: "center", background: "var(--forest)", color: "#fff", boxShadow: "0 6px 16px color-mix(in oklab, var(--forest) 38%, transparent)", flexShrink: 0 }}>
-          <Icon name="trend" size={30} />
-        </div>
+        <ModuleHeaderIcon icon="trend" color="forest" />
         <div style={{ minWidth: 0, flex: 1 }}>
           <h1 style={{ fontSize: 30, fontWeight: 800, color: "var(--text)" }}>Egresos</h1>
           <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 3 }}>

@@ -27,6 +27,7 @@ import { IncomePanel } from "./IncomePanel";
 import { csvName, downloadCsv, toCsv, type CsvColumn } from "../../_lib/csv";
 import { matchesSearch } from "../../_design/textSearch";
 import { compareStudentNames, formatStudentName } from "../../_design/students/studentName";
+import { ModuleHeaderIcon } from "../../_design/ModuleHeaderIcon";
 
 /** One key per payment attempt: a retried submit is the same payment, never a second one. */
 function newAttemptKey(): string {
@@ -371,7 +372,7 @@ export function FinanceScreen({ onBack, today: officeDay, notes, canCorrectPayme
 
       <div className="fade-up" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 16, marginBottom: 24 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          <div style={{ width: 56, height: 56, borderRadius: 18, display: "grid", placeItems: "center", background: "var(--orange)", color: "#fff", boxShadow: "0 6px 16px color-mix(in oklab, var(--orange) 38%, transparent)" }}><Icon name="finance" size={30} /></div>
+          <ModuleHeaderIcon icon="finance" color="orange" shrinks />
           <div>
             <h1 style={{ fontSize: 30, fontWeight: 800, color: "var(--text)" }}>Finanzas</h1>
             <p style={{ color: "var(--text-muted)", fontSize: 15, marginTop: 3 }}>Ciclo {cycleName} · Ingresos recibidos y adeudos</p>

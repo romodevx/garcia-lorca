@@ -15,6 +15,7 @@ import { CollectDrawer, type CollectStudent } from "../finance/CollectDrawer";
 import type { NotesAccess } from "../../_design/students/StudentNotesBeside";
 import { matchesSearch } from "../../_design/textSearch";
 import { formatStudentName, sortStudents, studentNameSearchKeys } from "../../_design/students/studentName";
+import { ModuleHeaderIcon } from "../../_design/ModuleHeaderIcon";
 
 const search: CSSProperties = {
   width: "100%", height: 60, paddingLeft: 52, paddingRight: 18,
@@ -114,9 +115,7 @@ export function PaymentsScreen({ onBack, canGrantDiscounts = false, notes, canCo
       </button>
 
       <div className="fade-up" style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 26 }}>
-        <div style={{ width: 56, height: 56, borderRadius: 18, display: "grid", placeItems: "center", background: "var(--forest)", color: "#fff", boxShadow: "0 6px 16px color-mix(in oklab, var(--forest) 38%, transparent)" }}>
-          <Icon name="card" size={30} />
-        </div>
+        <ModuleHeaderIcon icon="card" color="forest" shrinks />
         <div style={{ flex: 1, minWidth: 0 }}>
           <h1 style={{ fontSize: 30, fontWeight: 800, color: "var(--text)" }}>Registro de pagos</h1>
           <p style={{ color: "var(--text-muted)", fontSize: 15, marginTop: 3 }}>Busca al alumno y captura lo que entregó</p>

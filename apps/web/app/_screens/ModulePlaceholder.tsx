@@ -6,6 +6,7 @@ import { Icon } from "../_design/Icon";
 import { Page } from "../_design/Page";
 import { COLOR } from "../_design/colors";
 import type { ModuleDef } from "../_design/data";
+import { ModuleHeaderIcon } from "../_design/ModuleHeaderIcon";
 
 export interface ModulePlaceholderProps {
   m: ModuleDef;
@@ -27,19 +28,7 @@ export function ModulePlaceholder({ m, onBack }: ModulePlaceholderProps): ReactE
         Volver al inicio
       </button>
       <div className="fade-up" style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 40 }}>
-        <div
-          style={{
-            width: 56,
-            height: 56,
-            borderRadius: 18,
-            display: "grid",
-            placeItems: "center",
-            background: neutral ? "var(--surface-3)" : c.v,
-            color: neutral ? "var(--text-muted)" : c.ink
-          }}
-        >
-          <Icon name={m.icon} size={30} />
-        </div>
+        <ModuleHeaderIcon icon={m.icon} color={m.color} glow={false} shrinks />
         <div>
           <h1 style={{ fontSize: 30, fontWeight: 800, color: "var(--text)" }}>{m.label}</h1>
           <p style={{ color: "var(--text-muted)", fontSize: 15, marginTop: 3 }}>{m.desc}</p>

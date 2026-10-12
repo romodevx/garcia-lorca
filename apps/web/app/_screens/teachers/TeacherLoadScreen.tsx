@@ -16,6 +16,7 @@ import { ConflictNotice } from "./ConflictNotice";
 import { CurrentLoadPanel } from "./CurrentLoadPanel";
 import { useLoadWrites } from "./useLoadWrites";
 import { useTeacherLoadData } from "./useTeacherLoadData";
+import { ModuleHeaderIcon } from "../../_design/ModuleHeaderIcon";
 
 export interface TeacherLoadScreenProps {
   /** The teacher's id as the URL carries it, any case. */
@@ -59,9 +60,7 @@ export function TeacherLoadScreen({ teacherId: rawTeacherId, onBack, canWrite = 
       </button>
 
       <div className="fade-up" style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 20 }}>
-        <div style={{ width: 56, height: 56, flexShrink: 0, borderRadius: 18, display: "grid", placeItems: "center", background: "var(--purple)", color: "#fff" }}>
-          <Icon name="grades" size={30} />
-        </div>
+        <ModuleHeaderIcon icon="grades" color="purple" glow={false} />
         <div style={{ minWidth: 0 }}>
           <h1 style={{ fontSize: 28, fontWeight: 800, color: "var(--text)", overflowWrap: "anywhere" }}>
             {name === "" ? "Carga académica" : `Carga académica de ${name}`}

@@ -19,6 +19,7 @@ import { TermsPanel } from "./TermsPanel";
 import { LevelPeriodsEntry } from "./periods/LevelPeriodsEntry";
 import { StudentImportEntry } from "../studentImport/StudentImportEntry";
 import { useCatalogState } from "./useCatalogState";
+import { ModuleHeaderIcon } from "../../_design/ModuleHeaderIcon";
 
 export interface CatalogProps {
   onBack: () => void;
@@ -80,9 +81,7 @@ export function Catalog({ onBack, canDeleteLevels = false, onDeleteLevel, notice
 
       {!pricing && (
       <div className="fade-up" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 16, marginBottom: 24 }}>
-        <div style={{ width: 56, height: 56, borderRadius: 18, display: "grid", placeItems: "center", background: "var(--forest)", color: "#fff", boxShadow: "0 6px 16px color-mix(in oklab, var(--forest) 38%, transparent)" }}>
-          <Icon name="settings" size={30} />
-        </div>
+        <ModuleHeaderIcon icon="settings" color="forest" shrinks />
         <div>
           <h1 style={{ fontSize: 30, fontWeight: 800, color: "var(--text)" }}>Configuración académica</h1>
           <p style={{ color: "var(--text-muted)", fontSize: 15, marginTop: 3 }}>Ciclos, niveles, grados, materias, grupos y periodos</p>

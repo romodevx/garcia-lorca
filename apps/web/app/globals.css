@@ -218,6 +218,25 @@ input { font-family: var(--font-ui); }
 .fade-up { animation: fadeUp .5s var(--ease) both; }
 @media (prefers-reduced-motion: reduce) { .fade-up { animation: none; } }
 
+/* El cuadro de color a la cabeza de cada módulo (ModuleHeaderIcon). Eran
+   veinte copias en línea del mismo div; ahora una sola clase, para que la capa
+   html[data-look] de F2b los cambie todos a la vez. En línea van --icon-c,
+   --icon-ink y --icon-glow (40% en lima y amarillo, 38% en los demás). */
+.module-header-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 18px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  background: var(--icon-c);
+  color: var(--icon-ink);
+  box-shadow: 0 6px 16px color-mix(in oklab, var(--icon-c) var(--icon-glow), transparent);
+}
+.module-header-icon--neutral { background: var(--surface-3); color: var(--text-muted); box-shadow: none; }
+.module-header-icon--flat { box-shadow: none; }
+.module-header-icon--shrinks { flex-shrink: 1; }
+
 /* ============================================================
    INICIO: TARJETA DE MÓDULO Y TARJETA KPI
 
