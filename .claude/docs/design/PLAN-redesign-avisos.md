@@ -1,6 +1,6 @@
 # Plan — Rediseño de Avisos ("Redactar y ver", variante A)
 
-Estado: **v2 (enmiendas de las dos revisiones), pendiente de aprobación del dueño** · 2026-10-12 · rama `feature/redesign-avisos` (desde `dev`)
+Estado: **v2 APROBADO por el dueño el 2026-10-12** (D3: columna 960 px, foco a la alerta = layout, BC1–BC7 fuera) · 2026-10-12 · rama `feature/redesign-avisos` (desde `dev`)
 Insumos: `.gstack/redesign/avisos/behavior.md` (contrato) · `diagnosis.md` (P1–P14) ·
 `variants/variant-a.png` (elegida en D2) · `before/` (capturas).
 
