@@ -41,6 +41,9 @@ var AllModuleFlags = []string{
 	// PLAN-redesign-configuracion). Presentation only: it guards no route; the
 	// boundary stays module_config + config:read/write.
 	featureflag.Key("config_setup"),
+	// The app-wide look refresh and the new home (PLAN-redesign-home F2b/F3).
+	// Presentation only: it guards no route and no module depends on it.
+	featureflag.Key("ui_refresh"),
 }
 
 // ParseEnabledModules turns a comma-separated list of module names (or full
