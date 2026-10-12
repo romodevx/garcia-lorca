@@ -6,7 +6,7 @@ import { AppFlagsProvider } from "./flags-provider";
 import { buildMessages } from "./i18n/config";
 import { getServerLocale } from "./i18n/server";
 import { ThemeProvider } from "./theme/ThemeProvider";
-import { themeBootstrapScript } from "./theme/theme-script";
+import { prePaintScript } from "./theme/pre-paint";
 import "./globals.css";
 
 import { DemoBanner } from "./_design/DemoBanner";
@@ -46,11 +46,12 @@ export default async function RootLayout({
   const messages = buildMessages(locale);
 
   return (
-    // suppressHydrationWarning: the pre-paint theme script sets `data-theme` on
-    // <html> before React hydrates, so the client <html> carries an attribute the
-    // server HTML does not. This is the intended theme-flash pattern; the warning
-    // would otherwise fire on <html> every load. Scope is THIS element's
-    // attributes only — it does not mask mismatches in children.
+    // suppressHydrationWarning: the pre-paint script sets `data-theme` (and
+    // `data-look`) on <html> before React hydrates, so the client <html>
+    // carries attributes the server HTML does not. This is the intended
+    // no-flash pattern; the warning would otherwise fire on <html> every load.
+    // Scope is THIS element's attributes only — it does not mask mismatches in
+    // children.
     <html
       lang={locale}
       className={`${poppins.variable} ${dmSans.variable}`}
@@ -58,12 +59,12 @@ export default async function RootLayout({
     >
       <head>
         {/*
-          No-flash theme bootstrap. Runs before paint to set `data-theme` on
-          <html> from localStorage (`gl-theme`), avoiding both a light/dark
-          flash and a hydration mismatch. Static, app-authored string — not user
-          input — so it is safe as a pre-hydration inline script.
+          No-flash bootstrap. Runs before paint to set `data-theme` (from
+          `gl-theme`) and `data-look` (from `gl-look`) on <html>, avoiding both
+          a flash and a hydration mismatch. Static, app-authored string — not
+          user input — so it is safe as a pre-hydration inline script.
         */}
-        <script dangerouslySetInnerHTML={{ __html: themeBootstrapScript }} />
+        <script dangerouslySetInnerHTML={{ __html: prePaintScript }} />
       </head>
       <body>
         <NextIntlClientProvider locale={locale} messages={messages}>
