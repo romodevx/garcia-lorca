@@ -2,6 +2,7 @@ import { screen } from "@testing-library/react";
 import type userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 
+import { AnnouncementsCompose } from "./AnnouncementsCompose";
 import { AnnouncementsScreen, type AnnouncementsScreenProps } from "./AnnouncementsScreen";
 
 /*
@@ -28,4 +29,16 @@ export const OLD_VIEW: ViewUnderTest = {
   },
 };
 
-export const VIEWS: readonly ViewUnderTest[] = [OLD_VIEW];
+/** "Destinatarios al lado" (module_announcements_view): a pupil is found by typing first. */
+export const NEW_VIEW: ViewUnderTest = {
+  name: "new view",
+  Screen: AnnouncementsCompose,
+  pickStudent: async (user, name) => {
+    const search = await screen.findByRole("searchbox", { name: "Buscar alumno" });
+    await user.clear(search);
+    await user.type(search, name.split(" ")[0] ?? name);
+    await user.click(await screen.findByRole("button", { name }));
+  },
+};
+
+export const VIEWS: readonly ViewUnderTest[] = [OLD_VIEW, NEW_VIEW];

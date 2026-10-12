@@ -23,12 +23,20 @@ export function sentMessage({ created, audience }: SendResult): string {
   return created === 0 ? `${reached} · ya se había enviado, no se repitió` : reached;
 }
 
+/** Whether each list's own load has settled; A2–A4 fail silently, as empty. */
+export interface ListsLoaded {
+  groups: boolean;
+  levels: boolean;
+  students: boolean;
+}
+
 /** Everything a view of /avisos needs: the data, the draft and the rules. */
 export interface AnnouncementComposer {
   cycle: Cycle | undefined;
   levels: Level[];
   groups: LabelledGroup[];
   students: Student[];
+  loaded: ListsLoaded;
   scope: AnnouncementScope;
   picked: string[];
   title: string;
@@ -67,20 +75,24 @@ export function useAnnouncementComposer(): AnnouncementComposer {
   const [sent, setSent] = useState<SendResult | null>(null);
   const [error, setError] = useState<string | undefined>(undefined);
   const [attemptKey, setAttemptKey] = useState(newAttemptKey);
+  const [cyclesSettled, setCyclesSettled] = useState(false);
+  const [levelsSettled, setLevelsSettled] = useState(false);
+  const [studentsSettled, setStudentsSettled] = useState(false);
+  const [groupsSettled, setGroupsSettled] = useState(false);
 
   const cycle = cycles.find((c) => c.status === "active") ?? cycles[0];
 
   useEffect(() => {
-    listCycles(API_URL).then(setCycles).catch(() => setError("No pudimos leer los ciclos."));
-    listLevels(API_URL).then(setLevels).catch(() => {});
-    listStudents(API_URL).then(setStudents).catch(() => {});
+    listCycles(API_URL).then(setCycles).catch(() => setError("No pudimos leer los ciclos.")).finally(() => setCyclesSettled(true));
+    listLevels(API_URL).then(setLevels).catch(() => {}).finally(() => setLevelsSettled(true));
+    listStudents(API_URL).then(setStudents).catch(() => {}).finally(() => setStudentsSettled(true));
   }, []);
 
   useEffect(() => {
     if (cycle === undefined) {
       return;
     }
-    listLabelledGroups(API_URL, cycle.id).then(setGroups).catch(() => {});
+    listLabelledGroups(API_URL, cycle.id).then(setGroups).catch(() => {}).finally(() => setGroupsSettled(true));
   }, [cycle]);
 
   const chooseScope = (next: AnnouncementScope): void => {
@@ -138,8 +150,15 @@ export function useAnnouncementComposer(): AnnouncementComposer {
     }
   };
 
+  // Without a cycle there are no groups to wait for.
+  const loaded: ListsLoaded = {
+    groups: groupsSettled || (cyclesSettled && cycle === undefined),
+    levels: levelsSettled,
+    students: studentsSettled,
+  };
+
   return {
-    cycle, levels, groups, students, scope, picked, title, body, sending, sent, error,
+    cycle, levels, groups, students, loaded, scope, picked, title, body, sending, sent, error,
     chooseScope, toggle, setTitle, setBody, submit,
   };
 }
