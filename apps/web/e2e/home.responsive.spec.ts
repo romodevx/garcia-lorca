@@ -76,6 +76,31 @@ async function clippedText(scope: Locator): Promise<string[]> {
   }, EPS);
 }
 
+/**
+ * Words broken in two: `overflow-wrap: anywhere` never clips, it splits
+ * ("Calificacion / es"), so a word wider than its box is a cut too.
+ */
+async function splitWords(scope: Locator): Promise<string[]> {
+  return scope.evaluateAll((els) => {
+    const out: string[] = [];
+    for (const el of els as HTMLElement[]) {
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+        const text = node.textContent ?? "";
+        for (const m of text.matchAll(/\S+/g)) {
+          const range = document.createRange();
+          range.setStart(node, m.index);
+          range.setEnd(node, m.index + m[0].length);
+          // One line ⇒ one rect; a word broken over two lines has two.
+          const lines = new Set([...range.getClientRects()].filter((r) => r.width > 0).map((r) => Math.round(r.top)));
+          if (lines.size > 1) out.push(`${m[0]} split over ${lines.size} lines`);
+        }
+      }
+    }
+    return out;
+  });
+}
+
 /** The visible text of the home a person reads: titles, descriptions, area headings. */
 const READABLE = ".home-greeting, .home-area__title, .home-card__main, .home-card__desc, .home-kpi__main";
 
@@ -131,6 +156,7 @@ function rowSuite(row: Row): void {
       await openHome(page, REFRESH);
       await expect.poll(() => desbordeLateral(page), { message: "the home scrolls sideways" }).toBeLessThanOrEqual(1);
       expect(await clippedText(page.locator(READABLE))).toEqual([]);
+      expect(await splitWords(page.locator(".home-card__main, .home-area__title, .home-kpi__main"))).toEqual([]);
       // The search is the palette's door: at any width it stays a real target.
       const search = await page.locator(".topbar-search-btn").boundingBox();
       expect(search?.width ?? 0, "the search trigger collapsed").toBeGreaterThanOrEqual(MIN_TARGET_PX);
