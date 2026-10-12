@@ -40,6 +40,7 @@ import { Login } from "./_screens/Login";
 import { ChangePassword } from "./_screens/ChangePassword";
 import { ModulePlaceholder } from "./_screens/ModulePlaceholder";
 import { AnnouncementsScreen } from "./_screens/announcements/AnnouncementsScreen";
+import { AnnouncementsCompose } from "./_screens/announcements/AnnouncementsCompose";
 import { PaymentsScreen } from "./_screens/payments/PaymentsScreen";
 import { useTheme } from "./theme/ThemeProvider";
 import { endSession } from "./auth/logout";
@@ -245,6 +246,8 @@ export function AppShell(): ReactElement {
   // UX only, like every other flag read here: the gateway's 404 is what actually
   // keeps a disabled module unreachable.
   const commsEnabled = useFlag("module_comms");
+  // Presentation only: which view of /avisos (PLAN-redesign-avisos).
+  const announcementsView = useFlag("module_announcements_view");
   // The academic-catalog surface is gated by module_config (UX-only; the gateway
   // is the boundary). The "settings" module (Configuración) opens this catalog.
   const configEnabled = useFlag("module_config");
@@ -644,7 +647,7 @@ export function AppShell(): ReactElement {
         ))}
       {view.screen === "announcements" &&
         (commsEnabled ? (
-          <AnnouncementsScreen onBack={home} />
+          announcementsView ? <AnnouncementsCompose onBack={home} /> : <AnnouncementsScreen onBack={home} />
         ) : (
           // Flag OFF: never render the send surface; the friendly stub keeps
           // navigation from dead-ending. (Backend 404 is authoritative.)
