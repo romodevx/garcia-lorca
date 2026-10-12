@@ -271,4 +271,14 @@ Sin peek (D10; la tarjeta ya lleva ahí): Avisos, Asistencia, Calificaciones, Re
   - Además de `Finance.tsx` se borraron los 11 archivos que solo él alcanzaba (`useFinance`, sus paneles —incluido `GeneratePanel`— y `totals`).
   - Las 8 aserciones de `registry.test.ts:70-128` se dejaron: siguen siendo ciertas (esos comandos no tienen pantalla con intent). Cambiaron la de `:143` (cobro) y la de `CommandPaletteHost.test.tsx` ("Crear alumno" → `module:students:new`), y se agregaron 18 casos de intents y `requires`.
   - ⌘K ganó 7 comandos nuevos (Buscar alumno, Agregar profesor, Ver cargos vencidos, Registrar egreso, Registrar ausencia, Nueva actividad, Ver existencias). `settings.create.teacher` ("Crear profesor" → Configuración) sigue fuera de alcance (§10).
-- [ ] F2a–F4 (PR 2)
+- [x] F2a y F2b construidos en `feature/redesign-home`.
+- [x] F3 construido en `feature/redesign-home` (`apps/web/app/home/`). La variante se lee en un solo sitio (`home/homeVariant.ts`, `HOME_FLAG`). Desvíos del plan:
+  - Los KPI de dinero piden `finance:read` **y** `config:read`: el libro se lee por ciclo y solo `config:read` lee ciclos. Sin él, las dos tarjetas solo podrían mostrarse vacías.
+  - "Sin ciclo activo" también cuando hay ciclos pero ninguno activo. La línea de la fecha conserva el respaldo de hoy (el primer ciclo), así B2 no cambia.
+  - "Por cobrar" en cero dice "Aún no hay cargos" solo si el ciclo no tiene ningún cargo. Un ciclo pagado al corriente muestra `$0.00`.
+  - En cero no hay un botón aparte: toda la tarjeta lleva al siguiente paso (una sola parada de Tab) y el lector de pantalla oye una sola frase.
+  - Los accesos usan el título de ⌘K (una sola fuente): "Crear alumno" y "Ver cargos vencidos", no "Nuevo alumno" / "Ver vencidos".
+  - El filtro por flag de un acceso mira solo el flag de su módulo, no las compuertas compuestas de AppShell (p. ej. Egresos también exige `module_finance`). La tarjeta tiene el mismo hueco hoy.
+  - Saludo, fecha, "Nuevo aviso" y los avisos de permisos/sin módulos siguen en español fijo: se comparten con el inicio actual. El copy nuevo sí va por `home.*`.
+  - B3: no se enfoca el título de Avisos. No era trivial (intent `compose` nuevo, foco en `TextField`, llave de remontaje en AppShell).
+- [ ] F4 (PR 2)

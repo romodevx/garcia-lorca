@@ -5,8 +5,9 @@ import { useEffect } from "react";
 import { applyLook } from "./look";
 
 /**
- * The ONE place the skin reads its flag. The home variant (F3) reads it in its
- * own single place, so splitting the flag in two is a one-line change here.
+ * The ONE place the skin reads its flag. The home variant reads it in its own
+ * single place (home/homeVariant.ts), so splitting the flag in two is a
+ * one-line change in either file.
  */
 const SKIN_FLAG: FlagKey = "module_ui_refresh";
 
