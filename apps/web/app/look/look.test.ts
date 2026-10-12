@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { prePaintScript } from "../theme/pre-paint";
 import { THEME_STORAGE_KEY } from "../theme/theme-script";
-import { LOOK_STORAGE_KEY, applyLook, lookBootstrapScript } from "./look";
+import { LOOK_STORAGE_KEY, applyLook, isRefreshLookShown, lookBootstrapScript } from "./look";
 
 /*
  * PLAN-redesign-home §3.3 "Cómo se enciende" (review E7): the look must be on
@@ -83,5 +83,18 @@ describe("applyLook", () => {
     });
     expect(() => applyLook(true)).not.toThrow();
     expect(html().getAttribute("data-look")).toBe("refresh");
+  });
+});
+
+describe("isRefreshLookShown", () => {
+  // Review I1: before /features answers, the home asks this instead of the
+  // OFF-fallback flag, so it gives the same answer as the pre-paint skin.
+  it("is true only while <html> wears the refresh look", () => {
+    expect(isRefreshLookShown()).toBe(false);
+    localStorage.setItem(LOOK_STORAGE_KEY, "refresh");
+    run(lookBootstrapScript);
+    expect(isRefreshLookShown()).toBe(true);
+    applyLook(false);
+    expect(isRefreshLookShown()).toBe(false);
   });
 });

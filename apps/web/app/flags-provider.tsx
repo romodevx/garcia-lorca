@@ -4,6 +4,7 @@ import { FlagsProvider, type FlagSet } from "@garcia-lorca/ui/flags";
 import { useEffect, useState, type ReactNode } from "react";
 import { API_URL, IS_DESIGN_DEMO } from "./api-url";
 import { fetchFeatures } from "./features";
+import { FlagsResolvedProvider } from "./flags-resolved";
 import { LookAttribute } from "./look/LookAttribute";
 
 /**
@@ -30,7 +31,9 @@ import { LookAttribute } from "./look/LookAttribute";
  * provider lives in the root layout, survives navigation and covers pages that
  * never mount AppShell. It acts only once the flags are `resolved`, so the
  * pre-paint look is not undone by the OFF fallback; if the gateway is
- * unreachable the remembered look stays.
+ * unreachable the remembered look stays. `resolved` is also shared through
+ * FlagsResolvedProvider, so the home variant can agree with that look until
+ * the answer lands (review I1).
  */
 const DEMO_FLAGS: FlagSet = {
   module_finance: IS_DESIGN_DEMO
@@ -59,8 +62,10 @@ export function AppFlagsProvider({ children }: { children: ReactNode }): ReactNo
 
   return (
     <FlagsProvider flags={flags}>
-      <LookAttribute resolved={resolved} />
-      {children}
+      <FlagsResolvedProvider resolved={resolved}>
+        <LookAttribute resolved={resolved} />
+        {children}
+      </FlagsResolvedProvider>
     </FlagsProvider>
   );
 }

@@ -39,3 +39,13 @@ export function applyLook(refresh: boolean): void {
     // from today's look until /features answers.
   }
 }
+
+/**
+ * Whether <html> wears the refresh look right now: the remembered look the
+ * pre-paint script replayed, or the one applyLook set since. Readers that must
+ * agree with the skin before /features answers ask this (review I1).
+ */
+export function isRefreshLookShown(): boolean {
+  if (typeof document === "undefined") return false;
+  return document.documentElement.getAttribute(LOOK_ATTRIBUTE) === REFRESH;
+}
