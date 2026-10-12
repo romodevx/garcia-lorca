@@ -5,7 +5,6 @@ import { TextArea, TextField } from "../../_design/form";
 import { Icon } from "../../_design/Icon";
 import { ModuleHeaderIcon } from "../../_design/ModuleHeaderIcon";
 import { Page } from "../../_design/Page";
-import type { AnnouncementsScreenProps } from "./AnnouncementsScreen";
 import { groupSections, levelSections, recipientNames } from "./audience";
 import { AudiencePane } from "./AudiencePane";
 import { AutomaticMessages } from "./AutomaticMessages";
@@ -17,13 +16,17 @@ import { useAnnouncementComposer, type AnnouncementComposer } from "./useAnnounc
 /** C2: the message box starts four lines tall. */
 const MESSAGE_ROWS = 4;
 
+export interface AnnouncementsComposeProps {
+  onBack: () => void;
+}
+
 /**
  * Avisos, "Destinatarios al lado" (PLAN-redesign-avisos §10, behind
  * module_announcements_view). Same composer as today's screen, so the same
  * calls; only the layout is new. The <form> IS the two-pane grid, so Enter in
  * Título sends (E3); the birthday greeting has its own form and sits below.
  */
-export function AnnouncementsCompose({ onBack }: AnnouncementsScreenProps): ReactElement {
+export function AnnouncementsCompose({ onBack }: AnnouncementsComposeProps): ReactElement {
   const composer = useAnnouncementComposer();
   const [attempt, setAttempt] = useState(0);
 

@@ -1,11 +1,9 @@
 "use client";
 
-import type { ReactElement, ReactNode } from "react";
+import { useId, type ReactElement, type ReactNode } from "react";
 import type { AnnouncementScope } from "../../comms/api";
 import { SCOPES } from "./audience";
 import { TargetRow } from "./TargetRow";
-
-const TITLE_ID = "announce-pane-title";
 
 export interface AudiencePaneProps {
   scope: AnnouncementScope;
@@ -21,9 +19,10 @@ export interface AudiencePaneProps {
  * and the B6 counter at the foot.
  */
 export function AudiencePane({ scope, onChooseScope, pickedCount, children }: AudiencePaneProps): ReactElement {
+  const titleId = useId();
   return (
-    <section className="announce-card announce-pane" aria-labelledby={TITLE_ID}>
-      <h2 id={TITLE_ID} className="announce-pane__title">Destinatarios</h2>
+    <section className="announce-card announce-pane" aria-labelledby={titleId}>
+      <h2 id={titleId} className="announce-pane__title">Destinatarios</h2>
       <div className="announce-scopes">
         {SCOPES.map((s) => (
           <TargetRow key={s.value} label={s.label} text={s.label} on={scope === s.value} onToggle={() => onChooseScope(s.value)} mark="radio" />
