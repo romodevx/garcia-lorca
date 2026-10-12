@@ -1,8 +1,13 @@
 package config_test
 
 import (
+	"os"
+	"path/filepath"
+	"regexp"
 	"slices"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/garcia-lorca/services/gateway/internal/config"
 )
@@ -75,13 +80,41 @@ func TestStudentImportFlagIsRegisteredAndDefaultOff(t *testing.T) {
 	}
 }
 
+// composeFile is the repo-root docker-compose.yml, seen from this package.
+var composeFile = filepath.Join("..", "..", "..", "..", "docker-compose.yml")
+
+// composeDefault matches the gateway's `${ENABLED_MODULES:-<default>}`.
+var composeDefault = regexp.MustCompile(`^\$\{ENABLED_MODULES:-([^}]*)\}$`)
+
+// composeDefaultModules reads the default ENABLED_MODULES of the gateway in
+// docker-compose.yml, so the test follows the local stack instead of a copy
+// of it that silently drifts.
+func composeDefaultModules(t *testing.T) string {
+	t.Helper()
+	raw, err := os.ReadFile(composeFile)
+	if err != nil {
+		t.Fatalf("read %s: %v", composeFile, err)
+	}
+	var compose struct {
+		Services map[string]struct {
+			Environment map[string]string `yaml:"environment"`
+		} `yaml:"services"`
+	}
+	if err := yaml.Unmarshal(raw, &compose); err != nil {
+		t.Fatalf("parse %s: %v", composeFile, err)
+	}
+	m := composeDefault.FindStringSubmatch(compose.Services["gateway"].Environment["ENABLED_MODULES"])
+	if m == nil || m[1] == "" {
+		t.Fatalf("%s: gateway ENABLED_MODULES has no ${ENABLED_MODULES:-<default>}", composeFile)
+	}
+	return m[1]
+}
+
 // Flags that only switch a presentation (no routes of their own) still reach
 // the frontend through GET /features, and stay OFF unless listed explicitly:
 // enabling the module they dress up does not enable them.
-// composeDefaultModules mirrors docker-compose.yml's default ENABLED_MODULES.
-const composeDefaultModules = "iam,gateway,students,config,teachers,grades,finance,attendance,comms,uniforms,expenses,schedule,activities,scholarships,student_import"
-
 func TestPresentationFlagsAreRegisteredAndDefaultOff(t *testing.T) {
+	composeModules := composeDefaultModules(t)
 	tests := []struct {
 		key      string
 		baseline string
@@ -90,7 +123,7 @@ func TestPresentationFlagsAreRegisteredAndDefaultOff(t *testing.T) {
 		{key: "module_config_setup", baseline: "config", enabling: "config,config_setup"},
 		// The app-wide look (PLAN-redesign-home F2b) dresses every module, so
 		// its baseline is the whole local compose list.
-		{key: "module_ui_refresh", baseline: composeDefaultModules, enabling: composeDefaultModules + ",ui_refresh"},
+		{key: "module_ui_refresh", baseline: composeModules, enabling: composeModules + ",ui_refresh"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.key, func(t *testing.T) {
