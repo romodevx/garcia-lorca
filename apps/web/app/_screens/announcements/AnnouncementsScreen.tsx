@@ -1,22 +1,15 @@
 "use client";
 
-import { useEffect, useState, type FormEvent, type ReactElement } from "react";
+import type { ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
 import { HelpTip, TextField } from "../../_design/form";
 import { Icon } from "../../_design/Icon";
 import { Page } from "../../_design/Page";
-import { announce, type AnnouncementScope } from "../../comms/api";
-import { listCycles, listLabelledGroups, listLevels, type Cycle, type LabelledGroup, type Level } from "../../config/api";
-import { listStudents, type Student } from "../../students/api";
-import { API_URL } from "../../api-url";
+import type { AnnouncementScope } from "../../comms/api";
 import { formatStudentName, sortStudents } from "../../_design/students/studentName";
 import { BirthdayGreeting } from "./BirthdayGreeting";
 import { ModuleHeaderIcon } from "../../_design/ModuleHeaderIcon";
-
-/** One key per attempt: a retry must not buzz four hundred phones twice. */
-function newAttemptKey(): string {
-  return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
+import { useAnnouncementComposer } from "./useAnnouncementComposer";
 
 const SCOPES: { value: AnnouncementScope; label: string }[] = [
   { value: "student", label: "Un alumno" },
@@ -43,92 +36,16 @@ export interface AnnouncementsScreenProps {
  * level, the whole school — and the system works out who that is.
  */
 export function AnnouncementsScreen({ onBack }: AnnouncementsScreenProps): ReactElement {
-  const [cycles, setCycles] = useState<Cycle[]>([]);
-  const [levels, setLevels] = useState<Level[]>([]);
-  const [groups, setGroups] = useState<LabelledGroup[]>([]);
-  const [scope, setScope] = useState<AnnouncementScope>("group");
-  // A list, always: one pupil is a list of one, and "1° A y 1° B" is a list of
-  // two. Keeping two shapes for the same question is how the send ends up
-  // addressing the wrong people.
-  const [picked, setPicked] = useState<string[]>([]);
-  const [students, setStudents] = useState<Student[]>([]);
-  const [title, setTitle] = useState("");
-  const [body, setBody] = useState("");
-  const [sending, setSending] = useState(false);
-  const [sent, setSent] = useState<{ created: number; audience: number } | null>(null);
-  const [error, setError] = useState<string | undefined>(undefined);
-  const [attemptKey, setAttemptKey] = useState(newAttemptKey);
-
-  const cycle = cycles.find((c) => c.status === "active") ?? cycles[0];
-
-  useEffect(() => {
-    listCycles(API_URL).then(setCycles).catch(() => setError("No pudimos leer los ciclos."));
-    listLevels(API_URL).then(setLevels).catch(() => {});
-    listStudents(API_URL).then(setStudents).catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    if (cycle === undefined) {
-      return;
-    }
-    listLabelledGroups(API_URL, cycle.id).then(setGroups).catch(() => {});
-  }, [cycle]);
-
-  const send = async (e: FormEvent): Promise<void> => {
-    e.preventDefault();
-    if (cycle === undefined) {
-      setError("No hay un ciclo activo al que dirigir el aviso.");
-      return;
-    }
-    if (title.trim() === "" || body.trim() === "") {
-      setError("Un aviso necesita título y mensaje.");
-      return;
-    }
-    if (scope !== "cycle" && picked.length === 0) {
-      setError("Elige a quién va dirigido.");
-      return;
-    }
-    setSending(true);
-    setError(undefined);
-    try {
-      const result = await announce(API_URL, {
-        scope,
-        ...(scope === "cycle" ? {} : { targetIds: picked }),
-        cycleId: cycle.id,
-        title: title.trim(),
-        body: body.trim(),
-        idempotencyKey: attemptKey,
-      });
-      setSent(result);
-      setTitle("");
-      setBody("");
-      setPicked([]);
-      // A fresh key for the next message: the old one now means THIS junta, and
-      // reusing it would silently deliver nothing.
-      setAttemptKey(newAttemptKey());
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "No se pudo enviar el aviso.");
-    } finally {
-      setSending(false);
-    }
-  };
+  const {
+    levels, groups, students, scope, picked, title, body, sending, sent, error,
+    chooseScope, toggle, setTitle, setBody, submit,
+  } = useAnnouncementComposer();
 
   const targets = scope === "level"
     ? levels.map((l) => ({ id: l.id, name: l.name }))
     : scope === "student"
       ? sortStudents(students).map((s) => ({ id: s.id, name: formatStudentName(s) }))
       : groups.map((g) => ({ id: g.id, name: g.label }));
-
-  const toggle = (id: string): void => {
-    setPicked((prev) => {
-      if (prev.includes(id)) {
-        return prev.filter((p) => p !== id);
-      }
-      // One pupil at a time: a note to a family is not a circular, and picking
-      // several would be a group announcement wearing the wrong label.
-      return scope === "student" ? [id] : [...prev, id];
-    });
-  };
 
   return (
     <Page variant="reading">
@@ -146,7 +63,7 @@ export function AnnouncementsScreen({ onBack }: AnnouncementsScreenProps): React
         </div>
       </div>
 
-      <form onSubmit={(e) => void send(e)} className="fade-up" style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--r-xl)", boxShadow: "var(--shadow-card)", padding: "22px 24px", display: "flex", flexDirection: "column", gap: 18 }}>
+      <form onSubmit={(e) => void submit(e)} className="fade-up" style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--r-xl)", boxShadow: "var(--shadow-card)", padding: "22px 24px", display: "flex", flexDirection: "column", gap: 18 }}>
         <div>
           <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-muted)" }}>¿A quién?</span>
           <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
@@ -156,7 +73,7 @@ export function AnnouncementsScreen({ onBack }: AnnouncementsScreenProps): React
                 <button
                   key={s.value}
                   type="button"
-                  onClick={() => { setScope(s.value); setPicked([]); }}
+                  onClick={() => chooseScope(s.value)}
                   style={{ height: 44, padding: "0 18px", borderRadius: 99, fontSize: 14.5, fontWeight: 600, cursor: "pointer", border: `1.5px solid ${on ? "var(--lime)" : "var(--border)"}`, background: on ? "color-mix(in oklab, var(--lime) 12%, var(--surface))" : "var(--surface)", color: on ? "var(--forest)" : "var(--text-muted)" }}>
                   {s.label}
                 </button>
