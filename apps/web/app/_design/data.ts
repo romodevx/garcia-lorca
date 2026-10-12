@@ -11,8 +11,16 @@ import type { ColorKey } from "./colors";
 import type { IconName } from "./Icon";
 import type { FlagKey } from "@garcia-lorca/ui/flags";
 
+/**
+ * The home's areas (PLAN-redesign-home §3.1). Required on every module, so a
+ * new module cannot ship without deciding where the home draws it.
+ */
+export type ModuleGroup = "people" | "academic" | "money" | "system";
+
 export interface ModuleDef {
   id: string;
+  /** Home area the module's card lives in (only the refreshed home uses it). */
+  group: ModuleGroup;
   label: string;
   icon: IconName;
   color: ColorKey;
@@ -44,45 +52,45 @@ export interface ModuleDef {
 }
 
 export const MODULES: readonly ModuleDef[] = [
-  { id: "students", label: "Estudiantes", icon: "students", color: "forest", desc: "Alumnos y admisión", badge: null, flag: "module_students", perm: "students:read" },
-  { id: "teachers", label: "Docentes", icon: "user", color: "purple", desc: "Plantilla y asignaturas", badge: null, flag: "module_teachers", perm: ["teachers:read", "teachers:write"] },
+  { id: "students", group: "people", label: "Estudiantes", icon: "students", color: "forest", desc: "Alumnos y admisión", badge: null, flag: "module_students", perm: "students:read" },
+  { id: "teachers", group: "academic", label: "Docentes", icon: "user", color: "purple", desc: "Plantilla y asignaturas", badge: null, flag: "module_teachers", perm: ["teachers:read", "teachers:write"] },
   // Two doors on the same money, because two different people walk through
   // them: the front desk taking a payment, and the director reading the month.
   // Sentence case, like every other label and description in this list — and
   // like Spanish orthography, which capitalises only the first word. It read
   // "Registro de Pagos" until the palette's own copy disagreed with it.
-  { id: "payments", label: "Registro de pagos", icon: "card", color: "forest", desc: "Cobrar en ventanilla", badge: null, flag: "module_finance", perm: [["collections:read", "payments:write"], ["finance:read", "finance:write"]] },
-  { id: "finance", label: "Finanzas", icon: "finance", color: "orange", desc: "Ingresos y adeudos", badge: null, flag: "module_finance", perm: "finance:read" },
+  { id: "payments", group: "money", label: "Registro de pagos", icon: "card", color: "forest", desc: "Cobrar en ventanilla", badge: null, flag: "module_finance", perm: [["collections:read", "payments:write"], ["finance:read", "finance:write"]] },
+  { id: "finance", group: "money", label: "Finanzas", icon: "finance", color: "orange", desc: "Ingresos y adeudos", badge: null, flag: "module_finance", perm: "finance:read" },
   // T10: what goes out, the balance and the reports. Its own permission
   // (expenses:read, delegable) — finance:read stays owner-only.
-  { id: "expenses", label: "Egresos", icon: "trend", color: "red", desc: "Gastos, balance y reportes", badge: null, flag: "module_expenses", perm: "expenses:read" },
+  { id: "expenses", group: "money", label: "Egresos", icon: "trend", color: "red", desc: "Gastos, balance y reportes", badge: null, flag: "module_expenses", perm: "expenses:read" },
   // QR capture is deferred; the module ships as the daily pass list.
   // Any-of: directors/admins pass lists via attendance:read; teachers use their
   // self-scoped attendance_own:read surface. Either permission reveals the tile.
-  { id: "attendance", label: "Asistencia", icon: "qr", color: "lime", desc: "Pase de lista diario", badge: null, flag: "module_attendance", perm: ["attendance:read", "attendance_own:read"] },
+  { id: "attendance", group: "academic", label: "Asistencia", icon: "qr", color: "lime", desc: "Pase de lista diario", badge: null, flag: "module_attendance", perm: ["attendance:read", "attendance_own:read"] },
   // Any-of: directors capture via grades:read; teachers use their self-scoped
   // teaching:read surface. Either permission reveals the tile.
-  { id: "grades", label: "Calificaciones", icon: "grades", color: "yellow", desc: "Boletas y captura", badge: null, flag: "module_grades", perm: ["grades:read", "teaching:read"] },
+  { id: "grades", group: "academic", label: "Calificaciones", icon: "grades", color: "yellow", desc: "Boletas y captura", badge: null, flag: "module_grades", perm: ["grades:read", "teaching:read"] },
   // T16: the weekly timetable and the day's changes. Any-of: the director reads
   // it all (schedule:read); a teacher reads their own week (teaching:read).
-  { id: "schedule", label: "Horarios", icon: "clock", color: "forest", desc: "Horario semanal y suplencias", badge: null, flag: "module_schedule", perm: ["schedule:read", "teaching:read"] },
+  { id: "schedule", group: "academic", label: "Horarios", icon: "clock", color: "forest", desc: "Horario semanal y suplencias", badge: null, flag: "module_schedule", perm: ["schedule:read", "teaching:read"] },
   // T17: extracurriculars and their own charge. Its money lives in finance.
-  { id: "activities", label: "Actividades", icon: "star", color: "yellow", desc: "Extracurriculares y su cobro", badge: null, flag: "module_activities", perm: "activities:read" },
-  { id: "announcements", label: "Avisos", icon: "announcements", color: "orange", desc: "Comunicados y agenda", badge: null, flag: "module_comms", perm: "comms:read" },
-  { id: "scholarships", label: "Becas", icon: "scholarship", color: "purple", desc: "Becas y descuentos", badge: null, flag: "module_scholarships", perm: "scholarships:read" },
+  { id: "activities", group: "people", label: "Actividades", icon: "star", color: "yellow", desc: "Extracurriculares y su cobro", badge: null, flag: "module_activities", perm: "activities:read" },
+  { id: "announcements", group: "people", label: "Avisos", icon: "announcements", color: "orange", desc: "Comunicados y agenda", badge: null, flag: "module_comms", perm: "comms:read" },
+  { id: "scholarships", group: "money", label: "Becas", icon: "scholarship", color: "purple", desc: "Becas y descuentos", badge: null, flag: "module_scholarships", perm: "scholarships:read" },
   // Deactivated from the panel per the school (kept future-ready; nothing deleted). See [[module-docs-deactivated]].
-  { id: "documents", label: "Documentos", icon: "documents", color: "forest", desc: "Constancias, kardex", badge: null, flag: "module_docs", perm: "documents:read", hidden: true },
+  { id: "documents", group: "people", label: "Documentos", icon: "documents", color: "forest", desc: "Constancias, kardex", badge: null, flag: "module_docs", perm: "documents:read", hidden: true },
   // Two doors, because the read permission is split: the storeroom
   // (uniforms:stock) resolves no student data and is grantable, while the order
   // list (uniforms:orders) carries every pupil's name and is owner-only. Either
   // one is a reason to show the tile — a Caja/Almacén role that cannot see the
   // module cannot do its job.
-  { id: "uniforms", label: "Inventario", icon: "uniforms", color: "purple", desc: "Uniformes, libros y artículos", badge: null, flag: "module_uniforms", perm: ["uniforms:stock", "uniforms:orders"] },
-  { id: "billing", label: "Facturación", icon: "billing", color: "lime", desc: "CFDI 4.0", badge: null, flag: "module_billing", perm: "billing:read" },
-  { id: "reports", label: "Reportes", icon: "reports", color: "yellow", desc: "Indicadores", badge: null, flag: "module_reports", perm: "reports:read" },
-  { id: "settings", label: "Configuración", icon: "settings", color: "neutral", desc: "Centro y permisos", badge: null, flag: "module_config", perm: "config:read" },
+  { id: "uniforms", group: "money", label: "Inventario", icon: "uniforms", color: "purple", desc: "Uniformes, libros y artículos", badge: null, flag: "module_uniforms", perm: ["uniforms:stock", "uniforms:orders"] },
+  { id: "billing", group: "money", label: "Facturación", icon: "billing", color: "lime", desc: "CFDI 4.0", badge: null, flag: "module_billing", perm: "billing:read" },
+  { id: "reports", group: "system", label: "Reportes", icon: "reports", color: "yellow", desc: "Indicadores", badge: null, flag: "module_reports", perm: "reports:read" },
+  { id: "settings", group: "system", label: "Configuración", icon: "settings", color: "neutral", desc: "Centro y permisos", badge: null, flag: "module_config", perm: "config:read" },
   // Admin surface (module_iam): users, roles, and the teacher↔user link.
-  { id: "admin", label: "Administración", icon: "shield", color: "forest", desc: "Usuarios y roles", badge: null, flag: "module_iam", perm: "users:read" }
+  { id: "admin", group: "system", label: "Administración", icon: "shield", color: "forest", desc: "Usuarios y roles", badge: null, flag: "module_iam", perm: "users:read" }
 ];
 
 /**
