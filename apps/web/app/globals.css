@@ -1278,7 +1278,10 @@ html:has(.setup-mobilebar) {
   box-shadow: var(--halo, var(--shadow-hover));
   border-color: color-mix(in oklab, var(--area-c) 45%, var(--hair, var(--border)));
 }
-.home-card__head { display: flex; align-items: center; gap: 12px; padding-inline-end: 44px; }
+.home-card__head { display: flex; align-items: center; gap: 12px; }
+/* Room for the ⋯ only where there is one (D10): reserved on every card, it
+   broke "Calificaciones" in two at 768 and 1024px. */
+.home-card--peek .home-card__head { padding-inline-end: 44px; }
 .home-card__icon {
   width: 44px;
   height: 44px;

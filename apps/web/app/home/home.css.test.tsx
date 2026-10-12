@@ -87,6 +87,13 @@ describe("refreshed home — layout (§4.2)", () => {
     }
   });
 
+  it("reserves the ⋯'s 44px beside the title only on cards that have a ⋯ (F4)", () => {
+    // Reserved on every card, it squeezed "Calificaciones" (no shortcuts, no
+    // ⋯) until the word broke in two at 768 and 1024px.
+    expect(rule(".home-card__head").get("padding-inline-end")).toBeUndefined();
+    expect(rule(".home-card--peek .home-card__head").get("padding-inline-end")).toBe("44px");
+  });
+
   it("gives the ⋯ a 44×44 target", () => {
     home();
     const more = screen.getByRole("button", { name: "Accesos de Estudiantes" });
