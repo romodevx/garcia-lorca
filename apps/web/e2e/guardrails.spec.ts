@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { API_URL, apiAsOwner, signIn } from "./helpers";
+import { API_URL, apiAsOwner, HOME_GREETING, signIn } from "./helpers";
 
 /**
  * The boundaries that must hold whatever else is going on.
@@ -21,7 +21,7 @@ test("a wrong password is refused, and says so", async ({ page }) => {
 test("a signed-out visitor gets the login form, not a module", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("button", { name: "Entrar al sistema" })).toBeVisible();
-  await expect(page.getByRole("heading", { level: 1, name: /🌱/ })).toBeHidden();
+  await expect(page.getByRole("heading", { level: 1, name: HOME_GREETING })).toBeHidden();
 });
 
 /**

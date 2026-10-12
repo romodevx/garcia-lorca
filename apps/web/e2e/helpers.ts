@@ -21,6 +21,14 @@ export const OWNER = {
 
 export const API_URL = process.env.E2E_API_URL ?? "http://localhost:8080";
 
+/**
+ * The home's h1, on either home: "Buenas tardes, Director". It used to be the
+ * 🌱 emoji, but the refreshed home (module_ui_refresh) draws the sprout as an
+ * SVG out of the accessible name (review D14). The login page's own h1 never
+ * greets, so this still proves a sign-in.
+ */
+export const HOME_GREETING = /^Buen(os días|as tardes|as noches), /;
+
 /** A stamp unique to this run, so re-running never collides with itself. */
 export function runId(): string {
   return `e2e-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
@@ -55,7 +63,7 @@ export async function signIn(page: Page, forceLogin = false): Promise<void> {
   if (!forceLogin && cachedCookies !== null) {
     await page.context().addCookies(cachedCookies);
     await page.goto("/");
-    await expect(page.getByRole("heading", { level: 1, name: /🌱/ })).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByRole("heading", { level: 1, name: HOME_GREETING })).toBeVisible({ timeout: 20_000 });
     return;
   }
 
@@ -79,7 +87,7 @@ export async function signIn(page: Page, forceLogin = false): Promise<void> {
 
   // The greeting is the proof. Waiting for "an h1" would have passed on the
   // LOGIN page, which has one of its own — a green test that never signed in.
-  await expect(page.getByRole("heading", { level: 1, name: /🌱/ })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("heading", { level: 1, name: HOME_GREETING })).toBeVisible({ timeout: 20_000 });
 
   cachedCookies = await page.context().cookies();
 }
@@ -186,4 +194,26 @@ export async function pickStudent(page: Page, name: string): Promise<void> {
   // resolved rather than a string passed through.
   // exact, because the shell's theme toggle is labelled "Cambiar tema".
   await expect(page.getByRole("button", { name: "Cambiar", exact: true })).toBeVisible();
+}
+
+/** Cuánto se sale la página de lado. Uno es el margen de la barra de scroll. */
+export async function desbordeLateral(page: Page): Promise<number> {
+  return page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  );
+}
+
+/**
+ * Forces presentation flags in the browser by rewriting `/api/v1/features`.
+ *
+ * The gateway reads ENABLED_MODULES at boot, so one stack cannot serve a flag
+ * ON and OFF in one run; presentation-only flags are safe to force here because
+ * the gateway still answers everything else. Register BEFORE the first `goto`.
+ */
+export async function forceFlags(page: Page, overrides: Readonly<Record<string, boolean>>): Promise<void> {
+  await page.route("**/api/v1/features", async (route) => {
+    const response = await route.fetch();
+    const flags = (await response.json()) as Record<string, boolean>;
+    await route.fulfill({ response, json: { ...flags, ...overrides } });
+  });
 }
