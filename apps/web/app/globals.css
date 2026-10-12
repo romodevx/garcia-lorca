@@ -182,7 +182,15 @@ input { font-family: var(--font-ui); }
   cursor: text;
   text-align: left;
 }
-.topbar-search-text { flex: 1; }
+/* One line, ending in an ellipsis: a tablet's ~170px pill otherwise wrapped
+   the placeholder onto several lines that spilled out of it. */
+.topbar-search-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
 .topbar-search-kbd {
   font-family: var(--font-ui);
   font-size: 12px;
