@@ -104,9 +104,11 @@ function useCycleLedger(access: KpiAccess): [CycleInfo | undefined, LedgerReadin
     };
     listCycles(API_URL).then(
       (cs) => {
+        // Unmounted (or superseded) while the cycles were in flight: no ledger read.
+        if (!live) return;
         const cyc = currentCycle(cs);
         if (cyc === undefined) return settle({ status: "noCycle" });
-        if (live) setCycle({ name: cyc.name, active: cyc.status === "active" });
+        setCycle({ name: cyc.name, active: cyc.status === "active" });
         if (!readsLedger) return;
         listCharges(API_URL, { cycleId: cyc.id }).then((chs) => settle({ status: "ready", value: sumLedger(chs) }), () => settle(ERROR));
       },

@@ -40,6 +40,16 @@ describe("useHomeKpis", () => {
     expect(result.current.students).toEqual({ status: "ready", value: 0 });
   });
 
+  // Review M3: unmounted while the cycles are in flight, nothing reads the ledger.
+  it("does not read the ledger after unmounting before the cycles answer", async () => {
+    const cycles = deferred<never[]>();
+    vi.mocked(listCycles).mockReturnValue(cycles.promise);
+    const { unmount } = renderHook(() => useHomeKpis(ALL));
+    unmount();
+    await act(async () => cycles.resolve([ACTIVE] as never));
+    expect(listCharges).not.toHaveBeenCalled();
+  });
+
   it("counts the admission pipeline without rejected or withdrawn students", async () => {
     vi.mocked(listStudents).mockResolvedValue([{ admissionStatus: "enrolled" }, { admissionStatus: "rejected" }, { admissionStatus: "withdrawn" }, { admissionStatus: "applicant" }] as never);
     const { result } = renderHook(() => useHomeKpis(ALL));
