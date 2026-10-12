@@ -31,12 +31,21 @@ type StyleRule = { selectors: string[]; media: string | null; declarations: Decl
 export type StyleContext = {
   /** Viewport width in CSS px, for @media (min-|max-width). */
   width: number;
+  /** Viewport height in CSS px, for @media (min-|max-height). */
+  height?: number;
+  /** Paper instead of a screen: `print` holds and `screen` does not. */
+  print?: boolean;
+  /** Windows high contrast and friends: `forced-colors: active` holds. */
+  forcedColors?: boolean;
 };
+
+const DEFAULT_HEIGHT = 800;
 
 export const DESKTOP: StyleContext = { width: 1280 };
 export const PHONE: StyleContext = { width: 400 };
 
 const HOVER_ATTR = "data-declared-hover";
+const FOCUS_VISIBLE_ATTR = "data-declared-focus-visible";
 
 function stripComments(css: string): string {
   return css.replace(/\/\*[\s\S]*?\*\//g, "");
@@ -114,13 +123,17 @@ export function parseStylesheet(css: string): StyleRule[] {
 
 function featureHolds(feature: string, ctx: StyleContext): boolean {
   const f = feature.trim().replace(/^\(|\)$/g, "").trim();
-  const minW = /^min-width:\s*(\d+)px$/.exec(f);
-  if (minW !== null) return ctx.width >= Number(minW[1]);
-  const maxW = /^max-width:\s*(\d+)px$/.exec(f);
-  if (maxW !== null) return ctx.width <= Number(maxW[1]);
-  // screen, all: yes. print, reduced motion, dark scheme, coarse pointers,
-  // forced colors: the default desktop session says no.
-  return f === "screen" || f === "all";
+  const range = /^(min|max)-(width|height):\s*(\d+)px$/.exec(f);
+  if (range !== null) {
+    const actual = range[2] === "width" ? ctx.width : (ctx.height ?? DEFAULT_HEIGHT);
+    return range[1] === "min" ? actual >= Number(range[3]) : actual <= Number(range[3]);
+  }
+  if (f === "screen") return ctx.print !== true;
+  if (f === "print") return ctx.print === true;
+  if (/^forced-colors:\s*active$/.test(f)) return ctx.forcedColors === true;
+  // all: yes. Reduced motion, dark scheme, coarse pointers: the default
+  // desktop session says no.
+  return f === "all";
 }
 
 function mediaHolds(media: string | null, ctx: StyleContext): boolean {
@@ -143,7 +156,7 @@ function compareSpecificity(a: [number, number, number], b: [number, number, num
 
 function safeMatches(el: Element, selector: string): boolean {
   try {
-    return el.matches(selector.replace(/:hover/g, `[${HOVER_ATTR}]`));
+    return el.matches(selector.replace(/:hover/g, `[${HOVER_ATTR}]`).replace(/:focus-visible/g, `[${FOCUS_VISIBLE_ATTR}]`));
   } catch {
     return false; // pseudo-elements and selectors jsdom cannot evaluate
   }
@@ -255,6 +268,11 @@ export function markHovered(el: Element): void {
 export function clearHovered(root: ParentNode = document): void {
   root.querySelectorAll(`[${HOVER_ATTR}]`).forEach((n) => n.removeAttribute(HOVER_ATTR));
   document.documentElement.removeAttribute(HOVER_ATTR);
+}
+
+/** Marks `el` as keyboard-focused for the CSS side (:focus-visible); jsdom never matches it. */
+export function markFocusVisible(el: Element): void {
+  el.setAttribute(FOCUS_VISIBLE_ATTR, "");
 }
 
 /** Structural key for an element under `root` (tag names + sibling index; no classes, so renaming a class keeps the key). */
