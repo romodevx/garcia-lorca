@@ -17,6 +17,12 @@ export interface SendResult {
   audience: number;
 }
 
+/** D5: "Enviado a 28 alumnos", singular at one, and whether it was a repeat. */
+export function sentMessage({ created, audience }: SendResult): string {
+  const reached = `Enviado a ${audience} ${audience === 1 ? "alumno" : "alumnos"}`;
+  return created === 0 ? `${reached} · ya se había enviado, no se repitió` : reached;
+}
+
 /** Everything a view of /avisos needs: the data, the draft and the rules. */
 export interface AnnouncementComposer {
   cycle: Cycle | undefined;
