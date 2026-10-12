@@ -8,7 +8,7 @@ import { Page } from "../../_design/Page";
 import { formatStudentName, sortStudents } from "../../_design/students/studentName";
 import { BirthdayGreeting } from "./BirthdayGreeting";
 import { ModuleHeaderIcon } from "../../_design/ModuleHeaderIcon";
-import { useAnnouncementComposer } from "./useAnnouncementComposer";
+import { sentMessage, useAnnouncementComposer } from "./useAnnouncementComposer";
 import { SCOPES } from "./audience";
 
 const field = {
@@ -128,8 +128,7 @@ export function AnnouncementsScreen({ onBack }: AnnouncementsScreenProps): React
         {error !== undefined && <p role="alert" style={{ color: "var(--bad-fg)", fontSize: 14, margin: 0 }}>{error}</p>}
         {sent !== null && (
           <p role="status" style={{ color: "var(--ok-fg)", fontSize: 14.5, margin: 0 }}>
-            Enviado a {sent.audience} {sent.audience === 1 ? "alumno" : "alumnos"}
-            {sent.created === 0 && " · ya se había enviado, no se repitió"}
+            {sentMessage(sent)}
           </p>
         )}
 
