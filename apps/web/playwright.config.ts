@@ -63,6 +63,8 @@ export default defineConfig({
         /drawer\.spec\.ts/,
         // Su propio proyecto: fuerza module_config_setup y vacía la base al empezar.
         /config-setup\.flag\.spec\.ts/,
+        // Su propio proyecto: fuerza module_announcements_view y envía avisos.
+        /announcements-view\.flag\.spec\.ts/,
       ],
     },
     // The storeroom is worked from a phone, standing between the shelves, so the
@@ -84,6 +86,16 @@ export default defineConfig({
       name: "config-setup",
       use: { ...devices["Desktop Chrome"] },
       testMatch: /config-setup\.flag\.spec\.ts/,
+    },
+    // Avisos as "Destinatarios al lado" (module_announcements_view ON and OFF).
+    // Its own project because it forces the flag in the browser and sends real
+    // announcements (one pupil each); never part of `e2e`, run it with
+    // `pnpm e2e:announcements-view`. globalSetup WIPES the local database unless
+    // E2E_SKIP_RESET=1.
+    {
+      name: "announcements-view",
+      use: { ...devices["Desktop Chrome"] },
+      testMatch: /announcements-view\.flag\.spec\.ts/,
     },
     // READ-ONLY, and run against a SEEDED database rather than an empty one. It
     // is the check you want an hour before a demo: not "can the system be built
