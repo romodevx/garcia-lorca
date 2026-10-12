@@ -12,6 +12,7 @@ import { OrdersPanel } from "./OrdersPanel";
 import { ErrorNote, money, NARROW, SkeletonRows, StatCards } from "./parts";
 
 import { API_URL } from "../../api-url";
+import { ModuleHeaderIcon } from "../../_design/ModuleHeaderIcon";
 
 
 type TabId = "counter" | "orders" | "inventory" | "catalog";
@@ -154,21 +155,7 @@ export function UniformsScreen({
       </button>
 
       <header style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 24 }}>
-        <div
-          style={{
-            width: 56,
-            height: 56,
-            borderRadius: 18,
-            display: "grid",
-            placeItems: "center",
-            background: "var(--purple)",
-            color: "#fff",
-            boxShadow: "0 6px 16px color-mix(in oklab, var(--purple) 38%, transparent)",
-            flexShrink: 0,
-          }}
-        >
-          <Icon name="uniforms" size={30} />
-        </div>
+        <ModuleHeaderIcon icon="uniforms" color="purple" />
         <div style={{ minWidth: 0 }}>
           <h1 style={{ fontSize: narrow ? 24 : 30, fontWeight: 800, color: "var(--text)" }}>Inventario</h1>
           <p style={{ color: "var(--text-muted)", fontSize: 15, marginTop: 3 }}>

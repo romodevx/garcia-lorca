@@ -1,7 +1,8 @@
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { MODULES, USERS, isModuleVisible } from "../_design/data";
+import { HOME_VARIANTS, renderHome } from "../home/testing/renderHome";
 import { Dashboard } from "./Dashboard";
 
 // The dashboard now reads real KPIs from the gateway — mock the clients so the
@@ -26,7 +27,9 @@ const OWNER_PERMS = [
 const NOW = new Date("2026-06-12T09:00:00");
 const visibleFor = (perms: readonly string[]) => MODULES.filter((m) => isModuleVisible(m, perms));
 
-describe("Dashboard", () => {
+describe.each(HOME_VARIANTS)("Dashboard (%s home)", (_variant, refresh) => {
+  const render = (ui: Parameters<typeof renderHome>[0]) => renderHome(ui, refresh);
+
   it("renders a launcher card for every module the owner can read", () => {
     render(<Dashboard user={USERS.admin} onOpen={() => {}} permissions={OWNER_PERMS} now={NOW} />);
 
@@ -125,7 +128,9 @@ describe("Dashboard", () => {
   });
 });
 
-describe("Dashboard when the permissions could not be loaded", () => {
+describe.each(HOME_VARIANTS)("Dashboard when the permissions could not be loaded (%s home)", (_variant, refresh) => {
+  const render = (ui: Parameters<typeof renderHome>[0]) => renderHome(ui, refresh);
+
   // The regression this exists for (dev, 2026-09-07): the gateway answered 403
   // to /me, AppShell caught it as "non-fatal", and permissions stayed undefined
   // — which rendered the LOADING SKELETON forever. The owner saw a panel that
@@ -154,5 +159,21 @@ describe("Dashboard when the permissions could not be loaded", () => {
   it("still shows the skeleton while the answer is genuinely pending", () => {
     render(<Dashboard user={USERS.admin} onOpen={() => {}} now={NOW} />);
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+});
+
+// The ONE switch between the two homes (PLAN-redesign-home §3.3, E-flag).
+describe("Dashboard picks its home from module_ui_refresh", () => {
+  it("OFF: today's grid under the \"Módulos\" heading", () => {
+    renderHome(<Dashboard user={USERS.admin} onOpen={() => {}} permissions={OWNER_PERMS} now={NOW} />, false);
+    expect(screen.getByRole("heading", { level: 2, name: "Módulos" })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Académico" })).not.toBeInTheDocument();
+  });
+
+  it("ON: the areas, and no \"Módulos\" heading", () => {
+    renderHome(<Dashboard user={USERS.admin} onOpen={() => {}} permissions={OWNER_PERMS} now={NOW} />, true);
+    expect(screen.getByRole("region", { name: "Académico" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Módulos" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Todo el sistema, a la vista")).not.toBeInTheDocument();
   });
 });

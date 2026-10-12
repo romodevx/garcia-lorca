@@ -15,6 +15,7 @@ import { ActivitiesTable, type ActiveFilter } from "./ActivitiesTable";
 import { ActivityEnrollPage } from "./ActivityEnrollPage";
 import { ActivityFormPage } from "./ActivityFormPage";
 import { useToast } from "./useToast";
+import { ModuleHeaderIcon } from "../../_design/ModuleHeaderIcon";
 
 const FAB_HEIGHT = 60;
 const FAB_BOTTOM = 32;
@@ -91,9 +92,7 @@ export function ActivitiesScreen({ onBack, permissions, today: injectedToday }: 
       </button>
 
       <header style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 24, flexWrap: "wrap" }}>
-        <div style={{ width: 56, height: 56, borderRadius: 18, display: "grid", placeItems: "center", background: "var(--forest)", color: "#fff", boxShadow: "0 6px 16px color-mix(in oklab, var(--forest) 38%, transparent)", flexShrink: 0 }}>
-          <Icon name="star" size={30} />
-        </div>
+        <ModuleHeaderIcon icon="star" color="forest" />
         <div style={{ minWidth: 0, flex: 1 }}>
           <h1 style={{ fontSize: 30, fontWeight: 800, color: "var(--text)" }}>Actividades</h1>
           <p style={{ color: "var(--text-muted)", fontSize: 15, marginTop: 3 }}>Extracurriculares y su cobro</p>
@@ -120,7 +119,7 @@ export function ActivitiesScreen({ onBack, permissions, today: injectedToday }: 
         <>
           <div aria-hidden style={{ height: FAB_BOTTOM + FAB_HEIGHT + FAB_GAP }} />
           <button onClick={create} title="Nueva actividad" aria-label="Nueva actividad"
-            style={{ position: "fixed", right: 32, bottom: FAB_BOTTOM, zIndex: 50, height: FAB_HEIGHT, padding: "0 26px", borderRadius: 99, display: "inline-flex", alignItems: "center", gap: 10, background: "var(--primary)", color: "var(--primary-ink)", fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 16.5, cursor: "pointer", boxShadow: "0 10px 30px color-mix(in oklab, var(--lime) 45%, transparent)" }}>
+            style={{ position: "fixed", right: 32, bottom: FAB_BOTTOM, zIndex: 50, height: FAB_HEIGHT, padding: "0 26px", borderRadius: 99, display: "inline-flex", alignItems: "center", gap: 10, background: "var(--primary)", color: "var(--primary-ink)", fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 16.5, cursor: "pointer", boxShadow: "var(--shadow-fab)" }}>
             <Icon name="plus" size={22} stroke={2.6} />Nueva actividad
           </button>
         </>

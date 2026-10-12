@@ -15,6 +15,7 @@ import { Tabs } from "./parts";
 import { rangeForAbsence, UncoveredView, type UncoveredRange } from "./UncoveredView";
 import { sourceFor, useScheduleBoard, type ScheduleMode } from "./useScheduleBoard";
 import { WeekView } from "./WeekView";
+import { ModuleHeaderIcon } from "../../_design/ModuleHeaderIcon";
 
 export type TabId = "week" | "now" | "uncovered" | "history";
 
@@ -81,9 +82,7 @@ export function ScheduleScreen({ onBack, mode, canWrite, now, focus, openAbsence
       </button>
 
       <header style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 24, flexWrap: "wrap" }}>
-        <div style={{ width: 56, height: 56, borderRadius: 18, display: "grid", placeItems: "center", background: "var(--forest)", color: "#fff", boxShadow: "0 6px 16px color-mix(in oklab, var(--forest) 38%, transparent)", flexShrink: 0 }}>
-          <Icon name="clock" size={30} />
-        </div>
+        <ModuleHeaderIcon icon="clock" color="forest" />
         <div style={{ minWidth: 0, flex: 1 }}>
           <h1 style={{ fontSize: 30, fontWeight: 800, color: "var(--text)" }}>{manages ? "Horarios" : "Mi horario"}</h1>
           <p style={{ color: "var(--text-muted)", fontSize: 15, marginTop: 3 }}>

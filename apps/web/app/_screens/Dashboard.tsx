@@ -1,101 +1,45 @@
 "use client";
 
-import { useEffect, useState, type ReactElement } from "react";
+import type { CSSProperties, ReactElement } from "react";
 import { Btn } from "../_design/Controls";
 import { formatCents as money } from "../_lib/money";
 import { Icon, type IconName } from "../_design/Icon";
 import { Page } from "../_design/Page";
 import { COLOR, type ColorKey } from "../_design/colors";
-import { MODULES, isModuleVisible, type ModuleDef, type UserProfile } from "../_design/data";
-import { listCycles } from "../config/api";
-import { listCharges } from "../finance/api";
-import { listStudents } from "../students/api";
+import { MODULES, isModuleVisible, type ModuleDef } from "../_design/data";
+import { greetingFor, todayLabel } from "../home/greeting";
+import { HomeView } from "../home/HomeView";
+import { NoModules, PermissionsUnavailable } from "../home/HomeNotices";
+import { useRefreshedHome } from "../home/homeVariant";
+import type { HomeProps } from "../home/types";
+import { useHomeKpis, type Ledger } from "../home/useHomeKpis";
 
-import { API_URL } from "../api-url";
+const NO_LEDGER: Ledger = { pendingCents: 0, collectedCents: 0, withBalance: 0, charges: 0 };
 
+/** CSS custom properties are the one inline style a card keeps: they feed its classes. */
+type CardVars = CSSProperties & Record<`--${string}`, string>;
 
+// Every style lives in globals.css (.module-card*, .kpi-card*), hover
+// included (:hover). An inline style would beat the look layer under
+// html[data-look]; only the module's color and the stagger stay inline, as
+// custom properties.
 function ModuleCard({ m, i, onOpen }: { m: ModuleDef; i: number; onOpen: (id: string) => void }): ReactElement {
-  const [hov, setHov] = useState(false);
   const c = COLOR[m.color] ?? COLOR.neutral;
   const neutral = m.color === "neutral";
+  const vars: CardVars = { "--mod-c": c.v, "--mod-ink": c.ink, "--card-delay": `${i * 0.03}s` };
   return (
-    <button
-      onClick={() => onOpen(m.id)}
-      onMouseEnter={() => setHov(true)}
-      onMouseLeave={() => setHov(false)}
-      className="fade-up"
-      style={{
-        position: "relative",
-        textAlign: "left",
-        display: "flex",
-        flexDirection: "column",
-        gap: 16,
-        padding: "22px 22px 20px",
-        borderRadius: "var(--r-lg)",
-        minHeight: 172,
-        background: hov ? `color-mix(in oklab, ${c.v} 9%, var(--surface))` : "var(--surface)",
-        border: `1.5px solid ${hov ? `color-mix(in oklab, ${c.v} 45%, var(--border))` : "var(--border)"}`,
-        boxShadow: hov ? "var(--shadow-hover)" : "var(--shadow-card)",
-        transform: hov ? "translateY(-4px)" : "none",
-        transition: "all .22s var(--ease)",
-        animationDelay: `${i * 0.03}s`
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
-        <div
-          style={{
-            width: 58,
-            height: 58,
-            borderRadius: 18,
-            display: "grid",
-            placeItems: "center",
-            flexShrink: 0,
-            background: neutral ? "var(--surface-3)" : c.v,
-            color: neutral ? "var(--text-muted)" : c.ink,
-            boxShadow: neutral ? "none" : `0 6px 16px color-mix(in oklab, ${c.v} 38%, transparent)`,
-            transform: hov ? "scale(1.06) rotate(-3deg)" : "none",
-            transition: "transform .25s var(--ease)"
-          }}
-        >
+    <button onClick={() => onOpen(m.id)} className={neutral ? "module-card module-card--neutral fade-up" : "module-card fade-up"} style={vars}>
+      <div className="module-card-top">
+        <div className="module-card-icon">
           <Icon name={m.icon} size={30} stroke={2.1} />
         </div>
-        {m.badge !== null && m.badge > 0 && (
-          <span
-            style={{
-              minWidth: 26,
-              height: 26,
-              padding: "0 8px",
-              borderRadius: 99,
-              background: "var(--red)",
-              color: "#fff",
-              fontFamily: "var(--font-display)",
-              fontWeight: 700,
-              fontSize: 13,
-              display: "grid",
-              placeItems: "center"
-            }}
-          >
-            {m.badge}
-          </span>
-        )}
+        {m.badge !== null && m.badge > 0 && <span className="module-card-badge">{m.badge}</span>}
       </div>
-      <div style={{ marginTop: "auto" }}>
-        <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 18.5, color: "var(--text)", letterSpacing: "-.02em" }}>
-          {m.label}
-        </div>
-        <div style={{ fontSize: 13.5, color: "var(--text-muted)", marginTop: 3 }}>{m.desc}</div>
+      <div className="module-card-text">
+        <div className="module-card-label">{m.label}</div>
+        <div className="module-card-desc">{m.desc}</div>
       </div>
-      <span
-        style={{
-          position: "absolute",
-          right: 18,
-          bottom: 18,
-          color: c.v,
-          opacity: hov ? 1 : 0,
-          transform: hov ? "translateX(0)" : "translateX(-6px)",
-          transition: "all .22s var(--ease)"
-        }}
-      >
+      <span className="module-card-chevron">
         <Icon name="chevron" size={20} stroke={2.6} />
       </span>
     </button>
@@ -117,48 +61,16 @@ function KpiCard({
   sub: string;
   onClick: () => void;
 }): ReactElement {
-  const [hov, setHov] = useState(false);
-  const c = COLOR[color];
+  const vars: CardVars = { "--kpi-c": COLOR[color].v };
   return (
-    <button
-      onClick={onClick}
-      onMouseEnter={() => setHov(true)}
-      onMouseLeave={() => setHov(false)}
-      style={{
-        flex: 1,
-        textAlign: "left",
-        display: "flex",
-        alignItems: "center",
-        gap: 16,
-        padding: "18px 22px",
-        borderRadius: "var(--r-lg)",
-        background: "var(--surface)",
-        border: "1px solid var(--border)",
-        boxShadow: hov ? "var(--shadow-hover)" : "var(--shadow-card)",
-        transform: hov ? "translateY(-3px)" : "none",
-        transition: "all .2s var(--ease)"
-      }}
-    >
-      <div
-        style={{
-          width: 52,
-          height: 52,
-          borderRadius: 14,
-          flexShrink: 0,
-          display: "grid",
-          placeItems: "center",
-          background: `color-mix(in oklab, ${c.v} 16%, var(--surface))`,
-          color: c.v
-        }}
-      >
+    <button onClick={onClick} className="kpi-card" style={vars}>
+      <div className="kpi-card-icon">
         <Icon name={icon} size={26} />
       </div>
       <div>
-        <div style={{ fontSize: 13.5, color: "var(--text-muted)", fontWeight: 600 }}>{label}</div>
-        <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 26, color: "var(--text)", lineHeight: 1.1, marginTop: 2 }}>
-          {value}
-        </div>
-        <div style={{ fontSize: 12.5, color: "var(--text-faint)", marginTop: 2 }}>{sub}</div>
+        <div className="kpi-card-label">{label}</div>
+        <div className="kpi-card-value">{value}</div>
+        <div className="kpi-card-sub">{sub}</div>
       </div>
     </button>
   );
@@ -190,115 +102,16 @@ function ModulesSkeleton(): ReactElement {
   );
 }
 
-// Shown when the caller's permissions could not be loaded.
-//
-// NOT the same as "you have no modules", and saying that would be a lie: the
-// system does not know what this person can do, which is a fault on our side.
-// The previous behaviour said nothing at all — it kept showing the loading
-// skeleton — and a session broken this way was indistinguishable from a slow
-// network for as long as anybody cared to wait.
-function PermissionsUnavailable({ onRetry }: { onRetry?: () => void }): ReactElement {
-  return (
-    <div
-      role="alert"
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        gap: 10,
-        padding: "48px 24px",
-        borderRadius: "var(--r-lg)",
-        background: "var(--surface)",
-        border: "1px dashed var(--bad-fg)",
-        color: "var(--text-muted)",
-        textAlign: "center"
-      }}
-    >
-      <Icon name="shield" size={30} stroke={2} />
-      <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 18, color: "var(--text)" }}>
-        No pudimos cargar tus permisos
-      </div>
-      <div style={{ fontSize: 13.5 }}>
-        Tu sesión está iniciada, pero el sistema no pudo comprobar qué puedes ver. No es que no tengas módulos.
-      </div>
-      {onRetry !== undefined && (
-        <button
-          onClick={onRetry}
-          style={{
-            marginTop: 6,
-            height: 40,
-            padding: "0 18px",
-            borderRadius: "var(--r-pill)",
-            fontSize: 14,
-            fontWeight: 600,
-            color: "var(--forest)",
-            background: "var(--surface-3)",
-            border: "1px solid var(--border)",
-            cursor: "pointer"
-          }}
-        >
-          Reintentar
-        </button>
-      )}
-    </div>
-  );
+export type DashboardProps = HomeProps;
+
+/** The home: today's, or the refreshed one when module_ui_refresh is on. */
+export function Dashboard(props: DashboardProps): ReactElement {
+  return useRefreshedHome() ? <HomeView {...props} /> : <ClassicDashboard {...props} />;
 }
 
-// Shown to a signed-in user whose permissions match no module at all.
-function NoModules(): ReactElement {
-  return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        gap: 10,
-        padding: "48px 24px",
-        borderRadius: "var(--r-lg)",
-        background: "var(--surface)",
-        border: "1px dashed var(--border)",
-        color: "var(--text-muted)",
-        textAlign: "center"
-      }}
-    >
-      <Icon name="shield" size={30} stroke={2} />
-      <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 18, color: "var(--text)" }}>
-        No tienes módulos asignados
-      </div>
-      <div style={{ fontSize: 13.5 }}>Solicita acceso a tu administrador para ver tus módulos aquí.</div>
-    </div>
-  );
-}
-
-export interface DashboardProps {
-  user: UserProfile;
-  onOpen: (id: string) => void;
-  /**
-   * The authenticated principal's READ permissions. Drives which module tiles
-   * and KPI shortcuts are visible. `undefined` until `me()` resolves — the grid
-   * shows a skeleton rather than flashing every module. UX-only; the gateway is
-   * the security boundary.
-   */
-  permissions?: readonly string[];
-  /**
-   * The permissions could not be loaded at all (the /me call failed).
-   *
-   * Distinct from `permissions === undefined`, and the distinction is the whole
-   * point: undefined alone rendered the loading skeleton, so a failed call
-   * looked exactly like a slow one and shimmered forever. The owner read that
-   * as "no hay módulos" and reported it as such (dev, 2026-09-07).
-   */
-  permissionsFailed?: boolean;
-  /** Retry loading them, so the only way out is not signing out again. */
-  onRetryPermissions?: () => void;
-  /** Injectable clock so the greeting/date are deterministic under test. */
-  now?: Date;
-}
-
-export function Dashboard({ user, onOpen, permissions, permissionsFailed = false, onRetryPermissions, now = new Date() }: DashboardProps): ReactElement {
-  const hour = now.getHours();
-  const greet = hour < 12 ? "Buenos días" : hour < 19 ? "Buenas tardes" : "Buenas noches";
-  const today = now.toLocaleDateString("es-MX", { weekday: "long", day: "numeric", month: "long" });
+function ClassicDashboard({ user, onOpen, permissions, permissionsFailed = false, onRetryPermissions, now = new Date() }: DashboardProps): ReactElement {
+  const greet = greetingFor(now);
+  const today = todayLabel(now);
 
   // Role-aware visibility: a tile/shortcut is shown IFF the principal holds the
   // module's READ permission. `undefined` means `me()` has not resolved yet.
@@ -309,38 +122,22 @@ export function Dashboard({ user, onOpen, permissions, permissionsFailed = false
   // Real KPIs — no mock numbers: students from the roster, money from the ledger.
   // Each read runs only for a caller who may make it: a maestro or a cajera has
   // no students:read / config:read, and reading anyway filled their console
-  // with 403s on the one screen everybody opens.
-  const [kpi, setKpi] = useState({ students: 0, pending: 0, collected: 0, withBalance: 0 });
-  const [cycleName, setCycleName] = useState<string | undefined>(undefined);
-  const readsStudents = canSee("students:read");
+  // with 403s on the one screen everybody opens. This view reads every state
+  // as a plain number (0 until it is known), as it always has.
   const readsCycles = canSee("config:read");
-  const readsLedger = readsCycles && canSee("finance:read");
-  useEffect(() => {
-    let active = true;
-    // "Registrados": the active admission pipeline — exclude rejected/withdrawn,
-    // which are not current students, so the count never over-reports.
-    if (readsStudents) {
-      listStudents(API_URL).then((ss) => active && setKpi((k) => ({ ...k, students: ss.filter((s) => s.admissionStatus !== "rejected" && s.admissionStatus !== "withdrawn").length }))).catch(() => {});
-    }
-    if (readsCycles) {
-      listCycles(API_URL).then((cs) => {
-        const cyc = cs.find((c) => c.status === "active") ?? cs[0];
-        if (cyc === undefined) return;
-        if (active) setCycleName(cyc.name);
-        if (!readsLedger) return;
-        listCharges(API_URL, { cycleId: cyc.id }).then((chs) => {
-          if (!active) return;
-          setKpi((k) => ({
-            ...k,
-            collected: chs.reduce((a, c) => a + c.paidCents, 0),
-            pending: chs.reduce((a, c) => a + Math.max(0, c.remainingCents), 0),
-            withBalance: chs.filter((c) => c.remainingCents > 0).length,
-          }));
-        }).catch(() => {});
-      }).catch(() => {});
-    }
-    return () => { active = false; };
-  }, [readsStudents, readsCycles, readsLedger]);
+  const { students, cycle, ledger } = useHomeKpis({
+    students: canSee("students:read"),
+    cycles: readsCycles,
+    ledger: readsCycles && canSee("finance:read"),
+  });
+  const ledgerNow = ledger.status === "ready" ? ledger.value : NO_LEDGER;
+  const kpi = {
+    students: students.status === "ready" ? students.value : 0,
+    pending: ledgerNow.pendingCents,
+    collected: ledgerNow.collectedCents,
+    withBalance: ledgerNow.withBalance,
+  };
+  const cycleName = cycle?.name;
 
   return (
     <Page>

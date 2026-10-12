@@ -197,6 +197,8 @@ const ICON_PATHS = {
   ),
   heart: <path d="M12 20S4 14.5 4 9.2A4 4 0 0 1 12 7a4 4 0 0 1 8 2.2C20 14.5 12 20 12 20Z" />,
   message: <path d="M4 5.5h16a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H9l-4 3.5V6.5a1 1 0 0 1 1-1Z" />,
+  // The home greeting's sprout (it replaced the 🌱 emoji, review D14).
+  sprout: <path d="M7 20h10M12 20v-8M12 12c0-4 3-6 8-6 0 4-3 6-8 6ZM12 14c0-3-2-5-7-5 0 3 2 5 7 5Z" />,
   star: <path d="m12 4 2.4 5 5.5.6-4.1 3.7 1.2 5.4L12 16l-4.9 2.7 1.2-5.4L4.2 9.6 9.7 9 12 4Z" />,
   shield: (
     <g>

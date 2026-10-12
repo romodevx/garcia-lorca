@@ -4,6 +4,8 @@ import { FlagsProvider, type FlagSet } from "@garcia-lorca/ui/flags";
 import { useEffect, useState, type ReactNode } from "react";
 import { API_URL, IS_DESIGN_DEMO } from "./api-url";
 import { fetchFeatures } from "./features";
+import { FlagsResolvedProvider } from "./flags-resolved";
+import { LookAttribute } from "./look/LookAttribute";
 
 /**
  * App-level flag bootstrap.
@@ -24,6 +26,14 @@ import { fetchFeatures } from "./features";
  * lights modules up in the standalone design demo (no gateway at all); against a
  * real gateway every module stays OFF until `/features` says otherwise, and an
  * OFF module falls through to the friendly ModulePlaceholder.
+ *
+ * The app-wide look is synced here too (<LookAttribute/>, review E7): this
+ * provider lives in the root layout, survives navigation and covers pages that
+ * never mount AppShell. It acts only once the flags are `resolved`, so the
+ * pre-paint look is not undone by the OFF fallback; if the gateway is
+ * unreachable the remembered look stays. `resolved` is also shared through
+ * FlagsResolvedProvider, so the home variant can agree with that look until
+ * the answer lands (review I1).
  */
 const DEMO_FLAGS: FlagSet = {
   module_finance: IS_DESIGN_DEMO
@@ -31,6 +41,8 @@ const DEMO_FLAGS: FlagSet = {
 
 export function AppFlagsProvider({ children }: { children: ReactNode }): ReactNode {
   const [flags, setFlags] = useState<FlagSet>(DEMO_FLAGS);
+  // In the design demo DEMO_FLAGS are the answer, not a placeholder.
+  const [resolved, setResolved] = useState(IS_DESIGN_DEMO);
 
   useEffect(() => {
     if (IS_DESIGN_DEMO) {
@@ -38,12 +50,22 @@ export function AppFlagsProvider({ children }: { children: ReactNode }): ReactNo
     }
     const controller = new AbortController();
     fetchFeatures(API_URL, controller.signal)
-      .then(setFlags)
+      .then((granted) => {
+        setFlags(granted);
+        setResolved(true);
+      })
       .catch(() => {
         // Gateway unreachable — keep the fallback so the app still renders.
       });
     return () => controller.abort();
   }, []);
 
-  return <FlagsProvider flags={flags}>{children}</FlagsProvider>;
+  return (
+    <FlagsProvider flags={flags}>
+      <FlagsResolvedProvider resolved={resolved}>
+        <LookAttribute resolved={resolved} />
+        {children}
+      </FlagsResolvedProvider>
+    </FlagsProvider>
+  );
 }

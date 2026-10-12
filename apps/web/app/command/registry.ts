@@ -84,8 +84,11 @@ export const ACTIONS: readonly ActionSpec[] = [
 
 const moduleById = new Map<string, ModuleDef>(MODULES.map((m) => [m.id, m]));
 
-/** Whether the caller holds every permission the action requires (no set given ⇒ flag-only demo). */
-function holdsAll(required: readonly string[] | undefined, permissions: readonly string[] | undefined): boolean {
+/**
+ * Whether the caller holds every permission the action requires (no set given ⇒
+ * flag-only demo). Shared with the home's shortcuts so the two never drift.
+ */
+export function holdsAll(required: readonly string[] | undefined, permissions: readonly string[] | undefined): boolean {
   if (required === undefined || permissions === undefined) return true;
   return required.every((p) => permissions.includes(p));
 }

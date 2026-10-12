@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { openModule, pickStudent, signIn, uniqueSuffix } from "./helpers";
+import { HOME_GREETING, openModule, pickStudent, signIn, uniqueSuffix } from "./helpers";
 
 /**
  * THE DEMO, in order, against a database that starts empty.
@@ -39,7 +39,7 @@ test.describe.serial("setting up a school from zero", () => {
 
   test("the director signs in", async ({ page }) => {
     await signIn(page, true);
-    await expect(page.getByRole("heading", { level: 1, name: /🌱/ })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: HOME_GREETING })).toBeVisible();
   });
 
   test("the dashboard offers the modules to configure", async ({ page }) => {

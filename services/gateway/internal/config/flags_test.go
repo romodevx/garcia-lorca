@@ -1,8 +1,13 @@
 package config_test
 
 import (
+	"os"
+	"path/filepath"
+	"regexp"
 	"slices"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/garcia-lorca/services/gateway/internal/config"
 )
@@ -38,13 +43,14 @@ func TestParseEnabledModulesAcceptsFullKeys(t *testing.T) {
 }
 
 func TestAllModuleFlagsCoversRegistry(t *testing.T) {
-	// FLAGS.md registers 20 module flags; the enumeration must match so
+	// FLAGS.md registers 21 module flags; the enumeration must match so
 	// GET /features reports every module. (M14 added module_teachers; task 13,
 	// module_student_card; T10, module_expenses; T16, module_schedule; T17,
 	// module_activities; the legacy student import, module_student_import; the
-	// Configuración setup view, module_config_setup.)
-	if len(config.AllModuleFlags) != 20 {
-		t.Errorf("AllModuleFlags has %d entries, want 20", len(config.AllModuleFlags))
+	// Configuración setup view, module_config_setup; the app-wide look refresh,
+	// module_ui_refresh.)
+	if len(config.AllModuleFlags) != 21 {
+		t.Errorf("AllModuleFlags has %d entries, want 21", len(config.AllModuleFlags))
 	}
 	seen := map[string]bool{}
 	for _, k := range config.AllModuleFlags {
@@ -74,16 +80,50 @@ func TestStudentImportFlagIsRegisteredAndDefaultOff(t *testing.T) {
 	}
 }
 
+// composeFile is the repo-root docker-compose.yml, seen from this package.
+var composeFile = filepath.Join("..", "..", "..", "..", "docker-compose.yml")
+
+// composeDefault matches the gateway's `${ENABLED_MODULES:-<default>}`.
+var composeDefault = regexp.MustCompile(`^\$\{ENABLED_MODULES:-([^}]*)\}$`)
+
+// composeDefaultModules reads the default ENABLED_MODULES of the gateway in
+// docker-compose.yml, so the test follows the local stack instead of a copy
+// of it that silently drifts.
+func composeDefaultModules(t *testing.T) string {
+	t.Helper()
+	raw, err := os.ReadFile(composeFile)
+	if err != nil {
+		t.Fatalf("read %s: %v", composeFile, err)
+	}
+	var compose struct {
+		Services map[string]struct {
+			Environment map[string]string `yaml:"environment"`
+		} `yaml:"services"`
+	}
+	if err := yaml.Unmarshal(raw, &compose); err != nil {
+		t.Fatalf("parse %s: %v", composeFile, err)
+	}
+	m := composeDefault.FindStringSubmatch(compose.Services["gateway"].Environment["ENABLED_MODULES"])
+	if m == nil || m[1] == "" {
+		t.Fatalf("%s: gateway ENABLED_MODULES has no ${ENABLED_MODULES:-<default>}", composeFile)
+	}
+	return m[1]
+}
+
 // Flags that only switch a presentation (no routes of their own) still reach
 // the frontend through GET /features, and stay OFF unless listed explicitly:
 // enabling the module they dress up does not enable them.
 func TestPresentationFlagsAreRegisteredAndDefaultOff(t *testing.T) {
+	composeModules := composeDefaultModules(t)
 	tests := []struct {
 		key      string
 		baseline string
 		enabling string
 	}{
 		{key: "module_config_setup", baseline: "config", enabling: "config,config_setup"},
+		// The app-wide look (PLAN-redesign-home F2b) dresses every module, so
+		// its baseline is the whole local compose list.
+		{key: "module_ui_refresh", baseline: composeModules, enabling: composeModules + ",ui_refresh"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.key, func(t *testing.T) {

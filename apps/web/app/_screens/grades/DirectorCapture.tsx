@@ -13,6 +13,7 @@ import { PeriodGradeSheet } from "./PeriodGradeSheet";
 import { PeriodsPanel } from "./PeriodsPanel";
 import { useDirectorAssignments } from "./useDirectorAssignments";
 import { confirmLeavingUnsaved, useGradeSaves } from "./useGradeSaves";
+import { ModuleHeaderIcon } from "../../_design/ModuleHeaderIcon";
 
 export interface DirectorCaptureProps {
   onBack: () => void;
@@ -56,9 +57,7 @@ export function DirectorCapture({ onBack, permissions }: DirectorCaptureProps): 
       </button>
 
       <div className="fade-up" style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 20 }}>
-        <div style={{ width: 56, height: 56, flexShrink: 0, borderRadius: 18, display: "grid", placeItems: "center", background: "var(--yellow)", color: "#3A2E00", boxShadow: "0 6px 16px color-mix(in oklab, var(--yellow) 40%, transparent)" }}>
-          <Icon name="grades" size={30} />
-        </div>
+        <ModuleHeaderIcon icon="grades" color="yellow" />
         <div>
           <h1 style={{ fontSize: 30, fontWeight: 800, color: "var(--text)" }}>Calificaciones</h1>
           <p style={{ color: "var(--text-muted)", fontSize: 15, marginTop: 3 }}>Captura por periodo de evaluación · se guarda sola</p>

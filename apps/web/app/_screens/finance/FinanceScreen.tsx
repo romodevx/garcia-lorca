@@ -27,6 +27,7 @@ import { IncomePanel } from "./IncomePanel";
 import { csvName, downloadCsv, toCsv, type CsvColumn } from "../../_lib/csv";
 import { matchesSearch } from "../../_design/textSearch";
 import { compareStudentNames, formatStudentName } from "../../_design/students/studentName";
+import { ModuleHeaderIcon } from "../../_design/ModuleHeaderIcon";
 
 /** One key per payment attempt: a retried submit is the same payment, never a second one. */
 function newAttemptKey(): string {
@@ -371,7 +372,7 @@ export function FinanceScreen({ onBack, today: officeDay, notes, canCorrectPayme
 
       <div className="fade-up" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 16, marginBottom: 24 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          <div style={{ width: 56, height: 56, borderRadius: 18, display: "grid", placeItems: "center", background: "var(--orange)", color: "#fff", boxShadow: "0 6px 16px color-mix(in oklab, var(--orange) 38%, transparent)" }}><Icon name="finance" size={30} /></div>
+          <ModuleHeaderIcon icon="finance" color="orange" shrinks />
           <div>
             <h1 style={{ fontSize: 30, fontWeight: 800, color: "var(--text)" }}>Finanzas</h1>
             <p style={{ color: "var(--text-muted)", fontSize: 15, marginTop: 3 }}>Ciclo {cycleName} · Ingresos recibidos y adeudos</p>
@@ -512,7 +513,7 @@ function FinRow({ r, i, onPay }: { r: Row; i: number; onPay: () => void }): Reac
         ) : r.visual === "cancelled" ? (
           <span style={{ color: "var(--text-faint)", fontSize: 13.5 }}>Cancelado</span>
         ) : (
-          <button onClick={onPay} style={{ display: "inline-flex", alignItems: "center", gap: 7, height: 40, padding: "0 16px", borderRadius: 99, cursor: "pointer", background: "var(--primary)", color: "var(--primary-ink)", fontFamily: "var(--font-display)", fontWeight: 600, fontSize: 14, boxShadow: "0 3px 10px color-mix(in oklab, var(--lime) 36%, transparent)" }}><Icon name="card" size={17} />Registrar pago</button>
+          <button onClick={onPay} style={{ display: "inline-flex", alignItems: "center", gap: 7, height: 40, padding: "0 16px", borderRadius: 99, cursor: "pointer", background: "var(--primary)", color: "var(--primary-ink)", fontFamily: "var(--font-display)", fontWeight: 600, fontSize: 14, boxShadow: "var(--shadow-primary-sm)" }}><Icon name="card" size={17} />Registrar pago</button>
         )}
       </div>
     </div>

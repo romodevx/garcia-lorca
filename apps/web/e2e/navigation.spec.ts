@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { openModule, signIn } from "./helpers";
+import { HOME_GREETING, openModule, signIn } from "./helpers";
 
 /**
  * El botón "atrás" del navegador.
@@ -22,7 +22,7 @@ test.describe("la navegación del navegador", () => {
 
     await page.goBack();
     await expect(page).toHaveURL(/localhost:\d+\/$/);
-    await expect(page.getByRole("heading", { level: 1, name: /🌱/ })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: HOME_GREETING })).toBeVisible();
 
     await page.goForward();
     await expect(page).toHaveURL(/\/finanzas$/);
@@ -54,7 +54,7 @@ test.describe("la navegación del navegador", () => {
 
     await page.goto("/finansas");
 
-    await expect(page.getByRole("heading", { level: 1, name: /🌱/ })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: HOME_GREETING })).toBeVisible();
   });
 
   test("las rutas vecinas siguen siendo suyas y no se las come el catch-all", async ({ page }) => {

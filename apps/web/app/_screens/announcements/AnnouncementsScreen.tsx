@@ -11,6 +11,7 @@ import { listStudents, type Student } from "../../students/api";
 import { API_URL } from "../../api-url";
 import { formatStudentName, sortStudents } from "../../_design/students/studentName";
 import { BirthdayGreeting } from "./BirthdayGreeting";
+import { ModuleHeaderIcon } from "../../_design/ModuleHeaderIcon";
 
 /** One key per attempt: a retry must not buzz four hundred phones twice. */
 function newAttemptKey(): string {
@@ -136,9 +137,7 @@ export function AnnouncementsScreen({ onBack }: AnnouncementsScreenProps): React
       </button>
 
       <div className="fade-up" style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 24 }}>
-        <div style={{ width: 56, height: 56, borderRadius: 18, display: "grid", placeItems: "center", background: "var(--orange)", color: "#fff", boxShadow: "0 6px 16px color-mix(in oklab, var(--orange) 38%, transparent)" }}>
-          <Icon name="announcements" size={30} />
-        </div>
+        <ModuleHeaderIcon icon="announcements" color="orange" shrinks />
         <div>
           <h1 style={{ fontSize: 30, fontWeight: 800, color: "var(--text)" }}>Avisos</h1>
           <p style={{ color: "var(--text-muted)", fontSize: 15, marginTop: 3 }}>

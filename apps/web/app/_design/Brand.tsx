@@ -35,7 +35,7 @@ export function LogoBadge({ height = 44 }: { height?: number }): ReactElement {
         background: "#fff",
         borderRadius: 16,
         padding: "10px 16px",
-        boxShadow: "0 6px 20px rgba(0,0,0,.18)"
+        boxShadow: "var(--shadow-logo-badge)"
       }}
     >
       <Logo height={height} />

@@ -23,7 +23,8 @@ export type FlagKey =
   | "module_schedule"
   | "module_activities"
   | "module_student_import"
-  | "module_config_setup";
+  | "module_config_setup"
+  | "module_ui_refresh";
 
 /** Map of flag key -> enabled. Absent or false means OFF (flags default OFF). */
 export type FlagSet = Partial<Record<FlagKey, boolean>>;

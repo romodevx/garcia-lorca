@@ -1,6 +1,6 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 
-import { signIn } from "./helpers";
+import { desbordeLateral, signIn } from "./helpers";
 
 /**
  * El sistema en una tablet acostada y en un monitor grande.
@@ -26,13 +26,6 @@ const MODULOS = [
   "/avisos",
   "/pagos",
 ] as const;
-
-/** Cuánto se sale la página de lado. Uno es el margen de la barra de scroll. */
-async function desbordeLateral(page: Page): Promise<number> {
-  return page.evaluate(
-    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
-  );
-}
 
 test.describe("la escuela en una tablet acostada", () => {
   test.use({ viewport: { width: 1024, height: 768 } });

@@ -3,13 +3,14 @@
 // 403s in the console and a "Ciclo —" under the greeting.
 // Found by /qa on 2026-09-25
 // Report: .gstack/qa-reports/qa-report-localhost-3002-2026-09-25-t2.md
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { USERS } from "../_design/data";
 import { listCycles } from "../config/api";
 import { listCharges } from "../finance/api";
 import { listStudents } from "../students/api";
+import { HOME_VARIANTS, renderHome } from "../home/testing/renderHome";
 import { Dashboard } from "./Dashboard";
 
 vi.mock("../students/api", () => ({ listStudents: vi.fn().mockResolvedValue([]) }));
@@ -25,7 +26,9 @@ beforeEach(() => {
   vi.mocked(listCharges).mockClear();
 });
 
-describe("Dashboard — reads only what the caller may read", () => {
+describe.each(HOME_VARIANTS)("Dashboard — reads only what the caller may read (%s home)", (_variant, refresh) => {
+  const render = (ui: Parameters<typeof renderHome>[0]) => renderHome(ui, refresh);
+
   it("a maestro triggers no students, cycles or ledger read", async () => {
     render(<Dashboard user={USERS.teacher} onOpen={() => {}} permissions={MAESTRO} now={NOW} />);
 
