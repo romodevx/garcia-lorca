@@ -1,18 +1,15 @@
 "use client";
 
-import { useEffect, useState, type CSSProperties, type ReactElement } from "react";
+import type { CSSProperties, ReactElement } from "react";
 import { Btn } from "../_design/Controls";
 import { formatCents as money } from "../_lib/money";
 import { Icon, type IconName } from "../_design/Icon";
 import { Page } from "../_design/Page";
 import { COLOR, type ColorKey } from "../_design/colors";
 import { MODULES, isModuleVisible, type ModuleDef, type UserProfile } from "../_design/data";
-import { listCycles } from "../config/api";
-import { listCharges } from "../finance/api";
-import { listStudents } from "../students/api";
+import { useHomeKpis, type Ledger } from "../home/useHomeKpis";
 
-import { API_URL } from "../api-url";
-
+const NO_LEDGER: Ledger = { pendingCents: 0, collectedCents: 0, withBalance: 0, charges: 0 };
 
 /** CSS custom properties are the one inline style a card keeps: they feed its classes. */
 type CardVars = CSSProperties & Record<`--${string}`, string>;
@@ -219,38 +216,22 @@ export function Dashboard({ user, onOpen, permissions, permissionsFailed = false
   // Real KPIs — no mock numbers: students from the roster, money from the ledger.
   // Each read runs only for a caller who may make it: a maestro or a cajera has
   // no students:read / config:read, and reading anyway filled their console
-  // with 403s on the one screen everybody opens.
-  const [kpi, setKpi] = useState({ students: 0, pending: 0, collected: 0, withBalance: 0 });
-  const [cycleName, setCycleName] = useState<string | undefined>(undefined);
-  const readsStudents = canSee("students:read");
+  // with 403s on the one screen everybody opens. This view reads every state
+  // as a plain number (0 until it is known), as it always has.
   const readsCycles = canSee("config:read");
-  const readsLedger = readsCycles && canSee("finance:read");
-  useEffect(() => {
-    let active = true;
-    // "Registrados": the active admission pipeline — exclude rejected/withdrawn,
-    // which are not current students, so the count never over-reports.
-    if (readsStudents) {
-      listStudents(API_URL).then((ss) => active && setKpi((k) => ({ ...k, students: ss.filter((s) => s.admissionStatus !== "rejected" && s.admissionStatus !== "withdrawn").length }))).catch(() => {});
-    }
-    if (readsCycles) {
-      listCycles(API_URL).then((cs) => {
-        const cyc = cs.find((c) => c.status === "active") ?? cs[0];
-        if (cyc === undefined) return;
-        if (active) setCycleName(cyc.name);
-        if (!readsLedger) return;
-        listCharges(API_URL, { cycleId: cyc.id }).then((chs) => {
-          if (!active) return;
-          setKpi((k) => ({
-            ...k,
-            collected: chs.reduce((a, c) => a + c.paidCents, 0),
-            pending: chs.reduce((a, c) => a + Math.max(0, c.remainingCents), 0),
-            withBalance: chs.filter((c) => c.remainingCents > 0).length,
-          }));
-        }).catch(() => {});
-      }).catch(() => {});
-    }
-    return () => { active = false; };
-  }, [readsStudents, readsCycles, readsLedger]);
+  const { students, cycle, ledger } = useHomeKpis({
+    students: canSee("students:read"),
+    cycles: readsCycles,
+    ledger: readsCycles && canSee("finance:read"),
+  });
+  const ledgerNow = ledger.status === "ready" ? ledger.value : NO_LEDGER;
+  const kpi = {
+    students: students.status === "ready" ? students.value : 0,
+    pending: ledgerNow.pendingCents,
+    collected: ledgerNow.collectedCents,
+    withBalance: ledgerNow.withBalance,
+  };
+  const cycleName = cycle?.name;
 
   return (
     <Page>
