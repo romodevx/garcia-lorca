@@ -5,18 +5,11 @@ import { Btn } from "../../_design/Controls";
 import { HelpTip, TextField } from "../../_design/form";
 import { Icon } from "../../_design/Icon";
 import { Page } from "../../_design/Page";
-import type { AnnouncementScope } from "../../comms/api";
 import { formatStudentName, sortStudents } from "../../_design/students/studentName";
 import { BirthdayGreeting } from "./BirthdayGreeting";
 import { ModuleHeaderIcon } from "../../_design/ModuleHeaderIcon";
 import { useAnnouncementComposer } from "./useAnnouncementComposer";
-
-const SCOPES: { value: AnnouncementScope; label: string }[] = [
-  { value: "student", label: "Un alumno" },
-  { value: "group", label: "Grupos" },
-  { value: "level", label: "Niveles" },
-  { value: "cycle", label: "Toda la escuela" },
-];
+import { SCOPES } from "./audience";
 
 const field = {
   width: "100%", height: 48, padding: "0 16px", borderRadius: "var(--r-md)",
