@@ -71,6 +71,10 @@ exports[`TopBar styles (characterization) > resolves to today's values on a desk
   "header>div[1]>button[0]>span[1]": {
     "box-sizing": "border-box",
     "flex": "1",
+    "min-width": "0",
+    "overflow": "hidden",
+    "text-overflow": "ellipsis",
+    "white-space": "nowrap",
   },
   "header>div[1]>button[0]>svg[0]": {
     "box-sizing": "border-box",
@@ -258,6 +262,10 @@ exports[`TopBar styles (characterization) > resolves to today's values on a desk
   "header>div[1]>button[0]>span[1]": {
     "box-sizing": "border-box",
     "flex": "1",
+    "min-width": "0",
+    "overflow": "hidden",
+    "text-overflow": "ellipsis",
+    "white-space": "nowrap",
   },
   "header>div[1]>button[0]>svg[0]": {
     "box-sizing": "border-box",
@@ -449,6 +457,10 @@ exports[`TopBar styles (characterization) > resolves to today's values on a phon
     "box-sizing": "border-box",
     "display": "none",
     "flex": "1",
+    "min-width": "0",
+    "overflow": "hidden",
+    "text-overflow": "ellipsis",
+    "white-space": "nowrap",
   },
   "header>div[1]>button[0]>svg[0]": {
     "box-sizing": "border-box",
