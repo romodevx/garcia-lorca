@@ -51,22 +51,34 @@ func TestFeaturesAllOffByDefault(t *testing.T) {
 	}
 }
 
-// The Configuración setup view (module_config_setup) is reported, and OFF while
-// only module_config is enabled.
-func TestFeaturesReportsConfigSetupOff(t *testing.T) {
-	h := handler.NewFeaturesHandler(featureflag.NewInMemory(config.ParseEnabledModules("config")))
-	rec := httptest.NewRecorder()
-	h.Features(rec, httptest.NewRequest(http.MethodGet, "/api/v1/features", nil))
+// Presentation-only views are reported, and OFF while only the module they
+// dress up is enabled: module_config_setup over config, module_announcements_view
+// over comms.
+func TestFeaturesReportsPresentationViewsOff(t *testing.T) {
+	tests := []struct {
+		key     string
+		modules string
+	}{
+		{key: "module_config_setup", modules: "config"},
+		{key: "module_announcements_view", modules: "comms"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.key, func(t *testing.T) {
+			h := handler.NewFeaturesHandler(featureflag.NewInMemory(config.ParseEnabledModules(tt.modules)))
+			rec := httptest.NewRecorder()
+			h.Features(rec, httptest.NewRequest(http.MethodGet, "/api/v1/features", nil))
 
-	var got map[string]bool
-	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	enabled, reported := got["module_config_setup"]
-	if !reported {
-		t.Fatalf("/features does not report module_config_setup: %v", got)
-	}
-	if enabled {
-		t.Errorf("module_config_setup must be false by default")
+			var got map[string]bool
+			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			enabled, reported := got[tt.key]
+			if !reported {
+				t.Fatalf("/features does not report %s: %v", tt.key, got)
+			}
+			if enabled {
+				t.Errorf("%s must be false by default", tt.key)
+			}
+		})
 	}
 }
