@@ -242,7 +242,7 @@ export function HelpTip({ id, label, text }: HelpTipProps): ReactElement {
             fontSize: 12.5,
             lineHeight: 1.45,
             fontWeight: 500,
-            boxShadow: "0 8px 24px rgba(0,0,0,.18)",
+            boxShadow: "var(--shadow-tip)",
             pointerEvents: "auto",
           }}
         >

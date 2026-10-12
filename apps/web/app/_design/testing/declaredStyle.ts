@@ -19,11 +19,10 @@ import { readFileSync } from "node:fs";
  *      given (not the mangled DOM attribute), with React's own px rule;
  *   3. then !important rules;
  *   4. then var() substituted from the custom properties declared on the
- *      element or its nearest ancestor (:root included).
- *
- * Known approximation: var() is substituted at the element being read, not
- * where each custom property was declared. No style in this app depends on the
- * difference.
+ *      element or its nearest ancestor (:root included). As in a browser, a
+ *      custom property's own var()s are substituted where IT is declared: a
+ *      `--shadow-icon` built from `--icon-c` only works on an element that
+ *      has `--icon-c`, and declaring it on :root would read as unset here too.
  */
 
 type Declaration = { prop: string; value: string; important: boolean };
@@ -207,10 +206,11 @@ export function declaredStyle(el: Element, ctx: StyleContext): Map<string, strin
   return out;
 }
 
-function customProperty(el: Element | null, name: string, ctx: StyleContext): string | undefined {
+/** The custom property's value and the element that declares it. */
+function customProperty(el: Element | null, name: string, ctx: StyleContext): { value: string; owner: Element } | undefined {
   for (let node = el; node !== null; node = node.parentElement) {
-    const v = declaredStyle(node, ctx).get(name);
-    if (v !== undefined) return v;
+    const value = declaredStyle(node, ctx).get(name);
+    if (value !== undefined) return { value, owner: node };
   }
   return undefined;
 }
@@ -226,7 +226,9 @@ function substitute(value: string, el: Element, ctx: StyleContext, depth = 0): s
     if (value[close] === ")") d--;
   }
   const [name, ...fallback] = splitTopLevel(value.slice(at + 4, close - 1), ",");
-  const found = customProperty(el, name ?? "", ctx) ?? (fallback.length > 0 ? fallback.join(", ") : "<unset>");
+  const custom = customProperty(el, name ?? "", ctx);
+  const unset = fallback.length > 0 ? fallback.join(", ") : "<unset>";
+  const found = custom === undefined ? unset : substitute(custom.value, custom.owner, ctx, depth + 1);
   const replaced = value.slice(0, at) + found + value.slice(close);
   return substitute(normalize(replaced), el, ctx, depth + 1);
 }

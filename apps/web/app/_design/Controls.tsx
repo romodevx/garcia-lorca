@@ -86,7 +86,7 @@ export function Btn({
     primary: {
       background: "var(--primary)",
       color: "var(--primary-ink)",
-      boxShadow: "0 4px 14px color-mix(in oklab, var(--lime) 40%, transparent)"
+      boxShadow: "var(--shadow-primary)"
     },
     forest: { background: "var(--forest)", color: "#fff" },
     ghost: { background: "var(--surface-3)", color: "var(--text)", border: "1px solid var(--border)" },

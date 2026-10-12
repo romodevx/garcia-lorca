@@ -513,7 +513,7 @@ function FinRow({ r, i, onPay }: { r: Row; i: number; onPay: () => void }): Reac
         ) : r.visual === "cancelled" ? (
           <span style={{ color: "var(--text-faint)", fontSize: 13.5 }}>Cancelado</span>
         ) : (
-          <button onClick={onPay} style={{ display: "inline-flex", alignItems: "center", gap: 7, height: 40, padding: "0 16px", borderRadius: 99, cursor: "pointer", background: "var(--primary)", color: "var(--primary-ink)", fontFamily: "var(--font-display)", fontWeight: 600, fontSize: 14, boxShadow: "0 3px 10px color-mix(in oklab, var(--lime) 36%, transparent)" }}><Icon name="card" size={17} />Registrar pago</button>
+          <button onClick={onPay} style={{ display: "inline-flex", alignItems: "center", gap: 7, height: 40, padding: "0 16px", borderRadius: 99, cursor: "pointer", background: "var(--primary)", color: "var(--primary-ink)", fontFamily: "var(--font-display)", fontWeight: 600, fontSize: 14, boxShadow: "var(--shadow-primary-sm)" }}><Icon name="card" size={17} />Registrar pago</button>
         )}
       </div>
     </div>

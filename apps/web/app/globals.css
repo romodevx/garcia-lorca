@@ -46,6 +46,17 @@
      under it (--setup-topbar-h) and the redesign's floating bar (F2b) restates
      it under html[data-look]. 78px on a phone too: see the 768px block. */
   --topbar-h: 78px;
+
+  /* Elevation that does not change with the theme (the lime glow of what is
+     primary, and two dark drop shadows). Values are the ones the components
+     typed inline before F2a; none is --shadow-pop, which is theme-aware and
+     different, and merging them is a visual decision for F2b. The shadow
+     families and where each one lives: shadows.test.ts. */
+  --shadow-fab: 0 10px 30px color-mix(in oklab, var(--lime) 45%, transparent);
+  --shadow-primary: 0 4px 14px color-mix(in oklab, var(--lime) 40%, transparent);
+  --shadow-primary-sm: 0 3px 10px color-mix(in oklab, var(--lime) 36%, transparent);
+  --shadow-tip: 0 8px 24px rgba(0,0,0,.18);
+  --shadow-logo-badge: 0 6px 20px rgba(0,0,0,.18);
 }
 
 /* ---------------- LIGHT THEME ---------------- */
@@ -222,6 +233,15 @@ input { font-family: var(--font-ui); }
    veinte copias en línea del mismo div; ahora una sola clase, para que la capa
    html[data-look] de F2b los cambie todos a la vez. En línea van --icon-c,
    --icon-ink y --icon-glow (40% en lima y amarillo, 38% en los demás). */
+
+/* --shadow-icon: el halo de color bajo un cuadro de ícono (familia (a) del
+   inventario de sombras). Se declara en el propio cuadro y no en :root porque
+   una propiedad personalizada resuelve sus var() donde se declara: en :root no
+   hay --icon-c y el halo saldría vacío. */
+.module-header-icon,
+.module-card-icon {
+  --shadow-icon: 0 6px 16px color-mix(in oklab, var(--icon-c) var(--icon-glow), transparent);
+}
 .module-header-icon {
   width: 56px;
   height: 56px;
@@ -231,7 +251,7 @@ input { font-family: var(--font-ui); }
   flex-shrink: 0;
   background: var(--icon-c);
   color: var(--icon-ink);
-  box-shadow: 0 6px 16px color-mix(in oklab, var(--icon-c) var(--icon-glow), transparent);
+  box-shadow: var(--shadow-icon);
 }
 .module-header-icon--neutral { background: var(--surface-3); color: var(--text-muted); box-shadow: none; }
 .module-header-icon--flat { box-shadow: none; }
@@ -271,6 +291,8 @@ input { font-family: var(--font-ui); }
 }
 .module-card-top { display: flex; align-items: flex-start; justify-content: space-between; }
 .module-card-icon {
+  --icon-c: var(--mod-c);
+  --icon-glow: 38%;
   width: 58px;
   height: 58px;
   border-radius: 18px;
@@ -279,7 +301,7 @@ input { font-family: var(--font-ui); }
   flex-shrink: 0;
   background: var(--mod-c);
   color: var(--mod-ink);
-  box-shadow: 0 6px 16px color-mix(in oklab, var(--mod-c) 38%, transparent);
+  box-shadow: var(--shadow-icon);
   transform: none;
   transition: transform .25s var(--ease);
 }

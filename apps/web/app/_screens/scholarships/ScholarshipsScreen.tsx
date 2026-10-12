@@ -117,7 +117,7 @@ export function ScholarshipsScreen({ onBack, permissions }: ScholarshipsScreenPr
         <>
           <div aria-hidden style={{ height: FAB_BOTTOM + FAB_HEIGHT + FAB_GAP }} />
           <button onClick={create} title="Nueva beca" aria-label="Nueva beca"
-            style={{ position: "fixed", right: 32, bottom: FAB_BOTTOM, zIndex: 50, height: FAB_HEIGHT, padding: "0 26px", borderRadius: 99, display: "inline-flex", alignItems: "center", gap: 10, background: "var(--primary)", color: "var(--primary-ink)", fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 16.5, cursor: "pointer", boxShadow: "0 10px 30px color-mix(in oklab, var(--lime) 45%, transparent)" }}>
+            style={{ position: "fixed", right: 32, bottom: FAB_BOTTOM, zIndex: 50, height: FAB_HEIGHT, padding: "0 26px", borderRadius: 99, display: "inline-flex", alignItems: "center", gap: 10, background: "var(--primary)", color: "var(--primary-ink)", fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 16.5, cursor: "pointer", boxShadow: "var(--shadow-fab)" }}>
             <Icon name="plus" size={22} stroke={2.6} />Nueva beca
           </button>
         </>
