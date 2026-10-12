@@ -22,4 +22,17 @@ describe("TopBar", () => {
     const styled = [...own].filter((el) => el.hasAttribute("style")).map((el) => el.className || el.tagName);
     expect(styled).toEqual([]);
   });
+
+  // PLAN-redesign-home §4.2: below 768px the refreshed look drops the theme
+  // toggle, as it already drops the language one; it needs a box to aim at.
+  it("wraps the theme toggle so the stylesheet can drop it on a narrow window", () => {
+    const { container } = render(
+      <Providers>
+        <TopBar user={USERS.admin} theme="light" onToggle={() => {}} onHome={() => {}} onLogout={() => {}} onOpenPalette={() => {}} />
+      </Providers>
+    );
+    const wrapper = container.querySelector(".topbar-actions > .topbar-theme");
+    expect(wrapper?.querySelector("button[aria-label='Cambiar tema']")).not.toBeNull();
+    expect(wrapper?.hasAttribute("style")).toBe(false);
+  });
 });

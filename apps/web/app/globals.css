@@ -1085,6 +1085,21 @@ html:has(.setup-mobilebar) {
       background: var(--surface);
     }
   }
+  /* Below 768px (a laptop at 200–400% zoom): the capsule loses 24px to its
+     float, so it tightens, drops the theme toggle as the language one is
+     already dropped (§4.2), and keeps the search a 44px target. */
+  @media (max-width: 768px) {
+    html[data-look="refresh"] .topbar {
+      padding: 0 14px;
+      gap: 10px;
+    }
+    html[data-look="refresh"] .topbar-theme {
+      display: none;
+    }
+    html[data-look="refresh"] .topbar-search {
+      min-width: 44px;
+    }
+  }
   /* Sticky only where the window has height to spare: below 560px (a laptop
      at 200% zoom) a bar that never scrolls away eats a fifth of the screen. */
   @media (min-height: 560px) {

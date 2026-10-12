@@ -103,23 +103,6 @@ exports[`TopBar styles (characterization) > resolves to today's values on a desk
   "header>div[3]>button[0]>svg[0]": {
     "box-sizing": "border-box",
   },
-  "header>div[3]>button[2]": {
-    "background": "#16331F",
-    "border": "1px solid #1E3727",
-    "border-radius": "50%",
-    "box-sizing": "border-box",
-    "color": "#EAF4EC",
-    "cursor": "pointer",
-    "display": "grid",
-    "font-family": "<unset>, system-ui, sans-serif",
-    "height": "46px",
-    "place-items": "center",
-    "transition": "all .2s cubic-bezier(.22,.61,.36,1)",
-    "width": "46px",
-  },
-  "header>div[3]>button[2]>svg[0]": {
-    "box-sizing": "border-box",
-  },
   "header>div[3]>button[3]": {
     "align-items": "center",
     "background": "#16331F",
@@ -180,6 +163,26 @@ exports[`TopBar styles (characterization) > resolves to today's values on a desk
     "height": "40px",
     "min-width": "44px",
     "padding": "0 14px",
+  },
+  "header>div[3]>span[2]": {
+    "box-sizing": "border-box",
+  },
+  "header>div[3]>span[2]>button[0]": {
+    "background": "#16331F",
+    "border": "1px solid #1E3727",
+    "border-radius": "50%",
+    "box-sizing": "border-box",
+    "color": "#EAF4EC",
+    "cursor": "pointer",
+    "display": "grid",
+    "font-family": "<unset>, system-ui, sans-serif",
+    "height": "46px",
+    "place-items": "center",
+    "transition": "all .2s cubic-bezier(.22,.61,.36,1)",
+    "width": "46px",
+  },
+  "header>div[3]>span[2]>button[0]>svg[0]": {
+    "box-sizing": "border-box",
   },
 }
 `;
@@ -287,23 +290,6 @@ exports[`TopBar styles (characterization) > resolves to today's values on a desk
   "header>div[3]>button[0]>svg[0]": {
     "box-sizing": "border-box",
   },
-  "header>div[3]>button[2]": {
-    "background": "#F1F4EF",
-    "border": "1px solid #E7ECE5",
-    "border-radius": "50%",
-    "box-sizing": "border-box",
-    "color": "#0C2417",
-    "cursor": "pointer",
-    "display": "grid",
-    "font-family": "<unset>, system-ui, sans-serif",
-    "height": "46px",
-    "place-items": "center",
-    "transition": "all .2s cubic-bezier(.22,.61,.36,1)",
-    "width": "46px",
-  },
-  "header>div[3]>button[2]>svg[0]": {
-    "box-sizing": "border-box",
-  },
   "header>div[3]>button[3]": {
     "align-items": "center",
     "background": "#F1F4EF",
@@ -364,6 +350,26 @@ exports[`TopBar styles (characterization) > resolves to today's values on a desk
     "height": "40px",
     "min-width": "44px",
     "padding": "0 14px",
+  },
+  "header>div[3]>span[2]": {
+    "box-sizing": "border-box",
+  },
+  "header>div[3]>span[2]>button[0]": {
+    "background": "#F1F4EF",
+    "border": "1px solid #E7ECE5",
+    "border-radius": "50%",
+    "box-sizing": "border-box",
+    "color": "#0C2417",
+    "cursor": "pointer",
+    "display": "grid",
+    "font-family": "<unset>, system-ui, sans-serif",
+    "height": "46px",
+    "place-items": "center",
+    "transition": "all .2s cubic-bezier(.22,.61,.36,1)",
+    "width": "46px",
+  },
+  "header>div[3]>span[2]>button[0]>svg[0]": {
+    "box-sizing": "border-box",
   },
 }
 `;
@@ -476,23 +482,6 @@ exports[`TopBar styles (characterization) > resolves to today's values on a phon
   "header>div[3]>button[0]>svg[0]": {
     "box-sizing": "border-box",
   },
-  "header>div[3]>button[2]": {
-    "background": "#F1F4EF",
-    "border": "1px solid #E7ECE5",
-    "border-radius": "50%",
-    "box-sizing": "border-box",
-    "color": "#0C2417",
-    "cursor": "pointer",
-    "display": "grid",
-    "font-family": "<unset>, system-ui, sans-serif",
-    "height": "46px",
-    "place-items": "center",
-    "transition": "all .2s cubic-bezier(.22,.61,.36,1)",
-    "width": "46px",
-  },
-  "header>div[3]>button[2]>svg[0]": {
-    "box-sizing": "border-box",
-  },
   "header>div[3]>button[3]": {
     "align-items": "center",
     "background": "#F1F4EF",
@@ -555,6 +544,26 @@ exports[`TopBar styles (characterization) > resolves to today's values on a phon
     "height": "40px",
     "min-width": "44px",
     "padding": "0 14px",
+  },
+  "header>div[3]>span[2]": {
+    "box-sizing": "border-box",
+  },
+  "header>div[3]>span[2]>button[0]": {
+    "background": "#F1F4EF",
+    "border": "1px solid #E7ECE5",
+    "border-radius": "50%",
+    "box-sizing": "border-box",
+    "color": "#0C2417",
+    "cursor": "pointer",
+    "display": "grid",
+    "font-family": "<unset>, system-ui, sans-serif",
+    "height": "46px",
+    "place-items": "center",
+    "transition": "all .2s cubic-bezier(.22,.61,.36,1)",
+    "width": "46px",
+  },
+  "header>div[3]>span[2]>button[0]>svg[0]": {
+    "box-sizing": "border-box",
   },
 }
 `;

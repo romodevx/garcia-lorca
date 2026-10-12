@@ -69,7 +69,11 @@ export function TopBar({
         <span className="topbar-lang">
           <LanguageToggle />
         </span>
-        <ThemeToggle theme={theme} onToggle={onToggle} />
+        {/* Wrapped for the same reason: the refreshed look drops it below
+            768px (PLAN-redesign-home §4.2), so the capsule fits 320px. */}
+        <span className="topbar-theme">
+          <ThemeToggle theme={theme} onToggle={onToggle} />
+        </span>
         <button
           onClick={onLogout}
           aria-label="Cerrar sesión"

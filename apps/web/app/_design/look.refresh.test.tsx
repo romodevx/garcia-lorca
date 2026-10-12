@@ -238,6 +238,21 @@ describe("look refresh: the floating top bar", () => {
     expect(resolvedStyle(html(), SHORT)["scroll-padding-top"]).toBeUndefined();
   });
 
+  // §4.2 and WCAG 1.4.10: 1280px at 400% is 320px wide. The capsule's 12px
+  // margins left 266px for a bar that needed 283, and pushed the account chip
+  // 4px off the window (home.responsive.spec.ts, 320×200 @4x).
+  it("below 768px the capsule fits 320px: tighter padding, no theme toggle, a real search target", () => {
+    setLook("light");
+    const narrow: StyleContext = { width: 320, height: 800 };
+    const bar = only(<header className="topbar" />);
+    expect(resolvedStyle(bar, narrow)).toMatchObject({ padding: "0 14px", gap: "10px" });
+    const theme = only(<span className="topbar-theme" />);
+    expect(resolvedStyle(theme, narrow)["display"]).toBe("none");
+    expect(resolvedStyle(theme, TALL)["display"]).toBeUndefined();
+    const search = only(<div className="topbar-search" />);
+    expect(resolvedStyle(search, narrow)["min-width"]).toBe("44px");
+  });
+
   it("without backdrop-filter support the bar goes opaque", () => {
     const css = readFileSync("app/globals.css", "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
     expect(css).toMatch(
