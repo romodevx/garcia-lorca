@@ -35,16 +35,23 @@ export function usePeek(): Peek {
 const NEXT_KEYS = new Set(["ArrowDown", "ArrowRight"]);
 const PREVIOUS_KEYS = new Set(["ArrowUp", "ArrowLeft"]);
 
-/** Arrows (wrapping), Home and End move the focus between a peek's shortcuts; Tab still works too. */
+const NONE_FOCUSED = -1;
+
+/**
+ * Arrows (wrapping), Home and End move the focus between a peek's shortcuts;
+ * Tab still works too. With no shortcut focused yet, an arrow starts from an
+ * end: down/right on the first, up/left on the last.
+ */
 export function moveFocusAmongShortcuts(event: KeyboardEvent<HTMLElement>): void {
   const buttons = [...event.currentTarget.querySelectorAll<HTMLButtonElement>("button")];
   const count = buttons.length;
   const at = buttons.findIndex((b) => b === document.activeElement);
+  const last = count - 1;
   let next: number | undefined;
-  if (NEXT_KEYS.has(event.key)) next = (at + 1) % count;
-  else if (PREVIOUS_KEYS.has(event.key)) next = (at - 1 + count) % count;
+  if (NEXT_KEYS.has(event.key)) next = at === NONE_FOCUSED ? 0 : (at + 1) % count;
+  else if (PREVIOUS_KEYS.has(event.key)) next = at === NONE_FOCUSED ? last : (at - 1 + count) % count;
   else if (event.key === "Home") next = 0;
-  else if (event.key === "End") next = count - 1;
+  else if (event.key === "End") next = last;
   if (next === undefined) return;
   event.preventDefault();
   buttons[next]?.focus();
