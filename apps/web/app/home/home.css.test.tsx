@@ -71,6 +71,15 @@ describe("refreshed home — layout (§4.2)", () => {
     expect(rule(".home-card__shortcut").get("min-height")).toBe("2.75rem");
   });
 
+  it("scrolls a card into view with its whole ring clear of the top bar (WCAG 2.4.11)", () => {
+    // The stretched button draws its ring around the CARD, which starts a
+    // padding and a half-icon above the button. Scroll padding alone left the
+    // card's top edge 13px under the capsule on Shift+Tab (F4 matrix).
+    for (const selector of [".home-card__main", ".home-kpi__main"]) {
+      expect(rule(selector).get("scroll-margin-top"), selector).toBe("2rem");
+    }
+  });
+
   it("gives the ⋯ a 44×44 target", () => {
     home();
     const more = screen.getByRole("button", { name: "Accesos de Estudiantes" });

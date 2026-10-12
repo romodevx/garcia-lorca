@@ -230,9 +230,11 @@ describe("look refresh: the floating top bar", () => {
   });
 
   // WCAG 2.2 · 2.4.11: the sticky bar must never cover the focused field.
+  // It counts the 12px the capsule floats down too: 78 + 16 alone left a 4px
+  // gap, and a 2px ring at 2px offset touched the bar (home.responsive.spec.ts).
   it("scroll padding keeps a focused field clear of the sticky bar", () => {
     setLook("light");
-    expect(resolvedStyle(html(), TALL)["scroll-padding-top"]).toBe("calc(78px + 16px)");
+    expect(resolvedStyle(html(), TALL)["scroll-padding-top"]).toBe("calc(calc(78px + 12px) + 16px)");
     expect(resolvedStyle(html(), SHORT)["scroll-padding-top"]).toBeUndefined();
   });
 

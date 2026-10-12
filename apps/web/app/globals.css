@@ -1090,8 +1090,10 @@ html:has(.setup-mobilebar) {
   @media (min-height: 560px) {
     html[data-look="refresh"] {
       --topbar-clearance: calc(var(--topbar-h) + var(--topbar-float));
-      /* WCAG 2.2 · 2.4.11: a focused field never lands under the bar. */
-      scroll-padding-top: calc(var(--topbar-h) + 16px);
+      /* WCAG 2.2 · 2.4.11: a focused field never lands under the bar. The
+         clearance counts the capsule's float too: --topbar-h alone left a
+         4px gap, exactly what a 2px ring at a 2px offset needs. */
+      scroll-padding-top: calc(var(--topbar-clearance) + 16px);
     }
     html[data-look="refresh"] .topbar {
       position: sticky;
@@ -1290,6 +1292,10 @@ html:has(.setup-mobilebar) {
 .home-kpi__main::after { content: ""; position: absolute; inset: 0; border-radius: inherit; }
 .home-card__main:focus-visible,
 .home-kpi__main:focus-visible { outline: none; }
+/* Their ring goes around the CARD, a padding and a half-icon above the
+   button: the card's top edge needs that much more room under the bar. */
+.home-card__main,
+.home-kpi__main { scroll-margin-top: 2rem; }
 .home-card__main:focus-visible::after,
 .home-kpi__main:focus-visible::after { outline: 2px solid var(--focus-ring, var(--forest)); outline-offset: 2px; }
 .home-card__body { position: relative; flex: 1; }
