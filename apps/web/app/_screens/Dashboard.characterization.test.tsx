@@ -66,4 +66,18 @@ describe("home cards styles (characterization)", () => {
     hover(card);
     expect(styleTree(card, DESKTOP)).toMatchSnapshot();
   });
+
+  // An inline style beats every author rule: the look under html[data-look]
+  // (F2b) could not restyle a card that carried one. Only custom properties
+  // (the module's color, the stagger) may stay inline — they feed the classes.
+  it("the cards and everything in them carry no inline style but custom properties", () => {
+    renderHome();
+    const cards = [cardOf("Alumnos"), cardOf("Por cobrar"), cardOf("Estudiantes"), cardOf("Configuración")];
+    const offenders = cards.flatMap((card) =>
+      [card, ...card.querySelectorAll("*:not(svg *)")]
+        .filter((el) => el.tagName.toLowerCase() !== "svg")
+        .flatMap((el) => [...(el as HTMLElement).style].filter((prop) => !prop.startsWith("--")).map((prop) => `${el.tagName}.${prop}`))
+    );
+    expect(offenders).toEqual([]);
+  });
 });

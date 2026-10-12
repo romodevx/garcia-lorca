@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactElement } from "react";
+import { useEffect, useState, type CSSProperties, type ReactElement } from "react";
 import { Btn } from "../_design/Controls";
 import { formatCents as money } from "../_lib/money";
 import { Icon, type IconName } from "../_design/Icon";
@@ -14,88 +14,30 @@ import { listStudents } from "../students/api";
 import { API_URL } from "../api-url";
 
 
+/** CSS custom properties are the one inline style a card keeps: they feed its classes. */
+type CardVars = CSSProperties & Record<`--${string}`, string>;
+
+// Every style lives in globals.css (.module-card*, .kpi-card*), hover
+// included (:hover). An inline style would beat the look layer under
+// html[data-look]; only the module's color and the stagger stay inline, as
+// custom properties.
 function ModuleCard({ m, i, onOpen }: { m: ModuleDef; i: number; onOpen: (id: string) => void }): ReactElement {
-  const [hov, setHov] = useState(false);
   const c = COLOR[m.color] ?? COLOR.neutral;
   const neutral = m.color === "neutral";
+  const vars: CardVars = { "--mod-c": c.v, "--mod-ink": c.ink, "--card-delay": `${i * 0.03}s` };
   return (
-    <button
-      onClick={() => onOpen(m.id)}
-      onMouseEnter={() => setHov(true)}
-      onMouseLeave={() => setHov(false)}
-      className="fade-up"
-      style={{
-        position: "relative",
-        textAlign: "left",
-        display: "flex",
-        flexDirection: "column",
-        gap: 16,
-        padding: "22px 22px 20px",
-        borderRadius: "var(--r-lg)",
-        minHeight: 172,
-        background: hov ? `color-mix(in oklab, ${c.v} 9%, var(--surface))` : "var(--surface)",
-        border: `1.5px solid ${hov ? `color-mix(in oklab, ${c.v} 45%, var(--border))` : "var(--border)"}`,
-        boxShadow: hov ? "var(--shadow-hover)" : "var(--shadow-card)",
-        transform: hov ? "translateY(-4px)" : "none",
-        transition: "all .22s var(--ease)",
-        animationDelay: `${i * 0.03}s`
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
-        <div
-          style={{
-            width: 58,
-            height: 58,
-            borderRadius: 18,
-            display: "grid",
-            placeItems: "center",
-            flexShrink: 0,
-            background: neutral ? "var(--surface-3)" : c.v,
-            color: neutral ? "var(--text-muted)" : c.ink,
-            boxShadow: neutral ? "none" : `0 6px 16px color-mix(in oklab, ${c.v} 38%, transparent)`,
-            transform: hov ? "scale(1.06) rotate(-3deg)" : "none",
-            transition: "transform .25s var(--ease)"
-          }}
-        >
+    <button onClick={() => onOpen(m.id)} className={neutral ? "module-card module-card--neutral fade-up" : "module-card fade-up"} style={vars}>
+      <div className="module-card-top">
+        <div className="module-card-icon">
           <Icon name={m.icon} size={30} stroke={2.1} />
         </div>
-        {m.badge !== null && m.badge > 0 && (
-          <span
-            style={{
-              minWidth: 26,
-              height: 26,
-              padding: "0 8px",
-              borderRadius: 99,
-              background: "var(--red)",
-              color: "#fff",
-              fontFamily: "var(--font-display)",
-              fontWeight: 700,
-              fontSize: 13,
-              display: "grid",
-              placeItems: "center"
-            }}
-          >
-            {m.badge}
-          </span>
-        )}
+        {m.badge !== null && m.badge > 0 && <span className="module-card-badge">{m.badge}</span>}
       </div>
-      <div style={{ marginTop: "auto" }}>
-        <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 18.5, color: "var(--text)", letterSpacing: "-.02em" }}>
-          {m.label}
-        </div>
-        <div style={{ fontSize: 13.5, color: "var(--text-muted)", marginTop: 3 }}>{m.desc}</div>
+      <div className="module-card-text">
+        <div className="module-card-label">{m.label}</div>
+        <div className="module-card-desc">{m.desc}</div>
       </div>
-      <span
-        style={{
-          position: "absolute",
-          right: 18,
-          bottom: 18,
-          color: c.v,
-          opacity: hov ? 1 : 0,
-          transform: hov ? "translateX(0)" : "translateX(-6px)",
-          transition: "all .22s var(--ease)"
-        }}
-      >
+      <span className="module-card-chevron">
         <Icon name="chevron" size={20} stroke={2.6} />
       </span>
     </button>
@@ -117,48 +59,16 @@ function KpiCard({
   sub: string;
   onClick: () => void;
 }): ReactElement {
-  const [hov, setHov] = useState(false);
-  const c = COLOR[color];
+  const vars: CardVars = { "--kpi-c": COLOR[color].v };
   return (
-    <button
-      onClick={onClick}
-      onMouseEnter={() => setHov(true)}
-      onMouseLeave={() => setHov(false)}
-      style={{
-        flex: 1,
-        textAlign: "left",
-        display: "flex",
-        alignItems: "center",
-        gap: 16,
-        padding: "18px 22px",
-        borderRadius: "var(--r-lg)",
-        background: "var(--surface)",
-        border: "1px solid var(--border)",
-        boxShadow: hov ? "var(--shadow-hover)" : "var(--shadow-card)",
-        transform: hov ? "translateY(-3px)" : "none",
-        transition: "all .2s var(--ease)"
-      }}
-    >
-      <div
-        style={{
-          width: 52,
-          height: 52,
-          borderRadius: 14,
-          flexShrink: 0,
-          display: "grid",
-          placeItems: "center",
-          background: `color-mix(in oklab, ${c.v} 16%, var(--surface))`,
-          color: c.v
-        }}
-      >
+    <button onClick={onClick} className="kpi-card" style={vars}>
+      <div className="kpi-card-icon">
         <Icon name={icon} size={26} />
       </div>
       <div>
-        <div style={{ fontSize: 13.5, color: "var(--text-muted)", fontWeight: 600 }}>{label}</div>
-        <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 26, color: "var(--text)", lineHeight: 1.1, marginTop: 2 }}>
-          {value}
-        </div>
-        <div style={{ fontSize: 12.5, color: "var(--text-faint)", marginTop: 2 }}>{sub}</div>
+        <div className="kpi-card-label">{label}</div>
+        <div className="kpi-card-value">{value}</div>
+        <div className="kpi-card-sub">{sub}</div>
       </div>
     </button>
   );

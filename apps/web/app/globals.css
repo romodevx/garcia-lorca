@@ -218,6 +218,114 @@ input { font-family: var(--font-ui); }
 .fade-up { animation: fadeUp .5s var(--ease) both; }
 @media (prefers-reduced-motion: reduce) { .fade-up { animation: none; } }
 
+/* ============================================================
+   INICIO: TARJETA DE MÓDULO Y TARJETA KPI
+
+   Estaban en línea en Dashboard.tsx, con el hover hecho con useState. Pasan
+   aquí (PLAN-redesign-home F2a) porque un estilo en línea le gana a cualquier
+   regla, y la capa html[data-look] de F2b no habría podido tocarlas. El
+   componente sólo pone, en línea, propiedades personalizadas: --mod-c (color
+   del módulo), --mod-ink (tinta sobre ese color), --card-delay (escalonado)
+   y --kpi-c.
+   ============================================================ */
+.module-card {
+  position: relative;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 22px 22px 20px;
+  border-radius: var(--r-lg);
+  min-height: 172px;
+  background: var(--surface);
+  border: 1.5px solid var(--border);
+  box-shadow: var(--shadow-card);
+  transform: none;
+  transition: all .22s var(--ease);
+  animation-delay: var(--card-delay);
+}
+.module-card:hover {
+  background: color-mix(in oklab, var(--mod-c) 9%, var(--surface));
+  border: 1.5px solid color-mix(in oklab, var(--mod-c) 45%, var(--border));
+  box-shadow: var(--shadow-hover);
+  transform: translateY(-4px);
+}
+.module-card-top { display: flex; align-items: flex-start; justify-content: space-between; }
+.module-card-icon {
+  width: 58px;
+  height: 58px;
+  border-radius: 18px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  background: var(--mod-c);
+  color: var(--mod-ink);
+  box-shadow: 0 6px 16px color-mix(in oklab, var(--mod-c) 38%, transparent);
+  transform: none;
+  transition: transform .25s var(--ease);
+}
+.module-card--neutral .module-card-icon {
+  background: var(--surface-3);
+  color: var(--text-muted);
+  box-shadow: none;
+}
+.module-card:hover .module-card-icon { transform: scale(1.06) rotate(-3deg); }
+.module-card-badge {
+  min-width: 26px;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 99px;
+  background: var(--red);
+  color: #fff;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 13px;
+  display: grid;
+  place-items: center;
+}
+.module-card-text { margin-top: auto; }
+.module-card-label { font-family: var(--font-display); font-weight: 700; font-size: 18.5px; color: var(--text); letter-spacing: -.02em; }
+.module-card-desc { font-size: 13.5px; color: var(--text-muted); margin-top: 3px; }
+.module-card-chevron {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  color: var(--mod-c);
+  opacity: 0;
+  transform: translateX(-6px);
+  transition: all .22s var(--ease);
+}
+.module-card:hover .module-card-chevron { opacity: 1; transform: translateX(0); }
+
+.kpi-card {
+  flex: 1;
+  text-align: left;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 18px 22px;
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-card);
+  transform: none;
+  transition: all .2s var(--ease);
+}
+.kpi-card:hover { box-shadow: var(--shadow-hover); transform: translateY(-3px); }
+.kpi-card-icon {
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  background: color-mix(in oklab, var(--kpi-c) 16%, var(--surface));
+  color: var(--kpi-c);
+}
+.kpi-card-label { font-size: 13.5px; color: var(--text-muted); font-weight: 600; }
+.kpi-card-value { font-family: var(--font-display); font-weight: 700; font-size: 26px; color: var(--text); line-height: 1.1; margin-top: 2px; }
+.kpi-card-sub { font-size: 12.5px; color: var(--text-faint); margin-top: 2px; }
+
 /*
  * The top bar is laid out for a desk. On a phone it does not fit — it used to
  * push the whole page 346px wide, which put the module tiles half off-screen and
