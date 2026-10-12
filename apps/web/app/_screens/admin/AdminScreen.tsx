@@ -202,7 +202,17 @@ export function AdminScreen({ onBack, canDeleteUsers = false, currentUserId }: A
   };
   // Throws on refusal so the dialog can stay open and say why.
   const onDeleteUser = async (u: AdminUser): Promise<void> => {
-    await deleteUser(API_URL, u.id);
+    try {
+      await deleteUser(API_URL, u.id);
+    } catch (e) {
+      // Pending means the account is already blocked and off the list; show
+      // that now instead of after a page reload.
+      if (isDeletionPending(e)) reload();
+      throw e;
+    }
+    closeDeleted(u);
+  };
+  const closeDeleted = (u: AdminUser): void => {
     setDeleting(null);
     reload();
     say(`Usuario eliminado · ${u.displayName}`);
@@ -314,7 +324,7 @@ export function AdminScreen({ onBack, canDeleteUsers = false, currentUserId }: A
       {addRole && <CreateRoleDrawer onClose={() => setAddRole(false)} onSave={onCreateRole} />}
       {editRoles !== null && <EditRolesDrawer user={editRoles} roles={roles} onClose={() => setEditRoles(null)} onSave={(ids) => onSaveUserRoles(editRoles, ids)} />}
       {editPerms !== null && <EditPermsDrawer role={editPerms} onClose={() => setEditPerms(null)} onSave={(ps) => onSavePerms(editPerms, ps)} />}
-      {deleting !== null && <DeleteUserDialog user={deleting} onClose={() => setDeleting(null)} onConfirm={() => onDeleteUser(deleting)} />}
+      {deleting !== null && <DeleteUserDialog user={deleting} onClose={() => setDeleting(null)} onConfirm={() => onDeleteUser(deleting)} onGiveUp={() => closeDeleted(deleting)} />}
       {handover !== null && (
         <HandoverDrawer
           user={handover.user}
@@ -423,23 +433,34 @@ function InviteUserDrawer({ roles, onClose, onSave }: { roles: readonly Role[]; 
  * The shell is the APG dialog every drawer uses: focus in, trapped, Esc out,
  * and back to the row's button on close.
  */
-function DeleteUserDialog({ user, onClose, onConfirm }: { user: AdminUser; onClose: () => void; onConfirm: () => Promise<void> }): ReactElement {
+function DeleteUserDialog({ user, onClose, onConfirm, onGiveUp }: { user: AdminUser; onClose: () => void; onConfirm: () => Promise<void>; onGiveUp: () => void }): ReactElement {
   const [err, setErr] = useState<string | undefined>(undefined);
   const [pending, setPending] = useState(false);
+  const [pendingRefusals, setPendingRefusals] = useState(0);
+  // A second pending in a row is not a blip: the provider keeps refusing, and
+  // pressing the button again cannot fix it. Stop offering it.
+  const gaveUp = pendingRefusals >= MAX_PENDING_RETRIES;
   const confirm = async (): Promise<void> => {
     if (pending) return;
+    if (gaveUp) {
+      onGiveUp();
+      return;
+    }
     setPending(true);
     setErr(undefined);
     try {
       await onConfirm();
     } catch (e) {
-      setErr(deleteRefusal(e, user.displayName));
+      const refusals = isDeletionPending(e) ? pendingRefusals + 1 : 0;
+      setPendingRefusals(refusals);
+      setErr(refusals >= MAX_PENDING_RETRIES ? stuckPending(user.displayName) : deleteRefusal(e, user.displayName));
       setPending(false);
     }
   };
+  const label = gaveUp ? "Entendido" : pending ? "Eliminando…" : "Eliminar usuario";
   return (
-    <DrawerShell title="Eliminar usuario" subtitle={user.email} icon="warning" size="sm" onClose={onClose} onSubmit={() => void confirm()}
-      footer={<><Btn kind="ghost" onClick={onClose}>Cancelar</Btn><div style={{ flex: 1 }} /><Btn type="submit" danger icon="trash" style={{ height: 52 }}>{pending ? "Eliminando…" : "Eliminar usuario"}</Btn></>}>
+    <DrawerShell title="Eliminar usuario" subtitle={user.email} icon="warning" size="sm" onClose={gaveUp ? onGiveUp : onClose} onSubmit={() => void confirm()}
+      footer={<>{!gaveUp && <Btn kind="ghost" onClick={onClose}>Cancelar</Btn>}<div style={{ flex: 1 }} /><Btn type="submit" danger={!gaveUp} icon={gaveUp ? "check" : "trash"} style={{ height: 52 }}>{label}</Btn></>}>
       <div style={{ display: "grid", gap: 14, fontSize: 15, lineHeight: 1.55, color: "var(--text)" }}>
         <p style={{ margin: 0 }}><b>{user.displayName}</b> ya no podrá entrar al sistema y dejará de aparecer en esta lista.</p>
         <p style={{ margin: 0, color: "var(--text-muted)" }}>Su historial se conserva: los pagos que registró, las calificaciones que capturó y todo lo que quedó a su nombre. Si más adelante vuelves a invitar su correo, recupera esta misma cuenta.</p>
@@ -449,6 +470,16 @@ function DeleteUserDialog({ user, onClose, onConfirm }: { user: AdminUser; onClo
   );
 }
 
+/** Pending refusals in a row after which retrying stops being offered. */
+const MAX_PENDING_RETRIES = 2;
+
+const isDeletionPending = (e: unknown): boolean => e instanceof AdminError && e.code === "DELETION_PENDING";
+
+/** The provider keeps refusing: the account is blocked, and a retry will not finish it. */
+function stuckPending(name: string): string {
+  return `${name} ya no puede entrar al sistema y salió de la lista. Su acceso en el proveedor de identidad sigue sin cerrarse, y reintentar no lo resuelve: avisa a soporte técnico. Puedes cerrar esta ventana.`;
+}
+
 /** The refusal in words the director can act on. */
 function deleteRefusal(e: unknown, name: string): string {
   const status = e instanceof AdminError ? e.status : 0;
@@ -456,7 +487,7 @@ function deleteRefusal(e: unknown, name: string): string {
   // The account already cannot sign in; its links or the provider account are
   // still open, and pressing the button again finishes exactly that. Once the
   // dialog closes the row is gone from the list, so the retry lives here.
-  if (e instanceof AdminError && e.code === "DELETION_PENDING") {
+  if (isDeletionPending(e)) {
     return `${name} ya no puede entrar al sistema, pero su acceso no se terminó de cerrar (enlaces pendientes o proveedor de identidad). Pulsa «Eliminar usuario» otra vez, antes de cerrar esta ventana.`;
   }
   if (status === 409) return "No se puede eliminar al último director activo.";
