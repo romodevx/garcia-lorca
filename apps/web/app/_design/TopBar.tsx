@@ -30,24 +30,10 @@ export function TopBar({
   const t = useTranslations("common");
   const tp = useTranslations("palette");
   return (
-    <header
-      className="topbar"
-      style={{
-        position: "sticky",
-        top: 0,
-        zIndex: 30,
-        height: 78,
-        display: "flex",
-        alignItems: "center",
-        gap: 20,
-        padding: "0 28px",
-        background: "var(--topbar-bg)",
-        backdropFilter: "blur(18px) saturate(160%)",
-        WebkitBackdropFilter: "blur(18px) saturate(160%)",
-        borderBottom: "1px solid var(--border)"
-      }}
-    >
-      <button onClick={onHome} className="topbar-logo" style={{ display: "flex", alignItems: "center" }} aria-label={t("nav.dashboard")}>
+    // Every style of the bar lives in globals.css (.topbar*): an inline style
+    // would beat the look layer under html[data-look], and the 768px block.
+    <header className="topbar">
+      <button onClick={onHome} className="topbar-logo" aria-label={t("nav.dashboard")}>
         <Logo height={40} />
       </button>
       {/*
@@ -66,43 +52,15 @@ export function TopBar({
           type="button"
           onClick={onOpenPalette}
           aria-label={tp("ui.placeholder")}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 12,
-            width: "100%",
-            height: 50,
-            padding: "0 14px 0 18px",
-            borderRadius: "var(--r-pill)",
-            border: "1px solid var(--border)",
-            background: "var(--surface)",
-            color: "var(--text-faint)",
-            fontSize: 15.5,
-            cursor: "text",
-            textAlign: "left"
-          }}
+          className="topbar-search-btn"
         >
           <Icon name="search" size={20} />
-          <span className="topbar-search-text" style={{ flex: 1 }}>{tp("ui.placeholder")}</span>
-          <kbd
-            className="topbar-search-kbd"
-            style={{
-              fontFamily: "var(--font-ui)",
-              fontSize: 12,
-              fontWeight: 600,
-              color: "var(--text-muted)",
-              background: "var(--surface-3)",
-              border: "1px solid var(--border)",
-              borderRadius: 7,
-              padding: "3px 7px"
-            }}
-          >
-            ⌘K
-          </kbd>
+          <span className="topbar-search-text">{tp("ui.placeholder")}</span>
+          <kbd className="topbar-search-kbd">⌘K</kbd>
         </button>
       </div>
-      <div className="topbar-spacer" style={{ flex: 1 }} />
-      <div className="topbar-actions" style={{ display: "flex", alignItems: "center", gap: 12 }}>
+      <div className="topbar-spacer" />
+      <div className="topbar-actions">
         {/* No count until something feeds it: a fixed number announced
             notices an empty school did not have (QA 2026-09-25, ISSUE-001). */}
         <IconBtn name="bell" label={t("action.notifications")} />
@@ -117,28 +75,10 @@ export function TopBar({
           aria-label="Cerrar sesión"
           title="Cerrar sesión"
           className="topbar-user"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            padding: "5px 6px 5px 14px",
-            borderRadius: "var(--r-pill)",
-            background: "var(--surface-3)",
-            border: "1px solid var(--border)"
-          }}
         >
-          <div className="topbar-user-text" style={{ textAlign: "right", lineHeight: 1.15 }}>
-            <div
-              style={{
-                fontWeight: 700,
-                fontSize: 14,
-                color: "var(--text)",
-                fontFamily: "var(--font-display)"
-              }}
-            >
-              {user.name}
-            </div>
-            <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{user.role}</div>
+          <div className="topbar-user-text">
+            <div className="topbar-user-name">{user.name}</div>
+            <div className="topbar-user-role">{user.role}</div>
           </div>
           <Avatar name={user.name} color={user.color} size={40} />
         </button>

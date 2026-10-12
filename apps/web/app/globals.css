@@ -41,6 +41,11 @@
      render underneath the drawers it was meant to match. Converting those is
      its own task. */
   --z-palette: 100;
+
+  /* The top bar's height, published once. The setup step bar sticks right
+     under it (--setup-topbar-h) and the redesign's floating bar (F2b) restates
+     it under html[data-look]. 78px on a phone too: see the 768px block. */
+  --topbar-h: 78px;
 }
 
 /* ---------------- LIGHT THEME ---------------- */
@@ -133,6 +138,65 @@ input { font-family: var(--font-ui); }
 *::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 99px; border: 3px solid transparent; background-clip: content-box; }
 *::-webkit-scrollbar-track { background: transparent; }
 
+/* The top bar. Its styles were inline in TopBar.tsx until the redesign needed
+   to restyle it from html[data-look] (PLAN-redesign-home F2a): an inline style
+   beats every author rule, so no look layer could have reached it. */
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  height: var(--topbar-h);
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 0 28px;
+  background: var(--topbar-bg);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
+  backdrop-filter: blur(18px) saturate(160%);
+  border-bottom: 1px solid var(--border);
+}
+.topbar-logo { display: flex; align-items: center; }
+.topbar-search-btn {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  height: 50px;
+  padding: 0 14px 0 18px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-faint);
+  font-size: 15.5px;
+  cursor: text;
+  text-align: left;
+}
+.topbar-search-text { flex: 1; }
+.topbar-search-kbd {
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 3px 7px;
+}
+.topbar-spacer { flex: 1; }
+.topbar-actions { display: flex; align-items: center; gap: 12px; }
+.topbar-user {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 6px 5px 14px;
+  border-radius: var(--r-pill);
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+}
+.topbar-user-text { text-align: right; line-height: 1.15; }
+.topbar-user-name { font-weight: 700; font-size: 14px; color: var(--text); font-family: var(--font-display); }
+.topbar-user-role { font-size: 12px; color: var(--text-muted); }
+
 /* The top bar's search trigger. These were inline on the element until the
    phone media query needed to override them and could not: an inline style
    beats an author rule, so the box kept its desktop width on a 412px screen
@@ -175,11 +239,13 @@ input { font-family: var(--font-ui); }
  * the honest thing is the icon.
  */
 @media (max-width: 768px) {
-  .topbar {
-    height: 64px;
-    gap: 10px;
-    padding: 0 14px;
-  }
+  /* This block used to also ask for a 64px bar (gap 10, padding 0 14), a 6px
+     gap between the actions, a 4px account chip and a 0 14px search button.
+     None of it ever applied: those properties were inline in TopBar.tsx and
+     an inline style beats a media query, so a phone has always had the desk
+     bar's 78px, 20px and 28px. They were dropped when the styles moved to
+     classes (F2a, "no visual change"); shrinking the bar on a phone is a
+     design decision for its own change, and --topbar-h is where it goes. */
   /* `min-width: 0` on every link of the chain is what makes the placeholder
      able to CLIP instead of demanding its full width. A flex item defaults to
      min-width:auto — it refuses to shrink below its content — which is how
@@ -204,14 +270,7 @@ input { font-family: var(--font-ui); }
      thumb needs is 44. */
   .topbar-search button {
     min-width: 44px;
-    padding: 0 14px;
     justify-content: center;
-  }
-  .topbar-actions {
-    gap: 6px;
-  }
-  .topbar-user {
-    padding: 4px;
   }
   .topbar-lang {
     display: none;
@@ -729,10 +788,9 @@ input { font-family: var(--font-ui); }
    setup/layout.ts (NARROW_MAX_PX = 899, COMPACT_MAX_PX = 1199). */
 html:has(.setup-mobilebar) {
   /* El alto de la barra superior y el de la barra "Paso N de 8": lo que un
-     campo enfocado nunca debe quedar debajo. TopBar fija su alto (78px) en
-     línea, y eso le gana al @media que lo baja a 64px: en teléfono también
-     mide 78. */
-  --setup-topbar-h: 78px;
+     campo enfocado nunca debe quedar debajo. La barra superior publica su
+     alto en --topbar-h (78px, también en teléfono). */
+  --setup-topbar-h: var(--topbar-h);
   --setup-bar-h: 48px;
   --setup-bar-gap: 12px;
   scroll-padding-top: calc(var(--setup-topbar-h) + var(--setup-bar-h) + var(--setup-bar-gap));
