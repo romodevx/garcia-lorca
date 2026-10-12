@@ -1352,6 +1352,11 @@ html:has(.setup-mobilebar) {
     position: absolute;
     inset: 0;
     margin: 0;
+    /* Rows only: the body reserves --peek-rows × 2.75rem and nothing more, so
+       the in-flow peek's padding, rule and gaps would make this one scroll. */
+    padding: 0;
+    border-top: 0;
+    gap: 0;
     max-height: 100%;
     overflow: auto;
     background: var(--surface);

@@ -62,6 +62,15 @@ describe("refreshed home — layout (§4.2)", () => {
     expect(body && style(body).get("min-height")).toBe("calc(var(--peek-rows) * 2.75rem)");
   });
 
+  it("fits the hover peek in that reserve: rows only, no padding, rule or gaps on top (F4)", () => {
+    // The in-flow peek's 6px padding, 1px rule and 2px gaps made the hover
+    // peek 9px taller than the body it covers, so it scrolled and cut its last
+    // shortcut on every desktop (home.responsive.spec.ts).
+    const hover = rule(".home-card__peek[hidden]", "hover: hover");
+    expect([hover.get("padding"), hover.get("border-top"), hover.get("gap")]).toEqual(["0", "0", "0"]);
+    expect(rule(".home-card__shortcut").get("min-height")).toBe("2.75rem");
+  });
+
   it("gives the ⋯ a 44×44 target", () => {
     home();
     const more = screen.getByRole("button", { name: "Accesos de Estudiantes" });
