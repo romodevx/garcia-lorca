@@ -1,6 +1,6 @@
-# Plan — Rediseño de Avisos ("Redactar y ver", variante A)
+# Plan — Rediseño de Avisos (variante C, "Destinatarios al lado")
 
-Estado: **v2 APROBADO por el dueño el 2026-10-12** (D3: columna 960 px, foco a la alerta = layout, BC1–BC7 fuera) · 2026-10-12 · rama `feature/redesign-avisos` (desde `dev`)
+Estado: **v3, variante C, pendiente de aprobación** (el dueño cambió de A a C el 2026-10-12; se mantienen D3: columna 960 px, foco a la alerta = layout, BC1–BC7 fuera) · 2026-10-12 · rama `feature/redesign-avisos` (desde `dev`)
 Insumos: `.gstack/redesign/avisos/behavior.md` (contrato) · `diagnosis.md` (P1–P14) ·
 `variants/variant-a.png` (elegida en D2) · `before/` (capturas).
 
@@ -183,3 +183,92 @@ medios, 5 bajos) · `reviews/PLAN-redesign-avisos.eng-review.md` (16: 4 altos, 8
 2. D5: columna de 960 px (recomendado) o el ancho completo de la maqueta.
 3. D12: mover el foco a la alerta, ¿es layout? (recomendado: sí).
 4. BC1–BC7 quedan **fuera** salvo que el dueño pida alguno. BC6: que cada chip se anuncie como lo que muestra. BC7: "llega sola a las 7:00" no es cierto en el dev de GCP, porque el scheduler de cumpleaños nunca se encendió ahí. Esto ya pasaba antes del rediseño.
+
+## 10. Cambio a la variante C, "Destinatarios al lado" (v3)
+
+El dueño eligió **C** después de aprobar A ("no, me gusta mas la c"). Antes del cambio no
+se había construido nada. **Esta sección sustituye §2 y la parte de layout de §3.2 y
+§9.** Siguen vigentes: el flag (§1, E1, E11, E16), el hook compartido (§3.1, E10), las
+pruebas (§5, E4, E5, E3), el orden por `schoolOrder` (E6), los campos aditivos de
+`labelGroups` (D3/E7), Enter en el buscador (D1), ✓ con `aria-hidden` (D2), lo que no se
+construye (D4), la columna de 960 px (D5), los estados (D10/D11), el foco a la alerta
+(D12), `.announce-*` (D15), `rows={4}` (E13) y "Enviando…" (D17).
+
+### Layout (columna de lectura de 960 px)
+
+```
+‹ Volver al inicio
+[icono] Avisos / Un mensaje para un alumno, un grupo, un nivel o toda la escuela
+<form> ┌ Destinatarios (300 px) ┐ ┌──── Redactor (resto, ~620 px) ─────┐
+       │ ○ Un alumno            │ │ Título *                            │
+       │ ● Grupos               │ │ Mensaje *  (rows 4, crece)          │
+       │ ○ Niveles              │ │                                     │
+       │ ○ Toda la escuela      │ │ [alerta role=alert | status]        │
+       │ ─────────────────────  │ │ Para 2° Primaria · A y …  [Enviar]  │
+       │ ⌄ Primaria     2 de 12 │ └─────────────────────────────────────┘
+       │   ☑ 2° A  ☑ 2° B  ☐ …  │
+       │ › Secundaria         6 │
+       │ 2 seleccionados        │
+       └────────────────────────┘
+</form>
+┌ ★ Felicitación de cumpleaños · Mensaje automático · 7:00   Editar ⌄ ┐  ← <details>
+│   (abierto: BirthdayGreeting embedded, a lo ancho de la columna)      │
+└───────────────────────────────────────────────────────────────────────┘
+```
+
+- **Columna izquierda, "Destinatarios"** (`AudiencePane`): las cuatro audiencias en
+  filas tipo radio, de 48 px. Siguen siendo `button` con `aria-pressed` y el mismo
+  nombre (D2): cambia el aspecto, no el rol, así que la caracterización no se toca.
+- **Grupos** (`GroupedTargets`): un `<details>` por nivel con el contador "N de M".
+  Por defecto, los niveles se abren cuando tienen algo elegido, o todos si el colegio
+  tiene 3 niveles o menos; el resto queda cerrado. Las filas son tipo casilla, de 44
+  px, con "1° A" visible y el `aria-label` completo de hoy (D3/BC6). Se pueden elegir
+  varios (B4).
+- **Niveles**: una lista plana de filas tipo casilla, sin secciones.
+- **Un alumno** (`StudentSearch`): buscador más una lista de hasta 8 resultados, cada
+  uno con su grupo, dentro de la misma columna. Es de selección única (B5). Enter no
+  envía (D1).
+- **Toda la escuela**: no hay lista. La columna dice "Toda la escuela · ciclo 2026–2027".
+- El contador B6 ("N seleccionados") va al pie de la columna.
+- **Redactor, a la derecha**: Título y Mensaje como hoy. Al pie, el resumen "Para …"
+  (hasta 3 nombres y luego "y N más", D8, o la pista "Todavía no eliges destinatarios",
+  E9), la alerta y el estado del envío (un solo nodo de cada uno, E2) y el **único**
+  botón lima "Enviar aviso". El botón queda a la vista a 1280×900 y a 1024×768 (P5),
+  porque el redactor es corto.
+- **El `<form>` es la rejilla de las dos columnas** (E3): Enter en Título envía, y no
+  hay `form=`.
+- **Felicitación**: es la tarjeta compacta de la maqueta, pero va **debajo de la
+  rejilla y a lo ancho de la columna**, no en la columna izquierda. En 300 px no cabe
+  el editor con su vista previa, y abrirlo ahí empujaría la lista de grupos. Es un
+  `<details>`; al abrirse muestra `BirthdayGreeting embedded` (D13/D14) y queda fuera
+  del `<form>` del aviso.
+- **Menos de 860 px de columna** (`@container`, D5): una sola columna. Primero
+  Destinatarios y luego el redactor. El pie del redactor (resumen y botón) queda
+  `sticky` abajo, con `scroll-padding-bottom` (D6) para que no tape el campo con el
+  foco. Sigue habiendo un solo nodo.
+
+### Qué cambia frente a A (diagnóstico)
+
+- **P14 y la vista previa:** C no trae vista previa del aviso. P14 queda **abierto**, a
+  propósito, porque así es la variante elegida. Si el dueño la quiere, cabe arriba del
+  "Para …" del redactor. Es sólo presentación y se agrega con un sí.
+- **P6:** se resuelve con "Para …" junto al botón.
+- **P4:** se resuelve porque la felicitación queda plegada, con un botón fantasma.
+- **P1–P3, P5, P7–P13:** igual que en A.
+
+### Componentes (sustituye la tabla de §3.2)
+
+| Componente | Resuelve |
+|---|---|
+| `AudiencePane` | P7/P11: filas tipo radio con `aria-pressed`, título "Destinatarios" y contador al pie |
+| `GroupedTargets` | P2/P3/P10: `<details>` por nivel, filas de 44 px, sin recortes |
+| `StudentSearch` | P1: buscador y resultados (D1, D10) |
+| `SendFooter` | P5/P6/P8/P13: "Para …", alerta con foco, estado, el único "Enviar aviso" y "Enviando…" |
+| `AutomaticMessages` | P4: `<details>` con `BirthdayGreeting embedded` |
+| `AnnouncementsCompose` | Arma la pantalla con `useAnnouncementComposer()` |
+
+`ComposeSummary` y su vista previa salen del plan.
+
+### Decisión pendiente
+1. Aprobar v3.
+2. ¿Agregar la vista previa del aviso arriba del "Para …"? (recomendado: no; C tal cual)
