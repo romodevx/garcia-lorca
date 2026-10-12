@@ -56,7 +56,7 @@ export function HomeView({ user, onOpen, permissions, permissionsFailed = false,
         ) : visibleModules.length === 0 ? (
           <NoModules />
         ) : (
-          <HomeModules modules={visibleModules} onOpen={onOpen} />
+          <HomeModules modules={visibleModules} permissions={permissions} onOpen={onOpen} />
         )}
       </div>
     </Page>

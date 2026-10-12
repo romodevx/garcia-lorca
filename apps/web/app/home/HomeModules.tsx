@@ -1,11 +1,14 @@
 "use client";
 
+import { useFlags } from "@garcia-lorca/ui/flags";
 import { useTranslations } from "next-intl";
 import type { CSSProperties, ReactElement, ReactNode } from "react";
 
 import type { ModuleDef } from "../_design/data";
 import { groupHomeModules } from "./areas";
 import { HomeCard } from "./HomeCard";
+import { homeShortcuts } from "./shortcuts";
+import { usePeek } from "./usePeek";
 
 /** Up to this many modules, areas would be one-card rows: one plain list instead (B12). */
 const SINGLE_LIST_MAX = 4;
@@ -28,13 +31,27 @@ function Area({ id, title, index, compact, children }: { id: string; title: stri
 
 export interface HomeModulesProps {
   modules: readonly ModuleDef[];
+  /** The caller's permissions: a shortcut's `requires` is checked against them (E4). */
+  permissions: readonly string[];
   onOpen: (id: string, intent?: string) => void;
 }
 
 /** The visible modules, by area (§3.1); with four or fewer, one "Tus módulos" list. */
-export function HomeModules({ modules, onOpen }: HomeModulesProps): ReactElement {
+export function HomeModules({ modules, permissions, onOpen }: HomeModulesProps): ReactElement {
   const t = useTranslations("home");
-  const card = (m: ModuleDef): ReactElement => <HomeCard key={m.id} module={m} onOpen={onOpen} />;
+  const flags = useFlags();
+  const peek = usePeek();
+  const card = (m: ModuleDef): ReactElement => (
+    <HomeCard
+      key={m.id}
+      module={m}
+      shortcuts={homeShortcuts(m.id, permissions, flags)}
+      peekOpen={peek.openId === m.id}
+      onTogglePeek={() => peek.toggle(m.id)}
+      onClosePeek={peek.close}
+      onOpen={onOpen}
+    />
+  );
 
   if (modules.length <= SINGLE_LIST_MAX) {
     return (
