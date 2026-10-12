@@ -17,6 +17,7 @@ import { UniformsScreen } from "./_screens/uniforms/UniformsScreen";
 import { ExpensesScreen } from "./_screens/expenses/ExpensesScreen";
 import { ScheduleEntry } from "./_screens/schedule/ScheduleEntry";
 import { requestCoverFocus } from "./schedule/coverFocus";
+import { clearIntent, handOffIntent } from "./routing/pendingIntent";
 import { ActivitiesScreen } from "./_screens/activities/ActivitiesScreen";
 import { ScholarshipsScreen } from "./_screens/scholarships/ScholarshipsScreen";
 import type { CutAccess } from "./_screens/finance/CashCutClosing";
@@ -106,6 +107,25 @@ const RESTORE_ATTEMPTS = 3;
 /** Espera base entre intentos; crece con cada uno. */
 const RESTORE_BACKOFF_MS = 300;
 
+/** Modules with a screen of their own; any other module id opens the placeholder. */
+type ModuleScreen = Exclude<View["screen"], "module" | "studentEdit" | "teacherLoad" | "levelDelete" | "levelPeriods">;
+const MODULE_SCREENS: Readonly<Record<string, ModuleScreen>> = {
+  finance: "finance",
+  settings: "config",
+  students: "students",
+  grades: "grades",
+  attendance: "attendance",
+  teachers: "teachers",
+  uniforms: "uniforms",
+  expenses: "expenses",
+  schedule: "schedule",
+  activities: "activities",
+  scholarships: "scholarships",
+  payments: "payments",
+  announcements: "announcements",
+  admin: "admin",
+};
+
 export function AppShell(): ReactElement {
   const { theme, toggle } = useTheme();
   const router = useRouter();
@@ -123,7 +143,17 @@ export function AppShell(): ReactElement {
   // from the palette while /alumnos?nivel=… is open must drop the filters the
   // URL just dropped). Other screens do not count: no wasted remounts.
   const [visit, setVisit] = useState(0);
+  // Bumped by every shortcut that carries an intent. The intent screens are
+  // keyed on it: a shortcut picked while already on its screen keeps the path,
+  // so without a new key nothing would mount to take the intent.
+  const [intentVisit, setIntentVisit] = useState(0);
   const go = useCallback((next: View): void => {
+    // Every deliberate navigation disarms a leftover intent (its module was
+    // off, its screen never mounted): it must not fire on a later, unrelated
+    // visit. A shortcut arms its own AFTER this — see `open`. Not cleared on
+    // a pathname effect: the shell remounts per route and the screen mounts
+    // only once the session is restored, long after such an effect.
+    clearIntent();
     const toStudents = next.screen === "students";
     markStudentsVisit(toStudents);
     if (toStudents) setVisit((v) => v + 1);
@@ -508,68 +538,18 @@ export function AppShell(): ReactElement {
     setConfigNotice(message);
     go({ screen: "config" });
   };
-  const open = useCallback((id: string, _intent?: string): void => {
-    if (id === "finance") {
-      go({ screen: "finance" });
-      return;
-    }
-    if (id === "settings") {
-      go({ screen: "config" });
-      return;
-    }
-    if (id === "students") {
-      go({ screen: "students" });
-      return;
-    }
-    if (id === "grades") {
-      go({ screen: "grades" });
-      return;
-    }
-    if (id === "attendance") {
-      go({ screen: "attendance" });
-      return;
-    }
-    if (id === "teachers") {
-      go({ screen: "teachers" });
-      return;
-    }
-    if (id === "uniforms") {
-      go({ screen: "uniforms" });
-      return;
-    }
-    if (id === "expenses") {
-      go({ screen: "expenses" });
-      return;
-    }
-    if (id === "schedule") {
-      go({ screen: "schedule" });
-      return;
-    }
-    if (id === "activities") {
-      go({ screen: "activities" });
-      return;
-    }
-    if (id === "scholarships") {
-      go({ screen: "scholarships" });
-      return;
-    }
-    if (id === "payments") {
-      go({ screen: "payments" });
-      return;
-    }
-    if (id === "announcements") {
-      go({ screen: "announcements" });
-      return;
-    }
-    if (id === "admin") {
-      go({ screen: "admin" });
-      return;
-    }
-    go({ screen: "module", moduleId: id });
+  // The intent outlives the navigation in module scope: the destination
+  // screen mounts after it and takes it once (routing/pendingIntent.ts).
+  const open = useCallback((id: string, intent?: string): void => {
+    const screen = Object.hasOwn(MODULE_SCREENS, id) ? MODULE_SCREENS[id] : undefined;
+    go(screen === undefined ? { screen: "module", moduleId: id } : { screen });
+    // Armed after go() cleared, before the router renders the destination,
+    // which takes it once on mount (routing/pendingIntent.ts).
+    if (handOffIntent(id, intent)) setIntentVisit((v) => v + 1);
   }, [go]);
 
   // Command Palette navigation: a command route is `module:<id>` plus an optional
-  // intent (`module:finance:payment` lands on the ventanilla form). Navigating IS
+  // intent (`module:expenses:new` lands on the new-expense drawer). Navigating IS
   // executing (the palette never mutates), so we just open the target surface.
   const navigate = useCallback(
     (route: string): void => {
@@ -650,7 +630,7 @@ export function AppShell(): ReactElement {
       )}
       {view.screen === "finance" &&
         (financeEnabled ? (
-          <FinanceScreen onBack={home} notes={notesAccess} canCorrectPayments={canCorrectPayments} cutAccess={cutAccess} />
+          <FinanceScreen key={intentVisit} onBack={home} notes={notesAccess} canCorrectPayments={canCorrectPayments} cutAccess={cutAccess} />
         ) : (
           // Flag OFF: do not render the finance surface; show the friendly stub
           // instead so navigation never dead-ends. (Backend 404 is authoritative.)
@@ -713,6 +693,7 @@ export function AppShell(): ReactElement {
           <StudentsScreen
             key={visit}
             onBack={home}
+            canCreate={principal?.permissions?.includes("students:create") === true}
             onEdit={canEditStudents ? editStudent : undefined}
             canWriteNotes={principal?.permissions?.includes("students:notes_write") === true}
             canVoidAnyNote={principal?.permissions?.includes("students:notes_void") === true}
@@ -746,7 +727,7 @@ export function AppShell(): ReactElement {
         ))}
       {view.screen === "teachers" &&
         (teachersEnabled ? (
-          <TeachersScreen onBack={home} onOpenLoad={openTeacherLoad} canGrantAccess={canGrantTeacherAccess(principal?.permissions)} canListUsers={canListUsers(principal?.permissions)}
+          <TeachersScreen key={intentVisit} onBack={home} onOpenLoad={openTeacherLoad} canGrantAccess={canGrantTeacherAccess(principal?.permissions)} canListUsers={canListUsers(principal?.permissions)}
             // T19: absences live in Horarios — offered only with it on and schedule:write (UX; the gateway decides).
             canRegisterAbsence={scheduleEnabled && (principal?.permissions ?? []).includes("schedule:write")}
             onCoverClasses={(absence) => { requestCoverFocus(absence); go({ screen: "schedule" }); }} />
@@ -769,7 +750,7 @@ export function AppShell(): ReactElement {
         ))}
       {view.screen === "uniforms" &&
         (uniformsEnabled ? (
-          <UniformsScreen onBack={home} permissions={principal?.permissions} />
+          <UniformsScreen key={intentVisit} onBack={home} permissions={principal?.permissions} />
         ) : (
           // Flag OFF: never render the shop; show the friendly stub so navigation
           // never dead-ends. (Backend 404 is authoritative.)
@@ -777,7 +758,7 @@ export function AppShell(): ReactElement {
         ))}
       {view.screen === "expenses" &&
         (expensesEnabled ? (
-          <ExpensesScreen onBack={home} permissions={principal?.permissions} />
+          <ExpensesScreen key={intentVisit} onBack={home} permissions={principal?.permissions} />
         ) : (
           // Flag OFF: never render the module; the friendly stub keeps
           // navigation from dead-ending. (Backend 404 is authoritative.)
@@ -785,18 +766,18 @@ export function AppShell(): ReactElement {
         ))}
       {view.screen === "schedule" && (
         // Flag OFF renders the friendly stub (inside ScheduleEntry). Backend 404 is authoritative.
-        <ScheduleEntry enabled={scheduleEnabled} permissions={principal?.permissions} onBack={home} />
+        <ScheduleEntry key={intentVisit} enabled={scheduleEnabled} permissions={principal?.permissions} onBack={home} />
       )}
       {view.screen === "activities" &&
         (activitiesEnabled ? (
-          <ActivitiesScreen onBack={home} permissions={principal?.permissions} />
+          <ActivitiesScreen key={intentVisit} onBack={home} permissions={principal?.permissions} />
         ) : (
           // Flag OFF: the friendly stub. Backend 404 is authoritative.
           <ModulePlaceholder m={MODULES.find((m) => m.id === "activities") as ModuleDef} onBack={home} />
         ))}
       {view.screen === "scholarships" &&
         (scholarshipsEnabled ? (
-          <ScholarshipsScreen onBack={home} permissions={principal?.permissions} />
+          <ScholarshipsScreen key={intentVisit} onBack={home} permissions={principal?.permissions} />
         ) : (
           // Flag OFF: the friendly stub. Backend 404 is authoritative.
           <ModulePlaceholder m={MODULES.find((m) => m.id === "scholarships") as ModuleDef} onBack={home} />

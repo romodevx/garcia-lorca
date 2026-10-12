@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as api from "../../activities/api";
 import * as roster from "../../_design/students/useStudentRoster";
+import { clearIntent, requestIntent } from "../../routing/pendingIntent";
 import { ActivitiesScreen } from "./ActivitiesScreen";
 
 vi.mock("../../activities/api", async (importOriginal) => {
@@ -114,5 +115,23 @@ describe("ActivitiesScreen (T17)", () => {
     m.listActivities.mockResolvedValue([]);
     renderScreen();
     expect(await screen.findByText(/Todavía no hay actividades/)).toBeInTheDocument();
+  });
+});
+
+// Redesign F1: "Nueva actividad" from ⌘K or the home lands ON the form.
+describe("opened from a shortcut", () => {
+  afterEach(clearIntent);
+
+  it("opens the new-activity form", async () => {
+    requestIntent("activities", "new");
+    renderScreen();
+    expect(await screen.findByRole("heading", { name: "Nueva actividad" })).toBeInTheDocument();
+  });
+
+  it("never opens the form for a role that cannot write", async () => {
+    requestIntent("activities", "new");
+    renderScreen(["activities:read"]);
+    expect(await screen.findByRole("heading", { name: "Actividades" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Nueva actividad" })).not.toBeInTheDocument();
   });
 });

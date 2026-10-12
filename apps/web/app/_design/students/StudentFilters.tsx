@@ -64,6 +64,8 @@ export interface StudentFiltersProps<T extends FilterableStudent> {
   onClear?: () => void;
   /** Put before the search on the first row (the screen's status tabs). */
   leading?: ReactNode;
+  /** Start with the cursor in the search ("Buscar alumno" shortcut). */
+  focusSearch?: boolean;
 }
 
 /**
@@ -79,6 +81,7 @@ export function StudentFilters<T extends FilterableStudent>({
   extraActive = false,
   onClear,
   leading,
+  focusSearch = false,
 }: StudentFiltersProps<T>): ReactElement {
   const { facets, state } = filter;
   const clearable = filter.active || extraActive;
@@ -96,6 +99,7 @@ export function StudentFilters<T extends FilterableStudent>({
           <span style={{ position: "absolute", left: 16, top: "50%", transform: "translateY(-50%)", color: "var(--text-faint)" }}><Icon name="search" size={19} /></span>
           <input
             type="search"
+            autoFocus={focusSearch}
             value={state.q}
             onChange={(e) => filter.setQuery(e.target.value)}
             aria-label="Buscar"

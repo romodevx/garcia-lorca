@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as api from "../../expenses/api";
+import { clearIntent, requestIntent } from "../../routing/pendingIntent";
 import { ExpensesScreen } from "./ExpensesScreen";
 
 vi.mock("../../expenses/api", async (importOriginal) => {
@@ -204,5 +205,29 @@ describe("ExpensesScreen (T10)", () => {
     await user.click(screen.getByRole("button", { name: /Excel/ }));
     expect(m.downloadReport).toHaveBeenCalledWith(expect.any(String), "weekly", "2026-10-15", "xlsx");
     vi.unstubAllGlobals();
+  });
+});
+
+// Redesign F1: "Registrar egreso" from ⌘K or the home lands ON the drawer.
+describe("opened from a shortcut", () => {
+  afterEach(clearIntent);
+
+  it("opens the new-expense drawer", async () => {
+    requestIntent("expenses", "new");
+    renderScreen();
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("a plain visit opens the plain screen", async () => {
+    renderScreen();
+    await screen.findByRole("button", { name: /Registrar egreso/ });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("never opens the drawer for a role that cannot write", async () => {
+    requestIntent("expenses", "new");
+    renderScreen(["expenses:read"]);
+    await waitFor(() => expect(m.listExpenses).toHaveBeenCalled());
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 });

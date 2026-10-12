@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as studentsApi from "../../students/api";
 import * as configApi from "../../config/api";
+import { clearIntent, requestIntent } from "../../routing/pendingIntent";
 import { StudentsScreen } from "./StudentsScreen";
 
 // The screens read labelled groups (ISSUE-002); label them from the listGroups mock.
@@ -266,5 +267,36 @@ describe("StudentsScreen — la lista que no cargó", () => {
     await user.click(screen.getByRole("button", { name: /Reintentar/ }));
 
     expect(await screen.findByText("Cruz Valentina")).toBeInTheDocument();
+  });
+});
+
+// Redesign F1: the students shortcuts land ON the flow.
+describe("opened from a shortcut", () => {
+  afterEach(clearIntent);
+
+  it("\"Nuevo alumno\" opens the quick-add drawer", async () => {
+    requestIntent("students", "new");
+    render(<StudentsScreen onBack={() => {}} />);
+    expect(await screen.findByRole("dialog", { name: "Nuevo alumno" })).toBeInTheDocument();
+  });
+
+  it("\"Buscar alumno\" puts the cursor in the search", async () => {
+    requestIntent("students", "search");
+    render(<StudentsScreen onBack={() => {}} />);
+    await waitFor(() => expect(screen.getByRole("searchbox", { name: "Buscar" })).toHaveFocus());
+  });
+
+  it("never opens the drawer for a role that cannot create pupils", async () => {
+    requestIntent("students", "new");
+    render(<StudentsScreen onBack={() => {}} canCreate={false} />);
+    await screen.findByText("Cruz Valentina");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("a plain visit opens neither", async () => {
+    render(<StudentsScreen onBack={() => {}} />);
+    await screen.findByText("Cruz Valentina");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("searchbox", { name: "Buscar" })).not.toHaveFocus();
   });
 });

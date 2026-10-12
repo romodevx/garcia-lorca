@@ -4,6 +4,7 @@ import { useState, type ReactElement } from "react";
 
 import { MODULES, type ModuleDef } from "../../_design/data";
 import { ModulePlaceholder } from "../ModulePlaceholder";
+import { useIntent } from "../../routing/pendingIntent";
 import { takeCoverFocus, type CoverFocus } from "../../schedule/coverFocus";
 import { ScheduleScreen } from "./ScheduleScreen";
 
@@ -22,6 +23,8 @@ export interface ScheduleEntryProps {
 export function ScheduleEntry({ enabled, permissions, onBack }: ScheduleEntryProps): ReactElement {
   // "Cubrir ahora" from Docentes (T19): taken once, on mount.
   const [focus] = useState<CoverFocus | undefined>(takeCoverFocus);
+  // "Registrar ausencia" from ⌘K or the home: taken once, on mount.
+  const intent = useIntent("schedule");
   if (!enabled) return <ModulePlaceholder m={MODULES.find((m) => m.id === "schedule") as ModuleDef} onBack={onBack} />;
   const perms = permissions ?? [];
   const manages = perms.includes("schedule:read");
@@ -31,6 +34,7 @@ export function ScheduleEntry({ enabled, permissions, onBack }: ScheduleEntryPro
       mode={manages ? "manage" : "teacher"}
       canWrite={manages && perms.includes("schedule:write")}
       focus={focus}
+      openAbsence={intent === "absence"}
     />
   );
 }

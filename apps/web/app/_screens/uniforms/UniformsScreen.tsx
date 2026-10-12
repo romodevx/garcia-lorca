@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
 import { Icon } from "../../_design/Icon";
 import { Page } from "../../_design/Page";
+import { useIntent } from "../../routing/pendingIntent";
 import { listItems, listUniformLevels, UniformsError, type SchoolLevel, type UniformItem } from "../../uniforms/api";
 import { CatalogPanel } from "./CatalogPanel";
 import { CounterSalePanel } from "./CounterSalePanel";
@@ -42,7 +43,8 @@ export function UniformsScreen({
   onBack: () => void;
   permissions?: readonly string[];
 }): ReactElement {
-  const [tab, setTab] = useState<TabId>("counter");
+  const intent = useIntent("uniforms");
+  const [tab, setTab] = useState<TabId>(intent === "inventory" ? "inventory" : "counter");
   const [items, setItems] = useState<UniformItem[] | null>(null);
   const [failure, setFailure] = useState<UniformsError | null>(null);
   const [narrow, setNarrow] = useState(false);

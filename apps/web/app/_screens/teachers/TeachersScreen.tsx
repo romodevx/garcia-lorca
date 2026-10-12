@@ -30,6 +30,7 @@ import type { AbsenceSaved } from "../../schedule/api";
 import { nowInSchoolZone } from "../../schedule/time";
 import { AbsenceDrawer, AbsenceNotice } from "../schedule/AbsenceDrawer";
 import { AssignmentsPanel } from "./AssignmentsPanel";
+import { useIntent } from "../../routing/pendingIntent";
 import { TeachersPanel } from "./TeachersPanel";
 
 import { API_URL } from "../../api-url";
@@ -65,6 +66,7 @@ export interface TeachersScreenProps {
  * with no groups.
  */
 export function TeachersScreen({ onBack, onOpenLoad, canGrantAccess = false, canListUsers = false, canRegisterAbsence = false, onCoverClasses }: TeachersScreenProps): ReactElement {
+  const intent = useIntent("teachers");
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [accountStatuses, setAccountStatuses] = useState<ReadonlyMap<string, UserStatus> | undefined>(undefined);
   const [cycles, setCycles] = useState<Cycle[]>([]);
@@ -178,6 +180,7 @@ export function TeachersScreen({ onBack, onOpenLoad, canGrantAccess = false, can
           onGrantAccess={canGrantAccess ? handleGrantAccess : undefined}
           accountStatuses={accountStatuses}
           onRegisterAbsence={canRegisterAbsence ? setAbsenceFor : undefined}
+          focusNew={intent === "new"}
         />
         {!catalogueClosed && (
           <AssignmentsPanel

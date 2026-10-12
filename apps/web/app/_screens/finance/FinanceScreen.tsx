@@ -18,6 +18,7 @@ import { getOverdue, listCharges, registerPayment, type Charge } from "../../fin
 import { localISODate } from "../../_lib/localDate";
 import { centsToPesosInput, formatCents, pesosToCents } from "../../_lib/money";
 import { listStudents, type Student } from "../../students/api";
+import { useIntent } from "../../routing/pendingIntent";
 
 import { API_URL } from "../../api-url";
 import type { CutAccess } from "./CashCutClosing";
@@ -27,7 +28,7 @@ import { csvName, downloadCsv, toCsv, type CsvColumn } from "../../_lib/csv";
 import { matchesSearch } from "../../_design/textSearch";
 import { compareStudentNames, formatStudentName } from "../../_design/students/studentName";
 
-/** One key per payment attempt. Mirrors PaymentPanel, which had it right. */
+/** One key per payment attempt: a retried submit is the same payment, never a second one. */
 function newAttemptKey(): string {
   return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
@@ -250,7 +251,8 @@ export function FinanceScreen({ onBack, today: officeDay, notes, canCorrectPayme
   const [studentMap, setStudentMap] = useState<Map<string, Student>>(new Map());
   const [cycles, setCycles] = useState<Cycle[]>([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<"all" | "overdue" | "due" | "paid">("all");
+  const intent = useIntent("finance");
+  const [tab, setTab] = useState<"all" | "overdue" | "due" | "paid">(intent === "overdue" ? "overdue" : "all");
   const [q, setQ] = useState("");
   // Which month's charges to look at. The school reads its debt a month at a
   // time — "¿quién debe septiembre?" — and a year of rows on one screen is not
@@ -415,7 +417,7 @@ export function FinanceScreen({ onBack, today: officeDay, notes, canCorrectPayme
           {tabs.map(([id, label]) => {
             const on = tab === id;
             return (
-              <button key={id} onClick={() => setTab(id)} style={{ display: "inline-flex", alignItems: "center", gap: 8, height: 40, padding: "0 16px", borderRadius: 99, cursor: "pointer", background: on ? "var(--surface)" : "transparent", color: on ? "var(--text)" : "var(--text-muted)", fontWeight: 600, fontSize: 14, fontFamily: "var(--font-display)", boxShadow: on ? "var(--shadow-card)" : "none" }}>
+              <button key={id} aria-pressed={on} onClick={() => setTab(id)} style={{ display: "inline-flex", alignItems: "center", gap: 8, height: 40, padding: "0 16px", borderRadius: 99, cursor: "pointer", background: on ? "var(--surface)" : "transparent", color: on ? "var(--text)" : "var(--text-muted)", fontWeight: 600, fontSize: 14, fontFamily: "var(--font-display)", boxShadow: on ? "var(--shadow-card)" : "none" }}>
                 {label}<span style={{ minWidth: 22, height: 20, padding: "0 6px", borderRadius: 99, background: on ? "var(--surface-3)" : "var(--surface)", color: "var(--text-muted)", fontSize: 12, display: "grid", placeItems: "center" }}>{counts[id]}</span>
               </button>
             );

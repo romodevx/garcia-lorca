@@ -8,6 +8,7 @@ import { Page } from "../../_design/Page";
 import { Toast } from "../../_design/Toast";
 import { API_URL } from "../../api-url";
 import { listScholarships, listScholarshipTargets, type Scholarship, type ScholarshipTarget } from "../../scholarships/api";
+import { useIntent } from "../../routing/pendingIntent";
 import { useToast } from "../activities/useToast";
 import { StatCards } from "../uniforms/parts";
 import { ScholarshipAssignPage } from "./ScholarshipAssignPage";
@@ -34,7 +35,8 @@ export interface ScholarshipsScreenProps {
 export function ScholarshipsScreen({ onBack, permissions }: ScholarshipsScreenProps): ReactElement {
   const canWrite = (permissions ?? []).includes("scholarships:write");
   const [assigning, setAssigning] = useState<Scholarship | null>(null);
-  const [editing, setEditing] = useState<Editing>(null);
+  const intent = useIntent("scholarships");
+  const [editing, setEditing] = useState<Editing>(() => (intent === "new" && canWrite ? {} : null));
   const [filter, setFilter] = useState<ActiveFilter>("active");
   const [scholarships, setScholarships] = useState<Scholarship[] | null>(null);
   const [targets, setTargets] = useState<ScholarshipTarget[]>([]);

@@ -30,6 +30,8 @@ export interface ScheduleScreenProps {
   now?: Date;
   /** An absence saved elsewhere (Docentes, "Cubrir ahora"): open on "Por cubrir", on its dates. */
   focus?: { startsOn: string; endsOn: string };
+  /** Open on the new-absence drawer ("Registrar ausencia" shortcut); only where it could be opened by hand. */
+  openAbsence?: boolean;
 }
 
 /**
@@ -37,7 +39,7 @@ export interface ScheduleScreenProps {
  * a 5-minute grid), what is happening right now, and who changed what. In
  * "teacher" mode it is the caller's own timetable, read-only.
  */
-export function ScheduleScreen({ onBack, mode, canWrite, now, focus }: ScheduleScreenProps): ReactElement {
+export function ScheduleScreen({ onBack, mode, canWrite, now, focus, openAbsence = false }: ScheduleScreenProps): ReactElement {
   const [source] = useState(() => sourceFor(mode));
   const [cycleId, setCycleId] = useState<string | undefined>(undefined);
   const { board, failure, reload } = useScheduleBoard(source, cycleId);
@@ -46,7 +48,7 @@ export function ScheduleScreen({ onBack, mode, canWrite, now, focus }: ScheduleS
   const editable = manages && canWrite;
   const today = nowInSchoolZone(now).date;
   const [range, setRange] = useState<UncoveredRange>(() => (focus !== undefined ? rangeForAbsence(focus, today) : { kind: "today" }));
-  const [absenceTarget, setAbsenceTarget] = useState<AbsenceTarget>(null);
+  const [absenceTarget, setAbsenceTarget] = useState<AbsenceTarget>(() => (openAbsence && editable ? { kind: "new" } : null));
   const [saved, setSaved] = useState<AbsenceSaved | null>(null);
   // Bumped on every absence saved: the week and "Por cubrir" read again.
   const [absenceVersion, setAbsenceVersion] = useState(0);

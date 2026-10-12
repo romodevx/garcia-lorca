@@ -10,6 +10,7 @@ import { localISODate } from "../../_lib/localDate";
 import { API_URL } from "../../api-url";
 import { listActivities, type Activity } from "../../activities/api";
 import { StatCards } from "../uniforms/parts";
+import { useIntent } from "../../routing/pendingIntent";
 import { ActivitiesTable, type ActiveFilter } from "./ActivitiesTable";
 import { ActivityEnrollPage } from "./ActivityEnrollPage";
 import { ActivityFormPage } from "./ActivityFormPage";
@@ -36,7 +37,8 @@ export interface ActivitiesScreenProps {
 export function ActivitiesScreen({ onBack, permissions, today: injectedToday }: ActivitiesScreenProps): ReactElement {
   const today = injectedToday ?? localISODate();
   const canWrite = (permissions ?? []).includes("activities:write");
-  const [mode, setMode] = useState<Mode>({ kind: "list" });
+  const intent = useIntent("activities");
+  const [mode, setMode] = useState<Mode>(() => (intent === "new" && canWrite ? { kind: "form" } : { kind: "list" }));
   const [filter, setFilter] = useState<ActiveFilter>("active");
   const [activities, setActivities] = useState<Activity[] | null>(null);
   const [failure, setFailure] = useState<string | undefined>(undefined);

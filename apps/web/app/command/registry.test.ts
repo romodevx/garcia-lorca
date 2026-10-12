@@ -3,6 +3,7 @@ import type { FlagSet } from "@garcia-lorca/ui/flags";
 import { describe, expect, it } from "vitest";
 
 import { MODULES } from "../_design/data";
+import { toIntent } from "../routing/pendingIntent";
 import { buildCommandRegistry } from "./registry";
 
 /**
@@ -136,11 +137,67 @@ describe("buildCommandRegistry", () => {
     expect(ids({ module_students: true }).some((id) => id.startsWith("admin."))).toBe(false);
   });
 
-  it("routes the ventanilla shortcut straight to the payment flow", () => {
+  it("routes \"Registrar pago\" to Registro de pagos, where the ventanilla lives", () => {
     const cmds = buildCommandRegistry({ module_finance: true }, t);
-    // Nav opens the surface; the create shortcut opens it ON the payment form.
+    // Finanzas only lists charges; cobrar happens in Registro de pagos, whose
+    // search already takes the focus — no intent needed.
     expect(cmds.find((c) => c.id === "finance.nav")?.route).toBe("module:finance");
-    expect(cmds.find((c) => c.id === "finance.create")?.route).toBe("module:finance:payment");
+    expect(cmds.find((c) => c.id === "payments.create")?.route).toBe("module:payments");
+    expect(cmds.some((c) => c.id === "finance.create")).toBe(false);
+  });
+
+  // Redesign F1: shortcuts that open the module ON the flow, not just the module.
+  describe("shortcuts with an intent", () => {
+    const allOn = Object.fromEntries(MODULES.map((m) => [m.flag, true]));
+    const route = (id: string, perms?: readonly string[]): string | undefined =>
+      buildCommandRegistry(allOn, t, perms).find((c) => c.id === id)?.route;
+
+    it.each([
+      ["students.create", "module:students:new"],
+      ["students.quick", "module:students:search"],
+      ["teachers.create", "module:teachers:new"],
+      ["finance.quick", "module:finance:overdue"],
+      ["expenses.create", "module:expenses:new"],
+      ["schedule.create", "module:schedule:absence"],
+      ["activities.create", "module:activities:new"],
+      ["scholarships.create", "module:scholarships:new"],
+      ["uniforms.quick", "module:uniforms:inventory"],
+    ])("%s lands on %s", (id, expected) => {
+      expect(route(id)).toBe(expected);
+    });
+
+    it("every intent in the registry is one its screen understands", () => {
+      for (const command of buildCommandRegistry(allOn, t)) {
+        const [, module, intent] = command.route.split(":");
+        if (intent === undefined) continue;
+        expect(toIntent(module ?? "", intent), command.id).toBeDefined();
+      }
+    });
+
+    it("titles the scholarship shortcut \"Nueva beca\", like the button it opens", () => {
+      expect(buildCommandRegistry(allOn, t).find((c) => c.id === "scholarships.create")?.title).toBe("Nueva beca");
+    });
+
+    it("offers \"Ver existencias\" to every reader of Inventario, as the tab is", () => {
+      expect(route("uniforms.quick", ["uniforms:orders"])).toBe("module:uniforms:inventory");
+    });
+
+    it("hides a write shortcut from a role that can only read the module", () => {
+      expect(route("expenses.create", ["expenses:read"])).toBeUndefined();
+      expect(route("expenses.nav", ["expenses:read"])).toBe("module:expenses");
+      expect(route("expenses.create", ["expenses:read", "expenses:write"])).toBe("module:expenses:new");
+    });
+
+    it.each([
+      ["students.create", ["students:read"], ["students:read", "students:create"]],
+      ["teachers.create", ["teachers:read"], ["teachers:read", "teachers:write"]],
+      ["schedule.create", ["schedule:read"], ["schedule:read", "schedule:write"]],
+      ["activities.create", ["activities:read"], ["activities:read", "activities:write"]],
+      ["scholarships.create", ["scholarships:read"], ["scholarships:read", "scholarships:write"]],
+    ])("%s needs its write permission", (id, without, withIt) => {
+      expect(route(id, without)).toBeUndefined();
+      expect(route(id, withIt)).toBeDefined();
+    });
   });
 
   it("keys each command's route to its module for navigation", () => {
