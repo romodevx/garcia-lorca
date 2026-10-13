@@ -14,7 +14,8 @@
     "e2e:ui": "playwright test --ui",
     "e2e:report": "playwright show-report",
     "e2e:demo": "playwright test --project=demo",
-    "e2e:config-setup": "playwright test --project=config-setup"
+    "e2e:config-setup": "playwright test --project=config-setup",
+    "e2e:announcements-view": "playwright test --project=announcements-view"
   },
   "dependencies": {
     "@garcia-lorca/api-client": "workspace:*",

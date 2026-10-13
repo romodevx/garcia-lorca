@@ -17,6 +17,12 @@ const SAMPLE_NAME = "Ana";
 const MAX_TITLE = 80;
 const MAX_BODY = 500;
 
+/** The greeting's title id; a holder that draws the title itself gives it this id. */
+export const BIRTHDAY_HEADING_ID = "cumple-titulo";
+
+const CARD_SURFACE = { background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--r-xl)", padding: "22px 24px" } as const;
+const FORM_LAYOUT = { display: "flex", flexDirection: "column", gap: 16 } as const;
+
 /** The text with the pupil's first name wherever the school wrote {nombre}. */
 export function renderGreeting(text: string, firstName: string): string {
   return text.split(NAME_PLACEHOLDER).join(firstName);
@@ -49,7 +55,15 @@ function validate(title: string, body: string): Errors {
  * Two fields, so it edits in place (no drawer), with a live preview carrying a
  * real name — `{nombre}` reads as a typo until you see it replaced.
  */
-export function BirthdayGreeting(): ReactElement {
+export interface BirthdayGreetingProps {
+  /**
+   * Inside a panel that already draws the card, the star and the title (the
+   * folded panel of Avisos, PLAN-redesign-avisos D13). Presentation only.
+   */
+  embedded?: boolean;
+}
+
+export function BirthdayGreeting({ embedded = false }: BirthdayGreetingProps): ReactElement {
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [isDefault, setIsDefault] = useState(false);
@@ -112,8 +126,8 @@ export function BirthdayGreeting(): ReactElement {
     // not overwrite what somebody typed, and a failed one must not let them
     // replace a text they never saw.
     return (
-      <section aria-labelledby="cumple-titulo" className="fade-up" style={{ marginTop: 24, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--r-xl)", padding: "22px 24px" }}>
-        <h2 id="cumple-titulo" style={{ fontSize: 18, fontWeight: 800, color: "var(--text)", margin: 0 }}>Felicitación de cumpleaños</h2>
+      <section aria-labelledby={BIRTHDAY_HEADING_ID} className={embedded ? undefined : "fade-up"} style={embedded ? undefined : { marginTop: 24, ...CARD_SURFACE }}>
+        {!embedded && <h2 id={BIRTHDAY_HEADING_ID} style={{ fontSize: 18, fontWeight: 800, color: "var(--text)", margin: 0 }}>Felicitación de cumpleaños</h2>}
         {failure !== undefined
           ? <p role="alert" style={{ color: "var(--bad-fg)", fontSize: 14, margin: "8px 0 0" }}>{failure} Recarga la página para intentarlo de nuevo.</p>
           : <p style={{ color: "var(--text-muted)", fontSize: 14, margin: "8px 0 0" }}>Cargando…</p>}
@@ -124,22 +138,11 @@ export function BirthdayGreeting(): ReactElement {
   return (
     <form
       onSubmit={(e) => void save(e)}
-      aria-labelledby="cumple-titulo"
-      className="fade-up"
-      style={{ marginTop: 24, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--r-xl)", boxShadow: "var(--shadow-card)", padding: "22px 24px", display: "flex", flexDirection: "column", gap: 16 }}
+      aria-labelledby={BIRTHDAY_HEADING_ID}
+      className={embedded ? undefined : "fade-up"}
+      style={embedded ? FORM_LAYOUT : { marginTop: 24, ...CARD_SURFACE, boxShadow: "var(--shadow-card)", ...FORM_LAYOUT }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <span style={{ width: 40, height: 40, borderRadius: 12, display: "grid", placeItems: "center", background: "color-mix(in oklab, var(--orange) 16%, var(--surface))", color: "var(--orange)", flexShrink: 0 }}>
-          <Icon name="star" size={20} />
-        </span>
-        <div>
-          <h2 id="cumple-titulo" style={{ fontSize: 18, fontWeight: 800, color: "var(--text)", margin: 0 }}>Felicitación de cumpleaños</h2>
-          <p style={{ color: "var(--text-muted)", fontSize: 14, margin: "2px 0 0" }}>
-            Llega sola a la app de los papás cada mañana a las 7:00, el día que el alumno cumple años.
-            {isDefault && " Hoy se envía el texto predeterminado."}
-          </p>
-        </div>
-      </div>
+      {embedded ? <WhenItGoes isDefault={isDefault} /> : <CardHeader isDefault={isDefault} />}
 
       <TextField
         label="Título de la felicitación"
@@ -179,5 +182,29 @@ export function BirthdayGreeting(): ReactElement {
         </Btn>
       </div>
     </form>
+  );
+}
+
+/** The star, the title and when it goes out: the card's own head. */
+function CardHeader({ isDefault }: { isDefault: boolean }): ReactElement {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+      <span style={{ width: 40, height: 40, borderRadius: 12, display: "grid", placeItems: "center", background: "color-mix(in oklab, var(--orange) 16%, var(--surface))", color: "var(--orange)", flexShrink: 0 }}>
+        <Icon name="star" size={20} />
+      </span>
+      <div>
+        <h2 id={BIRTHDAY_HEADING_ID} style={{ fontSize: 18, fontWeight: 800, color: "var(--text)", margin: 0 }}>Felicitación de cumpleaños</h2>
+        <WhenItGoes isDefault={isDefault} />
+      </div>
+    </div>
+  );
+}
+
+function WhenItGoes({ isDefault }: { isDefault: boolean }): ReactElement {
+  return (
+    <p style={{ color: "var(--text-muted)", fontSize: 14, margin: "2px 0 0" }}>
+      Llega sola a la app de los papás cada mañana a las 7:00, el día que el alumno cumple años.
+      {isDefault && " Hoy se envía el texto predeterminado."}
+    </p>
   );
 }

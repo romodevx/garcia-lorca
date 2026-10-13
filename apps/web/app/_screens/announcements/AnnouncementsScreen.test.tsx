@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as commsApi from "../../comms/api";
 import * as configApi from "../../config/api";
 import * as studentsApi from "../../students/api";
-import { AnnouncementsScreen } from "./AnnouncementsScreen";
+import { VIEWS } from "./views.testkit";
 
 // The screens read labelled groups (ISSUE-002); label them from the listGroups mock.
 beforeEach(() => {
@@ -37,17 +37,17 @@ beforeEach(() => {
 });
 afterEach(() => vi.clearAllMocks());
 
-describe("AnnouncementsScreen", () => {
+describe.each(VIEWS)("Avisos ($name)", ({ Screen, pickStudent }) => {
   // T11: the school writes its birthday greeting where it writes to families.
   it("offers the birthday greeting below the announcement", async () => {
-    render(<AnnouncementsScreen onBack={() => {}} />);
+    render(<Screen onBack={() => {}} />);
     expect(await screen.findByDisplayValue("¡Feliz cumpleaños, {nombre}!")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Felicitación de cumpleaños" })).toBeInTheDocument();
   });
 
   it("sends one message to a chosen group", async () => {
     const user = userEvent.setup();
-    render(<AnnouncementsScreen onBack={() => {}} />);
+    render(<Screen onBack={() => {}} />);
 
     await user.click(await screen.findByRole("button", { name: "1° A" }));
     await user.type(screen.getByLabelText("Título"), "Junta de padres");
@@ -66,7 +66,7 @@ describe("AnnouncementsScreen", () => {
   // nothing in it that still blocks the send.
   it("does not ask for a target when the audience is the whole school", async () => {
     const user = userEvent.setup();
-    render(<AnnouncementsScreen onBack={() => {}} />);
+    render(<Screen onBack={() => {}} />);
     await screen.findByRole("button", { name: "1° A" });
 
     await user.click(screen.getByRole("button", { name: "Toda la escuela" }));
@@ -76,7 +76,7 @@ describe("AnnouncementsScreen", () => {
 
   it("refuses to send a message with nothing in it", async () => {
     const user = userEvent.setup();
-    render(<AnnouncementsScreen onBack={() => {}} />);
+    render(<Screen onBack={() => {}} />);
     await screen.findByRole("button", { name: "1° A" });
 
     await user.click(screen.getByRole("button", { name: /Enviar aviso/ }));
@@ -90,7 +90,7 @@ describe("AnnouncementsScreen", () => {
   it("shows the gateway's own words when nobody matched", async () => {
     const user = userEvent.setup();
     comms.announce.mockRejectedValue(new Error("nadie coincide con ese destino"));
-    render(<AnnouncementsScreen onBack={() => {}} />);
+    render(<Screen onBack={() => {}} />);
 
     await user.click(await screen.findByRole("button", { name: "1° A" }));
     await user.type(screen.getByLabelText("Título"), "Junta");
@@ -108,7 +108,7 @@ describe("AnnouncementsScreen", () => {
       { id: "g1", cycleId: "c1", gradeLevelId: "gl1", name: "1° A", capacity: 30 },
       { id: "g2", cycleId: "c1", gradeLevelId: "gl1", name: "1° B", capacity: 30 },
     ]);
-    render(<AnnouncementsScreen onBack={() => {}} />);
+    render(<Screen onBack={() => {}} />);
 
     await user.click(await screen.findByRole("button", { name: "1° A" }));
     await user.click(screen.getByRole("button", { name: "1° B" }));
@@ -124,11 +124,11 @@ describe("AnnouncementsScreen", () => {
   // is not a circular, and letting it become one silently would be worse.
   it("sends to one pupil, one at a time", async () => {
     const user = userEvent.setup();
-    render(<AnnouncementsScreen onBack={() => {}} />);
+    render(<Screen onBack={() => {}} />);
     await screen.findByRole("button", { name: "1° A" });
 
     await user.click(screen.getByRole("button", { name: "Un alumno" }));
-    await user.click(await screen.findByRole("button", { name: "Cruz Valentina" }));
+    await pickStudent(user, "Cruz Valentina");
     await user.type(screen.getByLabelText("Título"), "Recordatorio");
     await user.type(screen.getByLabelText("Mensaje"), "Traer uniforme");
     await user.click(screen.getByRole("button", { name: /Enviar aviso/ }));

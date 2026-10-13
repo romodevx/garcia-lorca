@@ -684,6 +684,12 @@ export function listGroups(baseURL: string, cycleId: string, gradeLevelId?: stri
 /** A group named for a picker: its grade and its letter, "1° PRIMARIA · A". */
 export interface LabelledGroup extends Group {
   label: string;
+  /** The grade's own name ("1°"); absent when the grade is unknown. */
+  gradeName?: string;
+  /** The grade's level id; absent when the grade is unknown. */
+  levelId?: string;
+  /** The grade's ordinal; absent when the grade is unknown. */
+  ordinal?: number;
 }
 
 /**
@@ -713,10 +719,17 @@ export function labelGroups(
   levels: readonly Pick<Level, "id" | "name">[] = [],
 ): LabelledGroup[] {
   const levelName = new Map(levels.map((l) => [l.id, l.name]));
-  const gradeName = new Map(grades.map((g) => [g.id, gradeWithLevel(g.name, levelName.get(g.levelId))]));
+  const gradeById = new Map(grades.map((g) => [g.id, g]));
   return groups.map((g) => {
-    const grade = gradeName.get(g.gradeLevelId);
-    return { ...g, label: grade === undefined ? g.name : `${grade} · ${g.name}` };
+    const grade = gradeById.get(g.gradeLevelId);
+    if (grade === undefined) return { ...g, label: g.name };
+    return {
+      ...g,
+      label: `${gradeWithLevel(grade.name, levelName.get(grade.levelId))} · ${g.name}`,
+      gradeName: grade.name,
+      levelId: grade.levelId,
+      ordinal: grade.ordinal,
+    };
   });
 }
 

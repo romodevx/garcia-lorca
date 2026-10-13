@@ -1024,6 +1024,241 @@ html:has(.setup-mobilebar) {
 }
 
 /* ============================================================
+   Avisos · "Destinatarios al lado" (module_announcements_view).
+   PLAN-redesign-avisos §10. The <form> is the grid: Destinatarios on the
+   left, the message and its send footer on the right; the birthday
+   greeting folds below. Classes, not inline styles, so the refresh look
+   reaches it; only tokens, so light and dark follow the theme. --hair only
+   exists under the refresh look, hence the --border fallback.
+   ============================================================ */
+.announce {
+  container-type: inline-size;
+  display: grid;
+  gap: 16px;
+  /* The footer's height: what a focused field must never land under once
+     it sticks to the bottom (WCAG 2.2 · 2.4.11, D6). */
+  --announce-footer-h: 104px;
+}
+html:has(.announce-footer) { scroll-padding-bottom: var(--announce-footer-h); }
+
+.announce-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 44px;
+  color: var(--text-muted);
+  font-size: 14.5px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.announce-head { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; }
+.announce-head__title { font-size: 30px; font-weight: 800; color: var(--text); }
+.announce-head__lead { color: var(--text-muted); font-size: 15px; margin: 3px 0 0; }
+
+.announce-grid {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  /* The pane spans both rows; its extra height goes to the footer's row,
+     so the editor and its footer stay one card. */
+  grid-template-rows: auto 1fr;
+  grid-template-areas: "pane editor" "pane footer";
+  column-gap: 22px;
+  align-items: start;
+}
+.announce-card {
+  background: var(--surface);
+  border: 1px solid var(--hair, var(--border));
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-card);
+}
+
+/* ---- Destinatarios ---- */
+.announce-pane { grid-area: pane; padding: 18px 14px 14px; min-width: 0; }
+.announce-pane__title { font-size: 17px; font-weight: 700; color: var(--text); margin: 0 6px 8px; }
+.announce-scopes { display: grid; gap: 2px; }
+.announce-scopes .announce-row { min-height: 48px; border-radius: 14px; padding: 0 12px; font-weight: 600; }
+.announce-scopes .announce-row[aria-pressed="true"] {
+  background: color-mix(in oklab, var(--lime) 12%, var(--surface));
+  box-shadow: inset 0 0 0 1.5px var(--lime);
+}
+.announce-pane__list { margin-top: 10px; padding-top: 6px; border-top: 1px solid var(--hair, var(--border)); }
+.announce-pane__count { margin: 8px 6px 0; font-size: 13.5px; font-weight: 600; color: var(--text-muted); }
+.announce-note { margin: 10px 6px; font-size: 14px; color: var(--text-muted); }
+
+.announce-rows { display: grid; }
+.announce-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 8px;
+  border-radius: var(--r-md);
+  color: var(--text-muted);
+  font-size: 15px;
+  text-align: left;
+}
+.announce-row:hover { background: var(--surface-3); }
+.announce-row[aria-pressed="true"] { color: var(--text); }
+.announce-row__text { display: grid; min-width: 0; }
+.announce-row__detail { font-size: 13px; color: var(--text-faint); }
+
+.announce-mark {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 1.5px solid var(--border-strong);
+  transition: border-color 140ms var(--ease), border-width 140ms var(--ease), background-color 140ms var(--ease);
+}
+.announce-mark--radio { border-radius: 99px; }
+.announce-mark--check { width: 22px; height: 22px; border-radius: 7px; }
+[aria-pressed="true"] > .announce-mark--radio { border: 6px solid var(--lime); }
+[aria-pressed="true"] > .announce-mark--check { background: var(--lime); border-color: var(--lime); color: var(--primary-ink); }
+.announce-mark__check { animation: announceCheckIn 160ms var(--ease) backwards; }
+
+.announce-level__summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 6px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+  cursor: pointer;
+  list-style: none;
+}
+.announce-level__summary::-webkit-details-marker { display: none; }
+.announce-level__title { flex: 1; }
+.announce-level__count { font-weight: 600; color: var(--text-muted); }
+.announce-level__chevron { transition: transform 160ms var(--ease); }
+.announce-level[open] > .announce-level__summary .announce-level__chevron { transform: rotate(90deg); }
+
+.announce-search { display: grid; gap: 6px; margin-top: 8px; }
+.announce-search__label { margin: 0 6px; font-size: 13.5px; font-weight: 600; color: var(--text-muted); }
+.announce-search__input {
+  height: 48px;
+  padding: 0 14px;
+  border-radius: var(--r-md);
+  border: 1.5px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 16px;
+}
+
+/* ---- the message and its footer: one card in two grid items ---- */
+.announce-editor {
+  grid-area: editor;
+  display: grid;
+  gap: 18px;
+  padding: 24px 26px 8px;
+  border-bottom: none;
+  border-radius: var(--r-xl) var(--r-xl) 0 0;
+  min-width: 0;
+}
+.announce-footer {
+  grid-area: footer;
+  display: grid;
+  gap: 10px;
+  padding: 14px 26px 22px;
+  border-top: none;
+  border-radius: 0 0 var(--r-xl) var(--r-xl);
+  min-width: 0;
+}
+.announce-footer__row { display: flex; align-items: center; gap: 16px; }
+.announce-for { flex: 1; margin: 0; font-size: 14.5px; color: var(--text-muted); }
+.announce-for strong { color: var(--text); font-weight: 700; }
+.announce-alert { margin: 0; font-size: 14px; color: var(--bad-fg); }
+.announce-alert:focus { outline: none; }
+.announce-alert:focus-visible { outline: 3px solid color-mix(in oklab, var(--lime) 55%, transparent); outline-offset: 2px; }
+.announce-sent { margin: 0; font-size: 14.5px; color: var(--ok-fg); }
+
+/* ---- the birthday greeting, folded below ---- */
+.announce-auto__summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas: "icon title edit" "icon meta edit";
+  align-items: center;
+  column-gap: 12px;
+  min-height: 44px;
+  padding: 14px 18px;
+  cursor: pointer;
+  list-style: none;
+}
+.announce-auto__summary::-webkit-details-marker { display: none; }
+.announce-auto__icon {
+  grid-area: icon;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 11px;
+  background: color-mix(in oklab, var(--orange) 16%, var(--surface));
+  color: var(--orange);
+}
+.announce-auto__title { grid-area: title; font-size: 15px; font-weight: 700; color: var(--text); }
+.announce-auto__meta { grid-area: meta; font-size: 13.5px; color: var(--text-muted); }
+.announce-auto__edit {
+  grid-area: edit;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 0 16px;
+  border-radius: var(--r-pill);
+  border: 1.5px solid var(--border);
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+.announce-auto__summary:hover .announce-auto__edit { background: var(--surface-3); }
+.announce-auto__chevron { transition: transform 160ms var(--ease); }
+.announce-auto[open] .announce-auto__chevron { transform: rotate(180deg); }
+.announce-auto__body { padding: 4px 22px 22px; }
+.announce-auto[open] .announce-auto__body { animation: announceOpen 180ms var(--ease) backwards; }
+
+/* Transform only, ending in `none`: content is visible from frame 0 and no
+   leftover transform becomes the containing block of anything fixed. */
+@keyframes announceCheckIn {
+  from { transform: scale(.6); }
+  to { transform: none; }
+}
+@keyframes announceOpen {
+  from { transform: translateY(-4px); }
+  to { transform: none; }
+}
+
+/* Below 860px of column (tablet portrait): one column, Destinatarios first,
+   and the footer sticks to the bottom so "Enviar aviso" never gets lost (P5).
+   Still one node of everything; only CSS moves it (E2, D5). */
+@container (max-width: 859px) {
+  .announce-grid {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto;
+    grid-template-areas: "pane" "editor" "footer";
+  }
+  .announce-pane { margin-bottom: 16px; }
+  .announce-footer {
+    position: sticky;
+    bottom: 0;
+    z-index: 5;
+    /* Stuck over the page, it needs an edge; a line, not a new shadow. */
+    border-top: 1px solid var(--hair, var(--border));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .announce-mark,
+  .announce-level__chevron,
+  .announce-auto__chevron { transition: none; }
+  .announce-mark__check,
+  .announce-auto[open] .announce-auto__body { animation: none; }
+}
+
+/* ============================================================
    LOOK REFRESH — "Captions adaptado" (module_ui_refresh, F2b)
 
    PLAN-redesign-home §3.3. Everything here hangs from
