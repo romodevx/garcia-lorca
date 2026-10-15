@@ -54,16 +54,18 @@ func ParseEnrollmentStatus(raw string) (EnrollmentStatus, error) {
 // is optional. The cycle is derived from the group at enroll time, so an
 // Enrollment always carries a group and its cycle together.
 type Enrollment struct {
-	id         string
-	tenantID   string
-	studentID  string
-	cycleID    string
-	groupID    string
-	termID     string
-	status     EnrollmentStatus
-	enrolledAt time.Time
-	endedAt    time.Time // zero while active
-	origin     EnrollmentOrigin
+	id               string
+	tenantID         string
+	studentID        string
+	cycleID          string
+	groupID          string
+	termID           string
+	status           EnrollmentStatus
+	enrolledAt       time.Time
+	endedAt          time.Time // zero while active
+	withdrawnOn      time.Time
+	withdrawalReason string
+	origin           EnrollmentOrigin
 }
 
 // EnrollmentOrigin says how a placement was made. Finance reads it: an
@@ -154,6 +156,52 @@ func (e Enrollment) CanTransfer() bool { return e.status == EnrollmentStatusActi
 // CanWithdraw reports whether the enrollment may be withdrawn.
 func (e Enrollment) CanWithdraw() bool { return e.status == EnrollmentStatusActive }
 
+// MaxEnrollmentWithdrawalReason is the largest allowed reason, in Unicode characters.
+const MaxEnrollmentWithdrawalReason = 500
+
+// Withdraw ends an active enrollment on a UTC calendar day. A zero date means today.
+func (e Enrollment) Withdraw(on time.Time, reason string) (Enrollment, error) {
+	if !e.CanWithdraw() {
+		return Enrollment{}, glerrors.New(glerrors.KindConflict, "enrollment is not active")
+	}
+	today := time.Now().UTC()
+	if on.IsZero() {
+		on = today
+	}
+	day := utcCalendarDay(on)
+	if day.After(utcCalendarDay(today)) {
+		return Enrollment{}, glerrors.New(glerrors.KindInvalid, "withdrawal date cannot be in the future")
+	}
+	if day.Before(utcCalendarDay(e.enrolledAt)) {
+		return Enrollment{}, glerrors.New(glerrors.KindInvalid, "withdrawal date cannot precede enrollment")
+	}
+	trimmed := strings.TrimSpace(reason)
+	if len([]rune(trimmed)) > MaxEnrollmentWithdrawalReason {
+		return Enrollment{}, glerrors.New(glerrors.KindInvalid, "withdrawal reason exceeds 500 characters")
+	}
+	e.status = EnrollmentStatusWithdrawn
+	e.withdrawnOn = day
+	e.withdrawalReason = trimmed
+	e.endedAt = day
+	return e, nil
+}
+
+// WithWithdrawal restores persisted withdrawal details without revalidating
+// historical data. It is intended for persistence adapters only.
+func (e Enrollment) WithWithdrawal(on time.Time, reason string) Enrollment {
+	e.withdrawnOn = utcCalendarDay(on)
+	e.withdrawalReason = reason
+	if e.status == EnrollmentStatusWithdrawn {
+		e.endedAt = e.withdrawnOn
+	}
+	return e
+}
+
+func utcCalendarDay(t time.Time) time.Time {
+	year, month, day := t.UTC().Date()
+	return time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
+}
+
 // Accessors.
 func (e Enrollment) ID() string               { return e.id }
 func (e Enrollment) TenantID() string         { return e.tenantID }
@@ -164,3 +212,5 @@ func (e Enrollment) TermID() string           { return e.termID }
 func (e Enrollment) Status() EnrollmentStatus { return e.status }
 func (e Enrollment) EnrolledAt() time.Time    { return e.enrolledAt }
 func (e Enrollment) EndedAt() time.Time       { return e.endedAt }
+func (e Enrollment) WithdrawnOn() time.Time   { return e.withdrawnOn }
+func (e Enrollment) WithdrawalReason() string { return e.withdrawalReason }

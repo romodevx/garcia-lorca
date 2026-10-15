@@ -3,10 +3,14 @@ package postgres
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
+	"google.golang.org/protobuf/proto"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
+	studentsv1 "github.com/garcia-lorca/gen/go/garcialorca/students/v1"
 	glerrors "github.com/garcia-lorca/pkg/errors"
 	"github.com/garcia-lorca/services/students/internal/domain"
 	"github.com/garcia-lorca/services/students/internal/ports"
@@ -203,6 +207,97 @@ func (r *Repository) SetEnrollmentStatus(ctx context.Context, id string, status 
 		}
 		return nil
 	})
+}
+
+// WithdrawEnrollment persists the withdrawal and its StudentWithdrawn event in
+// one tenant-bound transaction.
+func (r *Repository) WithdrawEnrollment(ctx context.Context, e domain.Enrollment) error {
+	data, err := proto.Marshal(&studentsv1.StudentWithdrawn{
+		TenantId: e.TenantID(), StudentId: e.StudentID(), CycleId: e.CycleID(),
+		EnrollmentId: e.ID(), WithdrawnOn: e.WithdrawnOn().Format("2006-01-02"),
+	})
+	if err != nil {
+		return glerrors.Wrap(glerrors.KindInternal, "encoding student withdrawal", err)
+	}
+	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		res := tx.Model(&enrollmentModel{}).Where("id = ? AND status = ?", e.ID(), domain.EnrollmentStatusActive.String()).Updates(map[string]any{
+			"status": domain.EnrollmentStatusWithdrawn.String(), "withdrawn_on": e.WithdrawnOn(),
+			"withdrawal_reason": e.WithdrawalReason(), "updated_at": gorm.Expr("now()"),
+		})
+		if res.Error != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "withdrawing enrollment", res.Error)
+		}
+		if res.RowsAffected == 0 {
+			var current enrollmentModel
+			if err := tx.Where("id = ?", e.ID()).First(&current).Error; err != nil {
+				return translateFindErr(err)
+			}
+			return glerrors.New(glerrors.KindConflict, "enrollment is not active")
+		}
+		row := outboxModel{TenantID: e.TenantID(), EventType: "StudentWithdrawn", Payload: data}
+		if err := tx.Create(&row).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "queueing student withdrawal", err)
+		}
+		return nil
+	})
+}
+
+const (
+	outboxBaseDelay = 30 * time.Second
+	outboxMaxDelay  = 30 * time.Minute
+)
+
+func outboxRetryDelay(attempts int) time.Duration {
+	d := outboxBaseDelay
+	for i := 1; i < attempts && d < outboxMaxDelay; i++ {
+		d *= 2
+	}
+	if d > outboxMaxDelay {
+		return outboxMaxDelay
+	}
+	return d
+}
+
+// DrainOutbox publishes due events oldest first. SKIP LOCKED lets multiple
+// service instances relay independently without sending a row concurrently.
+func (r *Repository) DrainOutbox(ctx context.Context, limit int, publish func(context.Context, ports.OutboxEvent) error) (int, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	published := 0
+	for i := 0; i < limit; i++ {
+		empty := false
+		err := r.withTenant(ctx, func(tx *gorm.DB) error {
+			var rows []outboxModel
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
+				Where("published_at IS NULL AND next_attempt_at <= now()").Order("created_at, id").Limit(1).Find(&rows).Error; err != nil {
+				return err
+			}
+			if len(rows) == 0 {
+				empty = true
+				return nil
+			}
+			row := rows[0]
+			attempts := row.Attempts + 1
+			if err := publish(ctx, ports.OutboxEvent{TenantID: row.TenantID, Type: row.EventType, Payload: row.Payload}); err != nil {
+				return tx.Model(&outboxModel{}).Where("id = ?", row.ID).Updates(map[string]any{
+					"attempts": attempts, "next_attempt_at": gorm.Expr("now() + make_interval(secs => ?)", outboxRetryDelay(attempts).Seconds()),
+				}).Error
+			}
+			if err := tx.Model(&outboxModel{}).Where("id = ?", row.ID).Updates(map[string]any{"published_at": gorm.Expr("now()"), "attempts": attempts}).Error; err != nil {
+				return err
+			}
+			published++
+			return nil
+		})
+		if err != nil {
+			return published, glerrors.Wrap(glerrors.KindInternal, "draining student outbox", err)
+		}
+		if empty {
+			break
+		}
+	}
+	return published, nil
 }
 
 // translateEnrollmentWriteErr maps Postgres constraint failures on an enrollment

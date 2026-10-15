@@ -67,6 +67,7 @@ const (
 	// shutdownTimeout bounds the drain: past it, Shutdown stops waiting for
 	// in-flight requests rather than holding the process open indefinitely.
 	shutdownTimeout = 15 * time.Second
+	outboxSweep     = 30 * time.Second
 
 	// defaultPubSubProject matches the project the compose emulator starts with.
 	defaultPubSubProject = "garcia-lorca-local"
@@ -89,7 +90,7 @@ func main() {
 // run is the process lifecycle: build the composition root, serve until the
 // listener stops, and release the event transport on the way out.
 func run(ctx context.Context, log *slog.Logger) error {
-	mux, events, consumer, err := buildMux(ctx, log)
+	mux, events, consumer, drain, err := buildMux(ctx, log)
 	if err != nil {
 		return err
 	}
@@ -121,6 +122,8 @@ func run(ctx context.Context, log *slog.Logger) error {
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	group, groupCtx := errgroup.WithContext(runCtx)
+	stopSweep := startSweep(groupCtx, drain, log, outboxSweep)
+	defer stopSweep()
 
 	group.Go(func() error {
 		log.Info("students starting", slog.String("addr", addr))
@@ -202,7 +205,7 @@ func pushMode() bool {
 // buildMux is the composition root: config → adapters → use case → Connect
 // handler, returning the mounted routes plus the event publisher the caller must
 // close on shutdown.
-func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.PublisherCloser, *pubsubadapter.Consumer, error) {
+func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.PublisherCloser, *pubsubadapter.Consumer, outboxDrain, error) {
 	// M03 is single-tenant: the tenant is fixed here (not derived from the
 	// caller), so RLS binds this one tenant for every request. When multi-tenant
 	// lands, the gateway must forward the authenticated principal's TenantID and
@@ -211,13 +214,13 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 
 	db, err := openDB()
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 
 	repo := pgadapter.NewRepository(db, tenantID)
 	publisher, err := gcp.PublisherFromEnv(ctx, log)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	events := pubsubadapter.NewEventPublisher(publisher)
 	newID := func() string { return uuid.NewString() }
@@ -232,7 +235,7 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 	catalog := configclient.New(configBaseURL, gcpauth.HTTPClient(ctx, configBaseURL))
 	svc := usecase.NewStudentService(repo, events, catalog, tenantID, newID)
 	if photos, err := openPhotoStore(ctx, log); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	} else if photos != nil {
 		svc = svc.WithPhotos(photos)
 	}
@@ -274,7 +277,37 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 	// to pull, so events arrive as authenticated POSTs instead. Mounted always —
 	// harmless locally, where the pull loop does the work.
 	mux.Handle("POST /pubsub", gcp.NewPushHandler(consumer.Handle, os.Getenv("PUBSUB_PUSH_SA_EMAIL"), log))
-	return mux, publisher, consumer, nil
+	return mux, publisher, consumer, func(c context.Context) (int, error) {
+		return repo.DrainOutbox(c, 100, events.PublishOutboxEvent)
+	}, nil
+}
+
+type outboxDrain func(context.Context) (int, error)
+
+func startSweep(ctx context.Context, drain outboxDrain, log *slog.Logger, every time.Duration) func() {
+	sweepCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(every)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-sweepCtx.Done():
+				return
+			case <-ticker.C:
+				count, err := drain(sweepCtx)
+				if err != nil {
+					log.Warn("students could not drain the outbox", slog.Any("error", err))
+					continue
+				}
+				if count > 0 {
+					log.Info("students published stranded events", slog.Int("count", count))
+				}
+			}
+		}
+	}()
+	return func() { cancel(); <-done }
 }
 
 // openDB opens the GORM Postgres pool, resolving its DSN via pkg/dbdsn:

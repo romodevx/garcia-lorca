@@ -23,6 +23,7 @@ const (
 	topicStudentEvents = "student-events"
 
 	typeStudentEnrolled        = "StudentEnrolled"
+	typeStudentWithdrawn       = "StudentWithdrawn"
 	typeAdmissionStatusChanged = "AdmissionStatusChanged"
 
 	attrType     = "type"
@@ -61,6 +62,17 @@ func (p *EventPublisher) PublishAdmissionChanged(ctx context.Context, ev domain.
 		NewStatus:      protoconv.ToProtoStatus(ev.New),
 		Reason:         ev.Reason,
 	})
+}
+
+// PublishOutboxEvent relays a durable proto payload with the same routing
+// attributes as the other student events.
+func (p *EventPublisher) PublishOutboxEvent(ctx context.Context, ev ports.OutboxEvent) error {
+	if ev.Type != typeStudentWithdrawn {
+		return glerrors.New(glerrors.KindInvalid, "unsupported student outbox event")
+	}
+	return p.bus.Publish(ctx, pubsub.Message{Topic: topicStudentEvents, Data: ev.Payload, Attributes: map[string]string{
+		attrType: ev.Type, attrTenantID: ev.TenantID,
+	}})
 }
 
 // publish marshals the proto event and hands it to the transport with routing

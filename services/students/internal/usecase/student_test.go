@@ -108,6 +108,7 @@ func (r *fakeRepo) List(_ context.Context, _ ports.ListFilter) ([]*domain.Studen
 type fakePub struct {
 	enrolled []domain.StudentEnrolledEvent
 	changed  []domain.AdmissionChangedEvent
+	outbox   []ports.OutboxEvent
 }
 
 func (p *fakePub) PublishStudentEnrolled(_ context.Context, ev domain.StudentEnrolledEvent) error {
@@ -116,6 +117,10 @@ func (p *fakePub) PublishStudentEnrolled(_ context.Context, ev domain.StudentEnr
 }
 func (p *fakePub) PublishAdmissionChanged(_ context.Context, ev domain.AdmissionChangedEvent) error {
 	p.changed = append(p.changed, ev)
+	return nil
+}
+func (p *fakePub) PublishOutboxEvent(_ context.Context, event ports.OutboxEvent) error {
+	p.outbox = append(p.outbox, event)
 	return nil
 }
 

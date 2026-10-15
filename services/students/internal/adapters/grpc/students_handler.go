@@ -300,8 +300,19 @@ func (h *StudentsHandler) ListTransfers(ctx context.Context, req *connect.Reques
 }
 
 func (h *StudentsHandler) WithdrawEnrollment(ctx context.Context, req *connect.Request[studentsv1.WithdrawEnrollmentRequest]) (*connect.Response[studentsv1.WithdrawEnrollmentResponse], error) {
-	enrollment, err := h.enroll.Withdraw(ctx, req.Msg.GetId())
+	var withdrawnOn time.Time
+	if raw := req.Msg.GetWithdrawnOn(); raw != "" {
+		parsed, err := time.Parse("2006-01-02", raw)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("withdrawn_on must be YYYY-MM-DD"))
+		}
+		withdrawnOn = parsed
+	}
+	enrollment, err := h.enroll.Withdraw(ctx, req.Msg.GetId(), withdrawnOn, req.Msg.GetReason())
 	if err != nil {
+		if glerrors.KindOf(err) == glerrors.KindConflict {
+			return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New(glerrors.SafeMessage(err)))
+		}
 		return nil, connectErr(err)
 	}
 	return connect.NewResponse(&studentsv1.WithdrawEnrollmentResponse{Enrollment: toProtoEnrollment(enrollment)}), nil
@@ -482,6 +493,13 @@ func toProtoEnrollment(e domain.Enrollment) *studentsv1.Enrollment {
 		EnrolledAt: timestamppb.New(e.EnrolledAt()),
 		EndedAt:    optionalTimestamp(e.EndedAt()),
 		Origin:     string(e.Origin()),
+		WithdrawnOn: func() string {
+			if e.WithdrawnOn().IsZero() {
+				return ""
+			}
+			return e.WithdrawnOn().Format("2006-01-02")
+		}(),
+		WithdrawalReason: e.WithdrawalReason(),
 	}
 }
 

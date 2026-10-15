@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -295,20 +296,30 @@ func levelOfGrade(ctx context.Context, catalog ports.CatalogValidator, gradeLeve
 	return level, err
 }
 
-// Withdraw terminates an active enrollment. Withdrawing a non-active enrollment
-// is invalid.
-func (s *EnrollmentService) Withdraw(ctx context.Context, enrollmentID string) (domain.Enrollment, error) {
+// Withdraw terminates an active enrollment and records a durable event in the
+// same transaction. The relay is attempted immediately; the periodic sweep
+// retries any event the broker did not accept.
+func (s *EnrollmentService) Withdraw(ctx context.Context, enrollmentID string, on time.Time, reason string) (domain.Enrollment, error) {
 	enr, err := s.enrollments.GetEnrollment(ctx, enrollmentID)
 	if err != nil {
 		return domain.Enrollment{}, err
 	}
-	if !enr.CanWithdraw() {
-		return domain.Enrollment{}, glerrors.New(glerrors.KindInvalid, "enrollment is not active")
+	if on.IsZero() {
+		on = s.now().UTC()
 	}
-	if err := s.enrollments.SetEnrollmentStatus(ctx, enrollmentID, domain.EnrollmentStatusWithdrawn); err != nil {
+	updated, err := enr.Withdraw(on, reason)
+	if err != nil {
 		return domain.Enrollment{}, err
 	}
-	return s.enrollments.GetEnrollment(ctx, enrollmentID)
+	if err := s.enrollments.WithdrawEnrollment(ctx, updated); err != nil {
+		return domain.Enrollment{}, err
+	}
+	if s.events != nil {
+		if _, err := s.enrollments.DrainOutbox(ctx, 100, s.events.PublishOutboxEvent); err != nil {
+			slog.Warn("students could not drain the outbox after withdrawal", slog.Any("error", err))
+		}
+	}
+	return updated, nil
 }
 
 // GetEnrollment returns an enrollment by id (KindNotFound if absent).

@@ -65,6 +65,15 @@ type StudentRepository interface {
 type EventPublisher interface {
 	PublishStudentEnrolled(ctx context.Context, ev domain.StudentEnrolledEvent) error
 	PublishAdmissionChanged(ctx context.Context, ev domain.AdmissionChangedEvent) error
+	PublishOutboxEvent(ctx context.Context, ev OutboxEvent) error
+}
+
+// OutboxEvent is the transport-ready, proto-encoded event persisted with its
+// aggregate change.
+type OutboxEvent struct {
+	TenantID string
+	Type     string
+	Payload  []byte
 }
 
 // PhotoRef is where a pupil's photo lives in the object store.
@@ -191,6 +200,10 @@ type EnrollmentRepository interface {
 	ListTransfersIntoGroup(ctx context.Context, groupID string) ([]domain.EnrollmentTransfer, error)
 	// SetEnrollmentStatus updates an enrollment's status (e.g. to withdrawn).
 	SetEnrollmentStatus(ctx context.Context, id string, status domain.EnrollmentStatus) error
+	// WithdrawEnrollment atomically stores the dated withdrawal and its outbox event.
+	WithdrawEnrollment(ctx context.Context, e domain.Enrollment) error
+	// DrainOutbox publishes due events and records success or retry backoff.
+	DrainOutbox(ctx context.Context, limit int, publish func(context.Context, OutboxEvent) error) (int, error)
 }
 
 // GuardianRepository loads and persists guardian ↔ student links. All access is

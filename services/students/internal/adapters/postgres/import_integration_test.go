@@ -87,12 +87,10 @@ func TestImportStudentStoresAnEnrolledPupilInOneTransaction(t *testing.T) {
 			t.Errorf("%s: %d rows (err %v); want 1", what, n, err)
 		}
 	}
-	// students keeps no outbox: an import publishes nothing because the
-	// service holds no publisher. If an outbox ever appears, this test must
-	// grow to prove the import writes no row to it.
-	var outboxes int64
-	if err := superDB.Raw(`SELECT count(*) FROM information_schema.tables WHERE table_name ILIKE '%outbox%'`).Scan(&outboxes).Error; err != nil || outboxes != 0 {
-		t.Errorf("outbox tables = %d (err %v); assert the import leaves no event rows in it", outboxes, err)
+	// Import publishes no event, even though withdrawals use the shared outbox.
+	var outboxRows int64
+	if err := superDB.Raw(`SELECT count(*) FROM students_outbox WHERE tenant_id = ?`, tenantA).Scan(&outboxRows).Error; err != nil || outboxRows != 0 {
+		t.Errorf("outbox rows = %d (err %v); want import to leave no events", outboxRows, err)
 	}
 }
 

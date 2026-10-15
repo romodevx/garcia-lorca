@@ -33,9 +33,11 @@ drift).
 
 ## Events (published)
 - `StudentEnrolled` — on enroll into a cycle.
+- `StudentWithdrawn` — after a dated enrollment withdrawal; stored in the same
+  transaction as the withdrawal and relayed from `students_outbox`.
 - `AdmissionStatusChanged` — on every admission transition.
 
-Both go to the single per-domain topic **`student-events`** (mirrors finance's
+All go to the single per-domain topic **`student-events`** (mirrors finance's
 `payment-events`), proto-marshaled, with `type` + `tenant_id` attributes.
 
 The legacy import (`ImportStudents`, ADR 0033) publishes **neither**: the
