@@ -134,6 +134,23 @@ func (h *FinanceHandler) ListCharges(ctx context.Context, req *connect.Request[f
 	return connect.NewResponse(&financev1.ListChargesResponse{Charges: toProtoCharges(charges)}), nil
 }
 
+// PreviewWithdrawal returns the charges a dated withdrawal would cancel and
+// the balance that would remain. The use case owns all pricing and reads only.
+func (h *FinanceHandler) PreviewWithdrawal(ctx context.Context, req *connect.Request[financev1.PreviewWithdrawalRequest]) (*connect.Response[financev1.PreviewWithdrawalResponse], error) {
+	m := req.Msg
+	plan, err := h.finance.PreviewWithdrawal(ctx, m.GetStudentId(), m.GetCycleId(), m.GetWithdrawnOn())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	toCancel := make([]*financev1.Charge, 0, len(plan.ToCancel))
+	for _, charge := range plan.ToCancel {
+		toCancel = append(toCancel, toProtoCharge(ports.ChargeWithPaid{Charge: charge}))
+	}
+	return connect.NewResponse(&financev1.PreviewWithdrawalResponse{
+		ToCancel: toCancel, ToCancelCents: plan.ToCancelCents, RemainingDebtCents: plan.RemainingDebtCents,
+	}), nil
+}
+
 // ApplyDiscount sets the discount on a charge and returns it re-derived.
 func (h *FinanceHandler) ApplyDiscount(ctx context.Context, req *connect.Request[financev1.ApplyDiscountRequest]) (*connect.Response[financev1.ApplyDiscountResponse], error) {
 	m := req.Msg

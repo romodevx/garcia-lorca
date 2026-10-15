@@ -244,7 +244,11 @@ func (f *fakeRepo) CreateCharge(_ context.Context, c domain.Charge) (domain.Char
 	return c, nil
 }
 
-func (f *fakeRepo) CancelChargeIfUnpaid(_ context.Context, id string) (ports.ChargeWithPaid, error) {
+func (f *fakeRepo) CancelChargeIfUnpaid(ctx context.Context, id string) (ports.ChargeWithPaid, error) {
+	return f.CancelChargeIfUnpaidWithReason(ctx, id, "")
+}
+
+func (f *fakeRepo) CancelChargeIfUnpaidWithReason(_ context.Context, id, reason string) (ports.ChargeWithPaid, error) {
 	c, ok := f.charges[id]
 	if !ok {
 		return ports.ChargeWithPaid{}, glerrors.ErrNotFound
@@ -253,7 +257,7 @@ func (f *fakeRepo) CancelChargeIfUnpaid(_ context.Context, id string) (ports.Cha
 	for _, p := range f.payments[id] {
 		paid += p.Amount().Int64()
 	}
-	cancelled, err := c.CancelIfUnpaid(paid)
+	cancelled, err := c.CancelIfUnpaidWithReason(paid, reason)
 	if err != nil {
 		return ports.ChargeWithPaid{}, err
 	}
@@ -1168,5 +1172,36 @@ func TestAnAccountsPaymentsNameTheirDeposit(t *testing.T) {
 	}
 	if len(res.Msg.GetPayments()) != 1 || res.Msg.GetPayments()[0].GetDepositId() != "dep-1" {
 		t.Errorf("payments = %+v", res.Msg.GetPayments())
+	}
+}
+
+func TestPreviewWithdrawalReturnsProjectedChargesAndDebt(t *testing.T) {
+	f := newFixture(t)
+	concept := f.seedConcept(t, "Cuota", 8000)
+	future, err := domain.NewCharge("future-charge", testTenant, testStudent, testCycle, concept.GetId(), "Cuota", 8000, 0, fixedNow.AddDate(0, 0, 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	past, err := domain.NewCharge("past-charge", testTenant, testStudent, testCycle, concept.GetId(), "Cuota", 5000, 0, fixedNow.AddDate(0, 0, -1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.repo.charges[future.ID()] = future
+	f.repo.charges[past.ID()] = past
+
+	res, err := f.h.PreviewWithdrawal(context.Background(), connect.NewRequest(&financev1.PreviewWithdrawalRequest{
+		StudentId: testStudent, CycleId: testCycle, WithdrawnOn: fixedNow.Format("2006-01-02"),
+	}))
+	if err != nil {
+		t.Fatalf("PreviewWithdrawal: %v", err)
+	}
+	if len(res.Msg.GetToCancel()) != 1 || res.Msg.GetToCancel()[0].GetId() != future.ID() {
+		t.Fatalf("to_cancel = %+v, want future charge", res.Msg.GetToCancel())
+	}
+	if res.Msg.GetToCancelCents() != 8000 || res.Msg.GetRemainingDebtCents() != 5000 {
+		t.Errorf("totals = cancel %d, remaining %d", res.Msg.GetToCancelCents(), res.Msg.GetRemainingDebtCents())
+	}
+	if f.repo.charges[future.ID()].Status() != domain.StatusPending {
+		t.Error("PreviewWithdrawal wrote to the ledger")
 	}
 }

@@ -140,12 +140,12 @@ ledger operations run in a single transaction (Unit of Work).
   (`scholarship` movement) and receipts (`ScholarshipCents/Name`) all price it.
 
 ## Events
-- **Consumed: `StudentEnrolled`** (student-events → `finance-student-events`).
-  It charges the pupil's inscription the moment they take a place in a group,
-  which is the school's rule. **No idempotency ledger** — unlike comms on the
-  same topic — because the charge's own `external_ref` makes a redelivery insert
-  nothing. Pull loop locally; authenticated `POST /pubsub` under Cloud Run
-  scale-to-zero.
+- **Consumed: `StudentEnrolled` and `StudentWithdrawn`**
+  (student-events → `finance-student-events`). Enrolment charges the inscription
+  through its unique `external_ref`; withdrawal cancels future unpaid charges
+  under the charge row lock and ends activity enrolments on the effective date
+  (ADR 0034). Both paths are safe on redelivery. Pull loop locally;
+  authenticated `POST /pubsub` under Cloud Run scale-to-zero.
 - Published: `PaymentRegistered` (via `adapters/pubsub`, `pkg/pubsub`; a dev
   logging bus locally — swap the Cloud Pub/Sub adapter before shared use).
   `DebtOverdue` is a READ (`ListOverdue`) for now; the event emitter is a later

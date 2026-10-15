@@ -14,13 +14,21 @@ import (
 )
 
 type spyBiller struct {
-	calls int
-	err   error
+	calls          int
+	withdrawals    int
+	withdrawalArgs []string
+	err            error
 }
 
 func (s *spyBiller) EnsureEnrollmentCharge(_ context.Context, _, _ string) (bool, error) {
 	s.calls++
 	return s.err == nil, s.err
+}
+
+func (s *spyBiller) ApplyWithdrawal(_ context.Context, studentID, cycleID, withdrawnOn string) error {
+	s.withdrawals++
+	s.withdrawalArgs = []string{studentID, cycleID, withdrawnOn}
+	return s.err
 }
 
 func quietLog() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
@@ -84,5 +92,54 @@ func TestConsumerLetsARealFailureRedeliver(t *testing.T) {
 
 	if err := c.Handle(context.Background(), enrolledMessage(t)); err == nil {
 		t.Error("a failure to bill must not be acked away")
+	}
+}
+
+func TestConsumerProcessesStudentWithdrawn(t *testing.T) {
+	biller := &spyBiller{}
+	c := financepubsub.NewConsumer(biller, quietLog())
+	data, err := proto.Marshal(&studentsv1.StudentWithdrawn{
+		TenantId: "tenant-1", StudentId: "stu-1", CycleId: "cyc-1", EnrollmentId: "enr-1", WithdrawnOn: "2026-10-15",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg := pubsub.Message{Attributes: map[string]string{"type": "StudentWithdrawn", "tenant_id": "tenant-1"}, Data: data}
+	if err := c.Handle(context.Background(), msg); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if biller.withdrawals != 1 {
+		t.Fatalf("withdrawals = %d, want 1", biller.withdrawals)
+	}
+	want := []string{"stu-1", "cyc-1", "2026-10-15"}
+	for i := range want {
+		if biller.withdrawalArgs[i] != want[i] {
+			t.Errorf("arg %d = %q, want %q", i, biller.withdrawalArgs[i], want[i])
+		}
+	}
+}
+
+func TestConsumerRedeliversWithdrawalOnUseCaseFailure(t *testing.T) {
+	biller := &spyBiller{err: errors.New("database unavailable")}
+	c := financepubsub.NewConsumer(biller, quietLog())
+	data, err := proto.Marshal(&studentsv1.StudentWithdrawn{StudentId: "stu-1", CycleId: "cyc-1", WithdrawnOn: "2026-10-15"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg := pubsub.Message{Attributes: map[string]string{"type": "StudentWithdrawn"}, Data: data}
+	if err := c.Handle(context.Background(), msg); err == nil {
+		t.Fatal("failure must be returned for redelivery")
+	}
+}
+
+func TestConsumerAcksMalformedStudentWithdrawn(t *testing.T) {
+	biller := &spyBiller{}
+	consumer := financepubsub.NewConsumer(biller, quietLog())
+	message := pubsub.Message{Attributes: map[string]string{"type": "StudentWithdrawn"}, Data: []byte("not protobuf")}
+	if err := consumer.Handle(context.Background(), message); err != nil {
+		t.Fatalf("malformed event should be acked: %v", err)
+	}
+	if biller.withdrawals != 0 {
+		t.Errorf("processed %d malformed withdrawals, want 0", biller.withdrawals)
 	}
 }

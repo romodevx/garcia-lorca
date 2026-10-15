@@ -46,7 +46,8 @@ type Charge struct {
 	// discountReason is why the discount exists. It matters most for the ones
 	// the system gives by itself: a family asking why a month is cheaper than
 	// the price list deserves an answer that outlives whoever applied it.
-	discountReason string
+	discountReason     string
+	cancellationReason string
 	// scholarship is the part a scholarship takes off (T18, ADR 0022), kept
 	// apart from discount because a month may carry both: the level's discount
 	// and, on the price left, the family's scholarship. Read time works it out
@@ -329,10 +330,20 @@ func (c Charge) WithAmount(amountCents int64) (Charge, error) {
 // reserved — instead of a silently voided charge with collected money behind it.
 // paidCents is read by the caller under the charge's row lock.
 func (c Charge) CancelIfUnpaid(paidCents int64) (Charge, error) {
+	return c.CancelIfUnpaidWithReason(paidCents, c.cancellationReason)
+}
+
+// CancelIfUnpaidWithReason cancels only when no money has been collected and
+// records the supplied reason on the terminal copy.
+func (c Charge) CancelIfUnpaidWithReason(paidCents int64, reason string) (Charge, error) {
 	if paidCents > 0 {
 		return Charge{}, glerrors.New(glerrors.KindConflict, "charge has payments and cannot be cancelled")
 	}
-	return c.Cancel()
+	cancelled, err := c.Cancel()
+	if err != nil {
+		return Charge{}, err
+	}
+	return cancelled.WithCancellationReason(reason), nil
 }
 
 // fitsBeside checks that a discount and a scholarship, together, do not take
@@ -384,3 +395,14 @@ func (c Charge) ScholarshipID() string {
 func (c Charge) DueDate() time.Time  { return c.dueDate }
 func (c Charge) Status() string      { return c.status }
 func (c Charge) ExternalRef() string { return c.externalRef }
+
+// WithCancellationReason returns a copy recording why the school cancelled it.
+// An empty reason is kept for cancellations made before audit reasons existed.
+func (c Charge) WithCancellationReason(reason string) Charge {
+	c.cancellationReason = strings.TrimSpace(reason)
+	return c
+}
+
+// CancellationReason explains a terminal cancellation when the caller supplied
+// one (for example, "baja").
+func (c Charge) CancellationReason() string { return c.cancellationReason }
