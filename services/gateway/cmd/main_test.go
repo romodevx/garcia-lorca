@@ -62,12 +62,13 @@ func (stubIAM) ValidateToken(_ context.Context, req *connect.Request[iamv1.Valid
 		// M13: the staff roster left Configuración, so it answers to its own
 		// permission. A config holder must NOT reach it any more — that split is
 		// the whole point of the move.
-		"teachers-writer":  {"teachers:write", "teachers:read"},
-		"teachers-reader":  {"teachers:read"},
-		"student-enroller": {"students:enroll"},
-		"student-reader":   {"students:read"},
-		"grades-writer":    {"grades:write", "grades:read"},
-		"grades-reader":    {"grades:read"},
+		"teachers-writer":            {"teachers:write", "teachers:read"},
+		"teachers-reader":            {"teachers:read"},
+		"student-enroller":           {"students:enroll"},
+		"student-collections-reader": {"students:enroll", "collections:read"},
+		"student-reader":             {"students:read"},
+		"grades-writer":              {"grades:write", "grades:read"},
+		"grades-reader":              {"grades:read"},
 		// T7: closing a period is the owner.s alone (iam 0023); grades:write is not enough.
 		"grades-closer":   {"grades:close", "grades:read"},
 		"teaching-writer": {"teaching:write", "teaching:read"},
@@ -268,6 +269,10 @@ func (stubStudents) ListEnrollments(_ context.Context, req *connect.Request[stud
 	return connect.NewResponse(&studentsv1.ListEnrollmentsResponse{Enrollments: []*studentsv1.Enrollment{
 		{Id: "enr-1", StudentId: req.Msg.GetStudentId(), CycleId: "cyc-1", GroupId: "grp-1", Status: studentsv1.EnrollmentStatus_ENROLLMENT_STATUS_ACTIVE},
 	}}), nil
+}
+
+func (stubStudents) GetEnrollment(_ context.Context, req *connect.Request[studentsv1.GetEnrollmentRequest]) (*connect.Response[studentsv1.GetEnrollmentResponse], error) {
+	return connect.NewResponse(&studentsv1.GetEnrollmentResponse{Enrollment: &studentsv1.Enrollment{Id: req.Msg.GetId(), StudentId: "stu-1", CycleId: "cyc-1", Status: studentsv1.EnrollmentStatus_ENROLLMENT_STATUS_ACTIVE}}), nil
 }
 
 // ListTransfers: the stub's pupils never moved.
@@ -522,6 +527,10 @@ func (stubFinance) CreateCharge(_ context.Context, req *connect.Request[financev
 		Description: "Colegiatura", AmountCents: 150000, DueDate: req.Msg.GetDueDate(),
 		Status: "pending", RemainingCents: 150000,
 	}}), nil
+}
+
+func (stubFinance) PreviewWithdrawal(_ context.Context, _ *connect.Request[financev1.PreviewWithdrawalRequest]) (*connect.Response[financev1.PreviewWithdrawalResponse], error) {
+	return connect.NewResponse(&financev1.PreviewWithdrawalResponse{}), nil
 }
 
 func (stubFinance) GenerateCharges(_ context.Context, _ *connect.Request[financev1.GenerateChargesRequest]) (*connect.Response[financev1.GenerateChargesResponse], error) {
@@ -1214,6 +1223,32 @@ func TestEnrollRouteWithEnrollPermissionCreates201(t *testing.T) {
 	// cycleId is derived server-side; the client never sends it.
 	if out["cycleId"] != "cyc-1" || out["status"] != "active" {
 		t.Errorf("body = %v", out)
+	}
+}
+
+func TestWithdrawalPreviewRequiresFinanceReadPermission(t *testing.T) {
+	gw := newTestGateway(t, map[string]bool{"module_students": true, "module_finance": true})
+	denied := doGateway(t, gw, http.MethodGet, "/api/v1/enrollments/enr-1/withdrawal-preview", "student-enroller", "")
+	if denied.StatusCode != http.StatusForbidden {
+		t.Fatalf("students:enroll alone status = %d, want 403", denied.StatusCode)
+	}
+	var envelope struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(denied.Body).Decode(&envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Error.Code != "forbidden" {
+		t.Errorf("error code = %q, want forbidden", envelope.Error.Code)
+	}
+	denied.Body.Close()
+
+	allowed := doGateway(t, gw, http.MethodGet, "/api/v1/enrollments/enr-1/withdrawal-preview", "student-collections-reader", "")
+	defer allowed.Body.Close()
+	if allowed.StatusCode != http.StatusOK {
+		t.Errorf("students:enroll + collections:read status = %d, want 200", allowed.StatusCode)
 	}
 }
 

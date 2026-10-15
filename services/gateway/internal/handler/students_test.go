@@ -13,6 +13,7 @@ import (
 
 	"github.com/garcia-lorca/services/gateway/internal/client"
 	"github.com/garcia-lorca/services/gateway/internal/handler"
+	"github.com/garcia-lorca/services/gateway/internal/middleware"
 )
 
 type fakeCreator struct {
@@ -437,6 +438,55 @@ func TestWithdrawForwardsDateAndReasonAndReturnsContractShape(t *testing.T) {
 	}
 	if out["status"] != "withdrawn" || out["withdrawnOn"] != "2026-10-15" || out["withdrawalReason"] != "Cambio de ciudad" {
 		t.Errorf("body = %v", out)
+	}
+}
+
+func TestWithdrawRequiresFinanceWriteOnlyForBackdatedDates(t *testing.T) {
+	for _, tc := range []struct {
+		name, date string
+		perms      []string
+		want       int
+	}{
+		{name: "backdated without finance write", date: "2026-10-14", want: http.StatusForbidden},
+		{name: "backdated with finance write", date: "2026-10-14", perms: []string{"finance:write"}, want: http.StatusOK},
+		{name: "today without finance write", date: "2026-10-15", want: http.StatusOK},
+		{name: "omitted date without finance write", want: http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := &fakeEnrollmentSvc{res: client.Enrollment{ID: "enr-1", Status: "withdrawn"}}
+			h := handler.NewEnrollmentsHandler(svc, handler.WithEnrollmentsClock(func() time.Time {
+				return time.Date(2026, 10, 15, 23, 30, 0, 0, time.FixedZone("east", 7*60*60))
+			}))
+			body := `{"enrollmentId":"enr-1","withdrawnOn":"` + tc.date + `"}`
+			if tc.date == "" {
+				body = `{"enrollmentId":"enr-1"}`
+			}
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/enrollments/withdraw", strings.NewReader(body))
+			req = req.WithContext(middleware.WithPrincipal(req.Context(), middleware.Principal{Permissions: tc.perms}))
+			rec := httptest.NewRecorder()
+			h.Withdraw(rec, req)
+			if rec.Code != tc.want {
+				t.Fatalf("status = %d, want %d: %s", rec.Code, tc.want, rec.Body.String())
+			}
+			if tc.want == http.StatusForbidden {
+				var envelope map[string]json.RawMessage
+				if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil || len(envelope) != 1 {
+					t.Fatalf("forbidden envelope = %s, err %v", rec.Body.String(), err)
+				}
+				var payload struct {
+					Error struct{ Code, Message string } `json:"error"`
+				}
+				if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+					t.Fatal(err)
+				}
+				if payload.Error.Code != "forbidden" || payload.Error.Message == "" {
+					t.Errorf("error = %+v", payload.Error)
+				}
+				if svc.gotWithdrawID != "" {
+					t.Errorf("forbidden request reached service: %+v", svc)
+				}
+			}
+		})
 	}
 }
 

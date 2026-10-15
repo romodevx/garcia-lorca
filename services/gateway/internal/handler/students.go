@@ -10,6 +10,7 @@ import (
 	"connectrpc.com/connect"
 	"github.com/garcia-lorca/pkg/featureflag"
 	"github.com/garcia-lorca/services/gateway/internal/client"
+	"github.com/garcia-lorca/services/gateway/internal/middleware"
 )
 
 // StudentsService is the students surface the edge needs (consumer-defined, so
@@ -221,6 +222,7 @@ type EnrollmentsHandler struct {
 	svc     EnrollmentService
 	finance WithdrawalPreviewService
 	flags   featureflag.Checker
+	now     func() time.Time
 }
 
 // EnrollmentsOption configures optional cross-module enrollment behavior.
@@ -231,9 +233,14 @@ func WithWithdrawalPreview(finance WithdrawalPreviewService, flags featureflag.C
 	return func(h *EnrollmentsHandler) { h.finance, h.flags = finance, flags }
 }
 
+// WithEnrollmentsClock replaces the clock used for withdrawal date checks.
+func WithEnrollmentsClock(now func() time.Time) EnrollmentsOption {
+	return func(h *EnrollmentsHandler) { h.now = now }
+}
+
 // NewEnrollmentsHandler wires the handler to its clients.
 func NewEnrollmentsHandler(svc EnrollmentService, opts ...EnrollmentsOption) *EnrollmentsHandler {
-	h := &EnrollmentsHandler{svc: svc}
+	h := &EnrollmentsHandler{svc: svc, now: time.Now}
 	for _, opt := range opts {
 		opt(h)
 	}
@@ -364,6 +371,21 @@ func (h *EnrollmentsHandler) Withdraw(w http.ResponseWriter, r *http.Request) {
 	if !validOptionalISODate(req.WithdrawnOn) {
 		writeWithdrawalError(w, http.StatusBadRequest, "invalid", "withdrawnOn must be a valid YYYY-MM-DD date.")
 		return
+	}
+	withdrawalDate := req.WithdrawnOn
+	if withdrawalDate == "" {
+		withdrawalDate = h.now().UTC().Format("2006-01-02")
+	}
+	if withdrawalDate < h.now().UTC().Format("2006-01-02") {
+		principal, ok := middleware.PrincipalFrom(r.Context())
+		if !ok {
+			writeWithdrawalError(w, http.StatusUnauthorized, "unauthorized", "Se requiere autenticación.")
+			return
+		}
+		if !middleware.HasPermission(principal, "finance:write") {
+			writeWithdrawalError(w, http.StatusForbidden, "forbidden", "Para una baja con fecha anterior a hoy se necesita permiso de finanzas")
+			return
+		}
 	}
 	if utf8.RuneCountInString(req.Reason) > 500 {
 		writeWithdrawalError(w, http.StatusBadRequest, "invalid", "reason must be at most 500 characters.")

@@ -1022,7 +1022,9 @@ paths:
       description: >
         Withdraws the enrollment. withdrawnOn is the effective date in
         YYYY-MM-DD; when omitted, today is used. The optional reason is free
-        text of at most 500 characters. Requires students:enroll.
+        text of at most 500 characters. Requires students:enroll. A date before
+        today (UTC) also requires finance:write because overdue charges may be
+        cancelled.
       operationId: withdrawEnrollment
       security: [{ sessionCookie: [] }]
       parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
@@ -1045,14 +1047,18 @@ paths:
               schema: { $ref: '#/components/schemas/Enrollment' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
+        '403':
+          description: Forbidden when students:enroll is missing, or when a backdated withdrawal is requested without finance:write.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '404': { $ref: '#/components/responses/NotFound' }
 
   /api/v1/enrollments/{id}/withdrawal-preview:
     get:
       tags: [students]
       summary: Preview the financial effect of a withdrawal
-      description: Requires students:enroll. Unknown enrollments return 404.
+      description: Requires students:enroll and either finance:read or collections:read because the preview exposes per-pupil charge amounts and remaining debt. Unknown enrollments return 404.
       operationId: previewEnrollmentWithdrawal
       security: [{ sessionCookie: [] }]
       parameters:
@@ -1097,7 +1103,11 @@ paths:
                 remainingDebtCents: 450000
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
+        '403':
+          description: Forbidden unless the caller has students:enroll and either finance:read or collections:read.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '404': { $ref: '#/components/responses/NotFound' }
 
   /api/v1/students/{id}:

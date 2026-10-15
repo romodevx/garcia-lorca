@@ -366,7 +366,8 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("GET /api/v1/enrollments/{id}", studentsRead(enrollH.GetEnrollment))
 	mux.Handle("POST /api/v1/enrollments/transfer", studentsWrite(enrollH.Transfer))
 	mux.Handle("POST /api/v1/enrollments/withdraw", studentsWrite(enrollH.Withdraw))
-	mux.Handle("GET /api/v1/enrollments/{id}/withdrawal-preview", studentsWrite(enrollH.PreviewWithdrawal))
+	mux.Handle("GET /api/v1/enrollments/{id}/withdrawal-preview", guard.Protect("students", requireAuthChanged(
+		middleware.RequirePermission("students:enroll")(middleware.RequireAnyPermission("finance:read", "collections:read")(http.HandlerFunc(enrollH.PreviewWithdrawal))))))
 
 	// Phase 9b guardian links: WHO MAY SEE A CHILD, so it is an admin action with
 	// its own permission pair (guardians:write / guardians:read) — students:* is
