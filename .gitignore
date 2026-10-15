@@ -67,3 +67,5 @@ apps/web/playwright-report/
 # Built in CI by the proto job and handed to the go matrix as an artifact
 # (govulncheck, built once instead of `go install`ed in all 14 legs).
 dist-tools/
+
+importaciones/
