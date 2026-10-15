@@ -220,8 +220,12 @@ jobs:
                 # honest and useless. Verified 2026-09-20 by cancelling a live
                 # build (74df1eaf). Fall back to the step that was still running,
                 # because on a timeout or a cancel THAT is the one you want.
+                # A step that ran out of time is marked TIMEOUT, not CANCELLED
+                # (only the cancel path was observed live), so it is asked for
+                # right after FAILURE: it is the culprit, not a bystander.
                 step=$(gcloud builds describe "$BUILD_ID" --project="$PROJECT_ID" --format=json 2>/dev/null \
                        | jq -r '(([.steps[]? | select(.status == "FAILURE")] | .[0].id)
+                                 // ([.steps[]? | select(.status == "TIMEOUT")] | .[0].id)
                                  // ([.steps[]? | select(.status == "WORKING")] | .[0].id)
                                  // ([.steps[]? | select(.status == "CANCELLED")] | .[0].id)
                                  // "unknown")')
