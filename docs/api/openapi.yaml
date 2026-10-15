@@ -1032,9 +1032,9 @@ paths:
           application/json:
             schema:
               type: object
-              required: [id]
+              required: [enrollmentId]
               properties:
-                id: { type: string, format: uuid, example: "e3b0c442-98fc-1c14-9afb-000000000001" }
+                enrollmentId: { type: string, format: uuid, example: "e3b0c442-98fc-1c14-9afb-000000000001" }
                 withdrawnOn: { type: string, format: date, description: "Optional effective date; omitted means today.", example: "2026-10-15" }
                 reason: { type: string, maxLength: 500, description: Optional free-text reason., example: "La familia se muda de ciudad." }
       responses:

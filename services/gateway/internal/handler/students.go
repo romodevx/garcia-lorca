@@ -2,9 +2,13 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"time"
+	"unicode/utf8"
 
+	"connectrpc.com/connect"
+	"github.com/garcia-lorca/pkg/featureflag"
 	"github.com/garcia-lorca/services/gateway/internal/client"
 )
 
@@ -201,7 +205,11 @@ type EnrollmentService interface {
 	ListEnrollments(ctx context.Context, studentID, cycleID, groupID string) ([]client.Enrollment, error)
 	GetEnrollment(ctx context.Context, id string) (client.Enrollment, error)
 	TransferStudent(ctx context.Context, enrollmentID, toGroupID, reason string) (client.Enrollment, error)
-	WithdrawEnrollment(ctx context.Context, id string) (client.Enrollment, error)
+	WithdrawEnrollment(ctx context.Context, id, withdrawnOn, reason string) (client.Enrollment, error)
+}
+
+type WithdrawalPreviewService interface {
+	PreviewWithdrawal(ctx context.Context, studentID, cycleID, withdrawnOn string) (client.WithdrawalPreview, error)
 }
 
 // EnrollmentsHandler exposes the front-facing (HTTP/JSON) enrollment endpoints,
@@ -210,12 +218,26 @@ type EnrollmentService interface {
 // guard (module_students) plus RequireAuth + rotation-enforcement, with writes
 // (enroll/transfer/withdraw) gated on students:enroll and reads on students:read.
 type EnrollmentsHandler struct {
-	svc EnrollmentService
+	svc     EnrollmentService
+	finance WithdrawalPreviewService
+	flags   featureflag.Checker
 }
 
-// NewEnrollmentsHandler wires the handler to an enrollment service.
-func NewEnrollmentsHandler(svc EnrollmentService) *EnrollmentsHandler {
-	return &EnrollmentsHandler{svc: svc}
+// EnrollmentsOption configures optional cross-module enrollment behavior.
+type EnrollmentsOption func(*EnrollmentsHandler)
+
+// WithWithdrawalPreview wires finance's optional withdrawal preview.
+func WithWithdrawalPreview(finance WithdrawalPreviewService, flags featureflag.Checker) EnrollmentsOption {
+	return func(h *EnrollmentsHandler) { h.finance, h.flags = finance, flags }
+}
+
+// NewEnrollmentsHandler wires the handler to its clients.
+func NewEnrollmentsHandler(svc EnrollmentService, opts ...EnrollmentsOption) *EnrollmentsHandler {
+	h := &EnrollmentsHandler{svc: svc}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h
 }
 
 // enrollRequest carries the client-supplied edges. cycleId is intentionally
@@ -239,16 +261,20 @@ type transferRequest struct {
 
 type withdrawRequest struct {
 	EnrollmentID string `json:"enrollmentId"`
+	WithdrawnOn  string `json:"withdrawnOn"`
+	Reason       string `json:"reason"`
 }
 
 type enrollmentResponse struct {
-	ID         string `json:"id"`
-	StudentID  string `json:"studentId"`
-	CycleID    string `json:"cycleId"`
-	GroupID    string `json:"groupId"`
-	TermID     string `json:"termId"`
-	Status     string `json:"status"`
-	EnrolledAt string `json:"enrolledAt"`
+	ID               string `json:"id"`
+	StudentID        string `json:"studentId"`
+	CycleID          string `json:"cycleId"`
+	GroupID          string `json:"groupId"`
+	TermID           string `json:"termId"`
+	Status           string `json:"status"`
+	EnrolledAt       string `json:"enrolledAt"`
+	WithdrawnOn      string `json:"withdrawnOn"`
+	WithdrawalReason string `json:"withdrawalReason"`
 }
 
 func toEnrollmentResponse(e client.Enrollment) enrollmentResponse {
@@ -257,13 +283,15 @@ func toEnrollmentResponse(e client.Enrollment) enrollmentResponse {
 		enrolledAt = e.EnrolledAt.UTC().Format(time.RFC3339)
 	}
 	return enrollmentResponse{
-		ID:         e.ID,
-		StudentID:  e.StudentID,
-		CycleID:    e.CycleID,
-		GroupID:    e.GroupID,
-		TermID:     e.TermID,
-		Status:     e.Status,
-		EnrolledAt: enrolledAt,
+		ID:               e.ID,
+		StudentID:        e.StudentID,
+		CycleID:          e.CycleID,
+		GroupID:          e.GroupID,
+		TermID:           e.TermID,
+		Status:           e.Status,
+		EnrolledAt:       enrolledAt,
+		WithdrawnOn:      e.WithdrawnOn,
+		WithdrawalReason: e.WithdrawalReason,
 	}
 }
 
@@ -330,15 +358,92 @@ func (h *EnrollmentsHandler) Transfer(w http.ResponseWriter, r *http.Request) {
 func (h *EnrollmentsHandler) Withdraw(w http.ResponseWriter, r *http.Request) {
 	var req withdrawRequest
 	if err := decodeJSONBody(w, r, &req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		writeWithdrawalError(w, http.StatusBadRequest, "invalid", "Invalid request body.")
 		return
 	}
-	res, err := h.svc.WithdrawEnrollment(r.Context(), req.EnrollmentID)
+	if !validOptionalISODate(req.WithdrawnOn) {
+		writeWithdrawalError(w, http.StatusBadRequest, "invalid", "withdrawnOn must be a valid YYYY-MM-DD date.")
+		return
+	}
+	if utf8.RuneCountInString(req.Reason) > 500 {
+		writeWithdrawalError(w, http.StatusBadRequest, "invalid", "reason must be at most 500 characters.")
+		return
+	}
+	res, err := h.svc.WithdrawEnrollment(r.Context(), req.EnrollmentID, req.WithdrawnOn, req.Reason)
 	if err != nil {
 		writeConnectError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, toEnrollmentResponse(res))
+}
+
+// PreviewWithdrawal handles GET /api/v1/enrollments/{id}/withdrawal-preview.
+func (h *EnrollmentsHandler) PreviewWithdrawal(w http.ResponseWriter, r *http.Request) {
+	withdrawnOn := r.URL.Query().Get("withdrawnOn")
+	if withdrawnOn == "" {
+		withdrawnOn = time.Now().UTC().Format("2006-01-02")
+	}
+	if !validOptionalISODate(withdrawnOn) {
+		writeWithdrawalError(w, http.StatusBadRequest, "invalid", "withdrawnOn must be a valid YYYY-MM-DD date.")
+		return
+	}
+	enrollment, err := h.svc.GetEnrollment(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeConnectError(w, err)
+		return
+	}
+	if enrollment.Status != "active" {
+		writeWithdrawalError(w, http.StatusConflict, "conflict", "Only an active enrollment can be previewed for withdrawal.")
+		return
+	}
+	if h.flags != nil && !h.flags.Enabled(r.Context(), featureflag.Key("finance")) {
+		writeJSON(w, http.StatusOK, withdrawalPreviewResponse{ToCancel: []withdrawalChargeResponse{}})
+		return
+	}
+	if h.finance == nil {
+		WriteConnectError(w, connect.NewError(connect.CodeUnavailable, nil))
+		return
+	}
+	preview, err := h.finance.PreviewWithdrawal(r.Context(), enrollment.StudentID, enrollment.CycleID, withdrawnOn)
+	if err != nil {
+		writeConnectError(w, err)
+		return
+	}
+	if preview.ToCancel == nil {
+		preview.ToCancel = []client.WithdrawalCharge{}
+	}
+	charges := make([]withdrawalChargeResponse, 0, len(preview.ToCancel))
+	for _, charge := range preview.ToCancel {
+		charges = append(charges, withdrawalChargeResponse{ID: charge.ID, Description: charge.Description, DueDate: charge.DueDate, AmountCents: charge.AmountCents})
+	}
+	writeJSON(w, http.StatusOK, withdrawalPreviewResponse{ToCancel: charges, ToCancelCents: preview.ToCancelCents, RemainingDebtCents: preview.RemainingDebtCents})
+}
+
+type withdrawalChargeResponse struct {
+	ID          string `json:"id"`
+	Description string `json:"description"`
+	DueDate     string `json:"dueDate"`
+	AmountCents int64  `json:"amountCents"`
+}
+
+type withdrawalPreviewResponse struct {
+	ToCancel           []withdrawalChargeResponse `json:"toCancel"`
+	ToCancelCents      int64                      `json:"toCancelCents"`
+	RemainingDebtCents int64                      `json:"remainingDebtCents"`
+}
+
+func validOptionalISODate(value string) bool {
+	if value == "" {
+		return true
+	}
+	parsed, err := time.Parse("2006-01-02", value)
+	return err == nil && parsed.Format("2006-01-02") == value
+}
+
+func writeWithdrawalError(w http.ResponseWriter, status int, code, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"code": code, "message": message}})
 }
 
 // EnrollIntoGrade: POST /api/v1/enrollments/by-grade

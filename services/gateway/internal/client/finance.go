@@ -58,6 +58,21 @@ type Charge struct {
 	ScholarshipCents int64
 }
 
+// WithdrawalCharge is a charge that would be cancelled by a dated withdrawal.
+type WithdrawalCharge struct {
+	ID          string
+	Description string
+	DueDate     string
+	AmountCents int64
+}
+
+// WithdrawalPreview is the finance service's projection for a dated withdrawal.
+type WithdrawalPreview struct {
+	ToCancel           []WithdrawalCharge
+	ToCancelCents      int64
+	RemainingDebtCents int64
+}
+
 // Payment is the edge's view of one amount applied to a charge. Method is
 // cash | card | transfer; Reference is the folio/voucher/transfer id. PaidAt is
 // rendered RFC3339 so the edge never leaks a proto timestamp.
@@ -197,6 +212,22 @@ func (c *FinanceClient) ListCharges(ctx context.Context, studentID, cycleID stri
 		return nil, err
 	}
 	return toCharges(res.Msg.GetCharges()), nil
+}
+
+// PreviewWithdrawal asks finance which future charges would be cancelled and
+// what debt would remain after withdrawing a student from a cycle.
+func (c *FinanceClient) PreviewWithdrawal(ctx context.Context, studentID, cycleID, withdrawnOn string) (WithdrawalPreview, error) {
+	res, err := c.rpc.PreviewWithdrawal(ctx, connect.NewRequest(&financev1.PreviewWithdrawalRequest{
+		StudentId: studentID, CycleId: cycleID, WithdrawnOn: withdrawnOn,
+	}))
+	if err != nil {
+		return WithdrawalPreview{}, err
+	}
+	out := WithdrawalPreview{ToCancelCents: res.Msg.GetToCancelCents(), RemainingDebtCents: res.Msg.GetRemainingDebtCents(), ToCancel: make([]WithdrawalCharge, 0, len(res.Msg.GetToCancel()))}
+	for _, charge := range res.Msg.GetToCancel() {
+		out.ToCancel = append(out.ToCancel, WithdrawalCharge{ID: charge.GetId(), Description: charge.GetDescription(), DueDate: charge.GetDueDate(), AmountCents: charge.GetAmountCents()})
+	}
+	return out, nil
 }
 
 // ApplyDiscount sets the discount on a charge (beca, convenio, ajuste); the

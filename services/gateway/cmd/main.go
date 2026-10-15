@@ -355,7 +355,7 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	// rotation-enforced, permission-gated: writes (enroll/transfer/withdraw) need
 	// students:enroll, reads (list/get) need students:read. Every route sits
 	// behind guard.Protect("students", …) so module_students OFF ⇒ 404.
-	enrollH := handler.NewEnrollmentsHandler(studentsClient)
+	enrollH := handler.NewEnrollmentsHandler(studentsClient, handler.WithWithdrawalPreview(financeClient, flags))
 	studentsWrite := func(h http.HandlerFunc) http.Handler {
 		return guard.Protect("students", requireAuthChanged(middleware.RequirePermission("students:enroll")(http.HandlerFunc(h))))
 	}
@@ -366,6 +366,7 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("GET /api/v1/enrollments/{id}", studentsRead(enrollH.GetEnrollment))
 	mux.Handle("POST /api/v1/enrollments/transfer", studentsWrite(enrollH.Transfer))
 	mux.Handle("POST /api/v1/enrollments/withdraw", studentsWrite(enrollH.Withdraw))
+	mux.Handle("GET /api/v1/enrollments/{id}/withdrawal-preview", studentsWrite(enrollH.PreviewWithdrawal))
 
 	// Phase 9b guardian links: WHO MAY SEE A CHILD, so it is an admin action with
 	// its own permission pair (guardians:write / guardians:read) — students:* is
