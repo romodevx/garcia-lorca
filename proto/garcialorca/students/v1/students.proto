@@ -508,6 +508,15 @@ message StudentEnrolled {
   string level_id = 6;
 }
 
+// StudentWithdrawn fires when a student's enrollment is withdrawn from a cycle.
+message StudentWithdrawn {
+  string tenant_id = 1;
+  string student_id = 2;
+  string cycle_id = 3;
+  string enrollment_id = 4;
+  string withdrawn_on = 5;  // YYYY-MM-DD; the effective withdrawal date.
+}
+
 // AdmissionStatusChanged fires on every admission state transition.
 message AdmissionStatusChanged {
   string student_id = 1;
@@ -547,6 +556,8 @@ message Enrollment {
   // recorded) or "import" (the legacy import). Finance bills no inscription to
   // an imported enrolment, nor the fees due before it (ADR 0033).
   string origin = 10;
+  string withdrawn_on = 11;  // YYYY-MM-DD; empty unless withdrawn.
+  string withdrawal_reason = 12;  // Optional free-text reason.
 }
 
 // EnrollmentTransfer is a dated, reasoned record of a move between groups.
@@ -612,6 +623,8 @@ message TransferStudentResponse {
 
 message WithdrawEnrollmentRequest {
   string id = 1;
+  string withdrawn_on = 2;  // YYYY-MM-DD; empty means today.
+  string reason = 3;  // Optional free text, at most 500 characters.
 }
 
 message WithdrawEnrollmentResponse {

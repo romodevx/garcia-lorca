@@ -1015,6 +1015,91 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
+  /api/v1/enrollments/withdraw:
+    post:
+      tags: [students]
+      summary: Withdraw a pupil from a cycle
+      description: >
+        Withdraws the enrollment. withdrawnOn is the effective date in
+        YYYY-MM-DD; when omitted, today is used. The optional reason is free
+        text of at most 500 characters. Requires students:enroll.
+      operationId: withdrawEnrollment
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id]
+              properties:
+                id: { type: string, format: uuid, example: "e3b0c442-98fc-1c14-9afb-000000000001" }
+                withdrawnOn: { type: string, format: date, description: "Optional effective date; omitted means today.", example: "2026-10-15" }
+                reason: { type: string, maxLength: 500, description: Optional free-text reason., example: "La familia se muda de ciudad." }
+      responses:
+        '200':
+          description: The withdrawn enrollment.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Enrollment' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/enrollments/{id}/withdrawal-preview:
+    get:
+      tags: [students]
+      summary: Preview the financial effect of a withdrawal
+      description: Requires students:enroll. Unknown enrollments return 404.
+      operationId: previewEnrollmentWithdrawal
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Enrollment id.
+          schema: { type: string, format: uuid }
+        - name: withdrawnOn
+          in: query
+          required: true
+          description: Effective withdrawal date (YYYY-MM-DD).
+          schema: { type: string, format: date, example: "2026-10-15" }
+      responses:
+        '200':
+          description: Charges that would be cancelled and debt remaining.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [toCancel, toCancelCents, remainingDebtCents]
+                properties:
+                  toCancel:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, description, dueDate, amountCents]
+                      properties:
+                        id: { type: string, format: uuid, example: "e3b0c442-98fc-1c14-9afb-000000000002" }
+                        description: { type: string, example: "Colegiatura noviembre" }
+                        dueDate: { type: string, format: date, example: "2026-11-01" }
+                        amountCents: { type: integer, format: int64, example: 450000 }
+                  toCancelCents: { type: integer, format: int64, example: 450000 }
+                  remainingDebtCents: { type: integer, format: int64, example: 450000 }
+              example:
+                toCancel:
+                  - id: "e3b0c442-98fc-1c14-9afb-000000000002"
+                    description: "Colegiatura noviembre"
+                    dueDate: "2026-11-01"
+                    amountCents: 450000
+                toCancelCents: 450000
+                remainingDebtCents: 450000
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   /api/v1/students/{id}:
     put:
       tags: [students]
@@ -7475,6 +7560,17 @@ components:
         admissionStatus: { type: string, enum: [pending, accepted, enrolled, rejected, withdrawn] }
         bankReference: { type: string, example: "231076", description: "BBVA payment reference (ADR 0033); empty when the pupil has none." }
         profile: { $ref: '#/components/schemas/StudentProfile' }
+
+    Enrollment:
+      type: object
+      required: [id, studentId, cycleId, status, withdrawnOn, withdrawalReason]
+      properties:
+        id: { type: string, format: uuid }
+        studentId: { type: string, format: uuid }
+        cycleId: { type: string, format: uuid }
+        status: { type: string, enum: [active, transferred, withdrawn] }
+        withdrawnOn: { type: string, format: date, description: Empty while the enrollment is not withdrawn., example: "2026-10-15" }
+        withdrawalReason: { type: string, maxLength: 500, description: Empty when no reason was recorded., example: "La familia se muda de ciudad." }
 
     MedicalRecord:
       type: object

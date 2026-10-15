@@ -55,6 +55,10 @@ service FinanceService {
   // follow-up.
   rpc ListCharges(ListChargesRequest) returns (ListChargesResponse);
 
+  // PreviewWithdrawal projects charges due strictly after the withdrawal date
+  // with no payments, and the unpaid balance due on or before that date.
+  rpc PreviewWithdrawal(PreviewWithdrawalRequest) returns (PreviewWithdrawalResponse);
+
   // ApplyDiscount sets the discount on a charge (beca, convenio, ajuste). The
   // discount cannot exceed the charge amount; the remaining balance and status
   // are recomputed server-side.
@@ -429,6 +433,21 @@ message ListChargesRequest {
 
 message ListChargesResponse {
   repeated Charge charges = 1;
+}
+
+// PreviewWithdrawalRequest asks which charges would be cancelled for a dated
+// student withdrawal. withdrawn_on is YYYY-MM-DD.
+message PreviewWithdrawalRequest {
+  string student_id = 1;
+  string cycle_id = 2;
+  string withdrawn_on = 3;
+}
+
+// PreviewWithdrawalResponse is the projected cancellation and remaining debt.
+message PreviewWithdrawalResponse {
+  repeated Charge to_cancel = 1;
+  int64 to_cancel_cents = 2;
+  int64 remaining_debt_cents = 3;
 }
 
 message ApplyDiscountRequest {
