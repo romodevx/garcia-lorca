@@ -19,7 +19,6 @@ import {
   listLevels,
   renameGradeLevel,
   renameGroup,
-  reorderLevels,
   updateLevelAttendanceMode,
   updateLevelGrading,
   type CopyTermMonthsInput,
@@ -34,7 +33,8 @@ import {
   type LevelGrading,
   type Term,
 } from "../../config/api";
-import { useLatest } from "./useLatest";
+import type { NameCorrections } from "./CorrectableName";
+import { useLevelReorder } from "./useLevelReorder";
 import { useLevelTerms, type LevelTerms } from "./useLevelTerms";
 
 /** How long a notice left by another screen stays up. */
@@ -62,8 +62,9 @@ export interface LevelsSlice {
   /** A level restored from the Papelera is back: re-read the list it belongs to. */
   reload: () => void;
   /**
-   * Puts the levels in this order (every id, first first). The list moves at
-   * once; a refusal puts the previous order back and rejects.
+   * Puts the levels in this order (every id, first first). Moves are queued;
+   * the list moves at once; a refusal puts back the server's last confirmed
+   * order and rejects (useLevelReorder).
    */
   reorder: (levelIds: string[]) => Promise<void>;
 }
@@ -75,18 +76,22 @@ export interface GradesSlice {
   selected: GradeLevel | undefined;
   select: (id: string) => void;
   create: (input: CreateGradeLevelInput) => Promise<void>;
-  rename: (id: string, name: string) => Promise<void>;
-  /** Rejects with the server's refusal (GRADE_LEVEL_IN_USE) and keeps the grade. */
-  remove: (id: string) => Promise<void>;
+  /**
+   * Rename + delete (a GRADE_LEVEL_IN_USE refusal rejects and keeps the grade).
+   * Undefined without config:write: the panel then shows read-only chips.
+   */
+  corrections: NameCorrections | undefined;
 }
 
 export interface GroupsSlice {
   /** The groups of the selected (cycle, grade) only. */
   list: Group[];
   create: (input: CreateGroupInput) => Promise<void>;
-  rename: (id: string, name: string) => Promise<void>;
-  /** Rejects with the server's refusal (GROUP_IN_USE) and keeps the group. */
-  remove: (id: string) => Promise<void>;
+  /**
+   * Rename + delete (a GROUP_IN_USE refusal rejects and keeps the group; any
+   * refused rename re-reads the list first). Undefined without config:write.
+   */
+  corrections: NameCorrections | undefined;
 }
 
 export interface TermsSlice extends LevelTerms {
@@ -127,7 +132,7 @@ export interface CatalogState {
  * async callbacks the presentational panels receive. The gateway (behind the
  * flag + config:read/write) is the security boundary; this is UX only.
  */
-export function useCatalogState(notice: string | undefined): CatalogState {
+export function useCatalogState(notice: string | undefined, canWriteConfig = false): CatalogState {
   const [cycles, setCycles] = useState<Cycle[]>([]);
   const [levels, setLevels] = useState<Level[]>([]);
   const [gradeLevels, setGradeLevels] = useState<GradeLevel[]>([]);
@@ -139,6 +144,7 @@ export function useCatalogState(notice: string | undefined): CatalogState {
 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | undefined>(undefined);
+  const { adopt: adoptLevels, reorder: handleReorderLevels } = useLevelReorder(setLevels);
 
   // Boot: load the cycles + the levels catalog, auto-selecting a cycle.
   useEffect(() => {
@@ -148,7 +154,7 @@ export function useCatalogState(notice: string | undefined): CatalogState {
       .then(([cs, ls]) => {
         if (!active) return;
         setCycles(cs);
-        setLevels(ls);
+        adoptLevels(ls);
         const preferred = cs.find((c) => c.status === "active") ?? cs[0];
         if (preferred !== undefined) setSelectedCycleId((prev) => prev ?? preferred.id);
       })
@@ -157,7 +163,7 @@ export function useCatalogState(notice: string | undefined): CatalogState {
     return () => {
       active = false;
     };
-  }, []);
+  }, [adoptLevels]);
 
   // Selecting a level loads its grades and clears any grade selection.
   useEffect(() => {
@@ -237,30 +243,24 @@ export function useCatalogState(notice: string | undefined): CatalogState {
     setSelectedGradeLevelId((prev) => (prev === id ? undefined : prev));
   }, []);
 
+  // A refused rename can still have half-happened (GROUP_RELABEL_PENDING: renamed in
+  // config, the pupils' files not yet), so the list is re-read before the refusal goes up.
   const handleRenameGroup = useCallback(async (id: string, name: string): Promise<void> => {
-    const renamed = await renameGroup(API_URL, id, name);
-    setGroups((prev) => prev.map((g) => (g.id === id ? renamed : g)));
-  }, []);
+    try {
+      const renamed = await renameGroup(API_URL, id, name);
+      setGroups((prev) => prev.map((g) => (g.id === id ? renamed : g)));
+    } catch (cause) {
+      if (selectedCycleId !== undefined && selectedGradeLevelId !== undefined) {
+        listGroups(API_URL, selectedCycleId, selectedGradeLevelId).then(setGroups).catch(() => {});
+      }
+      throw cause;
+    }
+  }, [selectedCycleId, selectedGradeLevelId]);
 
   const handleRemoveGroup = useCallback(async (id: string): Promise<void> => {
     await deleteGroup(API_URL, id);
     setGroups((prev) => prev.filter((g) => g.id !== id));
   }, []);
-
-  // Read from a ref so a move computes from the list as it stands, optimistic moves included.
-  const latestLevels = useLatest(levels);
-  const handleReorderLevels = useCallback(async (levelIds: string[]): Promise<void> => {
-    const before = latestLevels.current;
-    const byId = new Map(before.map((l) => [l.id, l]));
-    setLevels(levelIds.flatMap((id) => byId.get(id) ?? []));
-    try {
-      const saved = await reorderLevels(API_URL, levelIds);
-      if (saved.length > 0) setLevels(saved);
-    } catch (cause) {
-      setLevels(before);
-      throw cause;
-    }
-  }, [latestLevels]);
 
   // The notice (≥ 8 s, like an undo toast) leaves on its own instead of pinning over the page.
   const [noticeShown, setNoticeShown] = useState(notice !== undefined);
@@ -272,8 +272,8 @@ export function useCatalogState(notice: string | undefined): CatalogState {
   }, [notice]);
 
   const reloadLevels = useCallback((): void => {
-    listLevels(API_URL).then(setLevels).catch(() => {});
-  }, []);
+    listLevels(API_URL).then(adoptLevels).catch(() => {});
+  }, [adoptLevels]);
 
   const handleCopyTermMonths = useCallback((input: CopyTermMonthsInput): Promise<Term[]> => copyTermMonths(API_URL, input), []);
 
@@ -307,6 +307,15 @@ export function useCatalogState(notice: string | undefined): CatalogState {
   const selectedLevel = levels.find((l) => l.id === selectedLevelId);
   const selectedGradeLevel = gradeLevels.find((g) => g.id === selectedGradeLevelId);
 
+  const gradeCorrections = useMemo(
+    () => (canWriteConfig ? { rename: handleRenameGradeLevel, remove: handleRemoveGradeLevel } : undefined),
+    [canWriteConfig, handleRenameGradeLevel, handleRemoveGradeLevel],
+  );
+  const groupCorrections = useMemo(
+    () => (canWriteConfig ? { rename: handleRenameGroup, remove: handleRemoveGroup } : undefined),
+    [canWriteConfig, handleRenameGroup, handleRemoveGroup],
+  );
+
   return {
     load: { loading, error: loadError },
     cycles: {
@@ -335,10 +344,9 @@ export function useCatalogState(notice: string | undefined): CatalogState {
       selected: selectedGradeLevel,
       select: setSelectedGradeLevelId,
       create: handleCreateGradeLevel,
-      rename: handleRenameGradeLevel,
-      remove: handleRemoveGradeLevel,
+      corrections: gradeCorrections,
     },
-    groups: { list: groups, create: handleCreateGroup, rename: handleRenameGroup, remove: handleRemoveGroup },
+    groups: { list: groups, create: handleCreateGroup, corrections: groupCorrections },
     terms: { ...levelTerms, copyMonths: handleCopyTermMonths },
     pricing: {
       levelId: pricingLevelId,

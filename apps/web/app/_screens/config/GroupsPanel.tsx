@@ -5,6 +5,7 @@ import { useMemo, useState, type ReactElement } from "react";
 import { InlineCreateRow } from "../../_design/InlineCreateRow";
 import type { CreateGroupInput, Cycle, GradeLevel, Group } from "../../config/api";
 import { CorrectableName, type NameCorrections } from "./CorrectableName";
+import { DeletionStatus, useDeletionFeedback } from "./useDeletionFeedback";
 import { EmptyHint, ErrorAlert, Section } from "./parts";
 
 export interface GroupsPanelProps {
@@ -36,6 +37,7 @@ function nextLetter(groups: readonly Group[]): string {
  */
 export function GroupsPanel({ cycle, gradeLevel, groups, onCreate, corrections }: GroupsPanelProps): ReactElement {
   const [error, setError] = useState<string | undefined>(undefined);
+  const feedback = useDeletionFeedback();
 
   // Identidad estable: el renglón la observa para poner al día la celda que
   // nadie tocó, y un objeto nuevo en cada render la reescribiría siempre.
@@ -55,6 +57,7 @@ export function GroupsPanel({ cycle, gradeLevel, groups, onCreate, corrections }
               noun="grupo"
               onRename={(name) => corrections.rename(g.id, name)}
               onDelete={() => corrections.remove(g.id)}
+              onDeleted={(next) => feedback.deleted(`Grupo ${g.name} borrado`, next)}
               deleteDescription={`Se borra el grupo ${g.name} de ${gradeLevel.name} en ${cycle.name}.`}
             >
               <GroupPill group={g} />
@@ -71,7 +74,8 @@ export function GroupsPanel({ cycle, gradeLevel, groups, onCreate, corrections }
         <EmptyHint>Aún no hay grupos para este grado en el ciclo.</EmptyHint>
       )}
 
-      <div style={{ border: "1px solid var(--border)", borderRadius: "var(--r-md)", overflow: "hidden" }}>
+      <DeletionStatus message={feedback.message} />
+      <div ref={feedback.fallbackRef} style={{ border: "1px solid var(--border)", borderRadius: "var(--r-md)", overflow: "hidden" }}>
         <InlineCreateRow
           addLabel="Nuevo grupo"
           defaults={defaults}

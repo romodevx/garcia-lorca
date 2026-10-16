@@ -70,6 +70,38 @@ describe("CorrectableName — rename in place", () => {
     expect(screen.getByRole("textbox")).toHaveAttribute("aria-invalid", "true");
   });
 
+  it("GROUP_RELABEL_PENDING (503) shows the server's sentence and keeps the typed name", async () => {
+    const sentence = "El grupo ya se llama B, pero falta actualizar los expedientes. Guarda de nuevo para terminar.";
+    const onRename = vi.fn().mockRejectedValue(new ConfigError(503, sentence, "GROUP_RELABEL_PENDING"));
+    const { user } = setup({ name: "A", noun: "grupo", onRename });
+    await user.click(screen.getByRole("button", { name: "Renombrar grupo A" }));
+    const input = screen.getByRole("textbox");
+    await user.clear(input);
+    await user.type(input, "B{Enter}");
+    expect(await screen.findByRole("alert")).toHaveTextContent(sentence);
+    expect(screen.getByRole("textbox")).toHaveValue("B");
+    expect(screen.getByRole("textbox")).toHaveFocus();
+  });
+
+  it("after a failed save, saving the same name again is sent even if the list already reads it", async () => {
+    const onRename = vi.fn()
+      .mockRejectedValueOnce(new ConfigError(503, "Guarda de nuevo para terminar.", "GROUP_RELABEL_PENDING"))
+      .mockResolvedValueOnce(undefined);
+    const user = userEvent.setup();
+    const props = { noun: "grupo", onRename, onDelete: vi.fn(), deleteDescription: "", children: <span>grupo</span> };
+    const { rerender } = render(<ul><CorrectableName {...props} name="A" /></ul>);
+    await user.click(screen.getByRole("button", { name: "Renombrar grupo A" }));
+    await user.clear(screen.getByRole("textbox"));
+    await user.type(screen.getByRole("textbox"), "B{Enter}");
+    await screen.findByRole("alert");
+    // The screen re-read the groups: config already says B.
+    rerender(<ul><CorrectableName {...props} name="B" /></ul>);
+    await user.keyboard("{Enter}");
+    expect(onRename).toHaveBeenCalledTimes(2);
+    expect(onRename).toHaveBeenLastCalledWith("B");
+    await waitFor(() => expect(screen.queryByRole("textbox")).toBeNull());
+  });
+
   it("an empty name is said on save, not sent", async () => {
     const { user, props } = setup();
     await user.click(screen.getByRole("button", { name: "Renombrar grado 3°" }));

@@ -5,6 +5,7 @@ import { useMemo, useState, type ReactElement } from "react";
 import { InlineCreateRow } from "../../_design/InlineCreateRow";
 import type { CreateGradeLevelInput, GradeLevel, Level } from "../../config/api";
 import { CorrectableName, type NameCorrections } from "./CorrectableName";
+import { DeletionStatus, useDeletionFeedback } from "./useDeletionFeedback";
 import { EmptyHint, ErrorAlert, Section, SelectChip } from "./parts";
 import { useSetupPresentation } from "./SetupPresentation";
 
@@ -43,6 +44,7 @@ export function GradeLevelsPanel({
   corrections,
 }: GradeLevelsPanelProps): ReactElement {
   const [error, setError] = useState<string | undefined>(undefined);
+  const feedback = useDeletionFeedback();
   // Inside a setup step a grade chip is its name alone: "1. 1°" said the order twice (§1.8 #12).
   const { inSetup } = useSetupPresentation();
 
@@ -64,6 +66,7 @@ export function GradeLevelsPanel({
               noun="grado"
               onRename={(name) => corrections.rename(g.id, name)}
               onDelete={() => corrections.remove(g.id)}
+              onDeleted={(next) => feedback.deleted(`Grado ${g.name} borrado`, next)}
               deleteDescription={`Se borra el grado ${g.name} de ${level.name}. El nivel y sus otros grados no cambian.`}
             >
               <SelectChip selected={g.id === selectedGradeLevelId} onClick={() => onSelect(g.id)}>
@@ -86,7 +89,8 @@ export function GradeLevelsPanel({
         <EmptyHint>Aún no hay grados en este nivel.</EmptyHint>
       )}
 
-      <div style={{ border: "1px solid var(--border)", borderRadius: "var(--r-md)", overflow: "hidden" }}>
+      <DeletionStatus message={feedback.message} />
+      <div ref={feedback.fallbackRef} style={{ border: "1px solid var(--border)", borderRadius: "var(--r-md)", overflow: "hidden" }}>
         <InlineCreateRow
           addLabel="Nuevo grado"
           defaults={defaults}

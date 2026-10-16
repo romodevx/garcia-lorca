@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 
 import type { CopyTermMonthsInput, CreateCycleInput, CreateGradeLevelInput, CreateGroupInput, CreateLevelInput, CreateTermInput, Term } from "../../../config/api";
+import type { NameCorrections } from "../CorrectableName";
 import type { CatalogState } from "../useCatalogState";
 import type { RefreshKind } from "./useSetupStatus";
 
@@ -23,11 +24,14 @@ export interface SetupActions {
   createGroup: (input: CreateGroupInput) => Promise<void>;
   /** A level came back from the Papelera. */
   restoredLevel: () => void;
-  /** T8 corrections: each re-reads the status it changes. */
-  renameGrade: (id: string, name: string) => Promise<void>;
-  deleteGrade: (id: string) => Promise<void>;
-  renameGroup: (id: string, name: string) => Promise<void>;
-  deleteGroup: (id: string) => Promise<void>;
+  /** T8 corrections, each re-reading the status it changes. Undefined without config:write. */
+  gradeCorrections: NameCorrections | undefined;
+  groupCorrections: NameCorrections | undefined;
+}
+
+function withRefresh(corrections: NameCorrections | undefined, refresh: () => void): NameCorrections | undefined {
+  if (corrections === undefined) return undefined;
+  return { rename: thenRefresh(corrections.rename, refresh), remove: thenRefresh(corrections.remove, refresh) };
 }
 
 function thenRefresh<Args extends unknown[], Result>(action: (...args: Args) => Promise<Result>, refresh: () => void): (...args: Args) => Promise<Result> {
@@ -57,16 +61,14 @@ export function useSetupActions(state: CatalogState, refresh: (kind: RefreshKind
       setMonths: thenRefresh(terms.setMonths, () => refresh("terms")),
       copyMonths: thenRefresh(terms.copyMonths, () => refresh("terms")),
       createGroup: thenRefresh(groups.create, () => refresh("groups")),
-      renameGrade: thenRefresh(grades.rename, () => refresh("grades")),
-      deleteGrade: thenRefresh(grades.remove, () => refresh("grades")),
-      renameGroup: thenRefresh(groups.rename, () => refresh("groups")),
-      deleteGroup: thenRefresh(groups.remove, () => refresh("groups")),
+      gradeCorrections: withRefresh(grades.corrections, () => refresh("grades")),
+      groupCorrections: withRefresh(groups.corrections, () => refresh("groups")),
       // A restore brings the level back with its grades, terms and groups: every read is stale.
       restoredLevel: () => {
         reloadLevels();
         refresh("all");
       },
     }),
-    [cycles.create, cycles.activate, createLevel, reloadLevels, grades.create, grades.rename, grades.remove, terms.create, terms.setMonths, terms.copyMonths, groups.create, groups.rename, groups.remove, refresh],
+    [cycles.create, cycles.activate, createLevel, reloadLevels, grades.create, grades.corrections, terms.create, terms.setMonths, terms.copyMonths, groups.create, groups.corrections, refresh],
   );
 }

@@ -52,7 +52,7 @@ export interface CatalogProps {
  * screen is UX only.
  */
 export function Catalog({ onBack, canDeleteLevels = false, onDeleteLevel, notice, onOpenLevelPeriods, onOpenStudentImport, canWriteConfig = false }: CatalogProps): ReactElement {
-  const { load, cycles, levels, grades, groups, terms: levelTerms, pricing: pricingState, notice: noticeState } = useCatalogState(notice);
+  const { load, cycles, levels, grades, groups, terms: levelTerms, pricing: pricingState, notice: noticeState } = useCatalogState(notice, canWriteConfig);
   const selectedCycle = cycles.selected;
   const selectedLevel = levels.selected;
   const selectedGradeLevel = grades.selected;
@@ -159,7 +159,7 @@ export function Catalog({ onBack, canDeleteLevels = false, onDeleteLevel, notice
                 selectedGradeLevelId={grades.selectedId}
                 onSelect={grades.select}
                 onCreate={grades.create}
-                corrections={canWriteConfig ? { rename: grades.rename, remove: grades.remove } : undefined}
+                corrections={grades.corrections}
               />
             )}
 
@@ -209,7 +209,7 @@ export function Catalog({ onBack, canDeleteLevels = false, onDeleteLevel, notice
                 gradeLevel={selectedGradeLevel}
                 groups={groups.list}
                 onCreate={groups.create}
-                corrections={canWriteConfig ? { rename: groups.rename, remove: groups.remove } : undefined}
+                corrections={groups.corrections}
               />
             )}
           </div>
