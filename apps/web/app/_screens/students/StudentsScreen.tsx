@@ -22,7 +22,8 @@ import {
 import { listCycles, listGradeLevels, listLabelledGroups, listLevels, type Cycle, type GradeLevel, type LabelledGroup, type Level } from "../../config/api";
 import { addNote, enrollIntoGrade, reissueCard, revokeCard, StudentsError, type Placement } from "../../students/api";
 import { VerifyCardDrawer } from "./VerifyCardDrawer";
-import { WithdrawDialog } from "./WithdrawDialog";
+import { WithdrawPanel } from "./WithdrawDialog";
+import { dayWithYearLabel } from "../../_lib/localDate";
 import { todayISO } from "../attendance/sheetModel";
 
 import { API_URL } from "../../api-url";
@@ -597,6 +598,7 @@ function StudentSheet({
   const [refusal, setRefusal] = useState<string | undefined>(undefined);
   const [saving, setSaving] = useState(false);
   const [withdrawOpen, setWithdrawOpen] = useState(false);
+  const withdrawTrigger = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     let alive = true;
@@ -657,6 +659,7 @@ function StudentSheet({
       icon="students"
       size="sm"
       onClose={onClose}
+      dismissible={!withdrawOpen}
       header={
         <div style={{ padding: "26px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 16 }}>
           <Avatar name={formatStudentName(st)} color="forest" size={62} />
@@ -668,10 +671,10 @@ function StudentSheet({
         </div>
       }
       footer={
-        <>
+        !withdrawOpen && <>
           <Btn kind="ghost" icon="documents" style={{ flex: 1 }}>Documentos</Btn>
           {onEdit !== undefined && <Btn kind="ghost" onClick={onEdit} style={{ flex: 1 }}>Editar ficha</Btn>}
-          {canWithdraw && current !== null && current !== undefined && current !== "failed" && current.status === "active" && st.admissionStatus !== "withdrawn" && <Btn kind="ghost" onClick={() => setWithdrawOpen(true)} style={{ flex: 1, color: "var(--bad-fg)" }}>Dar de baja</Btn>}
+          {canWithdraw && current !== null && current !== undefined && current !== "failed" && current.status === "active" && st.admissionStatus !== "withdrawn" && <Btn ref={withdrawTrigger} kind="ghost" onClick={() => setWithdrawOpen(true)} style={{ flex: 1, color: "var(--bad-fg)" }}>Dar de baja</Btn>}
           {ready && current?.status !== "withdrawn" && st.admissionStatus !== "withdrawn" && (
             <Btn icon="check" onClick={() => void save()} style={{ flex: 1, opacity: saving ? 0.6 : 1 }}>
               {transferring ? "Cambiar de grupo" : "Inscribir"}
@@ -680,7 +683,7 @@ function StudentSheet({
         </>
       }
     >
-      <>
+      {withdrawOpen && placed !== undefined ? <WithdrawPanel enrollment={placed} triggerRef={withdrawTrigger} onBack={() => setWithdrawOpen(false)} onSuccess={(updated) => { setCurrent(updated); setWithdrawOpen(false); onPlaced("Alumno dado de baja", true); }} /> : <>
           {rows.map(([k, v]) => (
             <div key={k} style={{ display: "flex", justifyContent: "space-between", gap: 16, padding: "15px 0", borderBottom: "1px solid var(--border)" }}>
               <span style={{ fontSize: 14, color: "var(--text-muted)" }}>{k}</span>
@@ -738,9 +741,8 @@ function StudentSheet({
               )}
             </div>
           )}
-          {(st.admissionStatus === "withdrawn" || (current !== null && current !== undefined && current !== "failed" && current.status === "withdrawn")) && <p style={{ paddingTop: 18, color: "var(--text-muted)" }}>Baja el {placed?.withdrawnOn ?? "—"}{placed?.withdrawalReason ? ` · ${placed.withdrawalReason}` : ""}</p>}
-          {withdrawOpen && placed !== undefined && <WithdrawDialog enrollment={placed} onClose={() => setWithdrawOpen(false)} onSuccess={(updated) => { setCurrent(updated); setWithdrawOpen(false); onPlaced("Alumno dado de baja", true); }} />}
-      </>
+          {(st.admissionStatus === "withdrawn" || (current !== null && current !== undefined && current !== "failed" && current.status === "withdrawn")) && <p style={{ paddingTop: 18, color: "var(--text-muted)" }}>Baja el {placed?.withdrawnOn ? dayWithYearLabel(placed.withdrawnOn) : "—"}{placed?.withdrawalReason ? ` · ${placed.withdrawalReason}` : ""}</p>}
+      </>}
     </DrawerShell>
   );
 }

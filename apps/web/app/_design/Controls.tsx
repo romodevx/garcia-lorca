@@ -1,6 +1,7 @@
 "use client";
 
 import type { CSSProperties, MouseEvent, ReactElement, ReactNode } from "react";
+import type { Ref } from "react";
 import { Icon, type IconName } from "./Icon";
 import type { Theme } from "../theme/theme-script";
 
@@ -50,6 +51,7 @@ export interface BtnProps {
   style?: CSSProperties;
   /** Only when the visible text alone is ambiguous ("Editar" on every row). */
   "aria-label"?: string;
+  ref?: Ref<HTMLButtonElement>;
 }
 
 export function Btn({
@@ -62,7 +64,8 @@ export function Btn({
   disabled,
   type = "button",
   style = {},
-  "aria-label": ariaLabel
+  "aria-label": ariaLabel,
+  ref,
 }: BtnProps): ReactElement {
   const base: CSSProperties = {
     display: "inline-flex",
@@ -96,6 +99,7 @@ export function Btn({
   return (
     <button
       type={type}
+      ref={ref}
       onClick={onClick}
       disabled={disabled}
       aria-label={ariaLabel}
