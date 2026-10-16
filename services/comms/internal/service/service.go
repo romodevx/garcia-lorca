@@ -661,10 +661,25 @@ func notifiedMarkStatus(status string) error {
 // boundary in this system as int64 cents, never a float, so the decimal point is
 // placed by integer arithmetic here.
 func pesos(cents int64) string {
+	sign := ""
 	if cents < 0 {
-		return fmt.Sprintf("-$%d.%02d", -cents/100, -cents%100)
+		sign, cents = "-", -cents
 	}
-	return fmt.Sprintf("$%d.%02d", cents/100, cents%100)
+	return fmt.Sprintf("%s$%s.%02d", sign, groupThousands(cents/100), cents%100)
+}
+
+// groupThousands writes a non-negative whole number with a comma every three
+// digits, as es-MX does: 1234567 → "1,234,567".
+func groupThousands(n int64) string {
+	digits := strconv.FormatInt(n, 10)
+	var b strings.Builder
+	for i, d := range digits {
+		if i > 0 && (len(digits)-i)%3 == 0 {
+			b.WriteByte(',')
+		}
+		b.WriteRune(d)
+	}
+	return b.String()
 }
 
 // isKnownPlatform reports whether platform is one the contract accepts. The empty

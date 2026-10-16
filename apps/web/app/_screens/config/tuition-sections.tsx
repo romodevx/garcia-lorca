@@ -15,7 +15,10 @@ import {
   ladderProblem,
   monthlyTotals,
   pesosToCents,
+  readTierDraft,
   sameLineName,
+  withTier,
+  type TierDraftRead,
 } from "./tuition-math";
 
 /**
@@ -42,6 +45,24 @@ import {
 export type DraftCheck = () => string | undefined;
 
 /**
+ * La inscripción al guardar (ISSUE-013): un tramo COMPLETO escrito y sin
+ * agregar se agrega solo, como si se hubiera apretado "Agregar monto"; uno a
+ * medias sigue deteniendo el guardado con lo que le falta.
+ *
+ * Recibe los conceptos y devuelve los que hay que guardar, porque el `onChange`
+ * que los agrega no alcanza a repintar antes de que el guardado los lea.
+ */
+export type InscriptionFlush = (
+  concepts: EnrollmentConcept[],
+) => { problem: string } | { concepts: EnrollmentConcept[] };
+
+/** Lo que una tarjeta de concepto entrega al guardar, y cómo vaciarse después. */
+interface CardDraft {
+  read: () => TierDraftRead;
+  clear: () => void;
+}
+
+/**
  * The inscription, as the school's price list prints it: one line per concept,
  * each with what it costs from a date onward.
  *
@@ -53,7 +74,7 @@ export type DraftCheck = () => string | undefined;
  */
 export function InscriptionSection({ concepts, onChange, onError, draftRef }: InscriptionSectionProps): ReactElement {
   const [name, setName] = useState("");
-  const cardDrafts = useRef(new Map<string, DraftCheck>());
+  const cardDrafts = useRef(new Map<string, CardDraft>());
 
   /*
    * Al desmontarse deja de reclamar.
@@ -64,33 +85,26 @@ export function InscriptionSection({ concepts, onChange, onError, draftRef }: In
    * cuota que ya no existía —y al abrir la sección los campos estaban vacíos,
    * porque el estado se había reiniciado—; el segundo clic sí guardaba. Se leía
    * como un botón que a veces no hace nada.
+   *
+   * Se instala en un efecto de cada render, no durante el render: React en
+   * StrictMode ensaya un desmontaje que vaciaba el ref, y escribir en una
+   * tarjeta no repinta esta sección, así que el tramo escrito se guardaba sin
+   * él y sin aviso (QA de T7). La lectura ve las tarjetas de AHORA porque
+   * consulta el mapa vivo.
    */
   useEffect(() => {
-    const ref = draftRef;
+    if (draftRef === undefined) return undefined;
+    draftRef.current = (current) => flushDrafts(current, name, cardDrafts.current, onChange);
     return () => {
-      if (ref !== undefined) ref.current = () => undefined;
+      draftRef.current = (current) => ({ concepts: current });
     };
-  }, [draftRef]);
+  });
 
-  const registerDraft = (concept: string, check: DraftCheck | undefined): void => {
-    if (check === undefined) cardDrafts.current.delete(concept);
-    else cardDrafts.current.set(concept, check);
+  const registerDraft = (concept: string, draft: CardDraft | undefined): void => {
+    if (draft === undefined) cardDrafts.current.delete(concept);
+    else cardDrafts.current.set(concept, draft);
   };
 
-  // El nombre de un concepto escrito y sin agregar cuenta igual: es un renglón
-  // de la lista de precios que nadie va a cobrar.
-  if (draftRef !== undefined) {
-    draftRef.current = (): string | undefined => {
-      if (name.trim() !== "") {
-        return `Tienes el concepto "${name.trim()}" escrito sin agregar. Aprieta "Agregar concepto" o borra lo escrito.`;
-      }
-      for (const check of cardDrafts.current.values()) {
-        const problem = check();
-        if (problem !== undefined) return problem;
-      }
-      return undefined;
-    };
-  }
 
   const addConcept = (): void => {
     if (name.trim() === "") {
@@ -194,33 +208,30 @@ function ConceptCard({ concept, onChangeTiers, onRemove, onError, registerDraft 
   const [to, setTo] = useState("");
   const [amount, setAmount] = useState("");
 
-  // Se registra en cada render: la comprobación tiene que leer los valores de
-  // AHORA, y un registro que sólo corriera al montar leería los del principio.
+  const clear = (): void => {
+    setAmount("");
+    setFrom("");
+    setTo("");
+  };
+
+  // Se registra en cada render: la lectura tiene que ver los valores de AHORA,
+  // y un registro que sólo corriera al montar leería los del principio.
   useEffect(() => {
-    registerDraft(concept.name, () =>
-      amount.trim() !== "" || from.trim() !== "" || to.trim() !== ""
-        ? `Tienes un monto escrito en "${concept.name}" sin agregar. Aprieta "Agregar monto con su vigencia" o borra lo escrito.`
-        : undefined,
-    );
+    registerDraft(concept.name, { read: () => readTierDraft(concept.name, { amount, from, to }), clear });
     return () => registerDraft(concept.name, undefined);
   });
 
   const addAmount = (): void => {
-    const cents = pesosToCents(amount);
-    if (cents === null || from.trim() === "") {
-      onError(`Para agregar un monto a "${concept.name}": el monto y la fecha desde la que aplica.`);
+    const read = readTierDraft(concept.name, { amount, from, to });
+    if (read.kind !== "tier") {
+      onError(read.kind === "problem"
+        ? read.message
+        : `Para agregar un monto a "${concept.name}": el monto y la fecha desde la que aplica.`);
       return;
     }
     onError(undefined);
-    setAmount("");
-    setFrom("");
-    setTo("");
-    onChangeTiers(
-      [...concept.tiers, { effectiveFrom: from.trim(), effectiveTo: to.trim(), amountCents: cents }]
-        // En orden de fecha, que es como se cobra: así el director teclea en el
-        // orden que recuerde y el renglón se lee como la lista de precios.
-        .sort((a, b) => a.effectiveFrom.localeCompare(b.effectiveFrom)),
-    );
+    clear();
+    onChangeTiers(withTier(concept.tiers, read.tier));
   };
 
   return (
@@ -279,9 +290,47 @@ function ConceptCard({ concept, onChangeTiers, onRemove, onError, registerDraft 
   );
 }
 
+/**
+ * Lo pendiente de la sección al guardar: el nombre de un concepto sin agregar
+ * se reclama (un renglón sin monto no se puede cobrar); los tramos completos de
+ * cada tarjeta se agregan y las tarjetas se vacían, para que un segundo intento
+ * no los sume dos veces.
+ */
+function flushDrafts(
+  concepts: EnrollmentConcept[],
+  pendingName: string,
+  cards: ReadonlyMap<string, CardDraft>,
+  onChange: (concepts: EnrollmentConcept[]) => void,
+): { problem: string } | { concepts: EnrollmentConcept[] } {
+  if (pendingName.trim() !== "") {
+    return { problem: `Tienes el concepto "${pendingName.trim()}" escrito sin agregar. Aprieta "Agregar concepto" o borra lo escrito.` };
+  }
+  const ready = new Map<string, { tier: PriceTier; clear: () => void }>();
+  for (const [name, card] of cards) {
+    const read = card.read();
+    if (read.kind === "problem") return { problem: read.message };
+    if (read.kind === "tier") ready.set(name, { tier: read.tier, clear: card.clear });
+  }
+  if (ready.size === 0) return { concepts };
+  // Nada tecleado se tira en silencio: un tramo listo para un concepto que ya
+  // no está en la lista se reclama en vez de vaciarse.
+  for (const name of ready.keys()) {
+    if (!concepts.some((c) => c.name === name)) {
+      return { problem: `El monto escrito para "${name}" no tiene concepto en la lista. Vuelve a agregar el concepto o borra lo escrito.` };
+    }
+  }
+  const next = concepts.map((c) => {
+    const draft = ready.get(c.name);
+    return draft === undefined ? c : { ...c, tiers: withTier(c.tiers, draft.tier) };
+  });
+  for (const draft of ready.values()) draft.clear();
+  onChange(next);
+  return { concepts: next };
+}
+
 interface ConceptCardProps {
-  /** Cómo avisar qué tiene escrito y sin agregar; `undefined` la da de baja. */
-  registerDraft: (name: string, check: DraftCheck | undefined) => void;
+  /** Cómo entregar lo escrito y sin agregar; `undefined` la da de baja. */
+  registerDraft: (name: string, draft: CardDraft | undefined) => void;
   concept: EnrollmentConcept;
   onChangeTiers: (tiers: PriceTier[]) => void;
   onRemove: () => void;
@@ -289,8 +338,8 @@ interface ConceptCardProps {
 }
 
 export interface InscriptionSectionProps {
-  /** Dónde dejar la comprobación de lo escrito y sin agregar. */
-  draftRef?: { current: DraftCheck } | undefined;
+  /** Dónde dejar cómo se entrega lo escrito y sin agregar al guardar. */
+  draftRef?: { current: InscriptionFlush } | undefined;
   concepts: EnrollmentConcept[];
   onChange: (concepts: EnrollmentConcept[]) => void;
   onError: (message: string | undefined) => void;
@@ -335,19 +384,18 @@ export function FeesSection({
 
   // Ver InscriptionSection: plegar la sección la desmonta, y un cierre viejo en
   // el ref bloqueaba el siguiente guardado con una queja sobre algo inexistente.
+  // Igual que InscriptionSection: en un efecto, para sobrevivir al ensayo de
+  // desmontaje de StrictMode.
   useEffect(() => {
-    const ref = draftRef;
-    return () => {
-      if (ref !== undefined) ref.current = () => undefined;
-    };
-  }, [draftRef]);
-
-  if (draftRef !== undefined) {
+    if (draftRef === undefined) return undefined;
     draftRef.current = (): string | undefined =>
       name.trim() !== "" || amount.trim() !== "" || picked.length > 0
         ? `Tienes la cuota "${name.trim() === "" ? "sin nombre" : name.trim()}" escrita sin agregar. Aprieta "Agregar cuota" o borra lo escrito.`
         : undefined;
-  }
+    return () => {
+      draftRef.current = () => undefined;
+    };
+  });
 
   const calendar = billedMonths(cycle.startsOn, firstMonth, months);
   const totals = monthlyTotals(calendar, monthlyCents, fees);

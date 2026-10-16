@@ -703,7 +703,7 @@ describe("lo que la tabla dice que cuesta la inscripción", () => {
     render(<Host />);
 
     const fila = await screen.findByRole("row", { name: /Kínder/ });
-    expect(fila).toHaveTextContent("5000.00");
+    expect(fila).toHaveTextContent("$5,000.00");
     expect(fila, "sigue anunciando la inscripción como gratis").not.toHaveTextContent("$0.00");
   });
 });
@@ -736,7 +736,7 @@ describe("la inscripción de un plan sin conceptos", () => {
     render(<Host />);
 
     const fila = await screen.findByRole("row", { name: /Kínder/ });
-    expect(fila).toHaveTextContent("4500.00");
+    expect(fila).toHaveTextContent("$4,500.00");
     expect(fila, "anuncia la inscripción como gratis").not.toHaveTextContent("$0.00");
   });
 });

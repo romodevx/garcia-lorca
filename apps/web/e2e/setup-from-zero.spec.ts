@@ -238,7 +238,7 @@ test.describe.serial("setting up a school from zero", () => {
     await page.getByLabel("Colegiatura mensual").fill("3200");
     await page.getByRole("button", { name: "Guardar tabulador" }).click();
 
-    await expect(page.getByRole("row").filter({ hasText: level })).toContainText("$3200.00");
+    await expect(page.getByRole("row").filter({ hasText: level })).toContainText("$3,200.00");
 
     // Run the month, then run it again. The second press is the demonstration:
     // everything comes back as already existing.

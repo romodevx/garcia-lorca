@@ -21,11 +21,28 @@ const PESO_AMOUNT = /^(\d{1,9})(?:\.(\d{1,2}))?$/;
 const CENTS_PER_PESO = 100;
 
 /**
- * Currency display is pinned to es-MX/MXN regardless of the UI locale: the
- * amount IS Mexican pesos, so an English UI must not re-render it as USD.
+ * The ONE place money is turned into text a person reads (ISSUE-016). Screens
+ * that built "$" + toFixed(2) by hand showed "$4000.00" next to tables that
+ * said "$4,000.00".
+ *
+ * Pinned to es-MX/MXN regardless of the UI locale: the amount IS Mexican
+ * pesos, so an English UI must not re-render it as USD. Built once: an
+ * `Intl.NumberFormat` is costly to construct and every table row calls this.
  */
+const CURRENCY = new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" });
+const GROUPED_PESOS = new Intl.NumberFormat("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+/** 400000 → "$4,000.00". */
 export function formatCents(cents: number): string {
-  return (cents / CENTS_PER_PESO).toLocaleString("es-MX", { style: "currency", currency: "MXN" });
+  return CURRENCY.format(cents / CENTS_PER_PESO);
+}
+
+/**
+ * 400000 → "4,000.00": what a money input shows once the cursor leaves it.
+ * No symbol — the field draws its own "$" — and `pesosToCents` reads it back.
+ */
+export function formatPesosInput(cents: number): string {
+  return GROUPED_PESOS.format(cents / CENTS_PER_PESO);
 }
 
 /**

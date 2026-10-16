@@ -94,6 +94,34 @@ describe("readDraft", () => {
     expect(errors.lateFee).toBeDefined();
   });
 
+  // ISSUE-013: "Agregar precio" opens a blank row. A price already typed and
+  // then saved must go through, not stop on "Falta este dato" in an empty row.
+  it("ignores an untouched blank price row when another price is filled", () => {
+    const d = valid();
+    d.options = [{ key: "a", kind: "1", amount: "600" }, { key: "b", kind: "", amount: " " }];
+    const got = readDraft(d);
+    expect(got.errors).toEqual({});
+    expect(got.input?.options).toEqual([{ daysPerWeek: 1, amountCents: 60000 }]);
+  });
+
+  it("keeps the error keys of the rows that are not blank", () => {
+    const d = valid();
+    d.options = [{ key: "a", kind: "", amount: "" }, { key: "b", kind: "2", amount: "" }];
+    expect(Object.keys(readDraft(d).errors)).toEqual(["option-1-amount"]);
+  });
+
+  it("a half-filled price row is still an error", () => {
+    const d = valid();
+    d.options = [{ key: "a", kind: "1", amount: "600" }, { key: "b", kind: "", amount: "700" }];
+    expect(readDraft(d).errors["option-1-kind"]).toBeDefined();
+  });
+
+  it("with every price row blank, the first one is asked for", () => {
+    const d = valid();
+    d.options = [{ key: "a", kind: "", amount: "" }, { key: "b", kind: "", amount: "" }];
+    expect(Object.keys(readDraft(d).errors).sort()).toEqual(["option-0-amount", "option-0-kind"]);
+  });
+
   it("refuses a first due date before the first billing date", () => {
     const d = { ...valid(), firstDueOn: "2026-09-30" };
     expect(readDraft(d).errors.firstDueOn).toMatch(/antes/);

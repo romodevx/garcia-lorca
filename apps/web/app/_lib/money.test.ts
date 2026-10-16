@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { centsToPesosInput, formatBalance, formatCents, pesosToCents } from "./money";
+import { centsToPesosInput, formatBalance, formatCents, formatPesosInput, pesosToCents } from "./money";
 
 /**
  * Money integrity. `pesosToCents` is the ONLY door a human-typed amount walks
@@ -111,6 +111,33 @@ describe("un solo formateador para todo el sistema", () => {
   it("siempre son pesos mexicanos, aunque la interfaz esté en inglés", () => {
     // El monto ES pesos: una interfaz en inglés no puede repintarlo como USD.
     expect(formatCents(100000)).toContain("1,000.00");
+  });
+});
+
+/**
+ * ISSUE-016: the amount a MoneyField shows once the cursor leaves it. It used
+ * its own regex to group thousands; it now shares the formatter with
+ * `formatCents`, so a field and the table under it can never disagree.
+ */
+describe("formatPesosInput", () => {
+  it.each([
+    { cents: 0, text: "0.00" },
+    { cents: 5, text: "0.05" },
+    { cents: 185050, text: "1,850.50" },
+    { cents: 400000, text: "4,000.00" },
+    { cents: 99999999999, text: "999,999,999.99" },
+  ])("renders $cents cents as $text, grouped and without a symbol", ({ cents, text }) => {
+    expect(formatPesosInput(cents)).toBe(text);
+  });
+
+  it("is read back by pesosToCents to the same cents", () => {
+    for (const cents of [0, 1, 185050, 99999999999]) {
+      expect(pesosToCents(formatPesosInput(cents))).toBe(cents);
+    }
+  });
+
+  it("is the same digits formatCents shows, minus the symbol", () => {
+    expect(formatCents(400000)).toBe(`$${formatPesosInput(400000)}`);
   });
 });
 

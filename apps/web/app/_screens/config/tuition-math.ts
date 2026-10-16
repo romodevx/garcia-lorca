@@ -39,6 +39,51 @@ export function pesosToCents(raw: string): number | null {
   return Number.isNaN(cents) ? null : cents;
 }
 
+/** What a concept card has typed for its next tier, as text on screen. */
+export interface TierDraft {
+  amount: string;
+  from: string;
+  to: string;
+}
+
+/** Nothing typed, a tier ready to add, or what is missing to make one. */
+export type TierDraftRead =
+  | { kind: "empty" }
+  | { kind: "tier"; tier: PriceTier }
+  | { kind: "problem"; message: string };
+
+/**
+ * Reads a card's unsaved tier (ISSUE-013), the same way for its "Agregar
+ * monto" button and for "Guardar tabulador": a complete draft is a tier, a
+ * half-filled one says exactly what it lacks. Saving used to refuse even a
+ * complete draft until the button was pressed, and the year summary read $0.00.
+ */
+export function readTierDraft(concept: string, draft: TierDraft): TierDraftRead {
+  const amount = draft.amount.trim();
+  const from = draft.from.trim();
+  const to = draft.to.trim();
+  if (amount === "" && from === "" && to === "") return { kind: "empty" };
+  if (amount === "") {
+    return { kind: "problem", message: `A "${concept}" le falta el monto. Escríbelo, o borra las fechas que pusiste.` };
+  }
+  const cents = pesosToCents(amount);
+  if (cents === null) {
+    return { kind: "problem", message: `El monto de "${concept}" no se entiende. Escríbelo en pesos, por ejemplo 4500.00` };
+  }
+  if (cents <= 0) {
+    return { kind: "problem", message: `El monto de "${concept}" debe ser mayor a cero.` };
+  }
+  if (from === "") {
+    return { kind: "problem", message: `A "${concept}" le falta la fecha "Vigente desde" del monto. Escríbela, o borra el monto.` };
+  }
+  return { kind: "tier", tier: { effectiveFrom: from, effectiveTo: to, amountCents: cents } };
+}
+
+/** Adds a tier in date order, which is how it is charged and how a price list reads. */
+export function withTier(tiers: readonly PriceTier[], tier: PriceTier): PriceTier[] {
+  return [...tiers, tier].sort((a, b) => a.effectiveFrom.localeCompare(b.effectiveFrom));
+}
+
 /** Cents back into the pesos a person reads, always with both decimals. */
 export function centsToPesos(cents: number): string {
   return centsToPesosInput(cents);

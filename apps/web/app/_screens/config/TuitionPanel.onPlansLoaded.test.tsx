@@ -84,12 +84,12 @@ describe("TuitionPanel reload after a fast cycle switch", () => {
     const { rerender } = render(<TuitionPanel cycle={c1} levels={levels} onPlansLoaded={onPlansLoaded} />);
 
     rerender(<TuitionPanel cycle={c2} levels={levels} onPlansLoaded={onPlansLoaded} />);
-    expect(await screen.findByText(/3100/)).toBeInTheDocument();
+    expect(await screen.findByText(/\$3,100\.00/)).toBeInTheDocument();
 
     await act(async () => first.resolve([plan("c1", "lv1", 120000)]));
 
-    expect(screen.getByText(/3100/)).toBeInTheDocument();
-    expect(screen.queryByText(/1200/)).not.toBeInTheDocument();
+    expect(screen.getByText(/\$3,100\.00/)).toBeInTheDocument();
+    expect(screen.queryByText(/\$1,200\.00/)).not.toBeInTheDocument();
     expect(onPlansLoaded).not.toHaveBeenCalledWith("c1", expect.anything());
   });
 });
