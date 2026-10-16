@@ -11,10 +11,15 @@ import {
   createGradeLevel,
   createGroup,
   createLevel,
+  deleteGradeLevel,
+  deleteGroup,
   listCycles,
   listGradeLevels,
   listGroups,
   listLevels,
+  renameGradeLevel,
+  renameGroup,
+  reorderLevels,
   updateLevelAttendanceMode,
   updateLevelGrading,
   type CopyTermMonthsInput,
@@ -29,6 +34,7 @@ import {
   type LevelGrading,
   type Term,
 } from "../../config/api";
+import { useLatest } from "./useLatest";
 import { useLevelTerms, type LevelTerms } from "./useLevelTerms";
 
 /** How long a notice left by another screen stays up. */
@@ -55,6 +61,11 @@ export interface LevelsSlice {
   setGrading: (levelId: string, grading: LevelGrading) => Promise<void>;
   /** A level restored from the Papelera is back: re-read the list it belongs to. */
   reload: () => void;
+  /**
+   * Puts the levels in this order (every id, first first). The list moves at
+   * once; a refusal puts the previous order back and rejects.
+   */
+  reorder: (levelIds: string[]) => Promise<void>;
 }
 
 export interface GradesSlice {
@@ -64,12 +75,18 @@ export interface GradesSlice {
   selected: GradeLevel | undefined;
   select: (id: string) => void;
   create: (input: CreateGradeLevelInput) => Promise<void>;
+  rename: (id: string, name: string) => Promise<void>;
+  /** Rejects with the server's refusal (GRADE_LEVEL_IN_USE) and keeps the grade. */
+  remove: (id: string) => Promise<void>;
 }
 
 export interface GroupsSlice {
   /** The groups of the selected (cycle, grade) only. */
   list: Group[];
   create: (input: CreateGroupInput) => Promise<void>;
+  rename: (id: string, name: string) => Promise<void>;
+  /** Rejects with the server's refusal (GROUP_IN_USE) and keeps the group. */
+  remove: (id: string) => Promise<void>;
 }
 
 export interface TermsSlice extends LevelTerms {
@@ -209,6 +226,42 @@ export function useCatalogState(notice: string | undefined): CatalogState {
     setGroups((prev) => [...prev, created]);
   }, []);
 
+  const handleRenameGradeLevel = useCallback(async (id: string, name: string): Promise<void> => {
+    const renamed = await renameGradeLevel(API_URL, id, name);
+    setGradeLevels((prev) => prev.map((g) => (g.id === id ? renamed : g)));
+  }, []);
+
+  const handleRemoveGradeLevel = useCallback(async (id: string): Promise<void> => {
+    await deleteGradeLevel(API_URL, id);
+    setGradeLevels((prev) => prev.filter((g) => g.id !== id));
+    setSelectedGradeLevelId((prev) => (prev === id ? undefined : prev));
+  }, []);
+
+  const handleRenameGroup = useCallback(async (id: string, name: string): Promise<void> => {
+    const renamed = await renameGroup(API_URL, id, name);
+    setGroups((prev) => prev.map((g) => (g.id === id ? renamed : g)));
+  }, []);
+
+  const handleRemoveGroup = useCallback(async (id: string): Promise<void> => {
+    await deleteGroup(API_URL, id);
+    setGroups((prev) => prev.filter((g) => g.id !== id));
+  }, []);
+
+  // Read from a ref so a move computes from the list as it stands, optimistic moves included.
+  const latestLevels = useLatest(levels);
+  const handleReorderLevels = useCallback(async (levelIds: string[]): Promise<void> => {
+    const before = latestLevels.current;
+    const byId = new Map(before.map((l) => [l.id, l]));
+    setLevels(levelIds.flatMap((id) => byId.get(id) ?? []));
+    try {
+      const saved = await reorderLevels(API_URL, levelIds);
+      if (saved.length > 0) setLevels(saved);
+    } catch (cause) {
+      setLevels(before);
+      throw cause;
+    }
+  }, [latestLevels]);
+
   // The notice (≥ 8 s, like an undo toast) leaves on its own instead of pinning over the page.
   const [noticeShown, setNoticeShown] = useState(notice !== undefined);
   useEffect(() => {
@@ -274,6 +327,7 @@ export function useCatalogState(notice: string | undefined): CatalogState {
       setAttendanceMode: handleSetAttendanceMode,
       setGrading: handleSetGrading,
       reload: reloadLevels,
+      reorder: handleReorderLevels,
     },
     grades: {
       list: gradeLevels,
@@ -281,8 +335,10 @@ export function useCatalogState(notice: string | undefined): CatalogState {
       selected: selectedGradeLevel,
       select: setSelectedGradeLevelId,
       create: handleCreateGradeLevel,
+      rename: handleRenameGradeLevel,
+      remove: handleRemoveGradeLevel,
     },
-    groups: { list: groups, create: handleCreateGroup },
+    groups: { list: groups, create: handleCreateGroup, rename: handleRenameGroup, remove: handleRemoveGroup },
     terms: { ...levelTerms, copyMonths: handleCopyTermMonths },
     pricing: {
       levelId: pricingLevelId,

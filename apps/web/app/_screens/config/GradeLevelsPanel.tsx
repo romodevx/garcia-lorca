@@ -4,6 +4,7 @@ import { useMemo, useState, type ReactElement } from "react";
 
 import { InlineCreateRow } from "../../_design/InlineCreateRow";
 import type { CreateGradeLevelInput, GradeLevel, Level } from "../../config/api";
+import { CorrectableName, type NameCorrections } from "./CorrectableName";
 import { EmptyHint, ErrorAlert, Section, SelectChip } from "./parts";
 import { useSetupPresentation } from "./SetupPresentation";
 
@@ -13,6 +14,8 @@ export interface GradeLevelsPanelProps {
   selectedGradeLevelId: string | undefined;
   onSelect: (id: string) => void;
   onCreate: (input: CreateGradeLevelInput) => Promise<void>;
+  /** config:write: rename / delete beside each grade (T8). Absent = read-only chips. */
+  corrections?: NameCorrections;
 }
 
 /** El orden que sigue, para no obligar a nadie a contar la lista. */
@@ -37,6 +40,7 @@ export function GradeLevelsPanel({
   selectedGradeLevelId,
   onSelect,
   onCreate,
+  corrections,
 }: GradeLevelsPanelProps): ReactElement {
   const [error, setError] = useState<string | undefined>(undefined);
   // Inside a setup step a grade chip is its name alone: "1. 1°" said the order twice (§1.8 #12).
@@ -51,7 +55,25 @@ export function GradeLevelsPanel({
 
   return (
     <Section title={`Grados de ${level.name}`} subtitle={inSetup ? "Elige uno para ver sus grupos, o agrega otro." : "Elige uno para sus materias y grupos, o agrega otro."}>
-      {gradeLevels.length > 0 ? (
+      {gradeLevels.length > 0 && corrections !== undefined && (
+        <ul aria-label={`Grados de ${level.name}`} style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "start", listStyle: "none", padding: 0, margin: "0 0 16px" }}>
+          {gradeLevels.map((g) => (
+            <CorrectableName
+              key={g.id}
+              name={g.name}
+              noun="grado"
+              onRename={(name) => corrections.rename(g.id, name)}
+              onDelete={() => corrections.remove(g.id)}
+              deleteDescription={`Se borra el grado ${g.name} de ${level.name}. El nivel y sus otros grados no cambian.`}
+            >
+              <SelectChip selected={g.id === selectedGradeLevelId} onClick={() => onSelect(g.id)}>
+                {inSetup ? g.name : <>{g.ordinal}. {g.name}</>}
+              </SelectChip>
+            </CorrectableName>
+          ))}
+        </ul>
+      )}
+      {gradeLevels.length > 0 && corrections === undefined && (
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
           {gradeLevels.map((g) => (
             <SelectChip key={g.id} selected={g.id === selectedGradeLevelId} onClick={() => onSelect(g.id)}>
@@ -59,7 +81,8 @@ export function GradeLevelsPanel({
             </SelectChip>
           ))}
         </div>
-      ) : (
+      )}
+      {gradeLevels.length === 0 && (
         <EmptyHint>Aún no hay grados en este nivel.</EmptyHint>
       )}
 

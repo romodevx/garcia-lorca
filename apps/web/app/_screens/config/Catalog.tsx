@@ -36,6 +36,11 @@ export interface CatalogProps {
    * and students:import held; absent, neither way in is shown.
    */
   onOpenStudentImport?: () => void;
+  /**
+   * config:write: renaming and deleting grades and groups, and the levels'
+   * order (T8). UX only — the gateway's 403 is the boundary.
+   */
+  canWriteConfig?: boolean;
 }
 
 /**
@@ -46,7 +51,7 @@ export interface CatalogProps {
  * gateway (behind the flag + config:read/write) is the security boundary; this
  * screen is UX only.
  */
-export function Catalog({ onBack, canDeleteLevels = false, onDeleteLevel, notice, onOpenLevelPeriods, onOpenStudentImport }: CatalogProps): ReactElement {
+export function Catalog({ onBack, canDeleteLevels = false, onDeleteLevel, notice, onOpenLevelPeriods, onOpenStudentImport, canWriteConfig = false }: CatalogProps): ReactElement {
   const { load, cycles, levels, grades, groups, terms: levelTerms, pricing: pricingState, notice: noticeState } = useCatalogState(notice);
   const selectedCycle = cycles.selected;
   const selectedLevel = levels.selected;
@@ -143,6 +148,7 @@ export function Catalog({ onBack, canDeleteLevels = false, onDeleteLevel, notice
               onSetAttendanceMode={levels.setAttendanceMode}
               onSetGrading={levels.setGrading}
               onDelete={canDeleteLevels ? onDeleteLevel : undefined}
+              onReorder={canWriteConfig ? levels.reorder : undefined}
             />
 
             {selectedLevel !== undefined && (
@@ -153,6 +159,7 @@ export function Catalog({ onBack, canDeleteLevels = false, onDeleteLevel, notice
                 selectedGradeLevelId={grades.selectedId}
                 onSelect={grades.select}
                 onCreate={grades.create}
+                corrections={canWriteConfig ? { rename: grades.rename, remove: grades.remove } : undefined}
               />
             )}
 
@@ -202,6 +209,7 @@ export function Catalog({ onBack, canDeleteLevels = false, onDeleteLevel, notice
                 gradeLevel={selectedGradeLevel}
                 groups={groups.list}
                 onCreate={groups.create}
+                corrections={canWriteConfig ? { rename: groups.rename, remove: groups.remove } : undefined}
               />
             )}
           </div>

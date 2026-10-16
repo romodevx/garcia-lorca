@@ -45,6 +45,8 @@ export interface Level {
   attendanceMode?: AttendanceMode;
   /** How the level grades; absent from older gateways (read as the 5–10 default). */
   grading?: LevelGrading;
+  /** Its place in the school's order (first = 1); the server lists levels by it. */
+  sortOrder?: number;
 }
 
 /** A level's numeric grading: preescolar usually has none (`enabled:false`). */
@@ -192,6 +194,28 @@ async function postJSON<T>(baseURL: string, path: string, body: unknown): Promis
     throw await configFailure(res);
   }
   return (await res.json()) as T;
+}
+
+/** Sends a JSON body with `method` and returns the JSON answer. Throws on any non-2xx. */
+async function sendJSON<T>(baseURL: string, method: "PUT" | "PATCH", path: string, body: unknown): Promise<T> {
+  const res = await authFetch(url(baseURL, `${BASE_PATH}${path}`), {
+    method,
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    throw await configFailure(res);
+  }
+  return (await res.json()) as T;
+}
+
+/** DELETEs one resource (204). Throws on any non-2xx. */
+async function deleteResource(baseURL: string, path: string): Promise<void> {
+  const res = await authFetch(url(baseURL, `${BASE_PATH}${path}`), { method: "DELETE", credentials: "include" });
+  if (!res.ok) {
+    throw await configFailure(res);
+  }
 }
 
 /** GET a list endpoint and unwrap the single-key envelope (`{ <key>: [...] }`). */
@@ -363,6 +387,15 @@ export function listLevels(baseURL: string): Promise<Level[]> {
   return getList<Level>(baseURL, "/levels", "levels");
 }
 
+/**
+ * Puts the levels in school order: the WHOLE list, first level first. A list
+ * that is not exactly the school's levels is 400 LEVEL_ORDER_MISMATCH.
+ */
+export async function reorderLevels(baseURL: string, levelIds: readonly string[]): Promise<Level[]> {
+  const data = await sendJSON<{ levels?: Level[] }>(baseURL, "PUT", "/levels/order", { levelIds });
+  return data.levels ?? [];
+}
+
 /** PATCH one level with a partial body; the server answers with the whole level. */
 async function patchLevel(baseURL: string, id: string, body: Partial<Pick<Level, "attendanceMode" | "grading">>): Promise<Level> {
   const res = await authFetch(url(baseURL, `${BASE_PATH}/levels/${encodeURIComponent(id)}`), {
@@ -503,6 +536,16 @@ export function createGradeLevel(baseURL: string, input: CreateGradeLevelInput):
 
 export function listGradeLevels(baseURL: string, levelId?: string): Promise<GradeLevel[]> {
   return getList<GradeLevel>(baseURL, `/grade-levels${query({ levelId })}`, "gradeLevels");
+}
+
+/** Renames a grade in place; a name the level already has is 409 GRADE_NAME_TAKEN. */
+export function renameGradeLevel(baseURL: string, id: string, name: string): Promise<GradeLevel> {
+  return sendJSON<GradeLevel>(baseURL, "PATCH", `/grade-levels/${encodeURIComponent(id)}`, { name });
+}
+
+/** Deletes a grade that holds nothing; otherwise 409 GRADE_LEVEL_IN_USE says what blocks it. */
+export function deleteGradeLevel(baseURL: string, id: string): Promise<void> {
+  return deleteResource(baseURL, `/grade-levels/${encodeURIComponent(id)}`);
 }
 
 // --- subjects -------------------------------------------------------------
@@ -679,6 +722,16 @@ export function createGroup(baseURL: string, input: CreateGroupInput): Promise<G
 
 export function listGroups(baseURL: string, cycleId: string, gradeLevelId?: string): Promise<Group[]> {
   return getList<Group>(baseURL, `/groups${query({ cycleId, gradeLevelId })}`, "groups");
+}
+
+/** Renames a group in place; a name its grade already has in the cycle is 409 GROUP_NAME_TAKEN. */
+export function renameGroup(baseURL: string, id: string, name: string): Promise<Group> {
+  return sendJSON<Group>(baseURL, "PATCH", `/groups/${encodeURIComponent(id)}`, { name });
+}
+
+/** Deletes a group nothing ever used; otherwise 409 GROUP_IN_USE names each blocker. */
+export function deleteGroup(baseURL: string, id: string): Promise<void> {
+  return deleteResource(baseURL, `/groups/${encodeURIComponent(id)}`);
 }
 
 /** A group named for a picker: its grade and its letter, "1° PRIMARIA · A". */

@@ -9,6 +9,7 @@ import type { CreateLevelInput, EnrollmentGranularity, Level, LevelGrading } fro
 import { TextField } from "../../_design/form";
 import { AttendanceModeControl } from "./AttendanceModeControl";
 import { GradingControl } from "./GradingControl";
+import { LevelOrder } from "./LevelOrder";
 import { EmptyHint, RadioGroup, Section, SelectChip } from "./parts";
 import { useSetupPresentation } from "./SetupPresentation";
 
@@ -28,6 +29,8 @@ export interface LevelsPanelProps {
    * The setup step draws them itself, after the grades, with `LevelSettings`.
    */
   showLevelSettings?: boolean;
+  /** config:write: Subir / Bajar per level, the whole order sent each move (T8). */
+  onReorder?: (levelIds: string[]) => Promise<void>;
 }
 
 const GRANULARITY_OPTIONS = [
@@ -56,7 +59,7 @@ function levelChipLabel(level: Level, inSetup: boolean): string {
  * Now the panel is the list, and creating opens the same drawer a new pupil
  * does.
  */
-export function LevelsPanel({ levels, selectedLevelId, onSelect, onCreate, onSetAttendanceMode, onSetGrading, onDelete, showLevelSettings = true }: LevelsPanelProps): ReactElement {
+export function LevelsPanel({ levels, selectedLevelId, onSelect, onCreate, onSetAttendanceMode, onSetGrading, onDelete, showLevelSettings = true, onReorder }: LevelsPanelProps): ReactElement {
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
   const [sepCode, setSepCode] = useState("");
@@ -121,6 +124,8 @@ export function LevelsPanel({ levels, selectedLevelId, onSelect, onCreate, onSet
       ) : (
         <EmptyHint>Aún no hay niveles. Agrega el primero.</EmptyHint>
       )}
+
+      {onReorder !== undefined && levels.length > 1 && <LevelOrder levels={levels} onReorder={onReorder} />}
 
       {showLevelSettings && selectedLevel !== undefined && (
         <LevelSettings level={selectedLevel} onSetAttendanceMode={onSetAttendanceMode} onSetGrading={onSetGrading} onDelete={onDelete} />

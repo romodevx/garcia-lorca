@@ -23,6 +23,11 @@ export interface SetupActions {
   createGroup: (input: CreateGroupInput) => Promise<void>;
   /** A level came back from the Papelera. */
   restoredLevel: () => void;
+  /** T8 corrections: each re-reads the status it changes. */
+  renameGrade: (id: string, name: string) => Promise<void>;
+  deleteGrade: (id: string) => Promise<void>;
+  renameGroup: (id: string, name: string) => Promise<void>;
+  deleteGroup: (id: string) => Promise<void>;
 }
 
 function thenRefresh<Args extends unknown[], Result>(action: (...args: Args) => Promise<Result>, refresh: () => void): (...args: Args) => Promise<Result> {
@@ -52,12 +57,16 @@ export function useSetupActions(state: CatalogState, refresh: (kind: RefreshKind
       setMonths: thenRefresh(terms.setMonths, () => refresh("terms")),
       copyMonths: thenRefresh(terms.copyMonths, () => refresh("terms")),
       createGroup: thenRefresh(groups.create, () => refresh("groups")),
+      renameGrade: thenRefresh(grades.rename, () => refresh("grades")),
+      deleteGrade: thenRefresh(grades.remove, () => refresh("grades")),
+      renameGroup: thenRefresh(groups.rename, () => refresh("groups")),
+      deleteGroup: thenRefresh(groups.remove, () => refresh("groups")),
       // A restore brings the level back with its grades, terms and groups: every read is stale.
       restoredLevel: () => {
         reloadLevels();
         refresh("all");
       },
     }),
-    [cycles.create, cycles.activate, createLevel, reloadLevels, grades.create, terms.create, terms.setMonths, terms.copyMonths, groups.create, refresh],
+    [cycles.create, cycles.activate, createLevel, reloadLevels, grades.create, grades.rename, grades.remove, terms.create, terms.setMonths, terms.copyMonths, groups.create, groups.rename, groups.remove, refresh],
   );
 }

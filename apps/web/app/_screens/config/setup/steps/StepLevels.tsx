@@ -18,6 +18,8 @@ export interface StepLevelsProps {
   /** Every group of the cycle (the status read): the picked grade's groups. */
   cycleGroups: StatusRead<Group[]>;
   actions: SetupActions;
+  /** config:write: reorder levels, rename and delete grades (T8). */
+  canWrite?: boolean;
   /** Given only to the owner (levels:delete), exactly as the old view does (A37). */
   onDeleteLevel?: (levelId: string) => void;
 }
@@ -27,7 +29,7 @@ export interface StepLevelsProps {
  * Nuevo nivel, and the selected level's grades — then that level's settings,
  * which are edited far less often (N6). The old view keeps them under the chips.
  */
-export function StepLevels({ slot, levels, grades, cycleGroups, actions, onDeleteLevel }: StepLevelsProps): ReactElement {
+export function StepLevels({ slot, levels, grades, cycleGroups, actions, canWrite = false, onDeleteLevel }: StepLevelsProps): ReactElement {
   const selected = levels.selected;
   return (
     <StepFrame {...slot}>
@@ -40,11 +42,12 @@ export function StepLevels({ slot, levels, grades, cycleGroups, actions, onDelet
           onSetAttendanceMode={levels.setAttendanceMode}
           onSetGrading={levels.setGrading}
           onDelete={onDeleteLevel}
+          onReorder={canWrite ? levels.reorder : undefined}
           showLevelSettings={false}
         />
         {selected !== undefined && (
           <div>
-            <GradeLevelsPanel key={selected.id} level={selected} gradeLevels={grades.list} selectedGradeLevelId={grades.selectedId} onSelect={grades.select} onCreate={actions.createGrade} />
+            <GradeLevelsPanel key={selected.id} level={selected} gradeLevels={grades.list} selectedGradeLevelId={grades.selectedId} onSelect={grades.select} onCreate={actions.createGrade} corrections={canWrite ? { rename: actions.renameGrade, remove: actions.deleteGrade } : undefined} />
             {grades.selected !== undefined && <GradeGroups grade={grades.selected} cycleGroups={cycleGroups} onGo={slot.onGo} />}
           </div>
         )}

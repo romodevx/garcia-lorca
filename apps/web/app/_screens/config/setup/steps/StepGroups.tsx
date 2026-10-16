@@ -21,6 +21,8 @@ export interface StepGroupsProps {
   /** Every group of the cycle (the status read): the "1 grupo" pills. */
   cycleGroups: StatusRead<Group[]>;
   actions: SetupActions;
+  /** config:write: rename and delete groups (T8). */
+  canWrite?: boolean;
 }
 
 /** "sin grupos" / "1 grupo" / "3 grupos", once the cycle's groups are known. */
@@ -34,7 +36,7 @@ function groupPill(groups: StatusRead<Group[]>): ((gradeId: string) => string) |
 }
 
 /** Step 6 · Grupos: level and grade chips (with each grade's count) above the inline row. */
-export function StepGroups({ slot, cycle, levels, grades, groups, cycleGroups, actions }: StepGroupsProps): ReactElement {
+export function StepGroups({ slot, cycle, levels, grades, groups, cycleGroups, actions, canWrite = false }: StepGroupsProps): ReactElement {
   const need = needFor(cycle, levels.list);
   const grade = grades.selected;
   const noGrades = levels.selected !== undefined && grades.list.length === 0;
@@ -55,7 +57,7 @@ export function StepGroups({ slot, cycle, levels, grades, groups, cycleGroups, a
       {need === undefined && noGrades && <Prerequisite need="grades" onGo={slot.onGo} />}
       {need === undefined && !noGrades && grade === undefined && <EmptyHint>Elige un grado para ver sus grupos.</EmptyHint>}
       {cycle !== undefined && grade !== undefined && (
-        <GroupsPanel key={`${cycle.id}:${grade.id}`} cycle={cycle} gradeLevel={grade} groups={groups.list} onCreate={actions.createGroup} />
+        <GroupsPanel key={`${cycle.id}:${grade.id}`} cycle={cycle} gradeLevel={grade} groups={groups.list} onCreate={actions.createGroup} corrections={canWrite ? { rename: actions.renameGroup, remove: actions.deleteGroup } : undefined} />
       )}
     </StepFrame>
   );

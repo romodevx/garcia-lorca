@@ -40,7 +40,7 @@ function setupInput(state: CatalogState, status: SetupStatus): SetupInput {
  * the right. The same state, panels, calls and arguments as `Catalog` — only
  * order, grouping and hierarchy change. The gateway is the security boundary.
  */
-export function CatalogSetup({ onBack, canDeleteLevels = false, onDeleteLevel, notice, onOpenLevelPeriods, onOpenStudentImport }: CatalogProps): ReactElement {
+export function CatalogSetup({ onBack, canDeleteLevels = false, onDeleteLevel, notice, onOpenLevelPeriods, onOpenStudentImport, canWriteConfig = false }: CatalogProps): ReactElement {
   const state = useCatalogState(notice);
   const status = useSetupStatus(state.cycles.selectedId);
   const actions = useSetupActions(state, status.refresh);
@@ -79,6 +79,7 @@ export function CatalogSetup({ onBack, canDeleteLevels = false, onDeleteLevel, n
                 status={status}
                 actions={actions}
                 canDeleteLevels={canDeleteLevels}
+                canWriteConfig={canWriteConfig}
                 onDeleteLevel={onDeleteLevel}
                 onOpenLevelPeriods={onOpenLevelPeriods}
               />

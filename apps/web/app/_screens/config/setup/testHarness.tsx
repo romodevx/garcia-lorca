@@ -123,8 +123,32 @@ function installWrites(s: FakeSchool): void {
   c.deleteSchoolEvent.mockResolvedValue(undefined);
   c.saveSchoolProfile.mockImplementation(async (_, profile) => { s.profileName = profile.name; return profile; });
   c.restoreLevel.mockResolvedValue({ restored: {}, skipped: [] });
+  installCorrections(s);
   f.upsertTuitionPlan.mockImplementation(async (_, plan) => ({ ...PLAN, ...plan }));
   f.runBilling.mockResolvedValue(RUN);
+}
+
+/** T8: rename/delete grades and groups, and the levels' order. Writes change `s`. */
+function installCorrections(s: FakeSchool): void {
+  const c = vi.mocked(configApi);
+  // Only the files that mock these five get them answered; the others keep the real ones.
+  if (!vi.isMockFunction(c.reorderLevels)) return;
+  c.reorderLevels.mockImplementation(async (_, ids) => {
+    s.levels = ids.map((id, i) => ({ ...(s.levels.find((l) => l.id === id) ?? PRIMARIA), sortOrder: i + 1 }));
+    return [...s.levels];
+  });
+  c.renameGradeLevel.mockImplementation(async (_, id, name) => {
+    const saved: GradeLevel = { ...(s.grades.find((g) => g.id === id) ?? G1), name };
+    s.grades = s.grades.map((g) => (g.id === id ? saved : g));
+    return saved;
+  });
+  c.deleteGradeLevel.mockImplementation(async (_, id) => { s.grades = s.grades.filter((g) => g.id !== id); });
+  c.renameGroup.mockImplementation(async (_, id, name) => {
+    const saved: Group = { ...(s.groups.find((g) => g.id === id) ?? GROUP_A), name };
+    s.groups = s.groups.map((g) => (g.id === id ? saved : g));
+    return saved;
+  });
+  c.deleteGroup.mockImplementation(async (_, id) => { s.groups = s.groups.filter((g) => g.id !== id); });
 }
 
 /** Answers every config and finance call from `s`; writes change `s`, so a later read sees them. */
