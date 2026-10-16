@@ -88,6 +88,8 @@ export interface Enrollment {
   termId: string;
   status: EnrollmentStatus;
   enrolledAt: string;
+  withdrawnOn?: string;
+  withdrawalReason?: string;
 }
 
 /** The client-supplied edges of the enroll knot. cycleId is derived server-side. */
@@ -278,8 +280,37 @@ export function transfer(baseURL: string, input: TransferInput): Promise<Enrollm
   return postJSON<Enrollment>(baseURL, "/enrollments/transfer", input);
 }
 
-export function withdraw(baseURL: string, enrollmentId: string): Promise<Enrollment> {
-  return postJSON<Enrollment>(baseURL, "/enrollments/withdraw", { enrollmentId });
+export interface WithdrawInput {
+  withdrawnOn?: string;
+  reason?: string;
+}
+
+export interface WithdrawalPreviewItem {
+  id: string;
+  description: string;
+  dueDate: string;
+  amountCents: number;
+}
+
+export interface WithdrawalPreview {
+  toCancel: WithdrawalPreviewItem[];
+  toCancelCents: number;
+  remainingDebtCents: number;
+}
+
+export function withdraw(baseURL: string, enrollmentId: string, input: WithdrawInput = {}): Promise<Enrollment> {
+  return postJSON<Enrollment>(baseURL, "/enrollments/withdraw", {
+    enrollmentId,
+    ...(input.withdrawnOn !== undefined ? { withdrawnOn: input.withdrawnOn } : {}),
+    ...(input.reason !== undefined ? { reason: input.reason } : {}),
+  });
+}
+
+export async function previewWithdrawal(baseURL: string, enrollmentId: string, withdrawnOn?: string): Promise<WithdrawalPreview> {
+  const target = url(baseURL, `${BASE_PATH}/enrollments/${encodeURIComponent(enrollmentId)}/withdrawal-preview${query({ withdrawnOn })}`);
+  const res = await authFetch(target, { credentials: "include" });
+  if (!res.ok) throw await studentsFailure(res);
+  return (await res.json()) as WithdrawalPreview;
 }
 
 // --- contacts (M16) ---------------------------------------------------------

@@ -20,6 +20,8 @@ vi.mock("../../students/api", async (importOriginal) => ({
   listEnrollments: vi.fn(),
   enroll: vi.fn(),
   transfer: vi.fn(),
+  previewWithdrawal: vi.fn(),
+  withdraw: vi.fn(),
   revokeCard: vi.fn(),
   reissueCard: vi.fn(),
 }));
@@ -59,7 +61,7 @@ beforeEach(() => {
 });
 afterEach(() => vi.clearAllMocks());
 
-async function openSheet(user: ReturnType<typeof userEvent.setup>, props: { canRevokeCard?: boolean } = {}): Promise<HTMLElement> {
+async function openSheet(user: ReturnType<typeof userEvent.setup>, props: { canRevokeCard?: boolean; canWithdraw?: boolean } = {}): Promise<HTMLElement> {
   render(<StudentsScreen onBack={() => {}} {...props} />);
   await user.click(await screen.findByRole("button", { name: "Ver ficha de Cruz Ana" }));
   return screen.getByRole("dialog", { name: "Ficha del alumno" });
@@ -137,6 +139,21 @@ describe("la ficha de un alumno que ya tiene grupo", () => {
 
     expect(within(sheet).getByLabelText(/^Motivo/)).toHaveAttribute("aria-invalid", "true");
     expect(students.transfer).not.toHaveBeenCalled();
+  });
+
+  it("muestra la vista previa y deja la ficha en solo lectura al dar de baja", async () => {
+    const user = userEvent.setup();
+    students.previewWithdrawal.mockResolvedValue({ toCancel: [{ id: "fee-1", description: "Colegiatura", dueDate: "2026-11-01", amountCents: 25000 }], toCancelCents: 25000, remainingDebtCents: 0 });
+    students.withdraw.mockResolvedValue({ id: "enr-1", studentId: "stu-1", cycleId: "c1", groupId: "g-pri-b", termId: "", status: "withdrawn", enrolledAt: "2026-08-31", withdrawnOn: "2026-10-15", withdrawalReason: "Cambio de escuela" });
+    const sheet = await openSheet(user, { canWithdraw: true });
+    await user.click(within(sheet).getByRole("button", { name: "Dar de baja" }));
+    const dialog = screen.getByRole("dialog", { name: "Dar de baja" });
+    expect(await within(dialog).findByText(/Se cancelarán 1 cargos/)).toBeInTheDocument();
+    await user.type(within(dialog).getByLabelText("Motivo"), "Cambio de escuela");
+    await user.click(within(dialog).getByRole("button", { name: "Dar de baja" }));
+    await waitFor(() => expect(students.withdraw).toHaveBeenCalledWith(expect.any(String), "enr-1", { withdrawnOn: expect.any(String), reason: "Cambio de escuela" }));
+    expect(await within(sheet).findByText(/Baja el 2026-10-15 · Cambio de escuela/)).toBeInTheDocument();
+    expect(within(sheet).queryByRole("button", { name: "Cambiar de grupo" })).not.toBeInTheDocument();
   });
 });
 
