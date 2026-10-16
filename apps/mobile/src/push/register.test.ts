@@ -91,7 +91,7 @@ describe("registerForPush", () => {
   it("skips registration without a projectId: no prompt, no request, one dev log", async () => {
     const fetchMock = mockGateway();
     mockExpoConfig.extra = {};
-    const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined);
+    const info = jest.spyOn(console, "info").mockImplementation(() => undefined);
 
     await expect(registerForPush()).resolves.toBe("no-project");
     await expect(registerForPush()).resolves.toBe("no-project");
@@ -99,7 +99,19 @@ describe("registerForPush", () => {
     expect(mocked.getPermissionsAsync).not.toHaveBeenCalled();
     expect(mocked.requestPermissionsAsync).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(warn).toHaveBeenCalledTimes(1);
+    expect(info).toHaveBeenCalledTimes(1);
+    info.mockRestore();
+  });
+
+  it("logs missing project configuration once at info level, never as a warning", async () => {
+    mockExpoConfig.extra = {};
+    const info = jest.spyOn(console, "info").mockImplementation(() => undefined);
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined);
+    await registerForPush();
+    await registerForPush();
+    expect(info).toHaveBeenCalledTimes(1);
+    expect(warn).not.toHaveBeenCalled();
+    info.mockRestore();
     warn.mockRestore();
   });
 
