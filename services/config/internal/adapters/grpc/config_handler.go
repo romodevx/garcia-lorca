@@ -410,6 +410,7 @@ func toProtoLevel(l domain.Level) *configv1.Level {
 		AttendanceMode:        toProtoAttendanceMode(l.AttendanceMode()),
 		Grading:               toProtoGradingScale(l.Grading()),
 		Status:                toProtoLevelStatus(l.Deleting()),
+		SortOrder:             int32(l.SortOrder()),
 	}
 }
 

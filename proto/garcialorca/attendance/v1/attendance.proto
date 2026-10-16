@@ -99,6 +99,12 @@ service AttendanceService {
   // the gateway's sweep finds the batch past its restorable_until (config's
   // clock, ADR 0021). Idempotent: an unknown batch purges nothing.
   rpc PurgeLevelBatch(PurgeLevelBatchRequest) returns (PurgeLevelBatchResponse);
+
+  // --- group corrections (T8, ADR 0036) ---
+  // GroupUsage counts the pass lists taken in one config group and the marks
+  // stamped with it. The gateway refuses to delete a group while any is
+  // non-zero.
+  rpc GroupUsage(GroupUsageRequest) returns (GroupUsageResponse);
 }
 
 // --- Health ---------------------------------------------------------------
@@ -394,4 +400,15 @@ message PurgeLevelBatchRequest {
 
 message PurgeLevelBatchResponse {
   int64 purged_rows = 1;
+}
+
+// --- group corrections (T8) -------------------------------------------------
+
+message GroupUsageRequest {
+  string group_id = 1;
+}
+
+message GroupUsageResponse {
+  int64 sessions = 1;
+  int64 marks = 2;
 }

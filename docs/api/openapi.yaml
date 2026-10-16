@@ -2200,6 +2200,62 @@ paths:
               schema: { type: string }
               example: Ya hay calificaciones capturadas en este ciclo que no cumplirían la nueva escala
 
+  /api/v1/config/levels/order:
+    put:
+      tags: [config-levels]
+      summary: Put the levels in school order
+      description: >
+        The WHOLE order, first level first: `levelIds` must be exactly the
+        school's levels, each once. A list with one missing, one extra or one
+        repeated is 400 `X-Error-Code: LEVEL_ORDER_MISMATCH` and changes
+        nothing; otherwise every level's `sortOrder` is rewritten in ONE
+        transaction (first = 1) and `GET /config/levels` answers in that
+        order. Requires `config:write`.
+      operationId: reorderLevels
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [levelIds]
+              properties:
+                levelIds:
+                  type: array
+                  minItems: 1
+                  maxItems: 50
+                  uniqueItems: true
+                  items: { type: string, format: uuid }
+            example:
+              levelIds:
+                - 2c8e4f10-0000-4000-8000-000000000001
+                - 2c8e4f10-0000-4000-8000-000000000002
+      responses:
+        '200':
+          description: Every level, in its new order.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [levels]
+                properties:
+                  levels:
+                    type: array
+                    items: { $ref: '#/components/schemas/Level' }
+        '400':
+          description: The list is not exactly the school's levels; nothing changed.
+          headers:
+            X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
+          content:
+            text/plain:
+              schema: { type: string }
+              example: La lista de niveles no coincide con los niveles del colegio. Recarga la página e inténtalo de nuevo.
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
   /api/v1/config/levels/{id}/deletion-preview:
     parameters:
       - name: id
@@ -2589,6 +2645,166 @@ paths:
             text/plain:
               schema: { type: string }
               example: the subject has been in a teaching load; it can be renamed but not deleted
+
+  /api/v1/config/grade-levels/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    patch:
+      tags: [config]
+      summary: Rename a grade
+      description: >
+        Same id, level and ordinal: groups, subjects and periods follow it.
+        The name is trimmed and unique within the level whatever its case
+        (409 `X-Error-Code: GRADE_NAME_TAKEN`). Requires `config:write`.
+      operationId: renameGradeLevel
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 80 }
+            example:
+              name: 3°
+      responses:
+        '200':
+          description: The grade under its new name.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GradeLevel' }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409':
+          description: The level already has a grade with this name.
+          headers:
+            X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
+          content:
+            text/plain:
+              schema: { type: string }
+              example: Ya existe un grado con ese nombre en este nivel.
+    delete:
+      tags: [config]
+      summary: Delete a grade that holds nothing
+      description: >
+        Config-only: nothing outside config keeps a grade id. A grade with
+        groups (any cycle), subjects or evaluation periods is refused with 409
+        `X-Error-Code: GRADE_LEVEL_IN_USE`, and the sentence says what blocks
+        it and how many. The level and its other grades are untouched.
+        Requires `config:write`.
+      operationId: deleteGradeLevel
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      responses:
+        '204': { description: Removed. }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409':
+          description: The grade still holds groups, subjects or evaluation periods; nothing was deleted.
+          headers:
+            X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
+          content:
+            text/plain:
+              schema: { type: string }
+              example: 'No se puede borrar el grado 3°: tiene 2 grupos y 8 materias. Bórralos primero; si alguna materia ya tiene calificaciones, puedes cambiarle el nombre al grado.'
+
+  /api/v1/config/groups/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    patch:
+      tags: [config]
+      summary: Rename a group
+      description: >
+        Same id, cycle and grade, so it is allowed with pupils in it:
+        enrollments, attendance and report cards key on the id. The name is
+        trimmed and unique within its grade and cycle (409
+        `X-Error-Code: GROUP_NAME_TAKEN`). The pupils actively enrolled in it
+        get the new name on their file (receipts, card, family app) in the
+        same request. Requires `config:write`.
+      operationId: renameGroup
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 80 }
+            example:
+              name: B
+      responses:
+        '200':
+          description: The group under its new name.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Group' }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409':
+          description: The grade already has a group with this name in the cycle.
+          headers:
+            X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
+          content:
+            text/plain:
+              schema: { type: string }
+              example: Ya existe un grupo con ese nombre en este grado y ciclo.
+        '503':
+          description: >
+            Renamed in config, but the pupils' files could not be relabelled
+            (`X-Error-Code: GROUP_RELABEL_PENDING`). Sending the same request
+            again finishes it: both steps are idempotent.
+          headers:
+            X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
+          content:
+            text/plain:
+              schema: { type: string }
+              example: El grupo ya se llama B, pero no se pudo actualizar en la ficha de sus alumnos. Guarda otra vez para terminar.
+    delete:
+      tags: [config]
+      summary: Delete a group that was never used
+      description: >
+        Refused with 409 `X-Error-Code: GROUP_IN_USE` while anything keeps the
+        group: teaching assignments or timetable blocks (config), any
+        enrollment ever placed in it or any transfer from or to it (students),
+        pass lists or marks (attendance), or report cards (grades) — whatever
+        those modules' flags. The sentence names each blocker with its count.
+        Every service is asked before config deletes (ADR 0036). Requires
+        `config:write`.
+      operationId: deleteGroup
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      responses:
+        '204': { description: Removed. }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409':
+          description: Something still keeps the group; nothing was deleted.
+          headers:
+            X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
+          content:
+            text/plain:
+              schema: { type: string }
+              example: 'No se puede borrar el grupo A: tiene 25 inscripciones y 40 listas de asistencia. Ese historial se conserva; puedes cambiarle el nombre.'
 
   /api/v1/config/terms:
     get:
@@ -8612,6 +8828,25 @@ components:
         id: { type: string, format: uuid }
         gradeLevelId: { type: string, format: uuid }
         name: { type: string, example: Matemáticas }
+    GradeLevel:
+      type: object
+      description: A grade (grado) of a level, ordered by ordinal.
+      required: [id, levelId, name, ordinal]
+      properties:
+        id: { type: string, format: uuid }
+        levelId: { type: string, format: uuid }
+        name: { type: string, example: 3° }
+        ordinal: { type: integer, minimum: 1, example: 3 }
+    Group:
+      type: object
+      description: A group (grupo) of a grade in one cycle. capacity 0 = not sized.
+      required: [id, cycleId, gradeLevelId, name, capacity]
+      properties:
+        id: { type: string, format: uuid }
+        cycleId: { type: string, format: uuid }
+        gradeLevelId: { type: string, format: uuid }
+        name: { type: string, example: A }
+        capacity: { type: integer, minimum: 0, example: 25 }
     TeachingAssignment:
       type: object
       description: One teacher holding one (group, subject) slot in a cycle. cycleId is derived from the group.
@@ -8669,10 +8904,17 @@ components:
         (secundaria/preparatoria/bachillerato → per_class, others → daily).
     Level:
       type: object
-      required: [id, name, sepCode, enrollmentGranularity, attendanceMode, grading]
+      required: [id, name, sepCode, enrollmentGranularity, attendanceMode, grading, sortOrder]
       properties:
         id: { type: string, format: uuid }
         name: { type: string, example: Secundaria }
+        sortOrder:
+          type: integer
+          minimum: 0
+          example: 4
+          description: >
+            The level's place in the school order (1 = first). Lists of levels
+            come sorted by it, then by name.
         sepCode: { type: string }
         enrollmentGranularity: { type: string, enum: [cycle, term] }
         attendanceMode: { $ref: '#/components/schemas/AttendanceMode' }

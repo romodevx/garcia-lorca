@@ -87,7 +87,7 @@ function StepList({ steps, cardTitle, openId, onOpen, onOpenStudentImport, showT
           ))}
         </ol>
       </nav>
-      <Tools onOpenStudentImport={onOpenStudentImport} showTrash={showTrash} trashOpen={openId === "trash"} onOpenTrash={() => onOpen("trash")} />
+      <Tools steps={steps} onOpenStudentImport={onOpenStudentImport} showTrash={showTrash} trashOpen={openId === "trash"} onOpenTrash={() => onOpen("trash")} />
     </>
   );
 }
@@ -151,14 +151,17 @@ function StepMark({ step, open, animateCheck }: { step: StepView; open: boolean;
 const toolStyle: CSSProperties = { display: "flex", alignItems: "center", gap: 10, width: "100%", minHeight: 48, padding: "8px 10px", borderRadius: 12, textAlign: "left", color: "var(--text-muted)", fontWeight: 600, fontSize: 14.5, cursor: "pointer" };
 
 interface ToolsProps {
+  steps: readonly StepView[];
   onOpenStudentImport?: () => void;
   showTrash: boolean;
   trashOpen: boolean;
   onOpenTrash: () => void;
 }
 
-function Tools({ onOpenStudentImport, showTrash, trashOpen, onOpenTrash }: ToolsProps): ReactElement | null {
+function Tools({ steps, onOpenStudentImport, showTrash, trashOpen, onOpenTrash }: ToolsProps): ReactElement | null {
   if (onOpenStudentImport === undefined && !showTrash) return null;
+  // ISSUE-024: what the import needs is said only while it is still missing.
+  const importReady = steps.some((s) => s.id === "levels" && s.status === "done") && steps.some((s) => s.id === "groups" && s.status === "done");
   return (
     <div style={{ borderTop: "1px solid var(--border)", margin: "12px 10px 0", paddingTop: 10 }}>
       <p style={{ ...cardTitleStyle, padding: "0 0 6px" }}>Herramientas</p>
@@ -167,7 +170,7 @@ function Tools({ onOpenStudentImport, showTrash, trashOpen, onOpenTrash }: Tools
           <Icon name="upload" size={18} />
           <span style={{ display: "grid" }}>
             Migrar alumnos del sistema anterior
-            <span style={{ fontSize: 13, fontWeight: 500, color: QUIET_TEXT }}>Necesita niveles, grados y grupos.</span>
+            {!importReady && <span style={{ fontSize: 13, fontWeight: 500, color: QUIET_TEXT }}>Necesita niveles, grados y grupos.</span>}
           </span>
         </button>
       )}

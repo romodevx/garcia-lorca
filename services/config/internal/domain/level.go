@@ -54,6 +54,7 @@ type Level struct {
 	attendance  AttendanceMode
 	grading     GradingScale
 	deleting    bool
+	sortOrder   int
 }
 
 // NewLevel constructs a level. `id`, `tenantID`, and `name` are required, and
@@ -105,6 +106,17 @@ func (l Level) AttendanceMode() AttendanceMode { return l.attendance }
 // Deleting reports whether a level deletion's saga holds the level (ADR 0021):
 // writes that resolve it are refused with LEVEL_BEING_DELETED meanwhile.
 func (l Level) Deleting() bool { return l.deleting }
+
+// SortOrder is the level's place in the school order (1 = first; 0 until the
+// repository has placed it).
+func (l Level) SortOrder() int { return l.sortOrder }
+
+// WithSortOrder carries the stored place in the school order; only the
+// repository sets it (on create, last; on ReorderLevels, where asked).
+func (l Level) WithSortOrder(n int) Level {
+	l.sortOrder = n
+	return l
+}
 
 // WithDeleting carries the stored lifecycle; only BeginLevelDeletion and its
 // compensation or restore change it, never a catalog edit.

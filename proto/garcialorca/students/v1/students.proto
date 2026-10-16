@@ -178,6 +178,15 @@ service StudentsService {
   // the gateway's sweep finds the batch past its restorable_until (config's
   // clock, ADR 0021). Idempotent: an unknown batch purges nothing.
   rpc PurgeLevelBatch(PurgeLevelBatchRequest) returns (PurgeLevelBatchResponse);
+
+  // --- group corrections (T8, ADR 0036) ---
+  // GroupUsage counts what this service keeps of one config group: every
+  // enrollment ever placed in it (any status) and every transfer from or to
+  // it. The gateway refuses to delete a group while any is non-zero.
+  rpc GroupUsage(GroupUsageRequest) returns (GroupUsageResponse);
+  // RefreshGroupName rewrites the group label on the files of the pupils
+  // actively enrolled in the group, after config renamed it. Idempotent.
+  rpc RefreshGroupName(RefreshGroupNameRequest) returns (RefreshGroupNameResponse);
 }
 
 // --- Health ---------------------------------------------------------------
@@ -900,4 +909,27 @@ message ImportRowResult {
 
 message ImportStudentsResponse {
   repeated ImportRowResult results = 1;  // one per row, in request order
+}
+
+// --- group corrections (T8) -------------------------------------------------
+
+message GroupUsageRequest {
+  string group_id = 1;
+}
+
+message GroupUsageResponse {
+  // enrollments counts every enrollment in the group, whatever its status.
+  int64 enrollments = 1;
+  // transfers counts every move out of or into the group.
+  int64 transfers = 2;
+}
+
+message RefreshGroupNameRequest {
+  string group_id = 1;
+  string name = 2;
+}
+
+message RefreshGroupNameResponse {
+  // students is how many pupils' files changed (0 on a repeat).
+  int64 students = 1;
 }

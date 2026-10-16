@@ -26,6 +26,8 @@ export interface SetupPanesProps {
   status: SetupStatus;
   actions: SetupActions;
   canDeleteLevels: boolean;
+  /** config:write: rename/delete grades and groups, reorder levels (T8). */
+  canWriteConfig?: boolean;
   onDeleteLevel?: (levelId: string) => void;
   onOpenLevelPeriods?: (levelId: string) => void;
 }
@@ -36,7 +38,7 @@ export interface SetupPanesProps {
  * prices take the screen the other steps unmount, as they do today, and each
  * child keeps a fixed slot (`{cond && …}`), so TuitionPanel never moves (§3.3).
  */
-export function SetupPanes({ steps, openId, onOpen, state, status, actions, canDeleteLevels, onDeleteLevel, onOpenLevelPeriods }: SetupPanesProps): ReactElement {
+export function SetupPanes({ steps, openId, onOpen, state, status, actions, canDeleteLevels, canWriteConfig = false, onDeleteLevel, onOpenLevelPeriods }: SetupPanesProps): ReactElement {
   const pricing = state.pricing.active;
   const cycle = state.cycles.selected;
   const slot = (id: StepId): StepSlot => ({ step: stepOf(steps, id), hidden: openId !== id, onGo: onOpen });
@@ -44,7 +46,7 @@ export function SetupPanes({ steps, openId, onOpen, state, status, actions, canD
     <>
       {!pricing && <StepProfile slot={slot("profile")} onLoaded={status.onProfileLoaded} />}
       {!pricing && <StepCycle slot={slot("cycle")} cycles={state.cycles} actions={actions} />}
-      {!pricing && <StepLevels slot={slot("levels")} levels={state.levels} grades={state.grades} cycleGroups={status.groups} actions={actions} onDeleteLevel={canDeleteLevels ? onDeleteLevel : undefined} />}
+      {!pricing && <StepLevels slot={slot("levels")} levels={state.levels} grades={state.grades} cycleGroups={status.groups} actions={actions} canWrite={canWriteConfig} onDeleteLevel={canDeleteLevels ? onDeleteLevel : undefined} />}
       {!pricing && <StepTerms slot={slot("terms")} cycle={cycle} levels={state.levels} terms={state.terms} actions={actions} onOpenLevelPeriods={onOpenLevelPeriods} />}
       {!pricing && <StepSubjects slot={slot("subjects")} cycle={cycle} levels={state.levels} grades={state.grades} />}
       {!pricing && <StepGroups slot={slot("groups")} cycle={cycle} levels={state.levels} grades={state.grades} groups={state.groups} cycleGroups={status.groups} actions={actions} />}

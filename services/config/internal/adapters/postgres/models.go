@@ -38,7 +38,11 @@ type levelModel struct {
 	GradePassing          float64 `gorm:"column:grade_passing"`
 	// Status is read-only here: only the level deletion's own statements
 	// (BeginLevelDeletion, its compensation, a restore) change it.
-	Status    string    `gorm:"column:status;->"`
+	Status string `gorm:"column:status;->"`
+	// SortOrder is read-only here too: an insert leaves it to the column
+	// default and the insert trigger (0020: after the last level), and only
+	// ReorderLevels rewrites it.
+	SortOrder int       `gorm:"column:sort_order;->"`
 	CreatedAt time.Time `gorm:"column:created_at"`
 	UpdatedAt time.Time `gorm:"column:updated_at"`
 }

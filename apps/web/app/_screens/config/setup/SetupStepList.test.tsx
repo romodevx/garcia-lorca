@@ -110,6 +110,17 @@ describe("SetupStepList — Herramientas (§1.5)", () => {
     expect(screen.getAllByRole("button", { name: /Migrar alumnos/ })).toHaveLength(1);
   });
 
+  it("ISSUE-024 · stops asking for levels, grades and groups once those steps are done", () => {
+    renderSteps({ onOpenStudentImport: vi.fn(), steps: stepViews({ levels: { status: "done" }, groups: { status: "done" } }) });
+    const migrate = screen.getByRole("button", { name: /Migrar alumnos del sistema anterior/ });
+    expect(migrate).not.toHaveTextContent("Necesita niveles, grados y grupos.");
+  });
+
+  it("ISSUE-024 · still says what it needs while groups are missing", () => {
+    renderSteps({ onOpenStudentImport: vi.fn(), steps: stepViews({ levels: { status: "done" } }) });
+    expect(screen.getByRole("button", { name: /Migrar alumnos/ })).toHaveTextContent("Necesita niveles, grados y grupos.");
+  });
+
   it("shows neither tool without its permission", () => {
     renderSteps();
     expect(screen.queryByText("Herramientas")).toBeNull();

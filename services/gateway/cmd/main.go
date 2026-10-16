@@ -443,8 +443,12 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("POST /api/v1/config/levels", configWrite(configH.CreateLevel))
 	mux.Handle("GET /api/v1/config/levels", configRead(configH.ListLevels))
 	mux.Handle("PATCH /api/v1/config/levels/{id}", configWrite(configH.PatchLevel))
+	mux.Handle("PUT /api/v1/config/levels/order", configWrite(configH.ReorderLevels))
 	mux.Handle("POST /api/v1/config/grade-levels", configWrite(configH.CreateGradeLevel))
 	mux.Handle("GET /api/v1/config/grade-levels", configRead(configH.ListGradeLevels))
+	// T8 (ADR 0036): a grade captured wrong is fixed without deleting its level.
+	mux.Handle("PATCH /api/v1/config/grade-levels/{id}", configWrite(configH.RenameGradeLevel))
+	mux.Handle("DELETE /api/v1/config/grade-levels/{id}", configWrite(configH.DeleteGradeLevel))
 	mux.Handle("POST /api/v1/config/subjects", configWrite(configH.CreateSubject))
 	mux.Handle("GET /api/v1/config/subjects", configRead(configH.ListSubjects))
 	mux.Handle("PATCH /api/v1/config/subjects/{id}", configWrite(configH.RenameSubject))
@@ -467,6 +471,15 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("DELETE /api/v1/config/calendar/{id}", configWrite(configH.DeleteNonWorkingPeriod))
 	mux.Handle("POST /api/v1/config/groups", configWrite(configH.CreateGroup))
 	mux.Handle("GET /api/v1/config/groups", configRead(configH.ListGroups))
+	// T8 (ADR 0036): renaming relabels the pupils' files (students); deleting
+	// asks config, students, attendance and grades what they keep of the group
+	// — whatever their module flags, since a disabled module's rows still name
+	// it — and refuses naming every blocker.
+	groupEditH := handler.NewGroupEditHandler(handler.GroupEditDeps{
+		Config: configClient, Students: studentsClient, Attendance: attendanceClient, Grades: gradesClient,
+	})
+	mux.Handle("PATCH /api/v1/config/groups/{id}", configWrite(groupEditH.RenameGroup))
+	mux.Handle("DELETE /api/v1/config/groups/{id}", configWrite(groupEditH.DeleteGroup))
 
 	// ADR 0021 deleting a level: the owner's alone (levels:delete, owner-only in
 	// iam), under module_config like the catalog it edits. The delete itself

@@ -156,7 +156,7 @@ func (f *fakeCatalog) CreateLevel(_ context.Context, l domain.Level) error {
 	if err := f.claim("level|" + l.Name()); err != nil {
 		return err
 	}
-	f.levels[l.ID()] = l
+	f.levels[l.ID()] = l.WithSortOrder(len(f.levels) + 1)
 	return nil
 }
 

@@ -37,6 +37,11 @@ service ConfigService {
   // so a half-valid request changes nothing. An absent field keeps its value;
   // a request with neither is InvalidArgument; an unknown level is NotFound.
   rpc UpdateLevel(UpdateLevelRequest) returns (UpdateLevelResponse);
+  // ReorderLevels sets the school order ListLevels answers in: level_ids must
+  // be exactly the tenant's levels, each once, first = sort_order 1. Any other
+  // list (one missing, one extra, a repeat) is InvalidArgument and changes
+  // nothing; the whole order is written in ONE transaction.
+  rpc ReorderLevels(ReorderLevelsRequest) returns (ReorderLevelsResponse);
 
   // --- cycles (per-cycle umbrella) ---
   // CreateCycle adds a school-year umbrella (status defaults to draft).
@@ -58,6 +63,14 @@ service ConfigService {
   rpc GetGradeLevel(GetGradeLevelRequest) returns (GetGradeLevelResponse);
   // ListGradeLevels lists the grades of a level (scoped by level_id).
   rpc ListGradeLevels(ListGradeLevelsRequest) returns (ListGradeLevelsResponse);
+  // RenameGradeLevel fixes a grade's name in place (same id, level and
+  // ordinal). A name the level already has (case-insensitively) is
+  // AlreadyExists; an unknown grade is NotFound.
+  rpc RenameGradeLevel(RenameGradeLevelRequest) returns (RenameGradeLevelResponse);
+  // DeleteGradeLevel removes a grade that holds nothing: one with groups (any
+  // cycle), subjects or evaluation periods is AlreadyExists, and the message
+  // names what blocks it and how many. Nothing outside config keeps a grade id.
+  rpc DeleteGradeLevel(DeleteGradeLevelRequest) returns (DeleteGradeLevelResponse);
 
   // --- subjects (catalog) ---
   // CreateSubject adds a subject taught at a grade.
@@ -112,6 +125,18 @@ service ConfigService {
   rpc GetGroup(GetGroupRequest) returns (GetGroupResponse);
   // ListGroups lists the groups of a cycle (scoped by cycle_id, optional grade_level_id).
   rpc ListGroups(ListGroupsRequest) returns (ListGroupsResponse);
+  // RenameGroup fixes a group's name in place (same id, cycle and grade). A
+  // name its grade already has in the cycle is AlreadyExists; an unknown
+  // group is NotFound. Allowed with pupils in it: everything keys on the id.
+  rpc RenameGroup(RenameGroupRequest) returns (RenameGroupResponse);
+  // GroupUsage counts what config itself keeps of a group: teaching
+  // assignments and the timetable blocks placed on them. The gateway asks
+  // the other services the same question before DeleteGroup (ADR 0036).
+  rpc GroupUsage(GroupUsageRequest) returns (GroupUsageResponse);
+  // DeleteGroup removes a group config holds nothing of: one with teaching
+  // assignments (and so timetable blocks) is AlreadyExists naming the
+  // counts. Other services' references are checked by the gateway first.
+  rpc DeleteGroup(DeleteGroupRequest) returns (DeleteGroupResponse);
 
   // EnsurePlacements finds or creates, in ONE transaction, the level → grade →
   // group of each placement in a cycle (legacy student import, ADR 0033). A
@@ -353,6 +378,9 @@ message Level {
   // status is DELETING while a level deletion's saga runs (ADR 0021): writes
   // that resolve the level are refused with LEVEL_BEING_DELETED.
   LevelStatus status = 10;
+  // sort_order is the level's place in the school order (1 = first);
+  // ListLevels answers by it, then by name.
+  int32 sort_order = 11;
 }
 
 // LevelStatus is a level's lifecycle (ADR 0021).
@@ -503,6 +531,16 @@ message UpdateLevelResponse {
   Level level = 1;
 }
 
+// ReorderLevelsRequest is the whole school order, first level first.
+message ReorderLevelsRequest {
+  repeated string level_ids = 1;
+}
+
+// ReorderLevelsResponse returns every level in its new order.
+message ReorderLevelsResponse {
+  repeated Level levels = 1;
+}
+
 // --- Cycle RPC messages ---------------------------------------------------
 
 // CreateCycleRequest creates a school-year cycle.
@@ -577,6 +615,25 @@ message ListGradeLevelsRequest {
 message ListGradeLevelsResponse {
   repeated GradeLevel grade_levels = 1;
 }
+
+// RenameGradeLevelRequest renames one grade.
+message RenameGradeLevelRequest {
+  string id = 1;
+  string name = 2;
+}
+
+// RenameGradeLevelResponse returns the grade under its new name.
+message RenameGradeLevelResponse {
+  GradeLevel grade_level = 1;
+}
+
+// DeleteGradeLevelRequest removes one grade.
+message DeleteGradeLevelRequest {
+  string id = 1;
+}
+
+// DeleteGradeLevelResponse is empty: the grade is gone.
+message DeleteGradeLevelResponse {}
 
 // --- Subject RPC messages -------------------------------------------------
 
@@ -796,6 +853,37 @@ message ListGroupsRequest {
 message ListGroupsResponse {
   repeated Group groups = 1;
 }
+
+// RenameGroupRequest renames one group.
+message RenameGroupRequest {
+  string id = 1;
+  string name = 2;
+}
+
+// RenameGroupResponse returns the group under its new name.
+message RenameGroupResponse {
+  Group group = 1;
+}
+
+// GroupUsageRequest names the group whose config references are counted.
+message GroupUsageRequest {
+  string group_id = 1;
+}
+
+// GroupUsageResponse is what config keeps of the group; an unknown group is
+// NotFound, not zeros.
+message GroupUsageResponse {
+  int64 teaching_assignments = 1;
+  int64 schedule_blocks = 2;
+}
+
+// DeleteGroupRequest removes one group.
+message DeleteGroupRequest {
+  string id = 1;
+}
+
+// DeleteGroupResponse is empty: the group is gone.
+message DeleteGroupResponse {}
 
 // --- teachers / teaching_assignments (Phase 3) entities -------------------
 

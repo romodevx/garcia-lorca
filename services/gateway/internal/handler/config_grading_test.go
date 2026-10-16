@@ -62,7 +62,7 @@ func TestConfigPatchLevelGradingResponseIsInPersonUnits(t *testing.T) {
 	svc := &fakeConfig{}
 	rec := patchLevel(handler.NewConfigHandler(svc), "lvl-1", `{"grading":{"enabled":true,"min":5,"max":10,"decimals":1,"passing":6.5}}`)
 	require.Equal(t, http.StatusOK, rec.Code)
-	assert.JSONEq(t, `{"id":"lvl-1","name":"Primaria","sepCode":"","enrollmentGranularity":"cycle","attendanceMode":"daily",
+	assert.JSONEq(t, `{"id":"lvl-1","name":"Primaria","sepCode":"","sortOrder":0,"enrollmentGranularity":"cycle","attendanceMode":"daily",
 		"grading":{"enabled":true,"min":5,"max":10,"decimals":1,"passing":6.5}}`, rec.Body.String())
 }
 

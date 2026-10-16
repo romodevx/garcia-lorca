@@ -98,8 +98,9 @@ func (s *CatalogService) ListCycles(ctx context.Context) ([]domain.Cycle, error)
 
 // --- levels ----------------------------------------------------------------
 
-// CreateLevel validates and persists a new level. A duplicate name (per tenant)
-// surfaces as KindConflict from the repo.
+// CreateLevel validates and persists a new level and answers it as stored: the
+// database gives it its place in the school order (after the last level). A
+// duplicate name (per tenant) surfaces as KindConflict from the repo.
 func (s *CatalogService) CreateLevel(ctx context.Context, name, sepCode string, gran domain.EnrollmentGranularity) (domain.Level, error) {
 	l, err := domain.NewLevel(s.newID(), s.tenant, name, sepCode, gran)
 	if err != nil {
@@ -108,7 +109,7 @@ func (s *CatalogService) CreateLevel(ctx context.Context, name, sepCode string, 
 	if err := s.repo.CreateLevel(ctx, l); err != nil {
 		return domain.Level{}, err
 	}
-	return l, nil
+	return s.repo.GetLevel(ctx, l.ID())
 }
 
 // GetLevel returns a level by id (KindNotFound if absent).
@@ -170,6 +171,13 @@ func (s *CatalogService) ListLevels(ctx context.Context) ([]domain.Level, error)
 	return s.repo.ListLevels(ctx)
 }
 
+// ReorderLevels puts the levels in the school order ids gives, first = 1.
+// ids must be exactly the school's levels; the repository checks that with
+// the rows locked, so a level created meanwhile cannot be left unordered.
+func (s *CatalogService) ReorderLevels(ctx context.Context, ids []string) ([]domain.Level, error) {
+	return s.repo.ReorderLevels(ctx, ids)
+}
+
 // --- grade levels ----------------------------------------------------------
 
 // CreateGradeLevel validates the input, verifies the parent level exists (a
@@ -197,6 +205,28 @@ func (s *CatalogService) GetGradeLevel(ctx context.Context, id string) (domain.G
 // ListGradeLevels returns the grade levels of levelID.
 func (s *CatalogService) ListGradeLevels(ctx context.Context, levelID string) ([]domain.GradeLevel, error) {
 	return s.repo.ListGradeLevels(ctx, levelID)
+}
+
+// RenameGradeLevel fixes a grade captured wrong: same id, level and ordinal.
+// A blank name is KindInvalid, an unknown id KindNotFound, a name the level
+// already has GRADE_NAME_TAKEN.
+func (s *CatalogService) RenameGradeLevel(ctx context.Context, id, name string) (domain.GradeLevel, error) {
+	current, err := s.repo.GetGradeLevel(ctx, id)
+	if err != nil {
+		return domain.GradeLevel{}, err
+	}
+	renamed, err := current.Renamed(name)
+	if err != nil {
+		return domain.GradeLevel{}, err
+	}
+	return s.repo.RenameGradeLevel(ctx, renamed.ID(), renamed.Name())
+}
+
+// DeleteGradeLevel removes a grade that holds nothing, leaving its level and
+// sibling grades alone. A grade with groups, subjects or evaluation periods is
+// GRADE_LEVEL_IN_USE naming them; nothing outside config keeps a grade id.
+func (s *CatalogService) DeleteGradeLevel(ctx context.Context, id string) error {
+	return s.repo.DeleteGradeLevel(ctx, id)
 }
 
 // --- subjects --------------------------------------------------------------
@@ -315,6 +345,34 @@ func (s *CatalogService) GetGroup(ctx context.Context, id string) (domain.Group,
 // gradeLevelID ("" = all grade levels of the cycle).
 func (s *CatalogService) ListGroups(ctx context.Context, cycleID, gradeLevelID string) ([]domain.Group, error) {
 	return s.repo.ListGroups(ctx, cycleID, gradeLevelID)
+}
+
+// RenameGroup fixes a group captured wrong: same id, cycle, grade and
+// capacity, so it is allowed with pupils in it. A blank name is KindInvalid,
+// an unknown id KindNotFound, a name the grade has in the cycle
+// GROUP_NAME_TAKEN.
+func (s *CatalogService) RenameGroup(ctx context.Context, id, name string) (domain.Group, error) {
+	current, err := s.repo.GetGroup(ctx, id)
+	if err != nil {
+		return domain.Group{}, err
+	}
+	renamed, err := current.Renamed(name)
+	if err != nil {
+		return domain.Group{}, err
+	}
+	return s.repo.RenameGroup(ctx, renamed.ID(), renamed.Name())
+}
+
+// GroupUsage counts what config keeps of a group (KindNotFound if absent).
+func (s *CatalogService) GroupUsage(ctx context.Context, id string) (domain.GroupUsage, error) {
+	return s.repo.GroupUsage(ctx, id)
+}
+
+// DeleteGroup removes a group config keeps nothing of (GROUP_IN_USE
+// otherwise). The other services' references are the gateway's to check
+// first (ADR 0036); config's own are re-checked here under the row lock.
+func (s *CatalogService) DeleteGroup(ctx context.Context, id string) error {
+	return s.repo.DeleteGroup(ctx, id)
 }
 
 // --- teachers --------------------------------------------------------------

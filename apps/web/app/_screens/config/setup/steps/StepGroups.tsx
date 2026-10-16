@@ -20,6 +20,7 @@ export interface StepGroupsProps {
   groups: GroupsSlice;
   /** Every group of the cycle (the status read): the "1 grupo" pills. */
   cycleGroups: StatusRead<Group[]>;
+  /** Group corrections (T8) ride in `actions.groupCorrections`, given only to config:write. */
   actions: SetupActions;
 }
 
@@ -55,7 +56,7 @@ export function StepGroups({ slot, cycle, levels, grades, groups, cycleGroups, a
       {need === undefined && noGrades && <Prerequisite need="grades" onGo={slot.onGo} />}
       {need === undefined && !noGrades && grade === undefined && <EmptyHint>Elige un grado para ver sus grupos.</EmptyHint>}
       {cycle !== undefined && grade !== undefined && (
-        <GroupsPanel key={`${cycle.id}:${grade.id}`} cycle={cycle} gradeLevel={grade} groups={groups.list} onCreate={actions.createGroup} />
+        <GroupsPanel key={`${cycle.id}:${grade.id}`} cycle={cycle} gradeLevel={grade} groups={groups.list} onCreate={actions.createGroup} corrections={actions.groupCorrections} />
       )}
     </StepFrame>
   );

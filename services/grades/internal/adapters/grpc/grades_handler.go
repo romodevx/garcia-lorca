@@ -37,6 +37,7 @@ type GradesHandler struct {
 	periods      PeriodsUseCase
 	health       *usecase.HealthService
 	levels       *usecase.LevelArchiveService
+	groups       *usecase.GroupUsageService
 }
 
 // NewGradesHandler wires the handler to the term grades, period grades (T15),

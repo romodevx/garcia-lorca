@@ -350,3 +350,10 @@ type LevelArchiveRepository interface {
 	PurgeLevelArchives(ctx context.Context, cutoff time.Time) (int64, error)
 	PurgeLevelBatch(ctx context.Context, batchID string) (int64, error)
 }
+
+// GroupUsageRepository counts the report cards issued for one config group
+// (any status: a superseded card is still history), tenant-bound. An unknown
+// group is 0: grades does not own groups, only records of them (T8, ADR 0036).
+type GroupUsageRepository interface {
+	CountGroupReportCards(ctx context.Context, groupID string) (int64, error)
+}

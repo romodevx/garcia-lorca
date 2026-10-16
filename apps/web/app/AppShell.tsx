@@ -673,9 +673,9 @@ export function AppShell(): ReactElement {
         (view.screen === "studentImport" && !mayImportStudents)) &&
         (configEnabled ? (
           configSetupView ? (
-            <CatalogSetup onBack={home} canDeleteLevels={mayDeleteLevels} onDeleteLevel={openLevelDelete} onOpenLevelPeriods={openLevelPeriods} onOpenStudentImport={openStudentImport} notice={configNotice} />
+            <CatalogSetup onBack={home} canDeleteLevels={mayDeleteLevels} onDeleteLevel={openLevelDelete} onOpenLevelPeriods={openLevelPeriods} onOpenStudentImport={openStudentImport} notice={configNotice} canWriteConfig={mayWriteConfig} />
           ) : (
-            <Catalog onBack={home} canDeleteLevels={mayDeleteLevels} onDeleteLevel={openLevelDelete} onOpenLevelPeriods={openLevelPeriods} onOpenStudentImport={openStudentImport} notice={configNotice} />
+            <Catalog onBack={home} canDeleteLevels={mayDeleteLevels} onDeleteLevel={openLevelDelete} onOpenLevelPeriods={openLevelPeriods} onOpenStudentImport={openStudentImport} notice={configNotice} canWriteConfig={mayWriteConfig} />
           )
         ) : (
           // Flag OFF: never render the catalog; show the friendly stub so

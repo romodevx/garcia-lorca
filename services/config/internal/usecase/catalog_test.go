@@ -163,7 +163,8 @@ func (f *fakeCatalog) CreateLevel(_ context.Context, l domain.Level) error {
 	if err := f.claim("level|" + l.Name()); err != nil {
 		return err
 	}
-	f.levels[l.ID()] = l
+	// Like the 0020 insert trigger: a new level goes after the last.
+	f.levels[l.ID()] = l.WithSortOrder(len(f.levels) + 1)
 	return nil
 }
 
