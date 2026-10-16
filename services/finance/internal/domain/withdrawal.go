@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // WithdrawalPlan is the financial projection for a student's dated withdrawal.
 type WithdrawalPlan struct {
@@ -19,7 +22,7 @@ func PlanWithdrawal(charges []Charge, paidByCharge map[string]int64, on time.Tim
 		if charge.Status() == StatusCancelled {
 			continue
 		}
-		if charge.DueDate().After(on) && paid == 0 && charge.Status() == StatusPending {
+		if charge.DueDate().After(on) && paid == 0 && charge.Status() == StatusPending && IsBillingLedgerRef(charge.ExternalRef()) {
 			plan.ToCancel = append(plan.ToCancel, charge)
 			plan.ToCancelCents += charge.Effective().Int64()
 			continue
@@ -27,4 +30,16 @@ func PlanWithdrawal(charges []Charge, paidByCharge map[string]int64, on time.Tim
 		plan.RemainingDebtCents += max(0, charge.Effective().Int64()-paid)
 	}
 	return plan
+}
+
+// IsBillingLedgerRef reports whether billing created the charge. Withdrawals
+// may cancel only charges owned by the tuition, fee, enrollment, and activity
+// billing flows; manually entered and other-module charges remain debt.
+func IsBillingLedgerRef(ref string) bool {
+	for _, prefix := range []string{TuitionRefPrefix, FeeRefPrefix, EnrollmentRefPrefix, ActivityRefPrefix} {
+		if strings.HasPrefix(ref, prefix) {
+			return true
+		}
+	}
+	return false
 }

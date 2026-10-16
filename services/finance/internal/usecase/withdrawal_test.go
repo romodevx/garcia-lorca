@@ -19,6 +19,12 @@ func TestWithdrawalServiceCancelsOnlyEligibleChargesAndIsIdempotent(t *testing.T
 		if err != nil {
 			t.Fatal(err)
 		}
+		if id == "due-future" {
+			charge, err = charge.WithExternalRef("tuition:cycle:student:2026-10")
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
 		if status == domain.StatusCancelled {
 			charge, err = charge.Cancel()
 			if err != nil {
@@ -69,6 +75,10 @@ func TestPreviewWithdrawalDoesNotWrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	charge, err = charge.WithExternalRef("tuition:cycle:student:2026-10")
+	if err != nil {
+		t.Fatal(err)
+	}
 	f.repo.charges[charge.ID()] = charge
 
 	preview, err := f.svc.PreviewWithdrawal(context.Background(), testStudent, testCycle, fixedNow.Format("2006-01-02"))
@@ -80,6 +90,20 @@ func TestPreviewWithdrawalDoesNotWrite(t *testing.T) {
 	}
 	if f.repo.charges[charge.ID()].Status() != domain.StatusPending {
 		t.Errorf("preview changed charge status to %q", f.repo.charges[charge.ID()].Status())
+	}
+}
+
+func TestPreviewWithdrawalPricesAsOfTodayForBackdatedWithdrawal(t *testing.T) {
+	b := newBecaFixture(t, 0, noPolicy)
+	b.give(t, "Beca vigente hoy", becaSpec{kind: domain.ScholarshipPercent, value: 5000}, testStudent)
+	b.clock = time.Date(2026, time.September, 15, 10, 0, 0, 0, time.UTC)
+
+	preview, err := b.svc.PreviewWithdrawal(context.Background(), testStudent, testCycle, "2026-08-31")
+	if err != nil {
+		t.Fatalf("PreviewWithdrawal: %v", err)
+	}
+	if preview.ToCancelCents != 1650000 {
+		t.Errorf("to cancel = %d, want 1650000 after today's scholarship and surcharge pricing", preview.ToCancelCents)
 	}
 }
 

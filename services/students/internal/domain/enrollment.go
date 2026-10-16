@@ -159,12 +159,13 @@ func (e Enrollment) CanWithdraw() bool { return e.status == EnrollmentStatusActi
 // MaxEnrollmentWithdrawalReason is the largest allowed reason, in Unicode characters.
 const MaxEnrollmentWithdrawalReason = 500
 
-// Withdraw ends an active enrollment on a UTC calendar day. A zero date means today.
-func (e Enrollment) Withdraw(on time.Time, reason string) (Enrollment, error) {
+// Withdraw ends an active enrollment on a UTC calendar day. A zero date means
+// the caller's current day, supplied explicitly for deterministic behavior.
+func (e Enrollment) Withdraw(on time.Time, reason string, now time.Time) (Enrollment, error) {
 	if !e.CanWithdraw() {
 		return Enrollment{}, glerrors.New(glerrors.KindConflict, "enrollment is not active")
 	}
-	today := time.Now().UTC()
+	today := now.UTC()
 	if on.IsZero() {
 		on = today
 	}

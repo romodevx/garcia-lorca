@@ -225,9 +225,16 @@ func (c *FinanceClient) PreviewWithdrawal(ctx context.Context, studentID, cycleI
 	}
 	out := WithdrawalPreview{ToCancelCents: res.Msg.GetToCancelCents(), RemainingDebtCents: res.Msg.GetRemainingDebtCents(), ToCancel: make([]WithdrawalCharge, 0, len(res.Msg.GetToCancel()))}
 	for _, charge := range res.Msg.GetToCancel() {
-		out.ToCancel = append(out.ToCancel, WithdrawalCharge{ID: charge.GetId(), Description: charge.GetDescription(), DueDate: charge.GetDueDate(), AmountCents: charge.GetAmountCents()})
+		out.ToCancel = append(out.ToCancel, toWithdrawalCharge(charge))
 	}
 	return out, nil
+}
+
+func toWithdrawalCharge(charge *financev1.Charge) WithdrawalCharge {
+	return WithdrawalCharge{
+		ID: charge.GetId(), Description: charge.GetDescription(), DueDate: charge.GetDueDate(),
+		AmountCents: max(0, charge.GetAmountCents()-charge.GetDiscountCents()-charge.GetScholarshipCents()),
+	}
 }
 
 // ApplyDiscount sets the discount on a charge (beca, convenio, ajuste); the

@@ -1268,7 +1268,12 @@ func TestStudentWithdrawnConsumerCancelsFutureChargeInPostgres(t *testing.T) {
 	if _, err := repo.CreateConcept(ctx, newConcept(t, conceptID, tenantA, "withdrawal-consumer", 24000)); err != nil {
 		t.Fatalf("seed concept: %v", err)
 	}
-	charge := newCharge(t, chargeID, tenantA, studentID, cycleOne, conceptID, 24000, 0, tomorrow())
+	// A billing-run charge (tuition ref): only those may be cancelled by a baja.
+	charge, err := newCharge(t, chargeID, tenantA, studentID, cycleOne, conceptID, 24000, 0, tomorrow()).
+		WithExternalRef(domain.TuitionRefPrefix + cycleOne + ":" + studentID + ":2026-11")
+	if err != nil {
+		t.Fatalf("tuition ref: %v", err)
+	}
 	if _, err := repo.CreateCharge(ctx, charge); err != nil {
 		t.Fatalf("seed charge: %v", err)
 	}

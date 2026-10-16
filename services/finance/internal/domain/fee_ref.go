@@ -7,6 +7,8 @@ import "strings"
 // one, and a receipt marks a line as a late fee by them — one definition, so
 // none of the three can drift.
 const (
+	// TuitionRefPrefix names a monthly tuition charge issued by billing.
+	TuitionRefPrefix = "tuition:"
 	// DailyFeeRefPrefix: a daily surcharge a deposit wrote,
 	// "dailyfee:<chargeID>:<depositID>".
 	DailyFeeRefPrefix = "dailyfee:"

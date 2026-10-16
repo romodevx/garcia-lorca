@@ -33,6 +33,8 @@ type fakeEnrollRepo struct {
 	createSeen   []domain.Enrollment
 	history      map[string][]domain.EnrollmentTransfer // by student id
 	outbox       []domain.Enrollment
+	drainLimit   int
+	drainTimeout time.Duration
 }
 
 // CreateEnrollmentInFirstFreeGroup models what the transaction does: it counts
@@ -168,10 +170,14 @@ func (r *fakeEnrollRepo) WithdrawEnrollment(_ context.Context, e domain.Enrollme
 	return nil
 }
 
-func (r *fakeEnrollRepo) DrainOutbox(_ context.Context, _ int, publish func(context.Context, ports.OutboxEvent) error) (int, error) {
+func (r *fakeEnrollRepo) DrainOutbox(ctx context.Context, limit int, publish func(context.Context, ports.OutboxEvent) error) (int, error) {
+	r.drainLimit = limit
+	if deadline, ok := ctx.Deadline(); ok {
+		r.drainTimeout = time.Until(deadline)
+	}
 	published := 0
 	for range r.outbox {
-		if err := publish(context.Background(), ports.OutboxEvent{TenantID: tenant, Type: "StudentWithdrawn", Payload: []byte("event")}); err != nil {
+		if err := publish(ctx, ports.OutboxEvent{TenantID: tenant, Type: "StudentWithdrawn", Payload: []byte("event")}); err != nil {
 			return published, err
 		}
 		published++
@@ -537,6 +543,9 @@ func TestWithdrawActiveThenAlreadyWithdrawn(t *testing.T) {
 	}
 	if len(pub.outbox) != 1 || pub.outbox[0].Type != "StudentWithdrawn" || pub.outbox[0].TenantID != tenant {
 		t.Fatalf("published events = %+v", pub.outbox)
+	}
+	if enrollments.drainLimit != 5 || enrollments.drainTimeout <= 0 || enrollments.drainTimeout > 2*time.Second {
+		t.Errorf("synchronous drain = limit %d, timeout %s; want limit 5 and a deadline <= 2s", enrollments.drainLimit, enrollments.drainTimeout)
 	}
 
 	_, err = svc.Withdraw(context.Background(), e.ID(), withdrawnOn, "again")

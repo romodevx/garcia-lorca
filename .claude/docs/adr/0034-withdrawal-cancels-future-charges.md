@@ -19,4 +19,5 @@
 
 - El saldo posterior a la baja conserva cargos pasados y abonos parciales con el mismo precio efectivo que el estado de cuenta; la excepción de pago parcial evita borrar dinero recibido.
 - El repositorio y el consumidor tienen pruebas de integración con Postgres real (testcontainers), corridas en local y en CI.
+- El drain al inicio y el ticker recuperan eventos durante instancias activas. Falta implementar en el plan de infraestructura un drain disparado por Cloud Scheduler para cubrir servicios scale-to-zero, también para grades.
 - Si cambia la regla temporal (por ejemplo, cancelar también un cargo que vence el día de la baja), se modifica la regla pura y sus pruebas de frontera antes de adaptar los adaptadores.

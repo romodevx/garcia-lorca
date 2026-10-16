@@ -323,7 +323,7 @@ func TestWithdrawEnrollmentSetsWithdrawn(t *testing.T) {
 	enrollmentID := enrolled.Msg.GetEnrollment().GetId()
 
 	res, err := h.WithdrawEnrollment(context.Background(), connect.NewRequest(&studentsv1.WithdrawEnrollmentRequest{
-		Id: enrollmentID, WithdrawnOn: "2026-10-01", Reason: "cambio de escuela",
+		Id: enrollmentID, WithdrawnOn: "2026-08-01", Reason: "cambio de escuela",
 	}))
 	if err != nil {
 		t.Fatalf("WithdrawEnrollment: %v", err)
@@ -331,7 +331,7 @@ func TestWithdrawEnrollmentSetsWithdrawn(t *testing.T) {
 	if got := res.Msg.GetEnrollment().GetStatus(); got != studentsv1.EnrollmentStatus_ENROLLMENT_STATUS_WITHDRAWN {
 		t.Errorf("status = %v, want WITHDRAWN", got)
 	}
-	if res.Msg.GetEnrollment().GetWithdrawnOn() != "2026-10-01" || res.Msg.GetEnrollment().GetWithdrawalReason() != "cambio de escuela" {
+	if res.Msg.GetEnrollment().GetWithdrawnOn() != "2026-08-01" || res.Msg.GetEnrollment().GetWithdrawalReason() != "cambio de escuela" {
 		t.Errorf("withdrawal details = %q / %q", res.Msg.GetEnrollment().GetWithdrawnOn(), res.Msg.GetEnrollment().GetWithdrawalReason())
 	}
 	_, err = h.WithdrawEnrollment(context.Background(), connect.NewRequest(&studentsv1.WithdrawEnrollmentRequest{Id: enrollmentID}))
@@ -408,12 +408,12 @@ func TestEnrollmentCarriesItsEndInstant(t *testing.T) {
 		t.Error("an active enrollment must carry no ended_at")
 	}
 	res, err := h.WithdrawEnrollment(context.Background(), connect.NewRequest(&studentsv1.WithdrawEnrollmentRequest{
-		Id: enrolled.Msg.GetEnrollment().GetId(), WithdrawnOn: "2026-10-03",
+		Id: enrolled.Msg.GetEnrollment().GetId(), WithdrawnOn: "2026-08-01",
 	}))
 	if err != nil {
 		t.Fatalf("WithdrawEnrollment: %v", err)
 	}
-	if got := res.Msg.GetEnrollment().GetEndedAt().AsTime(); !got.Equal(time.Date(2026, 10, 3, 0, 0, 0, 0, time.UTC)) {
+	if got := res.Msg.GetEnrollment().GetEndedAt().AsTime(); !got.Equal(time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)) {
 		t.Errorf("ended_at = %v, want withdrawal date", got)
 	}
 }

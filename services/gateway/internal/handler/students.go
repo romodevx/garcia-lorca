@@ -2,13 +2,12 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
+	"os"
 	"time"
 	"unicode/utf8"
 
 	"connectrpc.com/connect"
-	"github.com/garcia-lorca/pkg/featureflag"
 	"github.com/garcia-lorca/services/gateway/internal/client"
 	"github.com/garcia-lorca/services/gateway/internal/middleware"
 )
@@ -221,7 +220,6 @@ type WithdrawalPreviewService interface {
 type EnrollmentsHandler struct {
 	svc     EnrollmentService
 	finance WithdrawalPreviewService
-	flags   featureflag.Checker
 	now     func() time.Time
 }
 
@@ -229,8 +227,8 @@ type EnrollmentsHandler struct {
 type EnrollmentsOption func(*EnrollmentsHandler)
 
 // WithWithdrawalPreview wires finance's optional withdrawal preview.
-func WithWithdrawalPreview(finance WithdrawalPreviewService, flags featureflag.Checker) EnrollmentsOption {
-	return func(h *EnrollmentsHandler) { h.finance, h.flags = finance, flags }
+func WithWithdrawalPreview(finance WithdrawalPreviewService) EnrollmentsOption {
+	return func(h *EnrollmentsHandler) { h.finance = finance }
 }
 
 // WithEnrollmentsClock replaces the clock used for withdrawal date checks.
@@ -280,8 +278,8 @@ type enrollmentResponse struct {
 	TermID           string `json:"termId"`
 	Status           string `json:"status"`
 	EnrolledAt       string `json:"enrolledAt"`
-	WithdrawnOn      string `json:"withdrawnOn"`
-	WithdrawalReason string `json:"withdrawalReason"`
+	WithdrawnOn      string `json:"withdrawnOn,omitempty"`
+	WithdrawalReason string `json:"withdrawalReason,omitempty"`
 }
 
 func toEnrollmentResponse(e client.Enrollment) enrollmentResponse {
@@ -365,33 +363,34 @@ func (h *EnrollmentsHandler) Transfer(w http.ResponseWriter, r *http.Request) {
 func (h *EnrollmentsHandler) Withdraw(w http.ResponseWriter, r *http.Request) {
 	var req withdrawRequest
 	if err := decodeJSONBody(w, r, &req); err != nil {
-		writeWithdrawalError(w, http.StatusBadRequest, "invalid", "Invalid request body.")
+		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 	if !validOptionalISODate(req.WithdrawnOn) {
-		writeWithdrawalError(w, http.StatusBadRequest, "invalid", "withdrawnOn must be a valid YYYY-MM-DD date.")
+		http.Error(w, "withdrawnOn must be a valid YYYY-MM-DD date.", http.StatusBadRequest)
 		return
 	}
+	today := schoolDate(h.now()).Format("2006-01-02")
 	withdrawalDate := req.WithdrawnOn
 	if withdrawalDate == "" {
-		withdrawalDate = h.now().UTC().Format("2006-01-02")
+		withdrawalDate = today
 	}
-	if withdrawalDate < h.now().UTC().Format("2006-01-02") {
+	if withdrawalDate < today {
 		principal, ok := middleware.PrincipalFrom(r.Context())
 		if !ok {
-			writeWithdrawalError(w, http.StatusUnauthorized, "unauthorized", "Se requiere autenticación.")
+			http.Error(w, "Se requiere autenticación.", http.StatusUnauthorized)
 			return
 		}
 		if !middleware.HasPermission(principal, "finance:write") {
-			writeWithdrawalError(w, http.StatusForbidden, "forbidden", "Para una baja con fecha anterior a hoy se necesita permiso de finanzas")
+			http.Error(w, "Para una baja con fecha anterior a hoy se necesita permiso de finanzas", http.StatusForbidden)
 			return
 		}
 	}
 	if utf8.RuneCountInString(req.Reason) > 500 {
-		writeWithdrawalError(w, http.StatusBadRequest, "invalid", "reason must be at most 500 characters.")
+		http.Error(w, "reason must be at most 500 characters.", http.StatusBadRequest)
 		return
 	}
-	res, err := h.svc.WithdrawEnrollment(r.Context(), req.EnrollmentID, req.WithdrawnOn, req.Reason)
+	res, err := h.svc.WithdrawEnrollment(r.Context(), req.EnrollmentID, withdrawalDate, req.Reason)
 	if err != nil {
 		writeConnectError(w, err)
 		return
@@ -403,10 +402,10 @@ func (h *EnrollmentsHandler) Withdraw(w http.ResponseWriter, r *http.Request) {
 func (h *EnrollmentsHandler) PreviewWithdrawal(w http.ResponseWriter, r *http.Request) {
 	withdrawnOn := r.URL.Query().Get("withdrawnOn")
 	if withdrawnOn == "" {
-		withdrawnOn = time.Now().UTC().Format("2006-01-02")
+		withdrawnOn = schoolDate(h.now()).Format("2006-01-02")
 	}
 	if !validOptionalISODate(withdrawnOn) {
-		writeWithdrawalError(w, http.StatusBadRequest, "invalid", "withdrawnOn must be a valid YYYY-MM-DD date.")
+		http.Error(w, "withdrawnOn must be a valid YYYY-MM-DD date.", http.StatusBadRequest)
 		return
 	}
 	enrollment, err := h.svc.GetEnrollment(r.Context(), r.PathValue("id"))
@@ -415,11 +414,7 @@ func (h *EnrollmentsHandler) PreviewWithdrawal(w http.ResponseWriter, r *http.Re
 		return
 	}
 	if enrollment.Status != "active" {
-		writeWithdrawalError(w, http.StatusConflict, "conflict", "Only an active enrollment can be previewed for withdrawal.")
-		return
-	}
-	if h.flags != nil && !h.flags.Enabled(r.Context(), featureflag.Key("finance")) {
-		writeJSON(w, http.StatusOK, withdrawalPreviewResponse{ToCancel: []withdrawalChargeResponse{}})
+		http.Error(w, "Only an active enrollment can be previewed for withdrawal.", http.StatusConflict)
 		return
 	}
 	if h.finance == nil {
@@ -462,10 +457,18 @@ func validOptionalISODate(value string) bool {
 	return err == nil && parsed.Format("2006-01-02") == value
 }
 
-func writeWithdrawalError(w http.ResponseWriter, status int, code, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"code": code, "message": message}})
+const defaultSchoolTimezone = "America/Mexico_City"
+
+func schoolDate(now time.Time) time.Time {
+	name := os.Getenv("SCHOOL_TIMEZONE")
+	if name == "" {
+		name = defaultSchoolTimezone
+	}
+	location, err := time.LoadLocation(name)
+	if err != nil {
+		location, _ = time.LoadLocation(defaultSchoolTimezone)
+	}
+	return now.In(location)
 }
 
 // EnrollIntoGrade: POST /api/v1/enrollments/by-grade

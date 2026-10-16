@@ -8,8 +8,11 @@ import (
 	"testing"
 
 	studentsv1 "github.com/garcia-lorca/gen/go/garcialorca/students/v1"
+	glerrors "github.com/garcia-lorca/pkg/errors"
 	"github.com/garcia-lorca/pkg/pubsub"
 	financepubsub "github.com/garcia-lorca/services/finance/internal/adapters/pubsub"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -130,6 +133,36 @@ func TestConsumerRedeliversWithdrawalOnUseCaseFailure(t *testing.T) {
 	if err := c.Handle(context.Background(), msg); err == nil {
 		t.Fatal("failure must be returned for redelivery")
 	}
+}
+
+func TestConsumerAcksPermanentWithdrawalUseCaseErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{name: "invalid", err: glerrors.New(glerrors.KindInvalid, "invalid withdrawal")},
+		{name: "not found", err: glerrors.ErrNotFound},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			biller := &spyBiller{err: tc.err}
+			consumer := financepubsub.NewConsumer(biller, quietLog())
+			data, err := proto.Marshal(&studentsv1.StudentWithdrawn{StudentId: "stu-1", CycleId: "cyc-1", WithdrawnOn: "2026-10-15"})
+			require.NoError(t, err)
+			msg := pubsub.Message{Attributes: map[string]string{"type": "StudentWithdrawn"}, Data: data}
+			assert.NoError(t, consumer.Handle(context.Background(), msg), "permanent failure should be ACKed")
+			assert.Equal(t, 1, biller.withdrawals)
+		})
+	}
+}
+
+func TestConsumerPassesMalformedWithdrawalDateToUseCase(t *testing.T) {
+	biller := &spyBiller{err: glerrors.New(glerrors.KindInvalid, "invalid withdrawal date")}
+	consumer := financepubsub.NewConsumer(biller, quietLog())
+	data, err := proto.Marshal(&studentsv1.StudentWithdrawn{StudentId: "stu-1", CycleId: "cyc-1", WithdrawnOn: "2026-02-30"})
+	require.NoError(t, err)
+	msg := pubsub.Message{Attributes: map[string]string{"type": "StudentWithdrawn"}, Data: data}
+	assert.NoError(t, consumer.Handle(context.Background(), msg), "invalid use-case input should be ACKed")
+	assert.Equal(t, 1, biller.withdrawals, "use case should validate the date")
 }
 
 func TestConsumerAcksMalformedStudentWithdrawn(t *testing.T) {

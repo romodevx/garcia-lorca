@@ -1182,6 +1182,10 @@ func TestPreviewWithdrawalReturnsProjectedChargesAndDebt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	future, err = future.WithExternalRef("tuition:cycle:student:2026-10")
+	if err != nil {
+		t.Fatal(err)
+	}
 	past, err := domain.NewCharge("past-charge", testTenant, testStudent, testCycle, concept.GetId(), "Cuota", 5000, 0, fixedNow.AddDate(0, 0, -1))
 	if err != nil {
 		t.Fatal(err)

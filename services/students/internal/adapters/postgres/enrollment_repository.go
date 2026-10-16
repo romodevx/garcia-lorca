@@ -258,43 +258,51 @@ func outboxRetryDelay(attempts int) time.Duration {
 	return d
 }
 
-// DrainOutbox publishes due events oldest first. SKIP LOCKED lets multiple
-// service instances relay independently without sending a row concurrently.
+// DrainOutbox claims due events in a short transaction, publishes them without
+// holding row locks, then records success or the retry delay in another short
+// transaction. SKIP LOCKED lets multiple instances relay independently.
 func (r *Repository) DrainOutbox(ctx context.Context, limit int, publish func(context.Context, ports.OutboxEvent) error) (int, error) {
 	if limit <= 0 {
 		limit = 100
 	}
+	var claimed []outboxModel
+	if err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
+			Where("published_at IS NULL AND next_attempt_at <= now()").Order("created_at, id").Limit(limit).Find(&claimed).Error; err != nil {
+			return err
+		}
+		for i := range claimed {
+			claimed[i].Attempts++
+			if err := tx.Model(&outboxModel{}).Where("id = ?", claimed[i].ID).Updates(map[string]any{
+				"attempts":        claimed[i].Attempts,
+				"next_attempt_at": gorm.Expr("now() + make_interval(secs => ?)", outboxRetryDelay(claimed[i].Attempts).Seconds()),
+			}).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		return 0, glerrors.Wrap(glerrors.KindInternal, "claiming student outbox events", err)
+	}
+
 	published := 0
-	for i := 0; i < limit; i++ {
-		empty := false
+	for _, row := range claimed {
+		event := ports.OutboxEvent{TenantID: row.TenantID, Type: row.EventType, Payload: row.Payload}
+		publishErr := publish(ctx, event)
 		err := r.withTenant(ctx, func(tx *gorm.DB) error {
-			var rows []outboxModel
-			if err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
-				Where("published_at IS NULL AND next_attempt_at <= now()").Order("created_at, id").Limit(1).Find(&rows).Error; err != nil {
-				return err
+			updates := map[string]any{}
+			if publishErr != nil {
+				updates["next_attempt_at"] = gorm.Expr("now() + make_interval(secs => ?)", outboxRetryDelay(row.Attempts).Seconds())
+			} else {
+				updates["published_at"] = gorm.Expr("now()")
 			}
-			if len(rows) == 0 {
-				empty = true
-				return nil
-			}
-			row := rows[0]
-			attempts := row.Attempts + 1
-			if err := publish(ctx, ports.OutboxEvent{TenantID: row.TenantID, Type: row.EventType, Payload: row.Payload}); err != nil {
-				return tx.Model(&outboxModel{}).Where("id = ?", row.ID).Updates(map[string]any{
-					"attempts": attempts, "next_attempt_at": gorm.Expr("now() + make_interval(secs => ?)", outboxRetryDelay(attempts).Seconds()),
-				}).Error
-			}
-			if err := tx.Model(&outboxModel{}).Where("id = ?", row.ID).Updates(map[string]any{"published_at": gorm.Expr("now()"), "attempts": attempts}).Error; err != nil {
-				return err
-			}
-			published++
-			return nil
+			return tx.Model(&outboxModel{}).Where("id = ? AND published_at IS NULL", row.ID).Updates(updates).Error
 		})
 		if err != nil {
-			return published, glerrors.Wrap(glerrors.KindInternal, "draining student outbox", err)
+			return published, glerrors.Wrap(glerrors.KindInternal, "finishing student outbox event", err)
 		}
-		if empty {
-			break
+		if publishErr == nil {
+			published++
 		}
 	}
 	return published, nil

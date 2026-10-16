@@ -18,11 +18,20 @@ func TestPlanWithdrawal(t *testing.T) {
 	}
 	before := newCharge("before", on.AddDate(0, 0, -1), StatusPending)
 	equal := newCharge("equal", on, StatusPending)
-	future := newCharge("future", on.AddDate(0, 0, 1), StatusPending)
+	future, err := newCharge("future", on.AddDate(0, 0, 1), StatusPending).WithExternalRef("tuition:cycle:student:2026-10")
+	require.NoError(t, err)
 	paid := newCharge("paid", on.AddDate(0, 0, 5), StatusPaid)
 	partial := newCharge("partial", on.AddDate(0, 0, 5), StatusPartiallyPaid)
 	cancelled := newCharge("cancelled", on.AddDate(0, 0, 5), StatusCancelled)
-	activity := newCharge("activity", on.AddDate(0, 0, 2), StatusPending)
+	activity, err := newCharge("activity", on.AddDate(0, 0, 2), StatusPending).WithExternalRef("activity:act:student:2026-10")
+	require.NoError(t, err)
+	fee, err := newCharge("fee", on.AddDate(0, 0, 2), StatusPending).WithExternalRef("fee:plan:2026-10")
+	require.NoError(t, err)
+	enrollment, err := newCharge("enrollment", on.AddDate(0, 0, 2), StatusPending).WithExternalRef("enrollment:cycle:student")
+	require.NoError(t, err)
+	uniforms, err := newCharge("uniforms", on.AddDate(0, 0, 2), StatusPending).WithExternalRef("uniforms:sale-1")
+	require.NoError(t, err)
+	manual := newCharge("manual", on.AddDate(0, 0, 2), StatusPending)
 
 	tests := []struct {
 		name            string
@@ -32,7 +41,7 @@ func TestPlanWithdrawal(t *testing.T) {
 		wantCancelCents int64
 		wantDebt        int64
 	}{
-		{name: "boundary and protections", charges: []Charge{before, equal, future, paid, partial, cancelled, activity}, paid: map[string]int64{"paid": 10000, "partial": 2500}, wantCancel: []string{"future", "activity"}, wantCancelCents: 20000, wantDebt: 27500},
+		{name: "boundary and protections", charges: []Charge{before, equal, future, paid, partial, cancelled, activity, fee, enrollment, uniforms, manual}, paid: map[string]int64{"paid": 10000, "partial": 2500}, wantCancel: []string{"future", "activity", "fee", "enrollment"}, wantCancelCents: 40000, wantDebt: 47500},
 		{name: "empty", wantCancel: []string{}, wantCancelCents: 0, wantDebt: 0},
 		{name: "future with any payment is kept", charges: []Charge{partial}, paid: map[string]int64{"partial": 1}, wantCancel: []string{}, wantCancelCents: 0, wantDebt: 9999},
 	}

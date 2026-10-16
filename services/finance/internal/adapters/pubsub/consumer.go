@@ -3,9 +3,9 @@ package pubsubadapter
 import (
 	"context"
 	"log/slog"
-	"time"
 
 	studentsv1 "github.com/garcia-lorca/gen/go/garcialorca/students/v1"
+	glerrors "github.com/garcia-lorca/pkg/errors"
 	"github.com/garcia-lorca/pkg/pubsub"
 	"google.golang.org/protobuf/proto"
 )
@@ -84,9 +84,12 @@ func (c *Consumer) handleWithdrawn(ctx context.Context, data []byte) error {
 		c.log.Warn("finance dropped an incomplete StudentWithdrawn")
 		return nil
 	}
-	if _, err := time.Parse("2006-01-02", ev.GetWithdrawnOn()); err != nil {
-		c.log.Warn("finance dropped a StudentWithdrawn with an invalid date", slog.Any("error", err))
+	err := c.biller.ApplyWithdrawal(ctx, ev.GetStudentId(), ev.GetCycleId(), ev.GetWithdrawnOn())
+	switch glerrors.KindOf(err) {
+	case glerrors.KindInvalid, glerrors.KindNotFound:
+		c.log.Warn("finance dropped a permanently invalid StudentWithdrawn", slog.Any("error", err))
 		return nil
+	default:
+		return err
 	}
-	return c.biller.ApplyWithdrawal(ctx, ev.GetStudentId(), ev.GetCycleId(), ev.GetWithdrawnOn())
 }

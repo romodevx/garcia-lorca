@@ -12,14 +12,15 @@ import (
 
 const withdrawalCancelReason = "baja"
 
-// PreviewWithdrawal projects a dated withdrawal using the same charge pricing
-// rules and date as the family account. It does not write to the ledger.
+// PreviewWithdrawal projects a dated withdrawal using today's charge pricing,
+// matching the family account. The effective date only selects which charges
+// are future; it does not rewind prices or scholarships. It does not write.
 func (s *FinanceService) PreviewWithdrawal(ctx context.Context, studentID, cycleID, withdrawnOn string) (domain.WithdrawalPlan, error) {
 	on, err := withdrawalDate(withdrawnOn)
 	if err != nil {
 		return domain.WithdrawalPlan{}, err
 	}
-	charges, err := s.withdrawalCharges(ctx, studentID, cycleID, on)
+	charges, err := s.withdrawalCharges(ctx, studentID, cycleID, s.now().UTC())
 	if err != nil {
 		return domain.WithdrawalPlan{}, err
 	}
@@ -34,7 +35,7 @@ func (s *FinanceService) WithdrawStudent(ctx context.Context, studentID, cycleID
 	if err != nil {
 		return domain.WithdrawalPlan{}, err
 	}
-	charges, err := s.withdrawalCharges(ctx, studentID, cycleID, on)
+	charges, err := s.withdrawalCharges(ctx, studentID, cycleID, s.now().UTC())
 	if err != nil {
 		return domain.WithdrawalPlan{}, err
 	}

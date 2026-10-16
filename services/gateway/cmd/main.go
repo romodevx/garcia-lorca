@@ -355,7 +355,7 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	// rotation-enforced, permission-gated: writes (enroll/transfer/withdraw) need
 	// students:enroll, reads (list/get) need students:read. Every route sits
 	// behind guard.Protect("students", …) so module_students OFF ⇒ 404.
-	enrollH := handler.NewEnrollmentsHandler(studentsClient, handler.WithWithdrawalPreview(financeClient, flags))
+	enrollH := handler.NewEnrollmentsHandler(studentsClient, handler.WithWithdrawalPreview(financeClient))
 	studentsWrite := func(h http.HandlerFunc) http.Handler {
 		return guard.Protect("students", requireAuthChanged(middleware.RequirePermission("students:enroll")(http.HandlerFunc(h))))
 	}

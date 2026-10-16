@@ -103,6 +103,7 @@ func run(ctx context.Context, log *slog.Logger) error {
 	}()
 
 	addr := envOr("ADDR", defaultAddr)
+	drainAtStartup(ctx, drain, log)
 	// h2c: serve HTTP/2 cleartext so both gRPC and Connect clients work.
 	srv := &http.Server{
 		Addr:              addr,
@@ -283,6 +284,19 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 }
 
 type outboxDrain func(context.Context) (int, error)
+
+func drainAtStartup(ctx context.Context, drain outboxDrain, log *slog.Logger) {
+	drainCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	count, err := drain(drainCtx)
+	if err != nil {
+		log.Warn("students could not drain the outbox at startup", slog.Any("error", err))
+		return
+	}
+	if count > 0 {
+		log.Info("students published stranded events at startup", slog.Int("count", count))
+	}
+}
 
 func startSweep(ctx context.Context, drain outboxDrain, log *slog.Logger, every time.Duration) func() {
 	sweepCtx, cancel := context.WithCancel(ctx)

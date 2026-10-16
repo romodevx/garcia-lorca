@@ -12,6 +12,11 @@ import (
 	"github.com/garcia-lorca/services/students/internal/ports"
 )
 
+const (
+	withdrawalOutboxDrainLimit = 5
+	withdrawalOutboxTimeout    = 2 * time.Second
+)
+
 // EnrollmentService places a student into a group of a cycle and moves them
 // between groups with a dated, reasoned history. It orchestrates three seams:
 // the local StudentRepository, the EnrollmentRepository, and the cross-service
@@ -307,7 +312,7 @@ func (s *EnrollmentService) Withdraw(ctx context.Context, enrollmentID string, o
 	if on.IsZero() {
 		on = s.now().UTC()
 	}
-	updated, err := enr.Withdraw(on, reason)
+	updated, err := enr.Withdraw(on, reason, s.now())
 	if err != nil {
 		return domain.Enrollment{}, err
 	}
@@ -315,7 +320,9 @@ func (s *EnrollmentService) Withdraw(ctx context.Context, enrollmentID string, o
 		return domain.Enrollment{}, err
 	}
 	if s.events != nil {
-		if _, err := s.enrollments.DrainOutbox(ctx, 100, s.events.PublishOutboxEvent); err != nil {
+		drainCtx, cancel := context.WithTimeout(ctx, withdrawalOutboxTimeout)
+		defer cancel()
+		if _, err := s.enrollments.DrainOutbox(drainCtx, withdrawalOutboxDrainLimit, s.events.PublishOutboxEvent); err != nil {
 			slog.Warn("students could not drain the outbox after withdrawal", slog.Any("error", err))
 		}
 	}

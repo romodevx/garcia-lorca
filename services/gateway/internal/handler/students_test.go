@@ -449,13 +449,13 @@ func TestWithdrawRequiresFinanceWriteOnlyForBackdatedDates(t *testing.T) {
 	}{
 		{name: "backdated without finance write", date: "2026-10-14", want: http.StatusForbidden},
 		{name: "backdated with finance write", date: "2026-10-14", perms: []string{"finance:write"}, want: http.StatusOK},
-		{name: "today without finance write", date: "2026-10-15", want: http.StatusOK},
+		{name: "same Mexico City day after 18:00 UTC", date: "2026-10-15", want: http.StatusOK},
 		{name: "omitted date without finance write", want: http.StatusOK},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			svc := &fakeEnrollmentSvc{res: client.Enrollment{ID: "enr-1", Status: "withdrawn"}}
 			h := handler.NewEnrollmentsHandler(svc, handler.WithEnrollmentsClock(func() time.Time {
-				return time.Date(2026, 10, 15, 23, 30, 0, 0, time.FixedZone("east", 7*60*60))
+				return time.Date(2026, 10, 16, 1, 0, 0, 0, time.UTC) // Oct 15, 19:00 in Mexico City
 			}))
 			body := `{"enrollmentId":"enr-1","withdrawnOn":"` + tc.date + `"}`
 			if tc.date == "" {
@@ -468,19 +468,12 @@ func TestWithdrawRequiresFinanceWriteOnlyForBackdatedDates(t *testing.T) {
 			if rec.Code != tc.want {
 				t.Fatalf("status = %d, want %d: %s", rec.Code, tc.want, rec.Body.String())
 			}
+			if tc.date == "" && tc.want == http.StatusOK && svc.gotWithdrawnOn != "2026-10-15" {
+				t.Errorf("omitted date forwarded as %q, want the school-local date", svc.gotWithdrawnOn)
+			}
 			if tc.want == http.StatusForbidden {
-				var envelope map[string]json.RawMessage
-				if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil || len(envelope) != 1 {
-					t.Fatalf("forbidden envelope = %s, err %v", rec.Body.String(), err)
-				}
-				var payload struct {
-					Error struct{ Code, Message string } `json:"error"`
-				}
-				if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
-					t.Fatal(err)
-				}
-				if payload.Error.Code != "forbidden" || payload.Error.Message == "" {
-					t.Errorf("error = %+v", payload.Error)
+				if !strings.Contains(rec.Body.String(), "Para una baja con fecha anterior a hoy") {
+					t.Errorf("forbidden body = %q", rec.Body.String())
 				}
 				if svc.gotWithdrawID != "" {
 					t.Errorf("forbidden request reached service: %+v", svc)
@@ -490,7 +483,7 @@ func TestWithdrawRequiresFinanceWriteOnlyForBackdatedDates(t *testing.T) {
 	}
 }
 
-func TestWithdrawRejectsBadDateOrLongReasonWithErrorEnvelope(t *testing.T) {
+func TestWithdrawRejectsBadDateOrLongReasonWithTextError(t *testing.T) {
 	tests := []struct {
 		name string
 		body string
@@ -502,17 +495,16 @@ func TestWithdrawRejectsBadDateOrLongReasonWithErrorEnvelope(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			svc := &fakeEnrollmentSvc{}
-			h := handler.NewEnrollmentsHandler(svc, handler.WithWithdrawalPreview(svc, nil))
+			h := handler.NewEnrollmentsHandler(svc, handler.WithWithdrawalPreview(svc))
 			rec := doReq(t, h.Withdraw, http.MethodPost, "/api/v1/enrollments/withdraw", tt.body)
 			if rec.Code != http.StatusBadRequest {
 				t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body.String())
 			}
-			var envelope map[string]json.RawMessage
-			if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil {
-				t.Fatalf("error envelope JSON: %v", err)
+			if rec.Header().Get("Content-Type") != "text/plain; charset=utf-8" {
+				t.Errorf("content type = %q, want text/plain", rec.Header().Get("Content-Type"))
 			}
-			if len(envelope) != 1 {
-				t.Fatalf("error envelope = %v, want single error field", envelope)
+			if strings.TrimSpace(rec.Body.String()) == "" {
+				t.Fatal("error body is empty")
 			}
 			if svc.gotWithdrawID != "" {
 				t.Fatalf("invalid request reached service: %+v", svc)
@@ -521,16 +513,34 @@ func TestWithdrawRejectsBadDateOrLongReasonWithErrorEnvelope(t *testing.T) {
 	}
 }
 
+func TestWithdrawConflictUsesSiblingPlainTextErrorFormat(t *testing.T) {
+	svc := &fakeEnrollmentSvc{err: connect.NewError(connect.CodeFailedPrecondition, nil)}
+	h := handler.NewEnrollmentsHandler(svc, handler.WithEnrollmentsClock(func() time.Time {
+		return time.Date(2026, 10, 16, 1, 0, 0, 0, time.UTC)
+	}))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/enrollments/withdraw", strings.NewReader(`{"enrollmentId":"enr-1","withdrawnOn":"2026-10-15"}`))
+	rec := httptest.NewRecorder()
+	h.Withdraw(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409: %s", rec.Code, rec.Body.String())
+	}
+	if rec.Header().Get("Content-Type") != "text/plain; charset=utf-8" {
+		t.Errorf("content type = %q, want sibling text/plain format", rec.Header().Get("Content-Type"))
+	}
+}
+
 func TestWithdrawalPreviewMapsContractAndDefaultsDate(t *testing.T) {
 	for _, tc := range []struct{ name, query, wantDate string }{
 		{name: "explicit", query: "?withdrawnOn=2026-10-15", wantDate: "2026-10-15"},
-		{name: "today UTC", wantDate: time.Now().UTC().Format("2006-01-02")},
+		{name: "today from injected clock", wantDate: "2026-10-15"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			svc := &fakeEnrollmentSvc{res: client.Enrollment{ID: "enr-1", StudentID: "stu-1", CycleID: "cyc-1", Status: "active"}, preview: client.WithdrawalPreview{
 				ToCancel: []client.WithdrawalCharge{{ID: "ch-1", Description: "Colegiatura noviembre", DueDate: "2026-11-01", AmountCents: 450000}}, ToCancelCents: 450000, RemainingDebtCents: 120000,
 			}}
-			h := handler.NewEnrollmentsHandler(svc, handler.WithWithdrawalPreview(svc, nil))
+			h := handler.NewEnrollmentsHandler(svc, handler.WithWithdrawalPreview(svc), handler.WithEnrollmentsClock(func() time.Time {
+				return time.Date(2026, 10, 16, 1, 0, 0, 0, time.UTC)
+			}))
 			req := httptest.NewRequest(http.MethodGet, "/api/v1/enrollments/enr-1/withdrawal-preview"+tc.query, nil)
 			req.SetPathValue("id", "enr-1")
 			rec := httptest.NewRecorder()
@@ -586,9 +596,11 @@ func TestWithdrawalPreviewRejectsInvalidDateAndNonActiveOrMissingEnrollment(t *t
 	}
 }
 
-func TestWithdrawalPreviewReturnsZerosWhenFinanceModuleIsOff(t *testing.T) {
-	svc := &fakeEnrollmentSvc{res: client.Enrollment{ID: "enr-1", StudentID: "stu-1", CycleID: "cyc-1", Status: "active"}}
-	h := handler.NewEnrollmentsHandler(svc, handler.WithWithdrawalPreview(svc, flagSet{}))
+func TestWithdrawalPreviewAlwaysReadsFinance(t *testing.T) {
+	svc := &fakeEnrollmentSvc{res: client.Enrollment{ID: "enr-1", StudentID: "stu-1", CycleID: "cyc-1", Status: "active"}, preview: client.WithdrawalPreview{
+		ToCancel: []client.WithdrawalCharge{{ID: "ch-1", AmountCents: 123}}, ToCancelCents: 123, RemainingDebtCents: 456,
+	}}
+	h := handler.NewEnrollmentsHandler(svc, handler.WithWithdrawalPreview(svc))
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/enrollments/enr-1/withdrawal-preview?withdrawnOn=2026-10-15", nil)
 	req.SetPathValue("id", "enr-1")
 	rec := httptest.NewRecorder()
@@ -604,11 +616,11 @@ func TestWithdrawalPreviewReturnsZerosWhenFinanceModuleIsOff(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if out.ToCancel == nil || len(out.ToCancel) != 0 || out.ToCancelCents != 0 || out.RemainingDebtCents != 0 {
+	if len(out.ToCancel) != 1 || out.ToCancelCents != 123 || out.RemainingDebtCents != 456 {
 		t.Errorf("finance-off preview = %+v", out)
 	}
-	if svc.gotPreviewStudentID != "" {
-		t.Errorf("called finance while its module was disabled: %+v", svc)
+	if svc.gotPreviewStudentID != "stu-1" {
+		t.Errorf("did not call finance while its module was disabled: %+v", svc)
 	}
 }
 
@@ -795,5 +807,24 @@ func TestStudentsAnswerAndForwardTheBankReference(t *testing.T) {
 	put(`{"firstName":"Ana","lastName":"Herrera","curp":"HEGA050312MDFRNN08","profile":{}}`)
 	if svc.gotUpdate.BankReference != nil {
 		t.Errorf("a PUT without the field forwarded %q; it must forward nil (keep)", *svc.gotUpdate.BankReference)
+	}
+}
+
+func TestActiveEnrollmentResponseOmitsWithdrawalDetails(t *testing.T) {
+	svc := &fakeEnrollmentSvc{res: client.Enrollment{ID: "enr-1", Status: "active"}}
+	h := handler.NewEnrollmentsHandler(svc)
+	rec := doReq(t, h.Enroll, http.MethodPost, "/api/v1/enrollments", `{"studentId":"stu-1","groupId":"grp-1"}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	var out map[string]json.RawMessage
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := out["withdrawnOn"]; ok {
+		t.Errorf("active enrollment includes withdrawnOn: %s", rec.Body.String())
+	}
+	if _, ok := out["withdrawalReason"]; ok {
+		t.Errorf("active enrollment includes withdrawalReason: %s", rec.Body.String())
 	}
 }

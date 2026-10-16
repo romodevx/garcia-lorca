@@ -30,7 +30,7 @@ func TestWithdrawalAndOutboxAreCommittedAndRelayed(t *testing.T) {
 		"dddddddd-0000-0000-0000-000000002001", "", domain.EnrollmentStatusActive, time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC))
 	require.NoError(t, err)
 	require.NoError(t, repo.CreateEnrollment(ctx, enrollment))
-	withdrawn, err := enrollment.Withdraw(time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC), "  se mudó  ")
+	withdrawn, err := enrollment.Withdraw(time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC), "  se mudó  ", time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC))
 	require.NoError(t, err)
 	require.NoError(t, repo.WithdrawEnrollment(ctx, withdrawn))
 
@@ -41,6 +41,15 @@ func TestWithdrawalAndOutboxAreCommittedAndRelayed(t *testing.T) {
 
 	var sent []ports.OutboxEvent
 	n, err := repo.DrainOutbox(ctx, 10, func(_ context.Context, event ports.OutboxEvent) error {
+		// If publication still holds the claim transaction's row lock, the
+		// independent connection cannot lock the same event here.
+		var unlockedID string
+		if err := superDB.Raw(`SELECT id FROM students_outbox WHERE tenant_id = ? AND event_type = 'StudentWithdrawn' AND published_at IS NULL ORDER BY created_at DESC LIMIT 1 FOR UPDATE NOWAIT`, withdrawalTenant).Scan(&unlockedID).Error; err != nil {
+			return err
+		}
+		if unlockedID == "" {
+			return errors.New("claimed event is not visible outside its transaction")
+		}
 		sent = append(sent, event)
 		return nil
 	})
@@ -67,7 +76,7 @@ func TestWithdrawalOutboxRetriesAndIsTenantIsolated(t *testing.T) {
 		"cccccccc-0000-0000-0000-000000002002", "dddddddd-0000-0000-0000-000000002002", "", domain.EnrollmentStatusActive, time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC))
 	require.NoError(t, err)
 	require.NoError(t, repo.CreateEnrollment(ctx, enrollment))
-	withdrawn, err := enrollment.Withdraw(time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC), "reason")
+	withdrawn, err := enrollment.Withdraw(time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC), "reason", time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC))
 	require.NoError(t, err)
 	require.NoError(t, repo.WithdrawEnrollment(ctx, withdrawn))
 	n, err := repo.DrainOutbox(ctx, 10, func(context.Context, ports.OutboxEvent) error { return errors.New("broker down") })
@@ -97,7 +106,7 @@ func TestWithdrawalOutboxRetriesAndIsTenantIsolated(t *testing.T) {
 		"cccccccc-0000-0000-0000-000000002003", "dddddddd-0000-0000-0000-000000002003", "", domain.EnrollmentStatusActive, time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC))
 	require.NoError(t, err)
 	require.NoError(t, other.CreateEnrollment(ctx, otherEnrollment))
-	otherWithdrawal, err := otherEnrollment.Withdraw(time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC), "reason")
+	otherWithdrawal, err := otherEnrollment.Withdraw(time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC), "reason", time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC))
 	require.NoError(t, err)
 	require.NoError(t, other.WithdrawEnrollment(ctx, otherWithdrawal))
 	n, err = repo.DrainOutbox(ctx, 10, func(context.Context, ports.OutboxEvent) error {
