@@ -430,7 +430,7 @@ func TestHandleEventDistinctEventsBothLand(t *testing.T) {
 	if repo.notifications[1].Type != "payment" {
 		t.Errorf("second type = %q, want %q", repo.notifications[1].Type, "payment")
 	}
-	if !strings.Contains(repo.notifications[1].Body, "1500.00") {
+	if !strings.Contains(repo.notifications[1].Body, "1,500.00") {
 		t.Errorf("payment body = %q, want the amount in pesos", repo.notifications[1].Body)
 	}
 }
@@ -872,7 +872,7 @@ func TestHandleEventRendersEveryNotifiableEvent(t *testing.T) {
 			msg:       paymentMessage(t, "ffffffff-1000-0000-0000-000000000001", studentID, tenantID, 150000),
 			wantType:  "payment",
 			wantTitle: "Pago recibido",
-			wantBody:  "Recibimos tu pago de $1500.00 MXN.",
+			wantBody:  "Recibimos tu pago de $1,500.00 MXN.",
 		},
 		{
 			name:      "payment of a few cents keeps two decimals",
@@ -882,12 +882,20 @@ func TestHandleEventRendersEveryNotifiableEvent(t *testing.T) {
 			wantBody:  "Recibimos tu pago de $0.05 MXN.",
 		},
 		{
+			// T7 (ISSUE-016): every thousand is separated, as on the web.
+			name:      "payment in the millions groups every thousand",
+			msg:       paymentMessage(t, "ffffffff-1000-0000-0000-000000000004", studentID, tenantID, 123456789),
+			wantType:  "payment",
+			wantTitle: "Pago recibido",
+			wantBody:  "Recibimos tu pago de $1,234,567.89 MXN.",
+		},
+		{
 			// T9: the family is told the corrected amount.
 			name:      "payment corrected",
 			msg:       correctedMessage(t, "ffffffff-1000-0000-0000-000000000003", studentID, tenantID, 100000, 50000),
 			wantType:  "payment",
 			wantTitle: "Pago actualizado",
-			wantBody:  "Tu pago fue actualizado: $1000.00 MXN.",
+			wantBody:  "Tu pago fue actualizado: $1,000.00 MXN.",
 		},
 	}
 	for _, tt := range tests {
