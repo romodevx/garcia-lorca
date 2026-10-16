@@ -12,6 +12,7 @@ import (
 
 	studentsv1 "github.com/garcia-lorca/gen/go/garcialorca/students/v1"
 	glerrors "github.com/garcia-lorca/pkg/errors"
+	"github.com/garcia-lorca/services/students/internal/adapters/protoconv"
 	"github.com/garcia-lorca/services/students/internal/domain"
 	"github.com/garcia-lorca/services/students/internal/ports"
 )
@@ -221,6 +222,10 @@ func (r *Repository) WithdrawEnrollment(ctx context.Context, e domain.Enrollment
 		return glerrors.Wrap(glerrors.KindInternal, "encoding student withdrawal", err)
 	}
 	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		var student studentModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", e.StudentID()).First(&student).Error; err != nil {
+			return translateFindErr(err)
+		}
 		res := tx.Model(&enrollmentModel{}).Where("id = ? AND status = ?", e.ID(), domain.EnrollmentStatusActive.String()).Updates(map[string]any{
 			"status": domain.EnrollmentStatusWithdrawn.String(), "withdrawn_on": e.WithdrawnOn(),
 			"withdrawal_reason": e.WithdrawalReason(), "updated_at": gorm.Expr("now()"),
@@ -234,6 +239,43 @@ func (r *Repository) WithdrawEnrollment(ctx context.Context, e domain.Enrollment
 				return translateFindErr(err)
 			}
 			return glerrors.New(glerrors.KindConflict, "enrollment is not active")
+		}
+		var active int64
+		if err := tx.Model(&enrollmentModel{}).Where("student_id = ? AND status = ?", e.StudentID(), domain.EnrollmentStatusActive.String()).Count(&active).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "checking active enrollments", err)
+		}
+		if active == 0 {
+			previous, err := domain.ParseAdmissionStatus(student.AdmissionStatus)
+			if err != nil {
+				return glerrors.Wrap(glerrors.KindInternal, "reading student admission status", err)
+			}
+			if previous != domain.AdmissionWithdrawn {
+				if !previous.CanTransitionTo(domain.AdmissionWithdrawn) {
+					return glerrors.New(glerrors.KindConflict, "student cannot transition to withdrawn")
+				}
+				statusResult := tx.Model(&studentModel{}).Where("id = ? AND admission_status = ?", e.StudentID(), previous.String()).Updates(map[string]any{
+					"admission_status": domain.AdmissionWithdrawn.String(), "updated_at": gorm.Expr("now()"),
+				})
+				if statusResult.Error != nil {
+					return glerrors.Wrap(glerrors.KindInternal, "withdrawing student admission", statusResult.Error)
+				}
+				if statusResult.RowsAffected == 0 {
+					return glerrors.New(glerrors.KindConflict, "student admission status changed concurrently")
+				}
+				admissionData, err := proto.Marshal(&studentsv1.AdmissionStatusChanged{
+					StudentId: e.StudentID(), TenantId: e.TenantID(),
+					PreviousStatus: protoconv.ToProtoStatus(previous),
+					NewStatus:      protoconv.ToProtoStatus(domain.AdmissionWithdrawn),
+					Reason:         e.WithdrawalReason(),
+				})
+				if err != nil {
+					return glerrors.Wrap(glerrors.KindInternal, "encoding admission status change", err)
+				}
+				admissionRow := outboxModel{TenantID: e.TenantID(), EventType: "AdmissionStatusChanged", Payload: admissionData}
+				if err := tx.Create(&admissionRow).Error; err != nil {
+					return glerrors.Wrap(glerrors.KindInternal, "queueing admission status change", err)
+				}
+			}
 		}
 		row := outboxModel{TenantID: e.TenantID(), EventType: "StudentWithdrawn", Payload: data}
 		if err := tx.Create(&row).Error; err != nil {

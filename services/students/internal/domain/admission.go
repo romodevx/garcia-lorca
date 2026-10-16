@@ -11,7 +11,7 @@ import (
 //
 //	pending ──accept──> accepted ──enroll──> enrolled
 //	   │                   │                    │
-//	 reject             withdraw             withdraw
+//	 reject/withdraw   withdraw             withdraw
 //	   ▼                   ▼                    ▼
 //	rejected           withdrawn            withdrawn   (rejected/withdrawn = terminal)
 type AdmissionStatus uint8
@@ -36,7 +36,7 @@ var admissionNames = map[AdmissionStatus]string{
 
 // allowedTransitions is the single source of truth for the state machine.
 var allowedTransitions = map[AdmissionStatus]map[AdmissionStatus]bool{
-	AdmissionPending:  {AdmissionAccepted: true, AdmissionRejected: true},
+	AdmissionPending:  {AdmissionAccepted: true, AdmissionRejected: true, AdmissionWithdrawn: true},
 	AdmissionAccepted: {AdmissionEnrolled: true, AdmissionWithdrawn: true},
 	AdmissionEnrolled: {AdmissionWithdrawn: true},
 	// rejected and withdrawn are terminal (no outgoing transitions).
