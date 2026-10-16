@@ -35,10 +35,10 @@ export function MoreScreen({ onLogout }: { onLogout: () => void }): ReactElement
         <Avatar initials={view.initials} size={52} />
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={[styles.name, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]} numberOfLines={1}>
-            {view.present ? view.fullName : "Portal de familias"}
+            {view.present ? view.headerName : "Portal de familias"}
           </Text>
           <Text style={[styles.teacher, { color: theme.colors.text3, fontFamily: theme.fonts.uiSemi }]}>
-            {view.present ? [view.levelLabel, view.group].filter(Boolean).join(" · ") : "—"}
+            {view.present ? view.subtitle : "—"}
           </Text>
         </View>
         {view.present ? <Chip kind="lime">{view.short}</Chip> : null}

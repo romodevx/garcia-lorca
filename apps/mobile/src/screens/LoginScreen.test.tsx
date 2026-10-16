@@ -1,6 +1,17 @@
+import { Platform } from "react-native";
 import { act, fireEvent, screen } from "@testing-library/react-native";
 import { LoginScreen } from "./LoginScreen";
 import { renderWithProviders } from "../test/renderWithProviders";
+
+const platformDescriptor = Object.getOwnPropertyDescriptor(Platform, "OS");
+
+function setPlatform(platform: "android" | "ios"): void {
+  Object.defineProperty(Platform, "OS", { configurable: true, value: platform });
+}
+
+afterEach(() => {
+  if (platformDescriptor) Object.defineProperty(Platform, "OS", platformDescriptor);
+});
 
 // The LoginScreen renders inside the full provider stack, whose AppState fetches
 // family notifications on mount. Draining that promise chain (a macrotask flush)
@@ -55,7 +66,17 @@ describe("LoginScreen", () => {
     expect(screen.getByText(/No pudimos iniciar sesión/)).toBeTruthy();
   });
 
+  it("shows fingerprint wording on Android", async () => {
+    setPlatform("android");
+    await renderWithProviders(<LoginScreen onSubmit={async () => undefined} />);
+    await drainMount();
+
+    expect(screen.getByRole("button", { name: "Entrar con huella" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Entrar con Face ID" })).toBeNull();
+  });
+
   it("does not submit credentials via Face ID (out of scope, not a silent login)", async () => {
+    setPlatform("ios");
     const onSubmit = jest.fn().mockResolvedValue(undefined);
     await renderWithProviders(<LoginScreen onSubmit={onSubmit} />);
     await drainMount();

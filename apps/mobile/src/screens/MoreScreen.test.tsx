@@ -1,8 +1,24 @@
 import { screen } from "@testing-library/react-native";
 import { MoreScreen } from "./MoreScreen";
 import { renderWithProviders } from "../test/renderWithProviders";
+import { useAppState } from "../state/AppState";
+
+jest.mock("../state/AppState", () => ({
+  ...jest.requireActual("../state/AppState"),
+  useAppState: jest.fn(),
+}));
 
 describe("MoreScreen module grid (flag-gated)", () => {
+  it("shows the shared title-cased display name and grade-level-group subtitle", async () => {
+    jest.mocked(useAppState).mockReturnValue({
+      child: { id: "s1", firstName: "VALENTINA", lastName: "GÓMEZ", maternalLastName: "RUIZ", level: "PRIMARIA", levelId: "l1", gradeGroup: "1° B" },
+    } as ReturnType<typeof useAppState>);
+    await renderWithProviders(<MoreScreen onLogout={() => undefined} />);
+    expect(screen.getByText("Valentina Gómez")).toBeTruthy();
+    expect(screen.getByText("1° PRIMARIA · B")).toBeTruthy();
+    expect(screen.queryByText("GÓMEZ RUIZ VALENTINA")).toBeNull();
+  });
+
   it("does not render a module tile whose flag is OFF", async () => {
     // Default demo flags keep the no-backend modules OFF (docs/billing/uniforms/
     // scholarships). None of their tiles should appear until the backend lands —

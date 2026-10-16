@@ -32,11 +32,11 @@ export function AppHeader(): ReactElement {
         <Avatar initials={view.initials} size={40} />
         <View style={styles.idText}>
           <Text style={[styles.greet, { color: theme.colors.text3, fontFamily: theme.fonts.uiExtra }]}>
-            {view.present ? `${view.short} · ${view.group}` : "García Lorca"}
+            {view.present ? view.subtitle : "García Lorca"}
           </Text>
           <Text
             style={[styles.name, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]}
-            numberOfLines={1}
+            numberOfLines={2}
           >
             {view.present ? view.headerName : "Portal de familias"}
           </Text>

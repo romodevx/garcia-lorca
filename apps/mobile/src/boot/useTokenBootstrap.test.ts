@@ -25,4 +25,13 @@ describe("useTokenBootstrap", () => {
 
     loadSpy.mockRestore();
   });
+
+  it("reports ready when token hydration rejects without leaking an unhandled rejection", async () => {
+    const loadSpy = jest.spyOn(tokenStore, "loadTokens").mockRejectedValue(new Error("storage unavailable"));
+
+    const { result } = await renderHook(() => useTokenBootstrap());
+    await waitFor(() => expect(result.current).toBe(true));
+
+    loadSpy.mockRestore();
+  });
 });

@@ -1,8 +1,8 @@
 import { router } from "expo-router";
-import { type ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import { ScrollView } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { signIn } from "@/src/api";
+import { getAccessToken, signIn } from "@/src/api";
 import { LoginScreen } from "@/src/screens/LoginScreen";
 import { useAppState } from "@/src/state/AppState";
 import { useTheme } from "@/src/theme";
@@ -19,6 +19,14 @@ export default function IndexRoute(): ReactNode {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const { refreshNotifications, refreshChildren } = useAppState();
+
+  // RootLayout has hydrated SecureStore before providers and routes mount. A
+  // saved guardian session can therefore resume without showing the login form.
+  useEffect(() => {
+    if (getAccessToken() !== null) {
+      router.replace("/(tabs)");
+    }
+  }, []);
 
   const onSubmit = async (email: string, password: string): Promise<void> => {
     const { mustChangePassword } = await signIn(email, password);

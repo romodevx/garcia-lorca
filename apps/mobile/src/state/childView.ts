@@ -1,4 +1,4 @@
-import { formatStudentName, studentInitials, studentShortName } from "@garcia-lorca/domain/student-name";
+import { formatDisplayName, formatStudentName, studentInitials } from "@garcia-lorca/domain/student-name";
 
 import type { FamilyStudent } from "../api";
 
@@ -14,13 +14,12 @@ export interface ChildView {
   present: boolean;
   /** "Herrera Díaz Mateo": surnames first, as every school list (T3). */
   fullName: string;
-  /**
-   * The first name alone. Kept on purpose for salutations ("Hola, familia
-   * Mateo") and the name chip — a greeting is not a list.
-   */
+  /** The pupil's paternal surname for the family greeting. */
   short: string;
-  /** Where two words fit (the app header): "Herrera Mateo". */
+  /** First name + paternal surname for the app header: "Mateo Herrera". */
   headerName: string;
+  /** Grade, level and group, with the level retained when grade is absent. */
+  subtitle: string;
   /** Two-letter monogram for the avatar. */
   initials: string;
   /** Grade + group label, e.g. "3° A". */
@@ -36,6 +35,7 @@ const EMPTY_VIEW: ChildView = {
   fullName: "",
   short: "",
   headerName: "",
+  subtitle: "",
   initials: "",
   group: "",
   levelLabel: "",
@@ -55,6 +55,16 @@ export function isQualitativeLevel(level: string): boolean {
   return QUALITATIVE_LEVELS.has(folded);
 }
 
+/** Formats the child's grade, level and optional group for the family profile. */
+export function formatSubtitle(gradeGroup: string, level: string): string {
+  const trimmedGroup = gradeGroup.trim();
+  const gradeMatch = trimmedGroup.match(/^(\d+°?)\s*(.*)$/);
+  const grade = gradeMatch?.[1] ?? "";
+  const group = (gradeMatch?.[2] ?? trimmedGroup).trim();
+  const levelText = [grade, level.trim()].filter(Boolean).join(" ");
+  return [levelText, group && group !== grade ? group : ""].filter(Boolean).join(" · ");
+}
+
 /** Projects a family student (or null) into the null-safe display view-model. */
 export function toChildView(student: FamilyStudent | null): ChildView {
   if (student === null) {
@@ -63,8 +73,9 @@ export function toChildView(student: FamilyStudent | null): ChildView {
   return {
     present: true,
     fullName: formatStudentName(student),
-    short: student.firstName,
-    headerName: studentShortName(student),
+    short: formatDisplayName("", student.lastName),
+    headerName: formatDisplayName(student.firstName, student.lastName),
+    subtitle: formatSubtitle(student.gradeGroup, student.level),
     initials: studentInitials(student),
     group: student.gradeGroup,
     levelLabel: student.level,
