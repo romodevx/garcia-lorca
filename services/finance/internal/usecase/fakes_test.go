@@ -219,11 +219,11 @@ func (f *fakeRepo) paidFor(chargeID string) int64 {
 // withPaid pairs a charge with what was collected, and what of it was paid
 // by its due date (T18) — as the repository's withPaidTotals does.
 func (f *fakeRepo) withPaid(c domain.Charge) ports.ChargeWithPaid {
-	due := c.DueDate().UTC()
-	cutoff := time.Date(due.Year(), due.Month(), due.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, 1)
+	// By the payment's DAY (paid_on), as the SQL does — never its instant.
+	due := domain.CalendarDay(c.DueDate())
 	var byDue int64
 	for _, p := range f.payments[c.ID()] {
-		if p.PaidAt().Before(cutoff) {
+		if !p.PaidOn().After(due) {
 			byDue += p.Amount().Int64()
 		}
 	}
@@ -639,7 +639,7 @@ func (f *fakeRepo) IncomeLines(_ context.Context, from, to time.Time) ([]ports.I
 			continue
 		}
 		for _, p := range ps {
-			if p.PaidAt().Before(from) || !p.PaidAt().Before(end) {
+			if p.PaidOn().Before(from) || !p.PaidOn().Before(end) {
 				continue
 			}
 			byConcept[key{charge.ConceptID(), p.Method() == domain.MethodCreditNote}] += p.Amount().Int64()
@@ -688,7 +688,7 @@ func (f *fakeRepo) ListDeposits(_ context.Context, studentID string) ([]domain.D
 func (f *fakeRepo) ListDepositsOn(_ context.Context, day time.Time) ([]domain.Deposit, error) {
 	var out []domain.Deposit
 	for _, d := range f.deposits {
-		if d.PaidAt().Year() == day.Year() && d.PaidAt().YearDay() == day.YearDay() {
+		if d.PaidOn().Equal(domain.CalendarDay(day)) {
 			out = append(out, d)
 		}
 	}
@@ -702,7 +702,7 @@ func (f *fakeRepo) ListLoosePaymentsOn(_ context.Context, day time.Time) ([]port
 			if _, inDeposit := f.depositOfPayment[p.ID()]; inDeposit {
 				continue
 			}
-			if p.PaidAt().Year() == day.Year() && p.PaidAt().YearDay() == day.YearDay() {
+			if p.PaidOn().Equal(domain.CalendarDay(day)) {
 				out = append(out, ports.LoosePayment{Payment: p, Description: f.charges[chargeID].Description()})
 			}
 		}

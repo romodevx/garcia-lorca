@@ -339,11 +339,12 @@ func (r *Repository) ExpenseTotals(ctx context.Context, from, to time.Time) (dom
 }
 
 // IncomeByMethod adds up the money received in a period, on the day it changed
-// hands: the tenders of deposits that count (not voided, not superseded) and
-// the payments taken outside a deposit — the same money the cash-up counts.
+// hands (paid_on, the school-local day — ADR 0035): the tenders of deposits
+// that count (not voided, not superseded) and the payments taken outside a
+// deposit — the same money the cash-up counts.
 func (r *Repository) IncomeByMethod(ctx context.Context, from, to time.Time) (domain.MethodTotals, int64, error) {
-	start := domain.CalendarDay(from)
-	end := domain.CalendarDay(to).AddDate(0, 0, 1)
+	start := domain.CalendarDay(from).Format(dateLayout)
+	end := domain.CalendarDay(to).AddDate(0, 0, 1).Format(dateLayout)
 	var rows []struct {
 		Method string
 		Cents  int64
@@ -353,11 +354,11 @@ func (r *Repository) IncomeByMethod(ctx context.Context, from, to time.Time) (do
 SELECT method, COALESCE(SUM(cents), 0) AS cents FROM (
     SELECT t.method, t.amount_cents AS cents
       FROM deposit_tenders t JOIN deposits d ON d.id = t.deposit_id
-     WHERE d.paid_at >= ? AND d.paid_at < ? AND d.voided_at IS NULL AND d.superseded_at IS NULL
+     WHERE d.paid_on >= ? AND d.paid_on < ? AND d.voided_at IS NULL AND d.superseded_at IS NULL
     UNION ALL
     SELECT p.method, p.amount_cents AS cents
       FROM payments p
-     WHERE p.deposit_id IS NULL AND p.paid_at >= ? AND p.paid_at < ?
+     WHERE p.deposit_id IS NULL AND p.paid_on >= ? AND p.paid_on < ?
 ) money GROUP BY method`, start, end, start, end).Scan(&rows).Error
 		if err != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "summing income by method", err)
@@ -460,26 +461,26 @@ const moneyEvent = `(kind IN ('created', 'cancelled') OR (kind = 'edited' AND (
 //   - an expense event after it that touches the day's money (moneyEvent):
 //     dated it, or moved off it.
 func (r *Repository) DayChangedSince(ctx context.Context, day, since time.Time) (bool, error) {
-	start := domain.CalendarDay(day)
-	end := start.AddDate(0, 0, 1)
+	// Money is on the day by paid_on (ADR 0035), expenses by spent_on.
+	on := domain.CalendarDay(day).Format(dateLayout)
 	var changed bool
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
 		err := tx.Raw(`
 SELECT EXISTS (
     SELECT 1 FROM deposits
-     WHERE paid_at >= ? AND paid_at < ?
+     WHERE paid_on = ?
        AND (created_at > ? OR voided_at > ? OR superseded_at > ?)
 ) OR EXISTS (
     SELECT 1 FROM payments
-     WHERE deposit_id IS NULL AND paid_at >= ? AND paid_at < ? AND created_at > ?
+     WHERE deposit_id IS NULL AND paid_on = ? AND created_at > ?
 ) OR EXISTS (
     SELECT 1 FROM expense_events
      WHERE spent_on = ? AND at > ? AND `+moneyEvent+`
 ) OR EXISTS (
     SELECT 1 FROM expense_events
      WHERE previous_spent_on = ? AND at > ? AND `+moneyEvent+`
-)`, start, end, since, since, since, start, end, since,
-			start.Format(dateLayout), since, start.Format(dateLayout), since).
+)`, on, since, since, since, on, since,
+			on, since, on, since).
 			Scan(&changed).Error
 		if err != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "checking the day for changes", err)

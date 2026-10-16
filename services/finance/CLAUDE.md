@@ -26,7 +26,8 @@ ledger operations run in a single transaction (Unit of Work).
   placed in a group (task 10, ADR 0016): `NewSaleCharge`, ref required, and a
   CHECK in finance/0017.
 - `Payment` — an append-only movement against a charge: amount (Cents), method
-  (`cash|card|transfer|credit_note`), reference ("con qué se pagó"), `paidAt`.
+  (`cash|card|transfer|credit_note`), reference ("con qué se pagó"), `paidAt`
+  (instant) and `paidOn` (school-local day, ADR 0035).
 - `Tender` (T8, ADR 0025) — one method of a combined payment. A deposit or a
   payment combines 1–4 tenders that add up EXACTLY to the amount to pay.
   `deposit_tenders` (0021) is the source of truth; `deposits.method` is a
@@ -59,9 +60,18 @@ ledger operations run in a single transaction (Unit of Work).
   stored date. NEVER truncate an instant to a day anywhere else (`.UTC()`,
   `Truncate(24h)`, `time.Date(..., time.UTC)` on `now`): that is the UTC day
   coming back in one calculation. Stored dates keep their UTC date
-  (`domain.CalendarDay`); known debt: live `paid_at` instants after 18:00 still
-  read as the next UTC day in `paid_by_due`, cash-cut windows and statement
-  movement dates (see the ADR).
+  (`domain.CalendarDay`).
+- **A payment's DAY is `paid_on`, never `paid_at`** (migration 0028, ADR 0035).
+  `deposits.paid_on` / `payments.paid_on` (`date NOT NULL`, no default) is the
+  Morelia civil day: the counter's picked day, or `clock.Today()` for a live
+  payment; `paid_at` is the audit instant only. `paymentDate` returns both
+  (`paymentDay{at, on}`); a deposit's allocations carry its day; a correction
+  without a new date keeps the original's day AND instant. Every day reader —
+  `paid_by_due`, `ListDepositsOn`, `ListLoosePaymentsOn`, `IncomeLines`,
+  `IncomeByMethod`, `DayChangedSince`, statement movements, receipts, correction
+  snapshots — reads `paid_on`. The mapper refuses undated money (`KindInternal`).
+  "No future date" compares days: a picked day after `Today()` is refused.
+  New code that writes a payment or deposit MUST call `WithPaidOn`.
 - Bulk `GenerateCharges` is idempotent via `UNIQUE(tenant, student, cycle,
   concept)` + ON CONFLICT DO NOTHING (re-run reports created vs skipped).
 - `RegisterPayment` is idempotent when the caller sends an `idempotency_key`:

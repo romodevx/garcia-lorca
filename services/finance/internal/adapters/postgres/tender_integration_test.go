@@ -30,7 +30,7 @@ func methodPayment(t *testing.T, id, tenant, chargeID string, amount int64, at t
 	if err != nil {
 		t.Fatalf("new payment: %v", err)
 	}
-	return p
+	return p.WithPaidOn(at)
 }
 
 // The tenders are stored in order and come back on every read; the deposit's

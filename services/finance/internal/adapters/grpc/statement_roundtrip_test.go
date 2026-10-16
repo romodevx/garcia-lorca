@@ -33,11 +33,14 @@ func TestAStatementSurvivesTheWireWhole(t *testing.T) {
 	}
 	f.repo.charges[later.ID()] = later
 
-	paidAt := time.Date(2026, 9, 6, 15, 0, 0, 0, time.UTC)
+	// 19:00 on the 6th in Morelia: the instant's UTC date is the 7th, the
+	// line is dated the deposit's day (paid_on, ADR 0035).
+	paidAt := time.Date(2026, 9, 7, 1, 0, 0, 0, time.UTC)
 	d, err := domain.NewDeposit("dep-1", testTenant, testStudent, 30000, domain.MethodCard, "voucher-9", paidAt, "", "cal")
 	if err != nil {
 		t.Fatalf("NewDeposit: %v", err)
 	}
+	d = d.WithPaidOn(time.Date(2026, 9, 6, 0, 0, 0, 0, time.UTC))
 	if d, err = d.WithCardType("debit"); err != nil {
 		t.Fatalf("WithCardType: %v", err)
 	}

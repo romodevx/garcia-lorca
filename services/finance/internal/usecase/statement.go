@@ -212,7 +212,7 @@ func depositMovements(deposits []domain.Deposit, family bool) []domain.Movement 
 		}
 		for _, t := range d.Tenders() {
 			out = append(out, domain.Movement{
-				Kind: tenderKind(t.Method()), Date: d.PaidAt(), Description: tenderDescription(t.Method()),
+				Kind: tenderKind(t.Method()), Date: d.PaidOn(), Description: tenderDescription(t.Method()),
 				AmountCents: t.Amount().Int64(), DepositID: d.ID(),
 				Method: t.Method(), CardType: t.CardType(), Reference: t.Reference(), Folio: d.Folio(),
 				Voided: d.Voided(), VoidReason: d.VoidReason(),
@@ -258,7 +258,7 @@ func loosePaymentMovements(payments []domain.Payment, charges []ports.ChargeWith
 			description += " · " + d
 		}
 		out = append(out, domain.Movement{
-			Kind: tenderKind(p.Method()), Date: p.PaidAt(), Description: description,
+			Kind: tenderKind(p.Method()), Date: p.PaidOn(), Description: description,
 			AmountCents: p.Amount().Int64(), ChargeID: p.ChargeID(),
 			Method: p.Method(), CardType: p.CardType(), Reference: p.Reference(),
 		})

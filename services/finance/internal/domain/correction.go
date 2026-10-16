@@ -108,14 +108,16 @@ type DepositSnapshot struct {
 	Folio       string
 	AmountCents int64
 	PaidAt      time.Time
-	Tenders     []TenderSnapshot
-	Lines       []SnapshotLine
+	// PaidOn is the school-local day the deposit was judged on.
+	PaidOn  time.Time
+	Tenders []TenderSnapshot
+	Lines   []SnapshotLine
 }
 
 // SnapshotOf records a deposit and the payments it split into. A charge paid
 // by two tenders is one line, in the order the charges were paid.
 func SnapshotOf(d Deposit, allocations []Payment) DepositSnapshot {
-	s := DepositSnapshot{DepositID: d.ID(), Folio: d.Folio(), AmountCents: d.Amount().Int64(), PaidAt: d.PaidAt()}
+	s := DepositSnapshot{DepositID: d.ID(), Folio: d.Folio(), AmountCents: d.Amount().Int64(), PaidAt: d.PaidAt(), PaidOn: d.PaidOn()}
 	for _, t := range d.Tenders() {
 		s.Tenders = append(s.Tenders, TenderSnapshot{
 			Method: t.Method(), AmountCents: t.Amount().Int64(), Reference: t.Reference(), CardType: t.CardType(),

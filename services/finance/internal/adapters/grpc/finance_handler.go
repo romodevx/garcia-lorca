@@ -577,6 +577,7 @@ func toProtoDeposit(d domain.Deposit) *financev1.Deposit {
 		Method:          d.Method(),
 		Reference:       d.Reference(),
 		PaidAt:          timestamppb.New(d.PaidAt()),
+		PaidOn:          formatPlanDate(d.PaidOn()),
 		CalendarVersion: d.CalendarVersion(),
 		CardType:        d.CardType(),
 		VoidReason:      d.VoidReason(),
@@ -676,7 +677,7 @@ func toProtoCorrection(c domain.DepositCorrection, descriptions map[string]strin
 }
 
 func toProtoSnapshot(s domain.DepositSnapshot, descriptions map[string]string) *financev1.DepositSnapshot {
-	out := &financev1.DepositSnapshot{DepositId: s.DepositID, Folio: s.Folio, AmountCents: s.AmountCents}
+	out := &financev1.DepositSnapshot{DepositId: s.DepositID, Folio: s.Folio, AmountCents: s.AmountCents, PaidOn: formatPlanDate(s.PaidOn)}
 	if !s.PaidAt.IsZero() {
 		out.PaidAt = timestamppb.New(s.PaidAt)
 	}
@@ -787,6 +788,7 @@ func toProtoPayment(p domain.Payment) *financev1.Payment {
 		Method:      p.Method(),
 		Reference:   p.Reference(),
 		PaidAt:      timestamppb.New(p.PaidAt()),
+		PaidOn:      formatPlanDate(p.PaidOn()),
 		CardType:    p.CardType(),
 		DepositId:   p.DepositID(),
 	}
@@ -1030,6 +1032,9 @@ func parsePlanDate(s string) (time.Time, error) {
 	return t, nil
 }
 
+// formatPlanDate is a stored date as the wire's "YYYY-MM-DD" (a plan's
+// window, a payment's paid_on); a date never recorded is empty, not
+// "0001-01-01".
 func formatPlanDate(t time.Time) string {
 	if t.IsZero() {
 		return ""

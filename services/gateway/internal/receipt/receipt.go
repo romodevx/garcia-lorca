@@ -152,7 +152,7 @@ func (b *Builder) Payment(ctx context.Context, depositID string) (Receipt, error
 	}
 	d := got.Deposit
 	r := Receipt{
-		Kind: KindPayment, Folio: d.Folio, School: school, PaidOn: dateOf(d.PaidAt),
+		Kind: KindPayment, Folio: d.Folio, School: school, PaidOn: depositDay(d),
 		Buyer:       pupil.FullName(),
 		BuyerDetail: pupil.GradeGroup,
 		Lines:       make([]Line, 0, len(got.Lines)),
@@ -275,6 +275,16 @@ func buyerOf(order client.UniformOrder) string {
 }
 
 // dateOf keeps the calendar day of an RFC 3339 instant ("2026-10-10T…").
+// depositDay is the day a deposit's receipt prints: its school-local day
+// (paid_on, ADR 0035). A finance that predates it sends none; its paid_at was
+// then the day as the counter stored it.
+func depositDay(d client.Deposit) string {
+	if d.PaidOn != "" {
+		return d.PaidOn
+	}
+	return dateOf(d.PaidAt)
+}
+
 func dateOf(instant string) string {
 	if len(instant) < len("2006-01-02") {
 		return instant

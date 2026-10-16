@@ -245,7 +245,9 @@ type paymentResponse struct {
 	Method      string `json:"method"`
 	Reference   string `json:"reference"`
 	PaidAt      string `json:"paidAt"`
-	CardType    string `json:"cardType,omitempty"`
+	// PaidOn is the school-local day (ADR 0035).
+	PaidOn   string `json:"paidOn,omitempty"`
+	CardType string `json:"cardType,omitempty"`
 	// DepositID is the receipt this payment is a slice of (T9).
 	DepositID string `json:"depositId,omitempty"`
 }
@@ -268,6 +270,7 @@ func toPaymentResponse(p client.Payment) paymentResponse {
 		Method:      p.Method,
 		Reference:   p.Reference,
 		PaidAt:      p.PaidAt,
+		PaidOn:      p.PaidOn,
 		CardType:    p.CardType,
 		DepositID:   p.DepositID,
 	}

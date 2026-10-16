@@ -17,6 +17,7 @@ import { listCycles, type Cycle } from "../../config/api";
 import { getOverdue, listCharges, registerPayment, type Charge } from "../../finance/api";
 import { pendingCents } from "../../finance/pending";
 import { localISODate } from "../../_lib/localDate";
+import { schoolISODate, schoolMonthStart } from "../../_lib/schoolDay";
 import { centsToPesosInput, formatCents, pesosToCents } from "../../_lib/money";
 import { listStudents, type Student } from "../../students/api";
 import { useIntent } from "../../routing/pendingIntent";
@@ -206,16 +207,6 @@ function monthName(iso: string): string {
   return name === undefined ? iso : `${name} ${year}`;
 }
 
-/** Today, as the wire wants it. */
-function today(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
-/** The first of the current month. */
-function monthStart(): string {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
-}
 
 /** The columns the school reads in Excel, in the order the table shows them. */
 const EXPORT_COLUMNS: readonly CsvColumn<Row>[] = [
@@ -409,7 +400,7 @@ export function FinanceScreen({ onBack, today: officeDay, notes, canCorrectPayme
       {/* What came IN, before what is owed. The director's first question is
           how the month is going, and it used to take opening a drawer. */}
       <div className="fade-up" style={{ marginBottom: 26 }}>
-        <IncomePanel key={paidCount} from={monthStart()} to={today()} />
+        <IncomePanel key={paidCount} from={schoolMonthStart()} to={schoolISODate()} />
       </div>
 
       <h2 className="fade-up" style={{ fontSize: 20, fontWeight: 700, color: "var(--text)", marginBottom: 14 }}>Adeudos</h2>

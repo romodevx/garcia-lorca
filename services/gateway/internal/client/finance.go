@@ -84,6 +84,9 @@ type Payment struct {
 	Method      string
 	Reference   string
 	PaidAt      string
+	// PaidOn is the school-local day, "YYYY-MM-DD" (ADR 0035): the day the
+	// money changed hands. PaidAt is the instant it was recorded.
+	PaidOn string
 	// CardType is debit or credit on a card payment (T8), empty otherwise.
 	CardType string
 	// DepositID is the deposit this payment is a slice of (T9), empty for a
@@ -419,12 +422,16 @@ type Receiver struct {
 }
 
 type Deposit struct {
-	ID              string `json:"id"`
-	StudentID       string `json:"studentId"`
-	AmountCents     int64  `json:"amountCents"`
-	Method          string `json:"method"`
-	Reference       string `json:"reference"`
-	PaidAt          string `json:"paidAt"`
+	ID          string `json:"id"`
+	StudentID   string `json:"studentId"`
+	AmountCents int64  `json:"amountCents"`
+	Method      string `json:"method"`
+	Reference   string `json:"reference"`
+	PaidAt      string `json:"paidAt"`
+	// PaidOn is the school-local day, "YYYY-MM-DD" (ADR 0035): what the cash
+	// cut, the statement and the receipt read. Empty from a finance that
+	// predates it; read PaidAt's date then.
+	PaidOn          string `json:"paidOn,omitempty"`
 	CalendarVersion string `json:"calendarVersion"`
 	// CardType is debit or credit on a card payment, empty otherwise.
 	CardType   string `json:"cardType,omitempty"`
@@ -674,6 +681,7 @@ type CashUpPayment struct {
 	Method      string `json:"method"`
 	Reference   string `json:"reference"`
 	PaidAt      string `json:"paidAt"`
+	PaidOn      string `json:"paidOn,omitempty"`
 	Description string `json:"description"`
 	CardType    string `json:"cardType,omitempty"`
 }
@@ -693,7 +701,7 @@ func toCashUp(m *financev1.DailyCashUpResponse) CashUp {
 		paid := toPayment(p.GetPayment())
 		payments = append(payments, CashUpPayment{
 			ID: paid.ID, ChargeID: paid.ChargeID, AmountCents: paid.AmountCents, Method: paid.Method,
-			Reference: paid.Reference, PaidAt: paid.PaidAt, Description: p.GetDescription(), CardType: paid.CardType,
+			Reference: paid.Reference, PaidAt: paid.PaidAt, PaidOn: paid.PaidOn, Description: p.GetDescription(), CardType: paid.CardType,
 		})
 	}
 	return CashUp{
@@ -809,6 +817,7 @@ func toDeposit(d *financev1.Deposit) Deposit {
 	if ts := d.GetPaidAt(); ts != nil {
 		out.PaidAt = ts.AsTime().Format(time.RFC3339)
 	}
+	out.PaidOn = d.GetPaidOn()
 	if ts := d.GetVoidedAt(); ts != nil {
 		out.VoidedAt = ts.AsTime().Format(time.RFC3339)
 	}
@@ -868,6 +877,7 @@ func toPayment(p *financev1.Payment) Payment {
 		Method:      p.GetMethod(),
 		Reference:   p.GetReference(),
 		PaidAt:      paidAt,
+		PaidOn:      p.GetPaidOn(),
 		CardType:    p.GetCardType(),
 		DepositID:   p.GetDepositId(),
 	}

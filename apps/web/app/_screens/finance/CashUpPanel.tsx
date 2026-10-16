@@ -3,6 +3,7 @@
 import { useEffect, useState, type ReactElement } from "react";
 import { Icon } from "../../_design/Icon";
 import { getCashUp, type CashUp, type Deposit } from "../../finance/api";
+import { depositDay } from "../../finance/depositDay";
 import { API_URL } from "../../api-url";
 import { localISODate, shortDayLabel } from "../../_lib/localDate";
 import { ticketPath } from "../../receipts/api";
@@ -195,15 +196,16 @@ export function CashUpPanel({ day, onCorrect, access }: CashUpPanelProps): React
 }
 
 /**
- * Keyed on a later day than the one it is dated. A back-dated payment carries
- * a calendar date, stored as midnight UTC, so its day is read as written
- * (UTC); the moment it was keyed is read on the office's clock.
+ * Keyed on a later day than the one it is dated. The deposit's day is its
+ * school-local day (depositDay, ADR 0035); the moment it was keyed is read on
+ * the school's clock too.
  */
 function capturedLate(d: Deposit): boolean {
   if (d.capturedAt === undefined || d.capturedAt === "") return false;
   const keyed = new Date(d.capturedAt);
-  if (Number.isNaN(keyed.getTime()) || d.paidAt.length < 10) return false;
-  return localISODate(keyed) > d.paidAt.slice(0, 10);
+  const day = depositDay(d);
+  if (Number.isNaN(keyed.getTime()) || day.length < 10) return false;
+  return localISODate(keyed) > day;
 }
 
 /** "13 oct": the day a late capture was keyed. */

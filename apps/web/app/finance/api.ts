@@ -139,7 +139,14 @@ export interface Deposit {
   /** `mixed` when it was paid with several methods: read `tenders`, not this. */
   method: DepositMethod;
   reference: string;
+  /** The instant it was recorded (audit). Not the day: read depositDay. */
   paidAt: string;
+  /**
+   * The school-local day the money changed hands, aaaa-mm-dd (ADR 0035). A
+   * live payment at 19:00 in Morelia is the next day in UTC; this is not.
+   * Absent from a server that predates it.
+   */
+  paidOn?: string;
   /** How it was paid, method by method (T8). Always at least one. */
   tenders: Tender[];
   /**
@@ -895,6 +902,7 @@ function toDeposit(d: WireDeposit): Deposit {
     ...present("supersededByFolio", d.supersededByFolio),
     ...present("correctsDepositId", d.correctsDepositId),
     ...present("correctsFolio", d.correctsFolio),
+    ...present("paidOn", d.paidOn),
   };
 }
 
@@ -931,6 +939,8 @@ export interface DepositSnapshot {
   folio: string;
   amountCents: number;
   paidAt?: string;
+  /** The school-local day (ADR 0035); absent on snapshots written before it. */
+  paidOn?: string;
   tenders: Tender[];
   lines: SnapshotLine[];
 }
@@ -965,6 +975,7 @@ const toSnapshot = (s: WireSnapshot | undefined): DepositSnapshot => ({
   folio: s?.folio ?? "",
   amountCents: s?.amountCents ?? 0,
   ...present("paidAt", s?.paidAt),
+  ...present("paidOn", s?.paidOn),
   tenders: (s?.tenders ?? []).map(toTender),
   lines: s?.lines ?? [],
 });

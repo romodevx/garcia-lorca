@@ -449,7 +449,7 @@ type TenderedPaymentInput struct {
 // and each further row the key with "#2", "#3"… appended, so a retry finds the
 // set already stored and returns it without collecting again.
 func (s *FinanceService) RegisterTenderedPayment(ctx context.Context, in TenderedPaymentInput) ([]domain.Payment, ports.ChargeWithPaid, error) {
-	when, day, err := s.paymentDate(in.PaidAt)
+	when, err := s.paymentDate(in.PaidAt)
 	if err != nil {
 		return nil, ports.ChargeWithPaid{}, err
 	}
@@ -457,7 +457,7 @@ func (s *FinanceService) RegisterTenderedPayment(ctx context.Context, in Tendere
 	if err != nil {
 		return nil, ports.ChargeWithPaid{}, err
 	}
-	if err := s.refuseScholarshipCharge(ctx, in.ChargeID, day); err != nil {
+	if err := s.refuseScholarshipCharge(ctx, in.ChargeID, when.on); err != nil {
 		return nil, ports.ChargeWithPaid{}, err
 	}
 
@@ -484,29 +484,38 @@ func (s *FinanceService) RegisterTenderedPayment(ctx context.Context, in Tendere
 // errFuturePayment refuses a payment dated after it was taken.
 var errFuturePayment = glerrors.New(glerrors.KindInvalid, "la fecha del pago no puede estar en el futuro")
 
-// paymentDate splits a payment's date in two: the instant written as paid_at,
-// and the day the collection rules judge it on (ADR 0035).
+// paymentDay is when a payment happened, in the two senses ADR 0035 keeps
+// apart: the instant it was recorded (paid_at, audit only) and the
+// school-local civil day it is judged on (paid_on, what every rule reads).
+type paymentDay struct {
+	at time.Time
+	on time.Time
+}
+
+// paymentDate turns the caller's date into a paymentDay.
 //
-// Unset means now: recorded at the instant, judged on the school's today — so
-// a family paying at 19:00 in Morelia on the last day of the early window still
-// earns it. A date the caller gave (the counter's, which arrives as midnight UTC
-// of the day picked, or a correction's original paid_at) keeps the day it has
-// always stood for, its UTC date, the same day the stored paid_by_due reads:
-// a stored date is never re-zoned.
-func (s *FinanceService) paymentDate(paidAt time.Time) (recorded, day time.Time, err error) {
-	now := s.clock.Now()
+// Unset means now: recorded at the instant, dated the school's today — so a
+// family paying at 19:00 in Morelia on the last day of the early window is
+// dated that day, and stays dated that day in paid_by_due, the cash cut, the
+// statement and the receipt. A date the caller gave is the day picked at the
+// counter, which arrives as midnight UTC of that day: it is that day. The
+// "no future date" rule compares DAYS with the school's today, so picking
+// tomorrow is refused at any hour of the local evening.
+func (s *FinanceService) paymentDate(paidAt time.Time) (paymentDay, error) {
+	today := s.clock.Today()
 	if paidAt.IsZero() {
-		return now, s.clock.Today(), nil
+		return paymentDay{at: s.clock.Now(), on: today}, nil
 	}
-	if paidAt.After(now) {
-		return time.Time{}, time.Time{}, errFuturePayment
+	day := domain.CalendarDay(paidAt)
+	if day.After(today) {
+		return paymentDay{}, errFuturePayment
 	}
-	return paidAt, domain.CalendarDay(paidAt), nil
+	return paymentDay{at: paidAt, on: day}, nil
 }
 
 // tenderedPayments builds one validated payment per tender, after checking
 // that the tenders add up to the amount being paid.
-func (s *FinanceService) tenderedPayments(in TenderedPaymentInput, when time.Time) ([]domain.Payment, error) {
+func (s *FinanceService) tenderedPayments(in TenderedPaymentInput, when paymentDay) ([]domain.Payment, error) {
 	if in.AmountCents <= 0 {
 		return nil, glerrors.New(glerrors.KindInvalid, "payment amount must be positive")
 	}
@@ -520,10 +529,11 @@ func (s *FinanceService) tenderedPayments(in TenderedPaymentInput, when time.Tim
 	out := make([]domain.Payment, 0, len(tenders))
 	for i, t := range tenders {
 		payment, err := domain.NewPayment(s.newID(), s.tenantID, in.ChargeID, t.Amount().Int64(),
-			t.Method(), t.Reference(), when, domain.TenderKey(in.IdempotencyKey, i))
+			t.Method(), t.Reference(), when.at, domain.TenderKey(in.IdempotencyKey, i))
 		if err != nil {
 			return nil, err
 		}
+		payment = payment.WithPaidOn(when.on)
 		if payment, err = payment.WithCardType(t.CardType()); err != nil {
 			return nil, err
 		}

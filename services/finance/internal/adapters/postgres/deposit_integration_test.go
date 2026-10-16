@@ -30,7 +30,9 @@ func newDeposit(t *testing.T, id, tenant, student string, amount int64, at time.
 	if err != nil {
 		t.Fatalf("new deposit: %v", err)
 	}
-	return d
+	// Dated on the UTC date of at: these fixtures use counter-style days. A
+	// test about a live instant sets its own day with WithPaidOn.
+	return d.WithPaidOn(at)
 }
 
 // splitOldestFirst is the production rule in the shape the repository wants: fill

@@ -48,13 +48,15 @@ func validateMethod(method string) error {
 // payment. It is opaque to the domain — enforcing the dedup needs the whole
 // ledger, so it belongs to the repository's payment transaction.
 type Payment struct {
-	id             string
-	tenantID       string
-	chargeID       string
-	amount         Cents
-	method         string
-	reference      string
-	paidAt         time.Time
+	id        string
+	tenantID  string
+	chargeID  string
+	amount    Cents
+	method    string
+	reference string
+	paidAt    time.Time
+	// paidOn is the school-local day the payment is judged on (ADR 0035).
+	paidOn         time.Time
 	idempotencyKey string
 	receivedBy     string
 	depositID      string
@@ -151,3 +153,13 @@ func (p Payment) Method() string         { return p.method }
 func (p Payment) Reference() string      { return p.reference }
 func (p Payment) PaidAt() time.Time      { return p.paidAt }
 func (p Payment) IdempotencyKey() string { return p.idempotencyKey }
+
+// PaidOn is the school-local day the money changed hands; zero until dated.
+func (p Payment) PaidOn() time.Time { return p.paidOn }
+
+// WithPaidOn returns the payment judged on that school-local day, stored as
+// midnight UTC like every finance date.
+func (p Payment) WithPaidOn(day time.Time) Payment {
+	p.paidOn = CalendarDay(day)
+	return p
+}

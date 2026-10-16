@@ -566,8 +566,9 @@ func TestPayingCollectsTheTierInForceOnTheDayTheMoneyArrives(t *testing.T) {
 	f := ladderFixture(t)
 	runOn(t, f, "2026-09-15")
 
-	// November: the inscription's second rung. No run has fired since.
-	f.clock = aug(2026, time.November, 5)
+	// November: the inscription's second rung. No run has fired since. Noon:
+	// midnight UTC is still the 4th in Morelia, and the 5th would be tomorrow.
+	f.clock = aug(2026, time.November, 5).Add(12 * time.Hour)
 	if _, err := f.svc.RegisterDeposit(context.Background(), usecase.DepositInput{
 		StudentID: testStudent, AmountCents: 330000, Method: domain.MethodCash,
 		PaidAt: aug(2026, time.November, 5),
