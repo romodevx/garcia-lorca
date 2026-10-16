@@ -67,6 +67,11 @@ type CatalogRepository interface {
 	// half-applied patch cannot exist), or KindNotFound when the level does not
 	// exist. The caller has already validated the patch.
 	UpdateLevel(ctx context.Context, id string, patch LevelPatch) error
+	// ReorderLevels rewrites every level's sort_order from ids (first = 1) in
+	// ONE transaction, holding the tenant's level rows locked while it checks
+	// that ids is exactly them (domain.CheckLevelOrder: else
+	// LEVEL_ORDER_MISMATCH, nothing written). It answers the levels in order.
+	ReorderLevels(ctx context.Context, ids []string) ([]domain.Level, error)
 
 	// --- grade levels (grados, catalog; child of level) ---
 
@@ -77,6 +82,14 @@ type CatalogRepository interface {
 	GetGradeLevel(ctx context.Context, id string) (domain.GradeLevel, error)
 	// ListGradeLevels returns the grade levels of levelID.
 	ListGradeLevels(ctx context.Context, levelID string) ([]domain.GradeLevel, error)
+	// RenameGradeLevel changes a grade's name in place and returns the stored
+	// row. Unknown id → KindNotFound; a name the level has (any case) →
+	// domain.GradeNameTaken.
+	RenameGradeLevel(ctx context.Context, id, name string) (domain.GradeLevel, error)
+	// DeleteGradeLevel removes a grade that holds nothing. Unknown id →
+	// KindNotFound; groups, subjects or evaluation periods counted with the
+	// grade row locked → domain.GradeLevelUsage.Refusal.
+	DeleteGradeLevel(ctx context.Context, id string) error
 
 	// --- subjects (materias, catalog; child of grade level) ---
 
@@ -122,6 +135,17 @@ type CatalogRepository interface {
 	// ListGroups returns the groups of cycleID, optionally narrowed to
 	// gradeLevelID ("" = all grade levels of the cycle).
 	ListGroups(ctx context.Context, cycleID string, gradeLevelID string) ([]domain.Group, error)
+	// RenameGroup changes a group's name in place and returns the stored row.
+	// Unknown id → KindNotFound; a name its grade has in the cycle →
+	// domain.GroupNameTaken.
+	RenameGroup(ctx context.Context, id, name string) (domain.Group, error)
+	// GroupUsage counts config's references to a group. Unknown id →
+	// KindNotFound.
+	GroupUsage(ctx context.Context, id string) (domain.GroupUsage, error)
+	// DeleteGroup removes a group config keeps nothing of. Unknown id →
+	// KindNotFound; references counted with the group row locked →
+	// domain.GroupUsage.Refusal.
+	DeleteGroup(ctx context.Context, id string) error
 
 	// --- teachers (catalog person records; NOT login accounts) ---
 

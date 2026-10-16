@@ -325,3 +325,25 @@ type LevelRestore struct {
 	Report                  levelarchive.Report
 	UnrestoredEnrollmentIDs []string
 }
+
+// GroupUsage is what students keeps of one config group: every enrollment
+// ever placed in it (any status) and every transfer out of or into it.
+type GroupUsage struct {
+	Enrollments int64
+	Transfers   int64
+}
+
+// GroupRecordRepository answers for the records students keeps of one config
+// group (T8, ADR 0036): how many there are, so the gateway can refuse to
+// delete a group with history, and the group label on the pupils' files,
+// rewritten after config renames the group.
+//
+//   - GroupUsage counts, tenant-bound; an unknown group is zeros (students
+//     does not own groups, only records of them).
+//   - RefreshGroupName sets grade_group = name on the file of every pupil
+//     ACTIVELY enrolled in the group and answers how many files changed
+//     (0 on a repeat: idempotent).
+type GroupRecordRepository interface {
+	GroupUsage(ctx context.Context, groupID string) (GroupUsage, error)
+	RefreshGroupName(ctx context.Context, groupID, name string) (int64, error)
+}

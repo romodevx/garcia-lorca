@@ -176,7 +176,8 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 	// gateway's hourly sweep (always warm, unlike this scale-to-zero service)
 	// purges each batch past config's restorable_until via PurgeLevelBatch.
 	levels := usecase.NewLevelArchiveService(repo, time.Now)
-	handler := grpcadapter.NewGradesHandler(svc, periodGrades, periods, health).WithLevelArchive(levels)
+	handler := grpcadapter.NewGradesHandler(svc, periodGrades, periods, health).WithLevelArchive(levels).
+		WithGroupUsage(usecase.NewGroupUsageService(repo))
 
 	mux := http.NewServeMux()
 	path, h := gradesv1connect.NewGradesServiceHandler(handler, connect.WithRecover(recoverFn))

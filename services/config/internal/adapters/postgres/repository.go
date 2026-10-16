@@ -185,26 +185,34 @@ func (r *Repository) GetLevel(ctx context.Context, id string) (domain.Level, err
 	return out, nil
 }
 
-// ListLevels returns every level in the tenant catalog, ordered by name.
+// ListLevels returns every level in the tenant catalog in school order
+// (sort_order, then name).
 func (r *Repository) ListLevels(ctx context.Context) ([]domain.Level, error) {
 	var out []domain.Level
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
-		var rows []levelModel
-		if err := tx.Order("name").Find(&rows).Error; err != nil {
-			return glerrors.Wrap(glerrors.KindInternal, "listing levels", err)
-		}
-		out = make([]domain.Level, 0, len(rows))
-		for _, m := range rows {
-			l, derr := toDomainLevel(m)
-			if derr != nil {
-				return derr
-			}
-			out = append(out, l)
-		}
-		return nil
+		var lerr error
+		out, lerr = listLevels(tx)
+		return lerr
 	})
 	if err != nil {
 		return nil, err
+	}
+	return out, nil
+}
+
+// listLevels reads the bound tenant's levels in school order.
+func listLevels(tx *gorm.DB) ([]domain.Level, error) {
+	var rows []levelModel
+	if err := tx.Order("sort_order, name").Find(&rows).Error; err != nil {
+		return nil, glerrors.Wrap(glerrors.KindInternal, "listing levels", err)
+	}
+	out := make([]domain.Level, 0, len(rows))
+	for _, m := range rows {
+		l, err := toDomainLevel(m)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, l)
 	}
 	return out, nil
 }

@@ -59,6 +59,11 @@ type fakeConfig struct {
 	renamedSubject string
 	renamedTo      string
 	deletedSubject string
+	// T8 catalog corrections.
+	reorderedLevels []string
+	renamedGrade    string
+	renamedGradeTo  string
+	deletedGrade    string
 
 	termIn     client.CreateTermInput
 	terms      []client.TermResult
@@ -71,7 +76,7 @@ type fakeConfig struct {
 	copyFrom     string
 	copyTo       []string
 	// T14 evaluation periods.
-	evalList    [3]string // cycle, level, grade of the last list
+	evalList [3]string // cycle, level, grade of the last list
 	// evalPeriods, when set, is what ListEvaluationPeriods answers (filtered
 	// by grade when one is asked).
 	evalPeriods []client.EvaluationPeriod

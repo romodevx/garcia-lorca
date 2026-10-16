@@ -34,6 +34,7 @@ type StudentsHandler struct {
 	cards    *usecase.CardService
 	levels   *usecase.LevelArchiveService
 	imports  *usecase.ImportService
+	groups   *usecase.GroupRecordService
 }
 
 // NewStudentsHandler wires the handler to the student, enrollment, guardian, and

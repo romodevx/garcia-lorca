@@ -45,7 +45,7 @@ func TestConfigSetLevelAttendanceMode(t *testing.T) {
 				return
 			}
 			assert.Equal(t, "lvl-1", svc.modeLevelID)
-			assert.JSONEq(t, `{"id":"lvl-1","name":"Secundaria","sepCode":"","enrollmentGranularity":"cycle","attendanceMode":"`+tt.wantMode+`",
+			assert.JSONEq(t, `{"id":"lvl-1","name":"Secundaria","sepCode":"","sortOrder":0,"enrollmentGranularity":"cycle","attendanceMode":"`+tt.wantMode+`",
 				"grading":{"enabled":false,"min":0,"max":0,"decimals":0,"passing":0}}`, rec.Body.String())
 		})
 	}

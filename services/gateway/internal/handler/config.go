@@ -22,9 +22,12 @@ type ConfigService interface {
 	ActivateCycle(ctx context.Context, id string) (client.CycleResult, error)
 	CreateLevel(ctx context.Context, in client.CreateLevelInput) (client.LevelResult, error)
 	ListLevels(ctx context.Context) ([]client.LevelResult, error)
+	ReorderLevels(ctx context.Context, levelIDs []string) ([]client.LevelResult, error)
 	UpdateLevel(ctx context.Context, id string, p client.LevelPatch) (client.LevelResult, error)
 	CreateGradeLevel(ctx context.Context, in client.CreateGradeLevelInput) (client.GradeLevelResult, error)
 	ListGradeLevels(ctx context.Context, levelID string) ([]client.GradeLevelResult, error)
+	RenameGradeLevel(ctx context.Context, id, name string) (client.GradeLevelResult, error)
+	DeleteGradeLevel(ctx context.Context, id string) error
 	CreateSubject(ctx context.Context, in client.CreateSubjectInput) (client.SubjectResult, error)
 	ListSubjects(ctx context.Context, gradeLevelID string) ([]client.SubjectResult, error)
 	RenameSubject(ctx context.Context, id, name string) (client.SubjectResult, error)
@@ -235,6 +238,8 @@ type levelResponse struct {
 	AttendanceMode string `json:"attendanceMode"`
 	// Grading is the level's numeric grading scale, in person units (T6).
 	Grading levelGradingResponse `json:"grading"`
+	// SortOrder is the level's place in the school order (T8; 1 = first).
+	SortOrder int `json:"sortOrder"`
 }
 
 // levelGradingResponse is a grading scale as a person reads it (5, 9.5).
@@ -268,6 +273,7 @@ func toLevelResponse(l client.LevelResult) levelResponse {
 		EnrollmentGranularity: l.Granularity,
 		AttendanceMode:        l.AttendanceMode,
 		Grading:               levelGradingResponse{Enabled: l.Grading.Enabled, gradeScaleResponse: toGradeScaleResponse(l.Grading.Scale)},
+		SortOrder:             l.SortOrder,
 	}
 }
 

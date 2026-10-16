@@ -274,7 +274,8 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 	// announces nothing, and its enrollments carry origin=import for finance.
 	imports := usecase.NewImportService(repo, catalog, catalog, tenantID, newID, time.Now).WithSchoolZone(zone)
 	handler := grpcadapter.NewStudentsHandler(svc, enroll, guardians, health).
-		WithNotes(notes).WithCards(cards).WithLevelArchive(levels).WithImports(imports)
+		WithNotes(notes).WithCards(cards).WithLevelArchive(levels).WithImports(imports).
+		WithGroupRecords(usecase.NewGroupRecordService(repo))
 
 	mux := http.NewServeMux()
 	path, h := studentsv1connect.NewStudentsServiceHandler(handler, connect.WithRecover(recoverFn))

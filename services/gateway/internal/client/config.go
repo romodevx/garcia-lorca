@@ -72,6 +72,8 @@ type LevelResult struct {
 	Grading LevelGrading
 	// Deleting is true while the level's deletion runs (ADR 0021).
 	Deleting bool
+	// SortOrder is the level's place in the school order (1 = first).
+	SortOrder int
 }
 
 // GradeScale is a numeric grading scale in exact hundredths (5.00 = 500).
@@ -760,6 +762,7 @@ func toLevelResult(l *configv1.Level) LevelResult {
 		AttendanceMode: attendanceModeNames[l.GetAttendanceMode()],
 		Grading:        toLevelGrading(l.GetGrading()),
 		Deleting:       l.GetStatus() == configv1.LevelStatus_LEVEL_STATUS_DELETING,
+		SortOrder:      int(l.GetSortOrder()),
 	}
 }
 

@@ -150,7 +150,8 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 	// this scale-to-zero service) purges each batch past config's
 	// restorable_until through PurgeLevelBatch.
 	trash := service.NewLevelArchiveService(repo, time.Now)
-	h := handler.NewAttendanceHandler(svc).WithLevelArchive(trash)
+	h := handler.NewAttendanceHandler(svc).WithLevelArchive(trash).
+		WithGroupUsage(service.NewGroupUsageService(repo))
 
 	mux := http.NewServeMux()
 	path, connectHandler := attendancev1connect.NewAttendanceServiceHandler(h, connect.WithRecover(recoverFn))

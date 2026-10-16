@@ -90,7 +90,7 @@ func toDomainLevel(m levelModel) (domain.Level, error) {
 	if l, err = l.WithGrading(scale); err != nil {
 		return domain.Level{}, err
 	}
-	return l.WithDeleting(m.Status == levelStatusDeleting), nil
+	return l.WithDeleting(m.Status == levelStatusDeleting).WithSortOrder(m.SortOrder), nil
 }
 
 // --- grade levels ---------------------------------------------------------

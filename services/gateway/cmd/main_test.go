@@ -435,10 +435,11 @@ func (stubConfig) ListGroups(_ context.Context, _ *connect.Request[configv1.List
 // only stub group) carries no grade, so its list resolves as daily; any other id
 // is NotFound.
 func (stubConfig) GetGroup(_ context.Context, req *connect.Request[configv1.GetGroupRequest]) (*connect.Response[configv1.GetGroupResponse], error) {
-	if req.Msg.GetId() != "grp-1" {
+	// correctionGroup is the uuid-shaped group the T8 group routes act on.
+	if id := req.Msg.GetId(); id != "grp-1" && id != correctionGroup {
 		return nil, connect.NewError(connect.CodeNotFound, errStr("group not found"))
 	}
-	return connect.NewResponse(&configv1.GetGroupResponse{Group: &configv1.Group{Id: "grp-1", CycleId: "cyc-1", Name: "3° A"}}), nil
+	return connect.NewResponse(&configv1.GetGroupResponse{Group: &configv1.Group{Id: req.Msg.GetId(), CycleId: "cyc-1", Name: "3° A"}}), nil
 }
 
 // ListGradeLevels places the stub group's grade gl-1 in lvl-1, the level whose
