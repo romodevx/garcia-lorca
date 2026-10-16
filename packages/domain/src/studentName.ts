@@ -1,5 +1,6 @@
 /**
- * The one place a pupil's name is put together and ordered (T3).
+ * The one place student names are composed, title-cased for family display,
+ * and ordered (T3).
  *
  * The school reads its lists surname first — "Pérez Núñez Ana Sofía" — and
  * alphabetically by surname, in Spanish: accents and case do not move a pupil,
@@ -31,10 +32,31 @@ export function studentNameSearchKeys(s: StudentNameParts): [string, string] {
   return [formatStudentName(s), spoken];
 }
 
-/** Where space is tight (the families' app header): "Paterno PrimerNombre". */
-export function studentShortName(s: StudentNameParts): string {
-  const firstGiven = clean(s.firstName).split(/\s+/)[0] ?? "";
-  return [clean(s.lastName), firstGiven].filter((p) => p !== "").join(" ");
+const LOWERCASE_PARTICLES = new Set(["de", "del", "la", "las", "los", "y", "e", "van", "von", "da", "di"]);
+
+function titleCasePart(value: string, firstWordOfName: boolean): string {
+  let wordIndex = 0;
+  return value.trim().toLocaleLowerCase("es-MX").replace(/[\p{L}]+(?:['’][\p{L}]+)*/gu, (word) => {
+    const isFirstWord = firstWordOfName && wordIndex === 0;
+    wordIndex += 1;
+    if (!isFirstWord && LOWERCASE_PARTICLES.has(word)) return word;
+    return word.replace(/(^|['’])([\p{L}])/gu, (_match, boundary: string, letter: string) =>
+      `${boundary}${letter.toLocaleUpperCase("es-MX")}`,
+    );
+  });
+}
+
+/** First name and paternal surname in family-facing order, with Spanish casing. */
+export function formatDisplayName(firstName: string, paternalSurname: string): string {
+  const given = firstName.trim();
+  const surname = paternalSurname.trim();
+  const parts = [given, surname].filter(Boolean);
+  let firstWordOfName = true;
+  return parts.map((part) => {
+    const formatted = titleCasePart(part, firstWordOfName);
+    firstWordOfName = false;
+    return formatted;
+  }).join(" ");
 }
 
 /** The avatar monogram: first name's initial, then the paternal surname's. */

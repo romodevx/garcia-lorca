@@ -1,5 +1,5 @@
 import type { FamilyStudent } from "../api";
-import { formatDisplayName, isQualitativeLevel, toChildView } from "./childView";
+import { formatSubtitle, isQualitativeLevel, toChildView } from "./childView";
 
 const student: FamilyStudent = {
   id: "s1",
@@ -46,10 +46,6 @@ describe("toChildView", () => {
     expect(view.subtitle).toBe("Primaria · B");
   });
 
-  it("title-cases the shared display name and preserves Spanish accents", () => {
-    expect(formatDisplayName("  VALENTINA maría  ", "GÓMEZ-RUIZ")).toBe("Valentina María Gómez-Ruiz");
-  });
-
   it("marks a kínder child as qualitative", () => {
     const view = toChildView({ ...student, level: "Kínder" });
     expect(view.levelLabel).toBe("Kínder");
@@ -70,6 +66,18 @@ describe("toChildView", () => {
     expect(view.headerName).toBe("");
     expect(view.subtitle).toBe("");
     expect(view.initials).toBe("");
+  });
+});
+
+describe("formatSubtitle", () => {
+  it.each([
+    ["3° A ", "Primaria", "3° Primaria · A"],
+    ["3°A", "Primaria", "3° Primaria · A"],
+    ["3°", "Primaria", "3° Primaria"],
+    ["", "Primaria", "Primaria"],
+    ["B", "Primaria", "Primaria · B"],
+  ])("formats grade group %j", (gradeGroup, level, expected) => {
+    expect(formatSubtitle(gradeGroup, level)).toBe(expected);
   });
 });
 

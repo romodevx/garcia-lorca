@@ -45,6 +45,33 @@ describe("tokenStore", () => {
     expect(getAccessToken()).toBe("legacy-access");
   });
 
+  it("loads legacy tokens when SecureStore cannot be read", async () => {
+    await AsyncStorage.multiSet([
+      ["gl.auth.accessToken", "legacy-access"],
+      ["gl.auth.refreshToken", "legacy-refresh"],
+    ]);
+    jest.spyOn(SecureStore, "getItemAsync").mockRejectedValueOnce(new Error("keychain unavailable"));
+    jest.spyOn(SecureStore, "deleteItemAsync").mockRejectedValueOnce(new Error("keychain unavailable"));
+
+    await expect(loadTokens()).resolves.toEqual({ accessToken: "legacy-access", refreshToken: "legacy-refresh" });
+    expect(getAccessToken()).toBe("legacy-access");
+  });
+
+  it("keeps the in-memory session and legacy copy when migration cannot write SecureStore", async () => {
+    await AsyncStorage.multiSet([
+      ["gl.auth.accessToken", "legacy-access"],
+      ["gl.auth.refreshToken", "legacy-refresh"],
+    ]);
+    jest.spyOn(SecureStore, "setItemAsync").mockRejectedValueOnce(new Error("keychain unavailable"));
+
+    await expect(loadTokens()).resolves.toEqual({ accessToken: "legacy-access", refreshToken: "legacy-refresh" });
+    expect(getAccessToken()).toBe("legacy-access");
+    expect(await AsyncStorage.multiGet(["gl.auth.accessToken", "gl.auth.refreshToken"])).toEqual([
+      ["gl.auth.accessToken", "legacy-access"],
+      ["gl.auth.refreshToken", "legacy-refresh"],
+    ]);
+  });
+
   it("clears the pair from memory and storage", async () => {
     await saveTokens({ accessToken: "a1", refreshToken: "r1" });
     await clearTokens();

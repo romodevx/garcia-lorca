@@ -1,4 +1,4 @@
-import { formatStudentName, studentInitials } from "@garcia-lorca/domain/student-name";
+import { formatDisplayName, formatStudentName, studentInitials } from "@garcia-lorca/domain/student-name";
 
 import type { FamilyStudent } from "../api";
 
@@ -45,21 +45,6 @@ const EMPTY_VIEW: ChildView = {
 /** Levels graded qualitatively, folded: kínder, and preescolar — its official name. */
 const QUALITATIVE_LEVELS = new Set(["kinder", "preescolar"]);
 
-function titleCaseWords(value: string): string {
-  return value
-    .trim()
-    .toLocaleLowerCase("es-MX")
-    .replace(
-      /(^|[\s-])([\p{L}])/gu,
-      (_match, boundary: string, letter: string) => `${boundary}${letter.toLocaleUpperCase("es-MX")}`,
-    );
-}
-
-/** Formats a pupil's shared display name as first name plus paternal surname. */
-export function formatDisplayName(firstName: string, paternalSurname: string): string {
-  return [firstName, paternalSurname].filter(Boolean).map(titleCaseWords).join(" ");
-}
-
 /**
  * True for levels graded qualitatively (logrado/proceso) rather than
  * numerically. The level is the school's own name for it now (not a fixed SEP
@@ -70,6 +55,16 @@ export function isQualitativeLevel(level: string): boolean {
   return QUALITATIVE_LEVELS.has(folded);
 }
 
+/** Formats the child's grade, level and optional group for the family profile. */
+export function formatSubtitle(gradeGroup: string, level: string): string {
+  const trimmedGroup = gradeGroup.trim();
+  const gradeMatch = trimmedGroup.match(/^(\d+°?)\s*(.*)$/);
+  const grade = gradeMatch?.[1] ?? "";
+  const group = (gradeMatch?.[2] ?? trimmedGroup).trim();
+  const levelText = [grade, level.trim()].filter(Boolean).join(" ");
+  return [levelText, group && group !== grade ? group : ""].filter(Boolean).join(" · ");
+}
+
 /** Projects a family student (or null) into the null-safe display view-model. */
 export function toChildView(student: FamilyStudent | null): ChildView {
   if (student === null) {
@@ -78,11 +73,9 @@ export function toChildView(student: FamilyStudent | null): ChildView {
   return {
     present: true,
     fullName: formatStudentName(student),
-    short: titleCaseWords(student.lastName),
+    short: formatDisplayName("", student.lastName),
     headerName: formatDisplayName(student.firstName, student.lastName),
-    subtitle: [student.gradeGroup && /\d/.test(student.gradeGroup) ? `${student.gradeGroup.split(/\s+/)[0]} ${student.level}` : student.level, student.gradeGroup.split(/\s+/).at(-1)]
-      .filter(Boolean)
-      .join(" · "),
+    subtitle: formatSubtitle(student.gradeGroup, student.level),
     initials: studentInitials(student),
     group: student.gradeGroup,
     levelLabel: student.level,

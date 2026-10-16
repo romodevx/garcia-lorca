@@ -15,7 +15,7 @@ export function useTokenBootstrap(): boolean {
 
   useEffect(() => {
     let active = true;
-    void loadTokens().finally(() => {
+    void loadTokens().catch(() => null).finally(() => {
       if (active) {
         setReady(true);
       }

@@ -7,10 +7,10 @@
 export {
   compareStudentNames,
   compareStudents,
+  formatDisplayName,
   formatStudentName,
   sortStudents,
   studentInitials,
   studentNameSearchKeys,
-  studentShortName,
   type StudentNameParts,
 } from "@garcia-lorca/domain/student-name";

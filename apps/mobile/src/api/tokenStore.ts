@@ -62,7 +62,16 @@ export async function saveTokens(pair: TokenPair): Promise<void> {
  * signed out.
  */
 export async function loadTokens(): Promise<TokenPair | null> {
-  const secureValue = await SecureStore.getItemAsync(SECURE_TOKEN_KEY);
+  let secureValue: string | null = null;
+  try {
+    secureValue = await SecureStore.getItemAsync(SECURE_TOKEN_KEY);
+  } catch {
+    try {
+      await SecureStore.deleteItemAsync(SECURE_TOKEN_KEY);
+    } catch {
+      // A failed cleanup must not prevent the legacy storage fallback.
+    }
+  }
   if (secureValue !== null) {
     try {
       const pair: unknown = JSON.parse(secureValue);
@@ -85,7 +94,12 @@ export async function loadTokens(): Promise<TokenPair | null> {
     return null;
   }
   cache = { accessToken, refreshToken };
-  await SecureStore.setItemAsync(SECURE_TOKEN_KEY, JSON.stringify(cache));
+  try {
+    await SecureStore.setItemAsync(SECURE_TOKEN_KEY, JSON.stringify(cache));
+  } catch {
+    // Keep the in-memory session and legacy copy so the next boot can retry.
+    return cache;
+  }
   await AsyncStorage.multiRemove([ACCESS_KEY, REFRESH_KEY]);
   return cache;
 }

@@ -66,7 +66,7 @@ importers:
         specifier: 56.2.21
         version: 56.2.21(4c3vaa5knxz3w3q43dqklws3ya)
       expo-secure-store:
-        specifier: ~56.0.4
+        specifier: 56.0.4
         version: 56.0.4(expo@56.0.23)
       expo-sharing:
         specifier: 56.0.26
