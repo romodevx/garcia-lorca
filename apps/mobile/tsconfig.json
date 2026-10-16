@@ -6,18 +6,41 @@
     "allowJs": true,
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "lib": ["ES2022"],
-    "types": ["jest", "expo/types"],
+    "lib": [
+      "ES2022"
+    ],
+    "types": [
+      "jest",
+      "node",
+      "expo/types"
+    ],
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./*"],
-      "@garcia-lorca/ui": ["../../packages/ui/index.ts"],
-      "@garcia-lorca/ui/flags": ["../../packages/ui/src/flags/index.ts"],
-      "@garcia-lorca/domain": ["../../packages/domain/index.ts"],
-      "@garcia-lorca/domain/student-name": ["../../packages/domain/src/studentName.ts"],
-      "@garcia-lorca/domain/grade-average": ["../../packages/domain/src/gradeAverage.ts"]
+      "@/*": [
+        "./*"
+      ],
+      "@garcia-lorca/ui": [
+        "../../packages/ui/index.ts"
+      ],
+      "@garcia-lorca/ui/flags": [
+        "../../packages/ui/src/flags/index.ts"
+      ],
+      "@garcia-lorca/domain": [
+        "../../packages/domain/index.ts"
+      ],
+      "@garcia-lorca/domain/student-name": [
+        "../../packages/domain/src/studentName.ts"
+      ],
+      "@garcia-lorca/domain/grade-average": [
+        "../../packages/domain/src/gradeAverage.ts"
+      ]
     }
   },
-  "include": ["**/*.ts", "**/*.tsx", ".expo/types/**/*.ts", "expo-env.d.ts"],
-  "exclude": ["node_modules"]
+  "include": [
+    "**/*.ts",
+    "**/*.tsx"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
 }

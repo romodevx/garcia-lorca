@@ -22,6 +22,16 @@ jest.mock("@react-native-async-storage/async-storage", () =>
   require("@react-native-async-storage/async-storage/jest/async-storage-mock"),
 );
 
+// expo-secure-store is a native keychain module; keep its backing in memory.
+jest.mock("expo-secure-store", () => {
+  const values = new Map();
+  return {
+    getItemAsync: jest.fn(async (key) => values.get(key) ?? null),
+    setItemAsync: jest.fn(async (key, value) => values.set(key, value)),
+    deleteItemAsync: jest.fn(async (key) => values.delete(key)),
+  };
+}, { virtual: true });
+
 // expo-font: fonts are always "loaded" in tests so screens render immediately.
 jest.mock("expo-font", () => ({
   useFonts: () => [true, null],

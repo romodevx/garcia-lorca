@@ -1,5 +1,5 @@
 import { useState, type ReactElement } from "react";
-import { Image, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Image, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { Icon } from "../icons";
 import { useTheme } from "../theme";
 import { Button } from "../ui";
@@ -43,7 +43,7 @@ const SIGN_IN_ERROR = "No pudimos iniciar sesión. Verifica tu correo y contrase
 // instead of silently authenticating.
 // TODO(pendiente-mobile: biometric-unlock) — gate biometric sign-in on
 // expo-local-authentication + a stored refresh token.
-const FACE_ID_PENDING = "El acceso con Face ID estará disponible pronto.";
+const BIOMETRIC_PENDING = "El acceso biométrico estará disponible pronto.";
 
 /**
  * The one spelling an address is sent under: trimmed and lowercase. Applied
@@ -150,10 +150,10 @@ export function LoginScreen({ onSubmit }: LoginScreenProps): ReactElement {
       </View>
 
       <Button
-        label="Entrar con Face ID"
+        label={Platform.OS === "ios" ? "Entrar con Face ID" : "Entrar con huella"}
         variant="outline"
         icon="lock"
-        onPress={() => setError(FACE_ID_PENDING)}
+        onPress={() => setError(BIOMETRIC_PENDING)}
       />
 
       <Text style={[styles.help, { color: theme.colors.text3, fontFamily: theme.fonts.uiExtra }]}>

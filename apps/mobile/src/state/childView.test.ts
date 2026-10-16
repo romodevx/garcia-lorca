@@ -1,5 +1,5 @@
 import type { FamilyStudent } from "../api";
-import { isQualitativeLevel, toChildView } from "./childView";
+import { formatDisplayName, isQualitativeLevel, toChildView } from "./childView";
 
 const student: FamilyStudent = {
   id: "s1",
@@ -18,10 +18,9 @@ describe("toChildView", () => {
       present: true,
       // T3: surnames first, as the school writes every list.
       fullName: "Herrera Díaz Mateo",
-      // The greeting and the chip keep the first name alone: a salutation.
-      short: "Mateo",
-      // The header has room for two words: paternal surname + first name.
-      headerName: "Herrera Mateo",
+      short: "Herrera",
+      headerName: "Mateo Herrera",
+      subtitle: "3° Primaria · A",
       initials: "MH",
       group: "3° A",
       levelLabel: "Primaria",
@@ -32,6 +31,23 @@ describe("toChildView", () => {
   it("shows a pupil captured before the maternal field as written (T3)", () => {
     const view = toChildView({ ...student, lastName: "Herrera Díaz", maternalLastName: undefined });
     expect(view.fullName).toBe("Herrera Díaz Mateo");
+  });
+
+  it("uses a title-cased paternal surname in the family greeting and header", () => {
+    const view = toChildView({ ...student, firstName: "VALENTINA", lastName: "GÓMEZ" });
+    expect(view.short).toBe("Gómez");
+    expect(view.headerName).toBe("Valentina Gómez");
+    expect(view.subtitle).toBe("3° Primaria · A");
+  });
+
+  it("formats the profile title with the same display name and a level fallback", () => {
+    const view = toChildView({ ...student, firstName: "VALENTINA", lastName: "GÓMEZ", gradeGroup: "B" });
+    expect(view.headerName).toBe("Valentina Gómez");
+    expect(view.subtitle).toBe("Primaria · B");
+  });
+
+  it("title-cases the shared display name and preserves Spanish accents", () => {
+    expect(formatDisplayName("  VALENTINA maría  ", "GÓMEZ-RUIZ")).toBe("Valentina María Gómez-Ruiz");
   });
 
   it("marks a kínder child as qualitative", () => {
@@ -52,6 +68,7 @@ describe("toChildView", () => {
     expect(view.present).toBe(false);
     expect(view.fullName).toBe("");
     expect(view.headerName).toBe("");
+    expect(view.subtitle).toBe("");
     expect(view.initials).toBe("");
   });
 });

@@ -1,4 +1,4 @@
-import { formatStudentName, studentInitials, studentShortName } from "@garcia-lorca/domain/student-name";
+import { formatStudentName, studentInitials } from "@garcia-lorca/domain/student-name";
 
 import type { FamilyStudent } from "../api";
 
@@ -14,13 +14,12 @@ export interface ChildView {
   present: boolean;
   /** "Herrera Díaz Mateo": surnames first, as every school list (T3). */
   fullName: string;
-  /**
-   * The first name alone. Kept on purpose for salutations ("Hola, familia
-   * Mateo") and the name chip — a greeting is not a list.
-   */
+  /** The pupil's paternal surname for the family greeting. */
   short: string;
-  /** Where two words fit (the app header): "Herrera Mateo". */
+  /** First name + paternal surname for the app header: "Mateo Herrera". */
   headerName: string;
+  /** Grade, level and group, with the level retained when grade is absent. */
+  subtitle: string;
   /** Two-letter monogram for the avatar. */
   initials: string;
   /** Grade + group label, e.g. "3° A". */
@@ -36,6 +35,7 @@ const EMPTY_VIEW: ChildView = {
   fullName: "",
   short: "",
   headerName: "",
+  subtitle: "",
   initials: "",
   group: "",
   levelLabel: "",
@@ -44,6 +44,21 @@ const EMPTY_VIEW: ChildView = {
 
 /** Levels graded qualitatively, folded: kínder, and preescolar — its official name. */
 const QUALITATIVE_LEVELS = new Set(["kinder", "preescolar"]);
+
+function titleCaseWords(value: string): string {
+  return value
+    .trim()
+    .toLocaleLowerCase("es-MX")
+    .replace(
+      /(^|[\s-])([\p{L}])/gu,
+      (_match, boundary: string, letter: string) => `${boundary}${letter.toLocaleUpperCase("es-MX")}`,
+    );
+}
+
+/** Formats a pupil's shared display name as first name plus paternal surname. */
+export function formatDisplayName(firstName: string, paternalSurname: string): string {
+  return [firstName, paternalSurname].filter(Boolean).map(titleCaseWords).join(" ");
+}
 
 /**
  * True for levels graded qualitatively (logrado/proceso) rather than
@@ -63,8 +78,11 @@ export function toChildView(student: FamilyStudent | null): ChildView {
   return {
     present: true,
     fullName: formatStudentName(student),
-    short: student.firstName,
-    headerName: studentShortName(student),
+    short: titleCaseWords(student.lastName),
+    headerName: formatDisplayName(student.firstName, student.lastName),
+    subtitle: [student.gradeGroup && /\d/.test(student.gradeGroup) ? `${student.gradeGroup.split(/\s+/)[0]} ${student.level}` : student.level, student.gradeGroup.split(/\s+/).at(-1)]
+      .filter(Boolean)
+      .join(" · "),
     initials: studentInitials(student),
     group: student.gradeGroup,
     levelLabel: student.level,
