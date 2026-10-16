@@ -30,7 +30,7 @@ func TestAnEntryDayPersistsAsMoreliaMidnight(t *testing.T) {
 
 	e, err := domain.NewEnrollment(enrGroup, tenantA, byGroup, cycleUUID, groupOne, "", domain.EnrollmentStatusActive, entry)
 	require.NoError(t, err)
-	require.NoError(t, repo.CreateEnrollment(ctx, e))
+	require.NoError(t, repo.CreateEnrollment(ctx, e, roomFor(e)))
 
 	draft, err := domain.NewEnrollment(enrGrade, tenantA, byGrade, cycleUUID, groupThree, "", domain.EnrollmentStatusActive, entry)
 	require.NoError(t, err)

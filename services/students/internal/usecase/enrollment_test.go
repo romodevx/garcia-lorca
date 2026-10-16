@@ -42,18 +42,12 @@ type fakeEnrollRepo struct {
 // capacity here rather than answering "yes" to everything is what lets the
 // overflow tests fail in a unit test instead of only against Postgres.
 func (r *fakeEnrollRepo) CreateEnrollmentInFirstFreeGroup(
-	ctx context.Context,
+	_ context.Context,
 	e domain.Enrollment,
 	groups []ports.GroupSeats,
 ) (ports.GroupSeats, error) {
 	for _, g := range groups {
-		taken := 0
-		for _, existing := range r.byID {
-			if existing.GroupID() == g.ID && existing.Status() == domain.EnrollmentStatusActive {
-				taken++
-			}
-		}
-		if taken >= g.Capacity {
+		if r.takenIn(g.ID) >= g.Capacity {
 			continue
 		}
 		placed, err := domain.NewEnrollment(e.ID(), e.TenantID(), e.StudentID(), g.CycleID, g.ID,
@@ -61,7 +55,7 @@ func (r *fakeEnrollRepo) CreateEnrollmentInFirstFreeGroup(
 		if err != nil {
 			return ports.GroupSeats{}, err
 		}
-		if err := r.CreateEnrollment(ctx, placed); err != nil {
+		if err := r.store(placed); err != nil {
 			return ports.GroupSeats{}, err
 		}
 		return g, nil
@@ -81,7 +75,26 @@ func newEnrollRepo() *fakeEnrollRepo {
 	return &fakeEnrollRepo{byID: map[string]domain.Enrollment{}, uniq: map[string]bool{}}
 }
 
-func (r *fakeEnrollRepo) CreateEnrollment(_ context.Context, e domain.Enrollment) error {
+// CreateEnrollment models the seat rule the transaction applies to a chosen
+// group (a full or unsized group is refused) before storing.
+func (r *fakeEnrollRepo) CreateEnrollment(_ context.Context, e domain.Enrollment, seats ports.GroupSeats) error {
+	if seats.Capacity <= 0 || r.takenIn(seats.ID) >= seats.Capacity {
+		return glerrors.New(glerrors.KindConflict, "ese grupo ya no tiene lugares")
+	}
+	return r.store(e)
+}
+
+func (r *fakeEnrollRepo) takenIn(groupID string) int {
+	taken := 0
+	for _, existing := range r.byID {
+		if existing.GroupID() == groupID && existing.Status() == domain.EnrollmentStatusActive {
+			taken++
+		}
+	}
+	return taken
+}
+
+func (r *fakeEnrollRepo) store(e domain.Enrollment) error {
 	if r.createErr != nil {
 		return r.createErr
 	}
@@ -281,7 +294,7 @@ func newEnrollService(t *testing.T) (*usecase.EnrollmentService, *fakeRepo, *fak
 func TestEnrollHappyDerivesCycleFromGroup(t *testing.T) {
 	svc, students, enrolls, catalog, pub := newEnrollService(t)
 	seedStudent(t, students, "stu-1")
-	catalog.groups["grp-1"] = groupRef{ID: "grp-1", CycleID: "cyc-99", GradeLevelID: "gl-1"}
+	catalog.groups["grp-1"] = groupRef{ID: "grp-1", CycleID: "cyc-99", GradeLevelID: "gl-1", Capacity: 30}
 
 	e, err := svc.Enroll(context.Background(), "stu-1", "grp-1", "", time.Time{})
 	if err != nil {
@@ -304,7 +317,7 @@ func TestEnrollHappyDerivesCycleFromGroup(t *testing.T) {
 func TestEnrollWithValidTerm(t *testing.T) {
 	svc, students, _, catalog, _ := newEnrollService(t)
 	seedStudent(t, students, "stu-1")
-	catalog.groups["grp-1"] = groupRef{ID: "grp-1", CycleID: "cyc-99"}
+	catalog.groups["grp-1"] = groupRef{ID: "grp-1", CycleID: "cyc-99", Capacity: 30}
 	catalog.terms["term-1"] = termRef{ID: "term-1", CycleID: "cyc-99"}
 
 	e, err := svc.Enroll(context.Background(), "stu-1", "grp-1", "term-1", time.Time{})
@@ -318,7 +331,7 @@ func TestEnrollWithValidTerm(t *testing.T) {
 
 func TestEnrollMissingStudentIsNotFound(t *testing.T) {
 	svc, _, _, catalog, _ := newEnrollService(t)
-	catalog.groups["grp-1"] = groupRef{ID: "grp-1", CycleID: "cyc-99"}
+	catalog.groups["grp-1"] = groupRef{ID: "grp-1", CycleID: "cyc-99", Capacity: 30}
 	_, err := svc.Enroll(context.Background(), "ghost", "grp-1", "", time.Time{})
 	if glerrors.KindOf(err) != glerrors.KindNotFound {
 		t.Errorf("want KindNotFound, got %v", err)
@@ -340,7 +353,7 @@ func TestEnrollMissingGroupIsInvalid(t *testing.T) {
 func TestEnrollTermNotInCycleIsInvalid(t *testing.T) {
 	svc, students, _, catalog, _ := newEnrollService(t)
 	seedStudent(t, students, "stu-1")
-	catalog.groups["grp-1"] = groupRef{ID: "grp-1", CycleID: "cyc-99"}
+	catalog.groups["grp-1"] = groupRef{ID: "grp-1", CycleID: "cyc-99", Capacity: 30}
 	catalog.terms["term-x"] = termRef{ID: "term-x", CycleID: "cyc-other"}
 	_, err := svc.Enroll(context.Background(), "stu-1", "grp-1", "term-x", time.Time{})
 	if glerrors.KindOf(err) != glerrors.KindInvalid {
@@ -351,7 +364,7 @@ func TestEnrollTermNotInCycleIsInvalid(t *testing.T) {
 func TestEnrollMissingTermIsInvalid(t *testing.T) {
 	svc, students, _, catalog, _ := newEnrollService(t)
 	seedStudent(t, students, "stu-1")
-	catalog.groups["grp-1"] = groupRef{ID: "grp-1", CycleID: "cyc-99"}
+	catalog.groups["grp-1"] = groupRef{ID: "grp-1", CycleID: "cyc-99", Capacity: 30}
 	_, err := svc.Enroll(context.Background(), "stu-1", "grp-1", "ghost-term", time.Time{})
 	if glerrors.KindOf(err) != glerrors.KindInvalid {
 		t.Errorf("want KindInvalid, got %v", err)
@@ -361,7 +374,7 @@ func TestEnrollMissingTermIsInvalid(t *testing.T) {
 func TestEnrollDuplicateIsConflict(t *testing.T) {
 	svc, students, _, catalog, _ := newEnrollService(t)
 	seedStudent(t, students, "stu-1")
-	catalog.groups["grp-1"] = groupRef{ID: "grp-1", CycleID: "cyc-99"}
+	catalog.groups["grp-1"] = groupRef{ID: "grp-1", CycleID: "cyc-99", Capacity: 30}
 	if _, err := svc.Enroll(context.Background(), "stu-1", "grp-1", "", time.Time{}); err != nil {
 		t.Fatalf("first enroll: %v", err)
 	}
@@ -376,7 +389,7 @@ func TestEnrollDuplicateIsConflict(t *testing.T) {
 func enrolledStudent(t *testing.T, svc *usecase.EnrollmentService, students *fakeRepo, catalog *fakeCatalog) domain.Enrollment {
 	t.Helper()
 	seedStudent(t, students, "stu-1")
-	catalog.groups["grp-1"] = groupRef{ID: "grp-1", CycleID: "cyc-99"}
+	catalog.groups["grp-1"] = groupRef{ID: "grp-1", CycleID: "cyc-99", Capacity: 30}
 	e, err := svc.Enroll(context.Background(), "stu-1", "grp-1", "", time.Time{})
 	if err != nil {
 		t.Fatalf("seed enroll: %v", err)
@@ -424,6 +437,23 @@ func TestTransferRecordsTheNewGroupOnTheFile(t *testing.T) {
 	}
 }
 
+// Owner decision after T9: enrolling into a CHOSEN group respects its seats
+// too, so the use case hands the repository the group's real capacity.
+func TestEnrollIntoAChosenFullGroupIsConflict(t *testing.T) {
+	svc, students, enrolls, catalog, _ := newEnrollService(t)
+	enrolledStudent(t, svc, students, catalog) // takes grp-1's seat
+	catalog.groups["grp-1"] = groupRef{ID: "grp-1", CycleID: "cyc-99", Capacity: 1}
+	seedStudent(t, students, "stu-2")
+
+	_, err := svc.Enroll(context.Background(), "stu-2", "grp-1", "", time.Time{})
+	if glerrors.KindOf(err) != glerrors.KindConflict {
+		t.Fatalf("Enroll into a full chosen group = %v, want Conflict", err)
+	}
+	if len(enrolls.byID) != 1 {
+		t.Errorf("enrolments = %d, want only the first", len(enrolls.byID))
+	}
+}
+
 // A transfer is a placement: a full group refuses it, as the by-grade path does.
 func TestTransferIntoAFullGroupIsConflict(t *testing.T) {
 	svc, students, enrolls, catalog, _ := newEnrollService(t)
@@ -458,7 +488,7 @@ func TestTransferRefusesATerminalFile(t *testing.T) {
 func TestEnrollIntoAGroupOfAnotherLevelIsInvalid(t *testing.T) {
 	svc, students, enrolls, catalog, _ := newEnrollService(t)
 	seedStudent(t, students, "stu-1")
-	catalog.groups["grp-k"] = groupRef{ID: "grp-k", CycleID: "cyc-99", Name: "1° A", GradeLevelID: "gl-k"}
+	catalog.groups["grp-k"] = groupRef{ID: "grp-k", CycleID: "cyc-99", Name: "1° A", GradeLevelID: "gl-k", Capacity: 30}
 
 	_, err := svc.Enroll(context.Background(), "stu-1", "grp-k", "", time.Time{})
 	if glerrors.KindOf(err) != glerrors.KindInvalid {
@@ -505,7 +535,7 @@ func TestTransferNonActiveIsInvalid(t *testing.T) {
 func TestTransferCrossCycleIsInvalid(t *testing.T) {
 	svc, students, _, catalog, _ := newEnrollService(t)
 	e := enrolledStudent(t, svc, students, catalog)
-	catalog.groups["grp-2"] = groupRef{ID: "grp-2", CycleID: "cyc-other"}
+	catalog.groups["grp-2"] = groupRef{ID: "grp-2", CycleID: "cyc-other", Capacity: 30}
 	_, err := svc.Transfer(context.Background(), e.ID(), "grp-2", "why")
 	if glerrors.KindOf(err) != glerrors.KindInvalid {
 		t.Errorf("want KindInvalid on a cross-cycle transfer, got %v", err)
@@ -600,7 +630,7 @@ func seedPendingApplicant(t *testing.T, repo *fakeRepo, id string) {
 func TestEnrollRecordsThePlacementWithoutCallingThemEnrolled(t *testing.T) {
 	svc, students, _, catalog, _ := newEnrollService(t)
 	seedPendingApplicant(t, students, "stu-1")
-	catalog.groups["grp-1"] = groupRef{ID: "grp-1", CycleID: "cyc-99", Name: "3° B", GradeLevelID: "gl-1"}
+	catalog.groups["grp-1"] = groupRef{ID: "grp-1", CycleID: "cyc-99", Name: "3° B", GradeLevelID: "gl-1", Capacity: 30}
 
 	if _, err := svc.Enroll(context.Background(), "stu-1", "grp-1", "", time.Time{}); err != nil {
 		t.Fatalf("Enroll: %v", err)
@@ -703,7 +733,7 @@ func TestEnrollRefusesAStudentWhoseFileIsTerminal(t *testing.T) {
 		Level: domain.RestoreLevel("e1000000-0000-0000-0000-000000000001", "Primaria"),
 	}, domain.AdmissionWithdrawn)
 	students.byID["stu-3"] = s
-	catalog.groups["grp-1"] = groupRef{ID: "grp-1", CycleID: "cyc-99", GradeLevelID: "gl-1"}
+	catalog.groups["grp-1"] = groupRef{ID: "grp-1", CycleID: "cyc-99", GradeLevelID: "gl-1", Capacity: 30}
 
 	if _, err := svc.Enroll(context.Background(), "stu-3", "grp-1", "", time.Time{}); err == nil {
 		t.Fatal("a withdrawn pupil must not be re-enrolled by placing them in a group")
@@ -870,7 +900,7 @@ func TestPlacementsIntoALevelBeingDeletedAreRefused(t *testing.T) {
 			svc, students, enrolls, catalog, pub := newEnrollService(t)
 			e := enrolledStudent(t, svc, students, catalog)
 			catalog.gradeLevels["gl-doomed"] = primariaLevel
-			catalog.groups["grp-2"] = groupRef{ID: "grp-2", CycleID: "cyc-98", GradeLevelID: "gl-k"}
+			catalog.groups["grp-2"] = groupRef{ID: "grp-2", CycleID: "cyc-98", GradeLevelID: "gl-k", Capacity: 30}
 			catalog.groups["grp-3"] = groupRef{ID: "grp-3", CycleID: "cyc-99", GradeLevelID: "gl-doomed", Capacity: 30}
 			catalog.gradeGroups["gl-k"] = []ports.GroupSeats{{ID: "grp-2", Name: "1° A", CycleID: "cyc-98", Capacity: 30}}
 			seedStudent(t, students, "stu-2")

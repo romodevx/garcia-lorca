@@ -63,5 +63,6 @@ func (g Group) GradeLevelID() string { return g.gradeLevelID }
 // Name returns the human-readable group name (e.g. "A").
 func (g Group) Name() string { return g.name }
 
-// Capacity returns the seat count (0 = unbounded / not yet set).
+// Capacity returns the seat count. 0 means not set yet: no placement path
+// (automatic, chosen group, transfer) puts a pupil in such a group.
 func (g Group) Capacity() int { return g.capacity }

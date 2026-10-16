@@ -365,7 +365,7 @@ func TestEnrollmentRoundTripAndTransfer(t *testing.T) {
 	studentID := seedStudent(t, tenantA, "dddddddd-0000-0000-0000-00000000000a", "HEGB050312MDFRNN10")
 	enrID := "e0000000-0000-0000-0000-00000000000a"
 
-	if err := repo.CreateEnrollment(ctx, enrollment(t, enrID, tenantA, studentID, groupOne)); err != nil {
+	if err := createRoomy(ctx, repo, enrollment(t, enrID, tenantA, studentID, groupOne)); err != nil {
 		t.Fatalf("CreateEnrollment: %v", err)
 	}
 
@@ -439,11 +439,11 @@ func TestDuplicateEnrollmentIsConflict(t *testing.T) {
 	ctx := context.Background()
 	studentID := seedStudent(t, tenantA, "dddddddd-0000-0000-0000-00000000000c", "HEGC050312MDFRNN12")
 
-	if err := repo.CreateEnrollment(ctx, enrollment(t, "e0000000-0000-0000-0000-00000000000c", tenantA, studentID, groupOne)); err != nil {
+	if err := createRoomy(ctx, repo, enrollment(t, "e0000000-0000-0000-0000-00000000000c", tenantA, studentID, groupOne)); err != nil {
 		t.Fatalf("first enrollment: %v", err)
 	}
 	// Same (student, cycle), different id/group → conflict.
-	err := repo.CreateEnrollment(ctx, enrollment(t, "e0000000-0000-0000-0000-00000000000d", tenantA, studentID, groupTwo))
+	err := createRoomy(ctx, repo, enrollment(t, "e0000000-0000-0000-0000-00000000000d", tenantA, studentID, groupTwo))
 	if glerrors.KindOf(err) != glerrors.KindConflict {
 		t.Errorf("duplicate enrollment: want KindConflict, got %v", err)
 	}
@@ -456,7 +456,7 @@ func TestRLSIsolatesEnrollments(t *testing.T) {
 	ctx := context.Background()
 	studentB := seedStudent(t, tenantB, "dddddddd-0000-0000-0000-00000000000b", "HEGD050312HDFRNN11")
 	enrB := "e0000000-0000-0000-0000-00000000000b"
-	if err := appRepo(t, tenantB).CreateEnrollment(ctx, enrollment(t, enrB, tenantB, studentB, groupOne)); err != nil {
+	if err := createRoomy(ctx, appRepo(t, tenantB), enrollment(t, enrB, tenantB, studentB, groupOne)); err != nil {
 		t.Fatalf("seed enrollment B: %v", err)
 	}
 
@@ -489,7 +489,7 @@ func TestRLSIsolatesTransfers(t *testing.T) {
 	ctx := context.Background()
 	studentA := seedStudent(t, tenantA, "dddddddd-0000-0000-0000-00000000000e", "HEGB050312HDFRNN13")
 	enrA := "e0000000-0000-0000-0000-00000000000e"
-	if err := appRepo(t, tenantA).CreateEnrollment(ctx, enrollment(t, enrA, tenantA, studentA, groupOne)); err != nil {
+	if err := createRoomy(ctx, appRepo(t, tenantA), enrollment(t, enrA, tenantA, studentA, groupOne)); err != nil {
 		t.Fatalf("seed enrollment A: %v", err)
 	}
 	transfer, err := domain.NewEnrollmentTransfer("70000000-0000-0000-0000-00000000000e", tenantA, enrA, groupOne, groupTwo, "cambio", enrollClock)
@@ -541,10 +541,10 @@ func TestTransferNamesTheGroupOnTheFileAndRespectsSeats(t *testing.T) {
 	studentID := seedStudent(t, tenantA, "dddddddd-0000-0000-0000-0000000007c1", "HEGC050312MDFRNN11")
 	occupantID := seedStudent(t, tenantA, "dddddddd-0000-0000-0000-0000000007c2", "HEGD050312MDFRNN12")
 	const enrID, occupantEnr = "e0000000-0000-0000-0000-0000000007c1", "e0000000-0000-0000-0000-0000000007c2"
-	if err := repo.CreateEnrollment(ctx, enrollment(t, enrID, tenantA, studentID, groupOne)); err != nil {
+	if err := createRoomy(ctx, repo, enrollment(t, enrID, tenantA, studentID, groupOne)); err != nil {
 		t.Fatalf("seed enrollment: %v", err)
 	}
-	if err := repo.CreateEnrollment(ctx, enrollment(t, occupantEnr, tenantA, occupantID, groupThree)); err != nil {
+	if err := createRoomy(ctx, repo, enrollment(t, occupantEnr, tenantA, occupantID, groupThree)); err != nil {
 		t.Fatalf("seed occupant: %v", err)
 	}
 
@@ -580,7 +580,7 @@ func TestTransferIntoAnUnsizedGroupSaysSo(t *testing.T) {
 	repo := appRepo(t, tenantA)
 	studentID := seedStudent(t, tenantA, "dddddddd-0000-0000-0000-0000000007d1", "HEGE050312MDFRNN13")
 	const enrID = "e0000000-0000-0000-0000-0000000007d1"
-	if err := repo.CreateEnrollment(ctx, enrollment(t, enrID, tenantA, studentID, groupOne)); err != nil {
+	if err := createRoomy(ctx, repo, enrollment(t, enrID, tenantA, studentID, groupOne)); err != nil {
 		t.Fatalf("seed enrollment: %v", err)
 	}
 	tr, _ := domain.NewEnrollmentTransfer("70000000-0000-0000-0000-0000000007d1", tenantA, enrID, groupOne, groupTwo, "x", enrollClock)

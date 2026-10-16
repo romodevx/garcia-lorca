@@ -40,7 +40,7 @@ func newFakeEnrollmentRepo() *fakeEnrollmentRepo {
 	return &fakeEnrollmentRepo{byID: map[string]domain.Enrollment{}, uniq: map[string]bool{}}
 }
 
-func (r *fakeEnrollmentRepo) CreateEnrollment(_ context.Context, e domain.Enrollment) error {
+func (r *fakeEnrollmentRepo) CreateEnrollment(_ context.Context, e domain.Enrollment, _ ports.GroupSeats) error {
 	key := e.TenantID() + "|" + e.StudentID() + "|" + e.CycleID()
 	if r.uniq[key] {
 		return glerrors.New(glerrors.KindConflict, "already enrolled this cycle")
@@ -382,7 +382,7 @@ func (f *fakeEnrollmentRepo) CreateEnrollmentInFirstFreeGroup(
 	if len(groups) == 0 {
 		return ports.GroupSeats{}, glerrors.New(glerrors.KindConflict, "no quedan lugares")
 	}
-	if err := f.CreateEnrollment(ctx, e); err != nil {
+	if err := f.CreateEnrollment(ctx, e, groups[0]); err != nil {
 		return ports.GroupSeats{}, err
 	}
 	return groups[0], nil
