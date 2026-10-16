@@ -14,6 +14,20 @@ import type { ConfigContext, ExpoConfig } from "expo/config";
  *   - Only EXPO_PUBLIC_* env vars reach the client bundle — never secrets or
  *     internal URLs. EXPO_PUBLIC_API_URL → gateway base URL.
  */
+export function easProjectConfig(projectId: string | undefined, config: Partial<ExpoConfig>): Pick<ExpoConfig, "extra" | "updates"> {
+  const trimmedProjectId = projectId?.trim();
+  return {
+    ...(trimmedProjectId ? { updates: { ...config.updates, url: `https://u.expo.dev/${trimmedProjectId}` } } : {}),
+    extra: {
+      ...config.extra,
+      eas: {
+        ...((config.extra?.eas as Record<string, unknown>) ?? {}),
+        ...(trimmedProjectId ? { projectId: trimmedProjectId } : {}),
+      },
+    },
+  };
+}
+
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
   name: config.name ?? "García Lorca",
@@ -24,10 +38,5 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   // HARDENING: no `hooks.postPublish` sourcemap-upload hook is registered, so
   // source maps never leave the build machine. (Intentionally absent — there is
   // nothing to add here; this comment documents the deliberate omission.)
-  extra: {
-    ...config.extra,
-    eas: {
-      ...((config.extra?.eas as Record<string, unknown>) ?? {})
-    }
-  }
+  ...easProjectConfig(process.env.EAS_PROJECT_ID, config),
 });

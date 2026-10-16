@@ -47,6 +47,7 @@ const (
 var migrationFiles = []string{
 	"../../../../migrations/comms/0001_init.sql",
 	"../../../../migrations/comms/0002_birthday_template.sql",
+	"../../../../migrations/comms/0003_push_tickets.sql",
 }
 
 var (
@@ -740,4 +741,59 @@ func TestDeleteUserDeviceIsOwnerOnly(t *testing.T) {
 	if n := countRows(t, tenantA, "devices", "fcm_token = ?", token); n != 0 {
 		t.Errorf("rows = %d after the owner logged out, want 0", n)
 	}
+}
+
+func TestPushTicketsAreStoredAndTenantBound(t *testing.T) {
+	ctx := context.Background()
+	a, b := appRepo(t, tenantA), appRepo(t, tenantB)
+	cutoff := time.Now().Add(time.Hour)
+	if err := a.StorePushTickets(ctx, []service.PushTicketPair{{TicketID: "expo-ticket-tenant-bound", DeviceToken: "ExponentPushToken[ticket-a]"}}); err != nil {
+		t.Fatalf("StorePushTicket: %v", err)
+	}
+	checkedBefore := time.Now().Add(time.Hour)
+	rows, err := a.ListPushTickets(ctx, cutoff, checkedBefore, time.Time{}, "", 1000)
+	if err != nil {
+		t.Fatalf("ListPushTickets tenant A: %v", err)
+	}
+	var found *service.PushTicket
+	for i := range rows {
+		if rows[i].TicketID == "expo-ticket-tenant-bound" {
+			found = &rows[i]
+			break
+		}
+	}
+	if found == nil || found.DeviceToken != "ExponentPushToken[ticket-a]" {
+		t.Fatalf("ticket = %+v, want stored ticket and token", found)
+	}
+	other, err := b.ListPushTickets(ctx, cutoff, checkedBefore, time.Time{}, "", 1000)
+	if err != nil {
+		t.Fatalf("ListPushTickets tenant B: %v", err)
+	}
+	for _, row := range other {
+		if row.TicketID == "expo-ticket-tenant-bound" {
+			t.Fatal("tenant B observed tenant A's ticket")
+		}
+	}
+	if _, err := a.RecordPushTicketFailure(ctx, found.ID, seedNow); err != nil {
+		t.Fatalf("RecordPushTicketFailure: %v", err)
+	}
+	if err := b.DeletePushTicket(ctx, found.ID); err != nil {
+		t.Fatalf("tenant B DeletePushTicket: %v", err)
+	}
+	rows, err = a.ListPushTickets(ctx, cutoff, checkedBefore, time.Time{}, "", 1000)
+	if err != nil {
+		t.Fatalf("ListPushTickets after cross-tenant delete: %v", err)
+	}
+	for _, row := range rows {
+		if row.ID == found.ID {
+			if row.Attempts != 1 {
+				t.Errorf("attempts = %d, want 1", row.Attempts)
+			}
+			if err := a.DeletePushTicket(ctx, found.ID); err != nil {
+				t.Fatalf("tenant A DeletePushTicket: %v", err)
+			}
+			return
+		}
+	}
+	t.Fatal("tenant B deleted tenant A's ticket")
 }

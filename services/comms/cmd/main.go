@@ -139,7 +139,8 @@ func run(ctx context.Context, log *slog.Logger) error {
 	// Push is the courtesy on top of the durable feed. PUSH_PROVIDER=expo delivers
 	// through the Expo Push Service (EXPO_ACCESS_TOKEN optional, required once
 	// enhanced push security is on); anything unset keeps the logging sender.
-	sender, err := selectSender(os.Getenv("PUSH_PROVIDER"), os.Getenv("EXPO_ACCESS_TOKEN"), log)
+	pushProvider := strings.ToLower(strings.TrimSpace(os.Getenv("PUSH_PROVIDER")))
+	sender, err := selectSender(pushProvider, os.Getenv("EXPO_ACCESS_TOKEN"), log)
 	if err != nil {
 		return err
 	}
@@ -232,6 +233,16 @@ func run(ctx context.Context, log *slog.Logger) error {
 	// consumer return: closing it while a Receive is still draining would cut the
 	// acks of messages already handled.
 	defer closeSubscribers()
+	if pushProvider == pushProviderExpo {
+		checker := expo.NewReceiptChecker(repo,
+			expo.WithReceiptsBaseURL(envOr("EXPO_BASE_URL", expo.DefaultReceiptsBaseURL)),
+			expo.WithReceiptAccessToken(os.Getenv("EXPO_ACCESS_TOKEN")),
+			expo.WithReceiptLogger(log))
+		group.Go(func() error {
+			checker.Run(groupCtx) // Includes a startup sweep for scale-to-zero instances.
+			return nil
+		})
+	}
 
 	return group.Wait()
 }
@@ -348,7 +359,8 @@ func selectSender(provider, expoAccessToken string, log *slog.Logger) (service.S
 		return fcm.NewLogSender(log), nil
 	case pushProviderExpo:
 		log.Info("comms push via Expo", slog.Bool("access_token", expoAccessToken != ""))
-		return expo.NewSender(expo.WithAccessToken(expoAccessToken), expo.WithLogger(log)), nil
+		options := []expo.Option{expo.WithAccessToken(expoAccessToken), expo.WithLogger(log), expo.WithEndpoint(envOr("EXPO_PUSH_URL", expo.DefaultEndpoint))}
+		return expo.NewSender(options...), nil
 	default:
 		return nil, fmt.Errorf("PUSH_PROVIDER %q is not one of log, expo", provider)
 	}

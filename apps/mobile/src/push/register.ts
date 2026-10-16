@@ -38,7 +38,7 @@ function logMissingProjectOnce(): void {
   }
   missingProjectLogged = true;
   if (__DEV__) {
-    console.warn("[push] no EAS projectId in app config; push registration skipped until EAS is configured.");
+    console.info("[push] no EAS projectId in app config; push registration skipped until EAS is configured.");
   }
 }
 

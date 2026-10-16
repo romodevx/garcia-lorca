@@ -315,9 +315,8 @@ variable "push_provider" {
 
 variable "expo_access_token_enabled" {
   description = <<-EOT
-    Mount the Expo access token secret into comms. Turn on only AFTER a version
-    has been written to garcia-lorca-expo-access-token-<env>: a revision that
-    references a secret with no version fails to start.
+    Mount the latest Expo access token secret version into comms. Turn on only
+    AFTER adding a version to garcia-lorca-expo-access-token-<env> with gcloud.
   EOT
   type        = bool
   default     = false

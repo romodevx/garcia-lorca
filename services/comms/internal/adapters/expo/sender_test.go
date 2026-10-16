@@ -134,6 +134,17 @@ func TestPushReportsUnregisteredDevices(t *testing.T) {
 	assert.Equal(t, []string{all[3], all[120]}, report.Unregistered)
 }
 
+func TestPushReturnsAcceptedTicketTokenPairs(t *testing.T) {
+	all := tokens(2)
+	f := &fakeExpo{dead: map[string]bool{all[1]: true}}
+	m := message
+	m.Tokens = all
+	report, err := newSender(t, f).Push(context.Background(), m)
+	require.NoError(t, err)
+	assert.Equal(t, []service.PushTicketPair{{TicketID: "ticket-0", DeviceToken: all[0]}}, report.Accepted)
+	assert.Equal(t, []string{all[1]}, report.Unregistered)
+}
+
 // A token that is not an Expo push token is never sent (it would fail the whole
 // batch), and no valid token means no request at all.
 func TestPushSkipsMalformedTokens(t *testing.T) {
