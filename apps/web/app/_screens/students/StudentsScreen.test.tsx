@@ -6,6 +6,7 @@ import * as studentsApi from "../../students/api";
 import * as configApi from "../../config/api";
 import { clearIntent, requestIntent } from "../../routing/pendingIntent";
 import { StudentsScreen } from "./StudentsScreen";
+import { leaveStudentsNotice } from "./studentsNotice";
 
 // The screens read labelled groups (ISSUE-002); label them from the listGroups mock.
 beforeEach(() => {
@@ -80,7 +81,7 @@ describe("StudentsScreen", () => {
   // pagination's "Siguiente". The page ends with room for it, so the last row
   // and the pager scroll clear of the button.
   it("leaves room under the table for the floating button", async () => {
-    render(<StudentsScreen onBack={() => {}} />);
+    render(<StudentsScreen onBack={() => {}} onCreate={() => {}} />);
     await screen.findByText("Cruz Valentina");
 
     const fab = screen.getByTitle("Nuevo alumno");
@@ -160,40 +161,37 @@ describe("StudentsScreen", () => {
     expect(screen.getByText("Ape24 Nom24")).toBeInTheDocument();
   });
 
-  it("opens the quick-add drawer and creates a student in one panel", async () => {
+  // The alta outgrew its drawer (eleven fields): every "Nuevo alumno" goes to
+  // its own page, /alumnos/nuevo. The list only asks to go there.
+  it("every \"Nuevo alumno\" asks for the alta page, and none opens a drawer", async () => {
     const user = userEvent.setup();
-    students.createStudent.mockResolvedValue(mk("9", "Nuevo", "Alumno", "pending"));
-    render(<StudentsScreen onBack={() => {}} />);
+    const onCreate = vi.fn();
+    render(<StudentsScreen onBack={() => {}} onCreate={onCreate} />);
     await screen.findByText("Cruz Valentina");
 
-    // "Nuevo alumno" is both the header button and the FAB — either opens the drawer.
-    const openButtons = screen.getAllByRole("button", { name: /Nuevo alumno/ });
-    await user.click(openButtons[0] as HTMLElement);
-    const dialog = await screen.findByRole("dialog", { name: "Nuevo alumno" });
-    // Por etiqueta y no por placeholder: el texto de reposo es decoración y
-    // cambia con el diseño; la etiqueta es lo que nombra al campo.
-    await user.type(within(dialog).getByLabelText("CURP"), "HEGA050312MDFRNN08");
-    await user.type(within(dialog).getByLabelText("Apellido paterno"), "Alumno");
-    await user.type(within(dialog).getByLabelText("Nombre(s)"), "Nuevo");
-    await user.type(within(dialog).getByLabelText("Tutor"), "Tutor Nuevo");
-    await user.selectOptions(within(dialog).getByLabelText("Nivel"), "lv-p");
-    await user.selectOptions(await within(dialog).findByLabelText("Grado"), "gl-1");
-    await user.click(within(dialog).getByRole("button", { name: "Crear alumno" }));
+    const buttons = screen.getAllByRole("button", { name: /Nuevo alumno/ });
+    expect(buttons.length).toBeGreaterThanOrEqual(2);
+    for (const b of buttons) await user.click(b);
 
-    await waitFor(() =>
-      // The level travels as the config level's ID, and gradeGroup is empty:
-      // the server writes it when capacity chooses the group, so the record can
-      // never claim a group the pupil is not in.
-      expect(students.createStudent).toHaveBeenCalledWith(expect.any(String), {
-        curp: "HEGA050312MDFRNN08",
-        firstName: "NUEVO",
-        lastName: "ALUMNO",
-        maternalLastName: "",
-        levelId: "lv-p",
-        gradeGroup: "",
-        guardianName: "TUTOR NUEVO",
-      }),
-    );
+    expect(onCreate).toHaveBeenCalledTimes(buttons.length);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("offers no \"Nuevo alumno\" to whoever cannot create pupils", async () => {
+    render(<StudentsScreen onBack={() => {}} />);
+    await screen.findByText("Cruz Valentina");
+    expect(screen.queryByRole("button", { name: /Nuevo alumno/ })).not.toBeInTheDocument();
+  });
+
+  it("says what the alta page created, once, when the list comes back", async () => {
+    leaveStudentsNotice("Alumno creado · ROMO VALENTINA quedó en 1° A");
+    const { unmount } = render(<StudentsScreen onBack={() => {}} />);
+    expect(await screen.findByText("Alumno creado · ROMO VALENTINA quedó en 1° A")).toBeInTheDocument();
+    unmount();
+
+    render(<StudentsScreen onBack={() => {}} />);
+    await screen.findByText("Cruz Valentina");
+    expect(screen.queryByText(/Alumno creado/)).not.toBeInTheDocument();
   });
 });
 
@@ -274,23 +272,10 @@ describe("StudentsScreen — la lista que no cargó", () => {
 describe("opened from a shortcut", () => {
   afterEach(clearIntent);
 
-  it("\"Nuevo alumno\" opens the quick-add drawer", async () => {
-    requestIntent("students", "new");
-    render(<StudentsScreen onBack={() => {}} />);
-    expect(await screen.findByRole("dialog", { name: "Nuevo alumno" })).toBeInTheDocument();
-  });
-
   it("\"Buscar alumno\" puts the cursor in the search", async () => {
     requestIntent("students", "search");
     render(<StudentsScreen onBack={() => {}} />);
     await waitFor(() => expect(screen.getByRole("searchbox", { name: "Buscar" })).toHaveFocus());
-  });
-
-  it("never opens the drawer for a role that cannot create pupils", async () => {
-    requestIntent("students", "new");
-    render(<StudentsScreen onBack={() => {}} canCreate={false} />);
-    await screen.findByText("Cruz Valentina");
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   it("a plain visit opens neither", async () => {

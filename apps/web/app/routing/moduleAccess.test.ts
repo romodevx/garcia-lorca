@@ -9,6 +9,7 @@ describe("moduleIdOfView", () => {
   it.each<[View, string | undefined]>([
     [{ screen: "students" }, "students"],
     [{ screen: "studentEdit", studentId: "s1" }, "students"],
+    [{ screen: "studentNew" }, "students"],
     [{ screen: "finance" }, "finance"],
     [{ screen: "payments" }, "payments"],
     [{ screen: "announcements" }, "announcements"],

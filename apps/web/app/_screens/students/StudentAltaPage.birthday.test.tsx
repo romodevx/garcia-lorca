@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as studentsApi from "../../students/api";
 import * as configApi from "../../config/api";
-import { StudentsScreen } from "./StudentsScreen";
+import { StudentAltaPage } from "./StudentAltaPage";
 
 const CAMPO = { selector: "input, select, textarea" } as const;
 
@@ -17,6 +17,15 @@ vi.mock("../../students/api", async (importOriginal) => ({
   addNote: vi.fn(),
 }));
 vi.mock("../../config/api", () => ({ listCycles: vi.fn(), listGroups: vi.fn(), listLabelledGroups: vi.fn(), listLevels: vi.fn(), listGradeLevels: vi.fn() }));
+
+/** Every alta test lands on the page itself: /alumnos/nuevo. */
+const onCreated = vi.fn();
+const onBack = vi.fn();
+async function openAlta(props: { canWriteNotes?: boolean } = {}): Promise<HTMLElement> {
+  render(<StudentAltaPage onBack={onBack} onCreated={onCreated} {...props} />);
+  await screen.findByRole("heading", { level: 1, name: "Nuevo alumno" });
+  return document.body;
+}
 
 const students = vi.mocked(studentsApi);
 const config = vi.mocked(configApi);
@@ -41,9 +50,7 @@ afterEach(() => vi.clearAllMocks());
 
 async function openAndFill(): Promise<{ drawer: HTMLElement; user: ReturnType<typeof userEvent.setup> }> {
   const user = userEvent.setup();
-  render(<StudentsScreen onBack={() => {}} />);
-  await user.click((await screen.findAllByRole("button", { name: "Nuevo alumno" }))[0]!);
-  const drawer = screen.getByRole("dialog", { name: "Nuevo alumno" });
+  const drawer = await openAlta();
   await user.type(within(drawer).getByLabelText(/CURP/, CAMPO), "ROQA930615HDFMRN08");
   await user.type(within(drawer).getByLabelText(/Apellido paterno/, CAMPO), "Romo");
   await user.type(within(drawer).getByLabelText(/Nombre\(s\)/, CAMPO), "Ana");
@@ -97,7 +104,7 @@ describe("quick add: birth date (T11)", () => {
     await user.click(more);
     await user.click(within(drawer).getByRole("button", { name: "Crear alumno" }));
 
-    expect(await within(drawer).findByText(/no puede ser posterior a hoy/i)).toBeInTheDocument();
+    expect(await within(drawer).findByLabelText(/Fecha de nacimiento/, CAMPO)).toHaveAccessibleDescription(/no puede ser posterior a hoy/i);
     expect(more).toHaveAttribute("aria-expanded", "true");
     expect(students.createStudent).not.toHaveBeenCalled();
   });

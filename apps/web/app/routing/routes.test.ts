@@ -10,6 +10,7 @@ describe("el mapa de rutas", () => {
     ["/finanzas", { screen: "finance" }],
     ["/pagos", { screen: "payments" }],
     ["/alumnos", { screen: "students" }],
+    ["/alumnos/nuevo", { screen: "studentNew" }],
     ["/calificaciones", { screen: "grades" }],
     ["/asistencia", { screen: "attendance" }],
     ["/docentes", { screen: "teachers" }],
