@@ -213,7 +213,11 @@ func (h *StudentsHandler) ChangeAdmissionStatus(ctx context.Context, req *connec
 // as AlreadyExists via the shared error mapper.
 func (h *StudentsHandler) Enroll(ctx context.Context, req *connect.Request[studentsv1.EnrollRequest]) (*connect.Response[studentsv1.EnrollResponse], error) {
 	m := req.Msg
-	enrollment, err := h.enroll.Enroll(ctx, m.GetStudentId(), m.GetGroupId(), m.GetTermId())
+	on, err := entryDay(m.GetEnrolledOn())
+	if err != nil {
+		return nil, err
+	}
+	enrollment, err := h.enroll.Enroll(ctx, m.GetStudentId(), m.GetGroupId(), m.GetTermId(), on)
 	if err != nil {
 		return nil, connectErr(err)
 	}
@@ -223,7 +227,11 @@ func (h *StudentsHandler) Enroll(ctx context.Context, req *connect.Request[stude
 // EnrollIntoGrade places a pupil in a grade and lets capacity choose the group.
 func (h *StudentsHandler) EnrollIntoGrade(ctx context.Context, req *connect.Request[studentsv1.EnrollIntoGradeRequest]) (*connect.Response[studentsv1.EnrollIntoGradeResponse], error) {
 	m := req.Msg
-	placed, err := h.enroll.EnrollIntoGrade(ctx, m.GetStudentId(), m.GetGradeLevelId())
+	on, err := entryDay(m.GetEnrolledOn())
+	if err != nil {
+		return nil, err
+	}
+	placed, err := h.enroll.EnrollIntoGrade(ctx, m.GetStudentId(), m.GetGradeLevelId(), on)
 	if err != nil {
 		return nil, connectErr(err)
 	}
@@ -231,6 +239,20 @@ func (h *StudentsHandler) EnrollIntoGrade(ctx context.Context, req *connect.Requ
 		Enrollment: toProtoEnrollment(placed.Enrollment),
 		GroupName:  placed.GroupName,
 	}), nil
+}
+
+// entryDay parses the optional enrolled_on (YYYY-MM-DD) into a calendar date
+// at midnight UTC; empty is the zero time ("today" to the use case). A day that
+// does not round-trip (2026-02-30, 2026-7-15) is InvalidArgument.
+func entryDay(raw string) (time.Time, error) {
+	if raw == "" {
+		return time.Time{}, nil
+	}
+	parsed, err := time.Parse(time.DateOnly, raw)
+	if err != nil || parsed.Format(time.DateOnly) != raw {
+		return time.Time{}, connect.NewError(connect.CodeInvalidArgument, errors.New("enrolled_on must be YYYY-MM-DD"))
+	}
+	return parsed, nil
 }
 
 func (h *StudentsHandler) GetEnrollment(ctx context.Context, req *connect.Request[studentsv1.GetEnrollmentRequest]) (*connect.Response[studentsv1.GetEnrollmentResponse], error) {

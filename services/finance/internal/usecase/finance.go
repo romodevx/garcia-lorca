@@ -123,7 +123,7 @@ func NewFinanceService(
 		repo:        repo,
 		students:    students,
 		cycles:      cycles,
-		enrollments: enrollments,
+		enrollments: schoolDayEnrollments{inner: enrollments, clock: clock},
 		catalog:     catalog,
 		calendar:    calendar,
 		publisher:   publisher,

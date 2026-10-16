@@ -3,6 +3,7 @@ package pubsubadapter_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"google.golang.org/protobuf/proto"
 
@@ -158,5 +159,38 @@ func TestPublishOutboxEventRelaysAdmissionStatusChanged(t *testing.T) {
 	}
 	if got.GetStudentId() != event.GetStudentId() || got.GetPreviousStatus() != event.GetPreviousStatus() || got.GetNewStatus() != event.GetNewStatus() || got.GetReason() != event.GetReason() {
 		t.Fatalf("payload = %+v", &got)
+	}
+}
+
+// T9: StudentEnrolled carries when the place starts (the proto field existed
+// and was never set); an event with no instant leaves it absent, not 1970.
+func TestPublishStudentEnrolledCarriesEnrolledAt(t *testing.T) {
+	at := time.Date(2026, time.August, 24, 6, 0, 0, 0, time.UTC) // 00:00 Morelia
+	for _, tc := range []struct {
+		name string
+		at   time.Time
+	}{{"set", at}, {"absent", time.Time{}}} {
+		t.Run(tc.name, func(t *testing.T) {
+			bus := &fakeBus{}
+			pub := pubsubadapter.NewEventPublisher(bus)
+			if err := pub.PublishStudentEnrolled(context.Background(), domain.StudentEnrolledEvent{
+				StudentID: "stu-1", TenantID: "t1", CycleID: "cyc", EnrolledAt: tc.at,
+			}); err != nil {
+				t.Fatalf("publish: %v", err)
+			}
+			var got studentsv1.StudentEnrolled
+			if err := proto.Unmarshal(bus.msgs[0].Data, &got); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			if tc.at.IsZero() {
+				if got.GetEnrolledAt() != nil {
+					t.Errorf("enrolled_at = %v, want absent", got.GetEnrolledAt())
+				}
+				return
+			}
+			if !got.GetEnrolledAt().AsTime().Equal(tc.at) {
+				t.Errorf("enrolled_at = %v, want %s", got.GetEnrolledAt().AsTime(), tc.at)
+			}
+		})
 	}
 }

@@ -249,7 +249,7 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 	} else if photos != nil {
 		svc = svc.WithPhotos(photos)
 	}
-	enroll := usecase.NewEnrollmentService(repo, repo, catalog, events, tenantID, newID, time.Now)
+	enroll := usecase.NewEnrollmentService(repo, repo, catalog, events, tenantID, newID, time.Now).WithSchoolZone(zone)
 
 	// Guardian links reference iam users, so the use case validates them against
 	// the iam bounded context by RPC (the user must exist AND hold the guardian

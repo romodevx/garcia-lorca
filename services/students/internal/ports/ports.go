@@ -118,6 +118,14 @@ type GroupRef struct {
 	Capacity int
 }
 
+// CycleRef is the students-owned view of a config cycle: what an enrolment
+// with a chosen entry day is bounded by. StartsOn is a calendar date (midnight
+// UTC, from config's date column).
+type CycleRef struct {
+	ID       string
+	StartsOn time.Time
+}
+
 // TermRef is the students-owned view of a config term (its identity and cycle).
 type TermRef struct {
 	ID      string
@@ -132,6 +140,9 @@ type TermRef struct {
 type CatalogValidator interface {
 	GroupByID(ctx context.Context, id string) (GroupRef, error)
 	TermByID(ctx context.Context, id string) (TermRef, error)
+	// CycleByID returns a cycle's first day, the earliest entry day an
+	// enrolment into it may carry. A missing cycle is glerrors.ErrNotFound.
+	CycleByID(ctx context.Context, id string) (CycleRef, error)
 	// GroupsOfGrade returns the ACTIVE cycle's groups for a grade, in the order a
 	// school fills them (A, then B, then C), each with the seats it holds.
 	//

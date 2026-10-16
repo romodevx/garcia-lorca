@@ -946,9 +946,11 @@ func TestEditingTheTableDownwardDoesNotWalkIssuedChargesDown(t *testing.T) {
 func TestTheInscriptionOfAMidYearJoinerIsNotBornOverdue(t *testing.T) {
 	f := billingFixture(t)
 	joined := aug(2027, time.March, 20)
+	// Noon UTC: EnrolledAt is an instant read in Morelia (ADR 0035), and
+	// midnight UTC of the 20th is still the 19th there.
 	f.enrollments.byCycle[testCycle] = []ports.EnrollmentRef{{
 		ID: "enr-late", StudentID: "stu-late", GroupID: testGroup, CycleID: testCycle,
-		Status: "active", EnrolledAt: joined,
+		Status: "active", EnrolledAt: joined.Add(12 * time.Hour),
 	}}
 
 	got := runOn(t, f, "2027-03-25")

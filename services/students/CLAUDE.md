@@ -36,10 +36,15 @@ drift).
   does not automatically close those rows.
 
 ## Events (published)
-- `StudentEnrolled` — on enroll into a cycle.
+- `StudentEnrolled` — on enroll into a cycle; carries `enrolled_at`.
 - `StudentWithdrawn` — after a dated enrollment withdrawal; stored in the same
   transaction as the withdrawal and relayed from `students_outbox`.
 - `AdmissionStatusChanged` — on every admission transition.
+
+Both enrol RPCs take an optional `enrolled_on` (YYYY-MM-DD, T9): bounded by the
+group's cycle `starts_on` and the school's today (Morelia), stored as 00:00
+America/Mexico_City. Empty keeps the alta's instant. A past day also needs
+`finance:write`, enforced by the gateway (it bills past months).
 
 All go to the single per-domain topic **`student-events`** (mirrors finance's
 `payment-events`), proto-marshaled, with `type` + `tenant_id` attributes.

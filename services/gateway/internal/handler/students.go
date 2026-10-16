@@ -200,8 +200,9 @@ func (h *StudentsHandler) Get(w http.ResponseWriter, r *http.Request) {
 // it. Enroll takes no cycleID: the students service derives the cycle from the
 // group so it can never drift.
 type EnrollmentService interface {
-	Enroll(ctx context.Context, studentID, groupID, termID string) (client.Enrollment, error)
-	EnrollIntoGrade(ctx context.Context, studentID, gradeLevelID string) (client.Placement, error)
+	// enrolledOn is the optional entry day (YYYY-MM-DD); "" means today.
+	Enroll(ctx context.Context, studentID, groupID, termID, enrolledOn string) (client.Enrollment, error)
+	EnrollIntoGrade(ctx context.Context, studentID, gradeLevelID, enrolledOn string) (client.Placement, error)
 	ListEnrollments(ctx context.Context, studentID, cycleID, groupID string) ([]client.Enrollment, error)
 	GetEnrollment(ctx context.Context, id string) (client.Enrollment, error)
 	TransferStudent(ctx context.Context, enrollmentID, toGroupID, reason string) (client.Enrollment, error)
@@ -260,12 +261,14 @@ func NewEnrollmentsHandler(svc EnrollmentService, opts ...EnrollmentsOption) *En
 type enrollIntoGradeRequest struct {
 	StudentID    string `json:"studentId"`
 	GradeLevelID string `json:"gradeLevelId"`
+	EnrolledOn   string `json:"enrolledOn"`
 }
 
 type enrollRequest struct {
-	StudentID string `json:"studentId"`
-	GroupID   string `json:"groupId"`
-	TermID    string `json:"termId"`
+	StudentID  string `json:"studentId"`
+	GroupID    string `json:"groupId"`
+	TermID     string `json:"termId"`
+	EnrolledOn string `json:"enrolledOn"`
 }
 
 type transferRequest struct {
@@ -318,7 +321,10 @@ func (h *EnrollmentsHandler) Enroll(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	res, err := h.svc.Enroll(r.Context(), req.StudentID, req.GroupID, req.TermID)
+	if !h.allowEntryDay(w, r, req.EnrolledOn) {
+		return
+	}
+	res, err := h.svc.Enroll(r.Context(), req.StudentID, req.GroupID, req.TermID, req.EnrolledOn)
 	if err != nil {
 		writeConnectError(w, err)
 		return
@@ -385,16 +391,8 @@ func (h *EnrollmentsHandler) Withdraw(w http.ResponseWriter, r *http.Request) {
 	if withdrawalDate == "" {
 		withdrawalDate = today
 	}
-	if withdrawalDate < today {
-		principal, ok := middleware.PrincipalFrom(r.Context())
-		if !ok {
-			http.Error(w, "Se requiere autenticación.", http.StatusUnauthorized)
-			return
-		}
-		if !middleware.HasPermission(principal, "finance:write") {
-			http.Error(w, "Para una baja con fecha anterior a hoy se necesita permiso de finanzas", http.StatusForbidden)
-			return
-		}
+	if withdrawalDate < today && !requireFinanceWrite(w, r, "Para una baja con fecha anterior a hoy se necesita permiso de finanzas") {
+		return
 	}
 	if utf8.RuneCountInString(req.Reason) > 500 {
 		http.Error(w, "reason must be at most 500 characters.", http.StatusBadRequest)
@@ -406,6 +404,38 @@ func (h *EnrollmentsHandler) Withdraw(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, toEnrollmentResponse(res))
+}
+
+// allowEntryDay checks an enrolment's optional entry day at the edge: a real
+// YYYY-MM-DD (400 otherwise), and finance:write when it is before the school's
+// today, because it bills months already past (ADR 0034's precedent for a
+// past-dated withdrawal). The cycle-start bound is the students service's: it
+// is the one that knows the group's cycle. An empty day is today and passes.
+func (h *EnrollmentsHandler) allowEntryDay(w http.ResponseWriter, r *http.Request, enrolledOn string) bool {
+	if !validOptionalISODate(enrolledOn) {
+		http.Error(w, "enrolledOn must be a valid YYYY-MM-DD date.", http.StatusBadRequest)
+		return false
+	}
+	today := schoolDate(h.now(), h.location).Format("2006-01-02")
+	if enrolledOn != "" && enrolledOn < today {
+		return requireFinanceWrite(w, r, "Para una fecha de ingreso anterior a hoy se necesita permiso de finanzas")
+	}
+	return true
+}
+
+// requireFinanceWrite answers 401/403 unless the caller holds finance:write.
+// Every back-dated write that moves money behind the scenes goes through it.
+func requireFinanceWrite(w http.ResponseWriter, r *http.Request, forbidden string) bool {
+	principal, ok := middleware.PrincipalFrom(r.Context())
+	if !ok {
+		http.Error(w, "Se requiere autenticación.", http.StatusUnauthorized)
+		return false
+	}
+	if !middleware.HasPermission(principal, "finance:write") {
+		http.Error(w, forbidden, http.StatusForbidden)
+		return false
+	}
+	return true
 }
 
 // PreviewWithdrawal handles GET /api/v1/enrollments/{id}/withdrawal-preview.
@@ -494,7 +524,10 @@ func (h *EnrollmentsHandler) EnrollIntoGrade(w http.ResponseWriter, r *http.Requ
 	if !decodeBody(w, r, &body) {
 		return
 	}
-	placed, err := h.svc.EnrollIntoGrade(r.Context(), body.StudentID, body.GradeLevelID)
+	if !h.allowEntryDay(w, r, body.EnrolledOn) {
+		return
+	}
+	placed, err := h.svc.EnrollIntoGrade(r.Context(), body.StudentID, body.GradeLevelID, body.EnrolledOn)
 	if err != nil {
 		writeConnectError(w, err)
 		return

@@ -40,3 +40,12 @@ func (c SchoolClock) Now() time.Time { return c.now() }
 // Today is the school's calendar date now, as midnight UTC like every stored
 // finance date.
 func (c SchoolClock) Today() time.Time { return domain.SchoolDate(c.now(), c.zone) }
+
+// DayOf is the school's calendar date of an instant, as midnight UTC. The zero
+// time stays zero: "not recorded" is not 1 January of year 1 in Morelia.
+func (c SchoolClock) DayOf(t time.Time) time.Time {
+	if t.IsZero() {
+		return t
+	}
+	return domain.SchoolDate(t, c.zone)
+}

@@ -34,6 +34,9 @@ type EnrollmentService struct {
 	tenant      string
 	newID       func() string
 	now         func() time.Time
+	// zone is the school's calendar: it decides the school's today and the
+	// midnight a chosen entry day is stored at. UTC until WithSchoolZone.
+	zone *time.Location
 }
 
 // NewEnrollmentService wires the use case. `tenant` is the single-tenant scope
@@ -56,7 +59,31 @@ func NewEnrollmentService(
 		tenant:      tenant,
 		newID:       newID,
 		now:         now,
+		zone:        time.UTC,
 	}
+}
+
+// WithSchoolZone returns the service reading days in the school's zone,
+// resolved once at boot (SCHOOL_TIMEZONE).
+func (s *EnrollmentService) WithSchoolZone(zone *time.Location) *EnrollmentService {
+	cp := *s
+	cp.zone = zone
+	return &cp
+}
+
+// enrolledAt is when a new enrolment starts. No entry day is the alta's
+// instant, as before. A chosen day (a calendar date, midnight UTC) must lie
+// between the cycle's first day and the school's today, and is stored as
+// 00:00 of that day in the school's zone; billing starts in its month.
+func (s *EnrollmentService) enrolledAt(ctx context.Context, cycleID string, on time.Time) (time.Time, error) {
+	if on.IsZero() {
+		return s.now(), nil
+	}
+	cycle, err := s.catalog.CycleByID(ctx, cycleID)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return domain.EntryInstant(on, domain.SchoolDate(s.now(), s.zone), cycle.StartsOn, s.zone)
 }
 
 // Enroll runs the enroll knot: the student must exist locally, the group is
@@ -64,7 +91,9 @@ func NewEnrollmentService(
 // to that same cycle, and the enrollment is persisted active. A duplicate
 // (student, cycle) is a conflict. On success it best-effort publishes
 // StudentEnrolled — a publish failure does NOT fail the enroll.
-func (s *EnrollmentService) Enroll(ctx context.Context, studentID, groupID, termID string) (domain.Enrollment, error) {
+//
+// on is the optional entry day (a calendar date; zero means now), see enrolledAt.
+func (s *EnrollmentService) Enroll(ctx context.Context, studentID, groupID, termID string, on time.Time) (domain.Enrollment, error) {
 	student, err := s.students.FindByID(ctx, studentID)
 	if err != nil {
 		return domain.Enrollment{}, err // KindNotFound propagates
@@ -98,8 +127,12 @@ func (s *EnrollmentService) Enroll(ctx context.Context, studentID, groupID, term
 		return domain.Enrollment{}, err
 	}
 
+	startsAt, err := s.enrolledAt(ctx, cycleID, on)
+	if err != nil {
+		return domain.Enrollment{}, err
+	}
 	enrollment, err := domain.NewEnrollment(s.newID(), s.tenant, student.ID(), cycleID, groupID, termID,
-		domain.EnrollmentStatusActive, s.now())
+		domain.EnrollmentStatusActive, startsAt)
 	if err != nil {
 		return domain.Enrollment{}, err
 	}
@@ -115,7 +148,7 @@ func (s *EnrollmentService) Enroll(ctx context.Context, studentID, groupID, term
 		return domain.Enrollment{}, err
 	}
 
-	s.publishEnrolled(ctx, student, cycleID)
+	s.publishEnrolled(ctx, student, cycleID, enrollment.EnrolledAt())
 	return enrollment, nil
 }
 
@@ -200,15 +233,16 @@ func (s *EnrollmentService) publishAdmissionChanges(ctx context.Context, changes
 // publishEnrolled emits StudentEnrolled best-effort: it is skipped when no
 // publisher is wired and never fails the enroll on a publish error (the
 // enrollment is already durably persisted).
-func (s *EnrollmentService) publishEnrolled(ctx context.Context, student *domain.Student, cycleID string) {
+func (s *EnrollmentService) publishEnrolled(ctx context.Context, student *domain.Student, cycleID string, enrolledAt time.Time) {
 	if s.events == nil {
 		return
 	}
 	_ = s.events.PublishStudentEnrolled(ctx, domain.StudentEnrolledEvent{
-		StudentID: student.ID(),
-		TenantID:  s.tenant,
-		CycleID:   cycleID,
-		LevelID:   student.Level().ID(),
+		StudentID:  student.ID(),
+		TenantID:   s.tenant,
+		CycleID:    cycleID,
+		LevelID:    student.Level().ID(),
+		EnrolledAt: enrolledAt,
 	})
 }
 
@@ -387,7 +421,9 @@ type Placement struct {
 // A grade with no groups and a grade with no seats are different problems and get
 // different sentences: one needs a group created, the other needs a decision
 // about opening one.
-func (s *EnrollmentService) EnrollIntoGrade(ctx context.Context, studentID, gradeLevelID string) (Placement, error) {
+//
+// on is the optional entry day (a calendar date; zero means now), see enrolledAt.
+func (s *EnrollmentService) EnrollIntoGrade(ctx context.Context, studentID, gradeLevelID string, on time.Time) (Placement, error) {
 	student, err := s.students.FindByID(ctx, studentID)
 	if err != nil {
 		return Placement{}, err
@@ -409,8 +445,14 @@ func (s *EnrollmentService) EnrollIntoGrade(ctx context.Context, studentID, grad
 		return Placement{}, err
 	}
 
+	// Every group of a grade is in the active cycle (GroupsOfGrade), so the
+	// first one names the cycle the entry day is bounded by.
+	startsAt, err := s.enrolledAt(ctx, groups[0].CycleID, on)
+	if err != nil {
+		return Placement{}, err
+	}
 	draft, err := domain.NewEnrollment(s.newID(), s.tenant, student.ID(), groups[0].CycleID,
-		groups[0].ID, "", domain.EnrollmentStatusActive, s.now())
+		groups[0].ID, "", domain.EnrollmentStatusActive, startsAt)
 	if err != nil {
 		return Placement{}, err
 	}
@@ -423,6 +465,6 @@ func (s *EnrollmentService) EnrollIntoGrade(ctx context.Context, studentID, grad
 		return Placement{}, err
 	}
 
-	s.publishEnrolled(ctx, student, chosen.CycleID)
+	s.publishEnrolled(ctx, student, chosen.CycleID, draft.EnrolledAt())
 	return Placement{Enrollment: draft, GroupID: chosen.ID, GroupName: chosen.Name}, nil
 }

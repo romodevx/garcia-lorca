@@ -106,6 +106,17 @@ func (c *Client) GroupByID(ctx context.Context, id string) (ports.GroupRef, erro
 	}, nil
 }
 
+// CycleByID fetches a cycle's first day (config's date column, midnight UTC
+// on the wire). A missing cycle is glerrors.ErrNotFound.
+func (c *Client) CycleByID(ctx context.Context, id string) (ports.CycleRef, error) {
+	res, err := c.rpc.GetCycle(ctx, connect.NewRequest(&configv1.GetCycleRequest{Id: id}))
+	if err != nil {
+		return ports.CycleRef{}, mapCatalogErr(err, "cycle")
+	}
+	cyc := res.Msg.GetCycle()
+	return ports.CycleRef{ID: cyc.GetId(), StartsOn: cyc.GetStartsOn().AsTime().UTC()}, nil
+}
+
 // TermByID fetches a term by id and projects it to the students-owned view (its
 // identity and cycle). A missing term is glerrors.ErrNotFound.
 func (c *Client) TermByID(ctx context.Context, id string) (ports.TermRef, error) {

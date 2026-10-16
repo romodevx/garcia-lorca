@@ -140,6 +140,11 @@ type fakeCatalogValidator struct {
 	deleting    bool // the pupils' level is being deleted (ADR 0021)
 }
 
+// CycleByID: every handler-test cycle opened on 1 July 2026.
+func (c *fakeCatalogValidator) CycleByID(_ context.Context, id string) (ports.CycleRef, error) {
+	return ports.CycleRef{ID: id, StartsOn: time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)}, nil
+}
+
 func (c *fakeCatalogValidator) GroupByID(_ context.Context, id string) (ports.GroupRef, error) {
 	if g, ok := c.groups[id]; ok {
 		return g, nil
@@ -178,8 +183,9 @@ func enrollmentHandlerOver(t *testing.T, enrollments *fakeEnrollmentRepo, deleti
 			enrollGroup: {ID: enrollGroup, CycleID: enrollCycle},
 			otherGroup:  {ID: otherGroup, CycleID: enrollCycle},
 		},
-		terms:    map[string]ports.TermRef{},
-		deleting: deleting,
+		terms:       map[string]ports.TermRef{},
+		deleting:    deleting,
+		gradeGroups: []ports.GroupSeats{{ID: enrollGroup, Name: "1° A", CycleID: enrollCycle, Capacity: 25}},
 	}
 	ids := 0
 	newID := func() string { ids++; return "enr-1" }
@@ -497,5 +503,52 @@ func TestEnrollIntoALevelBeingDeletedCarriesItsCode(t *testing.T) {
 	}
 	if ce.Message() != "Este nivel se está eliminando" {
 		t.Errorf("message = %q", ce.Message())
+	}
+}
+
+// T9: enrolled_on is parsed at the wire (YYYY-MM-DD) and reaches the use case
+// on both enrol RPCs; a malformed day is InvalidArgument and enrols nobody.
+func TestEnrolRPCsCarryTheEntryDay(t *testing.T) {
+	want := time.Date(2026, 7, 15, 0, 0, 0, 0, time.UTC) // handler tests run in UTC
+	t.Run("explicit group", func(t *testing.T) {
+		h, studentID := enrollmentHandler(t)
+		res, err := h.Enroll(context.Background(), connect.NewRequest(&studentsv1.EnrollRequest{
+			StudentId: studentID, GroupId: enrollGroup, EnrolledOn: "2026-07-15",
+		}))
+		if err != nil {
+			t.Fatalf("Enroll: %v", err)
+		}
+		if got := res.Msg.GetEnrollment().GetEnrolledAt().AsTime(); !got.Equal(want) {
+			t.Errorf("enrolled_at = %s, want %s", got, want)
+		}
+	})
+	t.Run("by grade", func(t *testing.T) {
+		h, studentID := enrollmentHandler(t)
+		res, err := h.EnrollIntoGrade(context.Background(), connect.NewRequest(&studentsv1.EnrollIntoGradeRequest{
+			StudentId: studentID, GradeLevelId: "gl-1", EnrolledOn: "2026-07-15",
+		}))
+		if err != nil {
+			t.Fatalf("EnrollIntoGrade: %v", err)
+		}
+		if got := res.Msg.GetEnrollment().GetEnrolledAt().AsTime(); !got.Equal(want) {
+			t.Errorf("enrolled_at = %s, want %s", got, want)
+		}
+	})
+	for _, bad := range []string{"2026-02-30", "15/07/2026", "2026-7-15"} {
+		t.Run("malformed "+bad, func(t *testing.T) {
+			h, studentID := enrollmentHandler(t)
+			_, err := h.Enroll(context.Background(), connect.NewRequest(&studentsv1.EnrollRequest{
+				StudentId: studentID, GroupId: enrollGroup, EnrolledOn: bad,
+			}))
+			if connect.CodeOf(err) != connect.CodeInvalidArgument {
+				t.Fatalf("code = %v, want InvalidArgument", connect.CodeOf(err))
+			}
+			_, err = h.EnrollIntoGrade(context.Background(), connect.NewRequest(&studentsv1.EnrollIntoGradeRequest{
+				StudentId: studentID, GradeLevelId: "gl-1", EnrolledOn: bad,
+			}))
+			if connect.CodeOf(err) != connect.CodeInvalidArgument {
+				t.Fatalf("by grade code = %v, want InvalidArgument", connect.CodeOf(err))
+			}
+		})
 	}
 }
