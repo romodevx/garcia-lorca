@@ -11,10 +11,19 @@ import { DualPanelPicker } from "../../_design/students/DualPanelPicker";
 import { formatStudentName } from "../../_design/students/studentName";
 import { useStudentRoster, type RosterStudent } from "../../_design/students/useStudentRoster";
 import { API_URL } from "../../api-url";
-import { changeActivityOption, endEnrollments, enrollStudents, listEnrollments, type Activity } from "../../activities/api";
+import { changeActivityOption, endEnrollments, enrollStudents, listEnrollments, type Activity, type Periodicity } from "../../activities/api";
 import { optionLabel, PERIODICITY_LABEL, scheduleSummary, sortOptions } from "../../activities/format";
 import { ErrorAlert } from "../config/parts";
 import { LONG_TOAST_MS, useToast } from "./useToast";
+
+// What enrolling charges (owner decision D3): the period in course in full,
+// due today when its own date already passed; a once-a-cycle activity keeps
+// the same window everyone had, counted from today.
+function chargeRule(periodicity: Periodicity): string {
+  return periodicity === "per_cycle"
+    ? "Pagan la actividad completa, con el mismo plazo que los demás contado desde hoy."
+    : "Pagan completo el periodo en curso; si su fecha límite ya pasó, vence hoy.";
+}
 
 const LABELS = { available: "Alumnos", assigned: "Inscritos", assign: "Inscribir", unassign: "Dar de baja", emptyAssigned: "Nadie inscrito todavía." };
 
@@ -141,7 +150,7 @@ export function ActivityEnrollPage({ activity, canWrite, onBack }: ActivityEnrol
       {asking !== null && (
         <ConfirmDialog title="Inscribir alumnos" confirmLabel="Inscribir" icon="students" onConfirm={() => reply(true)} onCancel={() => reply(false)}>
           <p style={{ margin: 0 }}><b>{`¿Inscribir ${plural(asking.ids.length, "alumno", "alumnos")} a ${activity.name} con ${batchLabel}?`}</b></p>
-          <p style={{ margin: "10px 0 0", color: "var(--text-muted)" }}>Se les generará el cargo del periodo en curso y no se borra al darlos de baja.</p>
+          <p style={{ margin: "10px 0 0", color: "var(--text-muted)" }}>{`${chargeRule(activity.periodicity)} El cargo no se borra al darlos de baja.`}</p>
         </ConfirmDialog>
       )}
       {toast !== undefined && <Toast>{toast}</Toast>}

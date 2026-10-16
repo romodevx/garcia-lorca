@@ -203,21 +203,31 @@ func TestEnrollChargesTheBillablePeriodsAtOnce(t *testing.T) {
 	}
 }
 
-// The approved rule: joining after the period's due date starts billing with
-// the next period. No proration.
-func TestJoiningAfterTheDueDateStartsWithTheNextPeriod(t *testing.T) {
-	f := newActivityFixture(t)
+// Owner decision D3 (plan T6): joining after the period's due date still pays
+// the period in course, in full, falling due the day the pupil joins — the same
+// rule as tuition. The run never issues it twice.
+func TestJoiningAfterTheDueDatePaysThePeriodInCourseDueTheDayOfJoining(t *testing.T) {
+	f := newActivityFixture(t) // today: 15 Sept 2026; September fell due on the 10th
 	a := f.create(t, swimmingInput())
-	f.enroll(t, a, day(2026, 9, 11), usecase.EnrollItem{StudentID: testStudent, OptionID: optionFor(t, a, 1)})
-
-	runOn(t, f.fixture, "2026-10-02")
-
-	got := f.activityCharges(t, testStudent)
-	if _, sept := got[domain.ActivityChargeRef(a.ID(), testStudent, "2026-09")]; sept {
-		t.Errorf("September charged to a pupil who joined on the 11th")
+	got := f.enroll(t, a, day(2026, 9, 15), usecase.EnrollItem{StudentID: testStudent, OptionID: optionFor(t, a, 1)})
+	if got.ChargesCreated != 1 {
+		t.Fatalf("enroll = %+v, want September charged at once", got)
 	}
-	if _, oct := got[domain.ActivityChargeRef(a.ID(), testStudent, "2026-10")]; !oct {
-		t.Errorf("October not charged: %v", got)
+
+	sept, ok := f.activityCharges(t, testStudent)[domain.ActivityChargeRef(a.ID(), testStudent, "2026-09")]
+	if !ok {
+		t.Fatalf("September not charged to a pupil who joined on the 15th")
+	}
+	if sept.Amount().Int64() != 40_000 || !sept.DueDate().Equal(day(2026, 9, 15)) {
+		t.Errorf("September = %d due %s, want 40000 due 2026-09-15", sept.Amount().Int64(), sept.DueDate())
+	}
+
+	run := runOn(t, f.fixture, "2026-10-02")
+	if run.ActivitiesCreated != 1 {
+		t.Errorf("run created %d activity charges, want only October", run.ActivitiesCreated)
+	}
+	if _, oct := f.activityCharges(t, testStudent)[domain.ActivityChargeRef(a.ID(), testStudent, "2026-10")]; !oct {
+		t.Errorf("October not charged")
 	}
 }
 

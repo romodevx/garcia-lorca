@@ -287,26 +287,43 @@ func TestNewActivityEnrollmentRejectsMissingParts(t *testing.T) {
 	}
 }
 
-// The approved rule (plan T17): the period in course is charged when the pupil
-// joined on or before its due date; otherwise billing starts with the next one.
-// No proration.
-func TestEnrollmentBillsThePeriodInCourseOnlyUpToItsDueDate(t *testing.T) {
-	sept := domain.ActivityPeriod{Key: "2026-09", BillsOn: day(2026, 9, 1), DueOn: day(2026, 9, 10)}
-	oct := domain.ActivityPeriod{Key: "2026-10", BillsOn: day(2026, 10, 1), DueOn: day(2026, 10, 10)}
+// Owner decision D3 (plan T6): the period in course is always charged, in full,
+// falling due on its own date or, for a pupil who joined after it, the day they
+// joined. A period already over when the pupil joined is never charged.
+func TestEnrollmentPaysThePeriodInCourseEvenAfterItsDueDate(t *testing.T) {
+	sept := domain.ActivityPeriod{Key: "2026-09", BillsOn: day(2026, 9, 1), DueOn: day(2026, 9, 10), NextBillsOn: day(2026, 10, 1)}
+	oct := domain.ActivityPeriod{Key: "2026-10", BillsOn: day(2026, 10, 1), DueOn: day(2026, 10, 10), NextBillsOn: day(2026, 11, 1)}
 
 	onDue := mustEnrollment(t, day(2026, 9, 10))
-	if !onDue.Bills(sept) || !onDue.Bills(oct) {
-		t.Fatalf("joined on the due date: the period in course is charged")
+	if !onDue.Bills(sept) || !onDue.DueOn(sept).Equal(day(2026, 9, 10)) {
+		t.Fatalf("joined on the due date: charged, due on the period's date")
 	}
-	late := mustEnrollment(t, day(2026, 9, 11))
-	if late.Bills(sept) || !late.Bills(oct) {
-		t.Fatalf("joined after the due date: billing starts next period")
+	late := mustEnrollment(t, day(2026, 9, 30))
+	if !late.Bills(sept) || !late.Bills(oct) {
+		t.Fatalf("joined after the due date: the period in course is still charged")
+	}
+	if got := late.DueOn(sept); !got.Equal(day(2026, 9, 30)) {
+		t.Fatalf("late joiner's September due %s, want the day they joined", got)
+	}
+	if got := late.DueOn(oct); !got.Equal(day(2026, 10, 10)) {
+		t.Fatalf("late joiner's October due %s, want the period's date", got)
+	}
+	if mustEnrollment(t, day(2026, 10, 15)).Bills(sept) {
+		t.Fatalf("a period over before the pupil joined is never charged")
+	}
+}
+
+func TestPeriodsKnowWhenTheNextOneBills(t *testing.T) {
+	a := mustActivity(t, nil)
+	got := a.PeriodsUpTo(day(2026, 10, 31))
+	if !got[0].NextBillsOn.Equal(day(2026, 10, 1)) || !got[1].NextBillsOn.Equal(day(2026, 11, 1)) {
+		t.Fatalf("next billing dates = %s, %s", got[0].NextBillsOn, got[1].NextBillsOn)
 	}
 }
 
 func TestEndedEnrollmentStopsPeriodsBilledOnOrAfterTheEnd(t *testing.T) {
-	sept := domain.ActivityPeriod{Key: "2026-09", BillsOn: day(2026, 9, 1), DueOn: day(2026, 9, 10)}
-	oct := domain.ActivityPeriod{Key: "2026-10", BillsOn: day(2026, 10, 1), DueOn: day(2026, 10, 10)}
+	sept := domain.ActivityPeriod{Key: "2026-09", BillsOn: day(2026, 9, 1), DueOn: day(2026, 9, 10), NextBillsOn: day(2026, 10, 1)}
+	oct := domain.ActivityPeriod{Key: "2026-10", BillsOn: day(2026, 10, 1), DueOn: day(2026, 10, 10), NextBillsOn: day(2026, 11, 1)}
 
 	e := mustEnrollment(t, day(2026, 8, 20)).End(day(2026, 10, 1))
 	if !e.Bills(sept) || e.Bills(oct) {

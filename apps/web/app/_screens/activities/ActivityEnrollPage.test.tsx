@@ -68,6 +68,8 @@ describe("ActivityEnrollPage (T17)", () => {
     const dialog = await screen.findByRole("dialog", { name: "Inscribir alumnos" });
     expect(dialog).toHaveTextContent("¿Inscribir 2 alumnos a Natación con 1 día/semana — $600.00?");
     expect(dialog).toHaveTextContent(/no se borra al darlos de baja/);
+    // D3: the period in course is paid in full, due today if its date passed.
+    expect(dialog).toHaveTextContent("Pagan completo el periodo en curso; si su fecha límite ya pasó, vence hoy.");
     expect(m.enrollStudents).not.toHaveBeenCalled();
     await user.click(within(dialog).getByRole("button", { name: "Inscribir" }));
 
