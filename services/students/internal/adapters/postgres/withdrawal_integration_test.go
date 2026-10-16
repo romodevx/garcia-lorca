@@ -13,6 +13,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	studentsv1 "github.com/garcia-lorca/gen/go/garcialorca/students/v1"
+	glerrors "github.com/garcia-lorca/pkg/errors"
 	pgadapter "github.com/garcia-lorca/services/students/internal/adapters/postgres"
 	"github.com/garcia-lorca/services/students/internal/domain"
 	"github.com/garcia-lorca/services/students/internal/ports"
@@ -79,28 +80,83 @@ func TestWithdrawalAndOutboxAreCommittedAndRelayed(t *testing.T) {
 	assert.Equal(t, studentsv1.AdmissionStatus_ADMISSION_STATUS_WITHDRAWN, statusEvent.GetNewStatus())
 }
 
-func TestWithdrawalKeepsAdmissionStatusWhenAnotherEnrollmentIsActive(t *testing.T) {
-	ctx := context.Background()
-	const studentID = "aaaaaaaa-0000-0000-0000-000000002004"
-	const enrollmentID = "bbbbbbbb-0000-0000-0000-000000002004"
-	repo := appRepo(t, withdrawalTenant)
-	seedStudent(t, withdrawalTenant, studentID, "WITA050312MDFRNN04")
-	markStudentEnrolled(t, repo, studentID, "cccccccc-0000-0000-0000-000000002004")
-	first, err := domain.NewEnrollment(enrollmentID, withdrawalTenant, studentID,
-		"cccccccc-0000-0000-0000-000000002004", "dddddddd-0000-0000-0000-000000002004", "", domain.EnrollmentStatusActive, time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC))
-	require.NoError(t, err)
-	second, err := domain.NewEnrollment("bbbbbbbb-0000-0000-0000-000000002005", withdrawalTenant, studentID,
-		"cccccccc-0000-0000-0000-000000002005", "dddddddd-0000-0000-0000-000000002005", "", domain.EnrollmentStatusActive, time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC))
-	require.NoError(t, err)
-	require.NoError(t, repo.CreateEnrollment(ctx, first))
-	require.NoError(t, repo.CreateEnrollment(ctx, second))
-	withdrawn, err := first.Withdraw(time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC), "reason", time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC))
-	require.NoError(t, err)
-	require.NoError(t, repo.WithdrawEnrollment(ctx, withdrawn))
+func TestWithdrawalKeepsAdmissionStatusOnlyForANewerActiveEnrollment(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		suffix     string
+		curpSuffix string
+		otherDate  time.Time
+		wantStatus domain.AdmissionStatus
+	}{
+		{name: "older active enrollment from a previous cycle does not count", suffix: "007", curpSuffix: "04", otherDate: time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC), wantStatus: domain.AdmissionWithdrawn},
+		{name: "newer active enrollment keeps admission status", suffix: "008", curpSuffix: "05", otherDate: time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC), wantStatus: domain.AdmissionEnrolled},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			studentID := "aaaaaaaa-0000-0000-0000-000000000" + tc.suffix
+			currentID := "bbbbbbbb-0000-0000-0000-000000000" + tc.suffix
+			otherID := "bbbbbbbb-0000-0000-0000-000000001" + tc.suffix
+			currentCycle := "cccccccc-0000-0000-0000-000000000" + tc.suffix
+			otherCycle := "cccccccc-0000-0000-0000-000000001" + tc.suffix
+			currentGroup := "dddddddd-0000-0000-0000-000000000" + tc.suffix
+			otherGroup := "dddddddd-0000-0000-0000-000000001" + tc.suffix
+			repo := appRepo(t, withdrawalTenant)
+			seedStudent(t, withdrawalTenant, studentID, "WITA050312MDFRNN"+tc.curpSuffix)
+			markStudentEnrolled(t, repo, studentID, currentCycle)
+			current, err := domain.NewEnrollment(currentID, withdrawalTenant, studentID,
+				currentCycle, currentGroup, "", domain.EnrollmentStatusActive, time.Date(2026, 8, 1, 10, 0, 0, 0, time.UTC))
+			require.NoError(t, err)
+			other, err := domain.NewEnrollment(otherID, withdrawalTenant, studentID,
+				otherCycle, otherGroup, "", domain.EnrollmentStatusActive, tc.otherDate)
+			require.NoError(t, err)
+			require.NoError(t, repo.CreateEnrollment(ctx, current))
+			require.NoError(t, repo.CreateEnrollment(ctx, other))
+			withdrawn, err := current.Withdraw(time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC), "reason", time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC))
+			require.NoError(t, err)
+			require.NoError(t, repo.WithdrawEnrollment(ctx, withdrawn))
 
-	student, err := repo.FindByID(ctx, studentID)
+			student, err := repo.FindByID(ctx, studentID)
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantStatus, student.Status())
+		})
+	}
+}
+
+func TestCreateEnrollmentRechecksTerminalAdmissionInsideTransaction(t *testing.T) {
+	ctx := context.Background()
+	const studentID = "aaaaaaaa-0000-0000-0000-000000002006"
+	const cycleID = "cccccccc-0000-0000-0000-000000002006"
+	repo := appRepo(t, withdrawalTenant)
+	seedStudent(t, withdrawalTenant, studentID, "WITA050312MDFRNN06")
+	require.NoError(t, superDB.Exec("UPDATE students SET admission_status = ? WHERE id = ?", domain.AdmissionWithdrawn.String(), studentID).Error)
+	enrollment, err := domain.NewEnrollment("bbbbbbbb-0000-0000-0000-000000002006", withdrawalTenant, studentID,
+		cycleID, "dddddddd-0000-0000-0000-000000002006", "", domain.EnrollmentStatusActive, time.Date(2026, 8, 1, 10, 0, 0, 0, time.UTC))
 	require.NoError(t, err)
-	assert.Equal(t, domain.AdmissionEnrolled, student.Status())
+
+	err = repo.CreateEnrollment(ctx, enrollment)
+	require.Error(t, err)
+	assert.Equal(t, glerrors.KindConflict, glerrors.KindOf(err))
+	assert.Empty(t, func() []domain.Enrollment {
+		rows, listErr := repo.ListEnrollments(ctx, studentID, cycleID, "")
+		require.NoError(t, listErr)
+		return rows
+	}())
+}
+
+func TestStalePlacementUpdateDoesNotRestoreTerminalAdmission(t *testing.T) {
+	ctx := context.Background()
+	const studentID = "aaaaaaaa-0000-0000-0000-000000002009"
+	repo := appRepo(t, withdrawalTenant)
+	seedStudent(t, withdrawalTenant, studentID, "WITA050312MDFRNN09")
+	stale, err := repo.FindByID(ctx, studentID)
+	require.NoError(t, err)
+	stale.PlaceIn("1° A")
+	require.NoError(t, superDB.Exec("UPDATE students SET admission_status = ? WHERE id = ?", domain.AdmissionWithdrawn.String(), studentID).Error)
+
+	require.NoError(t, repo.Update(ctx, stale))
+	current, err := repo.FindByID(ctx, studentID)
+	require.NoError(t, err)
+	assert.Equal(t, domain.AdmissionWithdrawn, current.Status())
 }
 
 func markStudentEnrolled(t *testing.T, repo *pgadapter.Repository, studentID, cycleID string) {

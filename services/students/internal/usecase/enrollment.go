@@ -150,6 +150,10 @@ func (s *EnrollmentService) MarkInscriptionPaid(ctx context.Context, studentID s
 	if student.Status() == domain.AdmissionEnrolled {
 		return nil
 	}
+	if student.Status().IsTerminal() {
+		slog.InfoContext(ctx, "ignoring inscription payment for terminal admission")
+		return nil
+	}
 	changes, err := admitAndEnroll(student, "")
 	if err != nil {
 		return err

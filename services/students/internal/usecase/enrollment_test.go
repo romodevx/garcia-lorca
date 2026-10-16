@@ -650,6 +650,26 @@ func TestMarkingAnAlreadyEnrolledPupilIsHarmless(t *testing.T) {
 	}
 }
 
+func TestMarkInscriptionPaidAcknowledgesTerminalAdmissions(t *testing.T) {
+	for _, status := range []domain.AdmissionStatus{domain.AdmissionWithdrawn, domain.AdmissionRejected} {
+		t.Run(status.String(), func(t *testing.T) {
+			svc, students, _, _, pub := newEnrollService(t)
+			student := domain.Rehydrate(domain.NewApplicantParams{
+				ID: "terminal-student", TenantID: tenant, FirstName: "Ana", LastName: "Hernández",
+				Level: domain.RestoreLevel("e1000000-0000-0000-0000-000000000001", "Primaria"),
+			}, status)
+			students.byID[student.ID()] = student
+
+			if err := svc.MarkInscriptionPaid(context.Background(), student.ID()); err != nil {
+				t.Fatalf("terminal admission must be acknowledged as a no-op: %v", err)
+			}
+			if len(students.updated) != 0 || len(pub.changed) != 0 {
+				t.Errorf("terminal admission was changed: updates=%d events=%d", len(students.updated), len(pub.changed))
+			}
+		})
+	}
+}
+
 // A withdrawn pupil cannot be quietly re-enrolled by dropping them in a group:
 // withdrawal is terminal, and the refusal has to come from the state machine
 // rather than from nobody noticing.

@@ -35,8 +35,8 @@ type InscriptionBiller interface {
 // joins them.
 //
 // It keeps NO idempotency ledger. A redelivery finds the pupil already enrolled
-// and does nothing, which is cheaper and simpler than a second mechanism guarding
-// a property the state machine already has.
+// and does nothing, as does a terminal admission, which is cheaper and simpler
+// than a second mechanism guarding properties the state machine already has.
 type Consumer struct {
 	biller InscriptionBiller
 	log    *slog.Logger

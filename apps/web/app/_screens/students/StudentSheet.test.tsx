@@ -155,8 +155,27 @@ describe("la ficha de un alumno que ya tiene grupo", () => {
     expect(submit).not.toBeNull();
     await user.click(submit!);
     await waitFor(() => expect(students.withdraw).toHaveBeenCalledWith(expect.any(String), "enr-1", { withdrawnOn: expect.any(String), reason: "Cambio de escuela" }));
-    expect(await within(sheet).findByText(/Baja el 15 oct 2026 · Cambio de escuela/)).toBeInTheDocument();
+    const baja = await within(sheet).findByText(/Baja el 15 oct 2026 · Cambio de escuela/);
+    expect(baja).toBeInTheDocument();
+    await waitFor(() => expect(baja).toHaveFocus());
     expect(within(sheet).queryByRole("button", { name: "Cambiar de grupo" })).not.toBeInTheDocument();
+  });
+
+  it("returns focus to Dar de baja after closing the panel with unsaved text", async () => {
+    const user = userEvent.setup();
+    const sheet = await openSheet(user, { canWithdraw: true });
+    const trigger = within(sheet).getByRole("button", { name: "Dar de baja" });
+    await user.click(trigger);
+    await user.type(within(sheet).getByLabelText("Motivo"), "Se muda");
+    await user.keyboard("{Escape}");
+
+    expect(await within(sheet).findByText(/¿Descartar el motivo escrito\?/)).toBeInTheDocument();
+    await user.click(within(sheet).getByRole("button", { name: "Seguir editando" }));
+    expect(within(sheet).getByLabelText("Motivo")).toHaveValue("Se muda");
+    await user.keyboard("{Escape}");
+    await user.click(await within(sheet).findByRole("button", { name: "Descartar cambios" }));
+    const restoredTrigger = await within(sheet).findByRole("button", { name: "Dar de baja" });
+    await waitFor(() => expect(restoredTrigger).toHaveFocus());
   });
 
 });
@@ -198,6 +217,18 @@ describe("lo que la ficha lee", () => {
     const user = userEvent.setup();
     await openSheet(user);
     await waitFor(() => expect(students.listEnrollments).toHaveBeenCalledWith(expect.any(String), { studentId: "stu-1", cycleId: "c1" }));
+  });
+
+  it("muestra fecha y motivo de una inscripción ya dada de baja", async () => {
+    students.listStudents.mockResolvedValue([{ ...pupil("lv-pri"), admissionStatus: "withdrawn" }]);
+    students.listEnrollments.mockResolvedValue([{
+      id: "enr-withdrawn", studentId: "stu-1", cycleId: "c1", groupId: "g-pri-b", termId: "",
+      status: "withdrawn", enrolledAt: "2026-08-31", withdrawnOn: "2026-10-15", withdrawalReason: "motivo",
+    }]);
+    const user = userEvent.setup();
+    const sheet = await openSheet(user);
+
+    expect(await within(sheet).findByText("Baja el 15 oct 2026 · motivo")).toBeInTheDocument();
   });
 
   // Not reading the enrolment is not "no group": offering "Inscribir" then

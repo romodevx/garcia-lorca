@@ -35,6 +35,13 @@ const (
 func (r *Repository) CreateEnrollment(ctx context.Context, e domain.Enrollment) error {
 	model := enrollmentFromDomain(e)
 	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		student, err := lockStudentForEnrollment(tx, e.StudentID())
+		if err != nil {
+			return err
+		}
+		if err := refuseTerminalAdmission(student); err != nil {
+			return err
+		}
 		if err := tx.Create(&model).Error; err != nil {
 			return translateEnrollmentWriteErr(err)
 		}
@@ -105,6 +112,20 @@ func (r *Repository) ListEnrollments(ctx context.Context, studentID, cycleID, gr
 func (r *Repository) TransferEnrollment(ctx context.Context, cmd ports.TransferCommand) error {
 	model := transferFromDomain(cmd.Transfer)
 	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		// The withdrawal path takes the student lock before touching an
+		// enrollment. Match that order so a concurrent transfer cannot race a
+		// terminal admission or deadlock with a withdrawal.
+		var student studentModel
+		if err := tx.Table("students").Select("students.*").
+			Joins("JOIN enrollments ON enrollments.student_id = students.id").
+			Where("enrollments.id = ?", cmd.EnrollmentID).
+			Clauses(clause.Locking{Strength: "UPDATE", Table: clause.Table{Name: "students"}}).
+			First(&student).Error; err != nil {
+			return translateFindErr(err)
+		}
+		if err := refuseTerminalAdmission(student); err != nil {
+			return err
+		}
 		// Seats first, under the same per-group lock the by-grade path takes, so
 		// two moves into the last seat cannot both win.
 		if err := tx.Exec(`SELECT pg_advisory_xact_lock(hashtext(?))`, cmd.To.ID).Error; err != nil {
@@ -240,11 +261,15 @@ func (r *Repository) WithdrawEnrollment(ctx context.Context, e domain.Enrollment
 			}
 			return glerrors.New(glerrors.KindConflict, "enrollment is not active")
 		}
-		var active int64
-		if err := tx.Model(&enrollmentModel{}).Where("student_id = ? AND status = ?", e.StudentID(), domain.EnrollmentStatusActive.String()).Count(&active).Error; err != nil {
-			return glerrors.Wrap(glerrors.KindInternal, "checking active enrollments", err)
+		var newerActive int64
+		// A cycle ending does not close its enrollment. Only a later placement
+		// means the pupil has already returned after this enrollment.
+		if err := tx.Model(&enrollmentModel{}).
+			Where("student_id = ? AND status = ? AND enrolled_at > ?", e.StudentID(), domain.EnrollmentStatusActive.String(), e.EnrolledAt()).
+			Count(&newerActive).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "checking newer active enrollments", err)
 		}
-		if active == 0 {
+		if newerActive == 0 {
 			previous, err := domain.ParseAdmissionStatus(student.AdmissionStatus)
 			if err != nil {
 				return glerrors.Wrap(glerrors.KindInternal, "reading student admission status", err)
@@ -401,6 +426,13 @@ func (r *Repository) CreateEnrollmentInFirstFreeGroup(
 ) (ports.GroupSeats, error) {
 	var chosen ports.GroupSeats
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		student, err := lockStudentForEnrollment(tx, e.StudentID())
+		if err != nil {
+			return err
+		}
+		if err := refuseTerminalAdmission(student); err != nil {
+			return err
+		}
 		for _, group := range groups {
 			if group.Capacity <= 0 {
 				// A group with no seats declared is not "infinitely large"; it is
@@ -437,4 +469,26 @@ func (r *Repository) CreateEnrollmentInFirstFreeGroup(
 		return ports.GroupSeats{}, err
 	}
 	return chosen, nil
+}
+
+// lockStudentForEnrollment serializes placement creation with withdrawal. Both
+// paths lock the student first; the admission state is therefore authoritative
+// when it is checked before the enrollment insert.
+func lockStudentForEnrollment(tx *gorm.DB, studentID string) (studentModel, error) {
+	var student studentModel
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", studentID).First(&student).Error; err != nil {
+		return studentModel{}, translateFindErr(err)
+	}
+	return student, nil
+}
+
+func refuseTerminalAdmission(student studentModel) error {
+	status, err := domain.ParseAdmissionStatus(student.AdmissionStatus)
+	if err != nil {
+		return glerrors.Wrap(glerrors.KindInternal, "reading student admission status", err)
+	}
+	if status.IsTerminal() {
+		return glerrors.New(glerrors.KindConflict, "student admission is terminal")
+	}
+	return nil
 }

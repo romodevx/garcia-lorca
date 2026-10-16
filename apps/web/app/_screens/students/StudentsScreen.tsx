@@ -599,13 +599,28 @@ function StudentSheet({
   const [saving, setSaving] = useState(false);
   const [withdrawOpen, setWithdrawOpen] = useState(false);
   const withdrawTrigger = useRef<HTMLButtonElement>(null);
+  const withdrawnLine = useRef<HTMLParagraphElement>(null);
+  const previousWithdrawOpen = useRef(false);
+  const focusWithdrawResult = useRef(false);
+
+  useEffect(() => {
+    if (previousWithdrawOpen.current && !withdrawOpen) {
+      const target = focusWithdrawResult.current ? withdrawnLine.current : withdrawTrigger.current;
+      target?.focus();
+      focusWithdrawResult.current = false;
+    }
+    previousWithdrawOpen.current = withdrawOpen;
+  }, [withdrawOpen, current]);
 
   useEffect(() => {
     let alive = true;
     // An enrolment from last year stays "active" (a cycle's end closes nothing),
     // so only this cycle's counts.
     listEnrollments(API_URL, { studentId: st.id, cycleId })
-      .then((all) => { if (alive) setCurrent(all.find((e) => e.status === "active") ?? null); })
+      .then((all) => {
+        if (!alive) return;
+        setCurrent(all.find((e) => e.status === "active") ?? all.find((e) => e.status === "withdrawn") ?? null);
+      })
       // Not knowing is not "no group": offering "Inscribir" then would bring
       // back the second-enrolment 409 this sheet was fixed for.
       .catch(() => { if (alive) setCurrent("failed"); });
@@ -683,7 +698,7 @@ function StudentSheet({
         </>
       }
     >
-      {withdrawOpen && placed !== undefined ? <WithdrawPanel enrollment={placed} triggerRef={withdrawTrigger} onBack={() => setWithdrawOpen(false)} onSuccess={(updated) => { setCurrent(updated); setWithdrawOpen(false); onPlaced("Alumno dado de baja", true); }} /> : <>
+      {withdrawOpen && placed !== undefined ? <WithdrawPanel enrollment={placed} onBack={() => setWithdrawOpen(false)} onSuccess={(updated) => { focusWithdrawResult.current = true; setCurrent(updated); setWithdrawOpen(false); onPlaced("Alumno dado de baja", true); }} /> : <>
           {rows.map(([k, v]) => (
             <div key={k} style={{ display: "flex", justifyContent: "space-between", gap: 16, padding: "15px 0", borderBottom: "1px solid var(--border)" }}>
               <span style={{ fontSize: 14, color: "var(--text-muted)" }}>{k}</span>
@@ -741,7 +756,7 @@ function StudentSheet({
               )}
             </div>
           )}
-          {(st.admissionStatus === "withdrawn" || (current !== null && current !== undefined && current !== "failed" && current.status === "withdrawn")) && <p style={{ paddingTop: 18, color: "var(--text-muted)" }}>Baja el {placed?.withdrawnOn ? dayWithYearLabel(placed.withdrawnOn) : "—"}{placed?.withdrawalReason ? ` · ${placed.withdrawalReason}` : ""}</p>}
+          {(st.admissionStatus === "withdrawn" || (current !== null && current !== undefined && current !== "failed" && current.status === "withdrawn")) && <p ref={withdrawnLine} tabIndex={-1} style={{ paddingTop: 18, color: "var(--text-muted)" }}>Baja el {placed?.withdrawnOn ? dayWithYearLabel(placed.withdrawnOn) : "—"}{placed?.withdrawalReason ? ` · ${placed.withdrawalReason}` : ""}</p>}
       </>}
     </DrawerShell>
   );

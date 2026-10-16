@@ -46,6 +46,18 @@ func TestPayingTheInscriptionEnrolsThePupil(t *testing.T) {
 	}
 }
 
+func TestTerminalAdmissionNoOpIsAcknowledged(t *testing.T) {
+	biller := &spyBiller{}
+	c := studentspubsub.NewConsumer(biller, quiet())
+
+	if err := c.Handle(context.Background(), settled(t, "enrollment:cyc-1:stu-1")); err != nil {
+		t.Fatalf("a terminal admission no-op must be acknowledged: %v", err)
+	}
+	if biller.calls != 1 {
+		t.Errorf("biller called %d times, want 1", biller.calls)
+	}
+}
+
 // Paying a colegiatura, a uniform or a late fee changes nothing about admission.
 // Reacting to every settled charge would enrol a pupil for buying a jumper.
 func TestPayingAnythingElseChangesNothing(t *testing.T) {

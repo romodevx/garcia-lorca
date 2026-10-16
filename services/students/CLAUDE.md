@@ -24,12 +24,16 @@ drift).
 - Admission is a state machine — the single source of truth is
   `allowedTransitions` in `domain/admission.go`:
   `pending → accepted → enrolled`, plus `rejected` (from pending) and
-  `withdrawn` (from accepted/enrolled). `rejected`/`withdrawn` are terminal.
+  `withdrawn` (from pending/accepted/enrolled). `rejected`/`withdrawn` are terminal.
 - Transition methods (`Accept`/`Reject`/`Enroll`/`Withdraw`) are the only place
   admission rules live; an illegal move is `KindConflict`, surfaced by the gRPC
   adapter as `FailedPrecondition` (a duplicate CURP on create is `AlreadyExists`).
 - Events are published only AFTER a successful persist, so a failed write
   publishes nothing.
+- When an enrollment is withdrawn, the admission file becomes `withdrawn` unless
+  another active enrollment has a later `enrolled_at`. Older active rows from
+  previous cycles do not keep the admission file enrolled because cycle end
+  does not automatically close those rows.
 
 ## Events (published)
 - `StudentEnrolled` — on enroll into a cycle.
