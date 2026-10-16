@@ -47,11 +47,11 @@ func (c Charge) WithStartsOn(startsOn time.Time) (Charge, error) {
 // or the zero time when it is open from the day it was issued.
 func (c Charge) StartsOn() time.Time { return c.startsOn }
 
-// OpenOn reports whether the charge has opened by the instant `on`.
+// OpenOn reports whether the charge has opened by the day `on`.
 //
-// Compared as instants against a start stored at UTC midnight, which is this
-// service's convention for the school's day (see school-day-is-utc-day): the
-// same convention the due date, the surcharge and the price ladder follow.
+// `on` is the school's day as midnight UTC (SchoolClock.Today, ADR 0035), the
+// representation starts_on is stored in: the same day the due date, the
+// surcharge and the price ladder are judged on.
 func (c Charge) OpenOn(on time.Time) bool {
 	return c.startsOn.IsZero() || !c.startsOn.After(on)
 }

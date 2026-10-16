@@ -99,12 +99,13 @@ type FinanceService struct {
 	scholarships ports.ScholarshipRepository
 	tenantID     string
 	newID        func() string
-	now          func() time.Time
+	// clock is the one source of time (ADR 0035): Now stamps, Today decides.
+	clock SchoolClock
 }
 
 // NewFinanceService wires the use case. tenantID is the single-tenant scope for
-// this phase; newID mints ids and now stamps payments and bounds the overdue
-// query (both injectable for deterministic tests). publisher may be nil, in
+// this phase; newID mints ids and clock stamps payments (Now) and
+// decides what is due on the school's day (Today) (both injectable for deterministic tests). publisher may be nil, in
 // which case events are simply not emitted.
 func NewFinanceService(
 	repo ports.FinanceRepository,
@@ -116,7 +117,7 @@ func NewFinanceService(
 	publisher ports.PaymentPublisher,
 	tenantID string,
 	newID func() string,
-	now func() time.Time,
+	clock SchoolClock,
 ) *FinanceService {
 	return &FinanceService{
 		repo:        repo,
@@ -128,7 +129,7 @@ func NewFinanceService(
 		publisher:   publisher,
 		tenantID:    tenantID,
 		newID:       newID,
-		now:         now,
+		clock:       clock,
 	}
 }
 
@@ -306,7 +307,7 @@ func (s *FinanceService) ListCharges(ctx context.Context, studentID, cycleID str
 	if err != nil {
 		return nil, err
 	}
-	return pricer.priceAll(charges, s.now())
+	return pricer.priceAll(charges, s.clock.Today())
 }
 
 // studentsOf is the one pupil asked about, or every pupil in the list.
@@ -448,18 +449,15 @@ type TenderedPaymentInput struct {
 // and each further row the key with "#2", "#3"… appended, so a retry finds the
 // set already stored and returns it without collecting again.
 func (s *FinanceService) RegisterTenderedPayment(ctx context.Context, in TenderedPaymentInput) ([]domain.Payment, ports.ChargeWithPaid, error) {
-	when := in.PaidAt
-	if when.IsZero() {
-		when = s.now()
-	} else if when.After(s.now()) {
-		return nil, ports.ChargeWithPaid{}, glerrors.New(glerrors.KindInvalid,
-			"la fecha del pago no puede estar en el futuro")
+	when, day, err := s.paymentDate(in.PaidAt)
+	if err != nil {
+		return nil, ports.ChargeWithPaid{}, err
 	}
 	payments, err := s.tenderedPayments(in, when)
 	if err != nil {
 		return nil, ports.ChargeWithPaid{}, err
 	}
-	if err := s.refuseScholarshipCharge(ctx, in.ChargeID, when); err != nil {
+	if err := s.refuseScholarshipCharge(ctx, in.ChargeID, day); err != nil {
 		return nil, ports.ChargeWithPaid{}, err
 	}
 
@@ -481,6 +479,29 @@ func (s *FinanceService) RegisterTenderedPayment(ctx context.Context, in Tendere
 		s.drainQuietly(ctx)
 	}
 	return stored, charge, nil
+}
+
+// errFuturePayment refuses a payment dated after it was taken.
+var errFuturePayment = glerrors.New(glerrors.KindInvalid, "la fecha del pago no puede estar en el futuro")
+
+// paymentDate splits a payment's date in two: the instant written as paid_at,
+// and the day the collection rules judge it on (ADR 0035).
+//
+// Unset means now: recorded at the instant, judged on the school's today — so
+// a family paying at 19:00 in Morelia on the last day of the early window still
+// earns it. A date the caller gave (the counter's, which arrives as midnight UTC
+// of the day picked, or a correction's original paid_at) keeps the day it has
+// always stood for, its UTC date, the same day the stored paid_by_due reads:
+// a stored date is never re-zoned.
+func (s *FinanceService) paymentDate(paidAt time.Time) (recorded, day time.Time, err error) {
+	now := s.clock.Now()
+	if paidAt.IsZero() {
+		return now, s.clock.Today(), nil
+	}
+	if paidAt.After(now) {
+		return time.Time{}, time.Time{}, errFuturePayment
+	}
+	return paidAt, domain.CalendarDay(paidAt), nil
 }
 
 // tenderedPayments builds one validated payment per tender, after checking
@@ -669,7 +690,7 @@ func (s *FinanceService) GetAccount(ctx context.Context, studentID string) (Acco
 // A charge that already has money on it stays, opened or not: the payment is in
 // the family's history, and a payment whose charge is missing explains nothing.
 func (s *FinanceService) GetFamilyAccount(ctx context.Context, studentID string) (AccountStatement, error) {
-	return s.account(ctx, studentID, inPlayOn(s.now()))
+	return s.account(ctx, studentID, inPlayOn(s.clock.Today()))
 }
 
 // inPlayOn is the family's view of a charge on `now` (T5): opened, or carrying
@@ -683,7 +704,7 @@ func inPlayOn(now time.Time) func(ports.ChargeWithPaid) bool {
 
 // account is the statement over the charges `shown` keeps.
 func (s *FinanceService) account(ctx context.Context, studentID string, shown func(ports.ChargeWithPaid) bool) (AccountStatement, error) {
-	statement, _, err := s.accountWithTerms(ctx, studentID, shown, s.now())
+	statement, _, err := s.accountWithTerms(ctx, studentID, shown, s.clock.Today())
 	return statement, err
 }
 
@@ -808,7 +829,7 @@ func (s *FinanceService) collectionTermsFor(ctx context.Context, studentID strin
 // ListOverdue returns the charges past due that still owe money, as of the
 // injected clock. An empty cycleID spans every cycle.
 func (s *FinanceService) ListOverdue(ctx context.Context, cycleID string) ([]ports.ChargeWithPaid, error) {
-	rows, err := s.repo.ListOverdue(ctx, cycleID, s.now())
+	rows, err := s.repo.ListOverdue(ctx, cycleID, s.clock.Today())
 	if err != nil {
 		return nil, err
 	}
@@ -821,7 +842,7 @@ func (s *FinanceService) ListOverdue(ctx context.Context, cycleID string) ([]por
 	if err != nil {
 		return nil, err
 	}
-	return stillOwed(pricer, rows, s.now())
+	return stillOwed(pricer, rows, s.clock.Today())
 }
 
 // requireStudent asserts the student exists, mapping a NotFound to KindInvalid

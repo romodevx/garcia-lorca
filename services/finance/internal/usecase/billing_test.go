@@ -604,7 +604,9 @@ func TestPayingCollectsTheTierInForceOnTheDayTheMoneyArrives(t *testing.T) {
 func TestTheStatementSaysWhatIsOwedToday(t *testing.T) {
 	f := billingFixture(t)
 	runOn(t, f, "2026-09-15")
-	f.clock = aug(2026, time.November, 20)
+	// Midday UTC, 06:00 in Morelia: midnight UTC would be 18:00 on the 19th,
+	// and the school's day decides AsOf (ADR 0035).
+	f.clock = aug(2026, time.November, 20).Add(12 * time.Hour)
 
 	got, err := f.svc.GetAccount(context.Background(), testStudent)
 	if err != nil {

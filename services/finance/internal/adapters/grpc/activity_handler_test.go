@@ -97,7 +97,7 @@ func activityHandler() *grpcadapter.FinanceHandler {
 	n := 0
 	ids := func() string { n++; return fmt.Sprintf("id-%d", n) }
 	svc := usecase.NewActivityService(&memActivities{activities: map[string]domain.Activity{}}, knownStudents{},
-		countingBiller{n: 2}, ids, func() time.Time { return fixedNow })
+		countingBiller{n: 2}, ids, usecase.NewSchoolClock(func() time.Time { return fixedNow }, schoolZone))
 	return grpcadapter.NewFinanceHandler(nil, usecase.NewHealthService("finance")).WithActivities(svc)
 }
 

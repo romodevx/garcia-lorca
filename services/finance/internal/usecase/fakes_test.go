@@ -31,6 +31,18 @@ const (
 // overdue charges reads this instant, never the wall clock.
 var fixedNow = time.Date(2026, 9, 15, 10, 0, 0, 0, time.UTC)
 
+// schoolZone is the zone production resolves from SCHOOL_TIMEZONE (ADR 0035):
+// every fixture decides "today" on Morelia's calendar, as the service does.
+var schoolZone = mustLoadZone("America/Mexico_City")
+
+func mustLoadZone(name string) *time.Location {
+	zone, err := time.LoadLocation(name)
+	if err != nil {
+		panic(err)
+	}
+	return zone
+}
+
 // Compile-time proof that the fakes still satisfy the ports.
 var (
 	_ ports.FinanceRepository = (*fakeRepo)(nil)
@@ -908,7 +920,7 @@ func newFixture(t *testing.T) *fixture {
 	}
 	f.clock = fixedNow
 	f.svc = usecase.NewFinanceService(f.repo, f.students, f.cycles, f.enrollments, f.catalog, f.calendar, f.publisher,
-		testTenant, seqID("id"), func() time.Time { return f.clock })
+		testTenant, seqID("id"), usecase.NewSchoolClock(func() time.Time { return f.clock }, schoolZone))
 	return f
 }
 

@@ -83,7 +83,7 @@ func (s *FinanceService) CorrectDeposit(ctx context.Context, in CorrectionInput)
 		CorrectionID: s.newID(),
 		Reason:       in.Reason,
 		By:           in.By,
-		At:           s.now(),
+		At:           s.clock.Now(),
 	}, planner.plan, s.correctionEvents)
 	if err != nil {
 		return CorrectionResult{}, err

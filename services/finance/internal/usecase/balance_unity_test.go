@@ -77,7 +77,7 @@ func withScholarships(t *testing.T, f *fixture) *becaFixture {
 	activities := newFakeActivityRepo()
 	f.svc.WithScholarships(srepo)
 	becas := usecase.NewScholarshipService(srepo, f.svc, f.repo, activities, f.students, testTenant,
-		seqID("beca"), func() time.Time { return f.clock })
+		seqID("beca"), usecase.NewSchoolClock(func() time.Time { return f.clock }, schoolZone))
 	return &becaFixture{fixture: f, becas: becas, srepo: srepo, activity: activities}
 }
 

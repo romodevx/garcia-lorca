@@ -28,7 +28,7 @@ func newActivityFixture(t *testing.T) *activityFixture {
 	f.students.byID[otherStudent] = ports.StudentRef{ID: otherStudent, Status: "active"}
 	repo := newFakeActivityRepo()
 	f.svc.WithActivities(repo)
-	svcA := usecase.NewActivityService(repo, f.students, f.svc, seqID("a"), func() time.Time { return f.clock })
+	svcA := usecase.NewActivityService(repo, f.students, f.svc, seqID("a"), usecase.NewSchoolClock(func() time.Time { return f.clock }, schoolZone))
 	return &activityFixture{fixture: f, activities: repo, svcA: svcA}
 }
 

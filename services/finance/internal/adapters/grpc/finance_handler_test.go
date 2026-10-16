@@ -32,6 +32,15 @@ const (
 // fixedNow is the injected clock: nothing here reads the wall clock.
 var fixedNow = time.Date(2026, 9, 15, 10, 0, 0, 0, time.UTC)
 
+// schoolZone is the zone production resolves from SCHOOL_TIMEZONE (ADR 0035).
+var schoolZone = func() *time.Location {
+	zone, err := time.LoadLocation("America/Mexico_City")
+	if err != nil {
+		panic(err)
+	}
+	return zone
+}()
+
 // --- cross-service readers ---------------------------------------------------
 
 type fakeStudents struct{ byID map[string]ports.StudentRef }
@@ -429,7 +438,7 @@ func newFixture(t *testing.T) *fixture {
 	seq := 0
 	newID := func() string { seq++; return fmt.Sprintf("id-%d", seq) }
 	svc := usecase.NewFinanceService(repo, students, cycles, enrollments, &fakeCatalog{}, nil, nil,
-		testTenant, newID, func() time.Time { return fixedNow })
+		testTenant, newID, usecase.NewSchoolClock(func() time.Time { return fixedNow }, schoolZone))
 	return &fixture{
 		h:           grpcadapter.NewFinanceHandler(svc, usecase.NewHealthService("finance")),
 		repo:        repo,

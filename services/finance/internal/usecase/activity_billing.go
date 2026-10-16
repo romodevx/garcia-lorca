@@ -159,7 +159,7 @@ func activityDescription(a domain.Activity, p domain.ActivityPeriod) string {
 // issue tomorrow. Each pupil is billed in the cycle they are placed in; one
 // with no cycle is left for the run of the cycle that takes them.
 func (s *FinanceService) BillActivityEnrollments(ctx context.Context, a domain.Activity, es []domain.ActivityEnrollment) (int, error) {
-	asOf, err := resolveAsOf("", s.now)
+	asOf, err := resolveAsOf("", s.clock.Today)
 	if err != nil {
 		return 0, err
 	}

@@ -32,7 +32,7 @@ func newExpenseFixture() *expenseFixture {
 	f.takings.cut = usecase.CashUp{ByMethod: map[string]int64{}}
 	f.svc = usecase.NewExpenseService(f.repo, f.takings, f.store,
 		func() string { f.sequence++; return fmt.Sprintf("id-%d", f.sequence) },
-		func() time.Time { return f.clock })
+		usecase.NewSchoolClock(func() time.Time { return f.clock }, schoolZone))
 	return f
 }
 
@@ -266,7 +266,7 @@ func TestAttachReceiptUploadsNothingForAnExpenseThatCannotTakeIt(t *testing.T) {
 
 func TestReceiptsUnavailableWithoutAStore(t *testing.T) {
 	repo := newFakeExpenseRepo()
-	svc := usecase.NewExpenseService(repo, &stubTakings{}, nil, func() string { return "x" }, func() time.Time { return expNow })
+	svc := usecase.NewExpenseService(repo, &stubTakings{}, nil, func() string { return "x" }, usecase.NewSchoolClock(func() time.Time { return expNow }, schoolZone))
 	if _, err := svc.AttachReceipt(context.Background(), "e", []byte("%PDF-"), cashier); glerrors.KindOf(err) != glerrors.KindNotFound {
 		t.Fatalf("want KindNotFound, got %v", err)
 	}

@@ -184,7 +184,7 @@ func (s *FinanceService) inscriptionMoves(ctx context.Context, plan domain.Tuiti
 	if err != nil {
 		return nil, err
 	}
-	asOf, err := resolveAsOf("", s.now)
+	asOf, err := resolveAsOf("", s.clock.Today)
 	if err != nil {
 		return nil, err
 	}
@@ -312,7 +312,7 @@ func (s *FinanceService) RunBilling(ctx context.Context, cycleID, asOfDate strin
 	if err != nil {
 		return BillingResult{}, err
 	}
-	asOf, err := resolveAsOf(asOfDate, s.now)
+	asOf, err := resolveAsOf(asOfDate, s.clock.Today)
 	if err != nil {
 		return BillingResult{}, err
 	}
@@ -871,12 +871,12 @@ func feeSlug(name string) string {
 }
 
 // resolveAsOf reads the date the run should pretend it is. An empty value means
-// today; anything else must be a date, because a run that silently fell back to
-// today after a typo would bill the wrong months without saying so.
-func resolveAsOf(raw string, now func() time.Time) (time.Time, error) {
+// the school's today (ADR 0035); anything else must be a date, because a run
+// that silently fell back to today after a typo would bill the wrong months
+// without saying so.
+func resolveAsOf(raw string, today func() time.Time) (time.Time, error) {
 	if strings.TrimSpace(raw) == "" {
-		t := now().UTC()
-		return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC), nil
+		return today(), nil
 	}
 	parsed, err := time.Parse("2006-01-02", strings.TrimSpace(raw))
 	if err != nil {

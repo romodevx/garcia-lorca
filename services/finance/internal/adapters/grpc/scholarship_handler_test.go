@@ -82,7 +82,9 @@ func (m *memScholarships) Unassign(_ context.Context, _ string, ids []string, _ 
 	return len(ids), nil
 }
 
-func (m *memScholarships) FreezeScholarships(context.Context, []domain.Charge) (int, error) { return 0, nil }
+func (m *memScholarships) FreezeScholarships(context.Context, []domain.Charge) (int, error) {
+	return 0, nil
+}
 
 type noLedger struct{}
 
@@ -90,14 +92,16 @@ func (noLedger) FreezeSettledScholarships(context.Context, []string) error { ret
 
 type noConcepts struct{}
 
-func (noConcepts) ListConcepts(context.Context, bool) ([]domain.ChargeConcept, error) { return nil, nil }
+func (noConcepts) ListConcepts(context.Context, bool) ([]domain.ChargeConcept, error) {
+	return nil, nil
+}
 
 func scholarshipHandler() *grpcadapter.FinanceHandler {
 	n := 0
 	ids := func() string { n++; return fmt.Sprintf("id-%d", n) }
 	svc := usecase.NewScholarshipService(&memScholarships{scholarships: map[string]domain.Scholarship{}}, noLedger{},
 		noConcepts{}, &memActivities{activities: map[string]domain.Activity{}}, knownStudents{}, testTenant, ids,
-		func() time.Time { return fixedNow })
+		usecase.NewSchoolClock(func() time.Time { return fixedNow }, schoolZone))
 	return grpcadapter.NewFinanceHandler(nil, usecase.NewHealthService("finance")).WithScholarships(svc)
 }
 

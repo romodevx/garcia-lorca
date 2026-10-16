@@ -42,14 +42,14 @@ func (s *FinanceService) GetFamilyStatement(ctx context.Context, studentID strin
 }
 
 func (s *FinanceService) statement(ctx context.Context, studentID string, family bool) (Statement, error) {
-	now := s.now()
+	today := s.clock.Today()
 	shown := func(ports.ChargeWithPaid) bool { return true }
 	if family {
-		shown = inPlayOn(now)
+		shown = inPlayOn(today)
 	}
-	// One instant for the whole read: the accrued line, the ladder price and
-	// the counter's figures are all worked out for the same day.
-	account, terms, err := s.accountWithTerms(ctx, studentID, shown, now)
+	// One day for the whole read, the school's (ADR 0035): the accrued line,
+	// the ladder price and the counter's figures are all worked out for it.
+	account, terms, err := s.accountWithTerms(ctx, studentID, shown, today)
 	if err != nil {
 		return Statement{}, err
 	}
@@ -60,7 +60,7 @@ func (s *FinanceService) statement(ctx context.Context, studentID string, family
 	if err := s.learnNames(ctx, terms.scholarships, account.raw); err != nil {
 		return Statement{}, err
 	}
-	movements, totals, err := ledger(account.raw, account.Payments, account.deposits, terms, now, family)
+	movements, totals, err := ledger(account.raw, account.Payments, account.deposits, terms, today, family)
 	if err != nil {
 		return Statement{}, err
 	}
@@ -123,7 +123,7 @@ func chargeMovements(
 		return nil, err
 	}
 	accrued := accruedSurcharges(priced, terms.plan.Policy(), terms.calendar, terms.lateFeeID, now)
-	asOf := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	asOf := domain.CalendarDay(now)
 	out := make([]domain.Movement, 0, len(charges))
 	for _, c := range charges {
 		ch := c.Charge

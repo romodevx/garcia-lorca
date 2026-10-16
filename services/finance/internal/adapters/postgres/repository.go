@@ -933,8 +933,9 @@ func withPaidTotals(tx *gorm.DB, rows []chargeModel) ([]ports.ChargeWithPaid, er
 		Paid      int64  `gorm:"column:paid"`
 		PaidByDue int64  `gorm:"column:paid_by_due"`
 	}
-	// paid_by_due is what was paid on or before the due date, the UTC day like
-	// every finance date: what decides whether a scholarship was kept (T18).
+	// paid_by_due is what was paid on or before the due date, by paid_at's UTC
+	// date — the day a stored paid_at stands for (ADR 0035 re-zones only
+	// "today"): what decides whether a scholarship was kept (T18).
 	var sums []chargePaid
 	if err := tx.Raw(`SELECT p.charge_id,
 	                         COALESCE(SUM(p.amount_cents), 0) AS paid,

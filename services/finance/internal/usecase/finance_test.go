@@ -604,7 +604,7 @@ func TestRegisterPaymentSurvivesPublisherFailures(t *testing.T) {
 		concept := f.seedConcept(t, "Colegiatura", 250000)
 		charge := f.seedCharge(t, concept.ID(), 100000)
 		svc := usecase.NewFinanceService(f.repo, f.students, f.cycles, f.enrollments, f.catalog, nil, nil,
-			testTenant, seqID("np"), func() time.Time { return fixedNow })
+			testTenant, seqID("np"), usecase.NewSchoolClock(func() time.Time { return fixedNow }, schoolZone))
 
 		_, cwp, err := svc.RegisterPayment(context.Background(), charge.ID(), 40000, domain.MethodCash, "", "")
 
@@ -773,6 +773,8 @@ func TestGetAccountOverCollectedChargeIsTheFamilysCredit(t *testing.T) {
 	}
 }
 
+// The read is cut at the school's day, a date at midnight UTC like due_date,
+// not at the clock's instant (ADR 0035).
 func TestListOverduePassesTheInjectedClock(t *testing.T) {
 	f := newFixture(t)
 	concept := f.seedConcept(t, "Colegiatura", 250000)
@@ -781,8 +783,8 @@ func TestListOverduePassesTheInjectedClock(t *testing.T) {
 	got, err := f.svc.ListOverdue(context.Background(), testCycle)
 
 	requireNoError(t, err)
-	if !f.repo.overdueToday.Equal(fixedNow) {
-		t.Fatalf("repo received today = %v, want the injected clock %v", f.repo.overdueToday, fixedNow)
+	if want := ymdUTC(2026, time.September, 15); !f.repo.overdueToday.Equal(want) {
+		t.Fatalf("repo received today = %v, want the school's day %v", f.repo.overdueToday, want)
 	}
 	if f.repo.overdueCycleID != testCycle {
 		t.Fatalf("repo received cycle = %q, want %q", f.repo.overdueCycleID, testCycle)

@@ -1277,8 +1277,10 @@ func TestStudentWithdrawnConsumerCancelsFutureChargeInPostgres(t *testing.T) {
 	if _, err := repo.CreateCharge(ctx, charge); err != nil {
 		t.Fatalf("seed charge: %v", err)
 	}
+	// UTC zone: `today` is a stored-style date (midnight UTC) and this test is
+	// about the consumer's writes, not the school's zone (ADR 0035).
 	service := usecase.NewFinanceService(repo, nil, nil, nil, nil, nil, nil, tenantA,
-		func() string { return "generated-id" }, func() time.Time { return today })
+		func() string { return "generated-id" }, usecase.NewSchoolClock(func() time.Time { return today }, time.UTC))
 	service.WithActivities(repo)
 	consumer := financepubsub.NewConsumer(service, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	data, err := proto.Marshal(&studentsv1.StudentWithdrawn{

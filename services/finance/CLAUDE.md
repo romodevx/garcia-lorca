@@ -48,6 +48,20 @@ ledger operations run in a single transaction (Unit of Work).
   write; only `cancelled` is set independently and is terminal.
 - Overdue is a function of due date + a clock passed in (deterministic; no
   `time.Now()` inside the domain).
+- **"Today" is Morelia's calendar day (D8, ADR 0035).** ONE source of time,
+  `usecase.SchoolClock`, built once in `cmd/main.go` from `SCHOOL_TIMEZONE`
+  (default `America/Mexico_City`, `time/tzdata` embedded, an unknown zone fails
+  startup) and injected into every service. `clock.Now()` stamps (paid_at,
+  events); `clock.Today()` decides (surcharge days, overdue months, early
+  window, `ListOverdue` cutoff, `RunBilling` default, `AsOf`, open charges,
+  default paidOn/startsOn/cash-cut day). `domain.SchoolDate` is the only
+  instant→day rule and returns midnight UTC, the representation of every
+  stored date. NEVER truncate an instant to a day anywhere else (`.UTC()`,
+  `Truncate(24h)`, `time.Date(..., time.UTC)` on `now`): that is the UTC day
+  coming back in one calculation. Stored dates keep their UTC date
+  (`domain.CalendarDay`); known debt: live `paid_at` instants after 18:00 still
+  read as the next UTC day in `paid_by_due`, cash-cut windows and statement
+  movement dates (see the ADR).
 - Bulk `GenerateCharges` is idempotent via `UNIQUE(tenant, student, cycle,
   concept)` + ON CONFLICT DO NOTHING (re-run reports created vs skipped).
 - `RegisterPayment` is idempotent when the caller sends an `idempotency_key`:

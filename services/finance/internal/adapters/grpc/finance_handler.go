@@ -274,8 +274,9 @@ func (h *FinanceHandler) GetStatement(ctx context.Context, req *connect.Request[
 	}), nil
 }
 
-// toProtoMovement projects one ledger line. Dates go out as the calendar day
-// (UTC, this service's school day — see school-day-is-utc-day).
+// toProtoMovement projects one ledger line. Dates go out as the stored date's
+// calendar day (its UTC date, domain.CalendarDay; ADR 0035 re-zones only
+// "today", never a stored date).
 func toProtoMovement(m domain.Movement) *financev1.StatementMovement {
 	return &financev1.StatementMovement{
 		Kind:         string(m.Kind),
