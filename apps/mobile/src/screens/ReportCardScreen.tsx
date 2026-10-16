@@ -51,7 +51,7 @@ export function ReportCardScreen({ id, studentId }: ReportCardScreenProps): Reac
     return (
       <AsyncErrorState
         title={notFound ? "Esta boleta ya no está disponible" : "No pudimos cargar la boleta"}
-        subtitle={notFound ? "Puede que la escuela haya emitido una versión nueva." : "Revisa tu conexión e inténtalo de nuevo."}
+        subtitle={notFound ? "La escuela la retiró o publicó una versión nueva." : "Revisa tu conexión e inténtalo de nuevo."}
         onRetry={reload}
       />
     );

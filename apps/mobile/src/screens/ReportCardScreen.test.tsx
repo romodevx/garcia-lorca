@@ -108,6 +108,9 @@ describe("ReportCardScreen", () => {
     await renderWithProviders(<ReportCardScreen id="rc1" studentId="s1" />);
 
     await waitFor(() => expect(screen.getByText("Esta boleta ya no está disponible")).toBeTruthy());
+    // T10 review: a re-close can withdraw a card with no newer version, and
+    // the API answers 404 for both cases, so it must not claim either one.
+    expect(screen.getByText("La escuela la retiró o publicó una versión nueva.")).toBeTruthy();
   });
 
   it("downloads the PDF and opens the share sheet", async () => {

@@ -20,7 +20,7 @@ const MESSAGES: Record<PdfErrorKind, string> = {
   network: "No pudimos descargar la boleta. Revisa tu conexión e inténtalo de nuevo.",
   server: "La escuela no pudo entregar la boleta en este momento. Inténtalo más tarde.",
   storage: "No pudimos guardar la boleta en el teléfono. Libera espacio e inténtalo de nuevo.",
-  not_found: "Esta boleta ya no está disponible. Puede que la escuela haya emitido una versión nueva.",
+  not_found: "Esta boleta ya no está disponible. La escuela la retiró o publicó una versión nueva.",
   session: "Tu sesión terminó. Vuelve a iniciar sesión para descargar la boleta.",
   unavailable: "Este teléfono no puede abrir el PDF. Inténtalo desde otro dispositivo.",
 };
