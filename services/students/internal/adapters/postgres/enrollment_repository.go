@@ -486,6 +486,9 @@ func refuseTerminalAdmission(student studentModel) error {
 // path refuses it, but saying so, so the director fixes the size instead of
 // hunting for seats that were never counted.
 func reserveSeat(tx *gorm.DB, g ports.GroupSeats) error {
+	if g.Capacity <= 0 {
+		return glerrors.New(glerrors.KindConflict, "ese grupo no tiene cupo definido: fíjalo en Configuración")
+	}
 	if err := tx.Exec(`SELECT pg_advisory_xact_lock(hashtext(?))`, g.ID).Error; err != nil {
 		return glerrors.Wrap(glerrors.KindInternal, "reserving the group", err)
 	}
@@ -494,9 +497,6 @@ func reserveSeat(tx *gorm.DB, g ports.GroupSeats) error {
 		Where("group_id = ? AND status = ?", g.ID, domain.EnrollmentStatusActive.String()).
 		Count(&taken).Error; err != nil {
 		return glerrors.Wrap(glerrors.KindInternal, "counting the group", err)
-	}
-	if g.Capacity <= 0 {
-		return glerrors.New(glerrors.KindConflict, "ese grupo no tiene cupo definido: fíjalo en Configuración")
 	}
 	if taken >= int64(g.Capacity) {
 		return glerrors.New(glerrors.KindConflict, "ese grupo ya no tiene lugares")
