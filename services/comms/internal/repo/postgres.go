@@ -285,15 +285,13 @@ func (r *Repo) DeleteExpiredPushTickets(ctx context.Context, before time.Time) e
 	})
 }
 
-const receiptRecheckInterval = 15 * time.Minute
-
 // ListPushTickets returns due tickets in creation order using stable keyset pagination.
-func (r *Repo) ListPushTickets(ctx context.Context, before, afterCreatedAt time.Time, afterID string, limit int) ([]service.PushTicket, error) {
+func (r *Repo) ListPushTickets(ctx context.Context, before, checkedBefore, afterCreatedAt time.Time, afterID string, limit int) ([]service.PushTicket, error) {
 	var out []service.PushTicket
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
 		var rows []pushTicketModel
 		q := tx.Where("created_at <= ?", before).
-			Where("checked_at IS NULL OR checked_at < ?", time.Now().Add(-receiptRecheckInterval))
+			Where("checked_at IS NULL OR checked_at < ?", checkedBefore)
 		if afterID != "" {
 			q = q.Where("(created_at, id) > (?, ?::uuid)", afterCreatedAt, afterID)
 		}

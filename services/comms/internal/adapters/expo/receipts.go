@@ -98,10 +98,11 @@ func (c *ReceiptChecker) Check(ctx context.Context) error {
 		return fmt.Errorf("deleting expired expo push tickets: %w", err)
 	}
 	cutoff := now.Add(-minReceiptAge)
+	checkedBefore := now.Add(-minReceiptAge)
 	afterID := ""
 	var afterCreatedAt time.Time
 	for {
-		tickets, err := c.store.ListPushTickets(ctx, cutoff, afterCreatedAt, afterID, maxReceiptBatch)
+		tickets, err := c.store.ListPushTickets(ctx, cutoff, checkedBefore, afterCreatedAt, afterID, maxReceiptBatch)
 		if err != nil {
 			return fmt.Errorf("listing expo push tickets: %w", err)
 		}

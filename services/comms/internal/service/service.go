@@ -220,7 +220,7 @@ type PushTicketPair struct {
 // PushReceiptStore supports the scheduled provider receipt sweep.
 type PushReceiptStore interface {
 	DeleteExpiredPushTickets(context.Context, time.Time) error
-	ListPushTickets(context.Context, time.Time, time.Time, string, int) ([]PushTicket, error)
+	ListPushTickets(context.Context, time.Time, time.Time, time.Time, string, int) ([]PushTicket, error)
 	DeletePushTicket(context.Context, string) error
 	DeletePushDevice(context.Context, string) error
 	RecordPushTicketFailure(context.Context, string, time.Time) (int, error)

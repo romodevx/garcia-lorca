@@ -17,12 +17,13 @@ import (
 )
 
 type receiptStoreSpy struct {
-	tickets    []service.PushTicket
-	deleted    []string
-	expired    []time.Time
-	operations []string
-	devices    []string
-	failures   []string
+	tickets       []service.PushTicket
+	deleted       []string
+	expired       []time.Time
+	operations    []string
+	devices       []string
+	failures      []string
+	checkedBefore []time.Time
 }
 
 func (s *receiptStoreSpy) DeleteExpiredPushTickets(_ context.Context, before time.Time) error {
@@ -38,8 +39,9 @@ func (s *receiptStoreSpy) DeleteExpiredPushTickets(_ context.Context, before tim
 	return nil
 }
 
-func (s *receiptStoreSpy) ListPushTickets(_ context.Context, before, afterCreatedAt time.Time, afterID string, limit int) ([]service.PushTicket, error) {
+func (s *receiptStoreSpy) ListPushTickets(_ context.Context, before, checkedBefore, afterCreatedAt time.Time, afterID string, limit int) ([]service.PushTicket, error) {
 	s.operations = append(s.operations, "list")
+	s.checkedBefore = append(s.checkedBefore, checkedBefore)
 	var out []service.PushTicket
 	for _, ticket := range s.tickets {
 		if ticket.CreatedAt.After(before) || (afterID != "" && (ticket.CreatedAt.Before(afterCreatedAt) || (ticket.CreatedAt.Equal(afterCreatedAt) && ticket.ID <= afterID))) {
@@ -80,6 +82,16 @@ func TestReceiptCheckerDeletesTicketsOlderThanRetentionBeforeFetching(t *testing
 	require.Equal(t, []time.Time{now.Add(-24 * time.Hour)}, store.expired)
 	assert.Empty(t, store.tickets)
 	assert.Equal(t, []string{"expire", "list"}, store.operations)
+}
+
+func TestReceiptCheckerUsesInjectedClockForRecheckWindow(t *testing.T) {
+	now := time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
+	store := &receiptStoreSpy{}
+	checker := expo.NewReceiptChecker(store, expo.WithReceiptClock(func() time.Time { return now }))
+
+	require.NoError(t, checker.Check(context.Background()))
+
+	require.Equal(t, []time.Time{now.Add(-15 * time.Minute)}, store.checkedBefore)
 }
 
 func TestReceiptCheckerRetriesOnlyMissingReceipts(t *testing.T) {
