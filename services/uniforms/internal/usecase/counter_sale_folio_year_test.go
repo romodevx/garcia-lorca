@@ -46,3 +46,25 @@ func TestCounterSaleIsNumberedInTheSchoolsYear(t *testing.T) {
 		})
 	}
 }
+
+// T5b review: the finance charge of a counter sale falls due on the school's
+// day — a sale at 19:00 on 31 October in Morelia is due 2026-10-31, the day
+// its receipt prints, not 2026-11-01 (the UTC day).
+func TestCounterSaleChargeFallsDueOnTheSchoolsDay(t *testing.T) {
+	morelia, err := time.LoadLocation("America/Mexico_City")
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := time.Date(2026, time.October, 31, 19, 0, 0, 0, morelia)
+	f := newFixture(t)
+	f.svc = usecase.NewService(f.repo, f.students, f.finance, f.pub, testTenant,
+		seqID("id"), func() time.Time { return at.UTC() }, morelia)
+	item := f.seedItem(t, "PLA", "8", 32000, 5)
+
+	if _, err := f.svc.CounterSale(context.Background(), saleFor(item, "8", 1)); err != nil {
+		t.Fatalf("CounterSale: %v", err)
+	}
+	if len(f.finance.charges) != 1 || f.finance.charges[0].DueDate != "2026-10-31" {
+		t.Fatalf("charges = %+v, want one due 2026-10-31", f.finance.charges)
+	}
+}

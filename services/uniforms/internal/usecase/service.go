@@ -449,7 +449,7 @@ func (s *Service) recordMoney(ctx context.Context, saved ports.OrderAggregate, t
 		ConceptID:   conceptID,
 		Description: "Uniformes · " + saved.Order.Folio(),
 		AmountCents: total,
-		DueDate:     s.now().Format("2006-01-02"),
+		DueDate:     s.now().In(s.zone).Format("2006-01-02"),
 		// The delivery IS the reference: it makes the call idempotent and lets
 		// reconciliation later ask finance about a delivery by name (ADR 0008).
 		ExternalRef: externalRef(fulfillmentID),
