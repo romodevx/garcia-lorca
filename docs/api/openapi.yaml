@@ -1015,6 +1015,91 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
+  /api/v1/enrollments:
+    post:
+      tags: [students]
+      summary: Enroll a pupil into a group
+      description: >
+        Places the pupil in the chosen group; the cycle is derived from the
+        group. Requires students:enroll. Group capacity is not checked here
+        (the by-grade route fills groups by capacity).
+        enrolledOn is the pupil's entry day (YYYY-MM-DD, the school's
+        calendar); omitted means today. It must lie between the start of the
+        group's cycle and today in the school's configured timezone (400
+        otherwise). Billing starts in that month: no tuition is charged for the
+        months before it. A day before today also requires finance:write,
+        because it creates charges for months already past (403 otherwise).
+      operationId: enrollStudent
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [studentId, groupId]
+              properties:
+                studentId: { type: string, format: uuid, example: "e3b0c442-98fc-1c14-9afb-000000000003" }
+                groupId: { type: string, format: uuid, example: "e3b0c442-98fc-1c14-9afb-000000000004" }
+                termId: { type: string, format: uuid, description: "Optional term of the same cycle.", example: "e3b0c442-98fc-1c14-9afb-000000000005" }
+                enrolledOn: { type: string, format: date, description: "Optional entry day; omitted means today.", example: "2026-08-24" }
+      responses:
+        '201':
+          description: The new enrollment.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Enrollment' }
+        '400': { $ref: '#/components/responses/PlainTextError' }
+        '401': { $ref: '#/components/responses/PlainTextError' }
+        '403': { $ref: '#/components/responses/PlainTextError' }
+        '404': { $ref: '#/components/responses/PlainTextError' }
+        '409': { $ref: '#/components/responses/PlainTextError' }
+
+  /api/v1/enrollments/by-grade:
+    post:
+      tags: [students]
+      summary: Enroll a pupil into a grade, the group chosen by capacity
+      description: >
+        Places the pupil in the first group of the grade (active cycle) that
+        still has a seat. Requires students:enroll.
+        enrolledOn is the pupil's entry day (YYYY-MM-DD, the school's
+        calendar); omitted means today. It must lie between the start of the
+        group's cycle and today in the school's configured timezone (400
+        otherwise). Billing starts in that month: no tuition is charged for the
+        months before it. A day before today also requires finance:write,
+        because it creates charges for months already past (403 otherwise).
+      operationId: enrollStudentIntoGrade
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [studentId, gradeLevelId]
+              properties:
+                studentId: { type: string, format: uuid, example: "e3b0c442-98fc-1c14-9afb-000000000003" }
+                gradeLevelId: { type: string, format: uuid, example: "e3b0c442-98fc-1c14-9afb-000000000006" }
+                enrolledOn: { type: string, format: date, description: "Optional entry day; omitted means today.", example: "2026-08-24" }
+      responses:
+        '201':
+          description: Where the pupil landed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [enrollment, groupName]
+                properties:
+                  enrollment: { $ref: '#/components/schemas/Enrollment' }
+                  groupName: { type: string, example: "1° B" }
+        '400': { $ref: '#/components/responses/PlainTextError' }
+        '401': { $ref: '#/components/responses/PlainTextError' }
+        '403': { $ref: '#/components/responses/PlainTextError' }
+        '404': { $ref: '#/components/responses/PlainTextError' }
+        '409': { $ref: '#/components/responses/PlainTextError' }
+
   /api/v1/enrollments/withdraw:
     post:
       tags: [students]
