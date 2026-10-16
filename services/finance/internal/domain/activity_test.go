@@ -313,6 +313,42 @@ func TestEnrollmentPaysThePeriodInCourseEvenAfterItsDueDate(t *testing.T) {
 	}
 }
 
+// The edges of D3: joining on the next period's billing date is joining that
+// period, not the one before; joining on the due date keeps the period's date.
+func TestEnrollmentPeriodInCourseBoundaries(t *testing.T) {
+	sept := domain.ActivityPeriod{Key: "2026-09", BillsOn: day(2026, 9, 1), DueOn: day(2026, 9, 10), NextBillsOn: day(2026, 10, 1)}
+
+	if mustEnrollment(t, day(2026, 10, 1)).Bills(sept) {
+		t.Fatalf("joined on October's billing date: September is over, not charged")
+	}
+	lastDay := mustEnrollment(t, day(2026, 9, 30))
+	if !lastDay.Bills(sept) || !lastDay.DueOn(sept).Equal(day(2026, 9, 30)) {
+		t.Fatalf("joined on September's last day: charged, due that day")
+	}
+}
+
+func TestWeeklyLateJoinerPaysTheWeekInCourse(t *testing.T) {
+	a := mustActivity(t, func(s *domain.ActivitySpec) {
+		s.Periodicity = domain.PeriodicityWeekly
+		s.BillingStartsOn = day(2026, 9, 28) // Monday
+		s.FirstDueOn = day(2026, 9, 30)      // Wednesday
+	})
+	ps := a.PeriodsUpTo(day(2026, 10, 5))
+	w40, w41 := ps[0], ps[1]
+	if !w40.NextBillsOn.Equal(day(2026, 10, 5)) {
+		t.Fatalf("week 40 next billing = %s, want next Monday", w40.NextBillsOn)
+	}
+
+	friday := mustEnrollment(t, day(2026, 10, 2))
+	if !friday.Bills(w40) || !friday.DueOn(w40).Equal(day(2026, 10, 2)) {
+		t.Fatalf("joined Friday after Wednesday's due date: the week is charged, due Friday")
+	}
+	monday := mustEnrollment(t, day(2026, 10, 5))
+	if monday.Bills(w40) || !monday.Bills(w41) || !monday.DueOn(w41).Equal(day(2026, 10, 7)) {
+		t.Fatalf("joined on next Monday: only the new week, due on its own date")
+	}
+}
+
 func TestPeriodsKnowWhenTheNextOneBills(t *testing.T) {
 	a := mustActivity(t, nil)
 	got := a.PeriodsUpTo(day(2026, 10, 31))
