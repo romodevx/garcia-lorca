@@ -38,9 +38,12 @@
   off a closed day. They are issued only once the billing date arrives, so the
   statement (T7), the counter (Registrar pago, receipts) and the parents' app
   show them as pending from that day, and several activities simply add up.
-- **Mid-period enrolment**: the period in course is charged when the pupil
-  joined on or before its due date; otherwise billing starts with the next one.
-  No proration. A once-a-cycle activity has no next period, so a late joiner
+- **Mid-period enrolment**: the period in course is always charged in full,
+  due on its own date, or — when the pupil joined after it — the day they
+  joined. No proration. *(Amended 2026-10-16, owner decision D3 / plan T6: it
+  used to start billing with the next period, unlike tuition, and the
+  enrolment dialog promised a charge that never came. A period already over
+  when the pupil joined is never charged.)* A once-a-cycle activity has no next period, so a late joiner
   is charged with the same window to pay, counted from the day they joined.
   **Switching an activity off and on**: `resumed_on` records the day it came
   back; periods due before it are never billed (the months it was off), the

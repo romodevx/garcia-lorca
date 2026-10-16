@@ -237,10 +237,11 @@ func optionOrder(o PriceOption) int {
 // Single marks the one period of a once-a-cycle activity, which has no "next
 // period" to start a late joiner on.
 type ActivityPeriod struct {
-	Key     string
-	BillsOn time.Time
-	DueOn   time.Time
-	Single  bool
+	Key         string
+	BillsOn     time.Time
+	DueOn       time.Time
+	NextBillsOn time.Time // the next period's billing date; zero when Single
+	Single      bool
 }
 
 // perCycleKey is the one period of a once-a-cycle activity: fixed, so moving
@@ -262,6 +263,9 @@ func (a Activity) PeriodsUpTo(asOf time.Time) []ActivityPeriod {
 			BillsOn: bills,
 			DueOn:   shift(a.periodicity, a.firstDueOn, n),
 			Single:  a.periodicity == PeriodicityPerCycle,
+		}
+		if !p.Single {
+			p.NextBillsOn = shift(a.periodicity, a.billingStartsOn, n+1)
 		}
 		// The months it was off are skipped; the period in course is billed
 		// when it came back on or before its due date.
@@ -436,19 +440,32 @@ func (e ActivityEnrollment) WithOption(optionID string) (ActivityEnrollment, err
 	return e, nil
 }
 
-// Bills reports whether the period is charged to this enrolment: the pupil
-// joined on or before its due date (plan T17: the period in course is charged
-// up to its due date, otherwise from the next; no proration) — except the one
-// period of a once-a-cycle activity, which has no next and is always charged —
-// and the period is billed before the enrolment ended.
+// Bills reports whether the period is charged to this enrolment: it had not
+// ended when the pupil joined (owner decision D3: the period in course is
+// charged in full, even after its due date; no proration) — the one period of a
+// once-a-cycle activity has no end and is always charged — and it is billed
+// before the enrolment ended.
 func (e ActivityEnrollment) Bills(p ActivityPeriod) bool {
-	if !p.Single && e.startsOn.After(p.DueOn) {
+	if !p.Single && !e.startsOn.Before(p.NextBillsOn) {
 		return false
 	}
 	if e.endsOn.IsZero() {
 		return true
 	}
 	return e.endsOn.After(e.startsOn) && p.BillsOn.Before(e.endsOn)
+}
+
+// DueOn is the day the period falls due for this pupil: its own due date, or,
+// for one who joined after it, the day they joined (D3) — for a once-a-cycle
+// period, the same window everyone had, counted from that day.
+func (e ActivityEnrollment) DueOn(p ActivityPeriod) time.Time {
+	if !e.startsOn.After(p.DueOn) {
+		return p.DueOn
+	}
+	if p.Single {
+		return e.startsOn.Add(p.DueOn.Sub(p.BillsOn))
+	}
+	return e.startsOn
 }
 
 // ActiveOn reports whether the pupil is still enrolled on that day: not ended,

@@ -138,7 +138,7 @@ ledger operations run in a single transaction (Unit of Work).
 - `RunBilling` issues `activity:<activity>:<student>:<period>` once the billing
   date arrives (`starts_on` = billing date), concept kind `activity`; enrolling
   issues what is already billable at once. Joined after a period's due date ⇒
-  starts next period; unenrolled ⇒ no period billed on/after `ends_on`.
+  that period is still charged in full, due the day they joined (D3, plan T6); unenrolled ⇒ no period billed on/after `ends_on`.
 - The fixed late fee is written once by the run (`latefee:<charge>:actividad`);
   the tuition's daily/monthly surcharge rules SKIP `activity:` refs
   (`accruedSurcharges`, `deriveSurcharge`, `accrueLateFees`).
