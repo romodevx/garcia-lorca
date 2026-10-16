@@ -999,6 +999,21 @@ func TestGetDepositReceipt(t *testing.T) {
 	}
 }
 
+// Review of D8: a cash-up asked without a day is the school clock's today,
+// never the server's wall clock.
+func TestDailyCashUpWithoutADayIsTheSchoolClocksToday(t *testing.T) {
+	f := newFixture(t)
+
+	res, err := f.h.DailyCashUp(context.Background(), connect.NewRequest(&financev1.DailyCashUpRequest{}))
+
+	if err != nil {
+		t.Fatalf("DailyCashUp: %v", err)
+	}
+	if res.Msg.GetDay() != "2026-09-15" {
+		t.Errorf("day = %q, want the injected clock's school day 2026-09-15", res.Msg.GetDay())
+	}
+}
+
 // QA 2026-09-25, ISSUE-010: the cash-up carries the payments taken outside a
 // deposit, with what they paid for, and counts them in its totals.
 func TestDailyCashUpCarriesLoosePayments(t *testing.T) {

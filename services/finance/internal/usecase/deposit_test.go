@@ -489,6 +489,27 @@ func TestDailyCashUpTotalsWhatCameIn(t *testing.T) {
 	}
 }
 
+// Review of D8: a cut asked without a day is the school's today, not the
+// server's: at 19:00 in Morelia on the 10th (01:00 UTC on the 11th) the office
+// still closes the 10th.
+func TestDailyCashUpWithoutADayIsTheSchoolsToday(t *testing.T) {
+	f := depositFixture(t)
+	deposit(t, f, 320000, "2026-10-10")
+	f.clock = time.Date(2026, time.October, 11, 1, 0, 0, 0, time.UTC)
+
+	cut, err := f.svc.DailyCashUp(context.Background(), time.Time{})
+
+	if err != nil {
+		t.Fatalf("DailyCashUp: %v", err)
+	}
+	if got := cut.Day.Format("2006-01-02"); got != "2026-10-10" {
+		t.Errorf("day = %s, want the school's today 2026-10-10", got)
+	}
+	if cut.TotalCents != 320000 {
+		t.Errorf("total = %d, want the 10th's 320000", cut.TotalCents)
+	}
+}
+
 // Money taken outside a deposit — a counter sale's, paid straight against its
 // charge — is in the drawer too. The cut that counted deposits alone said
 // $6,500 while the drawer held $1,350 more (QA 2026-09-25, ISSUE-010).

@@ -962,7 +962,11 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	// Receipts (task 12): proof of what a deposit or a sale took, as JSON for the
 	// 80 mm ticket the browser prints and as a PDF. A payment's answers to whoever
 	// sees the money (the counter or finance); a sale's to whoever reads orders.
-	receiptsH := handler.NewReceiptsHandler(receipt.NewBuilder(financeClient, uniformsClient, studentsClient, financeClient, configClient))
+	var receiptOptions []receipt.Option
+	if len(schoolLocations) > 0 {
+		receiptOptions = append(receiptOptions, receipt.WithSchoolLocation(schoolLocations[0]))
+	}
+	receiptsH := handler.NewReceiptsHandler(receipt.NewBuilder(financeClient, uniformsClient, studentsClient, financeClient, configClient, receiptOptions...))
 	paymentReceipt := func(h http.HandlerFunc) http.Handler {
 		return guard.Protect("finance", requireAuthChanged(middleware.RequireAnyPermission("finance:read", "collections:read")(h)))
 	}

@@ -3,11 +3,13 @@ package receipt_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/garcia-lorca/services/gateway/internal/client"
+	"github.com/garcia-lorca/services/gateway/internal/receipt"
 )
 
 // ADR 0035: "Fecha de pago" is the deposit's school-local day (paid_on). A
@@ -38,4 +40,24 @@ func TestTheReceiptDatesThePaymentOnItsDay(t *testing.T) {
 			assert.Equal(t, tt.want, got.PaidOn)
 		})
 	}
+}
+
+// Review of D8: a counter sale at 19:00 in Morelia on the 15th is 01:00 UTC
+// on the 16th; the sale receipt prints the school's day, not the UTC date.
+func TestTheSaleReceiptDatesTheSaleOnTheSchoolsDay(t *testing.T) {
+	morelia, err := time.LoadLocation("America/Mexico_City")
+	require.NoError(t, err)
+	f := fakeSources{
+		profile: school, found: true,
+		order: client.UniformOrder{
+			ID: "ord-9", Folio: "U-2026-000090", Source: "counter",
+			TotalCents: 32000, CreatedAt: "2026-10-16T01:00:00Z",
+		},
+	}
+	b := receipt.NewBuilder(f, f, f, f, f, receipt.WithSchoolLocation(morelia))
+
+	got, err := b.Sale(context.Background(), "ord-9")
+
+	require.NoError(t, err)
+	assert.Equal(t, "2026-10-15", got.PaidOn)
 }

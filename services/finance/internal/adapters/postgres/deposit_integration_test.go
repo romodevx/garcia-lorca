@@ -628,7 +628,8 @@ func TestVoidingADepositCancelsTheSurchargeItWrote(t *testing.T) {
 
 // Task 12: every deposit gets a folio the receipt prints — P-<year>-<six
 // digits>, one run per school and year, allocated in the deposit's own
-// transaction. The year is the capture's, as created_at records it.
+// transaction. The year is the deposit's day's (paid_on), which for these
+// fixtures is also the capture's, as created_at records it.
 func TestDepositsGetAFolioPerSchool(t *testing.T) {
 	ctx := context.Background()
 	empty := func([]ports.ChargeWithPaid) (ports.DepositWrite, error) { return ports.DepositWrite{}, nil }
@@ -671,6 +672,45 @@ func TestDepositsGetAFolioPerSchool(t *testing.T) {
 	}
 	if seqOf(t, other.Deposit.Folio()) != 1 {
 		t.Errorf("tenant B's first folio = %q, want number 1 of its own run", other.Deposit.Folio())
+	}
+}
+
+// Review of D8: the folio's year is the school's year of the deposit's day
+// (paid_on), never the UTC year of the database's now(). A payment at 19:00 in
+// Morelia on 31 December is already 1 January in UTC; its receipt is still
+// P-<that December's year>. The year Go dated the payment with is the year the
+// SQL numbers it in: one clock.
+func TestTheFolioYearIsTheSchoolYearOfTheDepositsDay(t *testing.T) {
+	ctx := context.Background()
+	empty := func([]ports.ChargeWithPaid) (ports.DepositWrite, error) { return ports.DepositWrite{}, nil }
+	morelia := time.FixedZone("Morelia", -6*60*60)
+	cases := []struct {
+		name, id, want string
+		at             time.Time
+	}{
+		{"new year's eve at 19:00 in Morelia", "62000000-0000-0000-0000-0000000d8f01", "P-2026-",
+			time.Date(2026, 12, 31, 19, 0, 0, 0, morelia)},
+		// Not the database's year either: its now() is not the day's year.
+		{"a day of another year than the database's", "62000000-0000-0000-0000-0000000d8f02", "P-2025-",
+			time.Date(2025, 12, 31, 19, 0, 0, 0, morelia)},
+	}
+	repo := appRepo(t, tenantA)
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			d, err := domain.NewDeposit(tt.id, tenantA, "80000000-0000-0000-0000-0000000d8f01", 100,
+				domain.MethodCash, "", tt.at, "", "cal-test")
+			if err != nil {
+				t.Fatalf("new deposit: %v", err)
+			}
+			day := time.Date(tt.at.Year(), tt.at.Month(), tt.at.Day(), 0, 0, 0, 0, time.UTC)
+			got, _, err := repo.RegisterDeposit(ctx, d.WithPaidOn(day), empty, nil)
+			if err != nil {
+				t.Fatalf("RegisterDeposit: %v", err)
+			}
+			if folio := got.Deposit.Folio(); folio[:len(tt.want)] != tt.want {
+				t.Errorf("folio %q for a payment on %s, want %s…", folio, day.Format(time.DateOnly), tt.want)
+			}
+		})
 	}
 }
 

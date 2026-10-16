@@ -42,6 +42,12 @@ describe("depositDay", () => {
   const cases: ReadonlyArray<[string, { paidAt?: string; paidOn?: string }, string]> = [
     ["the day the server sent", { paidAt: "2026-10-02T01:00:00Z", paidOn: "2026-10-01" }, "2026-10-01"],
     ["an older server: the stored date of paidAt", { paidAt: "2026-09-09T00:00:00Z" }, "2026-09-09"],
+    // Migration 0028's rule for a snapshot written before it: exactly midnight
+    // UTC is a day picked at the counter (its UTC date); any other instant is
+    // live, dated on the school's day — 19:00 in Morelia on the 1st.
+    ["an older snapshot of a live evening payment: Morelia's day", { paidAt: "2026-10-02T01:00:00Z" }, "2026-10-01"],
+    ["an older snapshot at exactly midnight UTC: the day picked", { paidAt: "2026-10-02T00:00:00.000Z" }, "2026-10-02"],
+    ["an older snapshot with an offset: Morelia's day", { paidAt: "2026-10-01T19:00:00-06:00" }, "2026-10-01"],
     ["nothing at all", {}, ""],
   ];
   it.each(cases)("%s", (_name, d, want) => {

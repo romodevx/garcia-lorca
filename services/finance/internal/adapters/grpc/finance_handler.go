@@ -460,9 +460,7 @@ func (h *FinanceHandler) DailyCashUp(ctx context.Context, req *connect.Request[f
 		}
 		return connect.NewResponse(cashCutResponse(cut)), nil
 	}
-	if day.IsZero() {
-		day = time.Now()
-	}
+	// An unset day is the school clock's today, decided in the use case.
 	cut, err := h.finance.DailyCashUp(ctx, day)
 	if err != nil {
 		return nil, connectErr(err)

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"connectrpc.com/connect"
 
@@ -129,11 +130,31 @@ type Builder struct {
 	students StudentReader
 	accounts AccountReader
 	profiles ProfileReader
+	// zone is the school's time zone, whose calendar day a sale prints
+	// (D8). UTC unless WithSchoolLocation says otherwise.
+	zone *time.Location
+}
+
+// Option configures a Builder.
+type Option func(*Builder)
+
+// WithSchoolLocation sets the school's time zone: a sale's receipt prints the
+// day its instant falls on there, not the UTC date.
+func WithSchoolLocation(location *time.Location) Option {
+	return func(b *Builder) {
+		if location != nil {
+			b.zone = location
+		}
+	}
 }
 
 // NewBuilder wires a Builder.
-func NewBuilder(deposits DepositReader, orders OrderReader, students StudentReader, accounts AccountReader, profiles ProfileReader) *Builder {
-	return &Builder{deposits: deposits, orders: orders, students: students, accounts: accounts, profiles: profiles}
+func NewBuilder(deposits DepositReader, orders OrderReader, students StudentReader, accounts AccountReader, profiles ProfileReader, opts ...Option) *Builder {
+	b := &Builder{deposits: deposits, orders: orders, students: students, accounts: accounts, profiles: profiles, zone: time.UTC}
+	for _, opt := range opts {
+		opt(b)
+	}
+	return b
 }
 
 // Payment is the receipt of a counter deposit.
@@ -199,7 +220,7 @@ func (b *Builder) Sale(ctx context.Context, orderID string) (Receipt, error) {
 		return Receipt{}, err
 	}
 	r := Receipt{
-		Kind: KindSale, Folio: order.Folio, School: school, PaidOn: dateOf(order.CreatedAt),
+		Kind: KindSale, Folio: order.Folio, School: school, PaidOn: b.schoolDayOf(order.CreatedAt),
 		Buyer: buyerOf(order), BuyerDetail: order.StudentGradeGroup,
 		Lines: make([]Line, 0, len(order.Lines)), TotalCents: order.TotalCents,
 		Tenders: []TenderLine{},
@@ -274,7 +295,17 @@ func buyerOf(order client.UniformOrder) string {
 	return order.StudentName
 }
 
-// dateOf keeps the calendar day of an RFC 3339 instant ("2026-10-10T…").
+// schoolDayOf is the school's calendar day of an RFC 3339 instant: a sale at
+// 19:00 in Morelia on the 15th is 01:00 UTC on the 16th and prints the 15th.
+// An instant that does not parse keeps its leading date, as before.
+func (b *Builder) schoolDayOf(instant string) string {
+	at, err := time.Parse(time.RFC3339, instant)
+	if err != nil {
+		return dateOf(instant)
+	}
+	return at.In(b.zone).Format(time.DateOnly)
+}
+
 // depositDay is the day a deposit's receipt prints: its school-local day
 // (paid_on, ADR 0035). A finance that predates it sends none; its paid_at was
 // then the day as the counter stored it.
@@ -285,6 +316,7 @@ func depositDay(d client.Deposit) string {
 	return dateOf(d.PaidAt)
 }
 
+// dateOf keeps the calendar day of an RFC 3339 instant ("2026-10-10T…").
 func dateOf(instant string) string {
 	if len(instant) < len("2006-01-02") {
 		return instant

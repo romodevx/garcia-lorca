@@ -1205,7 +1205,11 @@ func (r *Repository) storeDeposit(
 		return ports.DepositRecord{}, err
 	}
 
-	folio, capturedAt, err := r.nextDepositFolio(tx)
+	// Refused before a folio is spent on it: the folio's year is its day's.
+	if d.PaidOn().IsZero() {
+		return ports.DepositRecord{}, errUndated("deposit", d.ID())
+	}
+	folio, capturedAt, err := r.nextDepositFolio(tx, d.PaidOn().Year())
 	if err != nil {
 		return ports.DepositRecord{}, err
 	}
@@ -1437,22 +1441,23 @@ func cancelUnpaidSurchargesOf(tx *gorm.DB, studentID, depositID string) error {
 	return nil
 }
 
-// nextDepositFolio allocates the school's next receipt number for the year of
-// this transaction's instant, under the counter row's own lock (migration
-// 0018), and returns that instant for created_at: the folio's year and the
-// capture it names come from one clock. Per school: a SEQUENCE would share one
-// run.
-func (r *Repository) nextDepositFolio(tx *gorm.DB) (string, time.Time, error) {
+// nextDepositFolio allocates the school's next receipt number for year, under
+// the counter row's own lock (migration 0018), and returns this transaction's
+// instant for created_at. The year is the school's year of the deposit's day
+// (paid_on, D8), the one the school clock dated it with: the database's now()
+// in UTC would number a payment taken at 19:00 in Morelia on 31 December in
+// the next year's run. Per school: a SEQUENCE would share one run.
+func (r *Repository) nextDepositFolio(tx *gorm.DB, year int) (string, time.Time, error) {
 	var got struct {
 		Year int
 		Seq  int
 		At   time.Time
 	}
 	err := tx.Raw(`INSERT INTO deposit_folio_counters (tenant_id, year, next_seq)
-	               VALUES (?, EXTRACT(YEAR FROM now() AT TIME ZONE 'UTC')::int, 2)
+	               VALUES (?, ?, 2)
 	               ON CONFLICT (tenant_id, year)
 	               DO UPDATE SET next_seq = deposit_folio_counters.next_seq + 1
-	               RETURNING year, next_seq - 1 AS seq, now() AS at`, r.tenantID).Scan(&got).Error
+	               RETURNING year, next_seq - 1 AS seq, now() AS at`, r.tenantID, year).Scan(&got).Error
 	if err != nil {
 		return "", time.Time{}, glerrors.Wrap(glerrors.KindInternal, "allocating a deposit folio", err)
 	}

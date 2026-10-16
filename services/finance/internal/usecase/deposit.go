@@ -730,7 +730,11 @@ func (c *CashUp) count(method string, cents int64) {
 //
 // A cancelled deposit counts for nothing but is still shown. Hiding it would
 // leave a gap between the receipts and the total that nobody could account for.
+// An unset day is the school's today (the clock's), never the server's.
 func (s *FinanceService) DailyCashUp(ctx context.Context, day time.Time) (CashUp, error) {
+	if day.IsZero() {
+		day = s.clock.Today()
+	}
 	deposits, err := s.repo.ListDepositsOn(ctx, day)
 	if err != nil {
 		return CashUp{}, err
