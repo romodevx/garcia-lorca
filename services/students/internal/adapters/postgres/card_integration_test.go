@@ -17,7 +17,7 @@ func TestCardTokensRoundTripAndIsolation(t *testing.T) {
 	ctx := context.Background()
 	repo := appRepo(t, tenantA)
 	pupil := applicant(t, "aaaaaaaa-0000-0000-0000-0000000013e1", tenantA, "CARE050312MDFRNN07", "")
-	if err := repo.Create(ctx, pupil); err != nil {
+	if err := repo.Create(ctx, pupil, testNumberYear); err != nil {
 		t.Fatalf("Create pupil: %v", err)
 	}
 	at := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
@@ -61,7 +61,7 @@ func TestACardBornRevokedIsStoredRevoked(t *testing.T) {
 	ctx := context.Background()
 	repo := appRepo(t, tenantA)
 	pupil := applicant(t, "aaaaaaaa-0000-0000-0000-0000000013e2", tenantA, "CARF050312MDFRNN08", "")
-	if err := repo.Create(ctx, pupil); err != nil {
+	if err := repo.Create(ctx, pupil, testNumberYear); err != nil {
 		t.Fatalf("Create pupil: %v", err)
 	}
 	at := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)

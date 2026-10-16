@@ -16,7 +16,7 @@ func TestPhotoRefRoundTripsAndIsTenantIsolated(t *testing.T) {
 	ctx := context.Background()
 	repo := appRepo(t, tenantA)
 	const id = "aaaaaaaa-0000-0000-0000-0000000005d1"
-	if err := repo.Create(ctx, applicant(t, id, tenantA, "FOTA050312MDFRNN01", "1° A")); err != nil {
+	if err := repo.Create(ctx, applicant(t, id, tenantA, "FOTA050312MDFRNN01", "1° A"), testNumberYear); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	if _, err := repo.PhotoRef(ctx, id); glerrors.KindOf(err) != glerrors.KindNotFound {

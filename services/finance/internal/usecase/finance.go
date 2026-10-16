@@ -484,6 +484,15 @@ func (s *FinanceService) RegisterTenderedPayment(ctx context.Context, in Tendere
 // errFuturePayment refuses a payment dated after it was taken.
 var errFuturePayment = glerrors.New(glerrors.KindInvalid, "la fecha del pago no puede estar en el futuro")
 
+// earliestPaymentDay is the first day a payment may be dated. The folio
+// counter only numbers years 2000..3000 (migration 0018), so a mistyped year
+// at the counter (0202, 1999) must be refused here as invalid input instead of
+// reaching the counter and failing as an internal error.
+var earliestPaymentDay = time.Date(2000, time.January, 1, 0, 0, 0, 0, time.UTC)
+
+// errPaymentTooOld refuses a payment dated before earliestPaymentDay.
+var errPaymentTooOld = glerrors.New(glerrors.KindInvalid, "la fecha del pago es anterior al año 2000; revisa el año")
+
 // paymentDay is when a payment happened, in the two senses ADR 0035 keeps
 // apart: the instant it was recorded (paid_at, audit only) and the
 // school-local civil day it is judged on (paid_on, what every rule reads).
@@ -500,7 +509,8 @@ type paymentDay struct {
 // statement and the receipt. A date the caller gave is the day picked at the
 // counter, which arrives as midnight UTC of that day: it is that day. The
 // "no future date" rule compares DAYS with the school's today, so picking
-// tomorrow is refused at any hour of the local evening.
+// tomorrow is refused at any hour of the local evening; a day before
+// earliestPaymentDay is refused too.
 func (s *FinanceService) paymentDate(paidAt time.Time) (paymentDay, error) {
 	today := s.clock.Today()
 	if paidAt.IsZero() {
@@ -509,6 +519,9 @@ func (s *FinanceService) paymentDate(paidAt time.Time) (paymentDay, error) {
 	day := domain.CalendarDay(paidAt)
 	if day.After(today) {
 		return paymentDay{}, errFuturePayment
+	}
+	if day.Before(earliestPaymentDay) {
+		return paymentDay{}, errPaymentTooOld
 	}
 	return paymentDay{at: paidAt, on: day}, nil
 }

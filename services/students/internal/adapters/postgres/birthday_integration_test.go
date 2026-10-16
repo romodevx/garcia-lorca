@@ -18,7 +18,7 @@ const tenantBirthdays = "b1d0b1d0-0000-0000-0000-000000000001"
 
 // bornOn stores an applicant born on birth ("" = no date), enrolled or not.
 func bornOn(t *testing.T, repo interface {
-	Create(context.Context, *domain.Student) error
+	Create(context.Context, *domain.Student, int) error
 	Update(context.Context, *domain.Student) error
 }, id, curp, birth string, enrolled bool) {
 	t.Helper()
@@ -32,7 +32,7 @@ func bornOn(t *testing.T, repo interface {
 		t.Fatalf("UpdateDetails: %v", err)
 	}
 	ctx := context.Background()
-	if err := repo.Create(ctx, s); err != nil {
+	if err := repo.Create(ctx, s, testNumberYear); err != nil {
 		t.Fatalf("Create %s: %v", id, err)
 	}
 	if !enrolled {
@@ -139,7 +139,7 @@ func TestCreateStoresTheBirthDate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewApplicant: %v", err)
 	}
-	if err := repo.Create(ctx, s); err != nil {
+	if err := repo.Create(ctx, s, testNumberYear); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	got, err := repo.FindByID(ctx, id)

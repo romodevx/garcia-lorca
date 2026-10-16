@@ -478,7 +478,7 @@ func saleCmd(t *testing.T, item domain.Item, size string, qty int, key string) p
 		OrderID: orderID, FulfillmentID: newUUID(t), TenantID: tenantA,
 		Lines:      []domain.OrderLine{mustLine(t, orderID, item, size, qty)},
 		TotalCents: item.PriceCents() * int64(qty),
-		Note:       "venta de prueba", IdempotencyKey: key, SoldAt: soldAt,
+		Note:       "venta de prueba", IdempotencyKey: key, SoldAt: soldAt, FolioYear: soldAt.Year(),
 	}
 }
 
@@ -539,4 +539,24 @@ func lineStatus(t *testing.T, lineID string) string {
 		t.Fatalf("read line status: %v", err)
 	}
 	return status
+}
+
+// T5b review: the folio numbers under the year the use case hands in (the
+// school's year), not the UTC year of the instant. A sale at 19:00 on
+// 31 December 2026 in Morelia is 01:00 UTC on 1 January 2027 and is U-2026-….
+func TestCounterSaleFolioIsNumberedInTheGivenYear(t *testing.T) {
+	ctx := context.Background()
+	repo := appRepo(t, tenantA)
+	item, _ := seedGarment(t, repo, "FOLIO-YEAR-1", "8", 32000, 5)
+
+	cmd := saleCmd(t, item, "8", 1, "key-folio-year")
+	cmd.SoldAt = time.Date(2027, time.January, 1, 1, 0, 0, 0, time.UTC)
+	cmd.FolioYear = 2026
+	got, _, err := repo.CounterSale(ctx, cmd)
+	if err != nil {
+		t.Fatalf("CounterSale: %v", err)
+	}
+	if !strings.HasPrefix(got.Order.Folio(), "U-2026-") {
+		t.Errorf("folio = %q, want U-2026-…", got.Order.Folio())
+	}
 }

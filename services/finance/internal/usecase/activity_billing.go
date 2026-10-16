@@ -44,7 +44,7 @@ func (s *FinanceService) loadActivityBilling(ctx context.Context) (activityBilli
 	if err != nil {
 		return activityBilling{}, err
 	}
-	enrollments, err := s.activities.ListBillableEnrollments(ctx)
+	enrollments, err := s.activities.ListBillableEnrollments(ctx, s.clock.Today())
 	if err != nil {
 		return activityBilling{}, err
 	}

@@ -16,12 +16,14 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
+	"fmt"
 	stdlog "log"
 	"log/slog"
 	"net/http"
 	"os"
 	"strconv"
 	"time"
+	_ "time/tzdata" // the school's zone must load in a distroless image
 
 	connect "connectrpc.com/connect"
 	"github.com/google/uuid"
@@ -59,6 +61,9 @@ const (
 	// defaultIAMBaseURL targets the iam service on its local dev port (compose
 	// overrides it to the in-network address http://iam:8080).
 	defaultIAMBaseURL = "http://localhost:8091"
+	// defaultSchoolTimezone is the school's calendar (SCHOOL_TIMEZONE), as in
+	// finance: a matrícula is numbered under the school's year.
+	defaultSchoolTimezone = "America/Mexico_City"
 
 	readHeaderTimeout = 10 * time.Second
 	readTimeout       = 30 * time.Second
@@ -213,6 +218,10 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 	// this must stop being a process-wide constant. See ADR 0001.
 	tenantID := envOr("STUDENTS_TENANT_ID", defaultTenant)
 
+	zone, err := schoolLocation()
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
 	db, err := openDB()
 	if err != nil {
 		return nil, nil, nil, nil, err
@@ -234,7 +243,7 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 	// pupil's level against the school's own catalog (ADR 0014).
 	configBaseURL := envOr("CONFIG_BASE_URL", defaultConfigBaseURL)
 	catalog := configclient.New(configBaseURL, gcpauth.HTTPClient(ctx, configBaseURL))
-	svc := usecase.NewStudentService(repo, events, catalog, tenantID, newID)
+	svc := usecase.NewStudentService(repo, events, catalog, tenantID, newID).WithSchoolZone(zone)
 	if photos, err := openPhotoStore(ctx, log); err != nil {
 		return nil, nil, nil, nil, err
 	} else if photos != nil {
@@ -263,7 +272,7 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 	levels := usecase.NewLevelArchiveService(repo, time.Now)
 	// The legacy import (ADR 0033): no publisher on purpose — an import
 	// announces nothing, and its enrollments carry origin=import for finance.
-	imports := usecase.NewImportService(repo, catalog, catalog, tenantID, newID, time.Now)
+	imports := usecase.NewImportService(repo, catalog, catalog, tenantID, newID, time.Now).WithSchoolZone(zone)
 	handler := grpcadapter.NewStudentsHandler(svc, enroll, guardians, health).
 		WithNotes(notes).WithCards(cards).WithLevelArchive(levels).WithImports(imports)
 
@@ -374,6 +383,18 @@ func openPhotoStore(ctx context.Context, log *slog.Logger) (*gcsphotos.Store, er
 	}
 	log.Info("students photo store ready", slog.String("bucket", bucket))
 	return store, nil
+}
+
+// schoolLocation is the school's time zone (SCHOOL_TIMEZONE, default
+// America/Mexico_City). An unknown zone fails startup: falling back to UTC
+// would give a pupil registered at 19:00 on 31 December next year's matrícula.
+func schoolLocation() (*time.Location, error) {
+	name := envOr("SCHOOL_TIMEZONE", defaultSchoolTimezone)
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		return nil, fmt.Errorf("SCHOOL_TIMEZONE %q: %w", name, err)
+	}
+	return loc, nil
 }
 
 func envOr(key, fallback string) string {

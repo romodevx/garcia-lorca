@@ -204,7 +204,7 @@ func seedApplicant(t *testing.T, repo *fakeRepo) *domain.Student {
 	if err != nil {
 		t.Fatalf("applicant: %v", err)
 	}
-	if err := repo.Create(context.Background(), s); err != nil {
+	if err := repo.Create(context.Background(), s, 2026); err != nil {
 		t.Fatalf("seed applicant: %v", err)
 	}
 	return s

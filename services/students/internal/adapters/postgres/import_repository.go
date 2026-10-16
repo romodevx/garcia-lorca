@@ -107,7 +107,7 @@ func (r *Repository) ImportStudent(ctx context.Context, cmd ports.ImportCommand)
 				out.BankReferenceDropped = true
 			}
 		}
-		number, err := r.nextEnrollmentNumber(tx)
+		number, err := r.nextEnrollmentNumber(tx, cmd.NumberYear)
 		if err != nil {
 			return err
 		}

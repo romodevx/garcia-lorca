@@ -56,7 +56,7 @@ func (r *stubRepo) UpdateSettings(_ context.Context, s domain.Settings) (domain.
 
 func handlerWith(repo ports.Repository) *grpcadapter.UniformsHandler {
 	svc := usecase.NewService(repo, nil, nil, nil, tenant,
-		func() string { return "id-1" }, func() time.Time { return now })
+		func() string { return "id-1" }, func() time.Time { return now }, time.UTC)
 	return grpcadapter.NewUniformsHandler(svc, usecase.NewHealthService("uniforms"))
 }
 

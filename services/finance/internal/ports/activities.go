@@ -17,8 +17,10 @@ type ActivityRepository interface {
 	// UpdateActivity replaces the activity's fields and live options, in one
 	// transaction: options present are inserted or re-priced, options absent
 	// are retired. Retiring one an open enrolment still uses is KindConflict;
-	// a taken name is KindConflict; no activity is KindNotFound.
-	UpdateActivity(ctx context.Context, a domain.Activity) (domain.Activity, error)
+	// a taken name is KindConflict; no activity is KindNotFound. An
+	// enrolment still uses its option while it ends after today, the
+	// school's civil day (never the database's UTC day).
+	UpdateActivity(ctx context.Context, a domain.Activity, today time.Time) (domain.Activity, error)
 	// GetActivity reads one with its live options, or KindNotFound.
 	GetActivity(ctx context.Context, id string) (domain.Activity, error)
 	// ListActivities lists them by name; inactive ones only when asked.
@@ -31,8 +33,9 @@ type ActivityRepository interface {
 	ListActivityEnrollments(ctx context.Context, activityID string) ([]domain.ActivityEnrollment, error)
 	// ListBillableEnrollments lists every enrolment of every ACTIVE activity,
 	// ended ones included (a period billed before the end may still be owed
-	// when the run catches up).
-	ListBillableEnrollments(ctx context.Context) ([]domain.ActivityEnrollment, error)
+	// when the run catches up). "Recently ended" is counted back from today,
+	// the school's civil day.
+	ListBillableEnrollments(ctx context.Context, today time.Time) ([]domain.ActivityEnrollment, error)
 	// CreateEnrollments stores new open enrolments and returns those written;
 	// a pupil who already has an open one is skipped, never duplicated.
 	CreateEnrollments(ctx context.Context, es []domain.ActivityEnrollment) ([]domain.ActivityEnrollment, error)

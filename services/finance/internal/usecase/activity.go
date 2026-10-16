@@ -125,7 +125,7 @@ func (s *ActivityService) UpdateActivity(ctx context.Context, id string, in Acti
 	if err := s.refuseNewCalendar(ctx, current, a); err != nil {
 		return domain.Activity{}, err
 	}
-	return s.repo.UpdateActivity(ctx, a)
+	return s.repo.UpdateActivity(ctx, a, s.clock.Today())
 }
 
 // resumedOn is today when this edit switches the activity back on, so the

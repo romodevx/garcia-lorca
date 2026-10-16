@@ -15,7 +15,7 @@ func TestMedicalRecordRoundTrips(t *testing.T) {
 	ctx := context.Background()
 	repo := appRepo(t, tenantA)
 	const id = "aaaaaaaa-0000-0000-0000-0000000005b1"
-	if err := repo.Create(ctx, applicant(t, id, tenantA, "MEDA050312MDFRNN01", "1° A")); err != nil {
+	if err := repo.Create(ctx, applicant(t, id, tenantA, "MEDA050312MDFRNN01", "1° A"), testNumberYear); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	empty, err := repo.GetMedical(ctx, id)
@@ -41,7 +41,7 @@ func TestMedicalRecordRoundTrips(t *testing.T) {
 func TestMedicalRecordIsTenantIsolated(t *testing.T) {
 	ctx := context.Background()
 	const id = "aaaaaaaa-0000-0000-0000-0000000005b2"
-	if err := appRepo(t, tenantA).Create(ctx, applicant(t, id, tenantA, "MEDB050312MDFRNN02", "1° A")); err != nil {
+	if err := appRepo(t, tenantA).Create(ctx, applicant(t, id, tenantA, "MEDB050312MDFRNN02", "1° A"), testNumberYear); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	rec, _ := domain.NewMedicalRecord("O+", "Nueces", "")

@@ -531,3 +531,29 @@ func TestEnrollingAgainBillsAPupilAlreadyEnrolled(t *testing.T) {
 		t.Fatalf("re-enrolling = %+v, want no new enrolment and September billed", again)
 	}
 }
+
+// T5b review: whether an enrolment still runs is judged on the SCHOOL's today
+// (the repository used CURRENT_DATE, the database's UTC day). At 19:00 on the
+// 15th in Morelia both reads are handed the 15th, not the 16th.
+func TestActivityReadsAreJudgedOnTheSchoolsToday(t *testing.T) {
+	for _, tt := range schoolNight {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newActivityFixture(t)
+			a := f.create(t, swimmingInput())
+			f.clock = tt.instant
+
+			in := swimmingInput()
+			in.Options = a.Options()
+			_, err := f.svcA.UpdateActivity(context.Background(), a.ID(), in)
+			requireNoError(t, err)
+			if got := dateOf(f.activities.updateToday); got != tt.today {
+				t.Errorf("UpdateActivity judged on %s, want %s", got, tt.today)
+			}
+
+			runOn(t, f.fixture, "2026-10-01")
+			if got := dateOf(f.activities.billableToday); got != tt.today {
+				t.Errorf("ListBillableEnrollments judged on %s, want %s", got, tt.today)
+			}
+		})
+	}
+}

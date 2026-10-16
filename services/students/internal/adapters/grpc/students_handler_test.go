@@ -50,7 +50,7 @@ func newFakeRepo() *fakeRepo {
 	return &fakeRepo{byID: map[string]*domain.Student{}, byCURP: map[string]bool{}}
 }
 
-func (r *fakeRepo) Create(_ context.Context, s *domain.Student) error {
+func (r *fakeRepo) Create(_ context.Context, s *domain.Student, _ int) error {
 	if r.byCURP[s.CURP().String()] {
 		return glerrors.New(glerrors.KindConflict, "duplicate curp")
 	}

@@ -17,7 +17,7 @@ func TestNotesRoundTripNewestFirstAndAreTenantIsolated(t *testing.T) {
 	ctx := context.Background()
 	repo := appRepo(t, tenantA)
 	const studentID = "aaaaaaaa-0000-0000-0000-0000000006a1"
-	if err := repo.Create(ctx, applicant(t, studentID, tenantA, "NOTA050312MDFRNN01", "1° A")); err != nil {
+	if err := repo.Create(ctx, applicant(t, studentID, tenantA, "NOTA050312MDFRNN01", "1° A"), testNumberYear); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	at := time.Date(2026, 9, 24, 10, 0, 0, 0, time.UTC)
@@ -83,7 +83,7 @@ func TestANoteEditKeepsItsRevisionAndIsTenantIsolated(t *testing.T) {
 	ctx := context.Background()
 	repo := appRepo(t, tenantA)
 	const studentID = "aaaaaaaa-0000-0000-0000-0000000006b1"
-	if err := repo.Create(ctx, applicant(t, studentID, tenantA, "NOTB050312MDFRNN01", "1° A")); err != nil {
+	if err := repo.Create(ctx, applicant(t, studentID, tenantA, "NOTB050312MDFRNN01", "1° A"), testNumberYear); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	at := time.Date(2026, 9, 24, 10, 0, 0, 0, time.UTC)

@@ -19,6 +19,9 @@ var _ ports.ActivityRepository = (*fakeActivityRepo)(nil)
 type fakeActivityRepo struct {
 	activities  map[string]domain.Activity
 	enrollments []domain.ActivityEnrollment
+	// The day each read was judged on, as the use case handed it in.
+	updateToday   time.Time
+	billableToday time.Time
 }
 
 func newFakeActivityRepo() *fakeActivityRepo {
@@ -42,7 +45,8 @@ func (f *fakeActivityRepo) CreateActivity(_ context.Context, a domain.Activity) 
 	return a, nil
 }
 
-func (f *fakeActivityRepo) UpdateActivity(_ context.Context, a domain.Activity) (domain.Activity, error) {
+func (f *fakeActivityRepo) UpdateActivity(_ context.Context, a domain.Activity, today time.Time) (domain.Activity, error) {
+	f.updateToday = today
 	if _, ok := f.activities[a.ID()]; !ok {
 		return domain.Activity{}, glerrors.ErrNotFound
 	}
@@ -50,7 +54,7 @@ func (f *fakeActivityRepo) UpdateActivity(_ context.Context, a domain.Activity) 
 		return domain.Activity{}, glerrors.New(glerrors.KindConflict, "name taken")
 	}
 	for _, e := range f.enrollments {
-		if e.ActivityID() != a.ID() || !e.EndsOn().IsZero() {
+		if e.ActivityID() != a.ID() || (!e.EndsOn().IsZero() && !e.EndsOn().After(today)) {
 			continue
 		}
 		if _, live := a.Option(e.OptionID()); !live {
@@ -100,7 +104,8 @@ func (f *fakeActivityRepo) ListActivityEnrollments(_ context.Context, activityID
 	return out, nil
 }
 
-func (f *fakeActivityRepo) ListBillableEnrollments(_ context.Context) ([]domain.ActivityEnrollment, error) {
+func (f *fakeActivityRepo) ListBillableEnrollments(_ context.Context, today time.Time) ([]domain.ActivityEnrollment, error) {
+	f.billableToday = today
 	var out []domain.ActivityEnrollment
 	for _, e := range f.enrollments {
 		if a, ok := f.activities[e.ActivityID()]; ok && a.Active() {

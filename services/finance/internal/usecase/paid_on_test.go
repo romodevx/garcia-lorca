@@ -152,3 +152,38 @@ func TestTheStatementDatesALiveDepositOnItsDay(t *testing.T) {
 	}
 	assert.True(t, found, "the deposit is on the statement")
 }
+
+// The folio counter only knows years 2000..3000 (migration 0018), so a
+// mistyped year picked at the counter (0202-10-01, 1999-12-31) must be refused
+// as invalid input — not reach the counter and fail as a 500.
+func TestPickingADayBeforeTheEarliestIsRefused(t *testing.T) {
+	cases := []struct {
+		name    string
+		picked  time.Time
+		refused bool
+	}{
+		{"1999-12-31", ymdUTC(1999, time.December, 31), true},
+		{"0202-10-01", ymdUTC(202, time.October, 1), true},
+		{"2000-01-01", ymdUTC(2000, time.January, 1), false},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			f := depositFixture(t)
+			f.clock = evening15
+			charge := chargeDueOn(t, f, "2026-10-12")
+
+			_, depErr := f.svc.RegisterDeposit(context.Background(), usecase.DepositInput{
+				StudentID: testStudent, AmountCents: 100000, Method: domain.MethodCash, PaidAt: tt.picked,
+			})
+			_, _, payErr := f.svc.RegisterPaymentAt(context.Background(), charge.Charge.ID(), 100,
+				domain.MethodCash, "", "", tt.picked, "")
+			for label, err := range map[string]error{"deposit": depErr, "payment": payErr} {
+				if tt.refused {
+					assert.Equal(t, glerrors.KindInvalid, glerrors.KindOf(err), label)
+					continue
+				}
+				assert.NoError(t, err, label)
+			}
+		})
+	}
+}

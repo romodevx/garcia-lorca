@@ -22,10 +22,14 @@ type Service struct {
 	tenantID string
 	newID    func() string
 	now      func() time.Time
+	// zone is the school's time zone: a sale's folio numbers under the year
+	// of the school's calendar, the day its receipt prints (T5b).
+	zone *time.Location
 }
 
 // NewService wires the shop. newID and now are injected so every test is
-// deterministic and nothing in here reads a real clock.
+// deterministic and nothing in here reads a real clock; zone is the school's
+// time zone, resolved once at boot.
 func NewService(
 	repo ports.Repository,
 	students ports.StudentReader,
@@ -34,9 +38,10 @@ func NewService(
 	tenantID string,
 	newID func() string,
 	now func() time.Time,
+	zone *time.Location,
 ) *Service {
 	return &Service{repo: repo, students: students, finance: finance, events: events,
-		tenantID: tenantID, newID: newID, now: now}
+		tenantID: tenantID, newID: newID, now: now, zone: zone}
 }
 
 // --- catalogue ---------------------------------------------------------------
@@ -326,13 +331,15 @@ func (s *Service) CounterSale(ctx context.Context, in CounterSaleInput) (ports.O
 	// a retry of a sale that went through returns it even if the price moved.
 	tenders, tenderErr := tendersFor(in, total)
 
+	soldAt := s.now()
 	saved, replayed, err := s.repo.CounterSale(ctx, ports.CounterSaleCommand{
 		OrderID: orderID, FulfillmentID: fulfillmentID, TenantID: s.tenantID,
 		StudentID: student.ID, StudentName: student.FullName, StudentLevel: student.Level, StudentLevelName: student.LevelName,
 		StudentGradeGroup: student.GradeGroup, CycleID: student.CycleID,
 		Lines: lines, TotalCents: total, Note: strings.TrimSpace(in.Note),
-		ActorUserID: in.ActorUserID, IdempotencyKey: in.IdempotencyKey, SoldAt: s.now(),
-		Admit: func() error { return tenderErr },
+		ActorUserID: in.ActorUserID, IdempotencyKey: in.IdempotencyKey, SoldAt: soldAt,
+		FolioYear: soldAt.In(s.zone).Year(),
+		Admit:     func() error { return tenderErr },
 	})
 	if err != nil {
 		return ports.OrderAggregate{}, err

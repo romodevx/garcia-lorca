@@ -8,6 +8,8 @@
  * would quietly return something else.
  */
 
+import { schoolISODate } from "./schoolDay";
+
 /** One column: the header a person reads and how to get its value from a row. */
 export interface CsvColumn<T> {
   label: string;
@@ -64,7 +66,10 @@ function escapeCell(raw: string): string {
   return value;
 }
 
-/** A filename a person can find again: what it is, and when it was taken. */
+/**
+ * A filename a person can find again: what it is, and the school's day it was
+ * taken (Morelia's — UTC's day already turns at 18:00 local).
+ */
 export function csvName(what: string, day: Date): string {
-  return `${what}-${day.toISOString().slice(0, 10)}.csv`;
+  return `${what}-${schoolISODate(day)}.csv`;
 }

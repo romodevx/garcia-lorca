@@ -130,6 +130,10 @@ type CounterSaleCommand struct {
 	ActorUserID       string
 	IdempotencyKey    string
 	SoldAt            time.Time
+	// FolioYear is the year the folio numbers under: the school's calendar
+	// year of the sale (the day its receipt prints), not SoldAt's UTC year —
+	// a sale at 19:00 on 31 December in Morelia is already 2027 in UTC.
+	FolioYear int
 	// Admit runs after the replay check and before anything is written; its
 	// error refuses the sale (T8: tenders that do not add up). Nil admits.
 	Admit func() error

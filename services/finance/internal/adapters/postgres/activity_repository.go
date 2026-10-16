@@ -64,7 +64,7 @@ func (r *Repository) CreateActivity(ctx context.Context, a domain.Activity) (dom
 
 // UpdateActivity rewrites the activity and its live options, retiring those
 // left out — unless an open enrolment still uses one (KindConflict).
-func (r *Repository) UpdateActivity(ctx context.Context, a domain.Activity) (domain.Activity, error) {
+func (r *Repository) UpdateActivity(ctx context.Context, a domain.Activity, today time.Time) (domain.Activity, error) {
 	m, err := r.fromDomainActivity(a)
 	if err != nil {
 		return domain.Activity{}, err
@@ -82,7 +82,7 @@ func (r *Repository) UpdateActivity(ctx context.Context, a domain.Activity) (dom
 		if res.RowsAffected == 0 {
 			return glerrors.ErrNotFound
 		}
-		if err := retireMissingOptions(tx, a); err != nil {
+		if err := retireMissingOptions(tx, a, today); err != nil {
 			return err
 		}
 		return r.writeOptions(tx, a)
@@ -97,15 +97,17 @@ func (r *Repository) UpdateActivity(ctx context.Context, a domain.Activity) (dom
 // used by an enrolment still running (or ending later: it still owes the
 // periods before its end), then retires EVERY live option. writeOptions brings
 // back the ones listed, so swapping the days of two options in one edit never
-// collides on the live-days unique index halfway through.
-func retireMissingOptions(tx *gorm.DB, a domain.Activity) error {
+// collides on the live-days unique index halfway through. "Still running" is
+// judged on today, the school's civil day: CURRENT_DATE is the database's UTC
+// day, already tomorrow after 18:00 in Morelia.
+func retireMissingOptions(tx *gorm.DB, a domain.Activity, today time.Time) error {
 	keep := make([]string, 0, len(a.Options()))
 	for _, o := range a.Options() {
 		keep = append(keep, o.ID)
 	}
 	var inUse int64
 	if err := tx.Model(&activityEnrollmentModel{}).
-		Where("activity_id = ? AND option_id NOT IN ? AND (ends_on IS NULL OR ends_on > CURRENT_DATE)", a.ID(), keep).
+		Where("activity_id = ? AND option_id NOT IN ? AND (ends_on IS NULL OR ends_on > ?::date)", a.ID(), keep, today.Format(dateLayout)).
 		Count(&inUse).Error; err != nil {
 		return glerrors.Wrap(glerrors.KindInternal, "checking options in use", err)
 	}
@@ -276,12 +278,13 @@ func (r *Repository) ListActivityEnrollments(ctx context.Context, activityID str
 
 // ListBillableEnrollments lists the enrolments of every active activity that
 // are running or ended recently. Hitting the row cap is an error, never a
-// silently shorter list: the rows cut would be pupils nobody bills.
-func (r *Repository) ListBillableEnrollments(ctx context.Context) ([]domain.ActivityEnrollment, error) {
+// silently shorter list: the rows cut would be pupils nobody bills. The window
+// is counted back from today, the school's civil day.
+func (r *Repository) ListBillableEnrollments(ctx context.Context, today time.Time) ([]domain.ActivityEnrollment, error) {
 	rows, err := r.listEnrollments(ctx, func(q *gorm.DB) *gorm.DB {
 		return q.Where("activity_id IN (?)", q.Session(&gorm.Session{NewDB: true}).
 			Model(&activityModel{}).Select("id").Where("active")).
-			Where("ends_on IS NULL OR ends_on > CURRENT_DATE - ?::int", billableEndedWindowDays)
+			Where("ends_on IS NULL OR ends_on > ?::date", today.AddDate(0, 0, -billableEndedWindowDays).Format(dateLayout))
 	})
 	if err != nil {
 		return nil, err

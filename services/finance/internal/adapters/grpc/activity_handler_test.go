@@ -29,7 +29,7 @@ func (m *memActivities) CreateActivity(_ context.Context, a domain.Activity) (do
 	return a, nil
 }
 
-func (m *memActivities) UpdateActivity(_ context.Context, a domain.Activity) (domain.Activity, error) {
+func (m *memActivities) UpdateActivity(_ context.Context, a domain.Activity, _ time.Time) (domain.Activity, error) {
 	m.activities[a.ID()] = a
 	return a, nil
 }
@@ -62,7 +62,7 @@ func (m *memActivities) ListActivityEnrollments(context.Context, string) ([]doma
 	return m.enrollments, nil
 }
 
-func (m *memActivities) ListBillableEnrollments(context.Context) ([]domain.ActivityEnrollment, error) {
+func (m *memActivities) ListBillableEnrollments(context.Context, time.Time) ([]domain.ActivityEnrollment, error) {
 	return m.enrollments, nil
 }
 
