@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -14,13 +15,16 @@ import (
 )
 
 const (
-	defaultReceiptsBaseURL = "https://exp.host"
+	// DefaultReceiptsBaseURL is the production Expo API host used by receipts.
+	DefaultReceiptsBaseURL = "https://exp.host"
 	receiptsPath           = "/--/api/v2/push/getReceipts"
 	maxReceiptBatch        = 1000
 	maxReceiptAttempts     = 5
 	minReceiptAge          = 15 * time.Minute
+	receiptRetention       = 24 * time.Hour
 	receiptTimeout         = 10 * time.Second
 	defaultReceiptInterval = time.Minute
+	ticketStatusOK         = "ok"
 )
 
 // ReceiptChecker polls Expo receipts for successful push tickets.
@@ -67,7 +71,7 @@ func WithReceiptClock(now func() time.Time) ReceiptOption {
 // NewReceiptChecker builds a checker using Expo's production endpoint by default.
 func NewReceiptChecker(store service.PushReceiptStore, opts ...ReceiptOption) *ReceiptChecker {
 	c := &ReceiptChecker{
-		store: store, baseURL: defaultReceiptsBaseURL,
+		store: store, baseURL: DefaultReceiptsBaseURL,
 		client: &http.Client{Timeout: receiptTimeout}, log: slog.Default(), now: time.Now,
 	}
 	for _, opt := range opts {
@@ -89,10 +93,15 @@ type receiptsResponse struct {
 
 // Check processes all tickets at least 15 minutes old in bounded requests.
 func (c *ReceiptChecker) Check(ctx context.Context) error {
-	cutoff := c.now().Add(-minReceiptAge)
+	now := c.now()
+	if err := c.store.DeleteExpiredPushTickets(ctx, now.Add(-receiptRetention)); err != nil {
+		return fmt.Errorf("deleting expired expo push tickets: %w", err)
+	}
+	cutoff := now.Add(-minReceiptAge)
 	afterID := ""
+	var afterCreatedAt time.Time
 	for {
-		tickets, err := c.store.ListPushTickets(ctx, cutoff, afterID, maxReceiptBatch)
+		tickets, err := c.store.ListPushTickets(ctx, cutoff, afterCreatedAt, afterID, maxReceiptBatch)
 		if err != nil {
 			return fmt.Errorf("listing expo push tickets: %w", err)
 		}
@@ -103,6 +112,7 @@ func (c *ReceiptChecker) Check(ctx context.Context) error {
 			return err
 		}
 		afterID = tickets[len(tickets)-1].ID
+		afterCreatedAt = tickets[len(tickets)-1].CreatedAt
 		if len(tickets) < maxReceiptBatch {
 			return nil
 		}
@@ -145,38 +155,47 @@ func (c *ReceiptChecker) checkBatch(ctx context.Context, tickets []service.PushT
 	for _, t := range tickets {
 		r, found := parsed.Data[t.TicketID]
 		if !found { // Expo may not have produced the receipt yet.
-			if err := c.store.MarkPushTicketChecked(ctx, t.ID, checkedAt); err != nil {
-				return fmt.Errorf("marking pending expo receipt checked: %w", err)
+			attempts, err := c.store.RecordPushTicketFailure(ctx, t.ID, checkedAt)
+			if err != nil {
+				return fmt.Errorf("recording missing expo receipt: %w", err)
+			}
+			if attempts >= maxReceiptAttempts {
+				if err := c.store.DeletePushTicket(ctx, t.ID); err != nil {
+					return fmt.Errorf("deleting exhausted expo ticket: %w", err)
+				}
 			}
 			continue
 		}
-		if r.Status == "ok" {
+		if r.Status == ticketStatusOK {
 			if err := c.store.DeletePushTicket(ctx, t.ID); err != nil {
 				return fmt.Errorf("deleting completed expo ticket: %w", err)
 			}
 			continue
 		}
+		c.log.Warn("expo receipt reported a delivery error", slog.String("error_code", r.Details.Error))
 		if r.Details.Error == errDeviceNotRegistered {
-			if err := c.store.DeletePushDevice(ctx, t.DeviceToken); err != nil {
-				return fmt.Errorf("deleting unregistered expo device: %w", err)
-			}
-			if err := c.store.DeletePushTicket(ctx, t.ID); err != nil {
-				return fmt.Errorf("deleting unregistered expo ticket: %w", err)
+			deviceErr := c.store.DeletePushDevice(ctx, t.DeviceToken)
+			ticketErr := c.store.DeletePushTicket(ctx, t.ID)
+			if deviceErr != nil || ticketErr != nil {
+				return errors.Join(
+					wrapIfError("deleting unregistered expo device", deviceErr),
+					wrapIfError("deleting unregistered expo ticket", ticketErr),
+				)
 			}
 			continue
 		}
-		attempts, err := c.store.RecordPushTicketFailure(ctx, t.ID, maxReceiptAttempts, checkedAt)
-		if err != nil {
-			return fmt.Errorf("recording expo receipt failure: %w", err)
-		}
-		c.log.Warn("expo receipt reported a delivery error", slog.String("error_code", r.Details.Error), slog.Int("attempts", attempts))
-		if attempts >= maxReceiptAttempts {
-			if err := c.store.DeletePushTicket(ctx, t.ID); err != nil {
-				return fmt.Errorf("deleting exhausted expo ticket: %w", err)
-			}
+		if err := c.store.DeletePushTicket(ctx, t.ID); err != nil {
+			return fmt.Errorf("deleting failed expo ticket: %w", err)
 		}
 	}
 	return nil
+}
+
+func wrapIfError(message string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%s: %w", message, err)
 }
 
 // Run performs one startup sweep, then checks periodically until ctx is cancelled.

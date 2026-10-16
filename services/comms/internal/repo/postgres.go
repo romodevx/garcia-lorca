@@ -17,7 +17,6 @@ import (
 
 // Compile-time proof the adapter satisfies the seam the service declares.
 var _ service.Repo = (*Repo)(nil)
-var _ service.PushTicketWriter = (*Repo)(nil)
 var _ service.PushReceiptStore = (*Repo)(nil)
 
 // maxListLimit caps the unpaginated reads, so neither a long-lived notification
@@ -254,11 +253,17 @@ func (r *Repo) DeleteUserDevice(ctx context.Context, userID, token string) error
 	})
 }
 
-// StorePushTicket durably associates an Expo ticket id with the token it covers.
-func (r *Repo) StorePushTicket(ctx context.Context, ticketID, token string) error {
+// StorePushTickets durably associates Expo ticket ids with their target tokens.
+func (r *Repo) StorePushTickets(ctx context.Context, tickets []service.PushTicketPair) error {
+	if len(tickets) == 0 {
+		return nil
+	}
 	return r.withTenant(ctx, func(tx *gorm.DB) error {
-		m := pushTicketModel{ID: uuid.NewString(), TenantID: r.tenantID, TicketID: ticketID, DeviceToken: token}
-		if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "tenant_id"}, {Name: "ticket_id"}}, DoNothing: true}).Create(&m).Error; err != nil {
+		models := make([]pushTicketModel, 0, len(tickets))
+		for _, ticket := range tickets {
+			models = append(models, pushTicketModel{ID: uuid.NewString(), TenantID: r.tenantID, TicketID: ticket.TicketID, DeviceToken: ticket.DeviceToken})
+		}
+		if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "tenant_id"}, {Name: "ticket_id"}}, DoNothing: true}).Create(&models).Error; err != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "storing push ticket", err)
 		}
 		return nil
@@ -270,17 +275,29 @@ func (r *Repo) DeletePushDevice(ctx context.Context, token string) error {
 	return r.DeactivateDevices(ctx, []string{token})
 }
 
-// ListPushTickets returns up to limit tickets old enough for receipt lookup,
-// ordered by id for stable keyset pagination.
-func (r *Repo) ListPushTickets(ctx context.Context, before time.Time, afterID string, limit int) ([]service.PushTicket, error) {
+// DeleteExpiredPushTickets removes tickets past the receipt retention window.
+func (r *Repo) DeleteExpiredPushTickets(ctx context.Context, before time.Time) error {
+	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		if err := tx.Where("created_at < ?", before).Delete(&pushTicketModel{}).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "deleting expired push tickets", err)
+		}
+		return nil
+	})
+}
+
+const receiptRecheckInterval = 15 * time.Minute
+
+// ListPushTickets returns due tickets in creation order using stable keyset pagination.
+func (r *Repo) ListPushTickets(ctx context.Context, before, afterCreatedAt time.Time, afterID string, limit int) ([]service.PushTicket, error) {
 	var out []service.PushTicket
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
 		var rows []pushTicketModel
-		q := tx.Where("created_at <= ?", before)
+		q := tx.Where("created_at <= ?", before).
+			Where("checked_at IS NULL OR checked_at < ?", time.Now().Add(-receiptRecheckInterval))
 		if afterID != "" {
-			q = q.Where("id > ?::uuid", afterID)
+			q = q.Where("(created_at, id) > (?, ?::uuid)", afterCreatedAt, afterID)
 		}
-		if err := q.Order("id ASC").Limit(limit).Find(&rows).Error; err != nil {
+		if err := q.Order("created_at ASC, id ASC").Limit(limit).Find(&rows).Error; err != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "listing push tickets", err)
 		}
 		for _, row := range rows {
@@ -301,28 +318,15 @@ func (r *Repo) DeletePushTicket(ctx context.Context, id string) error {
 	})
 }
 
-// MarkPushTicketChecked records that Expo has not produced a receipt yet.
-func (r *Repo) MarkPushTicketChecked(ctx context.Context, id string, checkedAt time.Time) error {
-	return r.withTenant(ctx, func(tx *gorm.DB) error {
-		if err := tx.Model(&pushTicketModel{}).Where("id = ?", id).Update("checked_at", checkedAt).Error; err != nil {
-			return glerrors.Wrap(glerrors.KindInternal, "marking push ticket checked", err)
-		}
-		return nil
-	})
-}
-
 // RecordPushTicketFailure increments attempts and records the check time.
-func (r *Repo) RecordPushTicketFailure(ctx context.Context, id string, _ int, checkedAt time.Time) (int, error) {
+func (r *Repo) RecordPushTicketFailure(ctx context.Context, id string, checkedAt time.Time) (int, error) {
 	var attempts int
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
-		if err := tx.Model(&pushTicketModel{}).Where("id = ?", id).Updates(map[string]any{
-			"attempts": gorm.Expr("attempts + 1"), "checked_at": checkedAt,
-		}).Error; err != nil {
+		row := struct{ Attempts int }{}
+		if err := tx.Raw("UPDATE push_tickets SET attempts = attempts + 1, checked_at = ? WHERE id = ? AND tenant_id = ? RETURNING attempts", checkedAt, id, r.tenantID).Scan(&row).Error; err != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "recording push ticket failure", err)
 		}
-		if err := tx.Model(&pushTicketModel{}).Select("attempts").Where("id = ?", id).Scan(&attempts).Error; err != nil {
-			return glerrors.Wrap(glerrors.KindInternal, "reading push ticket attempts", err)
-		}
+		attempts = row.Attempts
 		return nil
 	})
 	return attempts, err

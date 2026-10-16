@@ -208,12 +208,12 @@ locals {
     PUSH_PROVIDER = var.push_provider
   })
 
-  # The Expo access token is mounted only when its Secret Manager version is
-  # created. The version reference also orders secret creation before Cloud Run.
+  # The Expo access token is added out of band; use latest so Terraform state
+  # never contains its value or version resource.
   comms_secret_env = merge(local.common_secret_env, var.expo_access_token_enabled ? {
     EXPO_ACCESS_TOKEN = {
       secret_id = google_secret_manager_secret.expo_access_token.secret_id
-      version   = google_secret_manager_secret_version.expo_access_token[0].version
+      version   = "latest"
     }
   } : {})
 

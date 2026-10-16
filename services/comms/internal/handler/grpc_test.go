@@ -27,6 +27,10 @@ type fakeRepo struct {
 	failWith      error
 }
 
+func (f *fakeRepo) StorePushTickets(context.Context, []service.PushTicketPair) error {
+	return f.failWith
+}
+
 func (f *fakeRepo) RecordEvent(_ context.Context, _ string, n service.Notification) (service.Notification, bool, error) {
 	if f.failWith != nil {
 		return service.Notification{}, false, f.failWith

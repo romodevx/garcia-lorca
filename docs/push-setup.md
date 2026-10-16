@@ -29,20 +29,24 @@ Instala el build en un teléfono real desde el enlace que entrega EAS. Expo Go n
 
 ## 4. Habilitar Expo en dev
 
-El token de acceso de Expo es opcional mientras el proyecto no habilite enhanced push security. Si lo habilitas, escríbelo directamente a Secret Manager:
+El token de acceso de Expo es opcional mientras el proyecto no habilite enhanced push security.
+
+Agrega el token directamente a Secret Manager y luego activa el montaje en Terraform. Si el secreto aún no existe en el entorno, aplícalo primero con `expo_access_token_enabled = false` para que Terraform cree el contenedor vacío:
 
 ```sh
 printf '%s' "$EXPO_ACCESS_TOKEN" | gcloud secrets versions add "garcia-lorca-expo-access-token-dev" --data-file=-
 ```
 
-En `deploy/terraform`, configura `push_provider = "expo"` y `expo_access_token_enabled = true` en el archivo local de variables del entorno dev, y aplica Terraform por el flujo habitual del equipo. Para apagarlo, usa `push_provider = "log"`. Terraform monta `EXPO_ACCESS_TOKEN` desde Secret Manager; el token no va en variables planas ni en Git. No habilites el montaje antes de crear la versión del secreto.
+En `deploy/terraform`, configura `push_provider = "expo"` y `expo_access_token_enabled = true` en el archivo local de variables del entorno dev, y aplica Terraform por el flujo habitual del equipo. Para apagarlo, usa `push_provider = "log"`. Terraform monta la versión `latest` como `EXPO_ACCESS_TOKEN`; el token nunca pasa por Terraform ni se guarda en Git o `.tfvars`.
 
 ## 5. Probar un aviso
 
 1. Inicia sesión en la app instalada, acepta el permiso de notificaciones y confirma que el dispositivo quedó registrado.
 2. Desde la interfaz web crea un aviso/operación que genere una notificación para un alumno con un tutor que tenga esa app instalada. La notificación aparece primero en el feed durable y luego se envía al teléfono.
-3. Revisa los logs de `comms` para confirmar que Expo aceptó el envío. El servicio guarda cada ticket exitoso junto con su token y consulta receipts en un barrido periódico (también al iniciar una instancia). Expo recomienda esperar 15 minutos antes de consultar. Un receipt exitoso elimina el ticket; `DeviceNotRegistered` elimina el dispositivo y el ticket. Otros errores se registran sin tokens ni datos personales, se reintentan hasta cinco veces y luego se descarta el ticket.
+3. Revisa los logs de `comms` para confirmar que Expo aceptó el envío. El servicio guarda en un lote cada ticket exitoso junto con su token y consulta receipts en un barrido periódico (también al iniciar una instancia). Expo recomienda esperar 15 minutos antes de consultar. Un receipt exitoso elimina el ticket. Si Expo aún no produjo el receipt, el servicio lo vuelve a consultar y descarta el ticket tras cinco intentos. Un receipt con `status: error` es final: se registra su código y se elimina el ticket; `DeviceNotRegistered` también elimina el dispositivo.
 
-En `deploy/terraform`, `push_provider` controla el envío (`"log"` por defecto o `"expo"`). `expo_access_token_enabled` monta `EXPO_ACCESS_TOKEN` desde Secret Manager; cuando se habilita, provee `expo_access_token` mediante una fuente segura durante `terraform apply`. El secreto no debe guardarse en Git ni en archivos `.tfvars`.
+`EXPO_BASE_URL` puede cambiar la base de la API de receipts y `EXPO_PUSH_URL` el endpoint de envío; ambos son opcionales y por defecto usan `https://exp.host` y `https://exp.host/--/api/v2/push/send`.
+
+En `deploy/terraform`, `push_provider` controla el envío (`"log"` por defecto o `"expo"`). Sigue el paso 4 para activar el token. El secreto nunca se guarda en variables Terraform ni `.tfvars`.
 
 Las credenciales APNs/FCM pertenecen al dueño del proyecto Expo y se mantienen en EAS. El token opcional de acceso del servidor pertenece a Secret Manager.

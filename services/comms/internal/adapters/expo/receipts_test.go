@@ -3,6 +3,7 @@ package expo_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -16,17 +17,32 @@ import (
 )
 
 type receiptStoreSpy struct {
-	tickets  []service.PushTicket
-	deleted  []string
-	devices  []string
-	checked  []string
-	failures []string
+	tickets    []service.PushTicket
+	deleted    []string
+	expired    []time.Time
+	operations []string
+	devices    []string
+	failures   []string
 }
 
-func (s *receiptStoreSpy) ListPushTickets(_ context.Context, before time.Time, afterID string, limit int) ([]service.PushTicket, error) {
+func (s *receiptStoreSpy) DeleteExpiredPushTickets(_ context.Context, before time.Time) error {
+	s.operations = append(s.operations, "expire")
+	s.expired = append(s.expired, before)
+	kept := s.tickets[:0]
+	for _, ticket := range s.tickets {
+		if !ticket.CreatedAt.Before(before) {
+			kept = append(kept, ticket)
+		}
+	}
+	s.tickets = kept
+	return nil
+}
+
+func (s *receiptStoreSpy) ListPushTickets(_ context.Context, before, afterCreatedAt time.Time, afterID string, limit int) ([]service.PushTicket, error) {
+	s.operations = append(s.operations, "list")
 	var out []service.PushTicket
 	for _, ticket := range s.tickets {
-		if ticket.CreatedAt.After(before) || ticket.ID <= afterID {
+		if ticket.CreatedAt.After(before) || (afterID != "" && (ticket.CreatedAt.Before(afterCreatedAt) || (ticket.CreatedAt.Equal(afterCreatedAt) && ticket.ID <= afterID))) {
 			continue
 		}
 		out = append(out, ticket)
@@ -44,11 +60,7 @@ func (s *receiptStoreSpy) DeletePushDevice(_ context.Context, token string) erro
 	s.devices = append(s.devices, token)
 	return nil
 }
-func (s *receiptStoreSpy) MarkPushTicketChecked(_ context.Context, id string, _ time.Time) error {
-	s.checked = append(s.checked, id)
-	return nil
-}
-func (s *receiptStoreSpy) RecordPushTicketFailure(_ context.Context, id string, _ int, _ time.Time) (int, error) {
+func (s *receiptStoreSpy) RecordPushTicketFailure(_ context.Context, id string, _ time.Time) (int, error) {
 	s.failures = append(s.failures, id)
 	for _, ticket := range s.tickets {
 		if ticket.ID == id {
@@ -56,6 +68,85 @@ func (s *receiptStoreSpy) RecordPushTicketFailure(_ context.Context, id string, 
 		}
 	}
 	return 1, nil
+}
+
+func TestReceiptCheckerDeletesTicketsOlderThanRetentionBeforeFetching(t *testing.T) {
+	now := time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
+	store := &receiptStoreSpy{tickets: []service.PushTicket{
+		{ID: "expired", TicketID: "old-ticket", CreatedAt: now.Add(-24*time.Hour - time.Second)},
+	}}
+	checker := expo.NewReceiptChecker(store, expo.WithReceiptClock(func() time.Time { return now }))
+	require.NoError(t, checker.Check(context.Background()))
+	require.Equal(t, []time.Time{now.Add(-24 * time.Hour)}, store.expired)
+	assert.Empty(t, store.tickets)
+	assert.Equal(t, []string{"expire", "list"}, store.operations)
+}
+
+func TestReceiptCheckerRetriesOnlyMissingReceipts(t *testing.T) {
+	now := time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
+	store := &receiptStoreSpy{tickets: []service.PushTicket{
+		{ID: "missing", TicketID: "missing-ticket", CreatedAt: now.Add(-time.Hour)},
+		{ID: "failed", TicketID: "failed-ticket", CreatedAt: now.Add(-time.Hour)},
+	}}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{
+			"failed-ticket": map[string]any{"status": "error", "details": map[string]any{"error": "MessageRateExceeded"}},
+		}})
+	}))
+	defer server.Close()
+	checker := expo.NewReceiptChecker(store, expo.WithReceiptsBaseURL(server.URL), expo.WithReceiptClock(func() time.Time { return now }))
+	require.NoError(t, checker.Check(context.Background()))
+	assert.Equal(t, []string{"missing"}, store.failures)
+	assert.Equal(t, []string{"failed"}, store.deleted)
+}
+
+func TestReceiptCheckerDeletesMissingReceiptAfterAttemptLimit(t *testing.T) {
+	now := time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
+	store := &receiptStoreSpy{tickets: []service.PushTicket{{ID: "missing", TicketID: "missing-ticket", CreatedAt: now.Add(-time.Hour), Attempts: 4}}}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{}})
+	}))
+	defer server.Close()
+	checker := expo.NewReceiptChecker(store, expo.WithReceiptsBaseURL(server.URL), expo.WithReceiptClock(func() time.Time { return now }))
+	require.NoError(t, checker.Check(context.Background()))
+	assert.Equal(t, []string{"missing"}, store.failures)
+	assert.Equal(t, []string{"missing"}, store.deleted)
+}
+
+func TestReceiptCheckerPagesBeyondExpoReceiptLimit(t *testing.T) {
+	now := time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
+	tickets := make([]service.PushTicket, 1001)
+	for i := range tickets {
+		tickets[i] = service.PushTicket{ID: fmt.Sprintf("%04d", i), TicketID: fmt.Sprintf("ticket-%04d", i), CreatedAt: now.Add(-time.Hour)}
+	}
+	store := &receiptStoreSpy{tickets: tickets}
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		var body struct {
+			IDs []string `json:"ids"`
+		}
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		if calls == 1 {
+			assert.Len(t, body.IDs, 1000)
+		} else {
+			assert.Len(t, body.IDs, 1)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{}})
+	}))
+	defer server.Close()
+	checker := expo.NewReceiptChecker(store, expo.WithReceiptsBaseURL(server.URL), expo.WithReceiptClock(func() time.Time { return now }))
+	require.NoError(t, checker.Check(context.Background()))
+	assert.Equal(t, 2, calls)
+}
+
+func TestReceiptCheckerReturnsNonOKHTTPStatus(t *testing.T) {
+	now := time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
+	store := &receiptStoreSpy{tickets: []service.PushTicket{{ID: "a", TicketID: "ticket-a", CreatedAt: now.Add(-time.Hour)}}}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusServiceUnavailable) }))
+	defer server.Close()
+	checker := expo.NewReceiptChecker(store, expo.WithReceiptsBaseURL(server.URL), expo.WithReceiptClock(func() time.Time { return now }))
+	require.ErrorContains(t, checker.Check(context.Background()), "HTTP 503")
 }
 
 func TestReceiptCheckerCleansSuccessfulAndDeadTicketsAndCapsRetries(t *testing.T) {
@@ -88,7 +179,7 @@ func TestReceiptCheckerCleansSuccessfulAndDeadTicketsAndCapsRetries(t *testing.T
 	assert.Equal(t, "Bearer access", gotAuth)
 	assert.Equal(t, []string{"a", "b", "c"}, store.deleted)
 	assert.Equal(t, []string{"token-dead"}, store.devices)
-	assert.Equal(t, []string{"c"}, store.failures)
+	assert.Empty(t, store.failures)
 }
 
 func TestReceiptCheckerDefersTicketsYoungerThanFifteenMinutes(t *testing.T) {

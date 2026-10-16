@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -63,6 +65,14 @@ type fakeRepo struct {
 	deactivated   []string // tokens removed as dead
 	deactivateErr error
 	unregistered  [][2]string // (user, token) pairs asked to unregister
+	storedTickets []service.PushTicketPair
+	ticketBatches int
+}
+
+func (f *fakeRepo) StorePushTickets(_ context.Context, tickets []service.PushTicketPair) error {
+	f.ticketBatches++
+	f.storedTickets = append(f.storedTickets, tickets...)
+	return nil
 }
 
 func (f *fakeRepo) DeactivateDevices(_ context.Context, tokens []string) error {
@@ -352,6 +362,19 @@ func TestHandleEventMaterialisesAnAbsence(t *testing.T) {
 	if sender.title != got.Title || sender.body != got.Body {
 		t.Errorf("push payload = %q/%q, want the notification's %q/%q", sender.title, sender.body, got.Title, got.Body)
 	}
+}
+
+func TestHandleEventStoresAcceptedPushTicketsInOneBatch(t *testing.T) {
+	repo := newFakeRepo()
+	_, err := repo.UpsertDevice(context.Background(), service.Device{ID: "device-1", UserID: userID, FCMToken: "token-abc", Platform: "android"})
+	require.NoError(t, err)
+	sender := &spySender{report: service.PushReport{Accepted: []service.PushTicketPair{{TicketID: "expo-ticket", DeviceToken: "token-abc"}}}}
+	svc, _ := newService(t, repo, newFakeGuardians(), sender)
+
+	err = svc.HandleEvent(context.Background(), absenceMessage(t, "eeeeeeee-0000-0000-0000-000000000091", studentID, tenantID, "2026-08-06"))
+	require.NoError(t, err)
+	assert.Equal(t, 1, repo.ticketBatches)
+	assert.Equal(t, []service.PushTicketPair{{TicketID: "expo-ticket", DeviceToken: "token-abc"}}, repo.storedTickets)
 }
 
 // TestHandleEventIsIdempotent is the load-bearing test of this service: Pub/Sub

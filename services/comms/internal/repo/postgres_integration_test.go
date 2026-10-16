@@ -747,10 +747,10 @@ func TestPushTicketsAreStoredAndTenantBound(t *testing.T) {
 	ctx := context.Background()
 	a, b := appRepo(t, tenantA), appRepo(t, tenantB)
 	cutoff := time.Now().Add(time.Hour)
-	if err := a.StorePushTicket(ctx, "expo-ticket-tenant-bound", "ExponentPushToken[ticket-a]"); err != nil {
+	if err := a.StorePushTickets(ctx, []service.PushTicketPair{{TicketID: "expo-ticket-tenant-bound", DeviceToken: "ExponentPushToken[ticket-a]"}}); err != nil {
 		t.Fatalf("StorePushTicket: %v", err)
 	}
-	rows, err := a.ListPushTickets(ctx, cutoff, "", 1000)
+	rows, err := a.ListPushTickets(ctx, cutoff, time.Time{}, "", 1000)
 	if err != nil {
 		t.Fatalf("ListPushTickets tenant A: %v", err)
 	}
@@ -764,7 +764,7 @@ func TestPushTicketsAreStoredAndTenantBound(t *testing.T) {
 	if found == nil || found.DeviceToken != "ExponentPushToken[ticket-a]" {
 		t.Fatalf("ticket = %+v, want stored ticket and token", found)
 	}
-	other, err := b.ListPushTickets(ctx, cutoff, "", 1000)
+	other, err := b.ListPushTickets(ctx, cutoff, time.Time{}, "", 1000)
 	if err != nil {
 		t.Fatalf("ListPushTickets tenant B: %v", err)
 	}
@@ -773,13 +773,13 @@ func TestPushTicketsAreStoredAndTenantBound(t *testing.T) {
 			t.Fatal("tenant B observed tenant A's ticket")
 		}
 	}
-	if _, err := a.RecordPushTicketFailure(ctx, found.ID, 5, seedNow); err != nil {
+	if _, err := a.RecordPushTicketFailure(ctx, found.ID, seedNow); err != nil {
 		t.Fatalf("RecordPushTicketFailure: %v", err)
 	}
 	if err := b.DeletePushTicket(ctx, found.ID); err != nil {
 		t.Fatalf("tenant B DeletePushTicket: %v", err)
 	}
-	rows, err = a.ListPushTickets(ctx, cutoff, "", 1000)
+	rows, err = a.ListPushTickets(ctx, cutoff, time.Time{}, "", 1000)
 	if err != nil {
 		t.Fatalf("ListPushTickets after cross-tenant delete: %v", err)
 	}

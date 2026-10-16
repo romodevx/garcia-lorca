@@ -155,6 +155,7 @@ type Repo interface {
 	// DeleteUserDevice removes token ONLY when it is registered to userID. A
 	// token of anyone else, or no token at all, is left alone without error.
 	DeleteUserDevice(ctx context.Context, userID, token string) error
+	StorePushTickets(ctx context.Context, tickets []PushTicketPair) error
 }
 
 // StudentNameReader resolves a pupil's first name for the copy a family reads.
@@ -190,6 +191,7 @@ type PushMessage struct {
 // DeviceNotRegistered): the service deactivates those devices.
 type PushReport struct {
 	Unregistered []string
+	Accepted     []PushTicketPair
 }
 
 // Sender delivers a rendered notification to push targets. Delivery is
@@ -208,19 +210,20 @@ type PushTicket struct {
 	Attempts    int
 }
 
-// PushTicketWriter stores tickets and removes devices reported as dead.
-type PushTicketWriter interface {
-	StorePushTicket(context.Context, string, string) error
-	DeletePushDevice(context.Context, string) error
+// PushTicketPair is the provider ticket id and the token it covers, before it
+// is assigned a local row id and persisted.
+type PushTicketPair struct {
+	TicketID    string
+	DeviceToken string
 }
 
 // PushReceiptStore supports the scheduled provider receipt sweep.
 type PushReceiptStore interface {
-	ListPushTickets(context.Context, time.Time, string, int) ([]PushTicket, error)
+	DeleteExpiredPushTickets(context.Context, time.Time) error
+	ListPushTickets(context.Context, time.Time, time.Time, string, int) ([]PushTicket, error)
 	DeletePushTicket(context.Context, string) error
 	DeletePushDevice(context.Context, string) error
-	MarkPushTicketChecked(context.Context, string, time.Time) error
-	RecordPushTicketFailure(context.Context, string, int, time.Time) (int, error)
+	RecordPushTicketFailure(context.Context, string, time.Time) (int, error)
 }
 
 // Option configures optional CommsService collaborators (functional options).
@@ -499,6 +502,14 @@ func (s *CommsService) pushTo(ctx context.Context, n Notification, guardianIDs [
 			slog.Any("error", err))
 	}
 	s.deactivate(ctx, n.ID, report.Unregistered)
+	if len(report.Accepted) > 0 {
+		if err := s.repo.StorePushTickets(ctx, report.Accepted); err != nil {
+			s.log.Warn("comms could not store Expo push tickets",
+				slog.String("notification_id", n.ID),
+				slog.Int("ticket_count", len(report.Accepted)),
+				slog.Any("error", err))
+		}
+	}
 }
 
 // deactivate removes the devices the provider reported as no longer
