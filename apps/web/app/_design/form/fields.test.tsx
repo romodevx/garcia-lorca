@@ -288,3 +288,25 @@ describe("onBlur", () => {
     expect(date).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("solo lectura", () => {
+  // The alta locks what the server already holds after a partial success:
+  // the value is still read (and focusable), never edited.
+  it("TextField, TextArea y DateField se pueden leer pero no editar", async () => {
+    const onChange = vi.fn();
+    render(
+      <>
+        <TextField label="CURP" value="ROQA930615HDFMRN08" onChange={onChange} readOnly />
+        <TextArea label="Nota" value="Alergia" onChange={onChange} readOnly />
+        <DateField label="Nacimiento" value="2016-02-29" onChange={onChange} readOnly />
+      </>
+    );
+    for (const name of ["CURP", "Nota", "Nacimiento"]) {
+      expect(screen.getByLabelText(name)).toHaveAttribute("readonly");
+      expect(screen.getByLabelText(name)).not.toBeDisabled();
+    }
+    await userEvent.type(screen.getByLabelText("CURP"), "X");
+    await userEvent.type(screen.getByLabelText("Nota"), "X");
+    expect(onChange).not.toHaveBeenCalled();
+  });
+});

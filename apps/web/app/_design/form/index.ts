@@ -25,6 +25,7 @@ export { Field, inputStyle, type FieldProps } from "./Field";
 export { HelpTip, type HelpTipProps } from "./HelpTip";
 export { useRequired, FALTA, type RequiredState } from "./useRequired";
 export { useFocusFirstInvalid } from "./useFocusFirstInvalid";
+export { ErrorSummary, focusFieldLabelled, type ErrorSummaryItem, type ErrorSummaryProps } from "./ErrorSummary";
 export { emailShapeError } from "./emailShape";
 export { useEmailShapeOnSave, type EmailShapeOnSave } from "./useEmailShapeOnSave";
 export { useFormatError, type FormatErrorState, type FormatRule } from "./useFormatError";

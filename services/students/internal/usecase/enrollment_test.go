@@ -196,6 +196,7 @@ type fakeCatalog struct {
 	gradeLevels map[string]string
 	// deleting marks config levels whose deletion is in flight (ADR 0021).
 	deleting map[string]bool
+	cycles   map[string]ports.CycleRef
 }
 
 // Config level ids the fixtures use: seedStudent places pupils in primaria.
@@ -210,7 +211,15 @@ func newCatalog() *fakeCatalog {
 		terms:       map[string]termRef{},
 		gradeGroups: map[string][]ports.GroupSeats{},
 		gradeLevels: map[string]string{"gl-1": primariaLevel, "": primariaLevel, "gl-k": kinderLevel},
+		cycles:      map[string]ports.CycleRef{},
 	}
+}
+
+func (c *fakeCatalog) CycleByID(_ context.Context, id string) (ports.CycleRef, error) {
+	if cyc, ok := c.cycles[id]; ok {
+		return cyc, nil
+	}
+	return ports.CycleRef{}, glerrors.ErrNotFound
 }
 
 func (c *fakeCatalog) LevelOfGrade(_ context.Context, gradeLevelID string) (string, error) {
@@ -274,7 +283,7 @@ func TestEnrollHappyDerivesCycleFromGroup(t *testing.T) {
 	seedStudent(t, students, "stu-1")
 	catalog.groups["grp-1"] = groupRef{ID: "grp-1", CycleID: "cyc-99", GradeLevelID: "gl-1"}
 
-	e, err := svc.Enroll(context.Background(), "stu-1", "grp-1", "")
+	e, err := svc.Enroll(context.Background(), "stu-1", "grp-1", "", time.Time{})
 	if err != nil {
 		t.Fatalf("Enroll: %v", err)
 	}
@@ -298,7 +307,7 @@ func TestEnrollWithValidTerm(t *testing.T) {
 	catalog.groups["grp-1"] = groupRef{ID: "grp-1", CycleID: "cyc-99"}
 	catalog.terms["term-1"] = termRef{ID: "term-1", CycleID: "cyc-99"}
 
-	e, err := svc.Enroll(context.Background(), "stu-1", "grp-1", "term-1")
+	e, err := svc.Enroll(context.Background(), "stu-1", "grp-1", "term-1", time.Time{})
 	if err != nil {
 		t.Fatalf("Enroll with term: %v", err)
 	}
@@ -310,7 +319,7 @@ func TestEnrollWithValidTerm(t *testing.T) {
 func TestEnrollMissingStudentIsNotFound(t *testing.T) {
 	svc, _, _, catalog, _ := newEnrollService(t)
 	catalog.groups["grp-1"] = groupRef{ID: "grp-1", CycleID: "cyc-99"}
-	_, err := svc.Enroll(context.Background(), "ghost", "grp-1", "")
+	_, err := svc.Enroll(context.Background(), "ghost", "grp-1", "", time.Time{})
 	if glerrors.KindOf(err) != glerrors.KindNotFound {
 		t.Errorf("want KindNotFound, got %v", err)
 	}
@@ -319,7 +328,7 @@ func TestEnrollMissingStudentIsNotFound(t *testing.T) {
 func TestEnrollMissingGroupIsInvalid(t *testing.T) {
 	svc, students, enrolls, _, pub := newEnrollService(t)
 	seedStudent(t, students, "stu-1")
-	_, err := svc.Enroll(context.Background(), "stu-1", "ghost-grp", "")
+	_, err := svc.Enroll(context.Background(), "stu-1", "ghost-grp", "", time.Time{})
 	if glerrors.KindOf(err) != glerrors.KindInvalid {
 		t.Errorf("want KindInvalid, got %v", err)
 	}
@@ -333,7 +342,7 @@ func TestEnrollTermNotInCycleIsInvalid(t *testing.T) {
 	seedStudent(t, students, "stu-1")
 	catalog.groups["grp-1"] = groupRef{ID: "grp-1", CycleID: "cyc-99"}
 	catalog.terms["term-x"] = termRef{ID: "term-x", CycleID: "cyc-other"}
-	_, err := svc.Enroll(context.Background(), "stu-1", "grp-1", "term-x")
+	_, err := svc.Enroll(context.Background(), "stu-1", "grp-1", "term-x", time.Time{})
 	if glerrors.KindOf(err) != glerrors.KindInvalid {
 		t.Errorf("want KindInvalid, got %v", err)
 	}
@@ -343,7 +352,7 @@ func TestEnrollMissingTermIsInvalid(t *testing.T) {
 	svc, students, _, catalog, _ := newEnrollService(t)
 	seedStudent(t, students, "stu-1")
 	catalog.groups["grp-1"] = groupRef{ID: "grp-1", CycleID: "cyc-99"}
-	_, err := svc.Enroll(context.Background(), "stu-1", "grp-1", "ghost-term")
+	_, err := svc.Enroll(context.Background(), "stu-1", "grp-1", "ghost-term", time.Time{})
 	if glerrors.KindOf(err) != glerrors.KindInvalid {
 		t.Errorf("want KindInvalid, got %v", err)
 	}
@@ -353,10 +362,10 @@ func TestEnrollDuplicateIsConflict(t *testing.T) {
 	svc, students, _, catalog, _ := newEnrollService(t)
 	seedStudent(t, students, "stu-1")
 	catalog.groups["grp-1"] = groupRef{ID: "grp-1", CycleID: "cyc-99"}
-	if _, err := svc.Enroll(context.Background(), "stu-1", "grp-1", ""); err != nil {
+	if _, err := svc.Enroll(context.Background(), "stu-1", "grp-1", "", time.Time{}); err != nil {
 		t.Fatalf("first enroll: %v", err)
 	}
-	_, err := svc.Enroll(context.Background(), "stu-1", "grp-1", "")
+	_, err := svc.Enroll(context.Background(), "stu-1", "grp-1", "", time.Time{})
 	if glerrors.KindOf(err) != glerrors.KindConflict {
 		t.Errorf("want KindConflict on duplicate (student,cycle), got %v", err)
 	}
@@ -368,7 +377,7 @@ func enrolledStudent(t *testing.T, svc *usecase.EnrollmentService, students *fak
 	t.Helper()
 	seedStudent(t, students, "stu-1")
 	catalog.groups["grp-1"] = groupRef{ID: "grp-1", CycleID: "cyc-99"}
-	e, err := svc.Enroll(context.Background(), "stu-1", "grp-1", "")
+	e, err := svc.Enroll(context.Background(), "stu-1", "grp-1", "", time.Time{})
 	if err != nil {
 		t.Fatalf("seed enroll: %v", err)
 	}
@@ -451,7 +460,7 @@ func TestEnrollIntoAGroupOfAnotherLevelIsInvalid(t *testing.T) {
 	seedStudent(t, students, "stu-1")
 	catalog.groups["grp-k"] = groupRef{ID: "grp-k", CycleID: "cyc-99", Name: "1° A", GradeLevelID: "gl-k"}
 
-	_, err := svc.Enroll(context.Background(), "stu-1", "grp-k", "")
+	_, err := svc.Enroll(context.Background(), "stu-1", "grp-k", "", time.Time{})
 	if glerrors.KindOf(err) != glerrors.KindInvalid {
 		t.Fatalf("want KindInvalid, got %v", err)
 	}
@@ -465,7 +474,7 @@ func TestEnrollIntoAGradeOfAnotherLevelIsInvalid(t *testing.T) {
 	seedStudent(t, students, "stu-1")
 	catalog.gradeGroups["gl-k"] = []ports.GroupSeats{{ID: "grp-k", Name: "1° A", CycleID: "cyc-99", Capacity: 30}}
 
-	if _, err := svc.EnrollIntoGrade(context.Background(), "stu-1", "gl-k"); glerrors.KindOf(err) != glerrors.KindInvalid {
+	if _, err := svc.EnrollIntoGrade(context.Background(), "stu-1", "gl-k", time.Time{}); glerrors.KindOf(err) != glerrors.KindInvalid {
 		t.Fatalf("want KindInvalid, got %v", err)
 	}
 }
@@ -593,7 +602,7 @@ func TestEnrollRecordsThePlacementWithoutCallingThemEnrolled(t *testing.T) {
 	seedPendingApplicant(t, students, "stu-1")
 	catalog.groups["grp-1"] = groupRef{ID: "grp-1", CycleID: "cyc-99", Name: "3° B", GradeLevelID: "gl-1"}
 
-	if _, err := svc.Enroll(context.Background(), "stu-1", "grp-1", ""); err != nil {
+	if _, err := svc.Enroll(context.Background(), "stu-1", "grp-1", "", time.Time{}); err != nil {
 		t.Fatalf("Enroll: %v", err)
 	}
 
@@ -696,7 +705,7 @@ func TestEnrollRefusesAStudentWhoseFileIsTerminal(t *testing.T) {
 	students.byID["stu-3"] = s
 	catalog.groups["grp-1"] = groupRef{ID: "grp-1", CycleID: "cyc-99", GradeLevelID: "gl-1"}
 
-	if _, err := svc.Enroll(context.Background(), "stu-3", "grp-1", ""); err == nil {
+	if _, err := svc.Enroll(context.Background(), "stu-3", "grp-1", "", time.Time{}); err == nil {
 		t.Fatal("a withdrawn pupil must not be re-enrolled by placing them in a group")
 	}
 	if len(enrolls.createSeen) != 0 {
@@ -720,7 +729,7 @@ func TestEnrollIntoGradeTakesTheFirstGroupWithRoom(t *testing.T) {
 		{ID: "grp-b", Name: "1° B", CycleID: "cyc-1", Capacity: 2},
 	}
 
-	placed, err := svc.EnrollIntoGrade(context.Background(), "stu-1", "gl-1")
+	placed, err := svc.EnrollIntoGrade(context.Background(), "stu-1", "gl-1", time.Time{})
 	if err != nil {
 		t.Fatalf("EnrollIntoGrade: %v", err)
 	}
@@ -745,7 +754,7 @@ func TestAFullGroupOverflowsIntoTheNext(t *testing.T) {
 	var landed []string
 	for i, id := range []string{"s1", "s2", "s3"} {
 		seedStudent(t, students, id)
-		placed, err := svc.EnrollIntoGrade(context.Background(), id, "gl-1")
+		placed, err := svc.EnrollIntoGrade(context.Background(), id, "gl-1", time.Time{})
 		if err != nil {
 			t.Fatalf("pupil %d: %v", i+1, err)
 		}
@@ -768,12 +777,12 @@ func TestAGradeWithNoSeatsLeftIsRefused(t *testing.T) {
 	svc, students, _, catalog, _ := newEnrollService(t)
 	catalog.gradeGroups["gl-1"] = []ports.GroupSeats{{ID: "grp-a", Name: "1° A", CycleID: "cyc-1", Capacity: 1}}
 	seedStudent(t, students, "s1")
-	if _, err := svc.EnrollIntoGrade(context.Background(), "s1", "gl-1"); err != nil {
+	if _, err := svc.EnrollIntoGrade(context.Background(), "s1", "gl-1", time.Time{}); err != nil {
 		t.Fatalf("first pupil: %v", err)
 	}
 
 	seedStudent(t, students, "s2")
-	_, err := svc.EnrollIntoGrade(context.Background(), "s2", "gl-1")
+	_, err := svc.EnrollIntoGrade(context.Background(), "s2", "gl-1", time.Time{})
 
 	if err == nil || glerrors.KindOf(err) != glerrors.KindConflict {
 		t.Fatalf("want KindConflict, got %v", err)
@@ -790,7 +799,7 @@ func TestAGradeWithNoGroupsSaysSo(t *testing.T) {
 	seedStudent(t, students, "s1")
 	catalog.gradeGroups["gl-1"] = nil
 
-	_, err := svc.EnrollIntoGrade(context.Background(), "s1", "gl-1")
+	_, err := svc.EnrollIntoGrade(context.Background(), "s1", "gl-1", time.Time{})
 
 	if err == nil {
 		t.Fatal("a grade with no groups cannot take a pupil")
@@ -807,7 +816,7 @@ func TestEnrollIntoGradeRecordsTheGroupWithoutEnrolling(t *testing.T) {
 	seedPendingApplicant(t, students, "stu-9")
 	catalog.gradeGroups["gl-1"] = []ports.GroupSeats{{ID: "grp-b", Name: "1° B", CycleID: "cyc-1", Capacity: 5}}
 
-	if _, err := svc.EnrollIntoGrade(context.Background(), "stu-9", "gl-1"); err != nil {
+	if _, err := svc.EnrollIntoGrade(context.Background(), "stu-9", "gl-1", time.Time{}); err != nil {
 		t.Fatalf("EnrollIntoGrade: %v", err)
 	}
 
@@ -840,15 +849,15 @@ func TestPlacementsIntoALevelBeingDeletedAreRefused(t *testing.T) {
 		run    func(svc *usecase.EnrollmentService, e domain.Enrollment) error
 	}{
 		{"enroll", false, func(svc *usecase.EnrollmentService, _ domain.Enrollment) error {
-			_, err := svc.Enroll(context.Background(), "stu-2", "grp-2", "")
+			_, err := svc.Enroll(context.Background(), "stu-2", "grp-2", "", time.Time{})
 			return err
 		}},
 		{"enroll a legacy pupil", true, func(svc *usecase.EnrollmentService, _ domain.Enrollment) error {
-			_, err := svc.Enroll(context.Background(), "stu-2", "grp-2", "")
+			_, err := svc.Enroll(context.Background(), "stu-2", "grp-2", "", time.Time{})
 			return err
 		}},
 		{"enroll into grade", false, func(svc *usecase.EnrollmentService, _ domain.Enrollment) error {
-			_, err := svc.EnrollIntoGrade(context.Background(), "stu-2", "gl-k")
+			_, err := svc.EnrollIntoGrade(context.Background(), "stu-2", "gl-k", time.Time{})
 			return err
 		}},
 		{"transfer", false, func(svc *usecase.EnrollmentService, e domain.Enrollment) error {

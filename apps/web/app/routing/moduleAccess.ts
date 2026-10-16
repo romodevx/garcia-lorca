@@ -5,6 +5,7 @@ import type { View } from "./routes";
 const MODULE_OF_SCREEN: Partial<Record<View["screen"], string>> = {
   students: "students",
   studentEdit: "students",
+  studentNew: "students",
   finance: "finance",
   expenses: "expenses",
   schedule: "schedule",

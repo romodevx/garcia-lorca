@@ -4,7 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as studentsApi from "../../students/api";
 import * as configApi from "../../config/api";
-import { StudentsScreen, missingFieldMessage, createFailureMessage } from "./StudentsScreen";
+import { createFailureMessage, missingFieldMessage } from "./altaModel";
+import { StudentAltaPage } from "./StudentAltaPage";
 import { StudentsError } from "../../students/api";
 
 // The screens read labelled groups (ISSUE-002); label them from the listGroups mock.
@@ -29,6 +30,15 @@ vi.mock("../../students/api", async (importOriginal) => ({
   addNote: vi.fn(),
 }));
 vi.mock("../../config/api", () => ({ listCycles: vi.fn(), listGroups: vi.fn(), listLabelledGroups: vi.fn(), listLevels: vi.fn(), listGradeLevels: vi.fn() }));
+
+/** Every alta test lands on the page itself: /alumnos/nuevo. */
+const onCreated = vi.fn();
+const onBack = vi.fn();
+async function openAlta(props: { canWriteNotes?: boolean } = {}): Promise<HTMLElement> {
+  render(<StudentAltaPage onBack={onBack} onCreated={onCreated} {...props} />);
+  await screen.findByRole("heading", { level: 1, name: "Nuevo alumno" });
+  return document.body;
+}
 
 const students = vi.mocked(studentsApi);
 const config = vi.mocked(configApi);
@@ -91,13 +101,10 @@ describe("what the server said, in words a person can act on", () => {
   });
 });
 
-describe("the quick-add drawer", () => {
+describe("the alta page", () => {
   it("says what is missing instead of leaving a dead button", async () => {
     const user = userEvent.setup();
-    render(<StudentsScreen onBack={() => {}} />);
-    await user.click((await screen.findAllByRole("button", { name: "Nuevo alumno" }))[0]!);
-
-    const drawer = screen.getByRole("dialog", { name: "Nuevo alumno" });
+    const drawer = await openAlta();
     await user.type(within(drawer).getByLabelText(/CURP/, CAMPO), FULL.curp);
     await user.type(within(drawer).getByLabelText(/Nombre\(s\)/, CAMPO), FULL.firstName);
     await user.type(within(drawer).getByLabelText(/Apellido paterno/, CAMPO), FULL.lastName);
@@ -120,17 +127,57 @@ describe("the quick-add drawer", () => {
    * y el foco se quedaba en el BOTÓN. Se corregían los cuatro visibles, se
    * volvía a guardar, y seguía fallando por una razón invisible.
    */
-  it("manda el foco al primer campo que falta, no lo deja en el botón", async () => {
+  // A page is long: the failed save lands on a summary at the top, and each
+  // of its lines takes the user to the field (ui-forms-and-modals).
+  it("lleva el foco al resumen de errores, y el resumen lleva a cada campo", async () => {
     const user = userEvent.setup();
-    render(<StudentsScreen onBack={() => {}} />);
-    await user.click((await screen.findAllByRole("button", { name: "Nuevo alumno" }))[0]!);
-
-    const drawer = screen.getByRole("dialog", { name: "Nuevo alumno" });
+    const drawer = await openAlta();
     const guardar = within(drawer).getByRole("button", { name: "Crear alumno" });
     await user.click(guardar);
 
-    expect(within(drawer).getByLabelText("CURP")).toHaveFocus();
+    const summary = within(drawer).getByRole("group", { name: /antes de guardar/i });
+    expect(summary).toHaveFocus();
     expect(guardar).not.toHaveFocus();
+    await user.click(within(summary).getByRole("link", { name: /^CURP:/ }));
+    expect(within(drawer).getByLabelText("CURP")).toHaveFocus();
+    await user.click(within(summary).getByRole("link", { name: /^Tutor:/ }));
+    expect(within(drawer).getByLabelText("Tutor")).toHaveFocus();
+  });
+
+  it("dice en texto qué campos son obligatorios", async () => {
+    const drawer = await openAlta();
+    expect(within(drawer).getByText(/los campos con \* son obligatorios/i)).toBeInTheDocument();
+  });
+
+  // Never disabled, not even while saving: a busy label, and repeat clicks ignored.
+  it("el botón nunca se apaga, y un doble clic crea un solo alumno", async () => {
+    const user = userEvent.setup();
+    let finish: (v: studentsApi.Student) => void = () => {};
+    students.createStudent.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+    const drawer = await openAlta();
+    await user.type(within(drawer).getByLabelText(/CURP/, CAMPO), FULL.curp);
+    await user.type(within(drawer).getByLabelText(/Apellido paterno/, CAMPO), FULL.lastName);
+    await user.type(within(drawer).getByLabelText(/Nombre\(s\)/, CAMPO), FULL.firstName);
+    await user.type(within(drawer).getByLabelText(/Tutor/, CAMPO), FULL.guardianName);
+    await user.selectOptions(within(drawer).getByLabelText("Nivel"), "lv-k");
+    await user.selectOptions(await within(drawer).findByLabelText("Grado"), "gl-k1");
+    const guardar = within(drawer).getByRole("button", { name: "Crear alumno" });
+    await user.click(guardar);
+    const busy = within(drawer).getByRole("button", { name: "Creando…" });
+    expect(busy).not.toBeDisabled();
+    await user.click(busy);
+    finish({ id: "s1", curp: FULL.curp, firstName: "ANDRÉS", lastName: "ROMO", level: "", levelId: "lv-k", gradeGroup: "", guardianName: "", admissionStatus: "pending" });
+
+    await waitFor(() => expect(onCreated).toHaveBeenCalled());
+    expect(students.createStudent).toHaveBeenCalledTimes(1);
+  });
+
+  it("Cancelar vuelve sin crear nada", async () => {
+    const user = userEvent.setup();
+    const drawer = await openAlta();
+    await user.click(within(drawer).getByRole("button", { name: "Cancelar" }));
+    expect(onBack).toHaveBeenCalled();
+    expect(students.createStudent).not.toHaveBeenCalled();
   });
 
   it("desplaza ese campo hasta el centro, para que el pie no lo tape", async () => {
@@ -141,10 +188,7 @@ describe("the quick-add drawer", () => {
       writable: true,
       configurable: true,
     });
-    render(<StudentsScreen onBack={() => {}} />);
-    await user.click((await screen.findAllByRole("button", { name: "Nuevo alumno" }))[0]!);
-
-    const drawer = screen.getByRole("dialog", { name: "Nuevo alumno" });
+    const drawer = await openAlta();
     await user.click(within(drawer).getByRole("button", { name: "Crear alumno" }));
 
     expect(scrollIntoView).toHaveBeenCalledWith(expect.objectContaining({ block: "center" }));
@@ -157,10 +201,7 @@ describe("the quick-add drawer", () => {
       level: "primaria", levelId: "", gradeGroup: "1° A", guardianName: FULL.guardianName,
       admissionStatus: "pending",
     });
-    render(<StudentsScreen onBack={() => {}} />);
-    await user.click((await screen.findAllByRole("button", { name: "Nuevo alumno" }))[0]!);
-
-    const drawer = screen.getByRole("dialog", { name: "Nuevo alumno" });
+    const drawer = await openAlta();
     await user.type(within(drawer).getByLabelText(/CURP/, CAMPO), FULL.curp);
     await user.type(within(drawer).getByLabelText(/Nombre\(s\)/, CAMPO), FULL.firstName);
     await user.type(within(drawer).getByLabelText(/Apellido paterno/, CAMPO), FULL.lastName);
@@ -173,6 +214,36 @@ describe("the quick-add drawer", () => {
     expect(students.createStudent.mock.calls[0]?.[1]).toMatchObject({ curp: FULL.curp });
   });
 
+  it("sends exactly the pupil's file: level by id, and no group letter", async () => {
+    const user = userEvent.setup();
+    students.createStudent.mockResolvedValue({
+      id: "s9", curp: "HEGA050312MDFRNN08", firstName: "NUEVO", lastName: "ALUMNO",
+      level: "Kínder", levelId: "lv-k", gradeGroup: "", guardianName: "TUTOR NUEVO", admissionStatus: "pending",
+    });
+    const page = await openAlta();
+    await user.type(within(page).getByLabelText("CURP"), "HEGA050312MDFRNN08");
+    await user.type(within(page).getByLabelText("Apellido paterno"), "Alumno");
+    await user.type(within(page).getByLabelText("Nombre(s)"), "Nuevo");
+    await user.type(within(page).getByLabelText("Tutor"), "Tutor Nuevo");
+    await user.selectOptions(within(page).getByLabelText("Nivel"), "lv-k");
+    await user.selectOptions(await within(page).findByLabelText("Grado"), "gl-k1");
+    await user.click(within(page).getByRole("button", { name: "Crear alumno" }));
+
+    // gradeGroup is empty: the server writes it when capacity chooses the
+    // group, so the record can never claim a group the pupil is not in.
+    await waitFor(() =>
+      expect(students.createStudent).toHaveBeenCalledWith(expect.any(String), {
+        curp: "HEGA050312MDFRNN08",
+        firstName: "NUEVO",
+        lastName: "ALUMNO",
+        maternalLastName: "",
+        levelId: "lv-k",
+        gradeGroup: "",
+        guardianName: "TUTOR NUEVO",
+      }),
+    );
+  });
+
   it("sends the maternal surname on its own (T3)", async () => {
     const user = userEvent.setup();
     students.createStudent.mockResolvedValue({
@@ -180,10 +251,7 @@ describe("the quick-add drawer", () => {
       level: "primaria", levelId: "", gradeGroup: "1° A", guardianName: FULL.guardianName,
       admissionStatus: "pending",
     });
-    render(<StudentsScreen onBack={() => {}} />);
-    await user.click((await screen.findAllByRole("button", { name: "Nuevo alumno" }))[0]!);
-
-    const drawer = screen.getByRole("dialog", { name: "Nuevo alumno" });
+    const drawer = await openAlta();
     await user.type(within(drawer).getByLabelText(/CURP/, CAMPO), FULL.curp);
     await user.type(within(drawer).getByLabelText(/Apellido paterno/, CAMPO), FULL.lastName);
     await user.type(within(drawer).getByLabelText(/Apellido materno/, CAMPO), "Quiroz");
@@ -206,10 +274,7 @@ describe("the quick-add drawer", () => {
       level: "Preescolar", levelId: "lv-pre", gradeGroup: "", guardianName: FULL.guardianName,
       admissionStatus: "pending",
     });
-    render(<StudentsScreen onBack={() => {}} />);
-    await user.click((await screen.findAllByRole("button", { name: "Nuevo alumno" }))[0]!);
-
-    const drawer = screen.getByRole("dialog", { name: "Nuevo alumno" });
+    const drawer = await openAlta();
     await user.type(within(drawer).getByLabelText(/CURP/, CAMPO), FULL.curp);
     await user.type(within(drawer).getByLabelText(/Nombre\(s\)/, CAMPO), FULL.firstName);
     await user.type(within(drawer).getByLabelText(/Apellido paterno/, CAMPO), FULL.lastName);
@@ -226,10 +291,7 @@ describe("the quick-add drawer", () => {
   it("says a CURP is taken when the server says so", async () => {
     const user = userEvent.setup();
     students.createStudent.mockRejectedValue(new StudentsError(409, ""));
-    render(<StudentsScreen onBack={() => {}} />);
-    await user.click((await screen.findAllByRole("button", { name: "Nuevo alumno" }))[0]!);
-
-    const drawer = screen.getByRole("dialog", { name: "Nuevo alumno" });
+    const drawer = await openAlta();
     await user.type(within(drawer).getByLabelText(/CURP/, CAMPO), FULL.curp);
     await user.type(within(drawer).getByLabelText(/Nombre\(s\)/, CAMPO), FULL.firstName);
     await user.type(within(drawer).getByLabelText(/Apellido paterno/, CAMPO), FULL.lastName);
@@ -243,11 +305,7 @@ describe("the quick-add drawer", () => {
 });
 
 describe("choosing where the pupil goes", () => {
-  const openDrawer = async (user: ReturnType<typeof userEvent.setup>) => {
-    render(<StudentsScreen onBack={() => {}} />);
-    await user.click((await screen.findAllByRole("button", { name: "Nuevo alumno" }))[0]!);
-    return screen.getByRole("dialog", { name: "Nuevo alumno" });
-  };
+  const openDrawer = async (_user: ReturnType<typeof userEvent.setup>) => openAlta();
 
   const fillIdentity = async (user: ReturnType<typeof userEvent.setup>, drawer: HTMLElement) => {
     await user.type(within(drawer).getByLabelText(/CURP/, CAMPO), FULL.curp);
@@ -270,14 +328,15 @@ describe("choosing where the pupil goes", () => {
     expect(config.listGradeLevels).toHaveBeenCalledWith(expect.any(String), "lv-k");
   });
 
-  // The group is NOT asked for. It is a consequence of how full each one is, and
-  // asking a person to type it is how "1° A" ended up in records for a group that
-  // was full or had never been created.
-  it("never asks for the group", async () => {
+  // The group is never TYPED — that is how "1° A" ended up in records for a group
+  // that was full or had never been created. By default capacity chooses it; a
+  // picker of the grade's real groups waits behind a disclosure (T9).
+  it("lets capacity choose the group by default", async () => {
     const user = userEvent.setup();
     const drawer = await openDrawer(user);
 
     expect(within(drawer).queryByLabelText("Grado y grupo")).toBeNull();
+    expect((within(drawer).getByLabelText("Grupo", CAMPO) as HTMLSelectElement).value).toBe("");
     expect(within(drawer).getByText(/se asigna solo/i)).toBeInTheDocument();
   });
 
@@ -294,10 +353,11 @@ describe("choosing where the pupil goes", () => {
 
     await user.click(within(drawer).getByRole("button", { name: "Crear alumno" }));
 
-    await waitFor(() => expect(students.enrollIntoGrade).toHaveBeenCalledWith(expect.any(String), "s1", "gl-k2"));
+    await waitFor(() => expect(students.enrollIntoGrade).toHaveBeenCalledWith(expect.any(String), "s1", "gl-k2", ""));
     // The level travels as the config level's ID; the server supplies its name.
     expect(students.createStudent.mock.calls[0]?.[1]).toMatchObject({ levelId: "lv-k" });
-    expect(await screen.findByText(/1° B/)).toBeInTheDocument();
+    // Back on the list, the toast names where the pupil landed.
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith(expect.stringMatching(/quedó en 1° B/)));
   });
 
   it("will not create a pupil with nowhere to put them", async () => {
@@ -350,10 +410,7 @@ describe("any level the school defined", () => {
       { id: "lv-m", name: "Universidad", sepCode: "", enrollmentGranularity: "cycle" as const },
     ]);
     config.listGradeLevels.mockResolvedValue([{ id: "gl-m1", levelId: "lv-m", name: "Primer semestre", ordinal: 1 }]);
-    render(<StudentsScreen onBack={() => {}} />);
-    await user.click((await screen.findAllByRole("button", { name: "Nuevo alumno" }))[0]!);
-
-    const drawer = screen.getByRole("dialog", { name: "Nuevo alumno" });
+    const drawer = await openAlta();
     await user.type(within(drawer).getByLabelText(/CURP/, CAMPO), FULL.curp);
     await user.type(within(drawer).getByLabelText(/Nombre\(s\)/, CAMPO), FULL.firstName);
     await user.type(within(drawer).getByLabelText(/Apellido paterno/, CAMPO), FULL.lastName);
@@ -369,12 +426,7 @@ describe("any level the school defined", () => {
 });
 
 describe("la captura del alta de alumno", () => {
-  async function abrirAlta(user: ReturnType<typeof userEvent.setup>): Promise<HTMLElement> {
-    render(<StudentsScreen onBack={() => {}} />);
-    // Son dos: el del encabezado y el flotante.
-    await user.click((await screen.findAllByRole("button", { name: "Nuevo alumno" }))[0]!);
-    return screen.getByRole("dialog", { name: "Nuevo alumno" });
-  }
+  const abrirAlta = async (_user: ReturnType<typeof userEvent.setup>): Promise<HTMLElement> => openAlta();
 
   it("el nombre, los apellidos, el CURP y el tutor se capturan en mayúsculas", async () => {
     const user = userEvent.setup();
@@ -440,7 +492,9 @@ describe("la captura del alta de alumno", () => {
     await user.type(within(alta).getByLabelText("CURP"), "ROQA930615HDFMRN0");
     await user.click(within(alta).getByRole("button", { name: "Crear alumno" }));
 
-    expect(within(alta).getByText(/18 caracteres.*17/)).toBeInTheDocument();
+    // Same words inline (wired by aria-describedby) and in the summary on top.
+    expect(within(alta).getByLabelText("CURP")).toHaveAccessibleDescription(/18 caracteres.*17/);
+    expect(within(alta).getByRole("link", { name: /18 caracteres.*17/ })).toBeInTheDocument();
   });
 });
 
@@ -451,9 +505,7 @@ describe("QuickAdd · una nota al dar de alta (tarea 6)", () => {
   };
 
   const openWith = async (user: ReturnType<typeof userEvent.setup>, canWriteNotes: boolean) => {
-    render(<StudentsScreen onBack={() => {}} canWriteNotes={canWriteNotes} />);
-    await user.click((await screen.findAllByRole("button", { name: "Nuevo alumno" }))[0]!);
-    const drawer = screen.getByRole("dialog", { name: "Nuevo alumno" });
+    const drawer = await openAlta({ canWriteNotes });
     await user.type(within(drawer).getByLabelText(/CURP/, CAMPO), FULL.curp);
     await user.type(within(drawer).getByLabelText(/Nombre\(s\)/, CAMPO), FULL.firstName);
     await user.type(within(drawer).getByLabelText(/Apellido paterno/, CAMPO), FULL.lastName);
@@ -499,7 +551,7 @@ describe("QuickAdd · una nota al dar de alta (tarea 6)", () => {
     await user.type(within(drawer).getByLabelText(/Nota/, CAMPO), "Alergia al polvo");
     await user.click(within(drawer).getByRole("button", { name: "Crear alumno" }));
 
-    expect(await screen.findByText(/la nota no se guardó/i)).toBeInTheDocument();
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith(expect.stringMatching(/la nota no se guardó/i)));
     expect(students.enrollIntoGrade).toHaveBeenCalled();
   });
 

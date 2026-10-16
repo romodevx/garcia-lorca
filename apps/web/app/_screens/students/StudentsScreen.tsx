@@ -4,27 +4,25 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import { Avatar } from "../../_design/Brand";
 import { Btn } from "../../_design/Controls";
 import { DrawerShell } from "../../_design/DrawerShell";
-import { DateField, SelectField, TextArea, TextField, useFocusFirstInvalid } from "../../_design/form";
+import { TextField } from "../../_design/form";
 import { Icon, type IconName } from "../../_design/Icon";
 import { Page } from "../../_design/Page";
 import type { ColorKey } from "../../_design/colors";
 import {
-  createStudent,
   enroll,
   listEnrollments,
   listStudents,
   transfer,
   type AdmissionStatus,
-  type CreateStudentInput,
   type Enrollment,
   type Student,
 } from "../../students/api";
 import { listCycles, listGradeLevels, listLabelledGroups, listLevels, type Cycle, type GradeLevel, type LabelledGroup, type Level } from "../../config/api";
-import { addNote, enrollIntoGrade, reissueCard, revokeCard, StudentsError, type Placement } from "../../students/api";
+import { reissueCard, revokeCard, StudentsError } from "../../students/api";
+import { takeStudentsNotice } from "./studentsNotice";
 import { VerifyCardDrawer } from "./VerifyCardDrawer";
 import { WithdrawPanel } from "./WithdrawDialog";
 import { dayWithYearLabel } from "../../_lib/localDate";
-import { todayISO } from "../attendance/sheetModel";
 
 import { API_URL } from "../../api-url";
 import { csvName, downloadCsv, toCsv, type CsvColumn } from "../../_lib/csv";
@@ -151,371 +149,6 @@ const pager = (disabled: boolean): CSSProperties => ({
   fontSize: 14, fontWeight: 600, fontFamily: "var(--font-display)", border: "1px solid var(--border)",
   background: "var(--surface)", color: "var(--text)", cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.45 : 1,
 });
-
-/**
- * Marks a failure that happened AFTER the pupil was created, while placing them.
- *
- * The distinction is the whole reason it exists: the drawer has to tell somebody
- * that their pupil is safe and only the placement failed, or they re-type the
- * form and meet "ya existe ese CURP".
- */
-export class PlacementFailed extends Error {
-  override readonly cause: unknown;
-  /** The first note failed too: a retry cannot write it (the CURP is taken). */
-  readonly noteFailed: boolean;
-
-  constructor(cause: unknown, noteFailed = false) {
-    super("placement failed");
-    this.name = "PlacementFailed";
-    this.cause = cause;
-    this.noteFailed = noteFailed;
-  }
-}
-
-const NOTE_LOST = "La nota no se guardó: agrégala en su ficha.";
-
-/** The shape the quick-add drawer validates before it asks the server. */
-export interface QuickAddDraft {
-  curp: string;
-  firstName: string;
-  /** The paternal surname. The maternal one is optional and never "missing". */
-  lastName: string;
-  guardianName: string;
-  /** The config grade the pupil joins. The GROUP is chosen by capacity, not here. */
-  gradeLevelId?: string;
-}
-
-/** A CURP is exactly eighteen characters. The server checks its shape too. */
-const CURP_LENGTH = 18;
-
-/**
- * What the form is still waiting for, or undefined when it is ready.
- *
- * This exists because the button used to be greyed out and silent: four separate
- * requirements, any one of which could be unmet, and no way to find out which.
- * The one nobody guesses is the tutor — a two-letter name failed the check with
- * no sign at all.
- *
- * One field at a time, in reading order, so the answer matches where the eye
- * already is.
- */
-export function missingFieldMessage(draft: QuickAddDraft): string | undefined {
-  return Object.values(missingFields(draft))[0];
-}
-
-/**
- * Lo mismo, pero por campo, para poder marcarlos TODOS a la vez.
- *
- * Devolver un solo mensaje era mejor que el botón gris y mudo que reemplazó,
- * pero seguía obligando a guardar cinco veces para descubrir los cinco datos
- * que faltaban. El texto de cada mensaje se conserva tal cual: un CURP de 17
- * caracteres no está "vacío", y decir cuántos lleva es justo lo que esta
- * pantalla ya sabía hacer bien.
- *
- * El orden de las llaves es el orden de lectura de la forma, así que el primero
- * que devuelve `missingFieldMessage` sigue siendo el de más arriba.
- */
-export function missingFields(draft: QuickAddDraft): Record<string, string> {
-  const found: Record<string, string> = {};
-  const curp = draft.curp.trim();
-  if (curp === "") {
-    found.curp = "Escribe el CURP del alumno.";
-  } else if (curp.length !== CURP_LENGTH) {
-    found.curp = `El CURP debe tener ${CURP_LENGTH} caracteres; llevas ${curp.length}.`;
-  }
-  // Surname before first name: the order the form asks for them (T3).
-  if (draft.lastName.trim().length < 2) found.lastName = "Escribe el apellido paterno del alumno.";
-  if (draft.firstName.trim().length < 2) found.firstName = "Escribe el nombre del alumno.";
-  if (draft.guardianName.trim().length < 3) found.guardianName = "Escribe el nombre del tutor.";
-  if (draft.gradeLevelId !== undefined && draft.gradeLevelId === "") {
-    found.gradeLevelId = "Elige el nivel y el grado al que entra.";
-  }
-  return found;
-}
-
-/**
- * What the server said, in words a person can act on.
- *
- * A duplicate and a malformed CURP need different advice, and a server that fell
- * over needs advice about neither — blaming the CURP for it, which is what this
- * used to do, sends somebody re-typing a perfectly good one.
- */
-export function createFailureMessage(err: unknown): string {
-  if (err instanceof StudentsError) {
-    if (err.isConflict) return "Ya existe un alumno con ese CURP.";
-    if (err.isInvalid) return "Revisa el CURP: son 18 caracteres con el formato oficial.";
-  }
-  return "No se pudo crear el alumno. Intenta de nuevo en un momento.";
-}
-
-/**
- * What went wrong PLACING a pupil who, by then, already exists.
- *
- * Saying so is the whole point of a separate message: without it somebody reads
- * "no quedan lugares", re-types the whole form and gets "ya existe ese CURP",
- * which is true and useless.
- */
-export function placementFailureMessage(err: unknown): string {
-  const tail = " El alumno sí se creó: inscríbelo desde su ficha cuando haya lugar.";
-  if (err instanceof StudentsError) {
-    if (err.isConflict) return "Ese grado ya no tiene lugares. Abre otro grupo en Configuración." + tail;
-    if (err.isInvalid) return (err.detail !== "" ? err.detail : "No se pudo inscribir en ese grado.") + tail;
-  }
-  return "No se pudo inscribir al alumno en ese grado." + tail;
-}
-
-// ── quick-add slide-over: create a student in one panel, minimal fields ──
-function QuickAdd({
-  onClose,
-  onSave,
-  levels,
-  withNote,
-}: {
-  onClose: () => void;
-  onSave: (input: CreateStudentInput, gradeLevelId: string, note: string) => Promise<void>;
-  levels: readonly Level[];
-  /** students:notes_write: offer an optional first note (task 6). */
-  withNote: boolean;
-}): ReactElement {
-  const [note, setNote] = useState("");
-  const [curp, setCurp] = useState("");
-  const [firstName, setFirst] = useState("");
-  const [lastName, setLast] = useState("");
-  const [maternalLastName, setMaternal] = useState("");
-  const [levelId, setLevelId] = useState("");
-  const [gradeLevelId, setGradeLevelId] = useState("");
-  const [grades, setGrades] = useState<GradeLevel[]>([]);
-  const [guardianName, setGuardian] = useState("");
-  // T11: the birth date waits under "Más datos". The drawer already holds eight
-  // fields — the most a drawer takes — and the 80% case creates the pupil
-  // without it, so it starts collapsed rather than growing the form.
-  const [birthDate, setBirthDate] = useState("");
-  const [showMore, setShowMore] = useState(false);
-  // Los faltantes vienen de missingFields, que conserva el mensaje propio de
-  // cada campo ("llevas 17 caracteres"), así que no se usa useRequired: ese
-  // hook da un mensaje genérico y aquí ya había uno mejor.
-  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
-  const señalarPrimerError = useFocusFirstInvalid();
-  const clearField = (key: string): void =>
-    setFieldErrors((prev) => {
-      if (prev[key] === undefined) return prev;
-      const rest = { ...prev };
-      delete rest[key];
-      return rest;
-    });
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | undefined>(undefined);
-
-  // Choosing a level loads its grades. They are whatever the school configured —
-  // kínder has three, primaria six — so a school that adds one sees it here
-  // without anybody editing this screen.
-  useEffect(() => {
-    if (levelId === "") {
-      setGrades([]);
-      return;
-    }
-    let alive = true;
-    setGradeLevelId("");
-    listGradeLevels(API_URL, levelId)
-      .then((gs) => alive && setGrades(gs))
-      .catch(() => alive && setGrades([]));
-    return () => {
-      alive = false;
-    };
-  }, [levelId]);
-
-  const submit = async (): Promise<void> => {
-    // Se valida al PRESIONAR, no apagando el botón. Un control que se niega y no
-    // dice por qué es justo lo que esto reemplazó — y ahora se marcan todos los
-    // faltantes a la vez, en sus propios campos.
-    const missing = missingFields({ curp, firstName, lastName, guardianName, gradeLevelId });
-    // The calendar's max binds only the picker; a typed year can still land
-    // after today. Its field may be collapsed, so the section opens to show it.
-    if (birthDate !== "" && birthDate > todayISO()) {
-      missing.birthDate = "La fecha de nacimiento no puede ser posterior a hoy.";
-      setShowMore(true);
-    }
-    setFieldErrors(missing);
-    if (Object.keys(missing).length > 0) {
-      // Marcarlos no basta: el último campo del cajón queda DEBAJO del pie
-      // pegajoso, así que su rojo no se ve y el foco, si se queda en el botón,
-      // tampoco lleva allí.
-      señalarPrimerError();
-      return;
-    }
-    const chosenLevel = levels.find((l) => l.id === levelId);
-    if (chosenLevel === undefined) {
-      setError("Elige el nivel y el grado al que entra.");
-      return;
-    }
-    setSaving(true);
-    setError(undefined);
-    try {
-      // The level travels as the config level's ID: whichever levels the school
-      // defined take pupils (ADR 0014), and the server supplies the name.
-      await onSave(
-        {
-          curp: curp.trim().toUpperCase(),
-          firstName: firstName.trim(),
-          lastName: lastName.trim(),
-          maternalLastName: maternalLastName.trim(),
-          levelId: chosenLevel.id,
-          // Left empty on purpose: the server writes it when capacity picks the
-          // group, so the record cannot claim a group the pupil is not in.
-          gradeGroup: "",
-          guardianName: guardianName.trim(),
-          ...(birthDate !== "" ? { birthDate } : {}),
-        },
-        gradeLevelId,
-        withNote ? note.trim() : "",
-      );
-    } catch (err) {
-      setError(
-        err instanceof PlacementFailed
-          ? [placementFailureMessage(err.cause), err.noteFailed ? NOTE_LOST : ""].filter((m) => m !== "").join(" ")
-          : createFailureMessage(err),
-      );
-      setSaving(false);
-    }
-  };
-
-  return (
-    <DrawerShell
-      title="Nuevo alumno"
-      subtitle="Alta rápida · la admisión inicia en trámite"
-      icon="students"
-      onClose={onClose}
-      footer={
-        <>
-          <Btn kind="ghost" onClick={onClose}>Cancelar</Btn>
-          <div style={{ flex: 1 }} />
-          {/* "Crear", no "Guardar": esto hace un alumno que no existía. Y se
-              apaga SÓLO mientras la petición va en camino — una forma
-              incompleta recibe sus campos en rojo, no un control muerto. */}
-          <Btn icon="check" onClick={() => void submit()} disabled={saving} style={{ opacity: saving ? 0.45 : 1, height: 52, fontSize: 16 }}>
-            {saving ? "Creando…" : "Crear alumno"}
-          </Btn>
-        </>
-      }
-    >
-      <>
-          <TextField
-            label="CURP"
-            value={curp}
-            onChange={setCurp}
-            uppercase
-            required
-            help="Los 18 caracteres de la CURP del alumno, tal como vienen en el acta. Es lo que impide que el mismo alumno se registre dos veces."
-            error={fieldErrors.curp}
-            onClearError={() => clearField("curp")}
-          />
-          {/* Surnames first, as the school reads its lists (T3). The two
-              surnames are one logical entity, so they may sit side by side. */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 14 }}>
-            <TextField
-              label="Apellido paterno"
-              value={lastName}
-              onChange={setLast}
-              uppercase
-              required
-              help="El primer apellido del alumno, el del padre."
-              error={fieldErrors.lastName}
-              onClearError={() => clearField("lastName")}
-            />
-            <TextField
-              label="Apellido materno"
-              value={maternalLastName}
-              onChange={setMaternal}
-              uppercase
-              help="El segundo apellido, el de la madre. Déjalo vacío si el acta no lo trae."
-            />
-          </div>
-          <TextField
-            label="Nombre(s)"
-            value={firstName}
-            onChange={setFirst}
-            uppercase
-            required
-            help="Sólo los nombres de pila, sin apellidos."
-            error={fieldErrors.firstName}
-            onClearError={() => clearField("firstName")}
-          />
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 14 }}>
-            <SelectField
-              label="Nivel"
-              value={levelId}
-              onChange={setLevelId}
-              required
-              help="El nivel educativo donde va a cursar: preescolar, primaria o secundaria."
-              options={levels.map((l) => ({ value: l.id, label: l.name }))}
-            />
-            <SelectField
-              label="Grado"
-              value={gradeLevelId}
-              onChange={setGradeLevelId}
-              required
-              disabled={grades.length === 0}
-              help="El grado dentro del nivel. Se enciende en cuanto eliges el nivel."
-              options={grades.map((g) => ({ value: g.id, label: g.name }))}
-              error={fieldErrors.gradeLevelId}
-              onClearError={() => clearField("gradeLevelId")}
-            />
-          </div>
-          <TextField
-            label="Tutor"
-            value={guardianName}
-            onChange={setGuardian}
-            uppercase
-            required
-            help="Quién responde por el alumno ante el colegio: nombre completo de la madre, el padre o el tutor legal."
-            error={fieldErrors.guardianName}
-            onClearError={() => clearField("guardianName")}
-          />
-          <div>
-            <button
-              type="button"
-              aria-expanded={showMore}
-              aria-controls="alta-mas-datos"
-              onClick={() => setShowMore((v) => !v)}
-              style={{ display: "inline-flex", alignItems: "center", gap: 6, minHeight: 44, padding: "0 4px", background: "none", border: "none", color: "var(--forest)", fontSize: 14.5, fontWeight: 700, cursor: "pointer" }}
-            >
-              <span style={{ display: "inline-flex", transform: showMore ? "rotate(90deg)" : "none", transition: "transform .15s" }}>
-                <Icon name="chevron" size={16} stroke={2.4} />
-              </span>
-              Más datos (opcional)
-            </button>
-            {showMore && (
-              <div id="alta-mas-datos" style={{ marginTop: 8 }}>
-                <DateField
-                  label="Fecha de nacimiento"
-                  value={birthDate}
-                  onChange={setBirthDate}
-                  max={todayISO()}
-                  error={fieldErrors.birthDate}
-                  onClearError={() => clearField("birthDate")}
-                  help="Con ella el sistema felicita al alumno en la app de sus papás el día de su cumpleaños. Se puede capturar después en su ficha."
-                />
-              </div>
-            )}
-          </div>
-          {withNote && (
-            <TextArea
-              label="Nota"
-              value={note}
-              onChange={setNote}
-              rows={2}
-              help="Opcional. Algo que el colegio deba recordar de este alumno; queda en su ficha, con tu nombre."
-            />
-          )}
-          <div style={{ display: "flex", gap: 11, padding: "14px 16px", borderRadius: "var(--r-md)", background: "var(--surface-3)", border: "1px solid var(--border)" }}>
-            <span style={{ color: "var(--forest)", flexShrink: 0, marginTop: 1 }}><Icon name="check" size={19} stroke={2.6} /></span>
-            <p style={{ fontSize: 13.5, color: "var(--text-muted)", lineHeight: 1.5, margin: 0 }}>El grupo <strong>se asigna solo</strong>, según el cupo de cada salón: se llena A y el siguiente alumno pasa a B. Los documentos se cargan después.</p>
-          </div>
-          {error !== undefined && <p role="alert" style={{ color: "var(--bad-fg)", fontSize: 14, margin: 0 }}>{error}</p>}
-      </>
-    </DrawerShell>
-  );
-}
 
 // ── detail sheet ──
 /**
@@ -765,14 +398,14 @@ function StudentSheet({
 export interface StudentsScreenProps {
   onBack: () => void;
   /**
-   * students:create. Gates the "Nuevo alumno" shortcut's drawer (UX only: the
-   * gateway refuses the write without it). Defaults to true, as the screen's
-   * own "Nuevo alumno" buttons have always been offered to every reader.
+   * Goes to the alta page (/alumnos/nuevo). Given only with students:create
+   * (UX only: the gateway refuses the write without it); absent, no
+   * "Nuevo alumno" is offered.
    */
-  canCreate?: boolean;
+  onCreate?: () => void;
   /** Opens a pupil's edit page. Absent when the caller cannot edit files. */
   onEdit?: (studentId: string) => void;
-  /** students:notes_write: the quick-add offers a first note, and the list's notes modal writes and edits (T6). */
+  /** students:notes_write: the list's notes modal writes and edits (T6). */
   canWriteNotes?: boolean;
   /** students:notes_void: the notes modal voids and edits any note. */
   canVoidAnyNote?: boolean;
@@ -806,7 +439,7 @@ const EXPORT_COLUMNS: readonly CsvColumn<Row>[] = [
   { label: "Estado", value: (r) => statusOf(r.student.admissionStatus).label },
 ];
 
-export function StudentsScreen({ onBack, canCreate = true, onEdit, canWriteNotes = false, canVoidAnyNote = false, userId = "", canVerifyCard = false, canRevokeCard = false, canReadStatement = false, canCorrectPayments = false, onOpenImport, canWithdraw = false }: StudentsScreenProps): ReactElement {
+export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false, canVoidAnyNote = false, userId = "", canVerifyCard = false, canRevokeCard = false, canReadStatement = false, canCorrectPayments = false, onOpenImport, canWithdraw = false }: StudentsScreenProps): ReactElement {
   const [verifying, setVerifying] = useState(false);
   const [students, setStudents] = useState<Student[]>([]);
   const [cycles, setCycles] = useState<Cycle[]>([]);
@@ -828,13 +461,13 @@ export function StudentsScreen({ onBack, canCreate = true, onEdit, canWriteNotes
   const [placement, setPlacement] = useState<PlacementState>("loading");
   const [rollVersion, setRollVersion] = useState(0);
   const intent = useIntent("students");
-  const [add, setAdd] = useState(intent === "new" && canCreate);
   const [sheet, setSheet] = useState<Student | null>(null);
   // The pupil whose notes are open from the list (T6), without the edit page.
   const [notesOf, setNotesOf] = useState<Student | null>(null);
   // The pupil whose account statement is open from the list (T7).
   const [statementOf, setStatementOf] = useState<Student | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
+  // What the alta page just created, said once on the way back (T9).
+  const [toast, setToast] = useState<string | null>(() => takeStudentsNotice() ?? null);
   const [pageSize, setPageSize] = useState(20);
   const [page, setPage] = useState(0);
 
@@ -988,33 +621,10 @@ export function StudentsScreen({ onBack, canCreate = true, onEdit, canWriteNotes
   const from = total === 0 ? 0 : cur * pageSize + 1;
   const to = Math.min(total, (cur + 1) * pageSize);
 
-  const cycleName = cycles.find((c) => c.status === "active")?.name ?? cycles[0]?.name ?? "—";
+  const activeCycle = cycles.find((c) => c.status === "active") ?? cycles[0];
+  const cycleName = activeCycle?.name ?? "—";
   const clear = (): void => { setTab("all"); filter.clear(); };
 
-  const onSave = async (input: CreateStudentInput, gradeLevelId: string, note: string): Promise<void> => {
-    const created = await createStudent(API_URL, input);
-    // The note goes right after the pupil exists and BEFORE placement: a full
-    // grade keeps the drawer open, and a retry must not write the note twice.
-    // A failed note does not undo the pupil; the message says so.
-    const noteFailed = note !== "" && !(await addNote(API_URL, created.id, note).then(() => true, () => false));
-    // Two calls, and the SECOND one is the one that can fail on a full grade —
-    // by then the pupil exists. PlacementFailed carries that distinction to the
-    // drawer, so the message can say "el alumno sí se creó" instead of sending
-    // somebody back to re-type a CURP that is now taken.
-    let placement: Placement;
-    try {
-      placement = await enrollIntoGrade(API_URL, created.id, gradeLevelId);
-    } catch (err) {
-      throw new PlacementFailed(err, noteFailed);
-    }
-    setAdd(false);
-    reload();
-    say(
-      noteFailed
-        ? `Alumno creado · ${formatStudentName(input)} quedó en ${placement.groupName}, pero la nota no se guardó: agrégala en su ficha`
-        : `Alumno creado · ${formatStudentName(input)} quedó en ${placement.groupName}`,
-    );
-  };
   const onPlaced = (message: string, keepSheet = false): void => {
     if (!keepSheet) setSheet(null);
     reload();
@@ -1046,7 +656,7 @@ export function StudentsScreen({ onBack, canCreate = true, onEdit, canWriteNotes
         <div style={{ display: "flex", gap: 12 }}>
           {canVerifyCard && <Btn kind="ghost" icon="qr" onClick={() => setVerifying(true)}>Verificar credencial</Btn>}
           <Btn kind="ghost" icon="download" onClick={() => exportRows(filtered)}>Exportar</Btn>
-          <Btn icon="plus" onClick={() => setAdd(true)} style={{ height: 52, fontSize: 16.5 }}>Nuevo alumno</Btn>
+          {onCreate !== undefined && <Btn icon="plus" onClick={onCreate} style={{ height: 52, fontSize: 16.5 }}>Nuevo alumno</Btn>}
         </div>
       </div>
 
@@ -1136,7 +746,7 @@ export function StudentsScreen({ onBack, canCreate = true, onEdit, canWriteNotes
               <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 19, color: "var(--text)" }}>Sin alumnos en esta vista</div>
               <div style={{ color: "var(--text-muted)", fontSize: 15, marginTop: 6 }}>Ajusta los filtros o da de alta un alumno nuevo.</div>
               <div style={{ display: "flex", gap: 12, justifyContent: "center", marginTop: 22 }}>
-                <Btn kind="ghost" onClick={clear}>Limpiar filtros</Btn><Btn icon="plus" onClick={() => setAdd(true)}>Nuevo alumno</Btn>
+                <Btn kind="ghost" onClick={clear}>Limpiar filtros</Btn>{onCreate !== undefined && <Btn icon="plus" onClick={onCreate}>Nuevo alumno</Btn>}
               </div>
               {students.length === 0 && onOpenImport !== undefined && (
                 <button type="button" onClick={onOpenImport} style={{ marginTop: 14, minHeight: 44, color: "var(--forest)", fontWeight: 700, fontSize: 15, textDecoration: "underline" }}>
@@ -1188,9 +798,8 @@ export function StudentsScreen({ onBack, canCreate = true, onEdit, canWriteNotes
           clear of it instead of hiding under it (QA 2026-09-25, ISSUE-005). */}
       <div aria-hidden data-testid="fab-clearance" style={{ height: FAB_BOTTOM + FAB_HEIGHT + FAB_GAP }} />
 
-      <button onClick={() => setAdd(true)} title="Nuevo alumno" style={{ position: "fixed", right: 32, bottom: FAB_BOTTOM, zIndex: 50, height: FAB_HEIGHT, padding: "0 26px", borderRadius: 99, display: "inline-flex", alignItems: "center", gap: 10, background: "var(--primary)", color: "var(--primary-ink)", fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 16.5, cursor: "pointer", boxShadow: "var(--shadow-fab)" }}><Icon name="plus" size={22} stroke={2.6} />Nuevo alumno</button>
+      {onCreate !== undefined && <button onClick={onCreate} title="Nuevo alumno" style={{ position: "fixed", right: 32, bottom: FAB_BOTTOM, zIndex: 50, height: FAB_HEIGHT, padding: "0 26px", borderRadius: 99, display: "inline-flex", alignItems: "center", gap: 10, background: "var(--primary)", color: "var(--primary-ink)", fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 16.5, cursor: "pointer", boxShadow: "var(--shadow-fab)" }}><Icon name="plus" size={22} stroke={2.6} />Nuevo alumno</button>}
 
-      {add && <QuickAdd onClose={() => setAdd(false)} onSave={onSave} levels={levels} withNote={canWriteNotes} />}
       {sheet !== null && <StudentSheet st={sheet} groups={groups} cycleId={groupsCycleId} gradeLevels={gradeLevels} gradeLevelsFailed={gradeLevelsFailed} onClose={() => setSheet(null)} onPlaced={onPlaced} onEdit={onEdit === undefined ? undefined : () => onEdit(sheet.id)} canRevokeCard={canRevokeCard} canWithdraw={canWithdraw} />}
       {notesOf !== null && (
         <StudentNotesDialog

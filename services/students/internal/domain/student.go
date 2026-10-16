@@ -3,6 +3,7 @@ package domain
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
 )
@@ -77,6 +78,9 @@ type StudentEnrolledEvent struct {
 	TenantID  string
 	CycleID   string
 	LevelID   string
+	// EnrolledAt is when the place starts: 00:00 Morelia of a chosen entry
+	// day, or the instant of the alta.
+	EnrolledAt time.Time
 }
 
 // NewApplicant creates a student in the pending admission state.

@@ -25,7 +25,7 @@ export interface DateFieldProps extends BaseFieldProps {
  * ya no puede ocurrir.
  */
 export function DateField(props: DateFieldProps): ReactElement {
-  const { label, value, onChange, required, error, onClearError, help, disabled, min, max } = props;
+  const { label, value, onChange, required, error, onClearError, help, disabled, readOnly, min, max } = props;
   return (
     <Field label={label} required={required} error={error} help={help}>
       {(id, describedBy) => (
@@ -37,6 +37,7 @@ export function DateField(props: DateFieldProps): ReactElement {
           min={min}
           max={max}
           disabled={disabled}
+          readOnly={readOnly}
           aria-describedby={describedBy}
           aria-invalid={error !== undefined ? true : undefined}
           aria-required={required === true ? true : undefined}

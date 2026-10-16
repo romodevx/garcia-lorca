@@ -177,25 +177,27 @@ test.describe.serial("setting up a school from zero", () => {
     await signIn(page);
     await openModule(page, "Estudiantes");
 
-    // The form lives behind the primary action, not on the page.
-    // Three buttons say this — header, empty state and FAB — and any of them
-    // opens the same drawer.
+    // Three buttons say this — header, empty state and FAB — and every one
+    // goes to the alta's own page: eleven fields outgrew a drawer (T9).
     await page.getByRole("button", { name: "Nuevo alumno" }).first().click();
-    // Scoped to the drawer: "CURP" also names the roster's search box, and an
-    // unscoped match takes whichever came first in the DOM.
-    const drawer = page.getByRole("dialog", { name: "Nuevo alumno" });
+    await expect(page).toHaveURL(/\/alumnos\/nuevo$/);
+    await expect(page.getByRole("heading", { level: 1, name: "Nuevo alumno" })).toBeVisible();
+    // Scoped to the page's form, so a match never lands on the shell's chrome.
+    const drawer = page.locator(".create-page");
     // Sin el " *": el asterisco es hermano del <label>, no su hijo, para que el
     // nombre accesible del campo siga siendo "CURP" y no "CURP *".
     await drawer.getByRole("textbox", { name: "CURP" }).fill(curpFor(tag));
     // Surnames first (T3), the way the school reads its lists.
     await drawer.getByRole("textbox", { name: "Apellido paterno" }).fill(`Villalobos ${tag}`);
     await drawer.getByRole("textbox", { name: "Nombre(s)" }).fill("Zoe");
-    // Level and grade are cascading selects, and the GROUP is never asked for:
-    // it is chosen by whichever one still has a seat.
+    // Level and grade are cascading selects; the group stays on Automático,
+    // chosen by whichever one still has a seat.
     await drawer.getByRole("combobox", { name: "Nivel" }).selectOption({ label: comoSeGuarda(level) });
     await drawer.getByRole("combobox", { name: "Grado" }).selectOption({ label: comoSeGuarda(grade) });
     await drawer.getByRole("textbox", { name: "Tutor" }).fill("Marisol Villalobos");
     await drawer.getByRole("button", { name: "Crear alumno" }).click();
+    // Saved: back on the list, which says where the pupil landed.
+    await expect(page).toHaveURL(/\/alumnos(\?|$)/);
 
     /*
      * Se BUSCA, no se espera que caiga en la primera pantalla.

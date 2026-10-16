@@ -58,6 +58,13 @@ func (s *stubConfigService) GetTerm(_ context.Context, _ *connect.Request[config
 
 func newClient(t *testing.T, svc *stubConfigService) *configclient.Client {
 	t.Helper()
+	return newClientFor(t, svc)
+}
+
+// newClientFor serves any config handler (a stub embedding stubConfigService
+// to add an RPC).
+func newClientFor(t *testing.T, svc configv1connect.ConfigServiceHandler) *configclient.Client {
+	t.Helper()
 	path, handler := configv1connect.NewConfigServiceHandler(svc)
 	mux := http.NewServeMux()
 	mux.Handle(path, handler)

@@ -33,6 +33,8 @@ import { canDeleteLevels, canWriteConfig } from "./config/permissions";
 import { canDeleteUsers } from "./admin/permissions";
 import { AdminScreen } from "./_screens/admin/AdminScreen";
 import { StudentEditScreen } from "./_screens/students/StudentEditScreen";
+import { StudentAltaPage } from "./_screens/students/StudentAltaPage";
+import { leaveStudentsNotice } from "./_screens/students/studentsNotice";
 import type { NotesAccess } from "./_design/students/StudentNotesBeside";
 import { StudentsScreen, markStudentsVisit, studentsListPath } from "./_screens/students/StudentsScreen";
 import { GradesScreen } from "./_screens/grades/GradesScreen";
@@ -109,7 +111,7 @@ const RESTORE_ATTEMPTS = 3;
 const RESTORE_BACKOFF_MS = 300;
 
 /** Modules with a screen of their own; any other module id opens the placeholder. */
-type ModuleScreen = Exclude<View["screen"], "module" | "studentEdit" | "teacherLoad" | "levelDelete" | "levelPeriods">;
+type ModuleScreen = Exclude<View["screen"], "module" | "studentEdit" | "studentNew" | "teacherLoad" | "levelDelete" | "levelPeriods">;
 const MODULE_SCREENS: Readonly<Record<string, ModuleScreen>> = {
   finance: "finance",
   settings: "config",
@@ -493,6 +495,15 @@ export function AppShell(): ReactElement {
   const canEditStudents = principal?.permissions?.includes("students:update") === true;
   const canEnrollStudents = principal?.permissions?.includes("students:enroll") === true;
   const editStudent = (studentId: string): void => go({ screen: "studentEdit", studentId });
+  // UX only: the gateway refuses POST /students without students:create.
+  const canCreateStudents = principal?.permissions?.includes("students:create") === true;
+  const newStudent = (): void => go({ screen: "studentNew" });
+  // Back to the list as it was left; a saved alta leaves its toast for it.
+  const backToStudents = (): void => router.push(studentsListPath());
+  const finishStudentAlta = (message: string): void => {
+    leaveStudentsNotice(message);
+    backToStudents();
+  };
   // A pupil's notes beside Registrar pago (T6). UX only: the gateway answers the
   // notes with students:read (and module_students), writes with notes_write.
   const notesAccess = useMemo<NotesAccess>(() => {
@@ -545,12 +556,17 @@ export function AppShell(): ReactElement {
   // The intent outlives the navigation in module scope: the destination
   // screen mounts after it and takes it once (routing/pendingIntent.ts).
   const open = useCallback((id: string, intent?: string): void => {
+    // "Crear alumno" has a page of its own (T9): straight there, no intent.
+    if (id === "students" && intent === "new" && canCreateStudents) {
+      go({ screen: "studentNew" });
+      return;
+    }
     const screen = Object.hasOwn(MODULE_SCREENS, id) ? MODULE_SCREENS[id] : undefined;
     go(screen === undefined ? { screen: "module", moduleId: id } : { screen });
     // Armed after go() cleared, before the router renders the destination,
     // which takes it once on mount (routing/pendingIntent.ts).
     if (handOffIntent(id, intent)) setIntentVisit((v) => v + 1);
-  }, [go]);
+  }, [go, canCreateStudents]);
 
   // Command Palette navigation: a command route is `module:<id>` plus an optional
   // intent (`module:expenses:new` lands on the new-expense drawer). Navigating IS
@@ -689,15 +705,24 @@ export function AppShell(): ReactElement {
           userId={principal?.userId ?? ""}
           permissions={principal?.permissions}
           // Back to the list as it was left: level, grade, group and search (T4).
-          onBack={() => router.push(studentsListPath())}
+          onBack={backToStudents}
         />
       )}
-      {(view.screen === "students" || (view.screen === "studentEdit" && !(studentsEnabled && canEditStudents))) &&
+      {view.screen === "studentNew" && studentsEnabled && canCreateStudents && (
+        <StudentAltaPage
+          onBack={backToStudents}
+          onCreated={finishStudentAlta}
+          canWriteNotes={principal?.permissions?.includes("students:notes_write") === true}
+        />
+      )}
+      {(view.screen === "students" ||
+        (view.screen === "studentEdit" && !(studentsEnabled && canEditStudents)) ||
+        (view.screen === "studentNew" && !(studentsEnabled && canCreateStudents))) &&
         (studentsEnabled ? (
           <StudentsScreen
             key={visit}
             onBack={home}
-            canCreate={principal?.permissions?.includes("students:create") === true}
+            onCreate={canCreateStudents ? newStudent : undefined}
             canWithdraw={canEnrollStudents}
             onEdit={canEditStudents ? editStudent : undefined}
             canWriteNotes={principal?.permissions?.includes("students:notes_write") === true}

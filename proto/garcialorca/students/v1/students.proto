@@ -498,6 +498,12 @@ message ChangeAdmissionStatusResponse {
 message EnrollIntoGradeRequest {
   string student_id = 1;
   string grade_level_id = 2;
+  // Optional entry day, YYYY-MM-DD in the school's calendar; empty means
+  // today. It must lie between the group's cycle start and the school's today
+  // (InvalidArgument otherwise). Stored as 00:00 America/Mexico_City; billing
+  // starts that month. A past day bills past months: the gateway requires
+  // finance:write for it.
+  string enrolled_on = 3;
 }
 
 // EnrollIntoGradeResponse carries the enrolment plus the group capacity chose,
@@ -585,6 +591,12 @@ message EnrollRequest {
   string student_id = 1;
   string group_id = 2;
   string term_id = 3;   // optional
+  // Optional entry day, YYYY-MM-DD in the school's calendar; empty means
+  // today. It must lie between the group's cycle start and the school's today
+  // (InvalidArgument otherwise). Stored as 00:00 America/Mexico_City; billing
+  // starts that month. A past day bills past months: the gateway requires
+  // finance:write for it.
+  string enrolled_on = 4;
 }
 
 message EnrollResponse {

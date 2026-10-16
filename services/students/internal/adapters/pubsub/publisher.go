@@ -2,8 +2,10 @@ package pubsubadapter
 
 import (
 	"context"
+	"time"
 
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	studentsv1 "github.com/garcia-lorca/gen/go/garcialorca/students/v1"
 	glerrors "github.com/garcia-lorca/pkg/errors"
@@ -46,11 +48,21 @@ func NewEventPublisher(bus pubsub.Publisher) *EventPublisher {
 // PublishStudentEnrolled emits a StudentEnrolled event.
 func (p *EventPublisher) PublishStudentEnrolled(ctx context.Context, ev domain.StudentEnrolledEvent) error {
 	return p.publish(ctx, ev.TenantID, typeStudentEnrolled, &studentsv1.StudentEnrolled{
-		StudentId: ev.StudentID,
-		TenantId:  ev.TenantID,
-		CycleId:   ev.CycleID,
-		LevelId:   ev.LevelID,
+		StudentId:  ev.StudentID,
+		TenantId:   ev.TenantID,
+		CycleId:    ev.CycleID,
+		LevelId:    ev.LevelID,
+		EnrolledAt: timestampOrNil(ev.EnrolledAt),
 	})
+}
+
+// timestampOrNil keeps "not recorded" absent on the wire: a zero time would
+// travel as year 1, and a consumer reading AsTime() of nothing gets 1970.
+func timestampOrNil(t time.Time) *timestamppb.Timestamp {
+	if t.IsZero() {
+		return nil
+	}
+	return timestamppb.New(t)
 }
 
 // PublishAdmissionChanged emits an AdmissionStatusChanged event.

@@ -98,6 +98,8 @@ export interface EnrollInput {
   groupId: string;
   /** Optional; omitted from the body when absent. */
   termId?: string;
+  /** The pupil's entry day (aaaa-mm-dd); omitted or "" means today. */
+  enrolledOn?: string;
 }
 
 export interface TransferInput {
@@ -254,8 +256,16 @@ export interface Placement {
  * ask for "grado y grupo" as free text, so somebody typed "1° A" and nothing
  * checked whether 1°A had a seat left.
  */
-export function enrollIntoGrade(baseURL: string, studentId: string, gradeLevelId: string): Promise<Placement> {
-  return postJSON<Placement>(baseURL, "/enrollments/by-grade", { studentId, gradeLevelId });
+export function enrollIntoGrade(baseURL: string, studentId: string, gradeLevelId: string, enrolledOn = ""): Promise<Placement> {
+  return postJSON<Placement>(baseURL, "/enrollments/by-grade", { studentId, gradeLevelId, ...entryDay(enrolledOn) });
+}
+
+/**
+ * The entry day travels only when one was chosen (T9). Omitted, the server takes
+ * the school's today, so a user without finance:write is never refused for it.
+ */
+function entryDay(enrolledOn: string | undefined): { enrolledOn?: string } {
+  return enrolledOn !== undefined && enrolledOn !== "" ? { enrolledOn } : {};
 }
 
 /**
@@ -268,7 +278,7 @@ export function enroll(baseURL: string, input: EnrollInput): Promise<Enrollment>
   if (input.termId !== undefined && input.termId !== "") {
     body.termId = input.termId;
   }
-  return postJSON<Enrollment>(baseURL, "/enrollments", body);
+  return postJSON<Enrollment>(baseURL, "/enrollments", { ...body, ...entryDay(input.enrolledOn) });
 }
 
 export function listEnrollments(baseURL: string, filters: EnrollmentFilters = {}): Promise<Enrollment[]> {

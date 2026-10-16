@@ -954,3 +954,89 @@ describe("migrar alumnos (ADR 0033)", () => {
     expect(await screen.findByRole("heading", { level: 1, name: "Migrar alumnos" })).toBeInTheDocument();
   });
 });
+
+describe("el alta de alumno es una página (T9)", () => {
+  const CREATOR_ME = { ...OWNER_ME, permissions: [...OWNER_ME.permissions, "students:create"] };
+
+  it("tiene su propia dirección con students:create", async () => {
+    resetFakeRouter("/alumnos/nuevo");
+    mockMe.mockResolvedValue(CREATOR_ME);
+    render(
+      <Providers flags={{ module_students: true }}>
+        <AppShell />
+      </Providers>
+    );
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Nuevo alumno" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("sin students:create, la dirección pinta la lista y ninguna forma", async () => {
+    resetFakeRouter("/alumnos/nuevo");
+    mockMe.mockResolvedValue(OWNER_ME);
+    render(
+      <Providers flags={{ module_students: true }}>
+        <AppShell />
+      </Providers>
+    );
+
+    expect(await screen.findByRole("heading", { name: "Estudiantes" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { level: 1, name: "Nuevo alumno" })).not.toBeInTheDocument();
+  });
+
+  it("el «Nuevo alumno» de la lista lleva a la página", async () => {
+    resetFakeRouter("/alumnos");
+    mockMe.mockResolvedValue(CREATOR_ME);
+    const user = userEvent.setup();
+    render(
+      <Providers flags={{ module_students: true }}>
+        <AppShell />
+      </Providers>
+    );
+
+    const [first] = await screen.findAllByRole("button", { name: "Nuevo alumno" });
+    if (first !== undefined) await user.click(first);
+
+    expect(fakePath()).toBe("/alumnos/nuevo");
+    expect(await screen.findByRole("heading", { level: 1, name: "Nuevo alumno" })).toBeInTheDocument();
+  });
+
+  it("«Crear alumno» de la paleta lleva directo a la página", async () => {
+    resetFakeRouter("/");
+    mockMe.mockResolvedValue(CREATOR_ME);
+    const user = userEvent.setup();
+    render(
+      <Providers flags={{ module_students: true }}>
+        <AppShell />
+      </Providers>
+    );
+    await screen.findByRole("heading", { name: /Módulos/ });
+
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+    await user.click((await screen.findAllByText("Crear alumno"))[0]!);
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Nuevo alumno" })).toBeInTheDocument();
+    expect(fakePath()).toBe("/alumnos/nuevo");
+  });
+
+  it("Cancelar regresa a la lista de donde salió", async () => {
+    // The list keeps its view in the real address bar (T4); jsdom's must match.
+    window.history.replaceState(null, "", "/alumnos");
+    resetFakeRouter("/alumnos");
+    mockMe.mockResolvedValue(CREATOR_ME);
+    const user = userEvent.setup();
+    render(
+      <Providers flags={{ module_students: true }}>
+        <AppShell />
+      </Providers>
+    );
+    const [first] = await screen.findAllByRole("button", { name: "Nuevo alumno" });
+    if (first !== undefined) await user.click(first);
+
+    await user.click(await screen.findByRole("button", { name: "Cancelar" }));
+
+    expect(await screen.findByRole("heading", { name: "Estudiantes" })).toBeInTheDocument();
+    expect(fakePath()).toBe("/alumnos");
+    window.history.replaceState(null, "", "/");
+  });
+});

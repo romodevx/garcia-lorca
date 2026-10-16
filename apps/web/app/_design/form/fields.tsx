@@ -35,6 +35,12 @@ export interface BaseFieldProps {
    */
   help?: string;
   disabled?: boolean;
+  /**
+   * Se lee y se enfoca, pero no se edita: lo que el servidor ya guardó y no se
+   * puede corregir desde esta forma. A diferencia de `disabled`, el lector de
+   * pantalla lo sigue recorriendo.
+   */
+  readOnly?: boolean;
   /** Al salir del campo: donde la pantalla acusa un dato mal escrito. */
   onBlur?: () => void;
 }
@@ -50,6 +56,7 @@ function common(
   "aria-invalid": true | undefined;
   "aria-required": true | undefined;
   disabled: boolean | undefined;
+  readOnly: boolean | undefined;
 } {
   return {
     id,
@@ -57,6 +64,7 @@ function common(
     "aria-invalid": p.error !== undefined ? true : undefined,
     "aria-required": p.required === true ? true : undefined,
     disabled: p.disabled,
+    readOnly: p.readOnly,
   };
 }
 

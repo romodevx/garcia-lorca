@@ -231,6 +231,7 @@ type fakeEnrollmentSvc struct {
 	gradeStudent                                           string
 	gradeLevel                                             string
 	gotStudentID, gotGroupID, gotTermID                    string
+	gotEnrolledOn, gradeEnrolledOn                         string
 	gotListStudentID, gotListCycleID, gotListGrp           string
 	gotGetID                                               string
 	gotXferEnrollmentID, gotXferToGroup, gotXferR          string
@@ -244,8 +245,8 @@ type fakeEnrollmentSvc struct {
 	err                                                    error
 }
 
-func (f *fakeEnrollmentSvc) Enroll(_ context.Context, studentID, groupID, termID string) (client.Enrollment, error) {
-	f.gotStudentID, f.gotGroupID, f.gotTermID = studentID, groupID, termID
+func (f *fakeEnrollmentSvc) Enroll(_ context.Context, studentID, groupID, termID, enrolledOn string) (client.Enrollment, error) {
+	f.gotStudentID, f.gotGroupID, f.gotTermID, f.gotEnrolledOn = studentID, groupID, termID, enrolledOn
 	return f.res, f.err
 }
 
@@ -627,8 +628,8 @@ func TestWithdrawalPreviewAlwaysReadsFinance(t *testing.T) {
 	}
 }
 
-func (f *fakeEnrollmentSvc) EnrollIntoGrade(_ context.Context, studentID, gradeLevelID string) (client.Placement, error) {
-	f.gradeStudent, f.gradeLevel = studentID, gradeLevelID
+func (f *fakeEnrollmentSvc) EnrollIntoGrade(_ context.Context, studentID, gradeLevelID, enrolledOn string) (client.Placement, error) {
+	f.gradeStudent, f.gradeLevel, f.gradeEnrolledOn = studentID, gradeLevelID, enrolledOn
 	if f.err != nil {
 		return client.Placement{}, f.err
 	}

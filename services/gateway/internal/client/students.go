@@ -273,11 +273,12 @@ func (c *StudentsClient) ScanCard(ctx context.Context, code string) (ScannedCard
 // from the group, so cycleID is never sent; the returned Enrollment carries it.
 // termID may be empty. Connect error codes propagate (InvalidArgument for a
 // missing group / term-not-in-cycle, AlreadyExists for a duplicate enrollment).
-func (c *StudentsClient) Enroll(ctx context.Context, studentID, groupID, termID string) (Enrollment, error) {
+func (c *StudentsClient) Enroll(ctx context.Context, studentID, groupID, termID, enrolledOn string) (Enrollment, error) {
 	res, err := c.rpc.Enroll(ctx, connect.NewRequest(&studentsv1.EnrollRequest{
-		StudentId: studentID,
-		GroupId:   groupID,
-		TermId:    termID,
+		StudentId:  studentID,
+		GroupId:    groupID,
+		TermId:     termID,
+		EnrolledOn: enrolledOn,
 	}))
 	if err != nil {
 		return Enrollment{}, err
@@ -293,9 +294,9 @@ type Placement struct {
 }
 
 // EnrollIntoGrade places a pupil in a grade and lets capacity pick the group.
-func (c *StudentsClient) EnrollIntoGrade(ctx context.Context, studentID, gradeLevelID string) (Placement, error) {
+func (c *StudentsClient) EnrollIntoGrade(ctx context.Context, studentID, gradeLevelID, enrolledOn string) (Placement, error) {
 	res, err := c.rpc.EnrollIntoGrade(ctx, connect.NewRequest(&studentsv1.EnrollIntoGradeRequest{
-		StudentId: studentID, GradeLevelId: gradeLevelID,
+		StudentId: studentID, GradeLevelId: gradeLevelID, EnrolledOn: enrolledOn,
 	}))
 	if err != nil {
 		return Placement{}, err

@@ -22,6 +22,7 @@ export type View =
   | { screen: "config" }
   | { screen: "studentImport" }
   | { screen: "students" }
+  | { screen: "studentNew" }
   | { screen: "grades" }
   | { screen: "attendance" }
   | { screen: "teachers" }
@@ -63,6 +64,8 @@ const BY_SCREEN = {
   /** Migrar alumnos from the previous system (ADR 0033). */
   studentImport: "/configuracion/migrar-alumnos",
   students: "/alumnos",
+  /** The alta of one pupil: eleven fields, so a page and not a drawer. */
+  studentNew: "/alumnos/nuevo",
   grades: "/calificaciones",
   attendance: "/asistencia",
   teachers: "/docentes",
