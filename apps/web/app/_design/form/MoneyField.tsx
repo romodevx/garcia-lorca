@@ -2,18 +2,12 @@
 
 import type { ChangeEvent, ReactElement } from "react";
 
-import { centsToPesosInput, pesosToCents } from "../../_lib/money";
+import { formatPesosInput, pesosToCents } from "../../_lib/money";
 import { Field, inputStyle } from "./Field";
 import type { BaseFieldProps } from "./fields";
 
 /** Ancho del prefijo "$" y su separación del texto. */
 const PREFIX_WIDTH = 30;
-
-/** Agrupa de tres en tres la parte entera: 1850.00 → 1,850.00 */
-function withThousands(plain: string): string {
-  const [whole = "0", decimals = "00"] = plain.split(".");
-  return `${whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",")}.${decimals}`;
-}
 
 /**
  * Un monto: se ve en pesos, viaja en centavos.
@@ -37,7 +31,7 @@ export function MoneyField(props: BaseFieldProps): ReactElement {
     if (value.trim() === "") return;
     const cents = pesosToCents(value);
     if (Number.isNaN(cents)) return;
-    const formatted = withThousands(centsToPesosInput(cents));
+    const formatted = formatPesosInput(cents);
     if (formatted !== value) onChange(formatted);
   };
 

@@ -25,7 +25,7 @@ import {
   wholeInRange,
 } from "./tuition-math";
 import { copyPlanToCycle } from "./tuition-copy";
-import { FeesSection, InscriptionSection, type DraftCheck } from "./tuition-sections";
+import { FeesSection, InscriptionSection, type DraftCheck, type InscriptionFlush } from "./tuition-sections";
 
 /**
  * El tabulador de un nivel: lo que cuesta el año.
@@ -69,8 +69,8 @@ export function TuitionPage({
   const [months, setMonths] = useState(String(plan?.months ?? 10));
   const [firstMonth, setFirstMonth] = useState(String(plan?.firstBilledMonth ?? 9));
   const [dueDay, setDueDay] = useState(String(plan?.dueDay ?? 10));
-  // La regla de cobranza de M16: el modo diario sustituye el recargo fijo
-  // mensual por un monto que se cobra por cada día de atraso.
+  // La regla de cobranza de M16. Apagado, NO hay recargo: el fijo mensual ya
+  // no existe (siempre viaja en cero, ver `lateFeeCents` abajo).
   const [dailyMode, setDailyMode] = useState(plan?.policy.dailyMode ?? false);
   const [dailyFee, setDailyFee] = useState(
     plan === undefined || plan.policy.lateFeeDailyCents === 0 ? "" : centsToPesos(plan.policy.lateFeeDailyCents));
@@ -112,7 +112,7 @@ export function TuitionPage({
    * En refs y no en estado: la comprobación corre al guardar, no en cada tecla,
    * y ponerla en estado repintaría catorce campos por letra.
    */
-  const inscriptionDraft = useRef<DraftCheck>(() => undefined);
+  const inscriptionDraft = useRef<InscriptionFlush>((current) => ({ concepts: current }));
   const feesDraft = useRef<DraftCheck>(() => undefined);
 
   /** Se queja Y abre la sección donde vive el campo, para no señalar al vacío. */
@@ -196,7 +196,18 @@ export function TuitionPage({
       complain("Los días de pronto pago son un número entero de días, desde 0.", "collection");
       return;
     }
-    if (concepts.length === 0) {
+    /*
+     * Un tramo completo escrito y sin agregar se agrega aquí, como si se
+     * hubiera apretado "Agregar monto" (ISSUE-013); uno a medias detiene el
+     * guardado diciendo qué le falta. Nada tecleado se tira en silencio.
+     */
+    const inscription = inscriptionDraft.current(concepts);
+    if ("problem" in inscription) {
+      complain(inscription.problem);
+      return;
+    }
+    const savedConcepts = inscription.concepts;
+    if (savedConcepts.length === 0) {
       setError("Captura la inscripción: al menos un concepto con su monto y vigencia.");
       return;
     }
@@ -205,25 +216,17 @@ export function TuitionPage({
       startRef.current?.querySelector("input")?.focus();
       return;
     }
-    const ladder = ladderProblem(concepts);
+    const ladder = ladderProblem(savedConcepts);
     if (ladder !== "") {
       setError(ladder);
       return;
     }
     /*
-     * Nada tecleado se tira por no haberlo "agregado": se dice y se detiene.
-     *
-     * Cada ref se consulta UNA vez. Consultarlas dos veces —una para el mensaje y
-     * otra para decidir qué sección abrir— hacía que, con borrador pendiente en
-     * las dos, el mensaje fuera el de Inscripción y la sección que se abría fuera
-     * Cuotas: señalando un lugar del que el mensaje no habla.
+     * Una cuota tecleada y no agregada se dice y se detiene: le faltan los
+     * meses para saber a quién cobrarla. El ref se consulta UNA vez, y su
+     * mensaje abre la sección de la que habla.
      */
-    const inscripcionPendiente = inscriptionDraft.current();
     const cuotaPendiente = feesDraft.current();
-    if (inscripcionPendiente !== undefined) {
-      complain(inscripcionPendiente);
-      return;
-    }
     if (cuotaPendiente !== undefined) {
       complain(cuotaPendiente, "fees");
       return;
@@ -238,7 +241,7 @@ export function TuitionPage({
         // Siempre cero: la inscripción vive en los conceptos, y el servidor
         // rechaza un plan que lleve las dos formas a la vez (ADR 0011).
         enrollmentCents: 0,
-        enrollmentConcepts: concepts,
+        enrollmentConcepts: savedConcepts,
         monthlyCents,
         months: count,
         firstBilledMonth: startMonth,
@@ -268,9 +271,7 @@ export function TuitionPage({
     }
   };
 
-  const collectionSummary = dailyMode
-    ? `recargo por día${dailyFee === "" ? "" : ` · $${dailyFee}`}`
-    : "recargo fijo";
+  const collectionSummary = describeCollection(dailyMode, dailyFee);
   const feesSummary = fees.length === 0 ? "ninguna" : `${fees.length}`;
 
   return (
@@ -377,11 +378,11 @@ export function TuitionPage({
             style={{ width: 18, height: 18 }}
           />
           <span style={{ fontSize: 14, color: "var(--text)" }}>
-            Cobrar recargo por día en vez del monto fijo mensual
+            Cobrar recargo por cada día de atraso (sin marcar: sin recargo)
           </span>
         </label>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
-          <MoneyField label="Recargo por día" value={dailyFee} onChange={setDailyFee} help="Lo que se suma por cada día de atraso, pasado el día límite." />
+          <MoneyField label="Recargo por día" value={dailyFee} onChange={setDailyFee} help="Lo que se suma por cada día de atraso, pasado el día límite. Sólo se cobra con la casilla de arriba marcada." />
           <MoneyField label="Pronto pago (monto)" value={earlyAmount} onChange={setEarlyAmount} help="El descuento para quien paga dentro del plazo de abajo." />
           <NumberField label="Pronto pago (días hábiles)" value={earlyDays} onChange={setEarlyDays} help="Cuántos días hábiles antes del día límite hay que pagar para ganarlo. Sábados y domingos no cuentan." />
         </div>
@@ -422,6 +423,18 @@ export function TuitionPage({
       {error !== undefined && <ErrorAlert message={error} />}
     </CreatePage>
   );
+}
+
+/**
+ * La línea de estado de Cobranza, fiel a lo que se va a guardar (ISSUE-010).
+ *
+ * Sin el modo diario la página envía `lateFeeCents: 0` y `dailyMode: false`:
+ * no se cobra ningún recargo, así que eso es lo que dice. Decía "recargo fijo".
+ */
+function describeCollection(dailyMode: boolean, dailyFee: string): string {
+  if (!dailyMode) return "sin recargo";
+  const cents = pesosToCents(dailyFee);
+  return cents === null || cents === 0 ? "recargo por día" : `recargo por día · ${formatCents(cents)}`;
 }
 
 /**

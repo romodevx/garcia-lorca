@@ -115,10 +115,20 @@ function readSlots(slots: readonly SlotDraft[], errors: Errors): ActivitySlot[] 
   return out;
 }
 
+const isBlankOption = (o: OptionDraft): boolean => o.kind === "" && o.amount.trim() === "";
+
+/**
+ * Untouched blank rows are skipped while another row has something (ISSUE-013):
+ * "Agregar precio" opens one, and people press it as if it confirmed the price
+ * above — the save then stopped on "Falta este dato" in a row nobody meant.
+ * When EVERY row is blank, the first is still asked for: an activity needs a price.
+ */
 function readOptions(options: readonly OptionDraft[], errors: Errors): ActivityPriceOption[] {
   const out: ActivityPriceOption[] = [];
   const seen = new Set<string>();
+  const someFilled = options.some((o) => !isBlankOption(o));
   options.forEach((o, i) => {
+    if (isBlankOption(o) && (someFilled || i > 0)) return;
     if (o.kind === "") errors[optionKey(i, "kind")] = MISSING;
     else if (seen.has(o.kind)) errors[optionKey(i, "kind")] = o.kind === FLAT ? "Ya hay una cuota fija." : "Ya hay un precio para esos días.";
     else seen.add(o.kind);

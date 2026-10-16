@@ -73,8 +73,8 @@ describe("TuitionPanel — characterization", () => {
 
     await waitFor(() => expect(within(row("Kínder")).getByText("—")).toBeInTheDocument());
     const kinder = row("Kínder");
-    expect(within(kinder).getByText("$4500.00")).toBeInTheDocument();
-    expect(within(kinder).getByText("$3200.00")).toBeInTheDocument();
+    expect(within(kinder).getByText("$4,500.00")).toBeInTheDocument();
+    expect(within(kinder).getByText("$3,200.00")).toBeInTheDocument();
     expect(within(kinder).getByText("10 desde septiembre")).toBeInTheDocument();
     expect(within(kinder).getByText("día 10")).toBeInTheDocument();
     expect(within(kinder).getByRole("button", { name: "Editar" })).toBeInTheDocument();

@@ -77,6 +77,28 @@ describe("ActivityFormPage (T17)", () => {
     expect(onSaved).toHaveBeenCalledWith(expect.stringMatching(/guardada/));
   });
 
+  // ISSUE-013: the price is typed, "Agregar precio" is pressed as if it
+  // confirmed it, and the blank row it opens used to block the save.
+  it("saves on the first try with a typed price and a blank row left by Agregar precio", async () => {
+    const user = userEvent.setup();
+    m.createActivity.mockResolvedValue(swim);
+    open();
+    await user.type(screen.getByLabelText("Nombre"), "Natación");
+    await user.selectOptions(within(slot(1)).getByLabelText("Día"), "Martes");
+    await user.selectOptions(within(slot(1)).getByLabelText("Inicio"), "15:00");
+    await user.selectOptions(within(slot(1)).getByLabelText("Fin"), "16:30");
+    await user.type(screen.getByLabelText("Primera fecha límite"), "2026-10-09");
+    await user.selectOptions(within(option(1)).getByLabelText("Esquema"), "1 día por semana");
+    await user.type(within(option(1)).getByLabelText("Monto"), "600");
+    await user.click(screen.getByRole("button", { name: /Agregar precio/ }));
+    await user.click(screen.getByRole("button", { name: /Guardar actividad/ }));
+
+    expect(m.createActivity).toHaveBeenCalledTimes(1);
+    expect(m.createActivity).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({
+      options: [{ daysPerWeek: 1, amountCents: 60000 }],
+    }));
+  });
+
   it("removes a row", async () => {
     const user = userEvent.setup();
     open();

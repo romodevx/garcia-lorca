@@ -216,13 +216,14 @@ const EXPORT_COLUMNS: readonly CsvColumn<Row>[] = [
   { label: "Concepto", value: (r) => r.charge.description },
   { label: "Vence", value: (r) => r.charge.dueDate },
   // Pesos with two decimals, not cents: the file is read by a person, and the
-  // column is summed in Excel.
-  { label: "Importe", value: (r) => (r.charge.amountCents / 100).toFixed(2) },
-  { label: "Descuento", value: (r) => (r.charge.discountCents / 100).toFixed(2) },
+  // column is summed in Excel — so deliberately WITHOUT thousands separators,
+  // which a spreadsheet would read as text.
+  { label: "Importe", value: (r) => centsToPesosInput(r.charge.amountCents) },
+  { label: "Descuento", value: (r) => centsToPesosInput(r.charge.discountCents) },
   // T18: Saldo is net of it, so without this column the file would not add up.
-  { label: "Beca", value: (r) => ((r.charge.scholarshipCents ?? 0) / 100).toFixed(2) },
-  { label: "Pagado", value: (r) => (r.charge.paidCents / 100).toFixed(2) },
-  { label: "Saldo", value: (r) => (r.charge.remainingCents / 100).toFixed(2) },
+  { label: "Beca", value: (r) => centsToPesosInput(r.charge.scholarshipCents ?? 0) },
+  { label: "Pagado", value: (r) => centsToPesosInput(r.charge.paidCents) },
+  { label: "Saldo", value: (r) => centsToPesosInput(r.charge.remainingCents) },
   { label: "Estado", value: (r) => STATUS[r.visual].label },
 ];
 

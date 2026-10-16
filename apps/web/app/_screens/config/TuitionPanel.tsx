@@ -5,8 +5,9 @@ import { useCallback, useEffect, useState, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
 import type { Cycle, Level } from "../../config/api";
 import { listTuitionPlans, runBilling, type BillingRun, type TuitionPlan } from "../../finance/api";
+import { formatCents } from "../../_lib/money";
 import { EmptyHint, ErrorAlert, Section } from "./parts";
-import { MONTH_NAMES, centsToPesos, inscriptionTotals } from "./tuition-math";
+import { MONTH_NAMES, inscriptionTotals } from "./tuition-math";
 import { TuitionPage } from "./TuitionPage";
 import { useSecondaryInSetup, useSetupPresentation } from "./SetupPresentation";
 import { useLatest } from "./useLatest";
@@ -219,16 +220,16 @@ export function TuitionPanel({
                           quien se inscribe en cuanto abre el periodo, que es el
                           número que el colegio publica.
                         */}
-                        <td data-label={label("Inscripción")} style={cell}>${centsToPesos(inscriptionShown(plan))}</td>
-                        <td data-label={label("Mensualidad")} style={cell}>${centsToPesos(plan.monthlyCents)}</td>
+                        <td data-label={label("Inscripción")} style={cell}>{formatCents(inscriptionShown(plan))}</td>
+                        <td data-label={label("Mensualidad")} style={cell}>{formatCents(plan.monthlyCents)}</td>
                         <td data-label={label("Mensualidades")} style={cell}>
                           {plan.months} desde {MONTH_NAMES[plan.firstBilledMonth - 1]}
                         </td>
                         <td data-label={label("Día límite")} style={cell}>día {plan.dueDay}</td>
                         <td data-label={label("Recargo")} style={cell}>
                           {plan.policy.dailyMode
-                            ? `$${centsToPesos(plan.policy.lateFeeDailyCents)} / día`
-                            : plan.lateFeeCents === 0 ? "—" : `$${centsToPesos(plan.lateFeeCents)}`}
+                            ? `${formatCents(plan.policy.lateFeeDailyCents)} / día`
+                            : plan.lateFeeCents === 0 ? "—" : formatCents(plan.lateFeeCents)}
                         </td>
                       </>
                     )}

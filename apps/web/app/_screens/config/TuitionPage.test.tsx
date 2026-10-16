@@ -1,3 +1,5 @@
+import { StrictMode } from "react";
+
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -177,6 +179,35 @@ describe("copiar del ciclo anterior", () => {
 /**
  * Dinero que se perdía sin decir nada, y un tope prestado de otro campo.
  */
+/**
+ * ISSUE-010: con el recargo por día apagado la página envía `lateFeeCents: 0`
+ * y `dailyMode: false` — no se cobra NINGÚN recargo. La sección decía "recargo
+ * fijo" y la casilla "en vez del monto fijo mensual", que ya no existe.
+ */
+describe("lo que Cobranza dice que se cobra", () => {
+  it("sin el recargo por día dice 'sin recargo', que es lo que se guarda", async () => {
+    const user = userEvent.setup();
+    open();
+
+    const section = screen.getByRole("button", { name: /Cobranza/ });
+    expect(section).toHaveTextContent("sin recargo");
+    expect(section).not.toHaveTextContent(/recargo fijo/i);
+
+    await user.click(section);
+    expect(screen.queryByText(/monto fijo mensual/i)).toBeNull();
+  });
+
+  it("con el recargo por día dice el monto, con separador de miles", async () => {
+    const user = userEvent.setup();
+    open();
+    await user.click(screen.getByRole("button", { name: /Cobranza/ }));
+    await user.click(screen.getByLabelText("Cobrar recargo por día"));
+    await user.type(screen.getByLabelText("Recargo por día"), "1500");
+
+    expect(screen.getByRole("button", { name: /Cobranza/ })).toHaveTextContent("recargo por día · $1,500.00");
+  });
+});
+
 describe("los montos de cobranza no se tragan en silencio", () => {
   async function abrirCobranza(user: ReturnType<typeof userEvent.setup>): Promise<void> {
     open();
@@ -267,22 +298,137 @@ describe("un error dentro de una sección plegada", () => {
  * escalón de menos que cobra mal todo el año.
  */
 describe("un monto escrito y no agregado", () => {
-  it("no se guarda el tabulador tirando el tramo a medio capturar", async () => {
-    const user = userEvent.setup();
+  // La sección tiene su propio aviso en vivo ("Falta decir cuánto cuesta…"):
+  // se busca el reclamo del guardado por lo que dice.
+  const alertSaying = (text: RegExp): HTMLElement | undefined =>
+    screen.getAllByRole("alert").find((a) => text.test(a.textContent ?? ""));
+
+  async function conConcepto(user: ReturnType<typeof userEvent.setup>): Promise<void> {
     open();
     await user.type(screen.getByLabelText("Colegiatura mensual"), "2800");
     await user.type(screen.getByLabelText("Nuevo concepto"), "INSCRIPCIÓN");
     await user.click(screen.getByRole("button", { name: /Agregar concepto/ }));
+  }
+
+  // ISSUE-013: con Monto y "Vigente desde" llenos, guardar fallaba con "Falta
+  // decir cuánto cuesta INSCRIPCIÓN" hasta apretar "Agregar monto". Un tramo
+  // completo es una intención clara: se agrega solo y se guarda a la primera.
+  it("un tramo lleno se agrega solo y el tabulador se guarda a la primera", async () => {
+    const user = userEvent.setup();
+    await conConcepto(user);
     await user.type(screen.getByLabelText("Monto"), "4500");
     await user.type(screen.getByLabelText("Vigente desde"), "2026-08-01");
-    await user.click(screen.getByRole("button", { name: /Agregar monto/ }));
-
-    // Un SEGUNDO escalón, tecleado y no agregado.
-    await user.type(screen.getByLabelText("Monto"), "5200");
-    await user.type(screen.getByLabelText("Vigente desde"), "2026-10-01");
     await user.click(screen.getByRole("button", { name: "Guardar tabulador" }));
 
-    expect(screen.getByRole("alert")).toHaveTextContent(/INSCRIPCIÓN/);
+    expect(finance.upsertTuitionPlan).toHaveBeenCalledTimes(1);
+    expect(finance.upsertTuitionPlan).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        enrollmentConcepts: [
+          { name: "INSCRIPCIÓN", tiers: [{ effectiveFrom: "2026-08-01", effectiveTo: "", amountCents: 450000 }] },
+        ],
+      }),
+    );
+  });
+
+  // QA de T7: editando un tabulador que ya existe, en el navegador (React en
+  // StrictMode monta, desmonta y vuelve a montar), el tramo escrito se perdía
+  // sin aviso: el ensayo de desmontaje vaciaba el ref y escribir en la tarjeta
+  // no repintaba la sección que lo vuelve a llenar.
+  it("en StrictMode, el tramo escrito de un tabulador existente se guarda", async () => {
+    const user = userEvent.setup();
+    render(
+      <StrictMode>
+        <TuitionPage cycle={CYCLE} level={LEVEL} plan={{ ...PREVIOUS, cycleId: CYCLE.id }} onClose={vi.fn()} onSaved={vi.fn()} />
+      </StrictMode>,
+    );
+    await user.type(screen.getByLabelText("Monto"), "4600");
+    await user.type(screen.getByLabelText("Vigente desde"), "2026-11-01");
+    await user.click(screen.getByRole("button", { name: "Guardar tabulador" }));
+
+    expect(finance.upsertTuitionPlan).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        enrollmentConcepts: [{
+          name: "INSCRIPCIÓN",
+          tiers: [
+            { effectiveFrom: "2025-08-31", effectiveTo: "", amountCents: 450000 },
+            { effectiveFrom: "2026-11-01", effectiveTo: "", amountCents: 460000 },
+          ],
+        }],
+      }),
+    );
+  });
+
+  it("un SEGUNDO escalón lleno se suma al que ya estaba, en orden de fecha", async () => {
+    const user = userEvent.setup();
+    await conConcepto(user);
+    await user.type(screen.getByLabelText("Monto"), "5200");
+    await user.type(screen.getByLabelText("Vigente desde"), "2026-10-01");
+    await user.click(screen.getByRole("button", { name: /Agregar monto/ }));
+    await user.type(screen.getByLabelText("Monto"), "4500");
+    await user.type(screen.getByLabelText("Vigente desde"), "2026-08-01");
+    await user.type(screen.getByLabelText("Vigente hasta (opcional)"), "2026-09-30");
+    await user.click(screen.getByRole("button", { name: "Guardar tabulador" }));
+
+    expect(finance.upsertTuitionPlan).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        enrollmentConcepts: [{
+          name: "INSCRIPCIÓN",
+          tiers: [
+            { effectiveFrom: "2026-08-01", effectiveTo: "2026-09-30", amountCents: 450000 },
+            { effectiveFrom: "2026-10-01", effectiveTo: "", amountCents: 520000 },
+          ],
+        }],
+      }),
+    );
+  });
+
+  it("agregado al guardar, queda en la lista y el borrador se vacía: otro clic no lo duplica", async () => {
+    const user = userEvent.setup();
+    await conConcepto(user);
+    // Un rango al revés hace fallar el guardado DESPUÉS de agregar el tramo.
+    await user.type(screen.getByLabelText("Fecha de inicio de inscripción"), "2026-07-01");
+    await user.type(screen.getByLabelText("Fecha límite de inscripción"), "2026-06-01");
+    await user.type(screen.getByLabelText("Monto"), "4500");
+    await user.type(screen.getByLabelText("Vigente desde"), "2026-08-01");
+    await user.click(screen.getByRole("button", { name: "Guardar tabulador" }));
+    await user.click(screen.getByRole("button", { name: "Guardar tabulador" }));
+
+    expect(finance.upsertTuitionPlan).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Monto")).toHaveValue("");
+    expect(screen.getAllByRole("button", { name: /Quitar el monto de \$4,500\.00/ })).toHaveLength(1);
+  });
+
+  it("un tramo a medias no se guarda: dice que falta la fecha", async () => {
+    const user = userEvent.setup();
+    await conConcepto(user);
+    await user.type(screen.getByLabelText("Monto"), "4500");
+    await user.click(screen.getByRole("button", { name: "Guardar tabulador" }));
+
+    expect(alertSaying(/INSCRIPCIÓN.*Vigente desde/)).toBeDefined();
+    expect(finance.upsertTuitionPlan).not.toHaveBeenCalled();
+  });
+
+  it("un tramo a medias no se guarda: dice que falta el monto", async () => {
+    const user = userEvent.setup();
+    await conConcepto(user);
+    await user.type(screen.getByLabelText("Vigente desde"), "2026-08-01");
+    await user.click(screen.getByRole("button", { name: "Guardar tabulador" }));
+
+    expect(alertSaying(/INSCRIPCIÓN.*falta el monto/)).toBeDefined();
+    expect(finance.upsertTuitionPlan).not.toHaveBeenCalled();
+  });
+
+  it("un monto que no se entiende no se vuelve otro: se reclama", async () => {
+    const user = userEvent.setup();
+    await conConcepto(user);
+    await user.type(screen.getByLabelText("Monto"), "45oo");
+    await user.type(screen.getByLabelText("Vigente desde"), "2026-08-01");
+    await user.click(screen.getByRole("button", { name: "Guardar tabulador" }));
+
+    expect(alertSaying(/no se entiende/)).toBeDefined();
     expect(finance.upsertTuitionPlan).not.toHaveBeenCalled();
   });
 
