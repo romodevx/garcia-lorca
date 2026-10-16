@@ -35,16 +35,16 @@ func groupRecordsFixture(t *testing.T, n int) (group, other, active, withdrawn s
 	moved := seedStudent(t, tenantT8, id("d8000000", 3), curp(3))
 	elsewhere := seedStudent(t, tenantT8, id("d8000000", 4), curp(4))
 	enrActive, enrWithdrawn, enrMoved, enrElsewhere := id("e8000000", 1), id("e8000000", 2), id("e8000000", 3), id("e8000000", 4)
-	require.NoError(t, repo.CreateEnrollment(ctx, enrollment(t, enrActive, tenantT8, active, group)))
-	require.NoError(t, repo.CreateEnrollment(ctx, enrollment(t, enrWithdrawn, tenantT8, withdrawn, group)))
+	require.NoError(t, createRoomy(ctx, repo, enrollment(t, enrActive, tenantT8, active, group)))
+	require.NoError(t, createRoomy(ctx, repo, enrollment(t, enrWithdrawn, tenantT8, withdrawn, group)))
 	require.NoError(t, repo.SetEnrollmentStatus(ctx, enrWithdrawn, domain.EnrollmentStatusWithdrawn))
-	require.NoError(t, repo.CreateEnrollment(ctx, enrollment(t, enrMoved, tenantT8, moved, group)))
+	require.NoError(t, createRoomy(ctx, repo, enrollment(t, enrMoved, tenantT8, moved, group)))
 	move, err := domain.NewEnrollmentTransfer(id("78000000", 1), tenantT8, enrMoved, group, other, "balanceo", enrollClock.AddDate(0, 0, 3))
 	require.NoError(t, err)
 	require.NoError(t, repo.TransferEnrollment(ctx, ports.TransferCommand{
 		EnrollmentID: enrMoved, To: ports.GroupSeats{ID: other, Name: "1° B", Capacity: 30}, Transfer: move,
 	}))
-	require.NoError(t, repo.CreateEnrollment(ctx, enrollment(t, enrElsewhere, tenantT8, elsewhere, other)))
+	require.NoError(t, createRoomy(ctx, repo, enrollment(t, enrElsewhere, tenantT8, elsewhere, other)))
 	return group, other, active, withdrawn
 }
 

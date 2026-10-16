@@ -32,7 +32,7 @@ const (
 
 // CreateEnrollment inserts a new enrollment. A duplicate (student, cycle) per
 // tenant is KindConflict; a dangling student_id is KindInvalid.
-func (r *Repository) CreateEnrollment(ctx context.Context, e domain.Enrollment) error {
+func (r *Repository) CreateEnrollment(ctx context.Context, e domain.Enrollment, seats ports.GroupSeats) error {
 	model := enrollmentFromDomain(e)
 	return r.withTenant(ctx, func(tx *gorm.DB) error {
 		student, err := lockStudentForEnrollment(tx, e.StudentID())
@@ -40,6 +40,9 @@ func (r *Repository) CreateEnrollment(ctx context.Context, e domain.Enrollment) 
 			return err
 		}
 		if err := refuseTerminalAdmission(student); err != nil {
+			return err
+		}
+		if err := reserveSeat(tx, seats); err != nil {
 			return err
 		}
 		if err := tx.Create(&model).Error; err != nil {
@@ -126,25 +129,8 @@ func (r *Repository) TransferEnrollment(ctx context.Context, cmd ports.TransferC
 		if err := refuseTerminalAdmission(student); err != nil {
 			return err
 		}
-		// Seats first, under the same per-group lock the by-grade path takes, so
-		// two moves into the last seat cannot both win.
-		if err := tx.Exec(`SELECT pg_advisory_xact_lock(hashtext(?))`, cmd.To.ID).Error; err != nil {
-			return glerrors.Wrap(glerrors.KindInternal, "reserving the group", err)
-		}
-		var taken int64
-		if err := tx.Model(&enrollmentModel{}).
-			Where("group_id = ? AND status = ?", cmd.To.ID, domain.EnrollmentStatusActive.String()).
-			Count(&taken).Error; err != nil {
-			return glerrors.Wrap(glerrors.KindInternal, "counting the group", err)
-		}
-		// A group nobody sized is refused as the by-grade path refuses it —
-		// but saying so, so the director fixes the size instead of hunting
-		// for seats that were never counted.
-		if cmd.To.Capacity <= 0 {
-			return glerrors.New(glerrors.KindConflict, "ese grupo no tiene cupo definido: fíjalo en Configuración")
-		}
-		if taken >= int64(cmd.To.Capacity) {
-			return glerrors.New(glerrors.KindConflict, "ese grupo ya no tiene lugares")
+		if err := reserveSeat(tx, cmd.To); err != nil {
+			return err
 		}
 
 		if err := tx.Create(&model).Error; err != nil {
@@ -489,6 +475,31 @@ func refuseTerminalAdmission(student studentModel) error {
 	}
 	if status.IsTerminal() {
 		return glerrors.New(glerrors.KindConflict, "student admission is terminal")
+	}
+	return nil
+}
+
+// reserveSeat takes the group's seat lock and refuses a group with no free
+// seat — the rule a transfer and a placement in a chosen group share, under
+// the same per-group lock the by-grade path takes, so two placements into the
+// last seat cannot both win. A group nobody sized is refused as the by-grade
+// path refuses it, but saying so, so the director fixes the size instead of
+// hunting for seats that were never counted.
+func reserveSeat(tx *gorm.DB, g ports.GroupSeats) error {
+	if err := tx.Exec(`SELECT pg_advisory_xact_lock(hashtext(?))`, g.ID).Error; err != nil {
+		return glerrors.Wrap(glerrors.KindInternal, "reserving the group", err)
+	}
+	var taken int64
+	if err := tx.Model(&enrollmentModel{}).
+		Where("group_id = ? AND status = ?", g.ID, domain.EnrollmentStatusActive.String()).
+		Count(&taken).Error; err != nil {
+		return glerrors.Wrap(glerrors.KindInternal, "counting the group", err)
+	}
+	if g.Capacity <= 0 {
+		return glerrors.New(glerrors.KindConflict, "ese grupo no tiene cupo definido: fíjalo en Configuración")
+	}
+	if taken >= int64(g.Capacity) {
+		return glerrors.New(glerrors.KindConflict, "ese grupo ya no tiene lugares")
 	}
 	return nil
 }

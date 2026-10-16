@@ -20,8 +20,8 @@ func TestListTransfersIsThePupilsHistory(t *testing.T) {
 	pupil := seedStudent(t, tenantA, "dddddddd-0000-0000-0000-000000000601", "HEGB050312HDFRNN61")
 	other := seedStudent(t, tenantA, "dddddddd-0000-0000-0000-000000000602", "HEGB050312HDFRNN62")
 	const enrPupil, enrOther = "e0000000-0000-0000-0000-000000000601", "e0000000-0000-0000-0000-000000000602"
-	require.NoError(t, repo.CreateEnrollment(ctx, enrollment(t, enrPupil, tenantA, pupil, groupOne)))
-	require.NoError(t, repo.CreateEnrollment(ctx, enrollment(t, enrOther, tenantA, other, groupOne)))
+	require.NoError(t, createRoomy(ctx, repo, enrollment(t, enrPupil, tenantA, pupil, groupOne)))
+	require.NoError(t, createRoomy(ctx, repo, enrollment(t, enrOther, tenantA, other, groupOne)))
 
 	first, err := domain.NewEnrollmentTransfer("70000000-0000-0000-0000-000000000601", tenantA, enrPupil, groupOne, groupTwo, "balanceo", enrollClock.AddDate(0, 0, 10))
 	require.NoError(t, err)
@@ -54,7 +54,7 @@ func TestAnEndedEnrollmentCarriesItsEndInstant(t *testing.T) {
 	ctx := context.Background()
 	pupil := seedStudent(t, tenantA, "dddddddd-0000-0000-0000-000000000603", "HEGB050312HDFRNN63")
 	const enrID = "e0000000-0000-0000-0000-000000000603"
-	require.NoError(t, repo.CreateEnrollment(ctx, enrollment(t, enrID, tenantA, pupil, groupOne)))
+	require.NoError(t, createRoomy(ctx, repo, enrollment(t, enrID, tenantA, pupil, groupOne)))
 
 	active, err := repo.GetEnrollment(ctx, enrID)
 	require.NoError(t, err)
@@ -74,8 +74,8 @@ func TestListTransfersIntoGroupIsTheClassListHistory(t *testing.T) {
 	a := seedStudent(t, tenantA, "dddddddd-0000-0000-0000-000000000611", "HEGB050312HDFRNN71")
 	b := seedStudent(t, tenantA, "dddddddd-0000-0000-0000-000000000612", "HEGB050312HDFRNN72")
 	const enrA, enrB = "e0000000-0000-0000-0000-000000000611", "e0000000-0000-0000-0000-000000000612"
-	require.NoError(t, repo.CreateEnrollment(ctx, enrollment(t, enrA, tenantA, a, groupOne)))
-	require.NoError(t, repo.CreateEnrollment(ctx, enrollment(t, enrB, tenantA, b, groupOne)))
+	require.NoError(t, createRoomy(ctx, repo, enrollment(t, enrA, tenantA, a, groupOne)))
+	require.NoError(t, createRoomy(ctx, repo, enrollment(t, enrB, tenantA, b, groupOne)))
 
 	intoTwoLate, err := domain.NewEnrollmentTransfer("70000000-0000-0000-0000-000000000611", tenantA, enrA, groupOne, groupTwo, "balanceo", enrollClock.AddDate(0, 0, 30))
 	require.NoError(t, err)

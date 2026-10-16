@@ -179,7 +179,10 @@ type GroupSeats struct {
 type EnrollmentRepository interface {
 	// CreateEnrollment inserts a new enrollment. A duplicate (student, cycle) per
 	// tenant is KindConflict.
-	CreateEnrollment(ctx context.Context, e domain.Enrollment) error
+	// CreateEnrollment places e in the chosen group (seats), refusing a full
+	// group or one with no size, under the same per-group lock as the other
+	// placements.
+	CreateEnrollment(ctx context.Context, e domain.Enrollment, seats GroupSeats) error
 	// CreateEnrollmentInFirstFreeGroup places a pupil in the first of `groups`
 	// that still has room, and returns which one, ALL INSIDE ONE TRANSACTION.
 	//

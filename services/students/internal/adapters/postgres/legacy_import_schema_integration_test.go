@@ -52,7 +52,7 @@ func TestEnrollmentOriginDefaultsToManualAndIsChecked(t *testing.T) {
 	ctx := context.Background()
 	sid := seedStudent(t, tenantA, "aaaaaaaa-0019-0000-0000-000000000010", "OAAA050312MDFRNN04")
 	repo := appRepo(t, tenantA)
-	if err := repo.CreateEnrollment(ctx, enrollment(t, "e0190000-0000-0000-0000-000000000001", tenantA, sid, groupOne)); err != nil {
+	if err := createRoomy(ctx, repo, enrollment(t, "e0190000-0000-0000-0000-000000000001", tenantA, sid, groupOne)); err != nil {
 		t.Fatalf("create enrollment: %v", err)
 	}
 	if n, err := repo.CountAsTenant(ctx, "SELECT count(*) FROM enrollments WHERE student_id = ? AND origin = 'manual'", sid); err != nil || n != 1 {

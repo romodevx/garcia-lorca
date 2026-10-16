@@ -136,8 +136,9 @@ func (s *EnrollmentService) Enroll(ctx context.Context, studentID, groupID, term
 	if err != nil {
 		return domain.Enrollment{}, err
 	}
-	if err := s.enrollments.CreateEnrollment(ctx, enrollment); err != nil {
-		return domain.Enrollment{}, err // KindConflict on duplicate propagates
+	seats := ports.GroupSeats{ID: grp.ID, Name: grp.Name, CycleID: grp.CycleID, Capacity: grp.Capacity}
+	if err := s.enrollments.CreateEnrollment(ctx, enrollment, seats); err != nil {
+		return domain.Enrollment{}, err // KindConflict on duplicate or no seat propagates
 	}
 	// The record follows the placement. Both enrolment paths write it, so a
 	// pupil's file can never name a group they are not in. The ADMISSION status

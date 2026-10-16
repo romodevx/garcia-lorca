@@ -85,7 +85,7 @@ func TestEnrollmentOriginRoundTrips(t *testing.T) {
 	sid := seedStudent(t, tenantA, "aaaaaaaa-0b00-0000-0000-000000000020", "BAAG050312MDFRNN09")
 	repo := appRepo(t, tenantA)
 	e := enrollment(t, "e0b00000-0000-0000-0000-000000000001", tenantA, sid, groupOne).WithOrigin(domain.EnrollmentOriginImport)
-	if err := repo.CreateEnrollment(ctx, e); err != nil {
+	if err := repo.CreateEnrollment(ctx, e, roomFor(e)); err != nil {
 		t.Fatalf("CreateEnrollment: %v", err)
 	}
 	got, err := repo.GetEnrollment(ctx, e.ID())
