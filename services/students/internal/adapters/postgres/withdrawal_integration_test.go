@@ -13,6 +13,8 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	studentsv1 "github.com/garcia-lorca/gen/go/garcialorca/students/v1"
+	glerrors "github.com/garcia-lorca/pkg/errors"
+	pgadapter "github.com/garcia-lorca/services/students/internal/adapters/postgres"
 	"github.com/garcia-lorca/services/students/internal/domain"
 	"github.com/garcia-lorca/services/students/internal/ports"
 )
@@ -26,6 +28,7 @@ func TestWithdrawalAndOutboxAreCommittedAndRelayed(t *testing.T) {
 	const cycleID = "cccccccc-0000-0000-0000-000000002001"
 	repo := appRepo(t, withdrawalTenant)
 	seedStudent(t, withdrawalTenant, studentID, "WITA050312MDFRNN01")
+	markStudentEnrolled(t, repo, studentID, cycleID)
 	enrollment, err := domain.NewEnrollment(enrollmentID, withdrawalTenant, studentID, cycleID,
 		"dddddddd-0000-0000-0000-000000002001", "", domain.EnrollmentStatusActive, time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC))
 	require.NoError(t, err)
@@ -38,13 +41,16 @@ func TestWithdrawalAndOutboxAreCommittedAndRelayed(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "se mudó", stored.WithdrawalReason())
 	assert.Equal(t, withdrawn.WithdrawnOn(), stored.WithdrawnOn())
+	student, err := repo.FindByID(ctx, studentID)
+	require.NoError(t, err)
+	assert.Equal(t, domain.AdmissionWithdrawn, student.Status())
 
 	var sent []ports.OutboxEvent
 	n, err := repo.DrainOutbox(ctx, 10, func(_ context.Context, event ports.OutboxEvent) error {
 		// If publication still holds the claim transaction's row lock, the
 		// independent connection cannot lock the same event here.
 		var unlockedID string
-		if err := superDB.Raw(`SELECT id FROM students_outbox WHERE tenant_id = ? AND event_type = 'StudentWithdrawn' AND published_at IS NULL ORDER BY created_at DESC LIMIT 1 FOR UPDATE NOWAIT`, withdrawalTenant).Scan(&unlockedID).Error; err != nil {
+		if err := superDB.Raw(`SELECT id FROM students_outbox WHERE tenant_id = ? AND event_type = ? AND published_at IS NULL ORDER BY created_at DESC LIMIT 1 FOR UPDATE NOWAIT`, withdrawalTenant, event.Type).Scan(&unlockedID).Error; err != nil {
 			return err
 		}
 		if unlockedID == "" {
@@ -54,16 +60,115 @@ func TestWithdrawalAndOutboxAreCommittedAndRelayed(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
-	assert.Equal(t, 1, n)
-	require.Len(t, sent, 1)
-	assert.Equal(t, "StudentWithdrawn", sent[0].Type)
-	assert.Equal(t, withdrawalTenant, sent[0].TenantID)
+	assert.Equal(t, 2, n)
+	require.Len(t, sent, 2)
+	events := map[string]ports.OutboxEvent{}
+	for _, event := range sent {
+		events[event.Type] = event
+	}
+	assert.Equal(t, withdrawalTenant, events["StudentWithdrawn"].TenantID)
 	var event studentsv1.StudentWithdrawn
-	require.NoError(t, proto.Unmarshal(sent[0].Payload, &event))
+	require.NoError(t, proto.Unmarshal(events["StudentWithdrawn"].Payload, &event))
 	assert.Equal(t, studentID, event.GetStudentId())
 	assert.Equal(t, cycleID, event.GetCycleId())
 	assert.Equal(t, enrollmentID, event.GetEnrollmentId())
 	assert.Equal(t, "2026-10-01", event.GetWithdrawnOn())
+	var statusEvent studentsv1.AdmissionStatusChanged
+	require.NoError(t, proto.Unmarshal(events["AdmissionStatusChanged"].Payload, &statusEvent))
+	assert.Equal(t, studentID, statusEvent.GetStudentId())
+	assert.Equal(t, studentsv1.AdmissionStatus_ADMISSION_STATUS_ENROLLED, statusEvent.GetPreviousStatus())
+	assert.Equal(t, studentsv1.AdmissionStatus_ADMISSION_STATUS_WITHDRAWN, statusEvent.GetNewStatus())
+}
+
+func TestWithdrawalKeepsAdmissionStatusOnlyForANewerActiveEnrollment(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		suffix     string
+		curpSuffix string
+		otherDate  time.Time
+		wantStatus domain.AdmissionStatus
+	}{
+		{name: "older active enrollment from a previous cycle does not count", suffix: "007", curpSuffix: "04", otherDate: time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC), wantStatus: domain.AdmissionWithdrawn},
+		{name: "newer active enrollment keeps admission status", suffix: "008", curpSuffix: "05", otherDate: time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC), wantStatus: domain.AdmissionEnrolled},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			studentID := "aaaaaaaa-0000-0000-0000-000000000" + tc.suffix
+			currentID := "bbbbbbbb-0000-0000-0000-000000000" + tc.suffix
+			otherID := "bbbbbbbb-0000-0000-0000-000000001" + tc.suffix
+			currentCycle := "cccccccc-0000-0000-0000-000000000" + tc.suffix
+			otherCycle := "cccccccc-0000-0000-0000-000000001" + tc.suffix
+			currentGroup := "dddddddd-0000-0000-0000-000000000" + tc.suffix
+			otherGroup := "dddddddd-0000-0000-0000-000000001" + tc.suffix
+			repo := appRepo(t, withdrawalTenant)
+			seedStudent(t, withdrawalTenant, studentID, "WITA050312MDFRNN"+tc.curpSuffix)
+			markStudentEnrolled(t, repo, studentID, currentCycle)
+			current, err := domain.NewEnrollment(currentID, withdrawalTenant, studentID,
+				currentCycle, currentGroup, "", domain.EnrollmentStatusActive, time.Date(2026, 8, 1, 10, 0, 0, 0, time.UTC))
+			require.NoError(t, err)
+			other, err := domain.NewEnrollment(otherID, withdrawalTenant, studentID,
+				otherCycle, otherGroup, "", domain.EnrollmentStatusActive, tc.otherDate)
+			require.NoError(t, err)
+			require.NoError(t, repo.CreateEnrollment(ctx, current))
+			require.NoError(t, repo.CreateEnrollment(ctx, other))
+			withdrawn, err := current.Withdraw(time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC), "reason", time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC))
+			require.NoError(t, err)
+			require.NoError(t, repo.WithdrawEnrollment(ctx, withdrawn))
+
+			student, err := repo.FindByID(ctx, studentID)
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantStatus, student.Status())
+		})
+	}
+}
+
+func TestCreateEnrollmentRechecksTerminalAdmissionInsideTransaction(t *testing.T) {
+	ctx := context.Background()
+	const studentID = "aaaaaaaa-0000-0000-0000-000000002006"
+	const cycleID = "cccccccc-0000-0000-0000-000000002006"
+	repo := appRepo(t, withdrawalTenant)
+	seedStudent(t, withdrawalTenant, studentID, "WITA050312MDFRNN06")
+	require.NoError(t, superDB.Exec("UPDATE students SET admission_status = ? WHERE id = ?", domain.AdmissionWithdrawn.String(), studentID).Error)
+	enrollment, err := domain.NewEnrollment("bbbbbbbb-0000-0000-0000-000000002006", withdrawalTenant, studentID,
+		cycleID, "dddddddd-0000-0000-0000-000000002006", "", domain.EnrollmentStatusActive, time.Date(2026, 8, 1, 10, 0, 0, 0, time.UTC))
+	require.NoError(t, err)
+
+	err = repo.CreateEnrollment(ctx, enrollment)
+	require.Error(t, err)
+	assert.Equal(t, glerrors.KindConflict, glerrors.KindOf(err))
+	assert.Empty(t, func() []domain.Enrollment {
+		rows, listErr := repo.ListEnrollments(ctx, studentID, cycleID, "")
+		require.NoError(t, listErr)
+		return rows
+	}())
+}
+
+func TestStalePlacementUpdateDoesNotRestoreTerminalAdmission(t *testing.T) {
+	ctx := context.Background()
+	const studentID = "aaaaaaaa-0000-0000-0000-000000002009"
+	repo := appRepo(t, withdrawalTenant)
+	seedStudent(t, withdrawalTenant, studentID, "WITA050312MDFRNN09")
+	stale, err := repo.FindByID(ctx, studentID)
+	require.NoError(t, err)
+	stale.PlaceIn("1° A")
+	require.NoError(t, superDB.Exec("UPDATE students SET admission_status = ? WHERE id = ?", domain.AdmissionWithdrawn.String(), studentID).Error)
+
+	err = repo.Update(ctx, stale)
+	require.Equal(t, glerrors.KindConflict, glerrors.KindOf(err))
+	current, err := repo.FindByID(ctx, studentID)
+	require.NoError(t, err)
+	assert.Equal(t, domain.AdmissionWithdrawn, current.Status())
+}
+
+func markStudentEnrolled(t *testing.T, repo *pgadapter.Repository, studentID, cycleID string) {
+	t.Helper()
+	student, err := repo.FindByID(context.Background(), studentID)
+	require.NoError(t, err)
+	_, err = student.Accept()
+	require.NoError(t, err)
+	_, _, err = student.Enroll(cycleID)
+	require.NoError(t, err)
+	require.NoError(t, repo.Update(context.Background(), student))
 }
 
 func TestWithdrawalOutboxRetriesAndIsTenantIsolated(t *testing.T) {
@@ -72,6 +177,7 @@ func TestWithdrawalOutboxRetriesAndIsTenantIsolated(t *testing.T) {
 	const enrollmentID = "bbbbbbbb-0000-0000-0000-000000002002"
 	repo := appRepo(t, withdrawalTenant)
 	seedStudent(t, withdrawalTenant, studentID, "WITA050312MDFRNN02")
+	markStudentEnrolled(t, repo, studentID, "cccccccc-0000-0000-0000-000000002002")
 	enrollment, err := domain.NewEnrollment(enrollmentID, withdrawalTenant, studentID,
 		"cccccccc-0000-0000-0000-000000002002", "dddddddd-0000-0000-0000-000000002002", "", domain.EnrollmentStatusActive, time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC))
 	require.NoError(t, err)
@@ -102,6 +208,7 @@ func TestWithdrawalOutboxRetriesAndIsTenantIsolated(t *testing.T) {
 	other := appRepo(t, otherTenant)
 	otherStudentID := "aaaaaaaa-0000-0000-0000-000000002003"
 	seedStudent(t, otherTenant, otherStudentID, "WITA050312MDFRNN03")
+	markStudentEnrolled(t, other, otherStudentID, "cccccccc-0000-0000-0000-000000002003")
 	otherEnrollment, err := domain.NewEnrollment("bbbbbbbb-0000-0000-0000-000000002003", otherTenant, otherStudentID,
 		"cccccccc-0000-0000-0000-000000002003", "dddddddd-0000-0000-0000-000000002003", "", domain.EnrollmentStatusActive, time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC))
 	require.NoError(t, err)

@@ -149,7 +149,7 @@ func (s *Student) Reject(reason string) (AdmissionChangedEvent, error) {
 	return s.transition(AdmissionRejected, reason)
 }
 
-// Withdraw terminally withdraws an accepted or enrolled student.
+// Withdraw terminally withdraws a pending, accepted, or enrolled student.
 func (s *Student) Withdraw(reason string) (AdmissionChangedEvent, error) {
 	return s.transition(AdmissionWithdrawn, reason)
 }

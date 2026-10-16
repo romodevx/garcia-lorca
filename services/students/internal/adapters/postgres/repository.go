@@ -98,16 +98,26 @@ func (r *Repository) nextEnrollmentNumber(tx *gorm.DB) (string, error) {
 func (r *Repository) Update(ctx context.Context, s *domain.Student) error {
 	return r.withTenant(ctx, func(tx *gorm.DB) error {
 		res := tx.Model(&studentModel{}).Where("id = ?", s.ID()).Updates(map[string]any{
-			"admission_status": s.Status().String(),
-			"grade_group":      s.GradeGroup(),
-			"guardian_name":    s.GuardianName(),
-			"updated_at":       gorm.Expr("now()"),
+			// A stale placement update may arrive after a withdrawal commits.
+			// Preserve a terminal decision instead of restoring the old status.
+			"admission_status": gorm.Expr(`CASE WHEN admission_status IN (?, ?) AND admission_status <> ? THEN admission_status ELSE ? END`,
+				domain.AdmissionWithdrawn.String(), domain.AdmissionRejected.String(), s.Status().String(), s.Status().String()),
+			"grade_group":   s.GradeGroup(),
+			"guardian_name": s.GuardianName(),
+			"updated_at":    gorm.Expr("now()"),
 		})
 		if res.Error != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "updating student", res.Error)
 		}
 		if res.RowsAffected == 0 {
 			return glerrors.ErrNotFound
+		}
+		var persistedStatus string
+		if err := tx.Model(&studentModel{}).Select("admission_status").Where("id = ?", s.ID()).Scan(&persistedStatus).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "checking persisted admission status", err)
+		}
+		if (persistedStatus == domain.AdmissionWithdrawn.String() || persistedStatus == domain.AdmissionRejected.String()) && persistedStatus != s.Status().String() {
+			return glerrors.New(glerrors.KindConflict, "admission became terminal while updating")
 		}
 		return nil
 	})

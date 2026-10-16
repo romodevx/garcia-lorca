@@ -67,7 +67,7 @@ func (p *EventPublisher) PublishAdmissionChanged(ctx context.Context, ev domain.
 // PublishOutboxEvent relays a durable proto payload with the same routing
 // attributes as the other student events.
 func (p *EventPublisher) PublishOutboxEvent(ctx context.Context, ev ports.OutboxEvent) error {
-	if ev.Type != typeStudentWithdrawn {
+	if ev.Type != typeStudentWithdrawn && ev.Type != typeAdmissionStatusChanged {
 		return glerrors.New(glerrors.KindInvalid, "unsupported student outbox event")
 	}
 	return p.bus.Publish(ctx, pubsub.Message{Topic: topicStudentEvents, Data: ev.Payload, Attributes: map[string]string{

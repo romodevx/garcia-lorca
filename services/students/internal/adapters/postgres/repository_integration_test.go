@@ -421,9 +421,11 @@ func TestTransferAtomicRollsBackOnMissingEnrollment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new transfer: %v", err)
 	}
-	// The enrollment FK does not exist → the insert itself is rejected as Invalid.
-	if err := repo.TransferEnrollment(ctx, transferInto(ghostEnrollment, groupTwo, transfer)); glerrors.KindOf(err) != glerrors.KindInvalid {
-		t.Fatalf("transfer of missing enrollment: want KindInvalid, got %v", err)
+	// The transfer locks the pupil through its enrollment first (same lock
+	// order as a withdrawal), so a missing enrollment is NotFound before any
+	// insert is attempted.
+	if err := repo.TransferEnrollment(ctx, transferInto(ghostEnrollment, groupTwo, transfer)); glerrors.KindOf(err) != glerrors.KindNotFound {
+		t.Fatalf("transfer of missing enrollment: want KindNotFound, got %v", err)
 	}
 	if n := countTransfers(t, tenantA, ghostEnrollment); n != 0 {
 		t.Errorf("a transfer row leaked after a failed transfer: %d rows", n)

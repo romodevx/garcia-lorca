@@ -636,6 +636,20 @@ func TestPayingTheInscriptionIsWhatEnrolsThem(t *testing.T) {
 	}
 }
 
+func TestMarkInscriptionPaidDoesNotPublishWhenUpdatePreservesTerminalStatus(t *testing.T) {
+	svc, students, _, _, pub := newEnrollService(t)
+	seedPendingApplicant(t, students, "stu-raced-withdrawal")
+	students.updateErr = glerrors.New(glerrors.KindConflict, "admission became terminal while updating")
+
+	err := svc.MarkInscriptionPaid(context.Background(), "stu-raced-withdrawal")
+	if glerrors.KindOf(err) != glerrors.KindConflict {
+		t.Fatalf("MarkInscriptionPaid error kind = %v, want conflict", glerrors.KindOf(err))
+	}
+	if len(pub.changed) != 0 {
+		t.Errorf("published %d admission changes after terminal status was preserved, want 0", len(pub.changed))
+	}
+}
+
 // Payments arrive at least once. A redelivery must be a no-op, or Pub/Sub keeps
 // redelivering it forever.
 func TestMarkingAnAlreadyEnrolledPupilIsHarmless(t *testing.T) {
@@ -647,6 +661,26 @@ func TestMarkingAnAlreadyEnrolledPupilIsHarmless(t *testing.T) {
 
 	if err := svc.MarkInscriptionPaid(context.Background(), "stu-3"); err != nil {
 		t.Errorf("a redelivered payment must be a no-op, not a failure: %v", err)
+	}
+}
+
+func TestMarkInscriptionPaidAcknowledgesTerminalAdmissions(t *testing.T) {
+	for _, status := range []domain.AdmissionStatus{domain.AdmissionWithdrawn, domain.AdmissionRejected} {
+		t.Run(status.String(), func(t *testing.T) {
+			svc, students, _, _, pub := newEnrollService(t)
+			student := domain.Rehydrate(domain.NewApplicantParams{
+				ID: "terminal-student", TenantID: tenant, FirstName: "Ana", LastName: "Hernández",
+				Level: domain.RestoreLevel("e1000000-0000-0000-0000-000000000001", "Primaria"),
+			}, status)
+			students.byID[student.ID()] = student
+
+			if err := svc.MarkInscriptionPaid(context.Background(), student.ID()); err != nil {
+				t.Fatalf("terminal admission must be acknowledged as a no-op: %v", err)
+			}
+			if len(students.updated) != 0 || len(pub.changed) != 0 {
+				t.Errorf("terminal admission was changed: updates=%d events=%d", len(students.updated), len(pub.changed))
+			}
+		})
 	}
 }
 

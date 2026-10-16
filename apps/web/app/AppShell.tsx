@@ -491,6 +491,7 @@ export function AppShell(): ReactElement {
   const home = (): void => go({ screen: "dashboard" });
   // UX only: the gateway refuses PUT /students/{id} without students:update.
   const canEditStudents = principal?.permissions?.includes("students:update") === true;
+  const canEnrollStudents = principal?.permissions?.includes("students:enroll") === true;
   const editStudent = (studentId: string): void => go({ screen: "studentEdit", studentId });
   // A pupil's notes beside Registrar pago (T6). UX only: the gateway answers the
   // notes with students:read (and module_students), writes with notes_write.
@@ -697,6 +698,7 @@ export function AppShell(): ReactElement {
             key={visit}
             onBack={home}
             canCreate={principal?.permissions?.includes("students:create") === true}
+            canWithdraw={canEnrollStudents}
             onEdit={canEditStudents ? editStudent : undefined}
             canWriteNotes={principal?.permissions?.includes("students:notes_write") === true}
             canVoidAnyNote={principal?.permissions?.includes("students:notes_void") === true}

@@ -22,6 +22,8 @@ import {
 import { listCycles, listGradeLevels, listLabelledGroups, listLevels, type Cycle, type GradeLevel, type LabelledGroup, type Level } from "../../config/api";
 import { addNote, enrollIntoGrade, reissueCard, revokeCard, StudentsError, type Placement } from "../../students/api";
 import { VerifyCardDrawer } from "./VerifyCardDrawer";
+import { WithdrawPanel } from "./WithdrawDialog";
+import { dayWithYearLabel } from "../../_lib/localDate";
 import { todayISO } from "../attendance/sheetModel";
 
 import { API_URL } from "../../api-url";
@@ -565,6 +567,7 @@ function StudentSheet({
   onPlaced,
   onEdit,
   canRevokeCard = false,
+  canWithdraw = false,
 }: {
   st: Student;
   groups: readonly LabelledGroup[];
@@ -573,11 +576,12 @@ function StudentSheet({
   gradeLevels: readonly GradeLevel[];
   gradeLevelsFailed: boolean;
   onClose: () => void;
-  onPlaced: (message: string) => void;
+  onPlaced: (message: string, keepSheet?: boolean) => void;
   /** Absent when the caller cannot edit a pupil's file. */
   onEdit?: () => void;
   /** module_student_card and students:update: the card can be revoked here. */
   canRevokeCard?: boolean;
+  canWithdraw?: boolean;
 }): ReactElement {
   const rows: [string, string][] = [
     ["Matrícula", st.enrollmentNumber ?? ""],
@@ -593,13 +597,30 @@ function StudentSheet({
   const [reasonError, setReasonError] = useState<string | undefined>(undefined);
   const [refusal, setRefusal] = useState<string | undefined>(undefined);
   const [saving, setSaving] = useState(false);
+  const [withdrawOpen, setWithdrawOpen] = useState(false);
+  const withdrawTrigger = useRef<HTMLButtonElement>(null);
+  const withdrawnLine = useRef<HTMLParagraphElement>(null);
+  const previousWithdrawOpen = useRef(false);
+  const focusWithdrawResult = useRef(false);
+
+  useEffect(() => {
+    if (previousWithdrawOpen.current && !withdrawOpen) {
+      const target = focusWithdrawResult.current ? withdrawnLine.current : withdrawTrigger.current;
+      target?.focus();
+      focusWithdrawResult.current = false;
+    }
+    previousWithdrawOpen.current = withdrawOpen;
+  }, [withdrawOpen, current]);
 
   useEffect(() => {
     let alive = true;
     // An enrolment from last year stays "active" (a cycle's end closes nothing),
     // so only this cycle's counts.
     listEnrollments(API_URL, { studentId: st.id, cycleId })
-      .then((all) => { if (alive) setCurrent(all.find((e) => e.status === "active") ?? null); })
+      .then((all) => {
+        if (!alive) return;
+        setCurrent(all.find((e) => e.status === "active") ?? all.find((e) => e.status === "withdrawn") ?? null);
+      })
       // Not knowing is not "no group": offering "Inscribir" then would bring
       // back the second-enrolment 409 this sheet was fixed for.
       .catch(() => { if (alive) setCurrent("failed"); });
@@ -653,6 +674,7 @@ function StudentSheet({
       icon="students"
       size="sm"
       onClose={onClose}
+      dismissible={!withdrawOpen}
       header={
         <div style={{ padding: "26px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 16 }}>
           <Avatar name={formatStudentName(st)} color="forest" size={62} />
@@ -664,10 +686,11 @@ function StudentSheet({
         </div>
       }
       footer={
-        <>
+        !withdrawOpen && <>
           <Btn kind="ghost" icon="documents" style={{ flex: 1 }}>Documentos</Btn>
           {onEdit !== undefined && <Btn kind="ghost" onClick={onEdit} style={{ flex: 1 }}>Editar ficha</Btn>}
-          {ready && (
+          {canWithdraw && current !== null && current !== undefined && current !== "failed" && current.status === "active" && st.admissionStatus !== "withdrawn" && <Btn ref={withdrawTrigger} kind="ghost" onClick={() => setWithdrawOpen(true)} style={{ flex: 1, color: "var(--bad-fg)" }}>Dar de baja</Btn>}
+          {ready && current?.status !== "withdrawn" && st.admissionStatus !== "withdrawn" && (
             <Btn icon="check" onClick={() => void save()} style={{ flex: 1, opacity: saving ? 0.6 : 1 }}>
               {transferring ? "Cambiar de grupo" : "Inscribir"}
             </Btn>
@@ -675,7 +698,7 @@ function StudentSheet({
         </>
       }
     >
-      <>
+      {withdrawOpen && placed !== undefined ? <WithdrawPanel enrollment={placed} onBack={() => setWithdrawOpen(false)} onSuccess={(updated) => { focusWithdrawResult.current = true; setCurrent(updated); setWithdrawOpen(false); onPlaced("Alumno dado de baja", true); }} /> : <>
           {rows.map(([k, v]) => (
             <div key={k} style={{ display: "flex", justifyContent: "space-between", gap: 16, padding: "15px 0", borderBottom: "1px solid var(--border)" }}>
               <span style={{ fontSize: 14, color: "var(--text-muted)" }}>{k}</span>
@@ -694,7 +717,7 @@ function StudentSheet({
               No pudimos leer los grados de la escuela, así que no sabemos qué grupos son de su nivel. Recarga la página.
             </p>
           )}
-          {ready && (
+          {ready && current?.status !== "withdrawn" && st.admissionStatus !== "withdrawn" && (
             <div style={{ padding: "18px 0", display: "grid", gap: 10 }}>
               {transferring && (
                 <p style={{ fontSize: 14, color: "var(--text)" }}>
@@ -733,7 +756,8 @@ function StudentSheet({
               )}
             </div>
           )}
-      </>
+          {(st.admissionStatus === "withdrawn" || (current !== null && current !== undefined && current !== "failed" && current.status === "withdrawn")) && <p ref={withdrawnLine} tabIndex={-1} style={{ paddingTop: 18, color: "var(--text-muted)" }}>Baja el {placed?.withdrawnOn ? dayWithYearLabel(placed.withdrawnOn) : "—"}{placed?.withdrawalReason ? ` · ${placed.withdrawalReason}` : ""}</p>}
+      </>}
     </DrawerShell>
   );
 }
@@ -767,6 +791,7 @@ export interface StudentsScreenProps {
    * module_student_import on and students:import held.
    */
   onOpenImport?: () => void;
+  canWithdraw?: boolean;
 }
 
 /** What the school reads in Excel, in the order the table shows it. */
@@ -781,7 +806,7 @@ const EXPORT_COLUMNS: readonly CsvColumn<Row>[] = [
   { label: "Estado", value: (r) => statusOf(r.student.admissionStatus).label },
 ];
 
-export function StudentsScreen({ onBack, canCreate = true, onEdit, canWriteNotes = false, canVoidAnyNote = false, userId = "", canVerifyCard = false, canRevokeCard = false, canReadStatement = false, canCorrectPayments = false, onOpenImport }: StudentsScreenProps): ReactElement {
+export function StudentsScreen({ onBack, canCreate = true, onEdit, canWriteNotes = false, canVoidAnyNote = false, userId = "", canVerifyCard = false, canRevokeCard = false, canReadStatement = false, canCorrectPayments = false, onOpenImport, canWithdraw = false }: StudentsScreenProps): ReactElement {
   const [verifying, setVerifying] = useState(false);
   const [students, setStudents] = useState<Student[]>([]);
   const [cycles, setCycles] = useState<Cycle[]>([]);
@@ -990,8 +1015,8 @@ export function StudentsScreen({ onBack, canCreate = true, onEdit, canWriteNotes
         : `Alumno creado · ${formatStudentName(input)} quedó en ${placement.groupName}`,
     );
   };
-  const onPlaced = (message: string): void => {
-    setSheet(null);
+  const onPlaced = (message: string, keepSheet = false): void => {
+    if (!keepSheet) setSheet(null);
     reload();
     say(message);
   };
@@ -1166,7 +1191,7 @@ export function StudentsScreen({ onBack, canCreate = true, onEdit, canWriteNotes
       <button onClick={() => setAdd(true)} title="Nuevo alumno" style={{ position: "fixed", right: 32, bottom: FAB_BOTTOM, zIndex: 50, height: FAB_HEIGHT, padding: "0 26px", borderRadius: 99, display: "inline-flex", alignItems: "center", gap: 10, background: "var(--primary)", color: "var(--primary-ink)", fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 16.5, cursor: "pointer", boxShadow: "var(--shadow-fab)" }}><Icon name="plus" size={22} stroke={2.6} />Nuevo alumno</button>
 
       {add && <QuickAdd onClose={() => setAdd(false)} onSave={onSave} levels={levels} withNote={canWriteNotes} />}
-      {sheet !== null && <StudentSheet st={sheet} groups={groups} cycleId={groupsCycleId} gradeLevels={gradeLevels} gradeLevelsFailed={gradeLevelsFailed} onClose={() => setSheet(null)} onPlaced={onPlaced} onEdit={onEdit === undefined ? undefined : () => onEdit(sheet.id)} canRevokeCard={canRevokeCard} />}
+      {sheet !== null && <StudentSheet st={sheet} groups={groups} cycleId={groupsCycleId} gradeLevels={gradeLevels} gradeLevelsFailed={gradeLevelsFailed} onClose={() => setSheet(null)} onPlaced={onPlaced} onEdit={onEdit === undefined ? undefined : () => onEdit(sheet.id)} canRevokeCard={canRevokeCard} canWithdraw={canWithdraw} />}
       {notesOf !== null && (
         <StudentNotesDialog
           studentId={notesOf.id}

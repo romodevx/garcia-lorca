@@ -94,6 +94,10 @@ func (r *Repository) ArchiveLevel(ctx context.Context, batchID string, scope lev
 
 func archivePeople(tx *gorm.DB, batchID string, scope levelarchive.Scope) (levelarchive.Counts, error) {
 	counts := levelarchive.Counts{}
+	var studentIDs []string
+	if err := tx.Raw("SELECT id::text FROM students WHERE "+pupilsOfLevel+" ORDER BY id FOR UPDATE", scope.LevelID).Scan(&studentIDs).Error; err != nil {
+		return nil, glerrors.Wrap(glerrors.KindInternal, "locking the level's pupils", err)
+	}
 	steps := enrollmentSteps(scope)
 	for i, s := range steps {
 		n, err := levelTrash.Move(tx, batchID, i, s)

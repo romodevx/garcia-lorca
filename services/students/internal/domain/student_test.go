@@ -118,13 +118,26 @@ func TestInvalidTransitionsAreFailedPrecondition(t *testing.T) {
 	if _, _, err := s.Enroll("c"); glerrors.KindOf(err) != glerrors.KindConflict {
 		t.Errorf("enroll from pending: want KindConflict, got %v", err)
 	}
-	if _, err := s.Withdraw("x"); glerrors.KindOf(err) != glerrors.KindConflict {
-		t.Errorf("withdraw from pending: want KindConflict, got %v", err)
-	}
 	// After reject (terminal), nothing works.
 	_, _ = s.Reject("x")
 	if _, err := s.Accept(); glerrors.KindOf(err) != glerrors.KindConflict {
 		t.Errorf("accept from rejected: want KindConflict, got %v", err)
+	}
+}
+
+// A pupil "en trámite" (pending) already sits in a group with an active
+// enrollment; withdrawing it is a real baja, not a rejected application.
+func TestWithdrawFromPending(t *testing.T) {
+	s := newApplicant(t) // pending
+	ev, err := s.Withdraw("se cambia de ciudad")
+	if err != nil {
+		t.Fatalf("Withdraw from pending: %v", err)
+	}
+	if s.Status() != domain.AdmissionWithdrawn || ev.Previous != domain.AdmissionPending {
+		t.Errorf("status = %v, previous = %v; want withdrawn from pending", s.Status(), ev.Previous)
+	}
+	if _, err := s.Accept(); glerrors.KindOf(err) != glerrors.KindConflict {
+		t.Errorf("accept after withdrawal: want KindConflict, got %v", err)
 	}
 }
 

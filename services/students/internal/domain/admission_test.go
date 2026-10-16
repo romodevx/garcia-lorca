@@ -13,6 +13,7 @@ func TestAdmissionValidTransitions(t *testing.T) {
 	}{
 		{domain.AdmissionPending, domain.AdmissionAccepted},
 		{domain.AdmissionPending, domain.AdmissionRejected},
+		{domain.AdmissionPending, domain.AdmissionWithdrawn},
 		{domain.AdmissionAccepted, domain.AdmissionEnrolled},
 		{domain.AdmissionAccepted, domain.AdmissionWithdrawn},
 		{domain.AdmissionEnrolled, domain.AdmissionWithdrawn},
@@ -29,7 +30,6 @@ func TestAdmissionInvalidTransitions(t *testing.T) {
 		from, to domain.AdmissionStatus
 	}{
 		{domain.AdmissionPending, domain.AdmissionEnrolled},   // must go via accepted
-		{domain.AdmissionPending, domain.AdmissionWithdrawn},  // pending is rejected, not withdrawn
 		{domain.AdmissionRejected, domain.AdmissionAccepted},  // terminal
 		{domain.AdmissionWithdrawn, domain.AdmissionEnrolled}, // terminal
 		{domain.AdmissionEnrolled, domain.AdmissionAccepted},  // no going back

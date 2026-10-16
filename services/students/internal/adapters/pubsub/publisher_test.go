@@ -128,3 +128,35 @@ func TestPublishOutboxEventPreservesStudentWithdrawnRouting(t *testing.T) {
 		t.Fatalf("payload = %v, want %v", &got, event)
 	}
 }
+
+func TestPublishOutboxEventRelaysAdmissionStatusChanged(t *testing.T) {
+	bus := &fakeBus{}
+	pub := pubsubadapter.NewEventPublisher(bus)
+	event := &studentsv1.AdmissionStatusChanged{
+		StudentId: "student-a", TenantId: "tenant-a",
+		PreviousStatus: studentsv1.AdmissionStatus_ADMISSION_STATUS_ENROLLED,
+		NewStatus:      studentsv1.AdmissionStatus_ADMISSION_STATUS_WITHDRAWN,
+		Reason:         "moved",
+	}
+	payload, err := proto.Marshal(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := pub.PublishOutboxEvent(context.Background(), ports.OutboxEvent{TenantID: "tenant-a", Type: "AdmissionStatusChanged", Payload: payload}); err != nil {
+		t.Fatalf("PublishOutboxEvent: %v", err)
+	}
+	if len(bus.msgs) != 1 {
+		t.Fatalf("published %d messages, want one", len(bus.msgs))
+	}
+	msg := bus.msgs[0]
+	if msg.Topic != "student-events" || msg.Attributes["type"] != "AdmissionStatusChanged" || msg.Attributes["tenant_id"] != "tenant-a" {
+		t.Fatalf("routing = %q %v", msg.Topic, msg.Attributes)
+	}
+	var got studentsv1.AdmissionStatusChanged
+	if err := proto.Unmarshal(msg.Data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.GetStudentId() != event.GetStudentId() || got.GetPreviousStatus() != event.GetPreviousStatus() || got.GetNewStatus() != event.GetNewStatus() || got.GetReason() != event.GetReason() {
+		t.Fatalf("payload = %+v", &got)
+	}
+}

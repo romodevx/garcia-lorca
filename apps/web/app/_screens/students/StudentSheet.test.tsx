@@ -20,6 +20,8 @@ vi.mock("../../students/api", async (importOriginal) => ({
   listEnrollments: vi.fn(),
   enroll: vi.fn(),
   transfer: vi.fn(),
+  previewWithdrawal: vi.fn(),
+  withdraw: vi.fn(),
   revokeCard: vi.fn(),
   reissueCard: vi.fn(),
 }));
@@ -59,7 +61,7 @@ beforeEach(() => {
 });
 afterEach(() => vi.clearAllMocks());
 
-async function openSheet(user: ReturnType<typeof userEvent.setup>, props: { canRevokeCard?: boolean } = {}): Promise<HTMLElement> {
+async function openSheet(user: ReturnType<typeof userEvent.setup>, props: { canRevokeCard?: boolean; canWithdraw?: boolean } = {}): Promise<HTMLElement> {
   render(<StudentsScreen onBack={() => {}} {...props} />);
   await user.click(await screen.findByRole("button", { name: "Ver ficha de Cruz Ana" }));
   return screen.getByRole("dialog", { name: "Ficha del alumno" });
@@ -138,6 +140,44 @@ describe("la ficha de un alumno que ya tiene grupo", () => {
     expect(within(sheet).getByLabelText(/^Motivo/)).toHaveAttribute("aria-invalid", "true");
     expect(students.transfer).not.toHaveBeenCalled();
   });
+
+  it("muestra la vista previa y deja la ficha en solo lectura al dar de baja", async () => {
+    const user = userEvent.setup();
+    students.previewWithdrawal.mockResolvedValue({ toCancel: [{ id: "fee-1", description: "Colegiatura", dueDate: "2026-11-01", amountCents: 25000 }], toCancelCents: 25000, remainingDebtCents: 0 });
+    students.withdraw.mockResolvedValue({ id: "enr-1", studentId: "stu-1", cycleId: "c1", groupId: "g-pri-b", termId: "", status: "withdrawn", enrolledAt: "2026-08-31", withdrawnOn: "2026-10-15", withdrawalReason: "Cambio de escuela" });
+    const sheet = await openSheet(user, { canWithdraw: true });
+    await user.click(within(sheet).getByRole("button", { name: "Dar de baja" }));
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    expect(within(sheet).getAllByRole("button", { name: "Dar de baja" })).toHaveLength(1);
+    expect(await within(sheet).findByText(/Se cancelarán 1 cargos/)).toBeInTheDocument();
+    await user.type(within(sheet).getByLabelText("Motivo"), "Cambio de escuela");
+    const submit = sheet.querySelector<HTMLButtonElement>('form[aria-labelledby="withdraw-title"] button[type="submit"]');
+    expect(submit).not.toBeNull();
+    await user.click(submit!);
+    await waitFor(() => expect(students.withdraw).toHaveBeenCalledWith(expect.any(String), "enr-1", { withdrawnOn: expect.any(String), reason: "Cambio de escuela" }));
+    const baja = await within(sheet).findByText(/Baja el 15 oct 2026 · Cambio de escuela/);
+    expect(baja).toBeInTheDocument();
+    await waitFor(() => expect(baja).toHaveFocus());
+    expect(within(sheet).queryByRole("button", { name: "Cambiar de grupo" })).not.toBeInTheDocument();
+  });
+
+  it("returns focus to Dar de baja after closing the panel with unsaved text", async () => {
+    const user = userEvent.setup();
+    const sheet = await openSheet(user, { canWithdraw: true });
+    const trigger = within(sheet).getByRole("button", { name: "Dar de baja" });
+    await user.click(trigger);
+    await user.type(within(sheet).getByLabelText("Motivo"), "Se muda");
+    await user.keyboard("{Escape}");
+
+    expect(await within(sheet).findByText(/¿Descartar el motivo escrito\?/)).toBeInTheDocument();
+    await user.click(within(sheet).getByRole("button", { name: "Seguir editando" }));
+    expect(within(sheet).getByLabelText("Motivo")).toHaveValue("Se muda");
+    await user.keyboard("{Escape}");
+    await user.click(await within(sheet).findByRole("button", { name: "Descartar cambios" }));
+    const restoredTrigger = await within(sheet).findByRole("button", { name: "Dar de baja" });
+    await waitFor(() => expect(restoredTrigger).toHaveFocus());
+  });
+
 });
 
 describe("la ficha de un alumno sin grupo", () => {
@@ -177,6 +217,18 @@ describe("lo que la ficha lee", () => {
     const user = userEvent.setup();
     await openSheet(user);
     await waitFor(() => expect(students.listEnrollments).toHaveBeenCalledWith(expect.any(String), { studentId: "stu-1", cycleId: "c1" }));
+  });
+
+  it("muestra fecha y motivo de una inscripción ya dada de baja", async () => {
+    students.listStudents.mockResolvedValue([{ ...pupil("lv-pri"), admissionStatus: "withdrawn" }]);
+    students.listEnrollments.mockResolvedValue([{
+      id: "enr-withdrawn", studentId: "stu-1", cycleId: "c1", groupId: "g-pri-b", termId: "",
+      status: "withdrawn", enrolledAt: "2026-08-31", withdrawnOn: "2026-10-15", withdrawalReason: "motivo",
+    }]);
+    const user = userEvent.setup();
+    const sheet = await openSheet(user);
+
+    expect(await within(sheet).findByText("Baja el 15 oct 2026 · motivo")).toBeInTheDocument();
   });
 
   // Not reading the enrolment is not "no group": offering "Inscribir" then
