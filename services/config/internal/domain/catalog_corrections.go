@@ -79,7 +79,10 @@ func (u GradeLevelUsage) Refusal(gradeName string) error {
 		return nil
 	}
 	return refusal(glerrors.KindConflict, CodeGradeLevelInUse,
-		"No se puede borrar el grado "+gradeName+": tiene "+what+". Bórralos primero.")
+		// The way out must always work: a subject with grades can never be
+		// deleted, so renaming the grade is offered too (tech-lead, T8).
+		"No se puede borrar el grado "+gradeName+": tiene "+what+". Bórralos primero; "+
+			"si alguna materia ya tiene calificaciones, puedes cambiarle el nombre al grado.")
 }
 
 // GroupUsage is what config keeps of a group: its teaching assignments and the
@@ -101,7 +104,7 @@ func (u GroupUsage) Refusal(groupName string) error {
 		return nil
 	}
 	return refusal(glerrors.KindConflict, CodeGroupInUse,
-		"No se puede borrar el grupo "+groupName+": tiene "+what+". Quita primero sus clases asignadas.")
+		"No se puede borrar el grupo "+groupName+": tiene "+what+". "+blockers.FreeClassesFirst)
 }
 
 // CheckLevelOrder accepts proposed only when it is exactly the school's levels

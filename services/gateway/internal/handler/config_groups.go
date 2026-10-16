@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 
 	"golang.org/x/sync/errgroup"
@@ -69,9 +70,11 @@ func NewGroupEditHandler(deps GroupEditDeps) *GroupEditHandler {
 
 // The refusal for deleting a group something keeps.
 const (
-	codeGroupInUse    = "GROUP_IN_USE"
-	adviceKeepHistory = " Ese historial se conserva; puedes cambiarle el nombre."
-	adviceFreeClasses = " Quita primero sus clases asignadas."
+	codeGroupInUse = "GROUP_IN_USE"
+	// codeGroupRelabelPending: renamed in config, pupils' files not yet.
+	codeGroupRelabelPending = "GROUP_RELABEL_PENDING"
+	adviceKeepHistory       = " Ese historial se conserva; puedes cambiarle el nombre."
+	adviceFreeClasses       = " " + blockers.FreeClassesFirst
 )
 
 // RenameGroup handles PATCH /api/v1/config/groups/{id} with {name}. Config
@@ -100,7 +103,11 @@ func (h *GroupEditHandler) RenameGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := h.deps.Students.RefreshGroupName(r.Context(), group.ID, group.Name); err != nil {
-		writeConnectError(w, err)
+		// Config already holds the new name: saying "could not rename" would
+		// be false. The same request again finishes the relabel.
+		slog.WarnContext(r.Context(), "group renamed in config but pupils' files not relabelled", "group_id", group.ID, "error", err)
+		writeCodedError(w, http.StatusServiceUnavailable, codeGroupRelabelPending,
+			"El grupo ya se llama "+group.Name+", pero no se pudo actualizar en la ficha de sus alumnos. Guarda otra vez para terminar.")
 		return
 	}
 	writeJSON(w, http.StatusOK, toGroupResponse(group))

@@ -57,11 +57,11 @@ func TestGradeLevelUsageRefusal(t *testing.T) {
 	}{
 		"empty grade deletes": {domain.GradeLevelUsage{}, ""},
 		"groups and subjects": {domain.GradeLevelUsage{Groups: 2, Subjects: 8},
-			"No se puede borrar el grado 3°: tiene 2 grupos y 8 materias. Bórralos primero."},
+			"No se puede borrar el grado 3°: tiene 2 grupos y 8 materias. Bórralos primero; si alguna materia ya tiene calificaciones, puedes cambiarle el nombre al grado."},
 		"one period": {domain.GradeLevelUsage{EvaluationPeriods: 1},
-			"No se puede borrar el grado 3°: tiene 1 periodo de evaluación. Bórralos primero."},
+			"No se puede borrar el grado 3°: tiene 1 periodo de evaluación. Bórralos primero; si alguna materia ya tiene calificaciones, puedes cambiarle el nombre al grado."},
 		"all three": {domain.GradeLevelUsage{Groups: 1, Subjects: 1, EvaluationPeriods: 4},
-			"No se puede borrar el grado 3°: tiene 1 grupo, 1 materia y 4 periodos de evaluación. Bórralos primero."},
+			"No se puede borrar el grado 3°: tiene 1 grupo, 1 materia y 4 periodos de evaluación. Bórralos primero; si alguna materia ya tiene calificaciones, puedes cambiarle el nombre al grado."},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {

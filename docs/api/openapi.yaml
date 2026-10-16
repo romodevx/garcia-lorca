@@ -2716,7 +2716,7 @@ paths:
           content:
             text/plain:
               schema: { type: string }
-              example: 'No se puede borrar el grado 3°: tiene 2 grupos y 8 materias. Bórralos primero.'
+              example: 'No se puede borrar el grado 3°: tiene 2 grupos y 8 materias. Bórralos primero; si alguna materia ya tiene calificaciones, puedes cambiarle el nombre al grado.'
 
   /api/v1/config/groups/{id}:
     parameters:
@@ -2766,6 +2766,17 @@ paths:
             text/plain:
               schema: { type: string }
               example: Ya existe un grupo con ese nombre en este grado y ciclo.
+        '503':
+          description: >
+            Renamed in config, but the pupils' files could not be relabelled
+            (`X-Error-Code: GROUP_RELABEL_PENDING`). Sending the same request
+            again finishes it: both steps are idempotent.
+          headers:
+            X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
+          content:
+            text/plain:
+              schema: { type: string }
+              example: El grupo ya se llama B, pero no se pudo actualizar en la ficha de sus alumnos. Guarda otra vez para terminar.
     delete:
       tags: [config]
       summary: Delete a group that was never used

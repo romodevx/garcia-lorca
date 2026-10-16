@@ -43,3 +43,7 @@ func Describe(counts ...Count) string {
 		return strings.Join(parts[:len(parts)-1], ", ") + " y " + parts[len(parts)-1]
 	}
 }
+
+// FreeClassesFirst is the way out when only a group's teaching assignments
+// keep it: config and the gateway both refuse with it, so it lives once.
+const FreeClassesFirst = "Quita primero sus clases asignadas."

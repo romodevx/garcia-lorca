@@ -87,7 +87,7 @@ func TestDeleteGradeLevelRefusesWhileItHoldsSomethingAndNamesIt(t *testing.T) {
 
 	assert.Equal(t, glerrors.KindConflict, glerrors.KindOf(err))
 	assert.Equal(t, domain.CodeGradeLevelInUse, domain.RefusalCodeOf(err))
-	assert.Equal(t, "No se puede borrar el grado Grade-e3e3: tiene 1 grupo, 1 materia y 1 periodo de evaluación. Bórralos primero.",
+	assert.Equal(t, "No se puede borrar el grado Grade-e3e3: tiene 1 grupo, 1 materia y 1 periodo de evaluación. Bórralos primero; si alguna materia ya tiene calificaciones, puedes cambiarle el nombre al grado.",
 		glerrors.SafeMessage(err))
 	_, err = repo.GetGradeLevel(ctx, gradeID)
 	assert.NoError(t, err, "nothing was deleted")

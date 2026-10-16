@@ -300,7 +300,13 @@ func TestRenameGroupRefusals(t *testing.T) {
 		g := newGroupFixture()
 		g.students.refreshErr = connect.NewError(connect.CodeUnavailable, errors.New("down"))
 		rec := doPathReq(t, g.handler().RenameGroup, http.MethodPatch, "/api/v1/config/groups/"+grpT8, grpT8, `{"name":"B"}`)
-		assert.Equal(t, http.StatusInternalServerError, rec.Code)
+		// Review of T8: config already holds the new name, so a generic
+		// "could not rename" would be false. It says what happened and how to
+		// finish it.
+		assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
+		assert.Equal(t, "GROUP_RELABEL_PENDING", rec.Header().Get("X-Error-Code"))
+		assert.Contains(t, rec.Body.String(), "El grupo ya se llama B")
+		assert.Contains(t, rec.Body.String(), "Guarda otra vez")
 	})
 }
 
