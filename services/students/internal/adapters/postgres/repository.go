@@ -112,6 +112,13 @@ func (r *Repository) Update(ctx context.Context, s *domain.Student) error {
 		if res.RowsAffected == 0 {
 			return glerrors.ErrNotFound
 		}
+		var persistedStatus string
+		if err := tx.Model(&studentModel{}).Select("admission_status").Where("id = ?", s.ID()).Scan(&persistedStatus).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "checking persisted admission status", err)
+		}
+		if (persistedStatus == domain.AdmissionWithdrawn.String() || persistedStatus == domain.AdmissionRejected.String()) && persistedStatus != s.Status().String() {
+			return glerrors.New(glerrors.KindConflict, "admission became terminal while updating")
+		}
 		return nil
 	})
 }

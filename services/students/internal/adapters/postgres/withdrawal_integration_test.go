@@ -153,7 +153,8 @@ func TestStalePlacementUpdateDoesNotRestoreTerminalAdmission(t *testing.T) {
 	stale.PlaceIn("1° A")
 	require.NoError(t, superDB.Exec("UPDATE students SET admission_status = ? WHERE id = ?", domain.AdmissionWithdrawn.String(), studentID).Error)
 
-	require.NoError(t, repo.Update(ctx, stale))
+	err = repo.Update(ctx, stale)
+	require.Equal(t, glerrors.KindConflict, glerrors.KindOf(err))
 	current, err := repo.FindByID(ctx, studentID)
 	require.NoError(t, err)
 	assert.Equal(t, domain.AdmissionWithdrawn, current.Status())
