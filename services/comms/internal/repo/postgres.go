@@ -3,7 +3,9 @@ package repo
 import (
 	"context"
 	"errors"
+	"time"
 
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
@@ -15,6 +17,8 @@ import (
 
 // Compile-time proof the adapter satisfies the seam the service declares.
 var _ service.Repo = (*Repo)(nil)
+var _ service.PushTicketWriter = (*Repo)(nil)
+var _ service.PushReceiptStore = (*Repo)(nil)
 
 // maxListLimit caps the unpaginated reads, so neither a long-lived notification
 // feed nor a push fanout can pull an unbounded number of rows into memory. It is a DOCUMENTED bound, not a hidden one: the capped methods say so,
@@ -248,6 +252,80 @@ func (r *Repo) DeleteUserDevice(ctx context.Context, userID, token string) error
 		}
 		return nil
 	})
+}
+
+// StorePushTicket durably associates an Expo ticket id with the token it covers.
+func (r *Repo) StorePushTicket(ctx context.Context, ticketID, token string) error {
+	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		m := pushTicketModel{ID: uuid.NewString(), TenantID: r.tenantID, TicketID: ticketID, DeviceToken: token}
+		if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "tenant_id"}, {Name: "ticket_id"}}, DoNothing: true}).Create(&m).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "storing push ticket", err)
+		}
+		return nil
+	})
+}
+
+// DeletePushDevice removes a device after Expo reports its token unregistered.
+func (r *Repo) DeletePushDevice(ctx context.Context, token string) error {
+	return r.DeactivateDevices(ctx, []string{token})
+}
+
+// ListPushTickets returns up to limit tickets old enough for receipt lookup,
+// ordered by id for stable keyset pagination.
+func (r *Repo) ListPushTickets(ctx context.Context, before time.Time, afterID string, limit int) ([]service.PushTicket, error) {
+	var out []service.PushTicket
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		var rows []pushTicketModel
+		q := tx.Where("created_at <= ?", before)
+		if afterID != "" {
+			q = q.Where("id > ?::uuid", afterID)
+		}
+		if err := q.Order("id ASC").Limit(limit).Find(&rows).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "listing push tickets", err)
+		}
+		for _, row := range rows {
+			out = append(out, service.PushTicket{ID: row.ID, TicketID: row.TicketID, DeviceToken: row.DeviceToken, CreatedAt: row.CreatedAt, Attempts: row.Attempts})
+		}
+		return nil
+	})
+	return out, err
+}
+
+// DeletePushTicket removes a handled Expo ticket by its internal row id.
+func (r *Repo) DeletePushTicket(ctx context.Context, id string) error {
+	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		if err := tx.Where("id = ?", id).Delete(&pushTicketModel{}).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "deleting push ticket", err)
+		}
+		return nil
+	})
+}
+
+// MarkPushTicketChecked records that Expo has not produced a receipt yet.
+func (r *Repo) MarkPushTicketChecked(ctx context.Context, id string, checkedAt time.Time) error {
+	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		if err := tx.Model(&pushTicketModel{}).Where("id = ?", id).Update("checked_at", checkedAt).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "marking push ticket checked", err)
+		}
+		return nil
+	})
+}
+
+// RecordPushTicketFailure increments attempts and records the check time.
+func (r *Repo) RecordPushTicketFailure(ctx context.Context, id string, _ int, checkedAt time.Time) (int, error) {
+	var attempts int
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		if err := tx.Model(&pushTicketModel{}).Where("id = ?", id).Updates(map[string]any{
+			"attempts": gorm.Expr("attempts + 1"), "checked_at": checkedAt,
+		}).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "recording push ticket failure", err)
+		}
+		if err := tx.Model(&pushTicketModel{}).Select("attempts").Where("id = ?", id).Scan(&attempts).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "reading push ticket attempts", err)
+		}
+		return nil
+	})
+	return attempts, err
 }
 
 // translateFindErr maps GORM's "no row" into the shared NotFound sentinel and

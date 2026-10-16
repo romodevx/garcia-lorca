@@ -41,6 +41,8 @@ En `deploy/terraform`, configura `push_provider = "expo"` y `expo_access_token_e
 
 1. Inicia sesión en la app instalada, acepta el permiso de notificaciones y confirma que el dispositivo quedó registrado.
 2. Desde la interfaz web crea un aviso/operación que genere una notificación para un alumno con un tutor que tenga esa app instalada. La notificación aparece primero en el feed durable y luego se envía al teléfono.
-3. Revisa los logs de `comms` para confirmar que el provider Expo aceptó el envío. Expo devuelve tickets al enviar. El servicio ya elimina tokens que reporta como `DeviceNotRegistered` en esos tickets; la consulta posterior de receipts todavía debe quedar implementada antes de considerar completo el ciclo de limpieza.
+3. Revisa los logs de `comms` para confirmar que Expo aceptó el envío. El servicio guarda cada ticket exitoso junto con su token y consulta receipts en un barrido periódico (también al iniciar una instancia). Expo recomienda esperar 15 minutos antes de consultar. Un receipt exitoso elimina el ticket; `DeviceNotRegistered` elimina el dispositivo y el ticket. Otros errores se registran sin tokens ni datos personales, se reintentan hasta cinco veces y luego se descarta el ticket.
+
+En `deploy/terraform`, `push_provider` controla el envío (`"log"` por defecto o `"expo"`). `expo_access_token_enabled` monta `EXPO_ACCESS_TOKEN` desde Secret Manager; cuando se habilita, provee `expo_access_token` mediante una fuente segura durante `terraform apply`. El secreto no debe guardarse en Git ni en archivos `.tfvars`.
 
 Las credenciales APNs/FCM pertenecen al dueño del proyecto Expo y se mantienen en EAS. El token opcional de acceso del servidor pertenece a Secret Manager.

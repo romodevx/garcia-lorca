@@ -4,10 +4,8 @@
 // to APNs/FCM. The adapter only translates — a rendered notification plus its
 // target tokens → HTTP batches — and reports back the tokens Expo says are dead.
 //
-// Only push TICKETS are read. Expo can also report DeviceNotRegistered later, in
-// push RECEIPTS (/getReceipts); polling receipts needs a durable ticket store and
-// is a deliberate follow-up. Tickets already catch an uninstalled app on the next
-// push, which is the case that matters.
+// Successful ticket ids are stored for the receipts sweep; unregistered devices
+// are deleted as soon as either a ticket or receipt reports them dead.
 package expo
 
 import (
@@ -62,6 +60,7 @@ type Sender struct {
 	accessToken string
 	client      *http.Client
 	log         *slog.Logger
+	store       service.PushTicketWriter
 }
 
 // Option configures a Sender (functional options).
@@ -84,6 +83,12 @@ func WithLogger(log *slog.Logger) Option {
 			s.log = log
 		}
 	}
+}
+
+// WithTicketStore persists Expo tickets for the receipt checker and immediately
+// removes tokens Expo reports as unregistered in a send ticket.
+func WithTicketStore(store service.PushTicketWriter) Option {
+	return func(s *Sender) { s.store = store }
 }
 
 // NewSender builds a Sender with the default endpoint and timeout.
@@ -112,6 +117,7 @@ type message struct {
 type ticket struct {
 	Status  string `json:"status"`
 	Message string `json:"message"`
+	ID      string `json:"id"`
 	Details struct {
 		Error string `json:"error"`
 	} `json:"details"`
@@ -188,7 +194,23 @@ func (s *Sender) send(ctx context.Context, tokens []string, m service.PushMessag
 	if err := json.NewDecoder(res.Body).Decode(&parsed); err != nil {
 		return nil, fmt.Errorf("decoding expo push tickets: %w", err)
 	}
-	return deadTokens(tokens, parsed.Data), nil
+	var errs []error
+	for i, t := range parsed.Data {
+		if i >= len(tokens) {
+			break
+		}
+		if t.Status == "ok" && t.ID != "" && s.store != nil {
+			if err := s.store.StorePushTicket(ctx, t.ID, tokens[i]); err != nil {
+				errs = append(errs, fmt.Errorf("storing expo push ticket: %w", err))
+			}
+		}
+		if t.Status == ticketStatusError && t.Details.Error == errDeviceNotRegistered && s.store != nil {
+			if err := s.store.DeletePushDevice(ctx, tokens[i]); err != nil {
+				errs = append(errs, fmt.Errorf("deleting unregistered expo device: %w", err))
+			}
+		}
+	}
+	return deadTokens(tokens, parsed.Data), errors.Join(errs...)
 }
 
 // deadTokens pairs each ticket with the token at the same position (Expo answers

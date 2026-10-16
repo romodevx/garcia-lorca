@@ -199,6 +199,30 @@ type Sender interface {
 	Push(ctx context.Context, m PushMessage) (PushReport, error)
 }
 
+// PushTicket is the persisted provider ticket and its target device token.
+type PushTicket struct {
+	ID          string
+	TicketID    string
+	DeviceToken string
+	CreatedAt   time.Time
+	Attempts    int
+}
+
+// PushTicketWriter stores tickets and removes devices reported as dead.
+type PushTicketWriter interface {
+	StorePushTicket(context.Context, string, string) error
+	DeletePushDevice(context.Context, string) error
+}
+
+// PushReceiptStore supports the scheduled provider receipt sweep.
+type PushReceiptStore interface {
+	ListPushTickets(context.Context, time.Time, string, int) ([]PushTicket, error)
+	DeletePushTicket(context.Context, string) error
+	DeletePushDevice(context.Context, string) error
+	MarkPushTicketChecked(context.Context, string, time.Time) error
+	RecordPushTicketFailure(context.Context, string, int, time.Time) (int, error)
+}
+
 // Option configures optional CommsService collaborators (functional options).
 type Option func(*CommsService)
 

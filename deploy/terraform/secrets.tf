@@ -213,6 +213,20 @@ resource "google_secret_manager_secret" "expo_access_token" {
   depends_on = [google_project_service.apis]
 }
 
+resource "google_secret_manager_secret_version" "expo_access_token" {
+  count       = var.expo_access_token_enabled ? 1 : 0
+  secret      = google_secret_manager_secret.expo_access_token.id
+  secret_data = var.expo_access_token
+
+  lifecycle {
+    precondition {
+      condition     = var.expo_access_token != ""
+      error_message = "expo_access_token must be supplied from a secure source when expo_access_token_enabled = true."
+    }
+    ignore_changes = [secret_data]
+  }
+}
+
 # ---- Level-deletion token key (gateway, ADR 0021) --------------------------
 # HMAC key that signs the level-deletion preview token. It MUST be the same on
 # every gateway instance: without it each instance falls back to a per-process

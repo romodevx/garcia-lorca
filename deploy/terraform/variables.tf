@@ -322,3 +322,10 @@ variable "expo_access_token_enabled" {
   type        = bool
   default     = false
 }
+
+variable "expo_access_token" {
+  description = "Expo server access token. Supply only from a secure apply-time source when expo_access_token_enabled=true; never commit it to tfvars."
+  type        = string
+  default     = ""
+  sensitive   = true
+}

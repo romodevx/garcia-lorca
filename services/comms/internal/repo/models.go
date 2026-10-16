@@ -2,6 +2,20 @@ package repo
 
 import "time"
 
+// pushTicketModel is the durable Expo ticket and token association used by the
+// asynchronous receipt sweep.
+type pushTicketModel struct {
+	ID          string     `gorm:"column:id;primaryKey"`
+	TenantID    string     `gorm:"column:tenant_id"`
+	TicketID    string     `gorm:"column:ticket_id"`
+	DeviceToken string     `gorm:"column:device_token"`
+	CreatedAt   time.Time  `gorm:"column:created_at"`
+	CheckedAt   *time.Time `gorm:"column:checked_at"`
+	Attempts    int        `gorm:"column:attempts"`
+}
+
+func (pushTicketModel) TableName() string { return "push_tickets" }
+
 // notificationModel is the GORM row for `notifications`: one message materialised
 // for a student. StudentID is a cross-service UUID (students.students) validated
 // upstream — a plain column, never a FK. ReadAt is a POINTER because NULL is

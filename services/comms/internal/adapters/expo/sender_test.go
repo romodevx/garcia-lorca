@@ -35,6 +35,21 @@ type fakeExpo struct {
 	status  int // non-zero: answer the whole request with this status
 }
 
+type ticketStoreSpy struct {
+	tickets [][2]string
+	deleted []string
+}
+
+func (s *ticketStoreSpy) StorePushTicket(_ context.Context, id, token string) error {
+	s.tickets = append(s.tickets, [2]string{id, token})
+	return nil
+}
+
+func (s *ticketStoreSpy) DeletePushDevice(_ context.Context, token string) error {
+	s.deleted = append(s.deleted, token)
+	return nil
+}
+
 func (f *fakeExpo) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var batch []sentMessage
 	if err := json.NewDecoder(r.Body).Decode(&batch); err != nil {
@@ -132,6 +147,18 @@ func TestPushReportsUnregisteredDevices(t *testing.T) {
 	report, err := newSender(t, f).Push(context.Background(), m)
 	require.NoError(t, err)
 	assert.Equal(t, []string{all[3], all[120]}, report.Unregistered)
+}
+
+func TestPushStoresSuccessfulTicketsAndImmediatelyDeletesUnregisteredDevices(t *testing.T) {
+	all := tokens(2)
+	store := &ticketStoreSpy{}
+	f := &fakeExpo{dead: map[string]bool{all[1]: true}}
+	m := message
+	m.Tokens = all
+	_, err := newSender(t, f, expo.WithTicketStore(store)).Push(context.Background(), m)
+	require.NoError(t, err)
+	assert.Equal(t, [][2]string{{"ticket-0", all[0]}}, store.tickets)
+	assert.Equal(t, []string{all[1]}, store.deleted)
 }
 
 // A token that is not an Expo push token is never sent (it would fail the whole
