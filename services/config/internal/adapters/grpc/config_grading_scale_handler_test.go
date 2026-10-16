@@ -18,8 +18,8 @@ func TestSetLevelGradingScaleRoundTrip(t *testing.T) {
 
 	got, err := h.GetLevel(ctx(), connect.NewRequest(&configv1.GetLevelRequest{Id: id}))
 	require.NoError(t, err)
-	assert.Equal(t, &configv1.GradingScale{Enabled: true, MinHundredths: 500, MaxHundredths: 1000, Decimals: 1, PassingHundredths: 600},
-		got.Msg.GetLevel().GetGrading(), "a new primary level grades 5–10, one decimal, 6 to pass")
+	assert.Equal(t, &configv1.GradingScale{Enabled: true, MinHundredths: 500, MaxHundredths: 1000, Decimals: 0, PassingHundredths: 600},
+		got.Msg.GetLevel().GetGrading(), "a new primary level grades 5–10, whole numbers, 6 to pass")
 
 	want := &configv1.GradingScale{Enabled: true, MinHundredths: 0, MaxHundredths: 10000, Decimals: 2, PassingHundredths: 7000}
 	res, err := h.SetLevelGradingScale(ctx(), connect.NewRequest(&configv1.SetLevelGradingScaleRequest{Id: id, Grading: want}))
