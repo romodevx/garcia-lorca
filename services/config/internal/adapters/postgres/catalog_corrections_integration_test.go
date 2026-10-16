@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
+	"github.com/garcia-lorca/pkg/levelarchive"
 	pgadapter "github.com/garcia-lorca/services/config/internal/adapters/postgres"
 	"github.com/garcia-lorca/services/config/internal/domain"
 )
@@ -257,4 +258,26 @@ func TestReorderLevelsRefusesAnythingButExactlyTheTenantsLevels(t *testing.T) {
 			assert.Equal(t, ids, listed, "nothing changed")
 		})
 	}
+}
+
+// Security review of T8: a level in the deletion saga is frozen, and its
+// trash restores what it archived. Deleting one of its grades or groups by
+// hand meanwhile would have that restore bring back a row deleted on purpose.
+func TestDeletingAGradeOrGroupOfALevelBeingDeletedIsRefused(t *testing.T) {
+	ctx := context.Background()
+	repo := pgadapter.NewRepository(appDB(t), tenantT8)
+	_, groupID, _, _ := teachingAssignmentFixture(t, tenantT8, "e8e8")
+	levelID := "e8e80000-0000-0000-0000-000000000002"
+	spare := grade(t, repo, tenantT8, "e8e80000-0000-0000-0000-000000000033", levelID, "En papelera", 2)
+	require.NoError(t, superDB(t).Exec(`UPDATE levels SET status = 'deleting' WHERE id = ?`, levelID).Error)
+
+	err := repo.DeleteGradeLevel(ctx, spare.ID())
+	assert.Equal(t, levelarchive.CodeLevelBeingDeleted, levelarchive.CodeOf(err), "grade: %v", err)
+	err = repo.DeleteGroup(ctx, groupID)
+	assert.Equal(t, levelarchive.CodeLevelBeingDeleted, levelarchive.CodeOf(err), "group: %v", err)
+
+	_, err = repo.GetGradeLevel(ctx, spare.ID())
+	assert.NoError(t, err, "the grade is still there")
+	_, err = repo.GetGroup(ctx, groupID)
+	assert.NoError(t, err, "the group is still there")
 }

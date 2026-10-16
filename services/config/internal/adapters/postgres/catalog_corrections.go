@@ -7,6 +7,7 @@ import (
 	"gorm.io/gorm/clause"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
+	"github.com/garcia-lorca/pkg/levelarchive"
 	"github.com/garcia-lorca/services/config/internal/domain"
 )
 
@@ -111,6 +112,9 @@ func (r *Repository) DeleteGradeLevel(ctx context.Context, id string) error {
 		var m gradeLevelModel
 		if err := tx.Clauses(lockForUpdate).Where("id = ?", id).First(&m).Error; err != nil {
 			return translateFindErr(err)
+		}
+		if err := refuseUnderLevelBeingDeleted(tx, `SELECT status FROM levels WHERE id = ? FOR SHARE`, m.LevelID); err != nil {
+			return err
 		}
 		var u gradeUsageRow
 		if err := tx.Raw(`SELECT
@@ -218,6 +222,10 @@ func (r *Repository) DeleteGroup(ctx context.Context, id string) error {
 		if err := tx.Clauses(lockForUpdate).Where("id = ?", id).First(&m).Error; err != nil {
 			return translateFindErr(err)
 		}
+		if err := refuseUnderLevelBeingDeleted(tx, `SELECT l.status FROM levels l
+				JOIN grade_levels g ON g.level_id = l.id WHERE g.id = ? FOR SHARE OF l`, m.GradeLevelID); err != nil {
+			return err
+		}
 		usage, err := countGroupUsage(tx, id)
 		if err != nil {
 			return err
@@ -230,4 +238,20 @@ func (r *Repository) DeleteGroup(ctx context.Context, id string) error {
 		}
 		return nil
 	})
+}
+
+// refuseUnderLevelBeingDeleted refuses a hand delete under a level in the
+// deletion saga (security review of T8). The freeze triggers of migration 0012
+// watch INSERT and UPDATE only — the saga itself deletes these rows — so a
+// grade or group deleted by hand meanwhile would come back on a restore. The
+// share lock keeps the saga from starting until this transaction ends.
+func refuseUnderLevelBeingDeleted(tx *gorm.DB, statusQuery string, arg string) error {
+	var status string
+	if err := tx.Raw(statusQuery, arg).Scan(&status).Error; err != nil {
+		return glerrors.Wrap(glerrors.KindInternal, "reading the level's status", err)
+	}
+	if status == levelStatusDeleting {
+		return levelarchive.LevelBeingDeleted()
+	}
+	return nil
 }
