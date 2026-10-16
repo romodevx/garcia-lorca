@@ -23,9 +23,9 @@ export interface ClosePeriodDialogProps {
 type ProgressLoad = { kind: "loading" } | { kind: "ready"; progress: PeriodCaptureProgress } | { kind: "failed" };
 
 /**
- * Review before closing: closing publishes a boleta per pupil to the parents'
- * app and locks the period for everyone, so this confirmation earns its place.
- * Unless the capture is honestly complete, the only way forward is the
+ * Review before closing: closing publishes the boletas (one per pupil with
+ * grades) to the parents' app and locks the period for everyone, so this
+ * confirmation earns its place. Unless the capture is honestly complete, the only way forward is the
  * explicit "de todos modos".
  */
 export function ClosePeriodDialog({ period, client, onClose, onClosed, onStale }: ClosePeriodDialogProps): ReactElement {
@@ -80,7 +80,7 @@ export function ClosePeriodDialog({ period, client, onClose, onClosed, onStale }
   );
 
   return (
-    <DrawerShell title={`Cerrar ${periodTitle(period)}`} subtitle="Se publica una boleta por alumno en la app de padres." icon="lock" onClose={onClose} footer={footer}>
+    <DrawerShell title={`Cerrar ${periodTitle(period)}`} subtitle="Las boletas se publican en la app de padres." icon="lock" onClose={onClose} footer={footer}>
       <div style={{ display: "grid", gap: 16 }}>
         {load.kind === "loading" && <EmptyHint>Revisando la captura…</EmptyHint>}
         {load.kind === "failed" && <ErrorAlert message="No se pudo revisar la captura del periodo." />}

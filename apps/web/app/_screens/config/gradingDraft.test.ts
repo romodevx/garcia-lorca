@@ -1,8 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { fromDraft, gradingErrors, type GradingDraft } from "./gradingDraft";
+import { DEFAULT_GRADING, fromDraft, gradingErrors, type GradingDraft } from "./gradingDraft";
 
 const OK: GradingDraft = { min: "5", max: "10", decimals: "1", passing: "6" };
+
+describe("DEFAULT_GRADING", () => {
+  it("grades a new level in whole numbers: 5 to 10, passing at 6, no decimals", () => {
+    expect(DEFAULT_GRADING).toEqual({ enabled: true, min: 5, max: 10, decimals: 0, passing: 6 });
+  });
+});
 
 describe("gradingErrors", () => {
   it("accepts a sound scale, with a decimal comma and surrounding spaces", () => {

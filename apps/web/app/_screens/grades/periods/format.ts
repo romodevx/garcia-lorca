@@ -1,5 +1,5 @@
 import { dayWithYearLabel } from "../../../_lib/localDate";
-import type { GradingPeriod } from "../../../grades/periods";
+import type { CloseResult, GradingPeriod } from "../../../grades/periods";
 
 const SCHOOL_TIME_ZONE = "America/Mexico_City";
 const DAY = new Intl.DateTimeFormat("es-MX", { day: "numeric", month: "short", year: "numeric", timeZone: SCHOOL_TIME_ZONE });
@@ -25,4 +25,25 @@ export function dayLabel(iso: string | null | undefined): string {
 /** "412 de 450 capturadas". */
 export function progressLabel(captured: number, expected: number): string {
   return `${captured} de ${expected} capturadas`;
+}
+
+/** "1 alumno sin calificaciones no recibirá boleta." — `verb` is [singular, plural]. */
+function skippedSentence(skipped: number, [one, many]: readonly [string, string]): string {
+  const pupils = skipped === 1 ? "1 alumno" : `${skipped} alumnos`;
+  return `${pupils} sin calificaciones ${skipped === 1 ? one : many} boleta.`;
+}
+
+/** "Se publicarán 24 boletas. 1 alumno sin calificaciones no recibirá boleta." — said before closing. */
+export function closePreview(reportCards: number, skipped: number): string {
+  const published =
+    reportCards === 0 ? "No se publicará ninguna boleta." : reportCards === 1 ? "Se publicará 1 boleta." : `Se publicarán ${reportCards} boletas.`;
+  return skipped > 0 ? `${published} ${skippedSentence(skipped, ["no recibirá", "no recibirán"])}` : published;
+}
+
+/** "Se publicaron 24 boletas" (+ who got none) — said after closing. */
+export function publishedMessage(result: Pick<CloseResult, "reportCards" | "skippedWithoutGrades">): string {
+  const { reportCards, skippedWithoutGrades: skipped } = result;
+  const published =
+    reportCards === 0 ? "No se publicó ninguna boleta" : reportCards === 1 ? "Se publicó 1 boleta" : `Se publicaron ${reportCards} boletas`;
+  return skipped > 0 ? `${published}. ${skippedSentence(skipped, ["no recibió", "no recibieron"])}` : published;
 }

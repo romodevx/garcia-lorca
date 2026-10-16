@@ -56,12 +56,18 @@ export interface PeriodCaptureProgress {
   expected: number;
   captured: number;
   missing: MissingCapture[];
+  /** Boletas closing now would publish (T10). */
+  reportCards: number;
+  /** Active pupils without any grade in the period: no boleta, no notification. */
+  skippedWithoutGrades: number;
 }
 
 export interface CloseResult {
   status: "closed";
   version: number;
   reportCards: number;
+  /** Active pupils without any grade in the period: they got no boleta. */
+  skippedWithoutGrades: number;
 }
 
 export interface ReportCard {

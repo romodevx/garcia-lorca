@@ -55,17 +55,39 @@ describe("periodProblems — the whole set, checked on save", () => {
 });
 
 describe("nextDraft — the defaults of a new row", () => {
-  it("starts the first period on the cycle's first day, three months long", () => {
-    expect(nextDraft([], cycle, "n1")).toEqual({ key: "n1", id: "", name: "PERIODO 1", startsOn: "2026-08-24", endsOn: "2026-11-23" });
+  it("names the first three rows after the trimesters and splits the cycle in contiguous thirds, the last ending with the cycle", () => {
+    const first = nextDraft([], cycle, "n1");
+    const second = nextDraft([first], cycle, "n2");
+    const third = nextDraft([first, second], cycle, "n3");
+    expect([first, second, third]).toEqual([
+      { key: "n1", id: "", name: "1.er trimestre", startsOn: "2026-08-24", endsOn: "2026-12-08" },
+      { key: "n2", id: "", name: "2.º trimestre", startsOn: "2026-12-09", endsOn: "2027-03-24" },
+      { key: "n3", id: "", name: "3.er trimestre", startsOn: "2027-03-25", endsOn: "2027-07-09" },
+    ]);
   });
 
-  it("starts the next period the day after the last one ends, clamped to the cycle", () => {
-    const set = [draft("a", "2026-08-24", "2026-11-30"), draft("b", "2026-12-01", "2027-05-31")];
-    expect(nextDraft(set, cycle, "n3")).toEqual({ key: "n3", id: "", name: "PERIODO 3", startsOn: "2027-06-01", endsOn: "2027-07-09" });
+  it("starts the next period the day after the last one ends; the third always ends on the cycle's last day", () => {
+    const set = [draft("a", "2026-08-24", "2026-11-30"), draft("b", "2026-12-01", "2027-03-31")];
+    expect(nextDraft(set, cycle, "n3")).toEqual({ key: "n3", id: "", name: "3.er trimestre", startsOn: "2027-04-01", endsOn: "2027-07-09" });
+  });
+
+  it("falls back to three months when an earlier row already runs past its third", () => {
+    expect(nextDraft([draft("a", "2026-08-24", "2027-03-31")], cycle, "n2")).toEqual({
+      key: "n2", id: "", name: "2.º trimestre", startsOn: "2027-04-01", endsOn: "2027-06-30",
+    });
+  });
+
+  it("gives a fourth row on a generic ordinal name, three months long, clamped to the cycle", () => {
+    const set = [draft("a", "2026-08-24", "2026-10-31"), draft("b", "2026-11-01", "2026-12-31"), draft("c", "2027-01-01", "2027-05-31")];
+    expect(nextDraft(set, cycle, "n4")).toEqual({ key: "n4", id: "", name: "4.º periodo", startsOn: "2027-06-01", endsOn: "2027-07-09" });
   });
 
   it("leaves the dates empty when the cycle is already covered", () => {
-    expect(nextDraft([draft("a", "2026-08-24", "2027-07-09")], cycle, "n2")).toEqual({ key: "n2", id: "", name: "PERIODO 2", startsOn: "", endsOn: "" });
+    expect(nextDraft([draft("a", "2026-08-24", "2027-07-09")], cycle, "n2")).toEqual({ key: "n2", id: "", name: "2.º trimestre", startsOn: "", endsOn: "" });
+  });
+
+  it("never names a row PERIODO N", () => {
+    expect(nextDraft([], cycle, "n1").name).not.toMatch(/PERIODO/);
   });
 });
 

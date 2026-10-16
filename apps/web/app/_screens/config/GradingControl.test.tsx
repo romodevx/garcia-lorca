@@ -35,10 +35,11 @@ describe("GradingControl", () => {
     expect(screen.getByRole("radio", { name: "1 decimal" })).toBeChecked();
   });
 
-  it("a level that does not say grades 5 to 10 with one decimal", () => {
+  it("a level that does not say grades 5 to 10 in whole numbers (no decimals by default)", () => {
     renderControl(kinder);
     expect(screen.getByRole("checkbox", { name: "Lleva calificación numérica" })).toBeChecked();
     expect(screen.getByLabelText("Calificación máxima", CAMPO)).toHaveValue(10);
+    expect(screen.getByRole("radio", { name: "Sin decimales" })).toBeChecked();
   });
 
   it("turning numeric grading off saves at once and hides the scale", async () => {

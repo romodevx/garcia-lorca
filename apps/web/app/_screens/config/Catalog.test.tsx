@@ -165,7 +165,7 @@ describe("Catalog — nested level → grade level", () => {
   it("turns a level's numeric grading off and keeps it off on screen", async () => {
     const user = userEvent.setup();
     const kinder = { id: "l1", name: "KINDER", sepCode: "", enrollmentGranularity: "cycle" as const };
-    const off = { enabled: false, min: 5, max: 10, decimals: 1, passing: 6 };
+    const off = { enabled: false, min: 5, max: 10, decimals: 0, passing: 6 };
     mocked.listLevels.mockResolvedValue([kinder]);
     mocked.updateLevelGrading.mockResolvedValue({ ...kinder, grading: off });
     render(<Catalog onBack={() => {}} />);
