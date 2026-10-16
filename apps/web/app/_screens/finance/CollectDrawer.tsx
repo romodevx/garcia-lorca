@@ -176,6 +176,9 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
   const target = lines.length > 0 ? selectedCents : (expected?.amountCents ?? 0);
   // What the family owes: the year's balance, or what is asked today when the
   // quote carries a surcharge the balance does not have yet.
+  // ONE balance (T5): the quote's, for the day asked about, once it is here —
+  // the figure the debt list totals too. Until then, the account's.
+  const balance = expected?.annualBalanceCents ?? owed;
   const capCents = owed === null ? Number.POSITIVE_INFINITY : Math.max(owed, expected?.amountCents ?? 0, selectedCents);
   // How the amount is paid, method by method (T8): it must add up to it.
   const tenders = useTenders(cents);
@@ -339,16 +342,11 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
                     <p style={{ fontSize: 13, color: "var(--text-faint)", marginTop: 6 }}>
                       {expected !== null && expected.surchargeCents > 0 && `Incluye ${formatCents(expected.surchargeCents)} de recargo. `}
                       {expected !== null && expected.discountCents > 0 && `Ya con ${formatCents(expected.discountCents)} de pronto pago. `}
-                      Del año debe <b data-testid="amount-owed">{owed === null ? "…" : formatCents(owed)}</b>.
+                      <YearBalance balanceCents={balance} surchargeCents={expected?.surchargeCents ?? 0} creditCents={credit} />
                     </p>
-                    {credit > 0 && (
-                      <p style={{ fontSize: 13.5, color: "var(--text-muted)", marginTop: 6 }}>
-                        Tiene {formatCents(credit)} a favor.
-                      </p>
-                    )}
                   </div>
 
-                  <DebtList lines={lines} chosen={chosen} selectedCents={selectedCents} onToggle={toggle} />
+                  <DebtList lines={lines} balanceCents={balance ?? 0} chosen={chosen} selectedCents={selectedCents} onToggle={toggle} />
 
                   <MoneyField
                     label="Monto a pagar"
@@ -510,6 +508,32 @@ function Receipt({ result, describe, onClose }: { result: DepositResult; describ
         <Btn icon="check" type="button" onClick={onClose}>Listo</Btn>
       </div>
     </div>
+  );
+}
+
+interface YearBalanceProps {
+  /** The one balance; null while unknown. Below zero is the family's credit. */
+  balanceCents: number | null;
+  /** The surcharge accrued to the day, already inside the balance. */
+  surchargeCents: number;
+  /** Money no charge claimed, already netted out of the balance. */
+  creditCents: number;
+}
+
+/** "Del año debe" — the single balance, said so the cashier reads it once (T5). */
+function YearBalance({ balanceCents, surchargeCents, creditCents }: YearBalanceProps): ReactElement {
+  if (balanceCents === null) {
+    return <>Del año debe <b data-testid="amount-owed">…</b>.</>;
+  }
+  if (balanceCents < 0) {
+    return <>Tiene saldo a favor <b data-testid="amount-owed">{formatCents(-balanceCents)}</b>.</>;
+  }
+  return (
+    <>
+      Del año debe <b data-testid="amount-owed">{formatCents(balanceCents)}</b>
+      {surchargeCents > 0 && ", con el recargo incluido"}
+      {creditCents > 0 && `, ya descontados ${formatCents(creditCents)} a favor`}.
+    </>
   );
 }
 

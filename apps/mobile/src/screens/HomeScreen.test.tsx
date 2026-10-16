@@ -54,6 +54,33 @@ describe("HomeScreen summary cards", () => {
     expect(screen.queryByText("Sin novedades")).toBeNull();
   });
 
+  // T5: a balance below zero is the school owing the family — said as credit,
+  // never "Saldo por pagar $0.00 · Pendiente".
+  it("names a negative balance as credit on the balance card", async () => {
+    await saveTokens({ accessToken: "a1", refreshToken: "r1" });
+    const kid = { id: "s1", firstName: "Mateo", lastName: "Herrera", level: "Primaria", levelId: "l1", gradeGroup: "3° A" };
+    globalThis.fetch = jest.fn(async (url: string) => {
+      const u = String(url);
+      if (u.includes("/family/students/s1/statement")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ movements: [], totals: { chargedCents: 0, discountCents: 0, paidCents: 50000, balanceCents: -50000, notYetDueCents: 0 }, dueTodayCents: 0, asOf: "2026-10-01" }),
+        };
+      }
+      if (u.endsWith("/family/students")) return { ok: true, status: 200, json: async () => ({ students: [kid] }) };
+      return { ok: true, status: 200, json: async () => ({ notifications: [] }) };
+    }) as unknown as typeof fetch;
+
+    await renderWithProviders(<HomeScreen />);
+
+    await waitFor(() => expect(screen.getByText("Saldo a favor")).toBeTruthy());
+    expect(screen.getByText("$500.00")).toBeTruthy();
+    expect(screen.getByText("Al corriente")).toBeTruthy();
+    expect(screen.queryByText("Saldo por pagar")).toBeNull();
+    expect(screen.queryByText("Pendiente")).toBeNull();
+  });
+
   it("does not render fake agenda events (next-event tile + list hidden)", async () => {
     // Agenda has no backend yet (Phase 9d): the mock `events` and the static
     // `today.nextEvent` must not be shown — a fake event would mislead the parent.

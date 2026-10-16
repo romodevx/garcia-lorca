@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { API_URL } from "../api-url";
 import { listCycles, type Cycle } from "../config/api";
 import { listCharges } from "../finance/api";
+import { isOwed, pendingCents, type OwedReading } from "../finance/pending";
 import { listStudents } from "../students/api";
 
 /**
@@ -60,11 +61,12 @@ function countCurrent(students: readonly { admissionStatus: string }[]): number 
   return students.filter((s) => s.admissionStatus !== "rejected" && s.admissionStatus !== "withdrawn").length;
 }
 
-function sumLedger(charges: readonly { paidCents: number; remainingCents: number }[]): Ledger {
+function sumLedger(charges: readonly (OwedReading & { paidCents: number })[]): Ledger {
   return {
     collectedCents: charges.reduce((a, c) => a + c.paidCents, 0),
-    pendingCents: charges.reduce((a, c) => a + Math.max(0, c.remainingCents), 0),
-    withBalance: charges.filter((c) => c.remainingCents > 0).length,
+    // Finanzas' rule, shared: a cancelled charge is never owed (T5).
+    pendingCents: pendingCents(charges),
+    withBalance: charges.filter(isOwed).length,
     charges: charges.length,
   };
 }

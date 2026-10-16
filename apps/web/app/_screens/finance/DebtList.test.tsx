@@ -10,7 +10,7 @@ const line: ExpectedLine = {
 };
 
 function renderList(lines: ExpectedLine[]): void {
-  render(<DebtList lines={lines} chosen={new Set(["ch1"])} selectedCents={160000} onToggle={() => undefined} />);
+  render(<DebtList lines={lines} balanceCents={lines.reduce((sum, l) => sum + l.totalCents, 0)} chosen={new Set(["ch1"])} selectedCents={160000} onToggle={() => undefined} />);
 }
 
 describe("DebtList · scholarships (T18)", () => {

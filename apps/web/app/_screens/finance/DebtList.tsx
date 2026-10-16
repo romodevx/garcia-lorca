@@ -8,6 +8,11 @@ import type { ExpectedLine } from "../../finance/api";
 
 export interface DebtListProps {
   lines: readonly ExpectedLine[];
+  /**
+   * The ONE balance (T5): what the year still owes, surcharge accrued to the
+   * day included and credit netted. The debt's total IS this figure.
+   */
+  balanceCents: number;
   /** The charges the money pays. */
   chosen: ReadonlySet<string>;
   /** Their total, computed once by the drawer (selectedTotal). */
@@ -20,11 +25,14 @@ export interface DebtListProps {
  * money is paying, can leave a concept out, or choose a month not yet due to
  * pay ahead.
  */
-export function DebtList({ lines, chosen, selectedCents, onToggle }: DebtListProps): ReactElement | null {
+export function DebtList({ lines, balanceCents, chosen, selectedCents, onToggle }: DebtListProps): ReactElement | null {
   if (lines.length === 0) {
     return null;
   }
-  const total = lines.reduce((sum, l) => sum + l.totalCents, 0);
+  // The pronto-pago prices are a projection, not a second debt: said apart,
+  // as the balance less every early-payment reward still within reach.
+  const rewardCents = lines.reduce((sum, l) => sum + l.discountCents, 0);
+  const onTimeCents = balanceCents - rewardCents;
   return (
     // flexShrink 0: the drawer's body is a column of fixed height, and a box
     // with overflow hidden shrinks in it to nothing (it measured 2 px).
@@ -60,8 +68,14 @@ export function DebtList({ lines, chosen, selectedCents, onToggle }: DebtListPro
       <div style={{ display: "grid", gap: 4, padding: "10px 16px", borderTop: "1px solid var(--border)", background: "var(--surface-2)", fontSize: 14 }}>
         <span style={{ display: "flex", justifyContent: "space-between" }}>
           <span style={{ color: "var(--text-muted)" }}>Total del adeudo</span>
-          <b data-testid="debt-total">{formatCents(total)}</b>
+          <b data-testid="debt-total">{formatCents(balanceCents)}</b>
         </span>
+        {rewardCents > 0 && onTimeCents > 0 && (
+          <span data-testid="debt-on-time" style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "var(--text-muted)" }}>
+            <span>Si paga cada mes a tiempo</span>
+            <span>{formatCents(onTimeCents)}</span>
+          </span>
+        )}
         <span style={{ display: "flex", justifyContent: "space-between" }}>
           <span style={{ color: "var(--text-muted)" }}>Total seleccionado</span>
           <b data-testid="debt-selected">{formatCents(selectedCents)}</b>

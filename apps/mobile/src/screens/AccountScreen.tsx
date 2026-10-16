@@ -11,7 +11,7 @@ import { useTheme, type TintName } from "../theme";
 import { Button, Card, Chip, EmptyState, ListRow, ScreenTitle, SectionLabel, TintIcon } from "../ui";
 import { AsyncErrorState, AsyncLoading, StaleNotice } from "./AsyncStates";
 import { usePdfDownload } from "./grades/usePdfDownload";
-import { formatDate, pesos } from "./format";
+import { balanceLine, formatDate, formatDayWithYear, pesos } from "./format";
 
 /** How each kind of ledger line looks. The ledger itself is finance's (T7). */
 const KIND_LOOK: Record<MovementKind, { icon: IconName; tint: TintName; label: string; credit: boolean }> = {
@@ -123,6 +123,10 @@ export function AccountScreen(): ReactElement {
   const balanceCents = data?.totals.balanceCents ?? 0;
   const heroCents = hasToday ? (data?.dueTodayCents ?? 0) : balanceCents;
   const settled = heroCents <= 0;
+  // Without the day the hero IS the balance, and a balance below zero is the
+  // school owing the family (T5): credit, in words and as a positive amount.
+  const heroIsCredit = !hasToday && balanceCents < 0;
+  const heroLabel = hasToday ? "A pagar hoy" : heroIsCredit ? "Saldo a favor" : settled ? "Saldo actual" : "Saldo por pagar";
   // Newest first: the order a parent reads a bank app in. The balances are
   // finance's, per line, whatever the order they are shown in.
   const movements = [...(data?.movements ?? [])].reverse();
@@ -134,21 +138,18 @@ export function AccountScreen(): ReactElement {
 
       <Card style={[styles.balanceHero, { marginTop: 12 }]}>
         <Text style={[styles.cap, { color: theme.colors.text2, fontFamily: theme.fonts.uiExtra }]}>
-          {hasToday ? "A pagar hoy" : settled ? "Saldo actual" : "Saldo por pagar"}
+          {heroLabel}
         </Text>
         <Text
           accessibilityLabel="Saldo"
           style={[styles.amount, { color: settled ? theme.colors.ok : theme.colors.text, fontFamily: theme.fonts.display }]}
         >
-          {pesos(Math.max(heroCents, 0))}
+          {pesos(heroIsCredit ? -heroCents : Math.max(heroCents, 0))}
         </Text>
         {hasToday && (
           <>
-            <Text
-              accessibilityLabel={balanceCents < 0 ? "Saldo a favor" : "Saldo pendiente"}
-              style={[styles.year, { color: theme.colors.text2, fontFamily: theme.fonts.ui }]}
-            >
-              {pesos(Math.abs(balanceCents))}
+            <Text style={[styles.year, { color: theme.colors.text2, fontFamily: theme.fonts.ui }]}>
+              {balanceLine(balanceCents)}
             </Text>
             <Text
               accessibilityLabel="Detalle del saldo"
@@ -156,7 +157,7 @@ export function AccountScreen(): ReactElement {
             >
               {`${(data?.surchargeCents ?? 0) > 0 ? `Incluye ${pesos(data?.surchargeCents ?? 0)} de recargo. ` : ""}` +
                 `${(data?.earlyDiscountCents ?? 0) > 0 ? `Ya con ${pesos(data?.earlyDiscountCents ?? 0)} de pronto pago. ` : ""}` +
-                `Al ${data?.asOf ?? ""}.`}
+                `Al ${formatDayWithYear(data?.asOf ?? "")}.`}
             </Text>
           </>
         )}
@@ -223,7 +224,7 @@ function MovementRow({ movement, divider }: { movement: FamilyMovement; divider:
           <Text style={[styles.amountVal, { color: look.credit ? theme.colors.ok : theme.colors.text, fontFamily: theme.fonts.display }]}>
             {pesos(amount)}
           </Text>
-          <Text style={[styles.rowSub, { color: theme.colors.text3, fontFamily: theme.fonts.uiSemi }]}>{`Saldo ${pesos(movement.balanceCents)}`}</Text>
+          <Text style={[styles.rowSub, { color: theme.colors.text3, fontFamily: theme.fonts.uiSemi }]}>{movement.balanceCents < 0 ? balanceLine(movement.balanceCents) : `Saldo ${pesos(movement.balanceCents)}`}</Text>
           {movement.accrued ? <Chip kind="warn">Acumulado a hoy</Chip> : null}
         </View>
       </ListRow>

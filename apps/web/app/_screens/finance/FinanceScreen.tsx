@@ -15,6 +15,7 @@ import { paymentDateError } from "./CollectDrawer";
 import { StudentNotesBeside, useNotesBeside, type NotesAccess } from "../../_design/students/StudentNotesBeside";
 import { listCycles, type Cycle } from "../../config/api";
 import { getOverdue, listCharges, registerPayment, type Charge } from "../../finance/api";
+import { pendingCents } from "../../finance/pending";
 import { localISODate } from "../../_lib/localDate";
 import { centsToPesosInput, formatCents, pesosToCents } from "../../_lib/money";
 import { listStudents, type Student } from "../../students/api";
@@ -319,7 +320,7 @@ export function FinanceScreen({ onBack, today: officeDay, notes, canCorrectPayme
   const totals = useMemo(() => ({
     collected: charges.reduce((a, c) => a + c.paidCents, 0),
     // A cancelled (voided) charge is never owed, so it must not count as pending debt.
-    pending: charges.filter((c) => c.status !== "cancelled").reduce((a, c) => a + Math.max(0, c.remainingCents), 0),
+    pending: pendingCents(charges),
   }), [charges]);
 
   // The months the cycle actually has charges in, newest last, as YYYY-MM.

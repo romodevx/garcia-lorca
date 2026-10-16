@@ -28,6 +28,14 @@ export function formatCents(cents: number): string {
   return (cents / CENTS_PER_PESO).toLocaleString("es-MX", { style: "currency", currency: "MXN" });
 }
 
+/**
+ * A running balance as a person reads it (T5): below zero the school owes the
+ * family, so it is "A favor $500.00" — never "-$500.00".
+ */
+export function formatBalance(cents: number): string {
+  return cents < 0 ? `A favor ${formatCents(-cents)}` : formatCents(cents);
+}
+
 /** The peso value a human sees in an amount input, e.g. 185000 → "1850.00". */
 export function centsToPesosInput(cents: number): string {
   return (cents / CENTS_PER_PESO).toFixed(2);

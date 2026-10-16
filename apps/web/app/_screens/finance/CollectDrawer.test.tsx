@@ -375,6 +375,23 @@ describe("CollectDrawer · fecha de pago (tarea 7)", () => {
 });
 });
 
+describe("CollectDrawer · saldo a favor (T5)", () => {
+  // The balance already nets the money no charge claimed. Below zero the
+  // school owes the family: credit, as a positive amount, never "-$500.00".
+  it("names a balance below zero as credit", async () => {
+    finance.getAccount.mockResolvedValue({
+      charges: [], payments: [], totalBalanceCents: -50000,
+      unallocatedCents: 50000, dueTodayCents: 0, surchargeCents: 0, earlyDiscountCents: 0, asOf: "",
+    });
+    finance.getExpected.mockResolvedValue({ amountCents: 0, surchargeCents: 0, discountCents: 0, annualBalanceCents: -50000, lines: [] });
+    render(<CollectDrawer student={student} onClose={() => {}} onCollected={() => {}} />);
+
+    expect(await screen.findByTestId("amount-owed")).toHaveTextContent(/^\$500\.00$/);
+    expect(screen.getByTestId("amount-owed").parentElement).toHaveTextContent(/Tiene saldo a favor/);
+    expect(screen.queryByText(/Del año debe/)).toBeNull();
+  });
+});
+
 describe("CollectDrawer · el adeudo, concepto por concepto (tarea 8)", () => {
   const lines: financeApi.ExpectedLine[] = [
     { chargeId: "ch-sep", description: "Colegiatura septiembre", dueDate: "2026-09-10", owedCents: 320000, surchargeCents: 30000, discountCents: 0, scholarshipCents: 0, totalCents: 350000, due: true },
@@ -383,7 +400,7 @@ describe("CollectDrawer · el adeudo, concepto por concepto (tarea 8)", () => {
   ];
   beforeEach(() => {
     finance.getExpected.mockResolvedValue({
-      amountCents: 670000, surchargeCents: 30000, discountCents: 0, annualBalanceCents: 960000, lines,
+      amountCents: 670000, surchargeCents: 30000, discountCents: 0, annualBalanceCents: 990000, lines,
     });
   });
   const open = () => render(<CollectDrawer student={student} onClose={() => {}} onCollected={() => {}} today="2026-10-12" />);
@@ -401,6 +418,34 @@ describe("CollectDrawer · el adeudo, concepto por concepto (tarea 8)", () => {
     expect(screen.getByTestId("debt-row-ch-sep")).toHaveTextContent(/recargo \$300/i);
     expect(screen.getByTestId("debt-total")).toHaveTextContent("9,900");
     expect(screen.getByTestId("debt-selected")).toHaveTextContent("6,700");
+  });
+
+  // T5 (ISSUE-006): ONE balance. The debt's total is the year's balance —
+  // the same figure as "Del año debe" — and says it carries the surcharge.
+  it("reads the debt's total as the one balance, surcharge included", async () => {
+    open();
+    await screen.findByRole("checkbox", { name: "Colegiatura septiembre" });
+    expect(screen.getByTestId("amount-owed")).toHaveTextContent("9,900");
+    expect(screen.getByTestId("debt-total")).toHaveTextContent("9,900");
+    expect(screen.getByTestId("amount-owed").parentElement).toHaveTextContent(/con el recargo incluido/);
+    expect(screen.queryByTestId("debt-on-time")).toBeNull();
+  });
+
+  // A month not yet due quoted with its early-payment price is a projection,
+  // not a second debt total: it is said apart, as what paying on time costs.
+  it("says the pronto-pago projection apart from the debt", async () => {
+    const withReward: financeApi.ExpectedLine[] = [
+      lines[0] as financeApi.ExpectedLine,
+      lines[1] as financeApi.ExpectedLine,
+      { chargeId: "ch-nov", description: "Colegiatura noviembre", dueDate: "2026-11-10", owedCents: 320000, surchargeCents: 0, discountCents: 20000, scholarshipCents: 0, totalCents: 300000, due: false },
+    ];
+    finance.getExpected.mockResolvedValue({ amountCents: 670000, surchargeCents: 30000, discountCents: 0, annualBalanceCents: 990000, lines: withReward });
+    open();
+    await screen.findByRole("checkbox", { name: "Colegiatura noviembre" });
+
+    expect(screen.getByTestId("debt-total")).toHaveTextContent("9,900");
+    expect(screen.getByTestId("debt-on-time")).toHaveTextContent(/Si paga cada mes a tiempo/);
+    expect(screen.getByTestId("debt-on-time")).toHaveTextContent("9,700");
   });
 
   it("follows the choice: paying ahead, and back", async () => {
