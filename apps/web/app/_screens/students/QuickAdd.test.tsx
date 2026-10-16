@@ -270,14 +270,15 @@ describe("choosing where the pupil goes", () => {
     expect(config.listGradeLevels).toHaveBeenCalledWith(expect.any(String), "lv-k");
   });
 
-  // The group is NOT asked for. It is a consequence of how full each one is, and
-  // asking a person to type it is how "1° A" ended up in records for a group that
-  // was full or had never been created.
-  it("never asks for the group", async () => {
+  // The group is never TYPED — that is how "1° A" ended up in records for a group
+  // that was full or had never been created. By default capacity chooses it; a
+  // picker of the grade's real groups waits behind a disclosure (T9).
+  it("lets capacity choose the group unless somebody opens the picker", async () => {
     const user = userEvent.setup();
     const drawer = await openDrawer(user);
 
     expect(within(drawer).queryByLabelText("Grado y grupo")).toBeNull();
+    expect(within(drawer).queryByLabelText("Grupo")).toBeNull();
     expect(within(drawer).getByText(/se asigna solo/i)).toBeInTheDocument();
   });
 
@@ -294,7 +295,7 @@ describe("choosing where the pupil goes", () => {
 
     await user.click(within(drawer).getByRole("button", { name: "Crear alumno" }));
 
-    await waitFor(() => expect(students.enrollIntoGrade).toHaveBeenCalledWith(expect.any(String), "s1", "gl-k2"));
+    await waitFor(() => expect(students.enrollIntoGrade).toHaveBeenCalledWith(expect.any(String), "s1", "gl-k2", ""));
     // The level travels as the config level's ID; the server supplies its name.
     expect(students.createStudent.mock.calls[0]?.[1]).toMatchObject({ levelId: "lv-k" });
     expect(await screen.findByText(/1° B/)).toBeInTheDocument();

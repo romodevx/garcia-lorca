@@ -20,7 +20,8 @@ import {
   type Student,
 } from "../../students/api";
 import { listCycles, listGradeLevels, listLabelledGroups, listLevels, type Cycle, type GradeLevel, type LabelledGroup, type Level } from "../../config/api";
-import { addNote, enrollIntoGrade, reissueCard, revokeCard, StudentsError, type Placement } from "../../students/api";
+import { addNote, enrollIntoGrade, reissueCard, revokeCard, StudentsError } from "../../students/api";
+import { entryDayToSend, FUTURE_ENTRY_ERROR, groupsOfGrade, QuickAddPlacement, usePlacementDraft } from "./QuickAddPlacement";
 import { VerifyCardDrawer } from "./VerifyCardDrawer";
 import { WithdrawPanel } from "./WithdrawDialog";
 import { dayWithYearLabel } from "../../_lib/localDate";
@@ -163,13 +164,31 @@ export class PlacementFailed extends Error {
   override readonly cause: unknown;
   /** The first note failed too: a retry cannot write it (the CURP is taken). */
   readonly noteFailed: boolean;
+  /** The pupil that WAS created: a retry places them instead of creating twice. */
+  readonly studentId: string;
 
-  constructor(cause: unknown, noteFailed = false) {
+  constructor(cause: unknown, noteFailed = false, studentId = "") {
     super("placement failed");
     this.name = "PlacementFailed";
     this.cause = cause;
     this.noteFailed = noteFailed;
+    this.studentId = studentId;
   }
+}
+
+/** Everything one press of "Crear alumno" asks for (T9 added group and entry day). */
+export interface AltaRequest {
+  student: CreateStudentInput;
+  gradeLevelId: string;
+  /** "" lets capacity choose the group. */
+  groupId: string;
+  /** How the chosen group reads in the confirmation, "1° PRIMARIA · B". */
+  groupLabel: string;
+  /** "" means today; anything else is a past day the server bills from. */
+  enrolledOn: string;
+  note: string;
+  /** Set on a retry: the pupil exists already, only the placement is left. */
+  createdStudentId?: string;
 }
 
 const NOTE_LOST = "La nota no se guardó: agrégala en su ficha.";
@@ -255,11 +274,17 @@ export function createFailureMessage(err: unknown): string {
  * "no quedan lugares", re-types the whole form and gets "ya existe ese CURP",
  * which is true and useless.
  */
+const HTTP_FORBIDDEN = 403;
+
 export function placementFailureMessage(err: unknown): string {
   const tail = " El alumno sí se creó: inscríbelo desde su ficha cuando haya lugar.";
+  // A refused entry day (out of the cycle, or past without finance:write) is
+  // fixed right here, and the retry only places the pupil (T9).
+  const retryTail = " El alumno sí se creó: corrige y presiona «Crear alumno» otra vez.";
   if (err instanceof StudentsError) {
     if (err.isConflict) return "Ese grado ya no tiene lugares. Abre otro grupo en Configuración." + tail;
-    if (err.isInvalid) return (err.detail !== "" ? err.detail : "No se pudo inscribir en ese grado.") + tail;
+    if (err.isInvalid) return (err.detail !== "" ? err.detail : "No se pudo inscribir en ese grado.") + retryTail;
+    if (err.status === HTTP_FORBIDDEN && err.detail !== "") return err.detail + retryTail;
   }
   return "No se pudo inscribir al alumno en ese grado." + tail;
 }
@@ -269,11 +294,17 @@ function QuickAdd({
   onClose,
   onSave,
   levels,
+  groups,
+  cycleStartsOn,
   withNote,
 }: {
   onClose: () => void;
-  onSave: (input: CreateStudentInput, gradeLevelId: string, note: string) => Promise<void>;
+  onSave: (request: AltaRequest) => Promise<void>;
   levels: readonly Level[];
+  /** The active cycle's groups; the drawer offers the chosen grade's. */
+  groups: readonly LabelledGroup[];
+  /** The active cycle's first day: the earliest entry day the server takes. */
+  cycleStartsOn: string;
   /** students:notes_write: offer an optional first note (task 6). */
   withNote: boolean;
 }): ReactElement {
@@ -291,6 +322,19 @@ function QuickAdd({
   // without it, so it starts collapsed rather than growing the form.
   const [birthDate, setBirthDate] = useState("");
   const [showMore, setShowMore] = useState(false);
+  const placement = usePlacementDraft();
+  const gradeGroups = useMemo(() => groupsOfGrade(groups, gradeLevelId), [groups, gradeLevelId]);
+  // Set once the pupil exists and only the placement failed: the retry must not
+  // create them again (their CURP is taken by then).
+  const [createdStudentId, setCreatedStudentId] = useState<string | undefined>(undefined);
+  const chooseLevel = (id: string): void => {
+    setLevelId(id);
+    placement.setGroupId("");
+  };
+  const chooseGrade = (id: string): void => {
+    setGradeLevelId(id);
+    placement.setGroupId("");
+  };
   // Los faltantes vienen de missingFields, que conserva el mensaje propio de
   // cada campo ("llevas 17 caracteres"), así que no se usa useRequired: ese
   // hook da un mensaje genérico y aquí ya había uno mejor.
@@ -335,6 +379,10 @@ function QuickAdd({
       missing.birthDate = "La fecha de nacimiento no puede ser posterior a hoy.";
       setShowMore(true);
     }
+    if (placement.entryDay > placement.today) {
+      missing.enrolledOn = FUTURE_ENTRY_ERROR;
+      placement.setOpen(true);
+    }
     setFieldErrors(missing);
     if (Object.keys(missing).length > 0) {
       // Marcarlos no basta: el último campo del cajón queda DEBAJO del pie
@@ -353,8 +401,8 @@ function QuickAdd({
     try {
       // The level travels as the config level's ID: whichever levels the school
       // defined take pupils (ADR 0014), and the server supplies the name.
-      await onSave(
-        {
+      await onSave({
+        student: {
           curp: curp.trim().toUpperCase(),
           firstName: firstName.trim(),
           lastName: lastName.trim(),
@@ -367,9 +415,17 @@ function QuickAdd({
           ...(birthDate !== "" ? { birthDate } : {}),
         },
         gradeLevelId,
-        withNote ? note.trim() : "",
-      );
+        groupId: placement.groupId,
+        groupLabel: gradeGroups.find((g) => g.id === placement.groupId)?.label ?? "",
+        enrolledOn: entryDayToSend(placement.entryDay, placement.today),
+        note: withNote ? note.trim() : "",
+        createdStudentId,
+      });
     } catch (err) {
+      if (err instanceof PlacementFailed) {
+        setCreatedStudentId(err.studentId);
+        placement.setOpen(true);
+      }
       setError(
         err instanceof PlacementFailed
           ? [placementFailureMessage(err.cause), err.noteFailed ? NOTE_LOST : ""].filter((m) => m !== "").join(" ")
@@ -444,7 +500,7 @@ function QuickAdd({
             <SelectField
               label="Nivel"
               value={levelId}
-              onChange={setLevelId}
+              onChange={chooseLevel}
               required
               help="El nivel educativo donde va a cursar: preescolar, primaria o secundaria."
               options={levels.map((l) => ({ value: l.id, label: l.name }))}
@@ -452,7 +508,7 @@ function QuickAdd({
             <SelectField
               label="Grado"
               value={gradeLevelId}
-              onChange={setGradeLevelId}
+              onChange={chooseGrade}
               required
               disabled={grades.length === 0}
               help="El grado dentro del nivel. Se enciende en cuanto eliges el nivel."
@@ -461,6 +517,13 @@ function QuickAdd({
               onClearError={() => clearField("gradeLevelId")}
             />
           </div>
+          <QuickAddPlacement
+            draft={placement}
+            groups={gradeGroups}
+            cycleStartsOn={cycleStartsOn}
+            entryDayError={fieldErrors.enrolledOn}
+            onClearEntryDayError={() => clearField("enrolledOn")}
+          />
           <TextField
             label="Tutor"
             value={guardianName}
@@ -509,7 +572,7 @@ function QuickAdd({
           )}
           <div style={{ display: "flex", gap: 11, padding: "14px 16px", borderRadius: "var(--r-md)", background: "var(--surface-3)", border: "1px solid var(--border)" }}>
             <span style={{ color: "var(--forest)", flexShrink: 0, marginTop: 1 }}><Icon name="check" size={19} stroke={2.6} /></span>
-            <p style={{ fontSize: 13.5, color: "var(--text-muted)", lineHeight: 1.5, margin: 0 }}>El grupo <strong>se asigna solo</strong>, según el cupo de cada salón: se llena A y el siguiente alumno pasa a B. Los documentos se cargan después.</p>
+            <p style={{ fontSize: 13.5, color: "var(--text-muted)", lineHeight: 1.5, margin: 0 }}>Si no eliges grupo, <strong>se asigna solo</strong> según el cupo de cada salón: se llena A y el siguiente alumno pasa a B. Los documentos se cargan después.</p>
           </div>
           {error !== undefined && <p role="alert" style={{ color: "var(--bad-fg)", fontSize: 14, margin: 0 }}>{error}</p>}
       </>
@@ -988,31 +1051,48 @@ export function StudentsScreen({ onBack, canCreate = true, onEdit, canWriteNotes
   const from = total === 0 ? 0 : cur * pageSize + 1;
   const to = Math.min(total, (cur + 1) * pageSize);
 
-  const cycleName = cycles.find((c) => c.status === "active")?.name ?? cycles[0]?.name ?? "—";
+  const activeCycle = cycles.find((c) => c.status === "active") ?? cycles[0];
+  const cycleName = activeCycle?.name ?? "—";
   const clear = (): void => { setTab("all"); filter.clear(); };
 
-  const onSave = async (input: CreateStudentInput, gradeLevelId: string, note: string): Promise<void> => {
-    const created = await createStudent(API_URL, input);
-    // The note goes right after the pupil exists and BEFORE placement: a full
-    // grade keeps the drawer open, and a retry must not write the note twice.
-    // A failed note does not undo the pupil; the message says so.
-    const noteFailed = note !== "" && !(await addNote(API_URL, created.id, note).then(() => true, () => false));
+  // A chosen group goes to POST /enrollments, which answers with the enrolment
+  // only, so the drawer's own label names it; otherwise capacity chooses (T9).
+  const place = async (studentId: string, req: AltaRequest): Promise<string> => {
+    if (req.groupId === "") {
+      return (await enrollIntoGrade(API_URL, studentId, req.gradeLevelId, req.enrolledOn)).groupName;
+    }
+    await enroll(API_URL, { studentId, groupId: req.groupId, enrolledOn: req.enrolledOn });
+    return req.groupLabel;
+  };
+
+  const onSave = async (req: AltaRequest): Promise<void> => {
+    const { student: input, note } = req;
+    let studentId = req.createdStudentId;
+    let noteFailed = false;
+    if (studentId === undefined) {
+      const created = await createStudent(API_URL, input);
+      studentId = created.id;
+      // The note goes right after the pupil exists and BEFORE placement: a full
+      // grade keeps the drawer open, and a retry must not write the note twice.
+      // A failed note does not undo the pupil; the message says so.
+      noteFailed = note !== "" && !(await addNote(API_URL, created.id, note).then(() => true, () => false));
+    }
     // Two calls, and the SECOND one is the one that can fail on a full grade —
     // by then the pupil exists. PlacementFailed carries that distinction to the
     // drawer, so the message can say "el alumno sí se creó" instead of sending
     // somebody back to re-type a CURP that is now taken.
-    let placement: Placement;
+    let groupName: string;
     try {
-      placement = await enrollIntoGrade(API_URL, created.id, gradeLevelId);
+      groupName = await place(studentId, req);
     } catch (err) {
-      throw new PlacementFailed(err, noteFailed);
+      throw new PlacementFailed(err, noteFailed, studentId);
     }
     setAdd(false);
     reload();
     say(
       noteFailed
-        ? `Alumno creado · ${formatStudentName(input)} quedó en ${placement.groupName}, pero la nota no se guardó: agrégala en su ficha`
-        : `Alumno creado · ${formatStudentName(input)} quedó en ${placement.groupName}`,
+        ? `Alumno creado · ${formatStudentName(input)} quedó en ${groupName}, pero la nota no se guardó: agrégala en su ficha`
+        : `Alumno creado · ${formatStudentName(input)} quedó en ${groupName}`,
     );
   };
   const onPlaced = (message: string, keepSheet = false): void => {
@@ -1190,7 +1270,7 @@ export function StudentsScreen({ onBack, canCreate = true, onEdit, canWriteNotes
 
       <button onClick={() => setAdd(true)} title="Nuevo alumno" style={{ position: "fixed", right: 32, bottom: FAB_BOTTOM, zIndex: 50, height: FAB_HEIGHT, padding: "0 26px", borderRadius: 99, display: "inline-flex", alignItems: "center", gap: 10, background: "var(--primary)", color: "var(--primary-ink)", fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 16.5, cursor: "pointer", boxShadow: "var(--shadow-fab)" }}><Icon name="plus" size={22} stroke={2.6} />Nuevo alumno</button>
 
-      {add && <QuickAdd onClose={() => setAdd(false)} onSave={onSave} levels={levels} withNote={canWriteNotes} />}
+      {add && <QuickAdd onClose={() => setAdd(false)} onSave={onSave} levels={levels} groups={groups} cycleStartsOn={activeCycle?.startsOn ?? ""} withNote={canWriteNotes} />}
       {sheet !== null && <StudentSheet st={sheet} groups={groups} cycleId={groupsCycleId} gradeLevels={gradeLevels} gradeLevelsFailed={gradeLevelsFailed} onClose={() => setSheet(null)} onPlaced={onPlaced} onEdit={onEdit === undefined ? undefined : () => onEdit(sheet.id)} canRevokeCard={canRevokeCard} canWithdraw={canWithdraw} />}
       {notesOf !== null && (
         <StudentNotesDialog
