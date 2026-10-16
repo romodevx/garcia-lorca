@@ -116,7 +116,8 @@ Cada tarea recorre este ciclo completo antes de empezar la siguiente:
 
 **T12 · Formularios, errores y mensajes** — ISSUE-012, 015, 018, 025, 026 · Medium/Low · frontend-sr
 - Mostrar el motivo que da el servidor (409 docente duplicado, asignación ocupada) y limpiar el error anterior al acertar.
-- El botón principal nunca se deshabilita (activar cuenta, tallas, entrada de almacén, cobrar y entregar): siempre muestra estado ocupado o error al enviar.
+- El botón principal nunca se deshabilita (activar cuenta, tallas, entrada de almacén, cobrar y entregar, **Guardar tabulador**): siempre muestra estado ocupado o error al enviar.
+- (Arrastrado de la revisión de T7) Los campos de dinero abren con el formato viejo ("4000.00") hasta perder el foco: sembrarlos con `formatPesosInput` (TuitionPage, ExpenseDrawer, CollectDrawer, FinanceScreen, CorrectPaymentDrawer).
 - Lista de grupos en orden de nivel y grado en todas las pantallas.
 - Egresos sin categorías: invitación a crear la primera, en vez de una lista vacía.
 - Cobrar con el corte del día cerrado: avisar antes de confirmar.

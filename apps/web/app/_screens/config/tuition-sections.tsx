@@ -312,6 +312,13 @@ function flushDrafts(
     if (read.kind === "tier") ready.set(name, { tier: read.tier, clear: card.clear });
   }
   if (ready.size === 0) return { concepts };
+  // Nada tecleado se tira en silencio: un tramo listo para un concepto que ya
+  // no está en la lista se reclama en vez de vaciarse.
+  for (const name of ready.keys()) {
+    if (!concepts.some((c) => c.name === name)) {
+      return { problem: `El monto escrito para "${name}" no tiene concepto en la lista. Vuelve a agregar el concepto o borra lo escrito.` };
+    }
+  }
   const next = concepts.map((c) => {
     const draft = ready.get(c.name);
     return draft === undefined ? c : { ...c, tiers: withTier(c.tiers, draft.tier) };
