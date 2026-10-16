@@ -1,6 +1,10 @@
 package domain
 
-import "time"
+import (
+	"time"
+
+	"github.com/garcia-lorca/pkg/schoolcal"
+)
 
 // SchoolDate is the school's calendar date at instant t: the wall-clock day in
 // zone (America/Mexico_City, resolved once at boot from SCHOOL_TIMEZONE),
@@ -16,6 +20,5 @@ import "time"
 // window. Every "today" in finance goes through here, never through a local
 // truncation of its own.
 func SchoolDate(t time.Time, zone *time.Location) time.Time {
-	local := t.In(zone)
-	return time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, time.UTC)
+	return schoolcal.Date(t, zone)
 }

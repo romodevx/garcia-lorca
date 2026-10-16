@@ -5,6 +5,7 @@ import (
 	"time"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
+	"github.com/garcia-lorca/pkg/schoolcal"
 )
 
 // shortSpanishMonths are the abbreviations the office reads ("24 ago 2026").
@@ -14,8 +15,7 @@ var shortSpanishMonths = [...]string{"ene", "feb", "mar", "abr", "may", "jun", "
 // represented at midnight UTC like a parsed YYYY-MM-DD or a stored date
 // column, so comparisons against those stay exact (ADR 0035).
 func SchoolDate(t time.Time, zone *time.Location) time.Time {
-	local := t.In(zone)
-	return time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, time.UTC)
+	return schoolcal.Date(t, zone)
 }
 
 // ShortSpanishDate formats a calendar date as the office writes it: "24 ago 2026".

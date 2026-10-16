@@ -1,6 +1,10 @@
 package domain
 
-import "time"
+import (
+	"time"
+
+	"github.com/garcia-lorca/pkg/schoolcal"
+)
 
 // EvaluationPeriod is grades' view of one evaluation period of a GRADE in a
 // cycle (T14, owned by config — ADR 0029): a trimester, a bimester… with real
@@ -20,8 +24,7 @@ type EvaluationPeriod struct {
 // is America/Mexico_City's (SCHOOL_TIMEZONE), never the UTC day: at 20:00 on
 // Nov 30 the school is still on Nov 30.
 func SchoolDay(now time.Time, loc *time.Location) time.Time {
-	y, m, d := now.In(loc).Date()
-	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+	return schoolcal.Date(now, loc)
 }
 
 // Contains reports whether day (a SchoolDay) is inside the period.

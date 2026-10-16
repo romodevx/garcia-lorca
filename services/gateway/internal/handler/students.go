@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"connectrpc.com/connect"
+	"github.com/garcia-lorca/pkg/schoolcal"
 	"github.com/garcia-lorca/services/gateway/internal/client"
 	"github.com/garcia-lorca/services/gateway/internal/middleware"
 )
@@ -510,7 +511,7 @@ func mustLoadSchoolLocation() *time.Location {
 }
 
 func schoolDate(now time.Time, location *time.Location) time.Time {
-	return now.In(location)
+	return schoolcal.Date(now, location)
 }
 
 // EnrollIntoGrade: POST /api/v1/enrollments/by-grade
