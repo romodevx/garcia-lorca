@@ -380,8 +380,8 @@ func (h *FamilyHandler) Account(w http.ResponseWriter, r *http.Request) {
 		// What the school is asking for TODAY, already with the surcharge that
 		// has accrued and net of the early-payment reward — the same figure the
 		// counter would quote. totalBalanceCents above is what the year still
-		// owes; a parent shown only that one is told a number nobody is asking
-		// them for.
+		// owes (the statement's balance, credit netted — T5); a parent shown
+		// only that one is told a number nobody is asking them for.
 		"dueTodayCents": res.DueTodayCents,
 		// Its parts, so a parent asking why is answered by the screen.
 		"surchargeCents":     res.SurchargeCents,

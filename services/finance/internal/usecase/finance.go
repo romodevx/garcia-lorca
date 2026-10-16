@@ -22,17 +22,28 @@ const (
 )
 
 // AccountStatement is a student's whole financial standing: every charge with
-// what has been collected against it, every payment received, and the total
-// still owed. TotalBalanceCents sums only what is genuinely outstanding —
-// cancelled charges are excluded and an over-collected charge contributes zero,
-// never a negative that would silently pay off another debt.
+// what has been collected against it, every payment received, and the balance.
 type AccountStatement struct {
 	// Charges are priced as of AsOf: a scholarship's part included (T18).
 	Charges []ports.ChargeWithPaid
 	// raw are the same charges as stored, for the ledger (T7), which prices
 	// each one itself after the inscription ladder.
-	raw               []ports.ChargeWithPaid
-	Payments          []domain.Payment
+	raw []ports.ChargeWithPaid
+	// deposits are the student's, read once for the balance and reused by the
+	// statement's lines.
+	deposits []domain.Deposit
+	Payments []domain.Payment
+	// TotalBalanceCents is THE balance (T5 · ISSUE-006), the statement's
+	// Totals.BalanceCents to the cent: opened, non-cancelled charges at the
+	// counter's price (inscription ladder, scholarship), plus the surcharge
+	// the daily rule has earned up to AsOf, less discounts and every live
+	// payment and credit note. Negative is money the school holds for the
+	// family (unallocated credit, an over-collected charge).
+	//
+	// A charge that has not opened (T5 window) is NOT in it, for the office
+	// as for the family: the office's Charges list it, the balance does not,
+	// so the drawer, the parents' app, the PDF and the counter read one number.
+	// Surcharges of a cancelled month owe nothing and are not in it either.
 	TotalBalanceCents int64
 	// UnallocatedCents is money the family has handed over that no charge has
 	// claimed: an overpayment, or a deposit made before the month was billed.
@@ -43,9 +54,9 @@ type AccountStatement struct {
 	// due, carrying the surcharge the daily rule has earned and net of the
 	// early-payment reward.
 	//
-	// TotalBalanceCents above stays the plain arithmetic of charge minus paid —
-	// what the YEAR still owes. Before this field the parents' app showed that
-	// figure and the counter showed this one, and the two disagreed by design.
+	// TotalBalanceCents above is what the YEAR still owes; this is the part of
+	// it asked for today (net of the early-payment reward, which is not in the
+	// balance until a payment earns it).
 	DueTodayCents int64
 	// The parts of DueTodayCents, so a family asking "why that number?" is
 	// answered by the statement rather than by a phone call.
@@ -715,14 +726,14 @@ func (s *FinanceService) accountWithTerms(
 		return AccountStatement{}, collectionTerms{}, err
 	}
 
-	var balance int64
-	for _, c := range priced {
-		if c.Charge.Status() == domain.StatusCancelled {
-			continue
-		}
-		// Floored at zero: an over-collected charge is a credit to reconcile,
-		// not a discount on the student's other debts.
-		balance += max(0, c.Charge.Effective().Int64()-c.PaidCents)
+	deposits, err := s.repo.ListDeposits(ctx, studentID)
+	if err != nil {
+		return AccountStatement{}, collectionTerms{}, err
+	}
+	// The balance is the ledger's, never a second sum: see ledger.
+	_, totals, err := ledger(charges, payments, deposits, terms, when, false)
+	if err != nil {
+		return AccountStatement{}, collectionTerms{}, err
 	}
 	// What the counter would collect today, through the SAME arithmetic the
 	// counter uses — but against the charges ALREADY read above, and without the
@@ -736,9 +747,10 @@ func (s *FinanceService) accountWithTerms(
 	}
 	return AccountStatement{
 		raw:                charges,
+		deposits:           deposits,
 		Charges:            priced,
 		Payments:           payments,
-		TotalBalanceCents:  balance,
+		TotalBalanceCents:  totals.BalanceCents,
 		UnallocatedCents:   credit,
 		DueTodayCents:      expected.AmountCents,
 		SurchargeCents:     expected.SurchargeCents,

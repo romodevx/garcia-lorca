@@ -184,8 +184,10 @@ func TestTheFamilyDoesNotSeeAChargeBeforeItOpens(t *testing.T) {
 	if !hasCharge(staff, inscription) {
 		t.Error("the school must always see the inscription")
 	}
-	if early.TotalBalanceCents != staff.TotalBalanceCents-inscriptionCents {
-		t.Errorf("family balance = %d, want the school's %d less the hidden inscription",
+	// T5 (ISSUE-006): one balance. The school lists the inscription, but a
+	// charge that has not opened is in nobody's balance.
+	if early.TotalBalanceCents != staff.TotalBalanceCents {
+		t.Errorf("family balance = %d, want the school's %d — a charge not yet open is in neither",
 			early.TotalBalanceCents, staff.TotalBalanceCents)
 	}
 

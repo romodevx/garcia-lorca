@@ -66,6 +66,18 @@ describe("useHomeKpis", () => {
     expect(result.current.cycle).toEqual({ name: "2026-2027", active: true });
   });
 
+  // T5: a cancelled charge is never owed — "Por cobrar" reads like Finanzas.
+  it("leaves cancelled charges out of what is still owed", async () => {
+    vi.mocked(listCharges).mockResolvedValue([
+      { status: "pending", paidCents: 0, remainingCents: 1000 },
+      { status: "cancelled", paidCents: 0, remainingCents: 4000 },
+    ] as never);
+    const { result } = renderHook(() => useHomeKpis(ALL));
+    await waitFor(() =>
+      expect(result.current.ledger).toEqual({ status: "ready", value: { pendingCents: 1000, collectedCents: 0, withBalance: 1, charges: 2 } }),
+    );
+  });
+
   it("says a failed read failed, and a retry reads again", async () => {
     vi.mocked(listStudents).mockRejectedValueOnce(new Error("500"));
     vi.mocked(listCharges).mockRejectedValueOnce(new Error("500"));

@@ -117,11 +117,13 @@ describe("AccountScreen (the backend's ledger, T7)", () => {
     await renderWithProviders(<AccountScreen />);
 
     await waitFor(() => expect(screen.getByLabelText("Saldo").props.children).toBe("$7,750.00"));
-    expect(screen.getByLabelText("Saldo pendiente").props.children).toBe("$32,000.00");
+    expect(screen.getByText("Saldo pendiente $32,000.00")).toBeTruthy();
     const note = screen.getByLabelText("Detalle del saldo");
     expect(String(note.props.children)).toContain("150.00");
     expect(String(note.props.children)).toContain("100.00");
-    expect(String(note.props.children)).toContain("2026-11-20");
+    // The day in words, not the wire's ISO (T5).
+    expect(String(note.props.children)).toContain("Al 20 nov 2026.");
+    expect(String(note.props.children)).not.toContain("2026-11-20");
   });
 
   it("says the family has credit when the balance is below zero", async () => {
@@ -130,7 +132,35 @@ describe("AccountScreen (the backend's ledger, T7)", () => {
     await renderWithProviders(<AccountScreen />);
 
     await waitFor(() => expect(screen.getByText("Al corriente")).toBeTruthy());
-    expect(screen.getByLabelText("Saldo a favor").props.children).toBe("$500.00");
+    expect(screen.getByText("Saldo a favor $500.00")).toBeTruthy();
+    expect(screen.queryByText(/-\$/)).toBeNull();
+  });
+
+  // Without the day the hero falls back to the balance: a credit is still a
+  // credit, not "$0.00" and not "Pendiente" (T5).
+  it("shows a credit as credit when the server did not send the day", async () => {
+    mockFetch({ movements: [], totals: { ...ZERO, balanceCents: -50000 } });
+
+    await renderWithProviders(<AccountScreen />);
+
+    await waitFor(() => expect(screen.getByText("Saldo a favor")).toBeTruthy());
+    expect(screen.getByLabelText("Saldo").props.children).toBe("$500.00");
+    expect(screen.getByText("Al corriente")).toBeTruthy();
+    expect(screen.queryByText("Pendiente")).toBeNull();
+  });
+
+  it("names a running balance below zero as credit", async () => {
+    mockFetch({
+      movements: [line("payment", "2026-09-12", "Pago", 50000, -50000, { method: "cash" })],
+      totals: { ...ZERO, paidCents: 50000, balanceCents: -50000 },
+      dueTodayCents: 0,
+      asOf: "2026-10-01",
+    });
+
+    await renderWithProviders(<AccountScreen />);
+
+    await waitFor(() => expect(screen.getAllByText("Saldo a favor $500.00").length).toBe(2));
+    expect(screen.queryByText(/Saldo -/)).toBeNull();
   });
 
   it("downloads the statement's PDF and opens the share sheet", async () => {

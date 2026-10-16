@@ -92,7 +92,8 @@ type Payment struct {
 }
 
 // AccountStatement is a student's full financial picture: every charge, every
-// payment, and the outstanding balance across non-cancelled charges.
+// payment, and the balance (the statement's, T5: accrued surcharge in, credit
+// netted, charges not yet open out).
 type AccountStatement struct {
 	Charges           []Charge
 	Payments          []Payment
@@ -102,8 +103,7 @@ type AccountStatement struct {
 	UnallocatedCents int64
 	// DueTodayCents is what is being asked for NOW, already carrying the accrued
 	// surcharge and net of the early-payment reward. TotalBalanceCents above is
-	// what the YEAR still owes; before this field the parents' app showed that
-	// one and the counter showed this one.
+	// what the YEAR still owes — the statement's balance (T5), credit netted.
 	DueTodayCents int64
 	// The parts of it, so the statement can explain its own number.
 	SurchargeCents     int64
@@ -556,6 +556,9 @@ type Expected struct {
 	SurchargeCents     int64 `json:"surchargeCents"`
 	DiscountCents      int64 `json:"discountCents"`
 	AnnualBalanceCents int64 `json:"annualBalanceCents"`
+	// OnTimeBalanceCents is AnnualBalanceCents less the early-payment rewards
+	// of the lines InBalance: "si paga a tiempo", worked out by finance.
+	OnTimeBalanceCents int64 `json:"onTimeBalanceCents"`
 	// ScholarshipCents is what scholarships take off the lines asked for (T18).
 	ScholarshipCents int64 `json:"scholarshipCents"`
 	// Lines is the debt concept by concept, oldest due date first (task 8).
@@ -575,12 +578,17 @@ type ExpectedLine struct {
 	ScholarshipCents int64 `json:"scholarshipCents"`
 	TotalCents       int64 `json:"totalCents"`
 	Due              bool  `json:"due"`
+	// InBalance is whether AnnualBalanceCents counts the line: false for a
+	// charge not yet open (T5), listed only so it can be paid ahead.
+	InBalance bool `json:"inBalance"`
 }
 
-// ExpectedToday asks what is due as of a date ("" = today).
-func (c *FinanceClient) ExpectedToday(ctx context.Context, studentID, on string) (Expected, error) {
+// ExpectedToday asks what is due as of a date ("" = today). withBalance false
+// leaves the year's balance out (both balance figures come back 0), sparing
+// finance two reads — for lists that show only what is due.
+func (c *FinanceClient) ExpectedToday(ctx context.Context, studentID, on string, withBalance bool) (Expected, error) {
 	res, err := c.rpc.ExpectedToday(ctx, connect.NewRequest(&financev1.ExpectedTodayRequest{
-		StudentId: studentID, On: on,
+		StudentId: studentID, On: on, SkipBalance: !withBalance,
 	}))
 	if err != nil {
 		return Expected{}, err
@@ -590,6 +598,7 @@ func (c *FinanceClient) ExpectedToday(ctx context.Context, studentID, on string)
 		SurchargeCents:     res.Msg.GetSurchargeCents(),
 		DiscountCents:      res.Msg.GetDiscountCents(),
 		AnnualBalanceCents: res.Msg.GetAnnualBalanceCents(),
+		OnTimeBalanceCents: res.Msg.GetOnTimeBalanceCents(),
 		ScholarshipCents:   res.Msg.GetScholarshipCents(),
 		Lines:              toExpectedLines(res.Msg.GetLines()),
 	}, nil
@@ -602,6 +611,7 @@ func toExpectedLines(lines []*financev1.ExpectedLine) []ExpectedLine {
 			ChargeID: l.GetChargeId(), Description: l.GetDescription(), DueDate: l.GetDueDate(),
 			OwedCents: l.GetOwedCents(), SurchargeCents: l.GetSurchargeCents(), DiscountCents: l.GetDiscountCents(),
 			TotalCents: l.GetTotalCents(), Due: l.GetDue(), ScholarshipCents: l.GetScholarshipCents(),
+			InBalance: l.GetInBalance(),
 		})
 	}
 	return out

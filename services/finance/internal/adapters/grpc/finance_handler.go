@@ -400,7 +400,11 @@ func (h *FinanceHandler) ExpectedToday(ctx context.Context, req *connect.Request
 		}
 		on = parsed
 	}
-	expected, err := h.finance.ExpectedToday(ctx, req.Msg.GetStudentId(), on)
+	quote := h.finance.ExpectedToday
+	if req.Msg.GetSkipBalance() {
+		quote = h.finance.ExpectedWithoutBalance
+	}
+	expected, err := quote(ctx, req.Msg.GetStudentId(), on)
 	if err != nil {
 		return nil, connectErr(err)
 	}
@@ -409,6 +413,7 @@ func (h *FinanceHandler) ExpectedToday(ctx context.Context, req *connect.Request
 		SurchargeCents:     expected.SurchargeCents,
 		DiscountCents:      expected.DiscountCents,
 		AnnualBalanceCents: expected.AnnualBalanceCents,
+		OnTimeBalanceCents: expected.OnTimeBalanceCents,
 		Lines:              toProtoExpectedLines(expected.Lines),
 		ScholarshipCents:   expected.ScholarshipCents,
 	}), nil
@@ -420,7 +425,7 @@ func toProtoExpectedLines(lines []usecase.ExpectedLine) []*financev1.ExpectedLin
 		out = append(out, &financev1.ExpectedLine{
 			ChargeId: l.ChargeID, Description: l.Description, DueDate: l.DueDate.Format(time.DateOnly),
 			OwedCents: l.OwedCents, SurchargeCents: l.SurchargeCents, DiscountCents: l.DiscountCents,
-			TotalCents: l.TotalCents, Due: l.Due, ScholarshipCents: l.ScholarshipCents,
+			TotalCents: l.TotalCents, Due: l.Due, ScholarshipCents: l.ScholarshipCents, InBalance: l.InBalance,
 		})
 	}
 	return out

@@ -95,7 +95,8 @@ export function PaymentsScreen({ onBack, canGrantDiscounts = false, notes, canCo
         continue;
       }
       asked.current.add(s.id);
-      getExpected(API_URL, s.id)
+      // Only amountCents is shown here: the year's balance is left out.
+      getExpected(API_URL, s.id, "", { withBalance: false })
         .then((e) => { if (live) { setOwed((prev) => new Map(prev).set(s.id, e.amountCents)); } })
         .catch(() => {
           // Unknown, not zero. Asked again next time the name comes up rather

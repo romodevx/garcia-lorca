@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactElement } from "react";
 
 import { API_URL } from "../../api-url";
-import { formatCents } from "../../_lib/money";
+import { dayWithYearLabel } from "../../_lib/localDate";
+import { formatBalance, formatCents } from "../../_lib/money";
 import {
   downloadStatementPdf,
   getStatement,
@@ -41,13 +42,6 @@ function detailOf(m: StatementMovement): string {
   return [m.folio, methodLabel(m), m.reference === undefined || m.reference === "" ? "" : `ref. ${m.reference}`]
     .filter((part) => part !== undefined && part !== "")
     .join(" · ");
-}
-
-/** `2026-09-10` → `10 sep 2026`, read as a calendar day (no time zone shift). */
-function dayOf(iso: string): string {
-  const [y, m, d] = iso.split("-").map(Number);
-  if (y === undefined || m === undefined || d === undefined || Number.isNaN(y + m + d)) return iso;
-  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("es-MX", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
 }
 
 type Load = { state: "loading" } | { state: "failed"; message: string } | { state: "ready"; statement: Statement };
@@ -159,6 +153,7 @@ function Ledger({ statement, onCorrect }: { statement: Statement; onCorrect?: (d
                 <MovementRow
                   key={`${m.kind}-${m.chargeId ?? ""}-${m.depositId ?? ""}-${i}`}
                   m={m}
+                  index={i}
                   onCorrect={onCorrect !== undefined && correctable.has(i) && m.depositId !== undefined ? () => onCorrect(m.depositId ?? "") : undefined}
                 />
               ))}
@@ -178,14 +173,14 @@ function Ledger({ statement, onCorrect }: { statement: Statement; onCorrect?: (d
 const th: CSSProperties = { padding: "8px 10px", borderBottom: "1px solid var(--border)", fontWeight: 600 };
 const td: CSSProperties = { padding: "10px", borderBottom: "1px solid var(--border)", verticalAlign: "top" };
 
-function MovementRow({ m, onCorrect }: { m: StatementMovement; onCorrect?: () => void }): ReactElement {
+function MovementRow({ m, index, onCorrect }: { m: StatementMovement; index: number; onCorrect?: () => void }): ReactElement {
   const struck = m.voided || m.superseded === true;
   const muted = struck || m.notYetDue;
   const amount = formatCents(m.amountCents);
   const detail = detailOf(m);
   return (
     <tr style={{ color: muted ? "var(--text-faint)" : "var(--text)", textDecoration: struck ? "line-through" : "none" }}>
-      <td style={{ ...td, whiteSpace: "nowrap" }}>{dayOf(m.date)}</td>
+      <td style={{ ...td, whiteSpace: "nowrap" }}>{dayWithYearLabel(m.date)}</td>
       <td style={td}>
         <div style={{ fontWeight: 600 }}>{m.description}</div>
         {detail !== "" && <div style={{ fontSize: 12.5, color: "var(--text-muted)" }}>{detail}</div>}
@@ -207,7 +202,7 @@ function MovementRow({ m, onCorrect }: { m: StatementMovement; onCorrect?: () =>
       </td>
       <td style={{ ...td, textAlign: "right", whiteSpace: "nowrap" }}>{isDebit(m.kind) ? amount : ""}</td>
       <td style={{ ...td, textAlign: "right", whiteSpace: "nowrap", color: muted ? undefined : "var(--forest)" }}>{isDebit(m.kind) ? "" : amount}</td>
-      <td style={{ ...td, textAlign: "right", whiteSpace: "nowrap", fontWeight: 600 }}>{formatCents(m.balanceCents)}</td>
+      <td data-testid={`running-balance-${index}`} style={{ ...td, textAlign: "right", whiteSpace: "nowrap", fontWeight: 600 }}>{formatBalance(m.balanceCents)}</td>
     </tr>
   );
 }
@@ -228,7 +223,7 @@ function Totals({ statement }: { statement: Statement }): ReactElement {
     ...(totals.discountCents > 0 ? [{ label: "Descuentos y becas", cents: totals.discountCents }] : []),
     { label: "Total pagado", cents: totals.paidCents },
     { label: credit ? "Saldo a favor" : "Saldo pendiente", cents: Math.abs(totals.balanceCents), strong: true },
-    { label: statement.asOf === "" ? "A pagar hoy" : `A pagar hoy (${dayOf(statement.asOf)})`, cents: statement.dueTodayCents },
+    { label: statement.asOf === "" ? "A pagar hoy" : `A pagar hoy (${dayWithYearLabel(statement.asOf)})`, cents: statement.dueTodayCents },
   ];
   return (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>

@@ -105,6 +105,24 @@ describe("StudentStatementDrawer (T7)", () => {
     expect(await within(dialog).findByText("Colegiatura septiembre")).toBeInTheDocument();
   });
 
+  // T5: below zero the school owes the family. Said as credit, with a positive
+  // amount — in the totals and in the running balance — never as "-$500.00".
+  it("names a balance below zero as credit, never with a minus sign", async () => {
+    api.getStatement.mockResolvedValue({
+      ...ledger,
+      movements: [{ kind: "payment", date: "2026-09-12", description: "Pago", amountCents: 50000, balanceCents: -50000, method: "cash", accrued: false, notYetDue: false, voided: false }],
+      totals: { chargedCents: 0, discountCents: 0, paidCents: 50000, balanceCents: -50000, notYetDueCents: 0 },
+      dueTodayCents: 0,
+    });
+    render(<StudentStatementDrawer studentId="st-1" name="Cruz Valentina" onClose={() => {}} />);
+    const dialog = await screen.findByRole("dialog", { name: "Estado de cuenta · Cruz Valentina" });
+
+    expect((await within(dialog).findByText("Saldo a favor")).nextSibling).toHaveTextContent(money("$500.00"));
+    expect(within(dialog).getByTestId("running-balance-0")).toHaveTextContent(/^A favor \$500\.00$/);
+    expect(dialog).not.toHaveTextContent(/-\s?\$/);
+    expect(within(dialog).queryByText("Saldo pendiente")).toBeNull();
+  });
+
   it("says a pupil with no movements has none", async () => {
     api.getStatement.mockResolvedValue({ ...ledger, movements: [], totals: { chargedCents: 0, discountCents: 0, paidCents: 0, balanceCents: 0, notYetDueCents: 0 } });
     render(<StudentStatementDrawer studentId="st-1" name="Cruz Valentina" onClose={() => {}} />);

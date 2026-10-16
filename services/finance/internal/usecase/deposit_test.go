@@ -336,8 +336,11 @@ func TestTheStatementShowsTheFamilysCredit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetAccount: %v", err)
 	}
-	if account.TotalBalanceCents != 0 {
-		t.Fatalf("balance = %d, want the year settled", account.TotalBalanceCents)
+	// T5 (ISSUE-006): the balance nets the credit — the year settled and
+	// the rest below zero, as the statement reads it.
+	if account.TotalBalanceCents != -(overpaid - 3230000) {
+		t.Fatalf("balance = %d, want the year settled and %d in the family's favour",
+			account.TotalBalanceCents, overpaid-3230000)
 	}
 	if account.UnallocatedCents != overpaid-3230000 {
 		t.Errorf("credit = %d, want %d", account.UnallocatedCents, overpaid-3230000)

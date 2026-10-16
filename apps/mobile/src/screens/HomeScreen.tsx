@@ -45,6 +45,9 @@ export function HomeScreen(): ReactElement {
 
   const balanceCents = account.data?.totals.balanceCents ?? null;
   const settled = balanceCents !== null && balanceCents <= 0;
+  // Below zero the school owes the family (T5): credit, as a positive amount.
+  const inCredit = balanceCents !== null && balanceCents < 0;
+  const balanceLabel = inCredit ? "Saldo a favor" : settled ? "Estado de cuenta" : "Saldo por pagar";
 
   const dateLabel = new Date().toLocaleDateString("es-MX", { weekday: "long", day: "numeric", month: "long" });
 
@@ -88,10 +91,10 @@ export function HomeScreen(): ReactElement {
           </View>
           <View style={styles.heroMain}>
             <Text style={[styles.heroLabel, { color: theme.colors.text2, fontFamily: theme.fonts.ui }]}>
-              {settled ? "Estado de cuenta" : "Saldo por pagar"}
+              {balanceLabel}
             </Text>
             <Text style={[styles.heroValue, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]}>
-              {balanceCents === null ? "—" : pesos(Math.max(balanceCents, 0))}
+              {balanceCents === null ? "—" : pesos(Math.abs(balanceCents))}
             </Text>
             <View style={{ marginTop: 7 }}>
               {balanceCents === null ? null : settled ? (

@@ -25,7 +25,7 @@ const student = (id: string, first: string, last: string): studentsApi.Student =
 
 beforeEach(() => {
   students.listStudents.mockResolvedValue([student("s1", "Valentina", "Cruz"), student("s2", "Mateo", "Sánchez")]);
-  finance.getExpected.mockResolvedValue({ amountCents: 670000, surchargeCents: 0, discountCents: 0, annualBalanceCents: 1300000, lines: [] });
+  finance.getExpected.mockResolvedValue({ amountCents: 670000, surchargeCents: 0, discountCents: 0, annualBalanceCents: 1300000, onTimeBalanceCents: 1300000, lines: [] });
   finance.getAccount.mockResolvedValue({ charges: [], payments: [], totalBalanceCents: 1300000, unallocatedCents: 0, dueTodayCents: 0, surchargeCents: 0, earlyDiscountCents: 0, asOf: "" });
   finance.previewDeposit.mockResolvedValue({ allocations: [], surcharges: [], unallocatedCents: 0 });
 });
@@ -117,6 +117,19 @@ describe("PaymentsScreen", () => {
     await waitFor(() => expect(finance.getExpected).toHaveBeenCalledTimes(3));
 
     expect(finance.getExpected).toHaveBeenCalledTimes(3);
+  });
+
+  // The list shows only what is due today: it asks without the year's
+  // balance, which would cost the service two more reads per name.
+  it("asks for what is due without the year's balance", async () => {
+    const user = userEvent.setup();
+    students.listStudents.mockResolvedValue([student("s1", "Valentina", "Cruz")]);
+    render(<PaymentsScreen onBack={() => {}} />);
+    await screen.findByLabelText("Buscar alumno");
+
+    await user.type(screen.getByLabelText("Buscar alumno"), "Valen");
+    await waitFor(() => expect(finance.getExpected).toHaveBeenCalled());
+    expect(finance.getExpected).toHaveBeenCalledWith(expect.any(String), "s1", "", { withBalance: false });
   });
 });
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { centsToPesosInput, formatCents, pesosToCents } from "./money";
+import { centsToPesosInput, formatBalance, formatCents, pesosToCents } from "./money";
 
 /**
  * Money integrity. `pesosToCents` is the ONLY door a human-typed amount walks
@@ -111,5 +111,15 @@ describe("un solo formateador para todo el sistema", () => {
   it("siempre son pesos mexicanos, aunque la interfaz esté en inglés", () => {
     // El monto ES pesos: una interfaz en inglés no puede repintarlo como USD.
     expect(formatCents(100000)).toContain("1,000.00");
+  });
+});
+
+describe("formatBalance", () => {
+  it("reads a balance below zero as credit, with a positive amount", () => {
+    expect(formatBalance(-50000)).toBe(`A favor ${formatCents(50000)}`);
+  });
+
+  it("leaves a balance owed as money", () => {
+    expect(formatBalance(50000)).toBe(formatCents(50000));
   });
 });

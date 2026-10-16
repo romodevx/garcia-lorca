@@ -3650,6 +3650,14 @@ paths:
           required: false
           schema: { type: string, format: date }
           description: The day to work it out for. Empty means today.
+        - name: withBalance
+          in: query
+          required: false
+          schema: { type: boolean, default: true }
+          description: >
+            false leaves the year's balance out (annualBalanceCents and
+            onTimeBalanceCents come back 0) and spares the service two reads:
+            for lists that show only amountCents, such as the counter's search.
       responses:
         '200':
           description: What is due today, and what makes it up.
@@ -3657,12 +3665,28 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [amountCents, surchargeCents, discountCents, annualBalanceCents]
+                required: [amountCents, surchargeCents, discountCents, annualBalanceCents, onTimeBalanceCents]
                 properties:
                   amountCents: { type: integer, format: int64, minimum: 0 }
                   surchargeCents: { type: integer, format: int64, minimum: 0 }
                   discountCents: { type: integer, format: int64, minimum: 0 }
-                  annualBalanceCents: { type: integer, format: int64, minimum: 0 }
+                  annualBalanceCents:
+                    type: integer
+                    format: int64
+                    example: 3200000
+                    description: >
+                      THE balance (T5), as of today: the lines inBalance, the
+                      surcharge accrued, less every peso received. Negative
+                      when the school holds the family's money.
+                  onTimeBalanceCents:
+                    type: integer
+                    format: int64
+                    example: 3000000
+                    description: >
+                      annualBalanceCents if every month in it is paid in time:
+                      less the early-payment rewards (discountCents) of the
+                      lines inBalance. A projection, not a debt; a line not yet
+                      open takes nothing off it.
                   lines:
                     type: array
                     description: >
@@ -3670,7 +3694,7 @@ paths:
                       lines marked due add up to amountCents.
                     items:
                       type: object
-                      required: [chargeId, description, dueDate, owedCents, surchargeCents, discountCents, totalCents, due]
+                      required: [chargeId, description, dueDate, owedCents, surchargeCents, discountCents, totalCents, due, inBalance]
                       properties:
                         chargeId: { type: string, format: uuid }
                         description: { type: string, example: "Colegiatura septiembre" }
@@ -3688,6 +3712,12 @@ paths:
                             was lost by paying after the due date.
                         totalCents: { type: integer, format: int64, example: 350000 }
                         due: { type: boolean, description: "Asked for that day: due, or falling due later that month — and already open (T5)." }
+                        inBalance:
+                          type: boolean
+                          description: >
+                            Counted in annualBalanceCents today. false for a
+                            charge not yet open (T5) with nothing paid on it:
+                            listed so it can be paid ahead, not part of the debt.
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }

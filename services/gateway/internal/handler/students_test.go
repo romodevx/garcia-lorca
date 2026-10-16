@@ -420,7 +420,10 @@ func TestTransferNonActiveIs400(t *testing.T) {
 
 func TestWithdrawForwardsDateAndReasonAndReturnsContractShape(t *testing.T) {
 	svc := &fakeEnrollmentSvc{res: client.Enrollment{ID: "enr-1", StudentID: "stu-1", CycleID: "cyc-1", Status: "withdrawn", WithdrawnOn: "2026-10-15", WithdrawalReason: "Cambio de ciudad"}}
-	h := handler.NewEnrollmentsHandler(svc)
+	// A fixed clock on the withdrawal day: with the real clock this date turns
+	// "back-dated" the next day and the handler (rightly) asks for finance:write.
+	sameDay := func() time.Time { return time.Date(2026, 10, 15, 17, 0, 0, 0, time.UTC) }
+	h := handler.NewEnrollmentsHandler(svc, handler.WithEnrollmentsClock(sameDay))
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/enrollments/withdraw",
 		strings.NewReader(`{"enrollmentId":"enr-1","withdrawnOn":"2026-10-15","reason":"Cambio de ciudad"}`))
 	rec := httptest.NewRecorder()

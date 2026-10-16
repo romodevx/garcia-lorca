@@ -536,7 +536,11 @@ message GetAccountRequest {
 }
 
 // GetAccountResponse is the student's account statement.
-// total_balance_cents is the sum of remaining_cents across non-cancelled charges.
+// total_balance_cents is THE balance (T5): the statement's balance to the cent —
+// opened, non-cancelled charges at the counter's price (ladder, scholarship),
+// plus the surcharge accrued to today, less discounts and every payment.
+// Negative is the family's credit. Charges not yet open are listed to the office
+// but are in nobody's balance, so office and family views read one number.
 message GetAccountResponse {
   repeated Charge charges = 1;
   repeated Payment payments = 2;
@@ -548,9 +552,9 @@ message GetAccountResponse {
   // have come due, already carrying the surcharge the daily rule has earned and
   // net of the early-payment reward.
   //
-  // total_balance_cents above is the plain arithmetic of charge minus paid, and
-  // stays that way — it is what the year still owes. This is what the family
-  // must hand over now, and it is the number the school quotes at the counter.
+  // total_balance_cents above is what the year still owes (the statement's
+  // balance). This is the part of it the family must hand over now, and it is
+  // the number the school quotes at the counter.
   // Before this field the parents' app showed the first and the window showed
   // the second, and the two disagreed by design.
   int64 due_today_cents = 5;
@@ -1113,6 +1117,10 @@ message IncomeByConceptResponse {
 message ExpectedTodayRequest {
   string student_id = 1;
   string on = 2;  // YYYY-MM-DD; empty means today
+  // Leave the year's balance out: annual_balance_cents and
+  // on_time_balance_cents come back 0, and the payments and deposits are not
+  // read. For lists that only show amount_cents (the counter's search).
+  bool skip_balance = 3;
 }
 
 // ExpectedTodayResponse is the figure the counter reads aloud, with the parts
@@ -1122,7 +1130,8 @@ message ExpectedTodayResponse {
   int64 surcharge_cents = 2;
   int64 discount_cents = 3;
   // The whole year still owed, shown beside it so nobody confuses "what is due
-  // today" with "what is left".
+  // today" with "what is left". THE balance (T5): equal to GetAccount's
+  // total_balance_cents and the statement's balance, always as of today.
   int64 annual_balance_cents = 4;
   // The same, concept by concept, oldest due date first (task 8). The lines
   // marked due add up to amount_cents.
@@ -1130,6 +1139,10 @@ message ExpectedTodayResponse {
   // What scholarships take off the lines asked for (T18), already out of
   // amount_cents.
   int64 scholarship_cents = 6;
+  // What annual_balance_cents comes to if every month in it is paid in time:
+  // the balance less the early-payment rewards of the lines in_balance (a
+  // projection, not a debt). Lines not yet open take nothing off it.
+  int64 on_time_balance_cents = 7;
 }
 
 // ExpectedLine is one charge still owed, as of the day asked about.
@@ -1144,6 +1157,10 @@ message ExpectedLine {
   bool due = 8;
   // The scholarship's part that day (T18), already out of owed_cents.
   int64 scholarship_cents = 9;
+  // Whether the line counts in annual_balance_cents today: false for a charge
+  // not yet open (T5) with nothing paid on it — listed, payable ahead, but
+  // not part of the debt.
+  bool in_balance = 10;
 }
 
 // DrainOutboxRequest asks for the waiting events to be published.

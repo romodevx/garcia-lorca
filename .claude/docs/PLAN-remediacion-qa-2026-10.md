@@ -14,6 +14,7 @@
 | D4 | **Cumpleaños:** todo alumno con inscripción activa en el ciclo, aunque esté "en trámite". |
 | D5 | **Integración:** un PR por tarea → CI + GitGuardian verdes → squash a `dev` → limpieza de ramas. Autorización permanente para empujar dentro de este plan. |
 | D6 | **Push real:** dejar todo listo (eas.json, projectId configurable, `PUSH_PROVIDER=expo` configurable, recibos de Expo, guía). El dueño conecta su cuenta de Expo/EAS cuando quiera. |
+| D8 | **Día del cobro (16-oct):** finanzas deja el día UTC y toma "hoy" en America/Mexico_City (recargos, vencimientos, pronto pago, corridas, "Al {fecha}"). |
 | D7 | **Datos del QA final:** los Excel de `importaciones/` (ignorada por git). Solo en la base LOCAL; nunca en reportes, capturas ni commits. |
 
 ## Ciclo por tarea (definición de terminado)
@@ -70,6 +71,11 @@ Cada tarea recorre este ciclo completo antes de empezar la siguiente:
 - Definir "saldo del año" como cargos efectivos + recargo acumulado a hoy − pagos. La misma cifra en caja ("Del año debe"), `/family/.../account.totalBalance`, estado de cuenta (web y app) y tarjetas de Finanzas.
 - El monto que supone pronto pago se etiqueta como proyección ("Si paga a tiempo: $X"), no como un segundo "total".
 - **Aceptación:** Valentina muestra el mismo saldo en las 4 superficies (test de contrato del gateway + test de componente).
+
+**T5b · El día del cobro es el de Morelia** — decisión D8 · backend-sr
+- finance toma "hoy" con un reloj de America/Mexico_City inyectado en la raíz de composición (como gateway y comms; tzdata embebido; falla al arrancar si la zona es inválida). Aplica a recargos diarios y mensuales, vencimientos, pronto pago, `ListOverdue`, corridas sin `asOfDate` y el `asOf` de cuenta y estado.
+- Las fechas que ya están guardadas no cambian. Solo cambia qué día se considera "hoy".
+- **Aceptación:** a las 19:00 de Morelia (01:00 UTC del día siguiente) no se acumula el recargo de mañana y la app dice "Al 15 oct 2026".
 
 **T6 · Actividad a mitad de mes** — ISSUE-007 · Medium · backend-sr
 - Regla D3: al inscribirse después del límite, se crea el cargo del periodo en curso con vencimiento el día de la inscripción. El texto del diálogo describe exactamente lo que pasa.

@@ -91,6 +91,7 @@ type fakeFinance struct {
 	deposits        []client.Deposit
 	expectedStudent string
 	expectedOn      string
+	expectedBalance bool
 	expected        client.Expected
 	depositGranted  bool
 	depositCardType string
@@ -107,8 +108,8 @@ type fakeFinance struct {
 	err    error
 }
 
-func (f *fakeFinance) ExpectedToday(_ context.Context, studentID, on string) (client.Expected, error) {
-	f.expectedStudent, f.expectedOn = studentID, on
+func (f *fakeFinance) ExpectedToday(_ context.Context, studentID, on string, withBalance bool) (client.Expected, error) {
+	f.expectedStudent, f.expectedOn, f.expectedBalance = studentID, on, withBalance
 	return f.expected, f.err
 }
 
@@ -985,6 +986,35 @@ func TestFinanceExpectedAnswersItsLines(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("expected body lacks %s: %s", want, body)
 		}
+	}
+}
+
+// D1 (T5 review): the balance it holds travels in the JSON, and the search
+// may leave the balance out with withBalance=false (default: included).
+func TestFinanceExpectedBalanceIsOptional(t *testing.T) {
+	svc := &fakeFinance{expected: client.Expected{OnTimeBalanceCents: 300000, Lines: []client.ExpectedLine{{
+		ChargeID: "ch-sep", InBalance: true,
+	}}}}
+	h := handler.NewFinanceHandler(svc)
+
+	rec := doReq(t, h.ExpectedToday, http.MethodGet, "/api/v1/finance/expected?studentId=stu-1", "")
+	body := rec.Body.String()
+	for _, want := range []string{`"onTimeBalanceCents":300000`, `"inBalance":true`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("expected body lacks %s: %s", want, body)
+		}
+	}
+	if !svc.expectedBalance {
+		t.Error("the balance is included by default")
+	}
+
+	doReq(t, h.ExpectedToday, http.MethodGet, "/api/v1/finance/expected?studentId=stu-1&withBalance=false", "")
+	if svc.expectedBalance {
+		t.Error("withBalance=false still asked for the balance")
+	}
+
+	if rec := doReq(t, h.ExpectedToday, http.MethodGet, "/api/v1/finance/expected?studentId=stu-1&withBalance=maybe", ""); rec.Code != http.StatusBadRequest {
+		t.Errorf("withBalance=maybe: status %d, want 400", rec.Code)
 	}
 }
 
