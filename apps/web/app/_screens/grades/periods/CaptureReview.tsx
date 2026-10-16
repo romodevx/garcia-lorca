@@ -35,8 +35,8 @@ function unfinishedText(endsOn: string | null): string {
 }
 
 /**
- * The review before closing: how many boletas it will publish and who gets
- * none, then what is missing. "Todas las calificaciones están capturadas" is
+ * The review before closing: how many boletas it will publish, who gets
+ * none and which published ones it withdraws, then what is missing. "Todas las calificaciones están capturadas" is
  * said only when it is true: something was expected, nothing is missing,
  * every group has the period and it has ended.
  */
@@ -44,7 +44,7 @@ export function CaptureReview({ period, progress, verdict }: { period: GradingPe
   return (
     <>
       <ProgressBar captured={progress.captured} expected={progress.expected} />
-      <p style={{ fontSize: 15, fontWeight: 600, color: "var(--text)" }}>{closePreview(progress.reportCards, progress.skippedWithoutGrades)}</p>
+      <p style={{ fontSize: 15, fontWeight: 600, color: "var(--text)" }}>{closePreview(progress.reportCards, progress.skippedWithoutGrades, progress.withdrawnReportCards)}</p>
       {verdict.blocked && (
         <div role="note" style={{ display: "grid", gap: 4 }}>
           <p style={WARN}>{`Sin periodo ${period.ordinal} configurado: ${progress.groupsWithoutPeriod.join(", ")}`}</p>

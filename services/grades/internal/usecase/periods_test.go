@@ -657,6 +657,48 @@ func TestReCloseNotifiesAPupilWithoutAPreviousCard(t *testing.T) {
 	assert.Equal(t, "stu-3", f.publisher.published[0].StudentID)
 }
 
+// A pupil whose grades were deleted while the term was reopened gets no new
+// card, and their v1 is superseded (withdrawn, as for a withdrawn pupil, ADR
+// 0020). Nobody is notified, but the director is told beforehand (Progress)
+// and after (Close): WithdrawnReportCards counts the term's published cards
+// whose enrollment is not graded now.
+func TestReCloseCountsTheCardsItWithdraws(t *testing.T) {
+	f := newPeriodsFixture(t)
+	f.captureAll(t)
+	_, err := f.svc.Close(context.Background(), firstTermID, false, dirActor)
+	require.NoError(t, err)
+	_, err = f.svc.Reopen(context.Background(), firstTermID, director)
+	require.NoError(t, err)
+	delete(f.grades.rows, gradeKey("enr-3", subjectID, "gl-2-"+period1))
+
+	preview, err := f.svc.Progress(context.Background(), firstTermID)
+	require.NoError(t, err)
+	assert.Equal(t, 1, preview.WithdrawnReportCards, "the dialog warns before closing")
+
+	res, err := f.svc.Close(context.Background(), firstTermID, true, dirActor)
+	require.NoError(t, err)
+	assert.Equal(t, usecase.CloseResult{Status: domain.PeriodClosed, Version: 2, ReportCards: 2,
+		SkippedWithoutGrades: 1, WithdrawnReportCards: 1}, res)
+	for _, rc := range f.periods.cards {
+		if rc.StudentID() == "stu-3" {
+			assert.Equal(t, domain.ReportCardSuperseded, rc.Status(), "v1 is withdrawn")
+		}
+	}
+	assert.Len(t, f.periods.outbox, 3, "no event queued for the withdrawn card")
+}
+
+// A first close withdraws nothing.
+func TestFirstCloseWithdrawsNothing(t *testing.T) {
+	f := newPeriodsFixture(t)
+	f.capture(t, "enr-1", subjectID, period1, 9)
+	preview, err := f.svc.Progress(context.Background(), firstTermID)
+	require.NoError(t, err)
+	assert.Zero(t, preview.WithdrawnReportCards)
+	res, err := f.svc.Close(context.Background(), firstTermID, true, dirActor)
+	require.NoError(t, err)
+	assert.Zero(t, res.WithdrawnReportCards)
+}
+
 func TestReopenRefusals(t *testing.T) {
 	f := newPeriodsFixture(t)
 	_, err := f.svc.Reopen(context.Background(), firstTermID, director)
@@ -751,6 +793,27 @@ func TestListPeriods(t *testing.T) {
 	assert.True(t, byTerm["term-fourth"].StartsOn.IsZero(), "no grade has a 4th period")
 	_, listed := byTerm["term-kinder"]
 	assert.False(t, listed, "Preescolar («Lleva calificación numérica» off) is not listed")
+}
+
+// A level whose numeric grades were turned off AFTER a term of it closed
+// still lists its terms: the published cards stay reachable to reopen.
+func TestListPeriodsKeepsALevelWithAClosedTermAfterGradingIsOff(t *testing.T) {
+	f := newPeriodsFixture(t)
+	closed, err := domain.NewOpenPeriod("term-kinder", cycleID, levelPreescolar).Close(dirActor, periodsNow, nil)
+	require.NoError(t, err)
+	f.grades.closures["term-kinder"] = closed
+
+	got, err := f.svc.ListPeriods(context.Background(), cycleID)
+	require.NoError(t, err)
+	var kinder *usecase.Period
+	for i := range got {
+		if got[i].Term.ID == "term-kinder" {
+			kinder = &got[i]
+		}
+	}
+	require.NotNil(t, kinder, "a closed term never disappears")
+	assert.True(t, kinder.Closure.IsClosed())
+	assert.Zero(t, kinder.Expected, "nothing is owed without numeric grades")
 	assert.Equal(t, 1, f.grades.batchCalls, "every grade of the cycle in ONE read")
 }
 

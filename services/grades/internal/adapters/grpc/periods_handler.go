@@ -73,6 +73,7 @@ func (h *GradesHandler) GetPeriodProgress(ctx context.Context, req *connect.Requ
 		GroupsWithoutPeriod: nonNil(p.GroupsWithoutPeriod),
 		Expected:            int32(p.Expected), Captured: int32(p.Captured), Missing: missing,
 		ReportCards: int32(p.ReportCards), SkippedWithoutGrades: int32(p.SkippedWithoutGrades),
+		WithdrawnReportCards: int32(p.WithdrawnReportCards),
 	}), nil
 }
 
@@ -85,7 +86,7 @@ func (h *GradesHandler) ClosePeriod(ctx context.Context, req *connect.Request[gr
 	}
 	return connect.NewResponse(&gradesv1.ClosePeriodResponse{
 		Status: string(res.Status), Version: int32(res.Version), ReportCards: int32(res.ReportCards),
-		SkippedWithoutGrades: int32(res.SkippedWithoutGrades),
+		SkippedWithoutGrades: int32(res.SkippedWithoutGrades), WithdrawnReportCards: int32(res.WithdrawnReportCards),
 	}), nil
 }
 

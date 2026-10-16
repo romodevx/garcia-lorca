@@ -111,13 +111,15 @@ service GradesService {
 
   // --- period closing and report cards (T7) ---
   // A period is one config term: exactly one level of one cycle, covering a
-  // set of months. Closing it snapshots a report card per active enrollment of
-  // the level with a grade in the term's period (T10; one transaction with the closure) and locks the term's months
-  // for every writer; reopening unlocks them, and closing again issues the
-  // next version, which supersedes the previous one.
+  // set of months. Closing it snapshots a report card per active enrollment
+  // of the level with a grade in the term's period (T10; one transaction with
+  // the closure) and locks the term's months for every writer; reopening
+  // unlocks them, and closing again issues the next version, which supersedes
+  // the previous one.
 
   // ListPeriods lists every term of a cycle with its closure state and capture
-  // progress, except the terms of a level without numeric grades (T10).
+  // progress, except the terms of a level without numeric grades (T10) that
+  // never closed one.
   rpc ListPeriods(ListPeriodsRequest) returns (ListPeriodsResponse);
   // GetPeriodProgress is one term's capture progress and what is missing,
   // grouped by group and subject. NotFound for an unknown term.
@@ -553,6 +555,10 @@ message GetPeriodProgressResponse {
   // notification) because they have no grade in the term's period.
   int32 report_cards = 10;
   int32 skipped_without_grades = 11;
+  // withdrawn_report_cards is how many report cards already published for
+  // the term closing now would withdraw without a replacement: their
+  // enrollment has no grade in the term's period any more.
+  int32 withdrawn_report_cards = 12;
 }
 
 message ClosedTermsRequest {
@@ -580,6 +586,9 @@ message ClosePeriodResponse {
   // T10: active pupils with no grade in the term's period: no report card,
   // no notification.
   int32 skipped_without_grades = 4;
+  // withdrawn_report_cards: previously published report cards this close
+  // withdrew without a replacement (no grade in the term's period any more).
+  int32 withdrawn_report_cards = 5;
 }
 
 message ReopenPeriodRequest {

@@ -6332,7 +6332,9 @@ paths:
         Every term of the cycle, of every level that grades numerically (a
         term is exactly one level of one cycle — the unit that closes and
         issues report cards; a level with «Lleva calificación numérica» off has
-        nothing to capture or close, so its terms are not listed, T10), whether it
+        nothing to capture or close, so its terms are not listed, T10 — unless
+        one of them was ever closed: then they stay listed, with `expected` 0,
+        so its published report cards stay reachable), whether it
         is `open` or `closed`, how many times it was closed (`version`, 0 =
         never; it is the version of its latest report cards) and its capture
         progress (T15): the term stands for the evaluation period with the
@@ -6407,7 +6409,10 @@ paths:
         one grade in the term's period of its grade (version = the period's
         close count; withdrawn pupils get none). A pupil with no grade in
         that period (a group without subjects, say) gets no card and no
-        notification; `skippedWithoutGrades` counts them (T10). Each card's columns
+        notification; `skippedWithoutGrades` counts them (T10). A re-close
+        supersedes every card of the previous version; one whose enrollment
+        has no grade in the period any more is withdrawn with no replacement
+        and no notification, counted by `withdrawnReportCards`. Each card's columns
         are the evaluation periods of the pupil's grade from the first up to
         the one with the term's ordinal, with the grades exactly as captured;
         each subject's `average` is the exact mean of its columns and the
@@ -6450,7 +6455,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [status, version, reportCards, skippedWithoutGrades]
+                required: [status, version, reportCards, skippedWithoutGrades, withdrawnReportCards]
                 properties:
                   status: { type: string, enum: [closed] }
                   version: { type: integer, minimum: 1, example: 1 }
@@ -6466,7 +6471,15 @@ paths:
                       Active pupils with no grade in the term's period: no
                       report card and no notification (T10).
                     example: 1
-              example: { status: closed, version: 1, reportCards: 31, skippedWithoutGrades: 1 }
+                  withdrawnReportCards:
+                    type: integer
+                    minimum: 0
+                    description: >
+                      Report cards of the previous version this close withdrew
+                      without a replacement: their pupil has no grade in the
+                      term's period any more. Zero on a first close.
+                    example: 0
+              example: { status: closed, version: 1, reportCards: 31, skippedWithoutGrades: 1, withdrawnReportCards: 0 }
         '400': { $ref: '#/components/responses/PlainBadRequest' }
         '401': { $ref: '#/components/responses/PlainUnauthorized' }
         '403': { $ref: '#/components/responses/PlainForbidden' }
@@ -7491,7 +7504,7 @@ components:
         progress: { captured: 288, expected: 288 }
     GradePeriodProgress:
       type: object
-      required: [termId, unfinished, endsOn, groupsWithoutPeriod, expected, captured, missing, reportCards, skippedWithoutGrades]
+      required: [termId, unfinished, endsOn, groupsWithoutPeriod, expected, captured, missing, reportCards, skippedWithoutGrades, withdrawnReportCards]
       properties:
         termId: { type: string, format: uuid }
         reportCards:
@@ -7504,6 +7517,11 @@ components:
           minimum: 0
           description: Active pupils who would get no report card (and no notification) because they have no grade in the term's period.
           example: 1
+        withdrawnReportCards:
+          type: integer
+          minimum: 0
+          description: Report cards already published for the term that closing now would withdraw without a replacement, because their pupil has no grade in the term's period any more.
+          example: 0
         unfinished:
           type: boolean
           description: >
@@ -7544,6 +7562,7 @@ components:
         captured: 270
         reportCards: 30
         skippedWithoutGrades: 1
+        withdrawnReportCards: 0
         missing:
           - { groupId: 4a000000-0000-4000-8000-000000000001, groupLabel: 1° PRIMARIA · A, subjectId: 5a000000-0000-4000-8000-000000000001, subjectName: Matemáticas, teacherName: Gabriela Rojas, missingCount: 18 }
     ReportCardSummary:

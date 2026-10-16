@@ -60,6 +60,8 @@ export interface PeriodCaptureProgress {
   reportCards: number;
   /** Active pupils without any grade in the period: no boleta, no notification. */
   skippedWithoutGrades: number;
+  /** Boletas already published that closing now would withdraw, unreplaced: their pupil has no grade any more. */
+  withdrawnReportCards: number;
 }
 
 export interface CloseResult {
@@ -68,6 +70,8 @@ export interface CloseResult {
   reportCards: number;
   /** Active pupils without any grade in the period: they got no boleta. */
   skippedWithoutGrades: number;
+  /** Boletas of the previous version withdrawn without a replacement. */
+  withdrawnReportCards: number;
 }
 
 export interface ReportCard {

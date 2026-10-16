@@ -33,17 +33,41 @@ function skippedSentence(skipped: number, [one, many]: readonly [string, string]
   return `${pupils} sin calificaciones ${skipped === 1 ? one : many} boleta.`;
 }
 
-/** "Se publicarán 24 boletas. 1 alumno sin calificaciones no recibirá boleta." — said before closing. */
-export function closePreview(reportCards: number, skipped: number): string {
-  const published =
-    reportCards === 0 ? "No se publicará ninguna boleta." : reportCards === 1 ? "Se publicará 1 boleta." : `Se publicarán ${reportCards} boletas.`;
-  return skipped > 0 ? `${published} ${skippedSentence(skipped, ["no recibirá", "no recibirán"])}` : published;
+/**
+ * "Se retirará 1 boleta ya publicada a un alumno que ya no tiene
+ * calificaciones." — a re-close withdraws, with no replacement, the boleta
+ * of a pupil left without grades; `verb` is [singular, plural]. Empty at 0.
+ */
+function withdrawnSentence(withdrawn: number, [one, many]: readonly [string, string]): string {
+  if (withdrawn === 0) return "";
+  return withdrawn === 1
+    ? `${one} 1 boleta ya publicada a un alumno que ya no tiene calificaciones.`
+    : `${many} ${withdrawn} boletas ya publicadas a alumnos que ya no tienen calificaciones.`;
 }
 
-/** "Se publicaron 24 boletas" (+ who got none) — said after closing. */
-export function publishedMessage(result: Pick<CloseResult, "reportCards" | "skippedWithoutGrades">): string {
-  const { reportCards, skippedWithoutGrades: skipped } = result;
+function joinSentences(...parts: string[]): string {
+  return parts.filter((p) => p !== "").join(" ");
+}
+
+/** "Se publicarán 24 boletas. 1 alumno sin calificaciones no recibirá boleta." (+ what it withdraws) — said before closing. */
+export function closePreview(reportCards: number, skipped: number, withdrawn: number): string {
+  const published =
+    reportCards === 0 ? "No se publicará ninguna boleta." : reportCards === 1 ? "Se publicará 1 boleta." : `Se publicarán ${reportCards} boletas.`;
+  return joinSentences(
+    published,
+    skipped > 0 ? skippedSentence(skipped, ["no recibirá", "no recibirán"]) : "",
+    withdrawnSentence(withdrawn, ["Se retirará", "Se retirarán"]),
+  );
+}
+
+/** "Se publicaron 24 boletas" (+ who got none, + what it withdrew) — said after closing. */
+export function publishedMessage(result: Pick<CloseResult, "reportCards" | "skippedWithoutGrades" | "withdrawnReportCards">): string {
+  const { reportCards, skippedWithoutGrades: skipped, withdrawnReportCards: withdrawn } = result;
   const published =
     reportCards === 0 ? "No se publicó ninguna boleta" : reportCards === 1 ? "Se publicó 1 boleta" : `Se publicaron ${reportCards} boletas`;
-  return skipped > 0 ? `${published}. ${skippedSentence(skipped, ["no recibió", "no recibieron"])}` : published;
+  const rest = joinSentences(
+    skipped > 0 ? skippedSentence(skipped, ["no recibió", "no recibieron"]) : "",
+    withdrawnSentence(withdrawn, ["Se retiró", "Se retiraron"]),
+  );
+  return rest === "" ? published : `${published}. ${rest}`;
 }

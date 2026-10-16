@@ -30,12 +30,21 @@ describe("closePreview — what closing will publish, said before closing (T10)"
     [1, 0, "Se publicará 1 boleta."],
     [0, 2, "No se publicará ninguna boleta. 2 alumnos sin calificaciones no recibirán boleta."],
   ])("%i boletas, %i without grades", (reportCards, skipped, text) => {
-    expect(closePreview(reportCards, skipped)).toBe(text);
+    expect(closePreview(reportCards, skipped, 0)).toBe(text);
+  });
+
+  it.each([
+    [2, 1, 1, "Se publicarán 2 boletas. 1 alumno sin calificaciones no recibirá boleta. Se retirará 1 boleta ya publicada a un alumno que ya no tiene calificaciones."],
+    [5, 0, 3, "Se publicarán 5 boletas. Se retirarán 3 boletas ya publicadas a alumnos que ya no tienen calificaciones."],
+  ])("re-close: %i boletas, %i without grades, %i withdrawn", (reportCards, skipped, withdrawn, text) => {
+    expect(closePreview(reportCards, skipped, withdrawn)).toBe(text);
   });
 });
 
 describe("publishedMessage — what closing did", () => {
-  const result = (reportCards: number, skippedWithoutGrades: number) => ({ status: "closed" as const, version: 1, reportCards, skippedWithoutGrades });
+  const result = (reportCards: number, skippedWithoutGrades: number, withdrawnReportCards = 0) => ({
+    status: "closed" as const, version: 1, reportCards, skippedWithoutGrades, withdrawnReportCards,
+  });
 
   it.each([
     [124, 0, "Se publicaron 124 boletas"],
@@ -45,5 +54,12 @@ describe("publishedMessage — what closing did", () => {
     [0, 2, "No se publicó ninguna boleta. 2 alumnos sin calificaciones no recibieron boleta."],
   ])("%i boletas, %i without grades", (reportCards, skipped, text) => {
     expect(publishedMessage(result(reportCards, skipped))).toBe(text);
+  });
+
+  it.each([
+    [2, 1, 1, "Se publicaron 2 boletas. 1 alumno sin calificaciones no recibió boleta. Se retiró 1 boleta ya publicada a un alumno que ya no tiene calificaciones."],
+    [5, 0, 3, "Se publicaron 5 boletas. Se retiraron 3 boletas ya publicadas a alumnos que ya no tienen calificaciones."],
+  ])("re-close: %i boletas, %i without grades, %i withdrawn", (reportCards, skipped, withdrawn, text) => {
+    expect(publishedMessage(result(reportCards, skipped, withdrawn))).toBe(text);
   });
 });

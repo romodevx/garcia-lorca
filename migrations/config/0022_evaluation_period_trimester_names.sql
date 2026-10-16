@@ -10,8 +10,8 @@
 --     'Periodo <ordinal>' (0016's fallback): text the school never typed;
 --   * the number is its own ordinal — a row renumbered by date since then
 --     ("PERIODO 4" at ordinal 3) is ambiguous and is left alone;
---   * its ordinal is 1..3 and its grade has no period beyond the 3rd in that
---     cycle: four or more periods are not trimesters;
+--   * its grade's periods in that cycle are EXACTLY ordinals 1, 2 and 3:
+--     two periods (semesters) or four or more (blocks) are not trimesters;
 --   * its level is not being deleted (the 0012/0016 freeze would refuse it).
 -- New names: 1 → '1.er trimestre', 2 → '2.º trimestre', 3 → '3.er trimestre'
 -- (the same text as the month calendar's terms).
@@ -39,14 +39,11 @@ UPDATE evaluation_periods p
   JOIN levels l ON l.id = g.level_id
  WHERE g.id = p.grade_level_id
    AND l.status <> 'deleting'
-   AND p.ordinal BETWEEN 1 AND 3
    AND p.name IN ('PERIODO ' || p.ordinal, 'Periodo ' || p.ordinal)
-   AND NOT EXISTS (
-       SELECT 1 FROM evaluation_periods o
-        WHERE o.tenant_id = p.tenant_id
-          AND o.cycle_id = p.cycle_id
-          AND o.grade_level_id = p.grade_level_id
-          AND o.ordinal > 3
-   );
+   AND (SELECT array_agg(o.ordinal ORDER BY o.ordinal)
+          FROM evaluation_periods o
+         WHERE o.tenant_id = p.tenant_id
+           AND o.cycle_id = p.cycle_id
+           AND o.grade_level_id = p.grade_level_id) = ARRAY[1, 2, 3];
 
 COMMIT;
