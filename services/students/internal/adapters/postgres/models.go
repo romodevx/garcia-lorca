@@ -53,14 +53,16 @@ func (studentModel) TableName() string { return "students" }
 // mapper.go). cycle_id/group_id/term_id are plain UUIDs validated by RPC, never
 // FKs (config owns those tables).
 type enrollmentModel struct {
-	ID         string    `gorm:"column:id;primaryKey"`
-	TenantID   string    `gorm:"column:tenant_id"`
-	StudentID  string    `gorm:"column:student_id"`
-	CycleID    string    `gorm:"column:cycle_id"`
-	GroupID    string    `gorm:"column:group_id"`
-	TermID     *string   `gorm:"column:term_id"`
-	Status     string    `gorm:"column:status"`
-	EnrolledAt time.Time `gorm:"column:enrolled_at"`
+	ID               string     `gorm:"column:id;primaryKey"`
+	TenantID         string     `gorm:"column:tenant_id"`
+	StudentID        string     `gorm:"column:student_id"`
+	CycleID          string     `gorm:"column:cycle_id"`
+	GroupID          string     `gorm:"column:group_id"`
+	TermID           *string    `gorm:"column:term_id"`
+	Status           string     `gorm:"column:status"`
+	EnrolledAt       time.Time  `gorm:"column:enrolled_at"`
+	WithdrawnOn      *time.Time `gorm:"column:withdrawn_on"`
+	WithdrawalReason *string    `gorm:"column:withdrawal_reason"`
 	// Origin is manual|import (migration 0019, ADR 0033).
 	Origin    string `gorm:"column:origin"`
 	CreatedAt time.Time
@@ -68,6 +70,19 @@ type enrollmentModel struct {
 }
 
 func (enrollmentModel) TableName() string { return "enrollments" }
+
+type outboxModel struct {
+	ID            string     `gorm:"column:id;primaryKey;default:gen_random_uuid()"`
+	TenantID      string     `gorm:"column:tenant_id"`
+	EventType     string     `gorm:"column:event_type"`
+	Payload       []byte     `gorm:"column:payload"`
+	CreatedAt     time.Time  `gorm:"column:created_at;default:now()"`
+	PublishedAt   *time.Time `gorm:"column:published_at"`
+	Attempts      int        `gorm:"column:attempts"`
+	NextAttemptAt time.Time  `gorm:"column:next_attempt_at;default:now()"`
+}
+
+func (outboxModel) TableName() string { return "students_outbox" }
 
 // enrollmentTransferModel is the GORM row for `enrollment_transfers`, the dated,
 // reasoned history of moving an enrollment between groups.

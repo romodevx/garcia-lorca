@@ -4,8 +4,12 @@ import (
 	"context"
 	"net/http"
 	"time"
+	_ "time/tzdata"
+	"unicode/utf8"
 
+	"connectrpc.com/connect"
 	"github.com/garcia-lorca/services/gateway/internal/client"
+	"github.com/garcia-lorca/services/gateway/internal/middleware"
 )
 
 // StudentsService is the students surface the edge needs (consumer-defined, so
@@ -201,7 +205,11 @@ type EnrollmentService interface {
 	ListEnrollments(ctx context.Context, studentID, cycleID, groupID string) ([]client.Enrollment, error)
 	GetEnrollment(ctx context.Context, id string) (client.Enrollment, error)
 	TransferStudent(ctx context.Context, enrollmentID, toGroupID, reason string) (client.Enrollment, error)
-	WithdrawEnrollment(ctx context.Context, id string) (client.Enrollment, error)
+	WithdrawEnrollment(ctx context.Context, id, withdrawnOn, reason string) (client.Enrollment, error)
+}
+
+type WithdrawalPreviewService interface {
+	PreviewWithdrawal(ctx context.Context, studentID, cycleID, withdrawnOn string) (client.WithdrawalPreview, error)
 }
 
 // EnrollmentsHandler exposes the front-facing (HTTP/JSON) enrollment endpoints,
@@ -210,12 +218,41 @@ type EnrollmentService interface {
 // guard (module_students) plus RequireAuth + rotation-enforcement, with writes
 // (enroll/transfer/withdraw) gated on students:enroll and reads on students:read.
 type EnrollmentsHandler struct {
-	svc EnrollmentService
+	svc      EnrollmentService
+	finance  WithdrawalPreviewService
+	now      func() time.Time
+	location *time.Location
 }
 
-// NewEnrollmentsHandler wires the handler to an enrollment service.
-func NewEnrollmentsHandler(svc EnrollmentService) *EnrollmentsHandler {
-	return &EnrollmentsHandler{svc: svc}
+// EnrollmentsOption configures optional cross-module enrollment behavior.
+type EnrollmentsOption func(*EnrollmentsHandler)
+
+// WithWithdrawalPreview wires finance's optional withdrawal preview.
+func WithWithdrawalPreview(finance WithdrawalPreviewService) EnrollmentsOption {
+	return func(h *EnrollmentsHandler) { h.finance = finance }
+}
+
+// WithEnrollmentsClock replaces the clock used for withdrawal date checks.
+func WithEnrollmentsClock(now func() time.Time) EnrollmentsOption {
+	return func(h *EnrollmentsHandler) { h.now = now }
+}
+
+// WithSchoolLocation sets the school's configured timezone for date defaults.
+func WithSchoolLocation(location *time.Location) EnrollmentsOption {
+	return func(h *EnrollmentsHandler) {
+		if location != nil {
+			h.location = location
+		}
+	}
+}
+
+// NewEnrollmentsHandler wires the handler to its clients.
+func NewEnrollmentsHandler(svc EnrollmentService, opts ...EnrollmentsOption) *EnrollmentsHandler {
+	h := &EnrollmentsHandler{svc: svc, now: time.Now, location: defaultSchoolLocation}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h
 }
 
 // enrollRequest carries the client-supplied edges. cycleId is intentionally
@@ -239,16 +276,20 @@ type transferRequest struct {
 
 type withdrawRequest struct {
 	EnrollmentID string `json:"enrollmentId"`
+	WithdrawnOn  string `json:"withdrawnOn"`
+	Reason       string `json:"reason"`
 }
 
 type enrollmentResponse struct {
-	ID         string `json:"id"`
-	StudentID  string `json:"studentId"`
-	CycleID    string `json:"cycleId"`
-	GroupID    string `json:"groupId"`
-	TermID     string `json:"termId"`
-	Status     string `json:"status"`
-	EnrolledAt string `json:"enrolledAt"`
+	ID               string `json:"id"`
+	StudentID        string `json:"studentId"`
+	CycleID          string `json:"cycleId"`
+	GroupID          string `json:"groupId"`
+	TermID           string `json:"termId"`
+	Status           string `json:"status"`
+	EnrolledAt       string `json:"enrolledAt"`
+	WithdrawnOn      string `json:"withdrawnOn,omitempty"`
+	WithdrawalReason string `json:"withdrawalReason,omitempty"`
 }
 
 func toEnrollmentResponse(e client.Enrollment) enrollmentResponse {
@@ -257,13 +298,15 @@ func toEnrollmentResponse(e client.Enrollment) enrollmentResponse {
 		enrolledAt = e.EnrolledAt.UTC().Format(time.RFC3339)
 	}
 	return enrollmentResponse{
-		ID:         e.ID,
-		StudentID:  e.StudentID,
-		CycleID:    e.CycleID,
-		GroupID:    e.GroupID,
-		TermID:     e.TermID,
-		Status:     e.Status,
-		EnrolledAt: enrolledAt,
+		ID:               e.ID,
+		StudentID:        e.StudentID,
+		CycleID:          e.CycleID,
+		GroupID:          e.GroupID,
+		TermID:           e.TermID,
+		Status:           e.Status,
+		EnrolledAt:       enrolledAt,
+		WithdrawnOn:      e.WithdrawnOn,
+		WithdrawalReason: e.WithdrawalReason,
 	}
 }
 
@@ -333,12 +376,111 @@ func (h *EnrollmentsHandler) Withdraw(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	res, err := h.svc.WithdrawEnrollment(r.Context(), req.EnrollmentID)
+	if !validOptionalISODate(req.WithdrawnOn) {
+		http.Error(w, "withdrawnOn must be a valid YYYY-MM-DD date.", http.StatusBadRequest)
+		return
+	}
+	today := schoolDate(h.now(), h.location).Format("2006-01-02")
+	withdrawalDate := req.WithdrawnOn
+	if withdrawalDate == "" {
+		withdrawalDate = today
+	}
+	if withdrawalDate < today {
+		principal, ok := middleware.PrincipalFrom(r.Context())
+		if !ok {
+			http.Error(w, "Se requiere autenticación.", http.StatusUnauthorized)
+			return
+		}
+		if !middleware.HasPermission(principal, "finance:write") {
+			http.Error(w, "Para una baja con fecha anterior a hoy se necesita permiso de finanzas", http.StatusForbidden)
+			return
+		}
+	}
+	if utf8.RuneCountInString(req.Reason) > 500 {
+		http.Error(w, "reason must be at most 500 characters.", http.StatusBadRequest)
+		return
+	}
+	res, err := h.svc.WithdrawEnrollment(r.Context(), req.EnrollmentID, withdrawalDate, req.Reason)
 	if err != nil {
 		writeConnectError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, toEnrollmentResponse(res))
+}
+
+// PreviewWithdrawal handles GET /api/v1/enrollments/{id}/withdrawal-preview.
+func (h *EnrollmentsHandler) PreviewWithdrawal(w http.ResponseWriter, r *http.Request) {
+	withdrawnOn := r.URL.Query().Get("withdrawnOn")
+	if withdrawnOn == "" {
+		withdrawnOn = schoolDate(h.now(), h.location).Format("2006-01-02")
+	}
+	if !validOptionalISODate(withdrawnOn) {
+		http.Error(w, "withdrawnOn must be a valid YYYY-MM-DD date.", http.StatusBadRequest)
+		return
+	}
+	enrollment, err := h.svc.GetEnrollment(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeConnectError(w, err)
+		return
+	}
+	if enrollment.Status != "active" {
+		http.Error(w, "Only an active enrollment can be previewed for withdrawal.", http.StatusConflict)
+		return
+	}
+	if h.finance == nil {
+		WriteConnectError(w, connect.NewError(connect.CodeUnavailable, nil))
+		return
+	}
+	preview, err := h.finance.PreviewWithdrawal(r.Context(), enrollment.StudentID, enrollment.CycleID, withdrawnOn)
+	if err != nil {
+		writeConnectError(w, err)
+		return
+	}
+	if preview.ToCancel == nil {
+		preview.ToCancel = []client.WithdrawalCharge{}
+	}
+	charges := make([]withdrawalChargeResponse, 0, len(preview.ToCancel))
+	for _, charge := range preview.ToCancel {
+		charges = append(charges, withdrawalChargeResponse{ID: charge.ID, Description: charge.Description, DueDate: charge.DueDate, AmountCents: charge.AmountCents})
+	}
+	writeJSON(w, http.StatusOK, withdrawalPreviewResponse{ToCancel: charges, ToCancelCents: preview.ToCancelCents, RemainingDebtCents: preview.RemainingDebtCents})
+}
+
+type withdrawalChargeResponse struct {
+	ID          string `json:"id"`
+	Description string `json:"description"`
+	DueDate     string `json:"dueDate"`
+	AmountCents int64  `json:"amountCents"`
+}
+
+type withdrawalPreviewResponse struct {
+	ToCancel           []withdrawalChargeResponse `json:"toCancel"`
+	ToCancelCents      int64                      `json:"toCancelCents"`
+	RemainingDebtCents int64                      `json:"remainingDebtCents"`
+}
+
+func validOptionalISODate(value string) bool {
+	if value == "" {
+		return true
+	}
+	parsed, err := time.Parse("2006-01-02", value)
+	return err == nil && parsed.Format("2006-01-02") == value
+}
+
+const defaultSchoolTimezone = "America/Mexico_City"
+
+var defaultSchoolLocation = mustLoadSchoolLocation()
+
+func mustLoadSchoolLocation() *time.Location {
+	location, err := time.LoadLocation(defaultSchoolTimezone)
+	if err != nil {
+		panic(err)
+	}
+	return location
+}
+
+func schoolDate(now time.Time, location *time.Location) time.Time {
+	return now.In(location)
 }
 
 // EnrollIntoGrade: POST /api/v1/enrollments/by-grade

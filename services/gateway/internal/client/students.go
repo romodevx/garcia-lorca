@@ -120,7 +120,9 @@ type Enrollment struct {
 	EnrolledAt time.Time
 	// EndedAt is when a withdrawn/transferred enrollment stopped being active;
 	// zero while active (or when students did not record it).
-	EndedAt time.Time
+	EndedAt          time.Time
+	WithdrawnOn      string
+	WithdrawalReason string
 }
 
 // Transfer is one move of an enrollment between groups. A transfer rewrites
@@ -387,8 +389,8 @@ func (c *StudentsClient) TransferStudent(ctx context.Context, enrollmentID, toGr
 }
 
 // WithdrawEnrollment marks an active enrollment as withdrawn.
-func (c *StudentsClient) WithdrawEnrollment(ctx context.Context, id string) (Enrollment, error) {
-	res, err := c.rpc.WithdrawEnrollment(ctx, connect.NewRequest(&studentsv1.WithdrawEnrollmentRequest{Id: id}))
+func (c *StudentsClient) WithdrawEnrollment(ctx context.Context, id, withdrawnOn, reason string) (Enrollment, error) {
+	res, err := c.rpc.WithdrawEnrollment(ctx, connect.NewRequest(&studentsv1.WithdrawEnrollmentRequest{Id: id, WithdrawnOn: withdrawnOn, Reason: reason}))
 	if err != nil {
 		return Enrollment{}, err
 	}
@@ -561,14 +563,16 @@ func toGuardianLink(l *studentsv1.GuardianLink) GuardianLink {
 
 func toEnrollment(e *studentsv1.Enrollment) Enrollment {
 	return Enrollment{
-		ID:         e.GetId(),
-		StudentID:  e.GetStudentId(),
-		CycleID:    e.GetCycleId(),
-		GroupID:    e.GetGroupId(),
-		TermID:     e.GetTermId(),
-		Status:     enrollmentStatusName(e.GetStatus()),
-		EnrolledAt: timeFromTS(e.GetEnrolledAt()),
-		EndedAt:    timeFromTS(e.GetEndedAt()),
+		ID:               e.GetId(),
+		StudentID:        e.GetStudentId(),
+		CycleID:          e.GetCycleId(),
+		GroupID:          e.GetGroupId(),
+		TermID:           e.GetTermId(),
+		Status:           enrollmentStatusName(e.GetStatus()),
+		EnrolledAt:       timeFromTS(e.GetEnrolledAt()),
+		EndedAt:          timeFromTS(e.GetEndedAt()),
+		WithdrawnOn:      e.GetWithdrawnOn(),
+		WithdrawalReason: e.GetWithdrawalReason(),
 	}
 }
 

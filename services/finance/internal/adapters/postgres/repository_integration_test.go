@@ -16,6 +16,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -29,10 +31,15 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
+	studentsv1 "github.com/garcia-lorca/gen/go/garcialorca/students/v1"
 	glerrors "github.com/garcia-lorca/pkg/errors"
+	"github.com/garcia-lorca/pkg/pubsub"
 	pgadapter "github.com/garcia-lorca/services/finance/internal/adapters/postgres"
+	financepubsub "github.com/garcia-lorca/services/finance/internal/adapters/pubsub"
 	"github.com/garcia-lorca/services/finance/internal/domain"
 	"github.com/garcia-lorca/services/finance/internal/ports"
+	"github.com/garcia-lorca/services/finance/internal/usecase"
+	"google.golang.org/protobuf/proto"
 )
 
 const (
@@ -1247,5 +1254,125 @@ func TestASaleChargeWithoutACycle(t *testing.T) {
 		tenantA, studentID, conceptID, today).Error
 	if err == nil {
 		t.Error("a charge with no cycle and no ref was stored; want the table to refuse it")
+	}
+}
+
+func TestStudentWithdrawnConsumerCancelsFutureChargeInPostgres(t *testing.T) {
+	ctx := context.Background()
+	const (
+		conceptID = "c0000000-0000-0000-0000-00000000ab21"
+		studentID = "50000000-0000-0000-0000-00000000ab21"
+		chargeID  = "d0000000-0000-0000-0000-00000000ab21"
+	)
+	repo := appRepo(t, tenantA)
+	if _, err := repo.CreateConcept(ctx, newConcept(t, conceptID, tenantA, "withdrawal-consumer", 24000)); err != nil {
+		t.Fatalf("seed concept: %v", err)
+	}
+	// A billing-run charge (tuition ref): only those may be cancelled by a baja.
+	charge, err := newCharge(t, chargeID, tenantA, studentID, cycleOne, conceptID, 24000, 0, tomorrow()).
+		WithExternalRef(domain.TuitionRefPrefix + cycleOne + ":" + studentID + ":2026-11")
+	if err != nil {
+		t.Fatalf("tuition ref: %v", err)
+	}
+	if _, err := repo.CreateCharge(ctx, charge); err != nil {
+		t.Fatalf("seed charge: %v", err)
+	}
+	service := usecase.NewFinanceService(repo, nil, nil, nil, nil, nil, nil, tenantA,
+		func() string { return "generated-id" }, func() time.Time { return today })
+	service.WithActivities(repo)
+	consumer := financepubsub.NewConsumer(service, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	data, err := proto.Marshal(&studentsv1.StudentWithdrawn{
+		TenantId: tenantA, StudentId: studentID, CycleId: cycleOne,
+		EnrollmentId: "60000000-0000-0000-0000-00000000ab21", WithdrawnOn: today.Format("2006-01-02"),
+	})
+	if err != nil {
+		t.Fatalf("marshal withdrawal: %v", err)
+	}
+	msg := pubsub.Message{Attributes: map[string]string{"type": "StudentWithdrawn", "tenant_id": tenantA}, Data: data}
+	if err := consumer.Handle(ctx, msg); err != nil {
+		t.Fatalf("consumer Handle: %v", err)
+	}
+	stored, err := repo.GetCharge(ctx, chargeID)
+	if err != nil {
+		t.Fatalf("read charge: %v", err)
+	}
+	if stored.Charge.Status() != domain.StatusCancelled || stored.Charge.CancellationReason() != "baja" {
+		t.Fatalf("stored cancellation = %q (%q), want cancelled (baja)", stored.Charge.Status(), stored.Charge.CancellationReason())
+	}
+	if err := consumer.Handle(ctx, msg); err != nil {
+		t.Fatalf("redelivery: %v", err)
+	}
+}
+
+func TestWithdrawalCancellationWaitsForLockedPaymentDecision(t *testing.T) {
+	ctx := context.Background()
+	const (
+		conceptID = "c0000000-0000-0000-0000-00000000ab22"
+		studentID = "50000000-0000-0000-0000-00000000ab22"
+		chargeID  = "d0000000-0000-0000-0000-00000000ab22"
+		paymentID = "e0000000-0000-0000-0000-00000000ab22"
+	)
+	repo := appRepo(t, tenantA)
+	if _, err := repo.CreateConcept(ctx, newConcept(t, conceptID, tenantA, "withdrawal-lock", 24000)); err != nil {
+		t.Fatalf("seed concept: %v", err)
+	}
+	charge := newCharge(t, chargeID, tenantA, studentID, cycleOne, conceptID, 24000, 0, tomorrow())
+	if _, err := repo.CreateCharge(ctx, charge); err != nil {
+		t.Fatalf("seed charge: %v", err)
+	}
+
+	locked := superDB.Begin()
+	if locked.Error != nil {
+		t.Fatal(locked.Error)
+	}
+	var lockedID string
+	if err := locked.Raw("SELECT id FROM charges WHERE id = ? FOR UPDATE", chargeID).Scan(&lockedID).Error; err != nil {
+		_ = locked.Rollback().Error
+		t.Fatalf("lock charge: %v", err)
+	}
+	cancelStarted := make(chan struct{})
+	cancelResult := make(chan error, 1)
+	go func() {
+		close(cancelStarted)
+		_, err := repo.CancelChargeIfUnpaidWithReason(ctx, chargeID, "baja")
+		cancelResult <- err
+	}()
+	<-cancelStarted
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		var waiters int64
+		err := superDB.Raw(`SELECT count(*) FROM pg_stat_activity
+			WHERE wait_event_type = 'Lock' AND query ILIKE '%charges%'`).Scan(&waiters).Error
+		if err != nil {
+			_ = locked.Rollback().Error
+			t.Fatalf("read lock waiters: %v", err)
+		}
+		if waiters > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			_ = locked.Rollback().Error
+			t.Fatal("cancellation did not wait for the charge row lock")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if err := locked.Exec(`INSERT INTO payments (id, tenant_id, charge_id, amount_cents, method, paid_at)
+		VALUES (?, ?, ?, 1000, 'cash', ?)`, paymentID, tenantA, chargeID, paidAt).Error; err != nil {
+		_ = locked.Rollback().Error
+		t.Fatalf("post payment while holding row lock: %v", err)
+	}
+	if err := locked.Commit().Error; err != nil {
+		t.Fatalf("commit payment: %v", err)
+	}
+	if err := <-cancelResult; glerrors.KindOf(err) != glerrors.KindConflict {
+		t.Fatalf("cancel after concurrent payment = %v, want KindConflict", err)
+	}
+	stored, err := repo.GetCharge(ctx, chargeID)
+	if err != nil {
+		t.Fatalf("read charge: %v", err)
+	}
+	if stored.Charge.Status() == domain.StatusCancelled || stored.PaidCents != 1000 {
+		t.Errorf("charge after race = %q, paid %d; want partially paid and not cancelled", stored.Charge.Status(), stored.PaidCents)
 	}
 }

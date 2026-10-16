@@ -177,7 +177,11 @@ func enrollmentToDomain(m enrollmentModel) (domain.Enrollment, error) {
 	// A non-active enrollment is never written again after its status change
 	// (only an ACTIVE one can be transferred or withdrawn), so updated_at is the
 	// instant it ended. WithEndedAt ignores it for an active one.
-	return e.WithEndedAt(m.UpdatedAt), nil
+	e = e.WithEndedAt(m.UpdatedAt)
+	if m.WithdrawnOn != nil && status == domain.EnrollmentStatusWithdrawn {
+		e = e.WithWithdrawal(*m.WithdrawnOn, derefOrEmpty(m.WithdrawalReason))
+	}
+	return e, nil
 }
 
 // enrollmentFromDomain projects a domain Enrollment into its GORM row. An empty
@@ -189,16 +193,31 @@ func enrollmentFromDomain(e domain.Enrollment) enrollmentModel {
 		term = &t
 	}
 	return enrollmentModel{
-		ID:         e.ID(),
-		TenantID:   e.TenantID(),
-		StudentID:  e.StudentID(),
-		CycleID:    e.CycleID(),
-		GroupID:    e.GroupID(),
-		TermID:     term,
-		Status:     e.Status().String(),
-		EnrolledAt: e.EnrolledAt(),
-		Origin:     string(e.Origin()),
+		ID:               e.ID(),
+		TenantID:         e.TenantID(),
+		StudentID:        e.StudentID(),
+		CycleID:          e.CycleID(),
+		GroupID:          e.GroupID(),
+		TermID:           term,
+		Status:           e.Status().String(),
+		EnrolledAt:       e.EnrolledAt(),
+		WithdrawnOn:      timePtrOrNil(e.WithdrawnOn()),
+		WithdrawalReason: stringPtrOrNil(e.WithdrawalReason()),
+		Origin:           string(e.Origin()),
 	}
+}
+
+func timePtrOrNil(t time.Time) *time.Time {
+	if t.IsZero() {
+		return nil
+	}
+	return &t
+}
+func stringPtrOrNil(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }
 
 // guardianLinkToDomain rebuilds a domain GuardianLink from its row. An

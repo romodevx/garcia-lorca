@@ -110,6 +110,12 @@ func hasPermission(p Principal, permission string) bool {
 	return false
 }
 
+// HasPermission reports whether p holds permission using the middleware's
+// permission matching semantics.
+func HasPermission(p Principal, permission string) bool {
+	return hasPermission(p, permission)
+}
+
 // TokenFrom returns the caller's access token from the Authorization header or
 // the gl_access cookie ("" if neither). Shared with RequireAuth's sourcing so the
 // change-password handler forwards the exact same token to iam.

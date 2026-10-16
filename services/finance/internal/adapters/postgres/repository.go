@@ -366,6 +366,12 @@ func (r *Repository) CreateChargesBulk(ctx context.Context, cs []domain.Charge) 
 // serialize: whichever runs second sees the other's work and the loser gets a
 // conflict instead of a silent inconsistency.
 func (r *Repository) CancelChargeIfUnpaid(ctx context.Context, id string) (ports.ChargeWithPaid, error) {
+	return r.CancelChargeIfUnpaidWithReason(ctx, id, "")
+}
+
+// CancelChargeIfUnpaidWithReason applies the guarded cancellation and its audit
+// reason under the same row lock as payment posting.
+func (r *Repository) CancelChargeIfUnpaidWithReason(ctx context.Context, id, reason string) (ports.ChargeWithPaid, error) {
 	var out ports.ChargeWithPaid
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
 		var row chargeModel
@@ -381,13 +387,14 @@ func (r *Repository) CancelChargeIfUnpaid(ctx context.Context, id string) (ports
 		if err != nil {
 			return err
 		}
-		cancelled, err := charge.CancelIfUnpaid(paid)
+		cancelled, err := charge.CancelIfUnpaidWithReason(paid, reason)
 		if err != nil {
 			return err
 		}
 		if err := tx.Model(&chargeModel{}).Where("id = ?", id).Updates(map[string]any{
-			"status":     cancelled.Status(),
-			"updated_at": gorm.Expr("now()"),
+			"status":              cancelled.Status(),
+			"cancellation_reason": cancelled.CancellationReason(),
+			"updated_at":          gorm.Expr("now()"),
 		}).Error; err != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "cancelling charge", err)
 		}

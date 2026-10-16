@@ -967,3 +967,42 @@ func TestTheInscriptionOfAMidYearJoinerIsNotBornOverdue(t *testing.T) {
 		t.Errorf("%d surcharges on a pupil who arrived five days ago", got.LateFeesCreated)
 	}
 }
+
+func TestRunBillingSkipsEveryChargeForWithdrawnEnrollment(t *testing.T) {
+	f := billingFixture(t)
+	f.enrollments.byCycle[testCycle][0].Status = "withdrawn"
+	if _, err := f.svc.UpsertTuitionPlan(context.Background(), usecase.TuitionPlanInput{
+		CycleID: testCycle, LevelID: testLevel, EnrollmentCents: 50000, MonthlyCents: 320000,
+		Months: 10, FirstBilledMonth: 9, DueDay: 10, LateFeeCents: 15000, Active: true,
+		Fees: []domain.Fee{{Name: "Materiales", AmountCents: 20000, Months: []int{9, 10}}},
+	}); err != nil {
+		t.Fatalf("add fee: %v", err)
+	}
+	activities := newFakeActivityRepo()
+	activity, err := domain.NewActivity(domain.ActivitySpec{
+		ID: "act-basketball", Name: "Basquetbol",
+		Schedule:        []domain.ActivitySlot{{Weekday: 2, StartMin: 15 * 60, EndMin: 16 * 60}},
+		Periodicity:     domain.PeriodicityMonthly,
+		BillingStartsOn: time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC),
+		FirstDueOn:      time.Date(2026, 9, 10, 0, 0, 0, 0, time.UTC),
+		Active:          true, Options: []domain.PriceOption{{ID: "opt-1", DaysPerWeek: 1, AmountCents: 25000}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	activities.activities[activity.ID()] = activity
+	activityEnrollment, err := domain.NewActivityEnrollment("act-enr-1", activity.ID(), testStudent, "opt-1", time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	activities.enrollments = append(activities.enrollments, activityEnrollment)
+	f.svc.WithActivities(activities)
+
+	got := runOn(t, f, "2026-10-15")
+	if got.TuitionCreated != 0 || got.EnrollmentCreated != 0 || got.FeesCreated != 0 || got.ActivitiesCreated != 0 {
+		t.Errorf("withdrawn pupil received charges: %+v", got)
+	}
+	if len(f.repo.charges) != 0 {
+		t.Errorf("ledger has %d charges for withdrawn pupil", len(f.repo.charges))
+	}
+}

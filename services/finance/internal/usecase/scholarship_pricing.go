@@ -2,7 +2,6 @@ package usecase
 
 import (
 	"context"
-	"strings"
 	"time"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
@@ -96,19 +95,8 @@ func (p *scholarshipPricer) target(c domain.Charge) string {
 // ownLedgerRef reports whether a charge is the school's own: typed by hand
 // (no ref) or issued by finance's run (tuition, inscription, fee, activity).
 func ownLedgerRef(ref string) bool {
-	if ref == "" {
-		return true
-	}
-	for _, prefix := range []string{tuitionRefPrefix, domain.EnrollmentRefPrefix, domain.FeeRefPrefix, domain.ActivityRefPrefix} {
-		if strings.HasPrefix(ref, prefix) {
-			return true
-		}
-	}
-	return false
+	return ref == "" || domain.IsBillingLedgerRef(ref)
 }
-
-// tuitionRefPrefix names a month the run issued, "tuition:<cycle>:<student>:<YYYY-MM>".
-const tuitionRefPrefix = "tuition:"
 
 // price is the charge as a payment (or a read) on `on` finds it: with the
 // scholarship's part, when one applies. Nothing is written.

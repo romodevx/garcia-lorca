@@ -32,6 +32,9 @@ type fakeEnrollRepo struct {
 	createErr    error
 	createSeen   []domain.Enrollment
 	history      map[string][]domain.EnrollmentTransfer // by student id
+	outbox       []domain.Enrollment
+	drainLimit   int
+	drainTimeout time.Duration
 }
 
 // CreateEnrollmentInFirstFreeGroup models what the transaction does: it counts
@@ -156,6 +159,31 @@ func (r *fakeEnrollRepo) SetEnrollmentStatus(_ context.Context, id string, statu
 	}
 	r.byID[id] = updated
 	return nil
+}
+
+func (r *fakeEnrollRepo) WithdrawEnrollment(_ context.Context, e domain.Enrollment) error {
+	if _, ok := r.byID[e.ID()]; !ok {
+		return glerrors.ErrNotFound
+	}
+	r.byID[e.ID()] = e
+	r.outbox = append(r.outbox, e)
+	return nil
+}
+
+func (r *fakeEnrollRepo) DrainOutbox(ctx context.Context, limit int, publish func(context.Context, ports.OutboxEvent) error) (int, error) {
+	r.drainLimit = limit
+	if deadline, ok := ctx.Deadline(); ok {
+		r.drainTimeout = time.Until(deadline)
+	}
+	published := 0
+	for range r.outbox {
+		if err := publish(ctx, ports.OutboxEvent{TenantID: tenant, Type: "StudentWithdrawn", Payload: []byte("event")}); err != nil {
+			return published, err
+		}
+		published++
+	}
+	r.outbox = nil
+	return published, nil
 }
 
 // fakeCatalog is an in-memory CatalogValidator. A missing group/term returns
@@ -456,7 +484,7 @@ func TestTransferNonActiveIsInvalid(t *testing.T) {
 	svc, students, _, catalog, _ := newEnrollService(t)
 	e := enrolledStudent(t, svc, students, catalog)
 	catalog.groups["grp-2"] = groupRef{ID: "grp-2", CycleID: "cyc-99", Capacity: 30}
-	if _, err := svc.Withdraw(context.Background(), e.ID()); err != nil {
+	if _, err := svc.Withdraw(context.Background(), e.ID(), e.EnrolledAt(), "x"); err != nil {
 		t.Fatalf("withdraw: %v", err)
 	}
 	_, err := svc.Transfer(context.Background(), e.ID(), "grp-2", "why")
@@ -496,19 +524,32 @@ func TestTransferMissingToGroupIsInvalid(t *testing.T) {
 // --- Withdraw --------------------------------------------------------------
 
 func TestWithdrawActiveThenAlreadyWithdrawn(t *testing.T) {
-	svc, students, _, catalog, _ := newEnrollService(t)
+	svc, students, enrollments, catalog, pub := newEnrollService(t)
 	e := enrolledStudent(t, svc, students, catalog)
 
-	updated, err := svc.Withdraw(context.Background(), e.ID())
+	withdrawnOn := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	updated, err := svc.Withdraw(context.Background(), e.ID(), withdrawnOn, "  cambio de escuela  ")
 	if err != nil {
 		t.Fatalf("Withdraw: %v", err)
 	}
 	if updated.Status() != domain.EnrollmentStatusWithdrawn {
 		t.Errorf("status = %v, want withdrawn", updated.Status())
 	}
+	if !updated.WithdrawnOn().Equal(withdrawnOn) || updated.WithdrawalReason() != "cambio de escuela" {
+		t.Errorf("withdrawal = %v / %q", updated.WithdrawnOn(), updated.WithdrawalReason())
+	}
+	if len(students.byID) == 0 || len(enrollments.outbox) != 0 {
+		t.Fatal("withdrawal outbox event was not drained after commit")
+	}
+	if len(pub.outbox) != 1 || pub.outbox[0].Type != "StudentWithdrawn" || pub.outbox[0].TenantID != tenant {
+		t.Fatalf("published events = %+v", pub.outbox)
+	}
+	if enrollments.drainLimit != 5 || enrollments.drainTimeout <= 0 || enrollments.drainTimeout > 2*time.Second {
+		t.Errorf("synchronous drain = limit %d, timeout %s; want limit 5 and a deadline <= 2s", enrollments.drainLimit, enrollments.drainTimeout)
+	}
 
-	_, err = svc.Withdraw(context.Background(), e.ID())
-	if glerrors.KindOf(err) != glerrors.KindInvalid {
+	_, err = svc.Withdraw(context.Background(), e.ID(), withdrawnOn, "again")
+	if glerrors.KindOf(err) != glerrors.KindConflict {
 		t.Errorf("want KindInvalid withdrawing an already-withdrawn enrollment, got %v", err)
 	}
 }

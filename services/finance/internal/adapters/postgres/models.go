@@ -96,7 +96,8 @@ type chargeModel struct {
 	DiscountCents int64   `gorm:"column:discount_cents"`
 	// Why the discount exists. Empty on the ones given before there was
 	// anywhere to record it, which is the truth about them.
-	DiscountReason string `gorm:"column:discount_reason"`
+	DiscountReason     string `gorm:"column:discount_reason"`
+	CancellationReason string `gorm:"column:cancellation_reason"`
 	// ScholarshipCents/ScholarshipID are the scholarship's part, written when
 	// the charge was settled under it (T18, migration 0026).
 	ScholarshipCents int64     `gorm:"column:scholarship_cents"`

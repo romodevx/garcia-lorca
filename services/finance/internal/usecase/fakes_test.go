@@ -273,14 +273,18 @@ func (f *fakeRepo) CreateCharge(_ context.Context, c domain.Charge) (domain.Char
 // CancelChargeIfUnpaid is the fake of the guarded cancel. The real one decides
 // under the charge's row lock; here it is enough to apply the same domain rule
 // against the payments recorded for the charge.
-func (f *fakeRepo) CancelChargeIfUnpaid(_ context.Context, id string) (ports.ChargeWithPaid, error) {
+func (f *fakeRepo) CancelChargeIfUnpaid(ctx context.Context, id string) (ports.ChargeWithPaid, error) {
+	return f.CancelChargeIfUnpaidWithReason(ctx, id, "")
+}
+
+func (f *fakeRepo) CancelChargeIfUnpaidWithReason(_ context.Context, id, reason string) (ports.ChargeWithPaid, error) {
 	f.cancelIfUnpaidCalls++
 	c, ok := f.charges[id]
 	if !ok {
 		return ports.ChargeWithPaid{}, glerrors.ErrNotFound
 	}
 	paid := f.paidFor(id)
-	cancelled, err := c.CancelIfUnpaid(paid)
+	cancelled, err := c.CancelIfUnpaidWithReason(paid, reason)
 	if err != nil {
 		return ports.ChargeWithPaid{}, err
 	}

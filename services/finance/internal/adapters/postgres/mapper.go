@@ -314,7 +314,11 @@ func toDomainCharge(m chargeModel, paidCents int64) (domain.Charge, error) {
 		}
 	}
 	if m.Status == domain.StatusCancelled {
-		return c.Cancel()
+		cancelled, err := c.Cancel()
+		if err != nil {
+			return domain.Charge{}, err
+		}
+		return cancelled.WithCancellationReason(m.CancellationReason), nil
 	}
 	return c.WithStatus(paidCents), nil
 }
@@ -345,21 +349,22 @@ func optionalString(s string) *string {
 // CreatedAt/UpdatedAt are left zero so the DB assigns them via DEFAULT now().
 func fromDomainCharge(c domain.Charge) chargeModel {
 	return chargeModel{
-		ID:               c.ID(),
-		TenantID:         c.TenantID(),
-		StudentID:        c.StudentID(),
-		CycleID:          cycleColumn(c.CycleID()),
-		ConceptID:        c.ConceptID(),
-		Description:      c.Description(),
-		AmountCents:      c.Amount().Int64(),
-		DiscountCents:    c.Discount().Int64(),
-		DiscountReason:   c.DiscountReason(),
-		ScholarshipCents: c.Scholarship().Int64(),
-		ScholarshipID:    optionalString(c.ScholarshipID()),
-		DueDate:          c.DueDate(),
-		StartsOn:         optionalDate(c.StartsOn()),
-		Status:           c.Status(),
-		ExternalRef:      c.ExternalRef(),
+		ID:                 c.ID(),
+		TenantID:           c.TenantID(),
+		StudentID:          c.StudentID(),
+		CycleID:            cycleColumn(c.CycleID()),
+		ConceptID:          c.ConceptID(),
+		Description:        c.Description(),
+		AmountCents:        c.Amount().Int64(),
+		DiscountCents:      c.Discount().Int64(),
+		DiscountReason:     c.DiscountReason(),
+		CancellationReason: c.CancellationReason(),
+		ScholarshipCents:   c.Scholarship().Int64(),
+		ScholarshipID:      optionalString(c.ScholarshipID()),
+		DueDate:            c.DueDate(),
+		StartsOn:           optionalDate(c.StartsOn()),
+		Status:             c.Status(),
+		ExternalRef:        c.ExternalRef(),
 	}
 }
 

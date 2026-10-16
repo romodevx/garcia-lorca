@@ -4,7 +4,16 @@ import (
 	"testing"
 
 	financev1 "github.com/garcia-lorca/gen/go/garcialorca/finance/v1"
+	"github.com/stretchr/testify/assert"
 )
+
+func TestWithdrawalChargeUsesEffectiveAmount(t *testing.T) {
+	charge := toWithdrawalCharge(&financev1.Charge{
+		Id: "ch-1", AmountCents: 10000, DiscountCents: 1000, ScholarshipCents: 2500,
+	})
+
+	assert.Equal(t, int64(6500), charge.AmountCents)
+}
 
 // The mapping this pins was silently missing twice: a field existed on the
 // struct, carried a JSON tag, and was never copied to the proto. The screen

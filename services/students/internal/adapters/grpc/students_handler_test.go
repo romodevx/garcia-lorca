@@ -127,6 +127,7 @@ func (p *fakePublisher) PublishAdmissionChanged(_ context.Context, ev domain.Adm
 	p.changed = append(p.changed, ev)
 	return nil
 }
+func (p *fakePublisher) PublishOutboxEvent(context.Context, ports.OutboxEvent) error { return nil }
 
 func newHandler(t *testing.T) (*grpcadapter.StudentsHandler, *fakePublisher) {
 	t.Helper()

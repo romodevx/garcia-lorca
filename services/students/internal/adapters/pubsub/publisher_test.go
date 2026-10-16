@@ -10,6 +10,7 @@ import (
 	"github.com/garcia-lorca/pkg/pubsub"
 	"github.com/garcia-lorca/services/students/internal/adapters/pubsub"
 	"github.com/garcia-lorca/services/students/internal/domain"
+	"github.com/garcia-lorca/services/students/internal/ports"
 )
 
 // fakeBus captures every published message for assertion.
@@ -98,5 +99,32 @@ func TestPublishAdmissionChangedMarshalsProtoToStudentEventsTopic(t *testing.T) 
 	}
 	if got.GetReason() != "incomplete documents" {
 		t.Errorf("reason = %q, want %q", got.GetReason(), "incomplete documents")
+	}
+}
+
+func TestPublishOutboxEventPreservesStudentWithdrawnRouting(t *testing.T) {
+	bus := &fakeBus{}
+	pub := pubsubadapter.NewEventPublisher(bus)
+	event := &studentsv1.StudentWithdrawn{TenantId: "tenant-a", StudentId: "student-a", CycleId: "cycle-a", EnrollmentId: "enrollment-a", WithdrawnOn: "2026-10-01"}
+	payload, err := proto.Marshal(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := pub.PublishOutboxEvent(context.Background(), ports.OutboxEvent{TenantID: "tenant-a", Type: "StudentWithdrawn", Payload: payload}); err != nil {
+		t.Fatalf("PublishOutboxEvent: %v", err)
+	}
+	if len(bus.msgs) != 1 {
+		t.Fatalf("published %d messages, want one", len(bus.msgs))
+	}
+	msg := bus.msgs[0]
+	if msg.Topic != "student-events" || msg.Attributes["type"] != "StudentWithdrawn" || msg.Attributes["tenant_id"] != "tenant-a" {
+		t.Fatalf("routing = %q %v", msg.Topic, msg.Attributes)
+	}
+	var got studentsv1.StudentWithdrawn
+	if err := proto.Unmarshal(msg.Data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if !proto.Equal(&got, event) {
+		t.Fatalf("payload = %v, want %v", &got, event)
 	}
 }

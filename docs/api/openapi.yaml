@@ -1015,6 +1015,101 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
+  /api/v1/enrollments/withdraw:
+    post:
+      tags: [students]
+      summary: Withdraw a pupil from a cycle
+      description: >
+        Withdraws the enrollment. withdrawnOn is the effective date in
+        YYYY-MM-DD; when omitted, today is used. The optional reason is free
+        text of at most 500 characters. Requires students:enroll. A date before
+        today in the school's configured timezone also requires finance:write
+        because overdue charges may be cancelled.
+      operationId: withdrawEnrollment
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enrollmentId]
+              properties:
+                enrollmentId: { type: string, format: uuid, example: "e3b0c442-98fc-1c14-9afb-000000000001" }
+                withdrawnOn: { type: string, format: date, description: "Optional effective date; omitted means today.", example: "2026-10-15" }
+                reason: { type: string, maxLength: 500, description: Optional free-text reason., example: "La familia se muda de ciudad." }
+      responses:
+        '200':
+          description: The withdrawn enrollment.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Enrollment' }
+        '400': { $ref: '#/components/responses/PlainTextError' }
+        '401': { $ref: '#/components/responses/PlainTextError' }
+        '403': { $ref: '#/components/responses/PlainTextError' }
+        '404': { $ref: '#/components/responses/PlainTextError' }
+        '409': { $ref: '#/components/responses/PlainTextError' }
+
+  /api/v1/enrollments/{id}/withdrawal-preview:
+    get:
+      tags: [students]
+      summary: Preview the financial effect of a withdrawal
+      description: Requires students:enroll and either finance:read or collections:read because the preview exposes per-pupil charge amounts and remaining debt. Unknown enrollments return 404.
+      operationId: previewEnrollmentWithdrawal
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Enrollment id.
+          schema: { type: string, format: uuid }
+        - name: withdrawnOn
+          in: query
+          required: false
+          description: Effective withdrawal date (YYYY-MM-DD); omitted defaults to today in the school's configured timezone.
+          schema: { type: string, format: date, example: "2026-10-15" }
+      responses:
+        '200':
+          description: Charges that would be cancelled and debt remaining.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [toCancel, toCancelCents, remainingDebtCents]
+                properties:
+                  toCancel:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, description, dueDate, amountCents]
+                      properties:
+                        id: { type: string, format: uuid, example: "e3b0c442-98fc-1c14-9afb-000000000002" }
+                        description: { type: string, example: "Colegiatura noviembre" }
+                        dueDate: { type: string, format: date, example: "2026-11-01" }
+                        amountCents: { type: integer, format: int64, example: 450000 }
+                  toCancelCents: { type: integer, format: int64, example: 450000 }
+                  remainingDebtCents: { type: integer, format: int64, example: 450000 }
+              example:
+                toCancel:
+                  - id: "e3b0c442-98fc-1c14-9afb-000000000002"
+                    description: "Colegiatura noviembre"
+                    dueDate: "2026-11-01"
+                    amountCents: 450000
+                toCancelCents: 450000
+                remainingDebtCents: 450000
+        '400': { $ref: '#/components/responses/PlainTextError' }
+        '401': { $ref: '#/components/responses/PlainTextError' }
+        '403':
+          description: Missing students:enroll, finance:read, or collections:read permission.
+          content:
+            text/plain:
+              schema: { $ref: '#/components/schemas/PlainTextError' }
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404': { $ref: '#/components/responses/PlainTextError' }
+        '409': { $ref: '#/components/responses/PlainTextError' }
+
   /api/v1/students/{id}:
     put:
       tags: [students]
@@ -6581,6 +6676,11 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
+    PlainTextError:
+      description: Human-readable error text returned as text/plain by students enrollment handlers.
+      content:
+        text/plain:
+          schema: { $ref: '#/components/schemas/PlainTextError' }
     LevelBeingDeleted:
       description: |
         The garment's level is being deleted (ADR 0021): X-Error-Code and the
@@ -7475,6 +7575,25 @@ components:
         admissionStatus: { type: string, enum: [pending, accepted, enrolled, rejected, withdrawn] }
         bankReference: { type: string, example: "231076", description: "BBVA payment reference (ADR 0033); empty when the pupil has none." }
         profile: { $ref: '#/components/schemas/StudentProfile' }
+
+    Enrollment:
+      type: object
+      required: [id, studentId, cycleId, status]
+      properties:
+        id: { type: string, format: uuid }
+        studentId: { type: string, format: uuid }
+        cycleId: { type: string, format: uuid }
+        status: { type: string, enum: [active, transferred, withdrawn] }
+        withdrawnOn:
+          description: Omitted or null until the enrollment is withdrawn.
+          oneOf:
+            - { type: string, format: date, example: "2026-10-15" }
+            - { type: 'null' }
+        withdrawalReason:
+          description: Omitted or null when no reason was recorded.
+          oneOf:
+            - { type: string, maxLength: 500, example: "La familia se muda de ciudad." }
+            - { type: 'null' }
 
     MedicalRecord:
       type: object
@@ -8849,6 +8968,10 @@ components:
             code: insufficient_stock
             message: Esa talla ya no está disponible, actualizamos la lista
             details: { itemId: 6f1c9a2e-1111-4e2b-9a11-000000000001, sizeLabel: "8", available: 0 }
+    PlainTextError:
+      type: string
+      description: Human-readable message sent by the gateway's students enrollment handlers.
+      example: Only an active enrollment can be previewed for withdrawal.
 
     LevelId:
       type: string
