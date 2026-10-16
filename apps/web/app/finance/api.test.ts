@@ -435,3 +435,32 @@ describe("getExpected · scholarships (T18)", () => {
     expect(got.lines[0]?.scholarshipCents).toBe(0);
   });
 });
+
+// D1 (T5 review): the server says which lines the balance holds and what it
+// comes to paid on time; the search may leave the balance out.
+describe("getExpected · the balance it holds", () => {
+  const line = { chargeId: "ch1", description: "Inscripción", dueDate: "2026-06-30", owedCents: 50000, surchargeCents: 0, discountCents: 0, scholarshipCents: 0, totalCents: 50000, due: false };
+
+  it("carries inBalance and the on-time balance", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ amountCents: 0, annualBalanceCents: 3200000, onTimeBalanceCents: 3000000, lines: [{ ...line, inBalance: false }] })));
+    const got = await getExpected(BASE, "st1");
+    expect(got.onTimeBalanceCents).toBe(3000000);
+    expect(got.lines[0]?.inBalance).toBe(false);
+  });
+
+  it("a gateway that does not say reads every line as in the balance", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ amountCents: 0, annualBalanceCents: 50000, onTimeBalanceCents: 50000, lines: [line] })));
+    const got = await getExpected(BASE, "st1");
+    expect(got.lines[0]?.inBalance).toBe(true);
+    expect(got.onTimeBalanceCents).toBe(50000);
+  });
+
+  it("asks without the balance when told to", async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(jsonResponse({ amountCents: 0, lines: [] })));
+    vi.stubGlobal("fetch", fetchMock);
+    await getExpected(BASE, "st1", "", { withBalance: false });
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("withBalance=false");
+    await getExpected(BASE, "st1");
+    expect(String(fetchMock.mock.calls[1]?.[0])).not.toContain("withBalance");
+  });
+});

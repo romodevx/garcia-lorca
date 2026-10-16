@@ -252,3 +252,78 @@ func cancelMonth(t *testing.T, f *fixture, m time.Month) {
 	}
 	t.Fatalf("no tuition in %s", m)
 }
+
+// windowWithReward is the window school with a $200 early-payment reward per
+// month, read on 20 May: the ten months are billed up front and are the
+// balance; the inscription opens on 1 June and is not.
+func windowWithReward(t *testing.T) *fixture {
+	t.Helper()
+	f := windowFixture(t)
+	in := windowPlan(ymdUTC(2026, time.June, 1), ymdUTC(2026, time.June, 30))
+	in.Policy = domain.CollectionPolicy{EarlyPaymentCents: 20000, EarlyPaymentDays: 10}
+	savePlan(t, f, in)
+	runOn(t, f, "2026-05-15")
+	f.clock = ymdUTC(2026, time.May, 20)
+	return f
+}
+
+// D1 (T5 review): the counter lists a charge not yet open — it may be paid
+// ahead — but it is not part of the debt. The server says which lines the
+// balance holds, and works out "si paga a tiempo" from those lines only, so
+// the drawer never has to add up a figure of its own.
+func TestTheCounterSaysWhichLinesTheBalanceHolds(t *testing.T) {
+	f := windowWithReward(t)
+	inscription := inscriptionOf(t, f, testStudent).Charge.ID()
+
+	got, err := f.svc.ExpectedToday(context.Background(), testStudent, time.Time{})
+	require.NoError(t, err)
+
+	var held, rewards int64
+	for _, l := range got.Lines {
+		if l.ChargeID == inscription {
+			assert.False(t, l.InBalance, "the inscription opens on 1 June: listed, not owed")
+			continue
+		}
+		assert.True(t, l.InBalance, "%s is billed and open", l.Description)
+		held += l.TotalCents + l.DiscountCents
+		rewards += l.DiscountCents
+	}
+	assert.Equal(t, int64(10*20000), rewards, "every month paid ahead earns its reward")
+	assert.Equal(t, int64(10*320000), got.AnnualBalanceCents)
+	assert.Equal(t, got.AnnualBalanceCents, held, "the lines in the balance add up to it")
+	assert.Equal(t, int64(10*320000-10*20000), got.OnTimeBalanceCents,
+		"the balance less the rewards of the lines it holds")
+}
+
+// A charge not yet open that already has money on it is in play: the ledger
+// counts it, so the counter marks it in the balance.
+func TestAPartPaidChargeNotYetOpenIsInTheBalance(t *testing.T) {
+	f := windowWithReward(t)
+	inscription := inscriptionOf(t, f, testStudent).Charge.ID()
+	pay(t, f, inscription, 10000)
+
+	got, err := f.svc.ExpectedToday(context.Background(), testStudent, time.Time{})
+	require.NoError(t, err)
+	for _, l := range got.Lines {
+		if l.ChargeID == inscription {
+			assert.True(t, l.InBalance, "money on it puts it in play")
+		}
+	}
+	requireOneBalance(t, f, 10*320000+inscriptionCents-10000)
+}
+
+// The counter's search shows only what is due today for each name on screen:
+// it asks without the balance, which costs two reads per row.
+func TestExpectedWithoutBalanceLeavesTheBalanceOut(t *testing.T) {
+	f := windowWithReward(t)
+	full, err := f.svc.ExpectedToday(context.Background(), testStudent, time.Time{})
+	require.NoError(t, err)
+
+	got, err := f.svc.ExpectedWithoutBalance(context.Background(), testStudent, time.Time{})
+	require.NoError(t, err)
+
+	assert.Equal(t, full.AmountCents, got.AmountCents)
+	assert.Equal(t, full.Lines, got.Lines, "the lines, in_balance included, need no extra read")
+	assert.Zero(t, got.AnnualBalanceCents)
+	assert.Zero(t, got.OnTimeBalanceCents)
+}

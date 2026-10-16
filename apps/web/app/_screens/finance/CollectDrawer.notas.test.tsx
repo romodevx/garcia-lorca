@@ -32,7 +32,7 @@ beforeEach(() => {
     charges: [], payments: [], totalBalanceCents: 0, unallocatedCents: 0, dueTodayCents: 0,
     surchargeCents: 0, earlyDiscountCents: 0, asOf: "",
   });
-  finance.getExpected.mockResolvedValue({ amountCents: 0, surchargeCents: 0, discountCents: 0, annualBalanceCents: 0, lines: [] });
+  finance.getExpected.mockResolvedValue({ amountCents: 0, surchargeCents: 0, discountCents: 0, annualBalanceCents: 0, onTimeBalanceCents: 0, lines: [] });
   finance.previewDeposit.mockResolvedValue({ allocations: [], surcharges: [], unallocatedCents: 0 });
 });
 afterEach(() => vi.clearAllMocks());

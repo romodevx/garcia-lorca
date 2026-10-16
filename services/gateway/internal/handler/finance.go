@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -31,7 +32,7 @@ type FinanceService interface {
 	RegisterTenderedPayment(ctx context.Context, in client.TenderedPayment) ([]client.Payment, client.Charge, error)
 	GetAccount(ctx context.Context, studentID string) (client.AccountStatement, error)
 	RegisterDeposit(ctx context.Context, studentID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time, grantEarlyPayment bool, cardType string, receiver client.Receiver, chargeIDs []string, tenders []client.Tender) (client.DepositResult, error)
-	ExpectedToday(ctx context.Context, studentID, on string) (client.Expected, error)
+	ExpectedToday(ctx context.Context, studentID, on string, withBalance bool) (client.Expected, error)
 	PreviewDeposit(ctx context.Context, studentID string, amountCents int64, paidAt time.Time, chargeIDs []string) (client.DepositResult, error)
 	ListDeposits(ctx context.Context, studentID string) ([]client.Deposit, error)
 	DailyCashUp(ctx context.Context, day string) (client.CashUp, error)
@@ -584,9 +585,10 @@ func (h *FinanceHandler) PreviewDeposit(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-// ExpectedToday handles GET /api/v1/finance/expected?studentId=…&on=… — what a
-// family must hand over today to be current. The counter shows it as "Monto
-// esperado" and never lets anybody edit it.
+// ExpectedToday handles GET /api/v1/finance/expected?studentId=…&on=…&withBalance=…
+// — what a family must hand over today to be current. The counter shows it as
+// "Monto esperado" and never lets anybody edit it. withBalance=false (the
+// search list) leaves the year's balance out; it is included by default.
 func (h *FinanceHandler) ExpectedToday(w http.ResponseWriter, r *http.Request) {
 	on := strings.TrimSpace(r.URL.Query().Get("on"))
 	if on != "" {
@@ -595,7 +597,16 @@ func (h *FinanceHandler) ExpectedToday(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	expected, err := h.svc.ExpectedToday(r.Context(), r.URL.Query().Get("studentId"), on)
+	withBalance := true
+	if raw := r.URL.Query().Get("withBalance"); raw != "" {
+		parsed, err := strconv.ParseBool(raw)
+		if err != nil {
+			http.Error(w, "withBalance must be true or false", http.StatusBadRequest)
+			return
+		}
+		withBalance = parsed
+	}
+	expected, err := h.svc.ExpectedToday(r.Context(), r.URL.Query().Get("studentId"), on, withBalance)
 	if err != nil {
 		writeConnectError(w, err)
 		return

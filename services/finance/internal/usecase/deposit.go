@@ -317,6 +317,10 @@ type Expected struct {
 	// left". Set by ExpectedToday; expectedFrom leaves it zero, having no
 	// deposits to net.
 	AnnualBalanceCents int64
+	// OnTimeBalanceCents is AnnualBalanceCents if every month in it is paid in
+	// time: less the early-payment rewards of the lines InBalance. A
+	// projection, not a debt; zero wherever AnnualBalanceCents is.
+	OnTimeBalanceCents int64
 	// Lines are the same figures concept by concept (task 8), oldest due date
 	// first: the counter lists them so the cashier can choose what the money
 	// pays. The Due lines add up to AmountCents.
@@ -342,6 +346,10 @@ type ExpectedLine struct {
 	TotalCents       int64
 	// Due is whether the charge is asked for that day (see expectedBy).
 	Due bool
+	// InBalance is whether the ledger counts the charge today (inPlayOn):
+	// false for one not yet open with nothing paid on it — listed so it can
+	// be paid ahead, but not part of the debt.
+	InBalance bool
 }
 
 // ExpectedToday works out what is due as of a date.
@@ -349,39 +357,7 @@ type ExpectedLine struct {
 // Only the months whose date has arrived. The year is billed up front, but
 // asking a family for all of it at the counter is not what that figure means.
 func (s *FinanceService) ExpectedToday(ctx context.Context, studentID string, on time.Time) (Expected, error) {
-	when := on
-	if when.IsZero() {
-		when = s.now()
-	}
-	calendar, _ := s.schoolCalendar(ctx, studentID)
-	// The whole table, not just its policy: the inscription's price is a
-	// function of the day being asked about, and only the table knows the ladder.
-	plan, err := s.planFor(ctx, studentID)
-	if err != nil {
-		return Expected{}, err
-	}
-	lateFee, err := s.repo.EnsureConceptOfKind(ctx, s.newID(), domain.KindLateFee, lateFeeConceptName)
-	if err != nil {
-		return Expected{}, err
-	}
-	enrolment, err := s.repo.EnsureConceptOfKind(ctx, s.newID(), domain.KindEnrollment, enrollmentConceptName)
-	if err != nil {
-		return Expected{}, err
-	}
-	tuition, err := s.repo.EnsureConceptOfKind(ctx, s.newID(), domain.KindTuition, tuitionConceptName)
-	if err != nil {
-		return Expected{}, err
-	}
-	charges, err := s.repo.ListCharges(ctx, studentID, "")
-	if err != nil {
-		return Expected{}, err
-	}
-	pricer, err := s.pricerFor(ctx, []string{studentID},
-		systemConceptIDs{tuition: tuition.ID(), enrolment: enrolment.ID(), lateFee: lateFee.ID()})
-	if err != nil {
-		return Expected{}, err
-	}
-	expected, err := expectedFrom(charges, plan, calendar, lateFee.ID(), tuition.ID(), enrolment.ID(), when, s.now(), true, pricer)
+	expected, q, err := s.quote(ctx, studentID, on)
 	if err != nil {
 		return Expected{}, err
 	}
@@ -393,17 +369,85 @@ func (s *FinanceService) ExpectedToday(ctx context.Context, studentID string, on
 	if err != nil {
 		return Expected{}, err
 	}
-	terms := collectionTerms{plan: plan, calendar: calendar, lateFeeID: lateFee.ID(), tuitionID: tuition.ID(),
-		enrolmentID: enrolment.ID(), scholarships: pricer}
 	// The statement's balance TODAY, never a second sum and never another day's:
 	// a quote for a back-dated payment still shows the balance every other
 	// surface shows (and the ladder is not walked down through a past date).
-	_, totals, err := ledger(charges, payments, deposits, terms, s.now(), false)
+	_, totals, err := ledger(q.charges, payments, deposits, q.terms, s.now(), false)
 	if err != nil {
 		return Expected{}, err
 	}
 	expected.AnnualBalanceCents = totals.BalanceCents
+	expected.OnTimeBalanceCents = totals.BalanceCents - rewardsInBalance(expected.Lines)
 	return expected, nil
+}
+
+// ExpectedWithoutBalance is ExpectedToday without the year's balance
+// (AnnualBalanceCents and OnTimeBalanceCents stay zero): for a list that shows
+// only what is due, it spares the payments and deposits reads per row.
+func (s *FinanceService) ExpectedWithoutBalance(ctx context.Context, studentID string, on time.Time) (Expected, error) {
+	expected, _, err := s.quote(ctx, studentID, on)
+	return expected, err
+}
+
+// quoteInputs is what a quote was worked out from, for the ledger to reuse.
+type quoteInputs struct {
+	charges []ports.ChargeWithPaid
+	terms   collectionTerms
+}
+
+// quote is the counter's arithmetic over the student's charges, read once.
+func (s *FinanceService) quote(ctx context.Context, studentID string, on time.Time) (Expected, quoteInputs, error) {
+	when := on
+	if when.IsZero() {
+		when = s.now()
+	}
+	calendar, _ := s.schoolCalendar(ctx, studentID)
+	// The whole table, not just its policy: the inscription's price is a
+	// function of the day being asked about, and only the table knows the ladder.
+	plan, err := s.planFor(ctx, studentID)
+	if err != nil {
+		return Expected{}, quoteInputs{}, err
+	}
+	lateFee, err := s.repo.EnsureConceptOfKind(ctx, s.newID(), domain.KindLateFee, lateFeeConceptName)
+	if err != nil {
+		return Expected{}, quoteInputs{}, err
+	}
+	enrolment, err := s.repo.EnsureConceptOfKind(ctx, s.newID(), domain.KindEnrollment, enrollmentConceptName)
+	if err != nil {
+		return Expected{}, quoteInputs{}, err
+	}
+	tuition, err := s.repo.EnsureConceptOfKind(ctx, s.newID(), domain.KindTuition, tuitionConceptName)
+	if err != nil {
+		return Expected{}, quoteInputs{}, err
+	}
+	charges, err := s.repo.ListCharges(ctx, studentID, "")
+	if err != nil {
+		return Expected{}, quoteInputs{}, err
+	}
+	pricer, err := s.pricerFor(ctx, []string{studentID},
+		systemConceptIDs{tuition: tuition.ID(), enrolment: enrolment.ID(), lateFee: lateFee.ID()})
+	if err != nil {
+		return Expected{}, quoteInputs{}, err
+	}
+	expected, err := expectedFrom(charges, plan, calendar, lateFee.ID(), tuition.ID(), enrolment.ID(), when, s.now(), true, pricer)
+	if err != nil {
+		return Expected{}, quoteInputs{}, err
+	}
+	terms := collectionTerms{plan: plan, calendar: calendar, lateFeeID: lateFee.ID(), tuitionID: tuition.ID(),
+		enrolmentID: enrolment.ID(), scholarships: pricer}
+	return expected, quoteInputs{charges: charges, terms: terms}, nil
+}
+
+// rewardsInBalance is the early-payment reward of the lines the balance holds:
+// a line not yet open is not owed, so its reward takes nothing off the debt.
+func rewardsInBalance(lines []ExpectedLine) int64 {
+	var sum int64
+	for _, l := range lines {
+		if l.InBalance {
+			sum += l.DiscountCents
+		}
+	}
+	return sum
 }
 
 // expectedFrom is the arithmetic of "what is due today", with NO I/O.
@@ -452,6 +496,8 @@ func expectedFrom(
 			unpaidFees[parent] += owed(c)
 		}
 	}
+	// The ledger's rule for what the balance holds, on the ledger's day.
+	inBalance := inPlayOn(now)
 	var lines map[string]*ExpectedLine
 	if withLines {
 		lines = map[string]*ExpectedLine{}
@@ -469,7 +515,7 @@ func expectedFrom(
 			if fees := unpaidFees[c.Charge.ID()]; fees > 0 && lines != nil && c.Charge.ConceptID() != lateFeeID {
 				lines[c.Charge.ID()] = &ExpectedLine{
 					ChargeID: c.Charge.ID(), Description: c.Charge.Description(), DueDate: c.Charge.DueDate(),
-					SurchargeCents: fees, Due: true,
+					SurchargeCents: fees, Due: true, InBalance: true,
 				}
 			}
 			continue
@@ -501,7 +547,7 @@ func expectedFrom(
 		var line *ExpectedLine
 		if _, ridesOnMonth := feeParent(c.Charge.ExternalRef()); !isFee || !ridesOnMonth {
 			line = &ExpectedLine{ChargeID: c.Charge.ID(), Description: c.Charge.Description(), DueDate: c.Charge.DueDate(),
-				OwedCents: owed(c), ScholarshipCents: c.Charge.Scholarship().Int64()}
+				OwedCents: owed(c), ScholarshipCents: c.Charge.Scholarship().Int64(), InBalance: inBalance(charges[i])}
 			if lines != nil {
 				lines[c.Charge.ID()] = line
 			}

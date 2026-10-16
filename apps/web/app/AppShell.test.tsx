@@ -40,7 +40,7 @@ vi.mock("./finance/api", () => ({
   getAccount: vi.fn(),
   getIncome: vi.fn().mockResolvedValue({ lines: [], totalCents: 0, creditNoteCents: 0 }),
   getCashUp: vi.fn().mockResolvedValue({ deposits: [], cancelled: [], payments: [], cashCents: 0, cardCents: 0, transferCents: 0, totalCents: 0, creditNoteCents: 0 }),
-  getExpected: vi.fn().mockResolvedValue({ amountCents: 0, surchargeCents: 0, discountCents: 0, annualBalanceCents: 0 }),
+  getExpected: vi.fn().mockResolvedValue({ amountCents: 0, surchargeCents: 0, discountCents: 0, annualBalanceCents: 0, onTimeBalanceCents: 0 }),
   previewDeposit: vi.fn(),
   registerDeposit: vi.fn(),
 }));

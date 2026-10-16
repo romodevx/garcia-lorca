@@ -216,6 +216,11 @@ export interface Expected {
   discountCents: number;
   /** The whole year still owed — not the same question as what is due today. */
   annualBalanceCents: number;
+  /**
+   * The year's balance if every month in it is paid in time (T5), worked out
+   * by the server from the lines in the balance only. A projection, not a debt.
+   */
+  onTimeBalanceCents: number;
   /** The debt concept by concept, oldest due date first (task 8). */
   lines: ExpectedLine[];
 }
@@ -239,9 +244,23 @@ export interface ExpectedLine {
   totalCents: number;
   /** Asked for that day: due, or falling due later that month. */
   due: boolean;
+  /**
+   * Counted in the year's balance (T5). false for a charge not yet open:
+   * listed so it can be paid ahead, not part of the debt.
+   */
+  inBalance: boolean;
 }
 
-type WireExpectedLine = Omit<ExpectedLine, "scholarshipCents"> & { scholarshipCents?: number };
+type WireExpectedLine = Omit<ExpectedLine, "scholarshipCents" | "inBalance"> & { scholarshipCents?: number; inBalance?: boolean };
+
+export interface GetExpectedOptions {
+  /**
+   * false leaves the year's balance out (annualBalanceCents and
+   * onTimeBalanceCents read 0): for a list that shows only what is due, it
+   * spares the service two reads per row. Included by default.
+   */
+  withBalance?: boolean;
+}
 
 export interface PreviewDepositInput {
   studentId: string;
@@ -651,19 +670,23 @@ export async function previewDeposit(baseURL: string, input: PreviewDepositInput
  * (and the one due later this month, which is how the early-payment reward is
  * earned), what being late has cost, and what paying early saves.
  */
-export async function getExpected(baseURL: string, studentId: string, on = ""): Promise<Expected> {
-  const query = on === "" ? "" : `&on=${encodeURIComponent(on)}`;
+export async function getExpected(baseURL: string, studentId: string, on = "", options: GetExpectedOptions = {}): Promise<Expected> {
+  const query = (on === "" ? "" : `&on=${encodeURIComponent(on)}`) + (options.withBalance === false ? "&withBalance=false" : "");
   const res = await getJSON<Partial<Omit<Expected, "lines">> & { lines?: WireExpectedLine[] }>(
     baseURL,
     `/expected?studentId=${encodeURIComponent(studentId)}${query}`,
   );
+  const annualBalanceCents = res.annualBalanceCents ?? 0;
   return {
     amountCents: res.amountCents ?? 0,
     surchargeCents: res.surchargeCents ?? 0,
     discountCents: res.discountCents ?? 0,
-    annualBalanceCents: res.annualBalanceCents ?? 0,
+    annualBalanceCents,
+    // A gateway that does not say has no projection to offer: the balance.
+    onTimeBalanceCents: res.onTimeBalanceCents ?? annualBalanceCents,
     // A gateway older than T18 sends no scholarshipCents: that is no scholarship.
-    lines: (res.lines ?? []).map((l) => ({ ...l, scholarshipCents: l.scholarshipCents ?? 0 })),
+    // One older than the T5 review sends no inBalance: every line counted, as then.
+    lines: (res.lines ?? []).map((l) => ({ ...l, scholarshipCents: l.scholarshipCents ?? 0, inBalance: l.inBalance ?? true })),
   };
 }
 

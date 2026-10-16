@@ -34,7 +34,7 @@ beforeEach(() => {
     unallocatedCents: 0, dueTodayCents: 0, surchargeCents: 0, earlyDiscountCents: 0, asOf: "",
   });
   finance.getExpected.mockResolvedValue({
-    amountCents: 670000, surchargeCents: 30000, discountCents: 0, annualBalanceCents: 640000, lines: [],
+    amountCents: 670000, surchargeCents: 30000, discountCents: 0, annualBalanceCents: 640000, onTimeBalanceCents: 640000, lines: [],
   });
   finance.previewDeposit.mockResolvedValue({
     allocations: [payment("p1", "ch-sep", 320000)],
@@ -321,7 +321,7 @@ describe("CollectDrawer · fecha de pago (tarea 7)", () => {
   // choosing another amount: a new date still brings its own quote.
   it("follows the quote of a new date when the amount was only reformatted", async () => {
     finance.getExpected.mockImplementation(async (_b, _s, on) => ({
-      amountCents: on === "2026-10-03" ? 640000 : 670000, surchargeCents: 0, discountCents: 0, annualBalanceCents: 640000, lines: [],
+      amountCents: on === "2026-10-03" ? 640000 : 670000, surchargeCents: 0, discountCents: 0, annualBalanceCents: 640000, onTimeBalanceCents: 640000, lines: [],
     }));
     open();
     await screen.findByTestId("amount-expected");
@@ -383,7 +383,7 @@ describe("CollectDrawer · saldo a favor (T5)", () => {
       charges: [], payments: [], totalBalanceCents: -50000,
       unallocatedCents: 50000, dueTodayCents: 0, surchargeCents: 0, earlyDiscountCents: 0, asOf: "",
     });
-    finance.getExpected.mockResolvedValue({ amountCents: 0, surchargeCents: 0, discountCents: 0, annualBalanceCents: -50000, lines: [] });
+    finance.getExpected.mockResolvedValue({ amountCents: 0, surchargeCents: 0, discountCents: 0, annualBalanceCents: -50000, onTimeBalanceCents: -50000, lines: [] });
     render(<CollectDrawer student={student} onClose={() => {}} onCollected={() => {}} />);
 
     expect(await screen.findByTestId("amount-owed")).toHaveTextContent(/^\$500\.00$/);
@@ -394,13 +394,13 @@ describe("CollectDrawer · saldo a favor (T5)", () => {
 
 describe("CollectDrawer · el adeudo, concepto por concepto (tarea 8)", () => {
   const lines: financeApi.ExpectedLine[] = [
-    { chargeId: "ch-sep", description: "Colegiatura septiembre", dueDate: "2026-09-10", owedCents: 320000, surchargeCents: 30000, discountCents: 0, scholarshipCents: 0, totalCents: 350000, due: true },
-    { chargeId: "ch-oct", description: "Colegiatura octubre", dueDate: "2026-10-10", owedCents: 320000, surchargeCents: 0, discountCents: 0, scholarshipCents: 0, totalCents: 320000, due: true },
-    { chargeId: "ch-nov", description: "Colegiatura noviembre", dueDate: "2026-11-10", owedCents: 320000, surchargeCents: 0, discountCents: 0, scholarshipCents: 0, totalCents: 320000, due: false },
+    { chargeId: "ch-sep", description: "Colegiatura septiembre", dueDate: "2026-09-10", owedCents: 320000, surchargeCents: 30000, discountCents: 0, scholarshipCents: 0, totalCents: 350000, due: true, inBalance: true },
+    { chargeId: "ch-oct", description: "Colegiatura octubre", dueDate: "2026-10-10", owedCents: 320000, surchargeCents: 0, discountCents: 0, scholarshipCents: 0, totalCents: 320000, due: true, inBalance: true },
+    { chargeId: "ch-nov", description: "Colegiatura noviembre", dueDate: "2026-11-10", owedCents: 320000, surchargeCents: 0, discountCents: 0, scholarshipCents: 0, totalCents: 320000, due: false, inBalance: true },
   ];
   beforeEach(() => {
     finance.getExpected.mockResolvedValue({
-      amountCents: 670000, surchargeCents: 30000, discountCents: 0, annualBalanceCents: 990000, lines,
+      amountCents: 670000, surchargeCents: 30000, discountCents: 0, annualBalanceCents: 990000, onTimeBalanceCents: 990000, lines,
     });
   });
   const open = () => render(<CollectDrawer student={student} onClose={() => {}} onCollected={() => {}} today="2026-10-12" />);
@@ -437,9 +437,9 @@ describe("CollectDrawer · el adeudo, concepto por concepto (tarea 8)", () => {
     const withReward: financeApi.ExpectedLine[] = [
       lines[0] as financeApi.ExpectedLine,
       lines[1] as financeApi.ExpectedLine,
-      { chargeId: "ch-nov", description: "Colegiatura noviembre", dueDate: "2026-11-10", owedCents: 320000, surchargeCents: 0, discountCents: 20000, scholarshipCents: 0, totalCents: 300000, due: false },
+      { chargeId: "ch-nov", description: "Colegiatura noviembre", dueDate: "2026-11-10", owedCents: 320000, surchargeCents: 0, discountCents: 20000, scholarshipCents: 0, totalCents: 300000, due: false, inBalance: true },
     ];
-    finance.getExpected.mockResolvedValue({ amountCents: 670000, surchargeCents: 30000, discountCents: 0, annualBalanceCents: 990000, lines: withReward });
+    finance.getExpected.mockResolvedValue({ amountCents: 670000, surchargeCents: 30000, discountCents: 0, annualBalanceCents: 990000, onTimeBalanceCents: 970000, lines: withReward });
     open();
     await screen.findByRole("checkbox", { name: "Colegiatura noviembre" });
 
@@ -616,5 +616,59 @@ describe("CollectDrawer · nota de crédito + pago combinado (tarea 8)", () => {
     const preview = await screen.findByTestId("preview");
     await waitFor(() => expect(within(preview).getAllByText("Colegiatura septiembre")).toHaveLength(1));
     expect(within(preview).getByText("$3,200.00")).toBeInTheDocument();
+  });
+});
+
+// D2 (T5 review): the cap on what may be taken is the gross debt the quote
+// lists — every line, the ones not yet open included — never the net
+// balance, which leaves those out and nets the credit (it can be negative).
+describe("CollectDrawer · pagar por adelantado lo que aún no abre (T5)", () => {
+  it("accepts an unmarked advance payment covering a charge not yet open", async () => {
+    const user = userEvent.setup();
+    finance.getAccount.mockResolvedValue({
+      charges: [], payments: [], totalBalanceCents: 0,
+      unallocatedCents: 0, dueTodayCents: 0, surchargeCents: 0, earlyDiscountCents: 0, asOf: "",
+    });
+    finance.getExpected.mockResolvedValue({
+      amountCents: 0, surchargeCents: 0, discountCents: 0, annualBalanceCents: 0, onTimeBalanceCents: 0,
+      lines: [{ chargeId: "ch-ins", description: "Inscripción", dueDate: "2026-06-30", owedCents: 50000, surchargeCents: 0, discountCents: 0, scholarshipCents: 0, totalCents: 50000, due: false, inBalance: false }],
+    });
+    finance.registerDeposit.mockResolvedValue({
+      deposit: { id: "d1", studentId: "s1", amountCents: 50000, method: "cash", reference: "", paidAt: "", calendarVersion: "", tenders: [] },
+      allocations: [], surcharges: [], unallocatedCents: 0, replayed: false,
+    } as unknown as financeApi.DepositResult);
+    render(<CollectDrawer student={student} onClose={() => {}} onCollected={() => {}} today="2026-05-20" />);
+    await screen.findByRole("checkbox", { name: "Inscripción" });
+
+    const amount = screen.getByLabelText(/Monto a pagar/, { selector: "input" });
+    await user.clear(amount);
+    await user.type(amount, "500");
+    await user.click(screen.getByRole("button", { name: "Cobrar" }));
+
+    await waitFor(() => expect(finance.registerDeposit).toHaveBeenCalled());
+    expect(finance.registerDeposit.mock.calls[0]?.[1]).toMatchObject({ amountCents: 50000 });
+    expect(screen.queryByText(/No puede ser mayor que el adeudo/)).toBeNull();
+  });
+
+  it("still refuses more than every line listed adds up to", async () => {
+    const user = userEvent.setup();
+    finance.getAccount.mockResolvedValue({
+      charges: [], payments: [], totalBalanceCents: 0,
+      unallocatedCents: 0, dueTodayCents: 0, surchargeCents: 0, earlyDiscountCents: 0, asOf: "",
+    });
+    finance.getExpected.mockResolvedValue({
+      amountCents: 0, surchargeCents: 0, discountCents: 0, annualBalanceCents: 0, onTimeBalanceCents: 0,
+      lines: [{ chargeId: "ch-ins", description: "Inscripción", dueDate: "2026-06-30", owedCents: 50000, surchargeCents: 0, discountCents: 0, scholarshipCents: 0, totalCents: 50000, due: false, inBalance: false }],
+    });
+    render(<CollectDrawer student={student} onClose={() => {}} onCollected={() => {}} today="2026-05-20" />);
+    await screen.findByRole("checkbox", { name: "Inscripción" });
+
+    const amount = screen.getByLabelText(/Monto a pagar/, { selector: "input" });
+    await user.clear(amount);
+    await user.type(amount, "600");
+    await user.click(screen.getByRole("button", { name: "Cobrar" }));
+
+    expect(await screen.findAllByText(/No puede ser mayor que el adeudo \(\$500\.00\)/)).not.toHaveLength(0);
+    expect(finance.registerDeposit).not.toHaveBeenCalled();
   });
 });

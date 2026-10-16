@@ -98,8 +98,18 @@ function choiceOf(lines: readonly ExpectedLine[], chosen: ReadonlySet<string>): 
 }
 
 /**
+ * The most the counter takes (T8 · T5): every line the quote lists at its
+ * figure — the ones not yet open included, which may be paid ahead — or what
+ * is asked today, or what was chosen, whichever is largest.
+ */
+export function maxPayableCents(expected: Pick<Expected, "amountCents" | "lines">, selectedCents: number): number {
+  const listed = expected.lines.reduce((sum, l) => sum + l.totalCents, 0);
+  return Math.max(listed, expected.amountCents, selectedCents);
+}
+
+/**
  * What is wrong with the amount to pay, if anything. It may not exceed what the
- * family owes (T8) — `capCents`, unknown (Infinity) until the account is read.
+ * family owes (T8) — `capCents`, unknown (Infinity) until the quote is read.
  */
 export function amountToPayError(cents: number, capCents: number): string | undefined {
   if (!Number.isFinite(cents) || cents <= 0) return AMOUNT_ERROR;
@@ -179,7 +189,11 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
   // ONE balance (T5): the quote's, for the day asked about, once it is here —
   // the figure the debt list totals too. Until then, the account's.
   const balance = expected?.annualBalanceCents ?? owed;
-  const capCents = owed === null ? Number.POSITIVE_INFINITY : Math.max(owed, expected?.amountCents ?? 0, selectedCents);
+  // The cap is the GROSS debt the quote lists — every line, those not yet open
+  // included — never the net balance: that one leaves them out and nets the
+  // credit (it can be below zero), and would refuse a legitimate payment ahead.
+  // Unknown (Infinity) until the quote is here; the server has the last word.
+  const capCents = expected === null ? Number.POSITIVE_INFINITY : maxPayableCents(expected, selectedCents);
   // How the amount is paid, method by method (T8): it must add up to it.
   const tenders = useTenders(cents);
   const toggle = (chargeId: string): void => {
@@ -346,7 +360,7 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
                     </p>
                   </div>
 
-                  <DebtList lines={lines} balanceCents={balance ?? 0} chosen={chosen} selectedCents={selectedCents} onToggle={toggle} />
+                  <DebtList lines={lines} balanceCents={balance ?? 0} onTimeCents={expected?.onTimeBalanceCents ?? balance ?? 0} chosen={chosen} selectedCents={selectedCents} onToggle={toggle} />
 
                   <MoneyField
                     label="Monto a pagar"
