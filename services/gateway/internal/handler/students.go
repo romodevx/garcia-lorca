@@ -3,8 +3,8 @@ package handler
 import (
 	"context"
 	"net/http"
-	"os"
 	"time"
+	_ "time/tzdata"
 	"unicode/utf8"
 
 	"connectrpc.com/connect"
@@ -218,9 +218,10 @@ type WithdrawalPreviewService interface {
 // guard (module_students) plus RequireAuth + rotation-enforcement, with writes
 // (enroll/transfer/withdraw) gated on students:enroll and reads on students:read.
 type EnrollmentsHandler struct {
-	svc     EnrollmentService
-	finance WithdrawalPreviewService
-	now     func() time.Time
+	svc      EnrollmentService
+	finance  WithdrawalPreviewService
+	now      func() time.Time
+	location *time.Location
 }
 
 // EnrollmentsOption configures optional cross-module enrollment behavior.
@@ -236,9 +237,18 @@ func WithEnrollmentsClock(now func() time.Time) EnrollmentsOption {
 	return func(h *EnrollmentsHandler) { h.now = now }
 }
 
+// WithSchoolLocation sets the school's configured timezone for date defaults.
+func WithSchoolLocation(location *time.Location) EnrollmentsOption {
+	return func(h *EnrollmentsHandler) {
+		if location != nil {
+			h.location = location
+		}
+	}
+}
+
 // NewEnrollmentsHandler wires the handler to its clients.
 func NewEnrollmentsHandler(svc EnrollmentService, opts ...EnrollmentsOption) *EnrollmentsHandler {
-	h := &EnrollmentsHandler{svc: svc, now: time.Now}
+	h := &EnrollmentsHandler{svc: svc, now: time.Now, location: defaultSchoolLocation}
 	for _, opt := range opts {
 		opt(h)
 	}
@@ -370,7 +380,7 @@ func (h *EnrollmentsHandler) Withdraw(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "withdrawnOn must be a valid YYYY-MM-DD date.", http.StatusBadRequest)
 		return
 	}
-	today := schoolDate(h.now()).Format("2006-01-02")
+	today := schoolDate(h.now(), h.location).Format("2006-01-02")
 	withdrawalDate := req.WithdrawnOn
 	if withdrawalDate == "" {
 		withdrawalDate = today
@@ -402,7 +412,7 @@ func (h *EnrollmentsHandler) Withdraw(w http.ResponseWriter, r *http.Request) {
 func (h *EnrollmentsHandler) PreviewWithdrawal(w http.ResponseWriter, r *http.Request) {
 	withdrawnOn := r.URL.Query().Get("withdrawnOn")
 	if withdrawnOn == "" {
-		withdrawnOn = schoolDate(h.now()).Format("2006-01-02")
+		withdrawnOn = schoolDate(h.now(), h.location).Format("2006-01-02")
 	}
 	if !validOptionalISODate(withdrawnOn) {
 		http.Error(w, "withdrawnOn must be a valid YYYY-MM-DD date.", http.StatusBadRequest)
@@ -459,15 +469,17 @@ func validOptionalISODate(value string) bool {
 
 const defaultSchoolTimezone = "America/Mexico_City"
 
-func schoolDate(now time.Time) time.Time {
-	name := os.Getenv("SCHOOL_TIMEZONE")
-	if name == "" {
-		name = defaultSchoolTimezone
-	}
-	location, err := time.LoadLocation(name)
+var defaultSchoolLocation = mustLoadSchoolLocation()
+
+func mustLoadSchoolLocation() *time.Location {
+	location, err := time.LoadLocation(defaultSchoolTimezone)
 	if err != nil {
-		location, _ = time.LoadLocation(defaultSchoolTimezone)
+		panic(err)
 	}
+	return location
+}
+
+func schoolDate(now time.Time, location *time.Location) time.Time {
 	return now.In(location)
 }
 

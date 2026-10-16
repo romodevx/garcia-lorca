@@ -285,8 +285,10 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 
 type outboxDrain func(context.Context) (int, error)
 
+const startupOutboxDrainTimeout = 2 * time.Second
+
 func drainAtStartup(ctx context.Context, drain outboxDrain, log *slog.Logger) {
-	drainCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	drainCtx, cancel := context.WithTimeout(ctx, startupOutboxDrainTimeout)
 	defer cancel()
 	count, err := drain(drainCtx)
 	if err != nil {

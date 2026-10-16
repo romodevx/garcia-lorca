@@ -83,6 +83,17 @@ func TestTeachingLoadContractDocumentsPlainTextErrors(t *testing.T) {
 	}
 }
 
+func TestWithdrawalPreviewContractDocumentsBothForbiddenFormats(t *testing.T) {
+	doc := loadOpenAPI(t)
+	node, ok := doc.Paths["/api/v1/enrollments/{id}/withdrawal-preview"]["get"]
+	require.True(t, ok, "withdrawal preview GET is documented")
+	var operation openAPIOperation
+	require.NoError(t, node.Decode(&operation))
+	response := doc.resolve(t, operation.Responses["403"])
+	assert.Contains(t, response.Content, "text/plain")
+	assert.Contains(t, response.Content, "application/json")
+}
+
 func TestTeachingLoadErrorsAreTextPlain(t *testing.T) {
 	const configSays = "items[0]: group not found"
 	h := handler.NewConfigHandler(&fakeConfig{err: connect.NewError(connect.CodeNotFound, errString(configSays))})

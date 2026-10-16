@@ -10,10 +10,12 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"time"
+	_ "time/tzdata"
 
 	"github.com/garcia-lorca/services/gateway/internal/client"
 	"github.com/garcia-lorca/services/gateway/internal/config"
@@ -41,8 +43,27 @@ const (
 	studentImportWriteBudget = 2 * time.Minute
 )
 
+const defaultSchoolTimezone = "America/Mexico_City"
+
+func schoolLocation() (*time.Location, error) {
+	name := os.Getenv("SCHOOL_TIMEZONE")
+	if name == "" {
+		name = defaultSchoolTimezone
+	}
+	location, err := time.LoadLocation(name)
+	if err != nil {
+		return nil, fmt.Errorf("SCHOOL_TIMEZONE %q: %w", name, err)
+	}
+	return location, nil
+}
+
 func main() {
 	log := logger.Default()
+	school, err := schoolLocation()
+	if err != nil {
+		log.Error("gateway timezone configuration is invalid", slog.Any("error", err))
+		os.Exit(1)
+	}
 
 	addr := os.Getenv("ADDR")
 	if addr == "" {
@@ -118,7 +139,7 @@ func main() {
 	reauthLimiter := middleware.NewRateLimiter(loginRL.Burst, loginRL.RefillPerSec(), time.Now)
 	deletionKey := config.ParseDeletionTokenKey(os.Getenv, log)
 
-	mux := newMux(iamHealth, authClient, studentsClient, configClient, gradesClient, financeClient, attendanceClient, commsClient, uniformsClient, flags, loginLimiter, inviteLimiter, reauthLimiter, deletionKey)
+	mux := newMux(iamHealth, authClient, studentsClient, configClient, gradesClient, financeClient, attendanceClient, commsClient, uniformsClient, flags, loginLimiter, inviteLimiter, reauthLimiter, deletionKey, school)
 
 	// ADR 0021: the level trash's retention sweep lives HERE, in the one
 	// always-warm service (min-instances=1) — the data services scale to zero
@@ -248,7 +269,7 @@ func main() {
 //
 // `flags` (via middleware.NewModuleGuard) is the module-visibility boundary:
 // disabled module ⇒ 404, evaluated before auth so a hidden module is invisible.
-func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, studentsClient *client.StudentsClient, configClient *client.ConfigClient, gradesClient *client.GradesClient, financeClient *client.FinanceClient, attendanceClient *client.AttendanceClient, commsClient *client.CommsClient, uniformsClient *client.UniformsClient, flags featureflag.Checker, loginLimiter, inviteLimiter, reauthLimiter *middleware.RateLimiter, deletionKey []byte) *http.ServeMux {
+func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, studentsClient *client.StudentsClient, configClient *client.ConfigClient, gradesClient *client.GradesClient, financeClient *client.FinanceClient, attendanceClient *client.AttendanceClient, commsClient *client.CommsClient, uniformsClient *client.UniformsClient, flags featureflag.Checker, loginLimiter, inviteLimiter, reauthLimiter *middleware.RateLimiter, deletionKey []byte, schoolLocations ...*time.Location) *http.ServeMux {
 	mux := http.NewServeMux()
 	handler.NewHealthHandler(iamHealth).Register(mux)
 
@@ -355,7 +376,11 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	// rotation-enforced, permission-gated: writes (enroll/transfer/withdraw) need
 	// students:enroll, reads (list/get) need students:read. Every route sits
 	// behind guard.Protect("students", …) so module_students OFF ⇒ 404.
-	enrollH := handler.NewEnrollmentsHandler(studentsClient, handler.WithWithdrawalPreview(financeClient))
+	enrollmentOptions := []handler.EnrollmentsOption{handler.WithWithdrawalPreview(financeClient)}
+	if len(schoolLocations) > 0 {
+		enrollmentOptions = append(enrollmentOptions, handler.WithSchoolLocation(schoolLocations[0]))
+	}
+	enrollH := handler.NewEnrollmentsHandler(studentsClient, enrollmentOptions...)
 	studentsWrite := func(h http.HandlerFunc) http.Handler {
 		return guard.Protect("students", requireAuthChanged(middleware.RequirePermission("students:enroll")(http.HandlerFunc(h))))
 	}

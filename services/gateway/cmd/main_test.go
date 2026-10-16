@@ -1234,14 +1234,18 @@ func TestWithdrawalPreviewRequiresFinanceReadPermission(t *testing.T) {
 	}
 	var envelope struct {
 		Error struct {
-			Code string `json:"code"`
+			Code    string `json:"code"`
+			Message string `json:"message"`
 		} `json:"error"`
+	}
+	if got := denied.Header.Get("Content-Type"); !strings.HasPrefix(got, "application/json") {
+		t.Errorf("denied content type = %q, want application/json", got)
 	}
 	if err := json.NewDecoder(denied.Body).Decode(&envelope); err != nil {
 		t.Fatal(err)
 	}
-	if envelope.Error.Code != "forbidden" {
-		t.Errorf("error code = %q, want forbidden", envelope.Error.Code)
+	if envelope.Error.Code != "forbidden" || envelope.Error.Message == "" {
+		t.Errorf("error envelope = %+v, want forbidden code and non-empty message", envelope.Error)
 	}
 	denied.Body.Close()
 

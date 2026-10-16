@@ -24,6 +24,7 @@ var _ ports.EnrollmentRepository = (*Repository)(nil)
 const (
 	foreignKeyViolation = "23503"
 	checkViolation      = "23514"
+	outboxFinishTimeout = 2 * time.Second
 	// contactEmailNormalizedCheck is the CHECK migrations/students/0006 adds.
 	contactEmailNormalizedCheck = "guardian_students_email_normalized_ck"
 )
@@ -289,7 +290,8 @@ func (r *Repository) DrainOutbox(ctx context.Context, limit int, publish func(co
 	for _, row := range claimed {
 		event := ports.OutboxEvent{TenantID: row.TenantID, Type: row.EventType, Payload: row.Payload}
 		publishErr := publish(ctx, event)
-		err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), outboxFinishTimeout)
+		err := r.withTenant(finishCtx, func(tx *gorm.DB) error {
 			updates := map[string]any{}
 			if publishErr != nil {
 				updates["next_attempt_at"] = gorm.Expr("now() + make_interval(secs => ?)", outboxRetryDelay(row.Attempts).Seconds())
@@ -298,6 +300,7 @@ func (r *Repository) DrainOutbox(ctx context.Context, limit int, publish func(co
 			}
 			return tx.Model(&outboxModel{}).Where("id = ? AND published_at IS NULL", row.ID).Updates(updates).Error
 		})
+		cancel()
 		if err != nil {
 			return published, glerrors.Wrap(glerrors.KindInternal, "finishing student outbox event", err)
 		}

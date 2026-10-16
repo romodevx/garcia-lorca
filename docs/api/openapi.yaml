@@ -1100,7 +1100,13 @@ paths:
                 remainingDebtCents: 450000
         '400': { $ref: '#/components/responses/PlainTextError' }
         '401': { $ref: '#/components/responses/PlainTextError' }
-        '403': { $ref: '#/components/responses/PlainTextError' }
+        '403':
+          description: Missing students:enroll, finance:read, or collections:read permission.
+          content:
+            text/plain:
+              schema: { $ref: '#/components/schemas/PlainTextError' }
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '404': { $ref: '#/components/responses/PlainTextError' }
         '409': { $ref: '#/components/responses/PlainTextError' }
 
