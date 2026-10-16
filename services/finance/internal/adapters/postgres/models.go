@@ -135,7 +135,10 @@ type paymentModel struct {
 	ReceivedBy     *string   `gorm:"column:received_by"`
 	IdempotencyKey string    `gorm:"column:idempotency_key"`
 	PaidAt         time.Time `gorm:"column:paid_at"`
-	CreatedAt      time.Time `gorm:"column:created_at"`
+	// PaidOn is the school-local day the payment is judged on (migration
+	// 0028, ADR 0035); PaidAt stays the audit instant.
+	PaidOn    time.Time `gorm:"column:paid_on"`
+	CreatedAt time.Time `gorm:"column:created_at"`
 	// DepositID is set when this payment is one slice of a deposit. NULL means a
 	// payment made the old way, against one named charge.
 	DepositID *string `gorm:"column:deposit_id"`
@@ -150,13 +153,15 @@ func (paymentModel) TableName() string { return "payments" }
 // deposit_id, so there is still exactly one place that answers "what has been
 // collected against this charge".
 type depositModel struct {
-	ID              string     `gorm:"column:id;primaryKey"`
-	TenantID        string     `gorm:"column:tenant_id"`
-	StudentID       string     `gorm:"column:student_id"`
-	AmountCents     int64      `gorm:"column:amount_cents"`
-	Method          string     `gorm:"column:method"`
-	Reference       string     `gorm:"column:reference"`
-	PaidAt          time.Time  `gorm:"column:paid_at"`
+	ID          string    `gorm:"column:id;primaryKey"`
+	TenantID    string    `gorm:"column:tenant_id"`
+	StudentID   string    `gorm:"column:student_id"`
+	AmountCents int64     `gorm:"column:amount_cents"`
+	Method      string    `gorm:"column:method"`
+	Reference   string    `gorm:"column:reference"`
+	PaidAt      time.Time `gorm:"column:paid_at"`
+	// PaidOn is the school-local day (migration 0028, ADR 0035).
+	PaidOn          time.Time  `gorm:"column:paid_on"`
 	IdempotencyKey  string     `gorm:"column:idempotency_key"`
 	CalendarVersion string     `gorm:"column:calendar_version"`
 	CardType        string     `gorm:"column:card_type"`

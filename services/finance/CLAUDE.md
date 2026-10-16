@@ -26,7 +26,8 @@ ledger operations run in a single transaction (Unit of Work).
   placed in a group (task 10, ADR 0016): `NewSaleCharge`, ref required, and a
   CHECK in finance/0017.
 - `Payment` — an append-only movement against a charge: amount (Cents), method
-  (`cash|card|transfer|credit_note`), reference ("con qué se pagó"), `paidAt`.
+  (`cash|card|transfer|credit_note`), reference ("con qué se pagó"), `paidAt`
+  (instant) and `paidOn` (school-local day, ADR 0035).
 - `Tender` (T8, ADR 0025) — one method of a combined payment. A deposit or a
   payment combines 1–4 tenders that add up EXACTLY to the amount to pay.
   `deposit_tenders` (0021) is the source of truth; `deposits.method` is a
@@ -48,6 +49,29 @@ ledger operations run in a single transaction (Unit of Work).
   write; only `cancelled` is set independently and is terminal.
 - Overdue is a function of due date + a clock passed in (deterministic; no
   `time.Now()` inside the domain).
+- **"Today" is Morelia's calendar day (D8, ADR 0035).** ONE source of time,
+  `usecase.SchoolClock`, built once in `cmd/main.go` from `SCHOOL_TIMEZONE`
+  (default `America/Mexico_City`, `time/tzdata` embedded, an unknown zone fails
+  startup) and injected into every service. `clock.Now()` stamps (paid_at,
+  events); `clock.Today()` decides (surcharge days, overdue months, early
+  window, `ListOverdue` cutoff, `RunBilling` default, `AsOf`, open charges,
+  default paidOn/startsOn/cash-cut day). `domain.SchoolDate` is the only
+  instant→day rule and returns midnight UTC, the representation of every
+  stored date. NEVER truncate an instant to a day anywhere else (`.UTC()`,
+  `Truncate(24h)`, `time.Date(..., time.UTC)` on `now`): that is the UTC day
+  coming back in one calculation. Stored dates keep their UTC date
+  (`domain.CalendarDay`).
+- **A payment's DAY is `paid_on`, never `paid_at`** (migration 0028, ADR 0035).
+  `deposits.paid_on` / `payments.paid_on` (`date NOT NULL`, no default) is the
+  Morelia civil day: the counter's picked day, or `clock.Today()` for a live
+  payment; `paid_at` is the audit instant only. `paymentDate` returns both
+  (`paymentDay{at, on}`); a deposit's allocations carry its day; a correction
+  without a new date keeps the original's day AND instant. Every day reader —
+  `paid_by_due`, `ListDepositsOn`, `ListLoosePaymentsOn`, `IncomeLines`,
+  `IncomeByMethod`, `DayChangedSince`, statement movements, receipts, correction
+  snapshots — reads `paid_on`. The mapper refuses undated money (`KindInternal`).
+  "No future date" compares days: a picked day after `Today()` is refused.
+  New code that writes a payment or deposit MUST call `WithPaidOn`.
 - Bulk `GenerateCharges` is idempotent via `UNIQUE(tenant, student, cycle,
   concept)` + ON CONFLICT DO NOTHING (re-run reports created vs skipped).
 - `RegisterPayment` is idempotent when the caller sends an `idempotency_key`:

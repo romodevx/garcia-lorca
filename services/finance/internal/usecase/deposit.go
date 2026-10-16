@@ -102,7 +102,11 @@ type DepositResult struct {
 // Friday. A future date is refused: it is the classic counter typo (2027 for
 // 2026) and it silently lifts the money out of every overdue calculation.
 func (s *FinanceService) RegisterDeposit(ctx context.Context, in DepositInput) (DepositResult, error) {
-	deposit, planner, err := s.prepareDeposit(ctx, in)
+	when, err := s.paymentDate(in.PaidAt)
+	if err != nil {
+		return DepositResult{}, err
+	}
+	deposit, planner, err := s.prepareDeposit(ctx, in, when)
 	if err != nil {
 		return DepositResult{}, err
 	}
@@ -136,7 +140,11 @@ func (s *FinanceService) RegisterDeposit(ctx context.Context, in DepositInput) (
 // changes the answer. That is the correct trade: holding a row lock open while
 // a person decides would block the counter.
 func (s *FinanceService) PreviewDeposit(ctx context.Context, in DepositInput) (DepositResult, error) {
-	deposit, planner, err := s.prepareDeposit(ctx, in)
+	when, err := s.paymentDate(in.PaidAt)
+	if err != nil {
+		return DepositResult{}, err
+	}
+	deposit, planner, err := s.prepareDeposit(ctx, in, when)
 	if err != nil {
 		return DepositResult{}, err
 	}
@@ -158,16 +166,10 @@ func (s *FinanceService) PreviewDeposit(ctx context.Context, in DepositInput) (D
 
 // prepareDeposit builds the deposit and the planner both paths need: the date
 // rules, the student, the calendar, the collection policy and the two system
-// concepts the split may have to reach for.
-func (s *FinanceService) prepareDeposit(ctx context.Context, in DepositInput) (domain.Deposit, *depositPlanner, error) {
-	when := in.PaidAt
-	if when.IsZero() {
-		when = s.now()
-	} else if when.After(s.now()) {
-		return domain.Deposit{}, nil, glerrors.New(glerrors.KindInvalid,
-			"la fecha del pago no puede estar en el futuro")
-	}
-
+// concepts the split may have to reach for. when is the deposit's date,
+// already resolved (paymentDate, or the original's on a correction): in.PaidAt
+// is not read here.
+func (s *FinanceService) prepareDeposit(ctx context.Context, in DepositInput, when paymentDay) (domain.Deposit, *depositPlanner, error) {
 	student, err := s.students.ByID(ctx, in.StudentID)
 	if err != nil {
 		return domain.Deposit{}, nil, glerrors.New(glerrors.KindInvalid, "student not found")
@@ -211,7 +213,7 @@ func (s *FinanceService) prepareDeposit(ctx context.Context, in DepositInput) (d
 		lateFeeID:    lateFee.ID(),
 		tuitionID:    tuition.ID(),
 		enrolmentID:  enrolment.ID(),
-		paidOn:       when,
+		paidOn:       when.on,
 		description:  lateFeeConceptName,
 		grantEarly:   in.GrantEarlyPayment,
 		chosen:       chosenSet(in.ChargeIDs),
@@ -220,25 +222,25 @@ func (s *FinanceService) prepareDeposit(ctx context.Context, in DepositInput) (d
 
 // newDeposit builds the deposit the counter described: by its tenders when it
 // sent them (T8), by its single method otherwise.
-func (s *FinanceService) newDeposit(in DepositInput, when time.Time, calendarVersion string) (domain.Deposit, error) {
+func (s *FinanceService) newDeposit(in DepositInput, when paymentDay, calendarVersion string) (domain.Deposit, error) {
 	if len(in.Tenders) == 0 {
 		deposit, err := domain.NewDeposit(s.newID(), s.tenantID, in.StudentID, in.AmountCents,
-			in.Method, in.Reference, when, in.IdempotencyKey, calendarVersion)
+			in.Method, in.Reference, when.at, in.IdempotencyKey, calendarVersion)
 		if err != nil {
 			return domain.Deposit{}, err
 		}
-		return deposit.WithCardType(in.CardType)
+		return deposit.WithPaidOn(when.on).WithCardType(in.CardType)
 	}
 	tenders, err := toTenders(in.Tenders)
 	if err != nil {
 		return domain.Deposit{}, err
 	}
 	deposit, err := domain.NewDeposit(s.newID(), s.tenantID, in.StudentID, in.AmountCents,
-		tenders[0].Method(), "", when, in.IdempotencyKey, calendarVersion)
+		tenders[0].Method(), "", when.at, in.IdempotencyKey, calendarVersion)
 	if err != nil {
 		return domain.Deposit{}, err
 	}
-	return deposit.WithTenders(tenders)
+	return deposit.WithPaidOn(when.on).WithTenders(tenders)
 }
 
 // VoidDeposit cancels a deposit and releases what it settled. The row survives
@@ -250,7 +252,7 @@ func (s *FinanceService) VoidDeposit(ctx context.Context, depositID, reason stri
 	if err != nil {
 		return err
 	}
-	voided, err := d.Void(reason, s.now())
+	voided, err := d.Void(reason, s.clock.Now())
 	if err != nil {
 		return err
 	}
@@ -372,7 +374,7 @@ func (s *FinanceService) ExpectedToday(ctx context.Context, studentID string, on
 	// The statement's balance TODAY, never a second sum and never another day's:
 	// a quote for a back-dated payment still shows the balance every other
 	// surface shows (and the ladder is not walked down through a past date).
-	_, totals, err := ledger(q.charges, payments, deposits, q.terms, s.now(), false)
+	_, totals, err := ledger(q.charges, payments, deposits, q.terms, s.clock.Today(), false)
 	if err != nil {
 		return Expected{}, err
 	}
@@ -399,7 +401,7 @@ type quoteInputs struct {
 func (s *FinanceService) quote(ctx context.Context, studentID string, on time.Time) (Expected, quoteInputs, error) {
 	when := on
 	if when.IsZero() {
-		when = s.now()
+		when = s.clock.Today()
 	}
 	calendar, _ := s.schoolCalendar(ctx, studentID)
 	// The whole table, not just its policy: the inscription's price is a
@@ -429,7 +431,7 @@ func (s *FinanceService) quote(ctx context.Context, studentID string, on time.Ti
 	if err != nil {
 		return Expected{}, quoteInputs{}, err
 	}
-	expected, err := expectedFrom(charges, plan, calendar, lateFee.ID(), tuition.ID(), enrolment.ID(), when, s.now(), true, pricer)
+	expected, err := expectedFrom(charges, plan, calendar, lateFee.ID(), tuition.ID(), enrolment.ID(), when, s.clock.Today(), true, pricer)
 	if err != nil {
 		return Expected{}, quoteInputs{}, err
 	}
@@ -728,7 +730,11 @@ func (c *CashUp) count(method string, cents int64) {
 //
 // A cancelled deposit counts for nothing but is still shown. Hiding it would
 // leave a gap between the receipts and the total that nobody could account for.
+// An unset day is the school's today (the clock's), never the server's.
 func (s *FinanceService) DailyCashUp(ctx context.Context, day time.Time) (CashUp, error) {
+	if day.IsZero() {
+		day = s.clock.Today()
+	}
 	deposits, err := s.repo.ListDepositsOn(ctx, day)
 	if err != nil {
 		return CashUp{}, err
@@ -799,6 +805,9 @@ type depositPlanner struct {
 	calendar    *schoolcal.Calendar
 	lateFeeID   string
 	tuitionID   string
+	// paidOn is the DAY the rules judge the money on (paymentDate): the
+	// school's today for a deposit taken now, stored as paid_on. The instant
+	// stays on the deposit as paid_at.
 	paidOn      time.Time
 	description string
 	// grantEarly carries the school's decision to honour the reward late.
@@ -831,7 +840,7 @@ type pendingScholarship struct {
 // Reports ok=false when nothing should move, so the caller writes no row for a
 // price that did not change.
 func (p *depositPlanner) repriceInscription(c ports.ChargeWithPaid) (domain.Charge, bool, error) {
-	amount, ok := ladderPrice(c, p.tuition, p.enrolmentID, p.svc.now())
+	amount, ok := ladderPrice(c, p.tuition, p.enrolmentID, p.svc.clock.Today())
 	if !ok {
 		return domain.Charge{}, false, nil
 	}
@@ -1015,7 +1024,7 @@ func (p *depositPlanner) plan(open []ports.ChargeWithPaid) (ports.DepositWrite, 
 		// priced at TODAY, which keeps a back-dated peso from freezing the
 		// earliest rung (SEC-2); for it the quote (a full settlement) and the
 		// collection differ by design, and the preview shows the collection.
-		settled, change, err := inscriptionPaidOn(c, p.tuition, p.enrolmentID, p.paidOn, p.svc.now())
+		settled, change, err := inscriptionPaidOn(c, p.tuition, p.enrolmentID, p.paidOn, p.svc.clock.Today())
 		if err != nil {
 			return ports.DepositWrite{}, err
 		}
@@ -1123,11 +1132,11 @@ func (p *depositPlanner) plan(open []ports.ChargeWithPaid) (ports.DepositWrite, 
 	payments := make([]domain.Payment, 0, len(tendered))
 	for _, a := range tendered {
 		payment, err := domain.NewPayment(p.svc.newID(), p.svc.tenantID, a.ChargeID,
-			a.AmountCents, a.Tender.Method(), a.Tender.Reference(), p.paidOn, "")
+			a.AmountCents, a.Tender.Method(), a.Tender.Reference(), p.deposit.PaidAt(), "")
 		if err != nil {
 			return ports.DepositWrite{}, err
 		}
-		if payment, err = payment.WithCardType(a.Tender.CardType()); err != nil {
+		if payment, err = payment.WithPaidOn(p.deposit.PaidOn()).WithCardType(a.Tender.CardType()); err != nil {
 			return ports.DepositWrite{}, err
 		}
 		payments = append(payments, payment.WithReceivedBy(p.deposit.ReceivedBy().UserID))

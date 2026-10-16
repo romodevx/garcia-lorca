@@ -192,7 +192,7 @@ func (s *FinanceService) FreezeSettledScholarships(ctx context.Context, studentI
 	if err != nil {
 		return err
 	}
-	now := s.now()
+	now := s.clock.Today()
 	today := dayOf(now)
 	var settled []domain.Charge
 	for _, student := range studentIDs {
@@ -225,7 +225,8 @@ func (s *FinanceService) FreezeSettledScholarships(ctx context.Context, studentI
 	return err
 }
 
-// dayOf is the UTC calendar day of an instant, as every finance date.
+// dayOf is the calendar day a stored date stands for (its UTC date). "Today"
+// is never found here: it is the clock's Today (ADR 0035).
 func dayOf(t time.Time) time.Time {
 	u := t.UTC()
 	return time.Date(u.Year(), u.Month(), u.Day(), 0, 0, 0, 0, time.UTC)

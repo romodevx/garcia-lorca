@@ -696,7 +696,10 @@ func (r *Repository) RegisterPayment(
 
 		storedPayments = make([]domain.Payment, 0, len(ps))
 		for _, p := range ps {
-			payment := fromDomainPayment(p)
+			payment, err := fromDomainPayment(p)
+			if err != nil {
+				return err
+			}
 			if err := tx.Create(&payment).Error; err != nil {
 				// The partial unique index caught a same-key attempt that did not
 				// serialize on this charge's lock. It is a retry, not a new payment,
@@ -785,7 +788,7 @@ func (r *Repository) ListPayments(ctx context.Context, studentID string) ([]doma
 			Select("payments.*").
 			Joins("JOIN charges ON charges.id = payments.charge_id").
 			Where("charges.student_id = ?", studentID).
-			Order("payments.paid_at ASC").
+			Order("payments.paid_on ASC, payments.paid_at ASC").
 			Find(&rows).Error; err != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "listing payments", err)
 		}
@@ -933,13 +936,15 @@ func withPaidTotals(tx *gorm.DB, rows []chargeModel) ([]ports.ChargeWithPaid, er
 		Paid      int64  `gorm:"column:paid"`
 		PaidByDue int64  `gorm:"column:paid_by_due"`
 	}
-	// paid_by_due is what was paid on or before the due date, the UTC day like
-	// every finance date: what decides whether a scholarship was kept (T18).
+	// paid_by_due is what was paid on or before the due date, by the payment's
+	// school-local day (paid_on, ADR 0035) — never paid_at, whose UTC date is
+	// the next day for a live payment after 18:00 in Morelia: what decides
+	// whether a scholarship was kept (T18).
 	var sums []chargePaid
 	if err := tx.Raw(`SELECT p.charge_id,
 	                         COALESCE(SUM(p.amount_cents), 0) AS paid,
 	                         COALESCE(SUM(p.amount_cents) FILTER (
-	                             WHERE (p.paid_at AT TIME ZONE 'UTC')::date <= c.due_date), 0) AS paid_by_due
+	                             WHERE p.paid_on <= c.due_date), 0) AS paid_by_due
 	                    FROM payments p
 	                    JOIN charges c ON c.id = p.charge_id
 	                   WHERE p.charge_id IN ?
@@ -1200,12 +1205,19 @@ func (r *Repository) storeDeposit(
 		return ports.DepositRecord{}, err
 	}
 
-	folio, capturedAt, err := r.nextDepositFolio(tx)
+	// Refused before a folio is spent on it: the folio's year is its day's.
+	if d.PaidOn().IsZero() {
+		return ports.DepositRecord{}, errUndated("deposit", d.ID())
+	}
+	folio, capturedAt, err := r.nextDepositFolio(tx, d.PaidOn().Year())
 	if err != nil {
 		return ports.DepositRecord{}, err
 	}
 	d = d.WithFolio(folio)
-	row := fromDomainDeposit(d)
+	row, err := fromDomainDeposit(d)
+	if err != nil {
+		return ports.DepositRecord{}, err
+	}
 	// One clock for the folio's year and the capture it names.
 	row.CreatedAt = capturedAt
 	if err := tx.Create(&row).Error; err != nil {
@@ -1318,7 +1330,10 @@ func applyAllocations(
 			return nil, glerrors.New(glerrors.KindInternal,
 				"deposit allocated to a charge that is not in the transaction")
 		}
-		model := fromDomainPayment(p)
+		model, err := fromDomainPayment(p)
+		if err != nil {
+			return nil, err
+		}
 		depositID := d.ID()
 		model.DepositID = &depositID
 		if err := tx.Create(&model).Error; err != nil {
@@ -1426,22 +1441,23 @@ func cancelUnpaidSurchargesOf(tx *gorm.DB, studentID, depositID string) error {
 	return nil
 }
 
-// nextDepositFolio allocates the school's next receipt number for the year of
-// this transaction's instant, under the counter row's own lock (migration
-// 0018), and returns that instant for created_at: the folio's year and the
-// capture it names come from one clock. Per school: a SEQUENCE would share one
-// run.
-func (r *Repository) nextDepositFolio(tx *gorm.DB) (string, time.Time, error) {
+// nextDepositFolio allocates the school's next receipt number for year, under
+// the counter row's own lock (migration 0018), and returns this transaction's
+// instant for created_at. The year is the school's year of the deposit's day
+// (paid_on, D8), the one the school clock dated it with: the database's now()
+// in UTC would number a payment taken at 19:00 in Morelia on 31 December in
+// the next year's run. Per school: a SEQUENCE would share one run.
+func (r *Repository) nextDepositFolio(tx *gorm.DB, year int) (string, time.Time, error) {
 	var got struct {
 		Year int
 		Seq  int
 		At   time.Time
 	}
 	err := tx.Raw(`INSERT INTO deposit_folio_counters (tenant_id, year, next_seq)
-	               VALUES (?, EXTRACT(YEAR FROM now() AT TIME ZONE 'UTC')::int, 2)
+	               VALUES (?, ?, 2)
 	               ON CONFLICT (tenant_id, year)
 	               DO UPDATE SET next_seq = deposit_folio_counters.next_seq + 1
-	               RETURNING year, next_seq - 1 AS seq, now() AS at`, r.tenantID).Scan(&got).Error
+	               RETURNING year, next_seq - 1 AS seq, now() AS at`, r.tenantID, year).Scan(&got).Error
 	if err != nil {
 		return "", time.Time{}, glerrors.Wrap(glerrors.KindInternal, "allocating a deposit folio", err)
 	}
@@ -1675,7 +1691,8 @@ func (r *Repository) UnallocatedCents(ctx context.Context, studentID string) (in
 // IncomeLines sums collected money per concept over a window, in ONE grouped
 // query rather than a read per concept.
 //
-// The window is on payments.paid_at — the day the money changed hands. Grouping
+// The window is on payments.paid_on — the school-local day the money changed
+// hands (ADR 0035), not the UTC date of paid_at. Grouping
 // on the charge's due date instead would credit October with September's
 // arrears, which is precisely the month a school most wants to read honestly.
 //
@@ -1684,8 +1701,8 @@ func (r *Repository) UnallocatedCents(ctx context.Context, studentID string) (in
 //
 // Rows paid by a credit note come back as their own lines, CreditNote set.
 func (r *Repository) IncomeLines(ctx context.Context, from, to time.Time) ([]ports.IncomeLine, error) {
-	start := time.Date(from.Year(), from.Month(), from.Day(), 0, 0, 0, 0, from.Location())
-	end := time.Date(to.Year(), to.Month(), to.Day(), 0, 0, 0, 0, to.Location()).AddDate(0, 0, 1)
+	start := domain.CalendarDay(from).Format(dateLayout)
+	end := domain.CalendarDay(to).AddDate(0, 0, 1).Format(dateLayout)
 
 	var rows []ports.IncomeLine
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
@@ -1694,7 +1711,7 @@ func (r *Repository) IncomeLines(ctx context.Context, from, to time.Time) ([]por
 				"p.method = ? AS credit_note", domain.MethodCreditNote).
 			Joins("JOIN charges c ON c.id = p.charge_id").
 			Joins("JOIN charge_concepts k ON k.id = c.concept_id").
-			Where("p.paid_at >= ? AND p.paid_at < ? AND c.status <> ?", start, end, domain.StatusCancelled).
+			Where("p.paid_on >= ? AND p.paid_on < ? AND c.status <> ?", start, end, domain.StatusCancelled).
 			// What a credit note settled is grouped apart (T8): it is not money,
 			// and the use case reports it on its own line.
 			Group("c.concept_id, k.name, credit_note").
@@ -1732,7 +1749,9 @@ func (r *Repository) GetDeposit(ctx context.Context, id string) (domain.Deposit,
 func (r *Repository) ListDeposits(ctx context.Context, studentID string) ([]domain.Deposit, error) {
 	var out []domain.Deposit
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
-		q := tx.Model(&depositModel{}).Order("paid_at DESC, id DESC").Limit(maxListLimit)
+		// By day first: a live payment's instant can sort after a later
+		// counter-picked day's midnight UTC.
+		q := tx.Model(&depositModel{}).Order("paid_on DESC, paid_at DESC, id DESC").Limit(maxListLimit)
 		if studentID != "" {
 			q = q.Where("student_id = ?", studentID)
 		}
@@ -1751,15 +1770,14 @@ func (r *Repository) ListDeposits(ctx context.Context, studentID string) ([]doma
 }
 
 // ListDepositsOn returns every deposit taken on one calendar day, cancelled
-// ones included. The window is [day, day+1) on paid_at — the day the money
-// changed hands, not the day it was keyed, which is the whole point of storing
-// them apart.
+// ones included. The day is paid_on — the school-local day the money changed
+// hands (ADR 0035), not the day it was keyed nor the UTC date of paid_at.
 func (r *Repository) ListDepositsOn(ctx context.Context, day time.Time) ([]domain.Deposit, error) {
-	from := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, day.Location())
+	on := domain.CalendarDay(day).Format(dateLayout)
 	var out []domain.Deposit
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
 		var rows []depositModel
-		if err := tx.Where("paid_at >= ? AND paid_at < ?", from, from.AddDate(0, 0, 1)).
+		if err := tx.Where("paid_on = ?", on).
 			Order("paid_at ASC, id ASC").Limit(maxListLimit).Find(&rows).Error; err != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "listing the day's deposits", err)
 		}
@@ -1774,14 +1792,14 @@ func (r *Repository) ListDepositsOn(ctx context.Context, day time.Time) ([]domai
 }
 
 // ListLoosePaymentsOn returns the payments taken on one day outside any
-// deposit, with the description of the charge each one paid. Same window as
-// ListDepositsOn: [day, day+1) on paid_at.
+// deposit, with the description of the charge each one paid. Same day as
+// ListDepositsOn: paid_on.
 func (r *Repository) ListLoosePaymentsOn(ctx context.Context, day time.Time) ([]ports.LoosePayment, error) {
-	from := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, day.Location())
+	on := domain.CalendarDay(day).Format(dateLayout)
 	var out []ports.LoosePayment
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
 		var rows []paymentModel
-		if err := tx.Where("deposit_id IS NULL AND paid_at >= ? AND paid_at < ?", from, from.AddDate(0, 0, 1)).
+		if err := tx.Where("deposit_id IS NULL AND paid_on = ?", on).
 			Order("paid_at ASC, id ASC").Limit(maxListLimit).Find(&rows).Error; err != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "listing the day's loose payments", err)
 		}

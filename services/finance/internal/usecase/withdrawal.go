@@ -20,7 +20,7 @@ func (s *FinanceService) PreviewWithdrawal(ctx context.Context, studentID, cycle
 	if err != nil {
 		return domain.WithdrawalPlan{}, err
 	}
-	charges, err := s.withdrawalCharges(ctx, studentID, cycleID, s.now().UTC())
+	charges, err := s.withdrawalCharges(ctx, studentID, cycleID, s.clock.Today())
 	if err != nil {
 		return domain.WithdrawalPlan{}, err
 	}
@@ -35,7 +35,7 @@ func (s *FinanceService) WithdrawStudent(ctx context.Context, studentID, cycleID
 	if err != nil {
 		return domain.WithdrawalPlan{}, err
 	}
-	charges, err := s.withdrawalCharges(ctx, studentID, cycleID, s.now().UTC())
+	charges, err := s.withdrawalCharges(ctx, studentID, cycleID, s.clock.Today())
 	if err != nil {
 		return domain.WithdrawalPlan{}, err
 	}

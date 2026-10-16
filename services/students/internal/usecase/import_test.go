@@ -114,6 +114,12 @@ type importFixture struct {
 
 func newImportFixture(t *testing.T) importFixture {
 	t.Helper()
+	return newImportFixtureAt(t, importNow)
+}
+
+// newImportFixtureAt is the fixture with its clock at `now`.
+func newImportFixtureAt(t *testing.T, now time.Time) importFixture {
+	t.Helper()
 	catalog := &countingCatalog{fakeCatalog: newCatalog(), groupCalls: map[string]int{}}
 	catalog.groups[importGroupA] = groupRef{ID: importGroupA, CycleID: importCycle, Name: "1° A", GradeLevelID: "gl-1", Capacity: 1}
 	catalog.groups[importGroupB] = groupRef{ID: importGroupB, CycleID: importCycle, Name: "1° B", GradeLevelID: "gl-1", Capacity: 25}
@@ -121,7 +127,7 @@ func newImportFixture(t *testing.T) importFixture {
 	ids := 0
 	svc := usecase.NewImportService(repo, catalog, fakeLevels{primariaLevel: "Primaria"}, tenant,
 		func() string { ids++; return fmt.Sprintf("00000000-0000-0000-0000-%012d", ids) },
-		func() time.Time { return importNow })
+		func() time.Time { return now })
 	return importFixture{svc: svc, repo: repo, catalog: catalog}
 }
 

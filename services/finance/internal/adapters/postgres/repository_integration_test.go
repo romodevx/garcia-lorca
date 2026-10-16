@@ -74,6 +74,7 @@ func migrationFiles() ([]string, error) {
 var (
 	superDB   *gorm.DB
 	appDSN    string
+	superDSN  string
 	superPass = randToken()
 	appPass   = randToken()
 )
@@ -127,7 +128,7 @@ func TestMain(m *testing.M) {
 
 	host, _ := container.Host(ctx)
 	port, _ := container.MappedPort(ctx, "5432")
-	superDSN := fmt.Sprintf("host=%s port=%s user=postgres password=%s dbname=%s sslmode=disable", host, port.Port(), superPass, dbName)
+	superDSN = fmt.Sprintf("host=%s port=%s user=postgres password=%s dbname=%s sslmode=disable", host, port.Port(), superPass, dbName)
 	appDSN = fmt.Sprintf("host=%s port=%s user=app password=%s dbname=%s sslmode=disable", host, port.Port(), appPass, dbName)
 
 	if superDB, err = open(superDSN); err != nil {
@@ -230,7 +231,8 @@ func newKeyedPayment(t *testing.T, id, tenant, chargeID string, amount int64, at
 	if err != nil {
 		t.Fatalf("new payment: %v", err)
 	}
-	return p
+	// Dated on the UTC date of at, like newDeposit.
+	return p.WithPaidOn(at)
 }
 
 // derive mirrors the use case's rule (usecase.derivePaidStatus): a cancelled
@@ -1277,8 +1279,10 @@ func TestStudentWithdrawnConsumerCancelsFutureChargeInPostgres(t *testing.T) {
 	if _, err := repo.CreateCharge(ctx, charge); err != nil {
 		t.Fatalf("seed charge: %v", err)
 	}
+	// UTC zone: `today` is a stored-style date (midnight UTC) and this test is
+	// about the consumer's writes, not the school's zone (ADR 0035).
 	service := usecase.NewFinanceService(repo, nil, nil, nil, nil, nil, nil, tenantA,
-		func() string { return "generated-id" }, func() time.Time { return today })
+		func() string { return "generated-id" }, usecase.NewSchoolClock(func() time.Time { return today }, time.UTC))
 	service.WithActivities(repo)
 	consumer := financepubsub.NewConsumer(service, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	data, err := proto.Marshal(&studentsv1.StudentWithdrawn{
@@ -1357,8 +1361,8 @@ func TestWithdrawalCancellationWaitsForLockedPaymentDecision(t *testing.T) {
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	if err := locked.Exec(`INSERT INTO payments (id, tenant_id, charge_id, amount_cents, method, paid_at)
-		VALUES (?, ?, ?, 1000, 'cash', ?)`, paymentID, tenantA, chargeID, paidAt).Error; err != nil {
+	if err := locked.Exec(`INSERT INTO payments (id, tenant_id, charge_id, amount_cents, method, paid_at, paid_on)
+		VALUES (?, ?, ?, 1000, 'cash', ?, ?)`, paymentID, tenantA, chargeID, paidAt, domain.CalendarDay(paidAt).Format("2006-01-02")).Error; err != nil {
 		_ = locked.Rollback().Error
 		t.Fatalf("post payment while holding row lock: %v", err)
 	}

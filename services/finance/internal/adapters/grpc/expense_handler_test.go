@@ -180,7 +180,7 @@ func newExpenseHandler(t *testing.T) (*grpcadapter.FinanceHandler, *memExpenses)
 	n := 0
 	svc := usecase.NewExpenseService(repo, fixedTakings{}, &memStore{objects: map[string][]byte{}},
 		func() string { n++; return fmt.Sprintf("00000000-0000-0000-0000-%012d", n) },
-		func() time.Time { return fixedNow })
+		usecase.NewSchoolClock(func() time.Time { return fixedNow }, schoolZone))
 	return grpcadapter.NewFinanceHandler(nil, usecase.NewHealthService("finance")).WithExpenses(svc), repo
 }
 

@@ -274,8 +274,9 @@ func (h *FinanceHandler) GetStatement(ctx context.Context, req *connect.Request[
 	}), nil
 }
 
-// toProtoMovement projects one ledger line. Dates go out as the calendar day
-// (UTC, this service's school day — see school-day-is-utc-day).
+// toProtoMovement projects one ledger line. Dates go out as the stored date's
+// calendar day (its UTC date, domain.CalendarDay; ADR 0035 re-zones only
+// "today", never a stored date).
 func toProtoMovement(m domain.Movement) *financev1.StatementMovement {
 	return &financev1.StatementMovement{
 		Kind:         string(m.Kind),
@@ -459,9 +460,7 @@ func (h *FinanceHandler) DailyCashUp(ctx context.Context, req *connect.Request[f
 		}
 		return connect.NewResponse(cashCutResponse(cut)), nil
 	}
-	if day.IsZero() {
-		day = time.Now()
-	}
+	// An unset day is the school clock's today, decided in the use case.
 	cut, err := h.finance.DailyCashUp(ctx, day)
 	if err != nil {
 		return nil, connectErr(err)
@@ -576,6 +575,7 @@ func toProtoDeposit(d domain.Deposit) *financev1.Deposit {
 		Method:          d.Method(),
 		Reference:       d.Reference(),
 		PaidAt:          timestamppb.New(d.PaidAt()),
+		PaidOn:          formatPlanDate(d.PaidOn()),
 		CalendarVersion: d.CalendarVersion(),
 		CardType:        d.CardType(),
 		VoidReason:      d.VoidReason(),
@@ -675,7 +675,7 @@ func toProtoCorrection(c domain.DepositCorrection, descriptions map[string]strin
 }
 
 func toProtoSnapshot(s domain.DepositSnapshot, descriptions map[string]string) *financev1.DepositSnapshot {
-	out := &financev1.DepositSnapshot{DepositId: s.DepositID, Folio: s.Folio, AmountCents: s.AmountCents}
+	out := &financev1.DepositSnapshot{DepositId: s.DepositID, Folio: s.Folio, AmountCents: s.AmountCents, PaidOn: formatPlanDate(s.PaidOn)}
 	if !s.PaidAt.IsZero() {
 		out.PaidAt = timestamppb.New(s.PaidAt)
 	}
@@ -786,6 +786,7 @@ func toProtoPayment(p domain.Payment) *financev1.Payment {
 		Method:      p.Method(),
 		Reference:   p.Reference(),
 		PaidAt:      timestamppb.New(p.PaidAt()),
+		PaidOn:      formatPlanDate(p.PaidOn()),
 		CardType:    p.CardType(),
 		DepositId:   p.DepositID(),
 	}
@@ -1029,6 +1030,9 @@ func parsePlanDate(s string) (time.Time, error) {
 	return t, nil
 }
 
+// formatPlanDate is a stored date as the wire's "YYYY-MM-DD" (a plan's
+// window, a payment's paid_on); a date never recorded is empty, not
+// "0001-01-01".
 func formatPlanDate(t time.Time) string {
 	if t.IsZero() {
 		return ""

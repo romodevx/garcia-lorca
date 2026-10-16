@@ -26,7 +26,7 @@ func TestBankReferenceIsStoredAndRead(t *testing.T) {
 	ctx := context.Background()
 	repo := appRepo(t, tenantA)
 	const id = "aaaaaaaa-0b00-0000-0000-000000000001"
-	if err := repo.Create(ctx, withBankReference(t, applicant(t, id, tenantA, "BAAC050312MDFRNN05", "1° A"), "7700112233")); err != nil {
+	if err := repo.Create(ctx, withBankReference(t, applicant(t, id, tenantA, "BAAC050312MDFRNN05", "1° A"), "7700112233"), testNumberYear); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	got, err := repo.FindByID(ctx, id)
@@ -55,18 +55,18 @@ func TestATakenBankReferenceIsItsOwnConflict(t *testing.T) {
 	ctx := context.Background()
 	repo := appRepo(t, tenantA)
 	first := withBankReference(t, applicant(t, "aaaaaaaa-0b00-0000-0000-000000000010", tenantA, "BAAD050312MDFRNN06", "1° A"), "5500")
-	if err := repo.Create(ctx, first); err != nil {
+	if err := repo.Create(ctx, first, testNumberYear); err != nil {
 		t.Fatalf("Create first: %v", err)
 	}
 
 	second := withBankReference(t, applicant(t, "aaaaaaaa-0b00-0000-0000-000000000011", tenantA, "BAAE050312MDFRNN07", "1° A"), "5500")
-	err := repo.Create(ctx, second)
+	err := repo.Create(ctx, second, testNumberYear)
 	if !errors.Is(err, domain.ErrBankReferenceTaken) || glerrors.KindOf(err) != glerrors.KindConflict {
 		t.Fatalf("Create with a taken reference: err = %v; want ErrBankReferenceTaken", err)
 	}
 
 	third := applicant(t, "aaaaaaaa-0b00-0000-0000-000000000012", tenantA, "BAAF050312MDFRNN08", "1° A")
-	if err := repo.Create(ctx, third); err != nil {
+	if err := repo.Create(ctx, third, testNumberYear); err != nil {
 		t.Fatalf("Create third: %v", err)
 	}
 	withBankReference(t, third, "5500")
@@ -75,7 +75,7 @@ func TestATakenBankReferenceIsItsOwnConflict(t *testing.T) {
 	}
 
 	dupCURP := applicant(t, "aaaaaaaa-0b00-0000-0000-000000000013", tenantA, "BAAD050312MDFRNN06", "1° A")
-	if err := repo.Create(ctx, dupCURP); !errors.Is(err, domain.ErrCURPTaken) || errors.Is(err, domain.ErrBankReferenceTaken) {
+	if err := repo.Create(ctx, dupCURP, testNumberYear); !errors.Is(err, domain.ErrCURPTaken) || errors.Is(err, domain.ErrBankReferenceTaken) {
 		t.Fatalf("Create with a taken CURP: err = %v; want ErrCURPTaken only", err)
 	}
 }

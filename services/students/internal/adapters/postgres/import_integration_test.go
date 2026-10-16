@@ -46,7 +46,7 @@ func importCommand(t *testing.T, tenant, id, enrollmentID, curp, ref string) por
 	if err != nil {
 		t.Fatalf("NewEnrollment: %v", err)
 	}
-	return ports.ImportCommand{Student: student, Enrollment: e.WithOrigin(domain.EnrollmentOriginImport), BatchID: importBatchID}
+	return ports.ImportCommand{Student: student, Enrollment: e.WithOrigin(domain.EnrollmentOriginImport), BatchID: importBatchID, NumberYear: testNumberYear}
 }
 
 func TestImportStudentStoresAnEnrolledPupilInOneTransaction(t *testing.T) {
@@ -98,7 +98,7 @@ func TestImportStudentDropsATakenBankReference(t *testing.T) {
 	ctx := context.Background()
 	repo := appRepo(t, tenantA)
 	holder := withBankReference(t, applicant(t, "aaaaaaaa-1a00-0000-0000-000000000010", tenantA, "IAAB100312MDFRNN02", "1° A"), "8800")
-	if err := repo.Create(ctx, holder); err != nil {
+	if err := repo.Create(ctx, holder, testNumberYear); err != nil {
 		t.Fatalf("seed holder: %v", err)
 	}
 	const id = "aaaaaaaa-1a00-0000-0000-000000000011"

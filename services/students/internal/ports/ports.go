@@ -36,8 +36,10 @@ type BirthdayFilter struct {
 // StudentRepository loads and persists students. All access is tenant-scoped for
 // RLS (the adapter binds app.current_tenant per transaction, as in iam).
 type StudentRepository interface {
-	// Create inserts a new applicant. A duplicate CURP (per tenant) is KindConflict.
-	Create(ctx context.Context, s *domain.Student) error
+	// Create inserts a new applicant, numbering its matrícula in numberYear
+	// (the school's calendar year of the registration). A duplicate CURP (per
+	// tenant) is KindConflict.
+	Create(ctx context.Context, s *domain.Student, numberYear int) error
 	// Update persists a status transition (and any mutable fields).
 	Update(ctx context.Context, s *domain.Student) error
 	// UpdateDetails persists a correction of the file: names, CURP and the

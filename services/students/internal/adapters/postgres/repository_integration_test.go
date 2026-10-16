@@ -195,7 +195,7 @@ func TestCreateFindAndTransition(t *testing.T) {
 	repo := appRepo(t, tenantA)
 	ctx := context.Background()
 	id := "aaaaaaaa-0000-0000-0000-000000000001"
-	if err := repo.Create(ctx, applicant(t, id, tenantA, "HEGA050312MDFRNN08", "4° A")); err != nil {
+	if err := repo.Create(ctx, applicant(t, id, tenantA, "HEGA050312MDFRNN08", "4° A"), testNumberYear); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
@@ -225,8 +225,8 @@ func TestCreateFindAndTransition(t *testing.T) {
 func TestDuplicateCURPIsConflict(t *testing.T) {
 	repo := appRepo(t, tenantA)
 	ctx := context.Background()
-	_ = repo.Create(ctx, applicant(t, "aaaaaaaa-0000-0000-0000-000000000010", tenantA, "MEXA080101HDFRNN01", "1° A"))
-	err := repo.Create(ctx, applicant(t, "aaaaaaaa-0000-0000-0000-000000000011", tenantA, "MEXA080101HDFRNN01", "1° B"))
+	_ = repo.Create(ctx, applicant(t, "aaaaaaaa-0000-0000-0000-000000000010", tenantA, "MEXA080101HDFRNN01", "1° A"), testNumberYear)
+	err := repo.Create(ctx, applicant(t, "aaaaaaaa-0000-0000-0000-000000000011", tenantA, "MEXA080101HDFRNN01", "1° B"), testNumberYear)
 	if glerrors.KindOf(err) != glerrors.KindConflict {
 		t.Errorf("duplicate CURP: want KindConflict, got %v", err)
 	}
@@ -234,7 +234,7 @@ func TestDuplicateCURPIsConflict(t *testing.T) {
 
 func TestRLSIsolatesTenants(t *testing.T) {
 	idB := "bbbbbbbb-0000-0000-0000-000000000001"
-	if err := appRepo(t, tenantB).Create(context.Background(), applicant(t, idB, tenantB, "LOBA070202MDFRNN02", "2° A")); err != nil {
+	if err := appRepo(t, tenantB).Create(context.Background(), applicant(t, idB, tenantB, "LOBA070202MDFRNN02", "2° A"), testNumberYear); err != nil {
 		t.Fatalf("seed B: %v", err)
 	}
 	// Tenant A must not see tenant B's student.
@@ -246,7 +246,7 @@ func TestRLSIsolatesTenants(t *testing.T) {
 		t.Errorf("tenant B should see its own student: %v", err)
 	}
 	// The same CURP may exist in a different tenant (uniqueness is per-tenant).
-	if err := appRepo(t, tenantA).Create(context.Background(), applicant(t, "aaaaaaaa-0000-0000-0000-000000000099", tenantA, "LOBA070202MDFRNN02", "2° A")); err != nil {
+	if err := appRepo(t, tenantA).Create(context.Background(), applicant(t, "aaaaaaaa-0000-0000-0000-000000000099", tenantA, "LOBA070202MDFRNN02", "2° A"), testNumberYear); err != nil {
 		t.Errorf("same CURP in another tenant should be allowed: %v", err)
 	}
 }
@@ -262,7 +262,7 @@ func TestListFilterAndPaginate(t *testing.T) {
 			ID: id, TenantID: tenantB, CURP: mustCURP(t, c), FirstName: "X", LastName: "Y",
 			Level: domain.RestoreLevel(secundariaLevelID, "Secundaria"), GradeGroup: "1° A",
 		})
-		if err := repo.Create(ctx, s); err != nil {
+		if err := repo.Create(ctx, s, testNumberYear); err != nil {
 			t.Fatalf("seed list %d: %v", i, err)
 		}
 	}
@@ -317,7 +317,7 @@ var enrollClock = time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
 // returns its id.
 func seedStudent(t *testing.T, tenant, id, curp string) string {
 	t.Helper()
-	if err := appRepo(t, tenant).Create(context.Background(), applicant(t, id, tenant, curp, "1° A")); err != nil {
+	if err := appRepo(t, tenant).Create(context.Background(), applicant(t, id, tenant, curp, "1° A"), testNumberYear); err != nil {
 		t.Fatalf("seed student: %v", err)
 	}
 	return id
@@ -616,7 +616,7 @@ func TestListOrdersBySurnameAcrossPages(t *testing.T) {
 		if err != nil {
 			t.Fatalf("seed %d: %v", i, err)
 		}
-		if err := repo.Create(ctx, s); err != nil {
+		if err := repo.Create(ctx, s, testNumberYear); err != nil {
 			t.Fatalf("create %d: %v", i, err)
 		}
 	}
@@ -664,7 +664,7 @@ func TestListPageTokenSurvivesARenamedCursorPupil(t *testing.T) {
 		if err != nil {
 			t.Fatalf("seed %d: %v", i, err)
 		}
-		if err := repo.Create(ctx, s); err != nil {
+		if err := repo.Create(ctx, s, testNumberYear); err != nil {
 			t.Fatalf("create %d: %v", i, err)
 		}
 	}

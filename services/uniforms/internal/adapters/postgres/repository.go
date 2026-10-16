@@ -497,7 +497,7 @@ func (r *Repository) CounterSale(ctx context.Context, cmd ports.CounterSaleComma
 			}
 		}
 
-		folio, err := r.nextFolio(tx, cmd.SoldAt.Year())
+		folio, err := r.nextFolio(tx, cmd.FolioYear)
 		if err != nil {
 			return err
 		}

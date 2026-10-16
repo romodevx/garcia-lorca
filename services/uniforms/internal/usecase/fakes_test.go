@@ -196,7 +196,7 @@ func (r *fakeRepo) CounterSale(_ context.Context, cmd ports.CounterSaleCommand) 
 	// transaction. It matters: Postgres rolls the whole thing back when the order
 	// is refused, and a fake that had already emptied the shelf by then would let
 	// a refused sale look like it moved goods.
-	order, err := domain.NewOrder(cmd.OrderID, cmd.TenantID, domain.FormatFolio(2026, len(r.sales)+1),
+	order, err := domain.NewOrder(cmd.OrderID, cmd.TenantID, domain.FormatFolio(cmd.FolioYear, len(r.sales)+1),
 		domain.OrderStudent{
 			ID: cmd.StudentID, FullName: cmd.StudentName, Level: cmd.StudentLevel,
 			GradeGroup: cmd.StudentGradeGroup, CycleID: cmd.CycleID,
@@ -358,7 +358,7 @@ func newFixture(t *testing.T) *fixture {
 		pub:     &spyPublisher{},
 	}
 	f.svc = usecase.NewService(f.repo, f.students, f.finance, f.pub, testTenant,
-		seqID("id"), func() time.Time { return fixedNow })
+		seqID("id"), func() time.Time { return fixedNow }, time.UTC)
 	return f
 }
 

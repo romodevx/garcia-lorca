@@ -29,13 +29,24 @@ type StudentService struct {
 	newID  func() string
 	now    func() time.Time
 	photos ports.PhotoStore
+	// zone is the school's time zone: a matrícula is numbered under the
+	// school's calendar year (T5b). UTC until WithSchoolZone.
+	zone *time.Location
 }
 
 // NewStudentService wires the use case. `levels` is config's level catalog;
 // `tenant` is the single-tenant scope for M03; `newID` mints student ids
 // (injectable for deterministic tests).
 func NewStudentService(repo ports.StudentRepository, pub ports.EventPublisher, levels ports.LevelCatalog, tenant string, newID func() string) *StudentService {
-	return &StudentService{repo: repo, pub: pub, levels: levels, tenant: tenant, newID: newID, now: time.Now}
+	return &StudentService{repo: repo, pub: pub, levels: levels, tenant: tenant, newID: newID, now: time.Now, zone: time.UTC}
+}
+
+// WithSchoolZone returns the service numbering matrículas in the school's
+// calendar year of `zone`, resolved once at boot.
+func (s *StudentService) WithSchoolZone(zone *time.Location) *StudentService {
+	cp := *s
+	cp.zone = zone
+	return &cp
 }
 
 // WithClock returns the service reading the school's date from `now`
@@ -256,7 +267,7 @@ func (s *StudentService) CreateApplicant(ctx context.Context, in CreateApplicant
 	if err != nil {
 		return nil, err
 	}
-	if err := s.repo.Create(ctx, student); err != nil {
+	if err := s.repo.Create(ctx, student, s.now().In(s.zone).Year()); err != nil {
 		return nil, err
 	}
 	return student, nil

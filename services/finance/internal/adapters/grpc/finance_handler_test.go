@@ -32,6 +32,15 @@ const (
 // fixedNow is the injected clock: nothing here reads the wall clock.
 var fixedNow = time.Date(2026, 9, 15, 10, 0, 0, 0, time.UTC)
 
+// schoolZone is the zone production resolves from SCHOOL_TIMEZONE (ADR 0035).
+var schoolZone = func() *time.Location {
+	zone, err := time.LoadLocation("America/Mexico_City")
+	if err != nil {
+		panic(err)
+	}
+	return zone
+}()
+
 // --- cross-service readers ---------------------------------------------------
 
 type fakeStudents struct{ byID map[string]ports.StudentRef }
@@ -429,7 +438,7 @@ func newFixture(t *testing.T) *fixture {
 	seq := 0
 	newID := func() string { seq++; return fmt.Sprintf("id-%d", seq) }
 	svc := usecase.NewFinanceService(repo, students, cycles, enrollments, &fakeCatalog{}, nil, nil,
-		testTenant, newID, func() time.Time { return fixedNow })
+		testTenant, newID, usecase.NewSchoolClock(func() time.Time { return fixedNow }, schoolZone))
 	return &fixture{
 		h:           grpcadapter.NewFinanceHandler(svc, usecase.NewHealthService("finance")),
 		repo:        repo,
@@ -987,6 +996,21 @@ func TestGetDepositReceipt(t *testing.T) {
 	}
 	if l := got.GetLines()[0]; l.GetDiscountCents() != 10000 || l.GetScholarshipCents() != 150000 || l.GetScholarshipName() != "Hermanos" {
 		t.Errorf("month line = %+v, want its 10000 discount and the Hermanos scholarship of 150000", l)
+	}
+}
+
+// Review of D8: a cash-up asked without a day is the school clock's today,
+// never the server's wall clock.
+func TestDailyCashUpWithoutADayIsTheSchoolClocksToday(t *testing.T) {
+	f := newFixture(t)
+
+	res, err := f.h.DailyCashUp(context.Background(), connect.NewRequest(&financev1.DailyCashUpRequest{}))
+
+	if err != nil {
+		t.Fatalf("DailyCashUp: %v", err)
+	}
+	if res.Msg.GetDay() != "2026-09-15" {
+		t.Errorf("day = %q, want the injected clock's school day 2026-09-15", res.Msg.GetDay())
 	}
 }
 

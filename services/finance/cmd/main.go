@@ -19,12 +19,14 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	stdlog "log"
 	"log/slog"
 	"net/http"
 	"os"
 	"strconv"
 	"time"
+	_ "time/tzdata" // the school's zone must load in a distroless image
 
 	connect "connectrpc.com/connect"
 	"github.com/google/uuid"
@@ -78,6 +80,10 @@ const (
 	// minutes: the events it rescues are the ones that decide whether a pupil
 	// who paid shows as inscribed, and a demo runs every day.
 	outboxSweep = 30 * time.Second
+
+	// defaultSchoolTimezone is the school's calendar (SCHOOL_TIMEZONE), as in
+	// gateway, comms, attendance and grades. Finance's "today" is its day.
+	defaultSchoolTimezone = "America/Mexico_City"
 
 	idleTimeout = 120 * time.Second
 	// shutdownTimeout bounds the drain: past it, Shutdown stops waiting for
@@ -208,6 +214,15 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 	// the caller), so RLS binds this one tenant for every request. See ADR 0001.
 	tenantID := envOr("FINANCE_TENANT_ID", defaultTenant)
 
+	// The school's zone, resolved ONCE: every "today" the service decides —
+	// surcharge days, overdue cutoffs, the early window, the run's default
+	// date, the account's "Al {fecha}" — is Morelia's day (ADR 0035).
+	zone, err := schoolLocation()
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	clock := usecase.NewSchoolClock(time.Now, zone)
+
 	db, err := openDB()
 	if err != nil {
 		return nil, nil, nil, nil, err
@@ -245,7 +260,7 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 	// cyclesClient is the config client twice over: it answers both "is this a
 	// real school year" and "which level does this group belong to".
 	svc := usecase.NewFinanceService(repo, studentsClient, cyclesClient, studentsClient, cyclesClient,
-		configclient.NewCachedCalendar(cyclesClient, calendarTTL, calendarTimeout), publisher, tenantID, newID, time.Now)
+		configclient.NewCachedCalendar(cyclesClient, calendarTTL, calendarTimeout), publisher, tenantID, newID, clock)
 	health := usecase.NewHealthService(serviceName)
 	// Level deletion (ADR 0021): finance's step of the gateway's saga (tuition
 	// plans only; money is never touched). The gateway's hourly sweep (always
@@ -258,15 +273,15 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
-	expenses := usecase.NewExpenseService(repo, svc, receipts, newID, time.Now)
+	expenses := usecase.NewExpenseService(repo, svc, receipts, newID, clock)
 	// T17: activities. Their periods are issued by the same billing run, so the
 	// run learns of them here and enrolling charges what is already due.
 	svc.WithActivities(repo)
-	activities := usecase.NewActivityService(repo, studentsClient, svc, newID, time.Now)
+	activities := usecase.NewActivityService(repo, studentsClient, svc, newID, clock)
 	// T18: scholarships. Every read and payment prices them (ADR 0022); the
 	// service only manages them and who holds them.
 	svc.WithScholarships(repo)
-	scholarships := usecase.NewScholarshipService(repo, svc, repo, repo, studentsClient, tenantID, newID, time.Now)
+	scholarships := usecase.NewScholarshipService(repo, svc, repo, repo, studentsClient, tenantID, newID, clock)
 	handler := grpcadapter.NewFinanceHandler(svc, health).WithLevelArchive(levels).WithExpenses(expenses).
 		WithActivities(activities).WithScholarships(scholarships)
 	consumer := pubsubadapter.NewConsumer(svc, log)
@@ -387,4 +402,16 @@ func startSubscriber(ctx context.Context, group *errgroup.Group, consumer *pubsu
 func pushMode() bool {
 	enabled, err := strconv.ParseBool(os.Getenv("PUBSUB_PUSH_MODE"))
 	return err == nil && enabled
+}
+
+// schoolLocation is the school's time zone (SCHOOL_TIMEZONE, default
+// America/Mexico_City). An unknown zone fails startup: falling back to UTC
+// would bring back the day that starts at 18:00 in Morelia (ADR 0035).
+func schoolLocation() (*time.Location, error) {
+	name := envOr("SCHOOL_TIMEZONE", defaultSchoolTimezone)
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		return nil, fmt.Errorf("SCHOOL_TIMEZONE %q: %w", name, err)
+	}
+	return loc, nil
 }

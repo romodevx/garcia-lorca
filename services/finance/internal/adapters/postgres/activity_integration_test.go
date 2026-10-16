@@ -88,7 +88,7 @@ func TestActivitiesRoundTripAndUpdateTwice(t *testing.T) {
 	spec.FirstDueOn = actDay.AddDate(0, 0, 2)
 	spec.Schedule = []domain.ActivitySlot{{Weekday: 6, StartMin: 9 * 60, EndMin: 11 * 60}}
 	for i := 0; i < 2; i++ {
-		if _, err := repo.UpdateActivity(ctx, mustActivityOf(t, spec)); err != nil {
+		if _, err := repo.UpdateActivity(ctx, mustActivityOf(t, spec), actDay); err != nil {
 			t.Fatalf("UpdateActivity #%d: %v", i+1, err)
 		}
 	}
@@ -112,7 +112,7 @@ func TestActivitiesRoundTripAndUpdateTwice(t *testing.T) {
 	// Retired, then brought back with the same days: the unique index is on
 	// LIVE options only.
 	spec.Options = append(spec.Options, domain.PriceOption{ID: "ac000000-0000-0000-0000-0000000000a3", DaysPerWeek: 2, AmountCents: 1})
-	if _, err := repo.UpdateActivity(ctx, mustActivityOf(t, spec)); err != nil {
+	if _, err := repo.UpdateActivity(ctx, mustActivityOf(t, spec), actDay); err != nil {
 		t.Fatalf("re-adding a 2-day option: %v", err)
 	}
 }
@@ -168,7 +168,7 @@ func TestActivityEnrollmentsLifecycleAndRLS(t *testing.T) {
 
 	// Retiring an option in use is a conflict.
 	if _, err := repo.UpdateActivity(ctx, mustActivityOf(t, swimSpec(actID, "Robótica",
-		domain.PriceOption{ID: o1, DaysPerWeek: 1, AmountCents: 1000}))); glerrors.KindOf(err) != glerrors.KindConflict {
+		domain.PriceOption{ID: o1, DaysPerWeek: 1, AmountCents: 1000})), actDay); glerrors.KindOf(err) != glerrors.KindConflict {
 		t.Fatalf("retiring a used option: want KindConflict, got %v", err)
 	}
 
@@ -205,7 +205,7 @@ func TestActivityEnrollmentsLifecycleAndRLS(t *testing.T) {
 		t.Fatalf("changing a pupil not enrolled: want NotFound, got %v", err)
 	}
 
-	billable, err := repo.ListBillableEnrollments(ctx)
+	billable, err := repo.ListBillableEnrollments(ctx, actDay)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -277,7 +277,7 @@ func TestActivityOptionsSwapDaysAndResumedOnRoundTrips(t *testing.T) {
 	}
 	spec.Options = []domain.PriceOption{{ID: o2, DaysPerWeek: 3, AmountCents: 300}, {ID: o3, DaysPerWeek: 2, AmountCents: 200}}
 	spec.ResumedOn = actDay.AddDate(0, 2, 0)
-	if _, err := repo.UpdateActivity(ctx, mustActivityOf(t, spec)); err != nil {
+	if _, err := repo.UpdateActivity(ctx, mustActivityOf(t, spec), actDay); err != nil {
 		t.Fatalf("swapping days: %v", err)
 	}
 	got, err := repo.GetActivity(ctx, id)
@@ -310,11 +310,66 @@ func TestAnOptionUsedByAnEnrolmentEndingLaterCannotBeRetired(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.EndEnrollments(ctx, id, []string{actStudent1}, time.Now().AddDate(1, 0, 0)); err != nil {
+	if _, err := repo.EndEnrollments(ctx, id, []string{actStudent1}, actDay.AddDate(1, 0, 0)); err != nil {
 		t.Fatal(err)
 	}
 	spec.Options = spec.Options[1:]
-	if _, err := repo.UpdateActivity(ctx, mustActivityOf(t, spec)); glerrors.KindOf(err) != glerrors.KindConflict {
+	if _, err := repo.UpdateActivity(ctx, mustActivityOf(t, spec), actDay); glerrors.KindOf(err) != glerrors.KindConflict {
 		t.Fatalf("retiring an option an enrolment still bills under: want KindConflict, got %v", err)
+	}
+}
+
+// T5b review: whether an enrolment is still running is judged on the SCHOOL's
+// today, handed in by the use case — never on CURRENT_DATE, the database's UTC
+// day, which turns over at 18:00 in Morelia. Dates far from the real clock
+// prove the parameter, not the database, decides.
+func TestEnrolmentEndsAreJudgedOnTheDayGiven(t *testing.T) {
+	ctx := context.Background()
+	const id = "ac000000-0000-0000-0000-000000000051"
+	const o1, o2 = "ac000000-0000-0000-0000-0000000005a1", "ac000000-0000-0000-0000-0000000005a2"
+	repo := appRepo(t, tenantA)
+	spec := swimSpec(id, "Origami",
+		domain.PriceOption{ID: o1, DaysPerWeek: 1, AmountCents: 100},
+		domain.PriceOption{ID: o2, DaysPerWeek: 2, AmountCents: 200})
+	if _, err := repo.CreateActivity(ctx, mustActivityOf(t, spec)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.CreateEnrollments(ctx, []domain.ActivityEnrollment{
+		actEnrollment(t, "ac000000-0000-0000-0000-0000000005e1", id, actStudent1, o1, actDay),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	end := time.Date(2032, time.March, 10, 0, 0, 0, 0, time.UTC)
+	if _, err := repo.EndEnrollments(ctx, id, []string{actStudent1}, end); err != nil {
+		t.Fatal(err)
+	}
+
+	billable := func(today time.Time) bool {
+		t.Helper()
+		rows, err := repo.ListBillableEnrollments(ctx, today)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, e := range rows {
+			if e.ActivityID() == id {
+				return true
+			}
+		}
+		return false
+	}
+	if !billable(end.AddDate(0, 0, 89)) {
+		t.Fatal("89 days after its end the enrolment must still be billable")
+	}
+	if billable(end.AddDate(0, 0, 90)) {
+		t.Fatal("90 days after its end the enrolment must no longer be billable")
+	}
+
+	without := spec
+	without.Options = spec.Options[1:]
+	if _, err := repo.UpdateActivity(ctx, mustActivityOf(t, without), end.AddDate(0, 0, -1)); glerrors.KindOf(err) != glerrors.KindConflict {
+		t.Fatalf("the day before its end the option is in use: want KindConflict, got %v", err)
+	}
+	if _, err := repo.UpdateActivity(ctx, mustActivityOf(t, without), end); err != nil {
+		t.Fatalf("on its end day the enrolment no longer uses the option: %v", err)
 	}
 }

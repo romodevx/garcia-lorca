@@ -71,15 +71,11 @@ type EnrollmentConcept struct {
 // for anybody who enquired in December, and a concept nobody was charged for is
 // one the school discovers in June.
 //
-// `on` must be the SCHOOL'S calendar day, and this service's convention is that
-// the school's day is the UTC day: resolveAsOf truncates now().UTC() to UTC
-// midnight, and a tier's effective_from parses from YYYY-MM-DD to the same. The
-// school is UTC-6, so that convention runs ~6 hours ahead of the office clock —
-// which it already does for due dates, for the daily surcharge and for the
-// early-payment window. Correcting it here alone would put the ladder 6 hours
-// out of step with the surcharge on the same statement, which is worse than a
-// system that is consistently offset. It belongs in one place, where now()
-// becomes a date, against a school timezone this service does not yet hold.
+// `on` must be the SCHOOL'S calendar day as midnight UTC — SchoolClock.Today
+// for "now" (ADR 0035), the same representation a tier's effective_from parses
+// to from YYYY-MM-DD. Never truncate an instant here: the one place an instant
+// becomes the school's day is the clock, so the ladder, the surcharge and the
+// early window on one statement always agree on which day it is.
 func (c EnrollmentConcept) AmountOn(on time.Time) int64 {
 	if len(c.Tiers) == 0 {
 		// validate() refuses a ladder with no steps, so this cannot happen on a

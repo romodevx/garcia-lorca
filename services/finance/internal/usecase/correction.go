@@ -60,19 +60,24 @@ func (s *FinanceService) CorrectDeposit(ctx context.Context, in CorrectionInput)
 	if err != nil {
 		return CorrectionResult{}, err
 	}
-	paidAt := in.PaidAt
-	if paidAt.IsZero() {
-		paidAt = original.PaidAt()
+	// No new date keeps the original's DAY and instant (ADR 0035): the
+	// correction is judged again on the day the office first recorded, never
+	// on the UTC date of the original's instant.
+	when := paymentDay{at: original.PaidAt(), on: original.PaidOn()}
+	if !in.PaidAt.IsZero() {
+		if when, err = s.paymentDate(in.PaidAt); err != nil {
+			return CorrectionResult{}, err
+		}
 	}
 	chosen, err := s.withoutRidingFees(ctx, original.StudentID(), in.ChargeIDs)
 	if err != nil {
 		return CorrectionResult{}, err
 	}
 	deposit, planner, err := s.prepareDeposit(ctx, DepositInput{
-		StudentID: original.StudentID(), AmountCents: in.AmountCents, PaidAt: paidAt,
+		StudentID: original.StudentID(), AmountCents: in.AmountCents,
 		IdempotencyKey: in.IdempotencyKey, ChargeIDs: chosen,
 		Receiver: original.ReceivedBy(), Tenders: in.Tenders,
-	})
+	}, when)
 	if err != nil {
 		return CorrectionResult{}, err
 	}
@@ -83,7 +88,7 @@ func (s *FinanceService) CorrectDeposit(ctx context.Context, in CorrectionInput)
 		CorrectionID: s.newID(),
 		Reason:       in.Reason,
 		By:           in.By,
-		At:           s.now(),
+		At:           s.clock.Now(),
 	}, planner.plan, s.correctionEvents)
 	if err != nil {
 		return CorrectionResult{}, err

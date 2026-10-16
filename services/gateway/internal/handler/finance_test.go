@@ -835,6 +835,28 @@ func TestFinanceRegisterDepositRejectsAMalformedDate(t *testing.T) {
 	}
 }
 
+// A mistyped year (1999-12-31) is a well-formed date finance refuses as invalid
+// input (the folio counter starts at 2000): the cashier gets a 400 with the
+// reason, not a 500.
+func TestFinanceRegisterDepositDatedBefore2000Is400(t *testing.T) {
+	const reason = "la fecha del pago es anterior al año 2000; revisa el año"
+	svc := &fakeFinance{err: connect.NewError(connect.CodeInvalidArgument, errString(reason))}
+	h := handler.NewFinanceHandler(svc)
+
+	rec := doReq(t, h.RegisterDeposit, http.MethodPost, "/api/v1/finance/deposits",
+		`{"studentId":"stu-1","amountCents":100000,"method":"cash","paidAt":"1999-12-31","idempotencyKey":"k1"}`)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "anterior al año 2000") {
+		t.Errorf("body = %q, want the reason", rec.Body.String())
+	}
+	if svc.depositPaidAt.Format("2006-01-02") != "1999-12-31" {
+		t.Errorf("paidAt forwarded = %v, want 1999-12-31", svc.depositPaidAt)
+	}
+}
+
 // Cancelling without a reason leaves an unexplained hole in the day's takings,
 // so the edge refuses it before the money service is ever asked.
 func TestFinanceVoidDepositNeedsAReason(t *testing.T) {

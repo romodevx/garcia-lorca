@@ -88,6 +88,9 @@ type ImportService struct {
 	tenant  string
 	newID   func() string
 	now     func() time.Time
+	// zone is the school's time zone: a matrícula is numbered under the
+	// school's calendar year (T5b). UTC until WithSchoolZone.
+	zone *time.Location
 }
 
 // NewImportService wires the import. `now` stamps the enrollments and judges
@@ -100,7 +103,15 @@ func NewImportService(
 	newID func() string,
 	now func() time.Time,
 ) *ImportService {
-	return &ImportService{repo: repo, catalog: catalog, levels: levels, tenant: tenant, newID: newID, now: now}
+	return &ImportService{repo: repo, catalog: catalog, levels: levels, tenant: tenant, newID: newID, now: now, zone: time.UTC}
+}
+
+// WithSchoolZone returns the import numbering matrículas in the school's
+// calendar year of `zone`, resolved once at boot.
+func (s *ImportService) WithSchoolZone(zone *time.Location) *ImportService {
+	cp := *s
+	cp.zone = zone
+	return &cp
 }
 
 // placement is a group resolved against config: where the pupil goes, the
@@ -377,6 +388,7 @@ func (s *ImportService) command(r ImportRow, p pendingRow, where placement, prof
 		Student:    student,
 		Enrollment: enrollment.WithOrigin(domain.EnrollmentOriginImport),
 		BatchID:    batchID,
+		NumberYear: s.now().In(s.zone).Year(),
 	}, nil
 }
 

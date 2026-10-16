@@ -3473,7 +3473,7 @@ paths:
                 paidAt:
                   type: string
                   format: date
-                  description: The day the money changed hands. Empty means today; a future date is refused.
+                  description: The day the money changed hands. Empty means today; a day after the school's today (Morelia, ADR 0035) is refused.
             examples:
               creditNoteAndTransfer:
                 summary: A credit note completed with a transfer (T8)
@@ -3562,7 +3562,8 @@ paths:
                     it was keyed — every collection rule is a function of it. A
                     date, not an instant: a time zone on a cashier's clock is a
                     bug waiting to move a payment across a due date. Empty means
-                    today; a future date is refused.
+                    today; a day after the school's today (Morelia, ADR 0035)
+                    is refused.
                 idempotencyKey: { type: string }
                 grantEarlyPayment:
                   type: boolean
@@ -3852,7 +3853,7 @@ paths:
                 paidAt:
                   type: string
                   format: date
-                  description: The corrected day. Empty keeps the original's; a future day is refused.
+                  description: The corrected day. Empty keeps the original's day; a day after the school's today (Morelia) is refused.
                   example: '2026-09-09'
                 tenders:
                   type: array
@@ -7869,6 +7870,15 @@ components:
           type: string
           description: What identifies the money itself — a folio, a transfer id, a card slip.
         paidAt: { type: string, format: date-time }
+        paidOn:
+          type: string
+          format: date
+          example: '2026-10-15'
+          description: >
+            The school-local day the money changed hands (Morelia, ADR 0035):
+            what the cash cut, the statement and the receipt's "Fecha de pago"
+            read. paidAt is the instant it was recorded; its UTC date is the
+            next day for a live payment after 18:00 local.
         calendarVersion:
           type: string
           description: >
@@ -7909,6 +7919,10 @@ components:
         folio: { type: string, example: 'P-2026-000123' }
         amountCents: { type: integer, format: int64, example: 50000 }
         paidAt: { type: string, format: date-time }
+        paidOn:
+          type: string
+          format: date
+          description: The school-local day (ADR 0035). Absent on snapshots written before it was kept.
         tenders:
           type: array
           items: { $ref: '#/components/schemas/Tender' }
@@ -8215,6 +8229,7 @@ components:
         method: { type: string, enum: [cash, card, transfer, credit_note] }
         reference: { type: string }
         paidAt: { type: string, format: date-time }
+        paidOn: { type: string, format: date, description: 'The school-local day (ADR 0035).' }
         description: { type: string, example: "Uniformes · U-2026-000001" }
         cardType:
           type: string

@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
@@ -375,6 +376,7 @@ func toDomainPayment(m paymentModel) (domain.Payment, error) {
 	if err != nil {
 		return p, err
 	}
+	p = p.WithPaidOn(m.PaidOn)
 	if m.DepositID != nil {
 		p = p.WithDepositID(*m.DepositID)
 	}
@@ -384,9 +386,19 @@ func toDomainPayment(m paymentModel) (domain.Payment, error) {
 	return p.WithCardType(m.CardType)
 }
 
+// errUndated refuses money with no school-local day. paid_on has no default
+// on purpose: guessing it from paid_at is the bug the column removes
+// (ADR 0035), so a path that forgot to date its money fails loudly here.
+func errUndated(what, id string) error {
+	return glerrors.New(glerrors.KindInternal, fmt.Sprintf("%s %s has no paid_on day", what, id))
+}
+
 // fromDomainPayment projects a domain Payment into its GORM row for insert.
-// CreatedAt is left zero (DEFAULT now()).
-func fromDomainPayment(p domain.Payment) paymentModel {
+// CreatedAt is left zero (DEFAULT now()). An undated payment is refused.
+func fromDomainPayment(p domain.Payment) (paymentModel, error) {
+	if p.PaidOn().IsZero() {
+		return paymentModel{}, errUndated("payment", p.ID())
+	}
 	return paymentModel{
 		ID:             p.ID(),
 		TenantID:       p.TenantID(),
@@ -396,9 +408,10 @@ func fromDomainPayment(p domain.Payment) paymentModel {
 		Reference:      p.Reference(),
 		IdempotencyKey: p.IdempotencyKey(),
 		PaidAt:         p.PaidAt(),
+		PaidOn:         p.PaidOn(),
 		ReceivedBy:     nullableUUID(p.ReceivedBy()),
 		CardType:       p.CardType(),
-	}
+	}, nil
 }
 
 // nullableUUID stores an empty account id as NULL, which is what the uuid
@@ -412,7 +425,12 @@ func nullableUUID(id string) *string {
 
 // --- deposits (M16) --------------------------------------------------------
 
-func fromDomainDeposit(d domain.Deposit) depositModel {
+// fromDomainDeposit projects a deposit into its row for insert. An undated
+// deposit is refused (errUndated).
+func fromDomainDeposit(d domain.Deposit) (depositModel, error) {
+	if d.PaidOn().IsZero() {
+		return depositModel{}, errUndated("deposit", d.ID())
+	}
 	m := depositModel{
 		Folio:           d.Folio(),
 		ID:              d.ID(),
@@ -422,6 +440,7 @@ func fromDomainDeposit(d domain.Deposit) depositModel {
 		Method:          d.Method(),
 		Reference:       d.Reference(),
 		PaidAt:          d.PaidAt(),
+		PaidOn:          d.PaidOn(),
 		IdempotencyKey:  d.IdempotencyKey(),
 		CalendarVersion: d.CalendarVersion(),
 		CardType:        d.CardType(),
@@ -436,7 +455,7 @@ func fromDomainDeposit(d domain.Deposit) depositModel {
 		at := d.VoidedAt()
 		m.VoidedAt = &at
 	}
-	return m
+	return m, nil
 }
 
 // fromDomainTenders is a deposit's tenders as rows, numbered in order.
@@ -479,7 +498,7 @@ func toDomainDeposit(m depositModel, tenderRows []depositTenderModel, folios map
 	if m.ReceivedBy != nil {
 		receiver.UserID = *m.ReceivedBy
 	}
-	d = d.WithReceiver(receiver).WithCapturedAt(m.CreatedAt).WithFolio(m.Folio)
+	d = d.WithReceiver(receiver).WithCapturedAt(m.CreatedAt).WithFolio(m.Folio).WithPaidOn(m.PaidOn)
 	if m.CorrectsDepositID != nil {
 		d = d.WithCorrects(*m.CorrectsDepositID, folios[*m.CorrectsDepositID])
 	}
@@ -517,12 +536,14 @@ func withStoredTenders(d domain.Deposit, cardType string, rows []depositTenderMo
 // snapshotJSON is a deposit snapshot as deposit_corrections stores it: plain
 // JSON a person reading the row with psql can follow.
 type snapshotJSON struct {
-	DepositID   string         `json:"depositId"`
-	Folio       string         `json:"folio"`
-	AmountCents int64          `json:"amountCents"`
-	PaidAt      time.Time      `json:"paidAt"`
-	Tenders     []tenderJSON   `json:"tenders"`
-	Lines       []snapLineJSON `json:"lines"`
+	DepositID   string    `json:"depositId"`
+	Folio       string    `json:"folio"`
+	AmountCents int64     `json:"amountCents"`
+	PaidAt      time.Time `json:"paidAt"`
+	// PaidOn is absent from snapshots written before migration 0028.
+	PaidOn  string         `json:"paidOn,omitempty"`
+	Tenders []tenderJSON   `json:"tenders"`
+	Lines   []snapLineJSON `json:"lines"`
 }
 
 type tenderJSON struct {
@@ -540,6 +561,9 @@ type snapLineJSON struct {
 func toSnapshotJSON(s domain.DepositSnapshot) ([]byte, error) {
 	out := snapshotJSON{DepositID: s.DepositID, Folio: s.Folio, AmountCents: s.AmountCents, PaidAt: s.PaidAt,
 		Tenders: make([]tenderJSON, 0, len(s.Tenders)), Lines: make([]snapLineJSON, 0, len(s.Lines))}
+	if !s.PaidOn.IsZero() {
+		out.PaidOn = s.PaidOn.Format(dateLayout)
+	}
 	for _, t := range s.Tenders {
 		out.Tenders = append(out.Tenders, tenderJSON(t))
 	}
@@ -559,6 +583,13 @@ func fromSnapshotJSON(raw []byte) (domain.DepositSnapshot, error) {
 		return domain.DepositSnapshot{}, glerrors.Wrap(glerrors.KindInternal, "a stored correction snapshot is unreadable", err)
 	}
 	out := domain.DepositSnapshot{DepositID: in.DepositID, Folio: in.Folio, AmountCents: in.AmountCents, PaidAt: in.PaidAt}
+	if in.PaidOn != "" {
+		day, err := time.Parse(dateLayout, in.PaidOn)
+		if err != nil {
+			return domain.DepositSnapshot{}, glerrors.Wrap(glerrors.KindInternal, "a stored correction snapshot has an unreadable day", err)
+		}
+		out.PaidOn = day
+	}
 	for _, t := range in.Tenders {
 		out.Tenders = append(out.Tenders, domain.TenderSnapshot(t))
 	}

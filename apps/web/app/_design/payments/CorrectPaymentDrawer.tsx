@@ -14,6 +14,7 @@ import {
   type DepositCorrection,
   type DepositSnapshot,
 } from "../../finance/api";
+import { depositDay } from "../../finance/depositDay";
 import { centsToPesosInput, formatCents, pesosToCents } from "../../_lib/money";
 import { localISODate } from "../../_lib/localDate";
 import { ticketPath } from "../../receipts/api";
@@ -115,10 +116,9 @@ function CorrectionForm({ data, today, onClose }: { data: Loaded; today: string;
   const { deposit } = data;
   const title = `Corregir pago ${deposit.folio ?? ""}`.trim();
   const [amount, setAmount] = useState(centsToPesosInput(deposit.amountCents));
-  // The recorded day as stored (the school's day is the UTC day). Untouched, it
-  // is not sent: the server keeps the original's instant, and a payment taken
-  // late in the evening is not refused as "future" by the office's clock.
-  const recordedDay = deposit.paidAt.slice(0, 10);
+  // The recorded day: the deposit's school-local day (ADR 0035). Untouched, it
+  // is not sent: the server keeps the original's day and instant.
+  const recordedDay = depositDay(deposit);
   const [paidAt, setPaidAt] = useState(recordedDay);
   const [chosen, setChosen] = useState<readonly string[]>(data.paid);
   const [reason, setReason] = useState("");
@@ -325,7 +325,7 @@ function History({ history, charges }: { history: DepositCorrection[]; charges: 
 /** "P-2026-000001 · $500.00 · 9 sep 2026 · Efectivo · Colegiatura septiembre". */
 function snapshotText(s: DepositSnapshot, names: Map<string, string>): string {
   const concepts = s.lines.map((l) => l.description ?? names.get(l.chargeId) ?? "").filter((d) => d !== "").join(", ");
-  return [s.folio, formatCents(s.amountCents), s.paidAt === undefined ? "" : formatDay(s.paidAt), tenderSummary(s.tenders), concepts]
+  return [s.folio, formatCents(s.amountCents), formatDay(depositDay(s)), tenderSummary(s.tenders), concepts]
     .filter((p) => p !== "")
     .join(" · ");
 }

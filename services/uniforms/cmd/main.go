@@ -15,11 +15,13 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	stdlog "log"
 	"log/slog"
 	"net/http"
 	"os"
 	"time"
+	_ "time/tzdata" // the school's zone must load in a distroless image
 
 	connect "connectrpc.com/connect"
 	"github.com/google/uuid"
@@ -49,6 +51,9 @@ const (
 	// http://students:8080 / http://finance:8080.
 	defaultStudentsBaseURL = "http://localhost:8092"
 	defaultFinanceBaseURL  = "http://localhost:8093"
+	// defaultSchoolTimezone is the school's calendar (SCHOOL_TIMEZONE), as in
+	// finance: a sale's folio numbers under the school's year.
+	defaultSchoolTimezone = "America/Mexico_City"
 
 	readHeaderTimeout = 10 * time.Second
 	readTimeout       = 30 * time.Second
@@ -98,6 +103,10 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, error) {
 	// request cannot talk its way into another's data by claiming one (ADR 0001).
 	tenantID := envOr("UNIFORMS_TENANT_ID", defaultTenant)
 
+	zone, err := schoolLocation()
+	if err != nil {
+		return nil, err
+	}
 	db, err := openDB()
 	if err != nil {
 		return nil, err
@@ -116,7 +125,7 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, error) {
 	// is over before anyone could react to it, so nothing here publishes yet, and
 	// a nil seam is honest about that.
 	shop := usecase.NewService(repo, students, finance, nil, tenantID,
-		func() string { return uuid.NewString() }, now)
+		func() string { return uuid.NewString() }, now, zone)
 	// The level-deletion trash (ADR 0021): the gateway's saga archives and
 	// restores through it, and the gateway's hourly sweep (always warm, unlike
 	// this scale-to-zero service) purges each batch past config's
@@ -160,6 +169,18 @@ func openDB() (*gorm.DB, error) {
 // carrying is not the caller's business.
 func recoverFn(_ context.Context, _ connect.Spec, _ http.Header, _ any) error {
 	return connect.NewError(connect.CodeInternal, errors.New("internal error"))
+}
+
+// schoolLocation is the school's time zone (SCHOOL_TIMEZONE, default
+// America/Mexico_City). An unknown zone fails startup: falling back to UTC
+// would number a sale at 19:00 on 31 December under next year's folios.
+func schoolLocation() (*time.Location, error) {
+	name := envOr("SCHOOL_TIMEZONE", defaultSchoolTimezone)
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		return nil, fmt.Errorf("SCHOOL_TIMEZONE %q: %w", name, err)
+	}
+	return loc, nil
 }
 
 func envOr(key, fallback string) string {

@@ -41,17 +41,17 @@ type ScholarshipService struct {
 	students   ports.StudentReader
 	tenantID   string
 	newID      func() string
-	now        func() time.Time
+	clock      SchoolClock
 }
 
 // NewScholarshipService wires the use case. concepts and activities are read
 // to offer, and check, what a scholarship can apply to.
 func NewScholarshipService(repo ports.ScholarshipRepository, ledger ScholarshipLedger, concepts ConceptLister,
-	activities ActivityLister, students ports.StudentReader, tenantID string, newID func() string, now func() time.Time,
+	activities ActivityLister, students ports.StudentReader, tenantID string, newID func() string, clock SchoolClock,
 ) *ScholarshipService {
 	return &ScholarshipService{
 		repo: repo, ledger: ledger, concepts: concepts, activities: activities, students: students,
-		tenantID: tenantID, newID: newID, now: now,
+		tenantID: tenantID, newID: newID, clock: clock,
 	}
 }
 
@@ -276,7 +276,7 @@ func (s *ScholarshipService) Assign(ctx context.Context, id string, studentIDs [
 	if !sch.Active() {
 		return nil, glerrors.New(glerrors.KindConflict, "la beca está inactiva")
 	}
-	today := dayOf(s.now())
+	today := s.clock.Today()
 	wanted := make([]domain.ScholarshipHolding, 0, len(studentIDs))
 	for _, student := range studentIDs {
 		if _, err := s.students.ByID(ctx, student); err != nil {
@@ -311,7 +311,7 @@ func (s *ScholarshipService) Unassign(ctx context.Context, id string, studentIDs
 	if err := s.ledger.FreezeSettledScholarships(ctx, studentIDs); err != nil {
 		return 0, err
 	}
-	return s.repo.Unassign(ctx, id, studentIDs, dayOf(s.now()))
+	return s.repo.Unassign(ctx, id, studentIDs, s.clock.Today())
 }
 
 // withOverlaps pairs each holding with the pupil's other scholarships that

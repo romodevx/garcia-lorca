@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { downloadCsv, toCsv } from "./csv";
+import { csvName, downloadCsv, toCsv } from "./csv";
 
 describe("toCsv", () => {
   it("writes the header from the column labels, in order", () => {
@@ -76,5 +76,20 @@ describe("downloadCsv", () => {
     expect(click).toHaveBeenCalledTimes(1);
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+  });
+});
+
+describe("csvName", () => {
+  // T5b: the date in the name is the school's day. At 19:00 in Morelia it is
+  // already tomorrow in UTC, and an export taken that evening was named with
+  // tomorrow's date.
+  it("dates the file on Morelia's day, not UTC's", () => {
+    const evening15 = new Date("2026-10-16T01:00:00Z"); // 19:00 on the 15th in Morelia
+    expect(csvName("alumnos", evening15)).toBe("alumnos-2026-10-15.csv");
+  });
+
+  it("turns at Morelia's midnight", () => {
+    const midnight16 = new Date("2026-10-16T06:00:00Z"); // 00:00 on the 16th in Morelia
+    expect(csvName("alumnos", midnight16)).toBe("alumnos-2026-10-16.csv");
   });
 });

@@ -17,21 +17,24 @@ const tenant = "t1"
 // --- fakes -----------------------------------------------------------------
 
 type fakeRepo struct {
-	medical   map[string]domain.MedicalRecord
-	photos    map[string]ports.PhotoRef
-	byID      map[string]*domain.Student
-	curps     map[string]bool // tenant+curp seen (for dup detection)
-	created   []*domain.Student
-	updated   []*domain.Student
-	createErr error
-	updateErr error
+	medical map[string]domain.MedicalRecord
+	photos  map[string]ports.PhotoRef
+	byID    map[string]*domain.Student
+	curps   map[string]bool // tenant+curp seen (for dup detection)
+	created []*domain.Student
+	updated []*domain.Student
+	// numberYears is the matrícula year each Create was handed.
+	numberYears []int
+	createErr   error
+	updateErr   error
 }
 
 func newRepo() *fakeRepo {
 	return &fakeRepo{byID: map[string]*domain.Student{}, curps: map[string]bool{}, medical: map[string]domain.MedicalRecord{}, photos: map[string]ports.PhotoRef{}}
 }
 
-func (r *fakeRepo) Create(_ context.Context, s *domain.Student) error {
+func (r *fakeRepo) Create(_ context.Context, s *domain.Student, numberYear int) error {
+	r.numberYears = append(r.numberYears, numberYear)
 	if r.createErr != nil {
 		return r.createErr
 	}

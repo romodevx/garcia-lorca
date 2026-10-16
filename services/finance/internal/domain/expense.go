@@ -170,8 +170,9 @@ func validateExpenseMethod(method string) error {
 	}
 }
 
-// CalendarDay is t's calendar day at midnight UTC: the one notion of "day"
-// finance has (see school-day-is-utc-day).
+// CalendarDay is t's calendar day at midnight UTC: the day a STORED date stands
+// for (a spent_on, a counter-dated paid_at, a parsed YYYY-MM-DD). It is not how
+// "today" is found — that is SchoolDate through the service's clock (ADR 0035).
 func CalendarDay(t time.Time) time.Time {
 	u := t.UTC()
 	return time.Date(u.Year(), u.Month(), u.Day(), 0, 0, 0, 0, time.UTC)

@@ -25,13 +25,17 @@ import (
 // holding the pre-void deposit keeps holding exactly what was true when it read
 // it.
 type Deposit struct {
-	id              string
-	tenantID        string
-	studentID       string
-	amount          Cents
-	method          string
-	reference       string
-	paidAt          time.Time
+	id        string
+	tenantID  string
+	studentID string
+	amount    Cents
+	method    string
+	reference string
+	paidAt    time.Time
+	// paidOn is the school-local civil date the money is judged on (ADR 0035):
+	// the day picked at the counter, or the school's today for a live payment.
+	// paidAt stays the audit instant; it is never turned back into a day.
+	paidOn          time.Time
 	idempotencyKey  string
 	calendarVersion string
 	voidedAt        time.Time
@@ -251,6 +255,17 @@ func (d Deposit) Reference() string { return d.reference }
 
 // PaidAt is when the money changed hands, which is not always when it was keyed.
 func (d Deposit) PaidAt() time.Time { return d.paidAt }
+
+// WithPaidOn returns the deposit judged on that school-local day, stored as
+// midnight UTC like every finance date.
+func (d Deposit) WithPaidOn(day time.Time) Deposit {
+	d.paidOn = CalendarDay(day)
+	return d
+}
+
+// PaidOn is the school-local day the money changed hands: what paid_by_due,
+// the cash cut, the statement and the receipt read. Zero until it is dated.
+func (d Deposit) PaidOn() time.Time { return d.paidOn }
 
 // IdempotencyKey is the caller's handle on the attempt.
 func (d Deposit) IdempotencyKey() string { return d.idempotencyKey }

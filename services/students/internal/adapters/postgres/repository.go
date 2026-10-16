@@ -49,11 +49,12 @@ func (r *Repository) withTenant(ctx context.Context, fn func(tx *gorm.DB) error)
 	})
 }
 
-// Create inserts a new applicant. A duplicate CURP (per tenant) is KindConflict.
-func (r *Repository) Create(ctx context.Context, s *domain.Student) error {
+// Create inserts a new applicant, numbering its matrícula in numberYear. A
+// duplicate CURP (per tenant) is KindConflict.
+func (r *Repository) Create(ctx context.Context, s *domain.Student, numberYear int) error {
 	model := fromDomain(s)
 	return r.withTenant(ctx, func(tx *gorm.DB) error {
-		number, err := r.nextEnrollmentNumber(tx)
+		number, err := r.nextEnrollmentNumber(tx, numberYear)
 		if err != nil {
 			return err
 		}
@@ -69,20 +70,22 @@ func (r *Repository) Create(ctx context.Context, s *domain.Student) error {
 // maxEnrollmentSeq is the last number a matrícula's five digits can carry.
 const maxEnrollmentSeq = 99999
 
-// nextEnrollmentNumber allocates the school's next matrícula for the year of
-// this transaction (task 13, migration 0013), under the counter row's own lock.
+// nextEnrollmentNumber allocates the school's next matrícula for `year` (task
+// 13, migration 0013), under the counter row's own lock. The year is the
+// school's calendar year, handed in by the use case: the database's UTC year is
+// already next year at 19:00 on 31 December in Morelia (T5b).
 // Per school: a SEQUENCE is per database and ignores RLS, so two schools would
 // share one run and read each other's size in the gaps.
-func (r *Repository) nextEnrollmentNumber(tx *gorm.DB) (string, error) {
+func (r *Repository) nextEnrollmentNumber(tx *gorm.DB, year int) (string, error) {
 	var got struct {
 		Year int
 		Seq  int
 	}
 	err := tx.Raw(`INSERT INTO student_number_counters (tenant_id, year, next_seq)
-	               VALUES (?, EXTRACT(YEAR FROM now() AT TIME ZONE 'UTC')::int, 2)
+	               VALUES (?, ?, 2)
 	               ON CONFLICT (tenant_id, year)
 	               DO UPDATE SET next_seq = student_number_counters.next_seq + 1
-	               RETURNING year, next_seq - 1 AS seq`, r.tenantID).Scan(&got).Error
+	               RETURNING year, next_seq - 1 AS seq`, r.tenantID, year).Scan(&got).Error
 	if err != nil {
 		return "", glerrors.Wrap(glerrors.KindInternal, "allocating a matrícula", err)
 	}

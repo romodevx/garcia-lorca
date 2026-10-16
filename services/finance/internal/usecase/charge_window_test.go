@@ -191,7 +191,9 @@ func TestTheFamilyDoesNotSeeAChargeBeforeItOpens(t *testing.T) {
 			early.TotalBalanceCents, staff.TotalBalanceCents)
 	}
 
-	f.clock = ymdUTC(2026, time.June, 1)
+	// 06:00 on 1 June in Morelia. Midnight UTC is still 18:00 on 31 May there,
+	// and the window opens on the school's day (ADR 0035).
+	f.clock = time.Date(2026, time.June, 1, 12, 0, 0, 0, time.UTC)
 	opened, err := f.svc.GetFamilyAccount(context.Background(), testStudent)
 	requireNoError(t, err)
 	if !hasCharge(opened, inscription) {

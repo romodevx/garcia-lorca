@@ -28,14 +28,14 @@ type ActivityService struct {
 	students ports.StudentReader
 	biller   ActivityBiller
 	newID    func() string
-	now      func() time.Time
+	clock    SchoolClock
 }
 
 // NewActivityService wires the use case.
 func NewActivityService(repo ports.ActivityRepository, students ports.StudentReader, biller ActivityBiller,
-	newID func() string, now func() time.Time,
+	newID func() string, clock SchoolClock,
 ) *ActivityService {
-	return &ActivityService{repo: repo, students: students, biller: biller, newID: newID, now: now}
+	return &ActivityService{repo: repo, students: students, biller: biller, newID: newID, clock: clock}
 }
 
 // ActivityInput is what the office types about an activity. An option with an
@@ -70,9 +70,9 @@ type EnrollResult struct {
 	ChargesCreated int
 }
 
-// today is the school's day as this service counts it (school-day-is-utc-day).
+// today is the school's day in Morelia (ADR 0035).
 func (s *ActivityService) today() time.Time {
-	return dayOf(s.now())
+	return s.clock.Today()
 }
 
 // CreateActivity adds an activity. A name already used — ignoring case AND
@@ -125,7 +125,7 @@ func (s *ActivityService) UpdateActivity(ctx context.Context, id string, in Acti
 	if err := s.refuseNewCalendar(ctx, current, a); err != nil {
 		return domain.Activity{}, err
 	}
-	return s.repo.UpdateActivity(ctx, a)
+	return s.repo.UpdateActivity(ctx, a, s.clock.Today())
 }
 
 // resumedOn is today when this edit switches the activity back on, so the

@@ -78,9 +78,9 @@ func seedFinanceLevel(t *testing.T) {
 			[]any{flCharge, tenantH, flStudent, flCycle, flConcept,
 				flCharge2, tenantH, flStudent, flCycle2, flConcept,
 				byChargeID, tenantH, byStudent, flCycle, flConcept}},
-		{`INSERT INTO deposits (id, tenant_id, student_id, amount_cents, method, folio) VALUES (?, ?, ?, 100000, 'cash', 'P-2026-000001')`,
+		{`INSERT INTO deposits (id, tenant_id, student_id, amount_cents, method, folio, paid_on) VALUES (?, ?, ?, 100000, 'cash', 'P-2026-000001', CURRENT_DATE)`,
 			[]any{flDeposit, tenantH, flStudent}},
-		{`INSERT INTO payments (tenant_id, charge_id, amount_cents, method, deposit_id) VALUES (?, ?, 100000, 'cash', ?)`,
+		{`INSERT INTO payments (tenant_id, charge_id, amount_cents, method, deposit_id, paid_on) VALUES (?, ?, 100000, 'cash', ?, CURRENT_DATE)`,
 			[]any{tenantH, flCharge, flDeposit}},
 	} {
 		require.NoError(t, superDB.Exec(stmt.sql, stmt.args...).Error, stmt.sql)

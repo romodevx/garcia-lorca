@@ -29,15 +29,15 @@ type ExpenseService struct {
 	takings  DayTakings
 	receipts ports.ReceiptStore
 	newID    func() string
-	now      func() time.Time
+	clock    SchoolClock
 }
 
 // NewExpenseService wires the use case. receipts may be nil: a deployment with
 // no bucket records expenses without files, and receipt calls say so.
 func NewExpenseService(repo ports.ExpenseRepository, takings DayTakings, receipts ports.ReceiptStore,
-	newID func() string, now func() time.Time,
+	newID func() string, clock SchoolClock,
 ) *ExpenseService {
-	return &ExpenseService{repo: repo, takings: takings, receipts: receipts, newID: newID, now: now}
+	return &ExpenseService{repo: repo, takings: takings, receipts: receipts, newID: newID, clock: clock}
 }
 
 // --- categories ------------------------------------------------------------
@@ -78,8 +78,8 @@ func (s *ExpenseService) CreateExpense(ctx context.Context, d domain.ExpenseDraf
 	if err := s.requireActiveCategory(ctx, d.CategoryID); err != nil {
 		return domain.Expense{}, err
 	}
-	at := s.now()
-	e, err := domain.NewExpense(s.newID(), d, at, by)
+	at := s.clock.Now()
+	e, err := domain.NewExpense(s.newID(), d, s.clock.Today(), by)
 	if err != nil {
 		return domain.Expense{}, err
 	}
@@ -122,7 +122,7 @@ func (s *ExpenseService) UpdateExpense(ctx context.Context, id string, d domain.
 			return domain.Expense{}, err
 		}
 	}
-	at := s.now()
+	at, today := s.clock.Now(), s.clock.Today()
 	return s.repo.UpdateExpense(ctx, id, func(cur domain.Expense) (domain.Expense, domain.ExpenseEvent, error) {
 		// The category check above was made against the expense as read
 		// before its lock. If somebody re-filed it in between, that check no
@@ -130,7 +130,7 @@ func (s *ExpenseService) UpdateExpense(ctx context.Context, id string, d domain.
 		if cur.CategoryID() != current.CategoryID() {
 			return domain.Expense{}, domain.ExpenseEvent{}, errExpenseChanged
 		}
-		next, err := cur.Edit(d, at)
+		next, err := cur.Edit(d, today)
 		if err != nil {
 			return domain.Expense{}, domain.ExpenseEvent{}, err
 		}
@@ -141,7 +141,7 @@ func (s *ExpenseService) UpdateExpense(ctx context.Context, id string, d domain.
 // CancelExpense cancels an expense with its reason (required). It stays,
 // counting for nothing.
 func (s *ExpenseService) CancelExpense(ctx context.Context, id, reason string, by domain.Receiver) (domain.Expense, error) {
-	at := s.now()
+	at := s.clock.Now()
 	return s.repo.UpdateExpense(ctx, id, func(cur domain.Expense) (domain.Expense, domain.ExpenseEvent, error) {
 		next, err := cur.Cancel(reason, at)
 		if err != nil {
@@ -242,7 +242,7 @@ func (s *ExpenseService) AttachReceipt(ctx context.Context, id string, data []by
 		return domain.Expense{}, err
 	}
 	var previous domain.ExpenseReceiptRef
-	at := s.now()
+	at := s.clock.Now()
 	saved, err := s.repo.UpdateExpense(ctx, id, func(cur domain.Expense) (domain.Expense, domain.ExpenseEvent, error) {
 		next, err := cur.WithReceipt(ref)
 		if err != nil {
@@ -289,7 +289,7 @@ func (s *ExpenseService) RemoveReceipt(ctx context.Context, id string, by domain
 		return domain.Expense{}, errReceiptsUnavailable
 	}
 	var removed domain.ExpenseReceiptRef
-	at := s.now()
+	at := s.clock.Now()
 	saved, err := s.repo.UpdateExpense(ctx, id, func(cur domain.Expense) (domain.Expense, domain.ExpenseEvent, error) {
 		ref, has := cur.Receipt()
 		if !has {
@@ -373,7 +373,7 @@ func (c CashCut) Figures() domain.CutFigures {
 // CashCut reads a day's cut. A zero day is today.
 func (s *ExpenseService) CashCut(ctx context.Context, day time.Time) (CashCut, error) {
 	if day.IsZero() {
-		day = s.now()
+		day = s.clock.Today()
 	}
 	day = domain.CalendarDay(day)
 	takings, err := s.takings.DailyCashUp(ctx, day)
@@ -426,11 +426,11 @@ func (s *ExpenseService) attachClosures(ctx context.Context, cut *CashCut, day t
 // CloseCashCut closes a day with the cash counted in the drawer, storing the
 // cut's figures as they stand. A day already closed is KindConflict.
 func (s *ExpenseService) CloseCashCut(ctx context.Context, day time.Time, countedCashCents int64, note string, by domain.Receiver) (domain.CashCutClosure, error) {
-	now := s.now()
+	now := s.clock.Now()
 	if day.IsZero() {
-		day = now
+		day = s.clock.Today()
 	}
-	if domain.CalendarDay(day).After(domain.CalendarDay(now)) {
+	if domain.CalendarDay(day).After(s.clock.Today()) {
 		return domain.CashCutClosure{}, glerrors.New(glerrors.KindInvalid, "no se puede cerrar un día futuro")
 	}
 	cut, err := s.CashCut(ctx, day)
@@ -454,7 +454,7 @@ func (s *ExpenseService) CloseCashCut(ctx context.Context, day time.Time, counte
 // day is not closed.
 func (s *ExpenseService) ReopenCashCut(ctx context.Context, day time.Time, reason string, by domain.Receiver) (domain.CashCutClosure, error) {
 	if day.IsZero() {
-		day = s.now()
+		day = s.clock.Today()
 	}
 	closures, err := s.repo.ListCashCutClosures(ctx, domain.CalendarDay(day))
 	if err != nil {
@@ -464,7 +464,7 @@ func (s *ExpenseService) ReopenCashCut(ctx context.Context, day time.Time, reaso
 		if c.Reopened() {
 			continue
 		}
-		reopened, err := c.Reopen(reason, by, s.now())
+		reopened, err := c.Reopen(reason, by, s.clock.Now())
 		if err != nil {
 			return domain.CashCutClosure{}, err
 		}

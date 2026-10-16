@@ -19,6 +19,9 @@ type ImportCommand struct {
 	Student    *domain.Student
 	Enrollment domain.Enrollment
 	BatchID    string
+	// NumberYear is the year the matrícula is numbered in: the school's
+	// calendar year of the import, not the database's UTC year.
+	NumberYear int
 }
 
 // ImportedPupil is what storing one imported pupil did.

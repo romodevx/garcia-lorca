@@ -342,6 +342,10 @@ message Payment {
   // The deposit this payment is a slice of (T9: what a correction preselects);
   // empty for a payment made straight against its charge.
   string deposit_id = 9;
+  // paid_on is the school-local day the payment is judged on, "YYYY-MM-DD"
+  // (ADR 0035). paid_at is the instant it was recorded; its UTC date is NOT
+  // the day for a live payment after 18:00 in Morelia.
+  string paid_on = 10;
 }
 
 // --- Concept RPC messages -------------------------------------------------
@@ -960,6 +964,10 @@ message Deposit {
   // On a correction: the deposit (and folio) it corrects.
   string corrects_deposit_id = 19;
   string corrects_folio = 20;
+  // paid_on is the school-local day the money changed hands, "YYYY-MM-DD"
+  // (ADR 0035): what the cash cut, the statement and the receipt's "Fecha de
+  // pago" read. paid_at is the audit instant.
+  string paid_on = 21;
 }
 
 message RegisterDepositRequest {
@@ -1264,6 +1272,9 @@ message DepositSnapshot {
   google.protobuf.Timestamp paid_at = 4;
   repeated Tender tenders = 5;
   repeated SnapshotLine lines = 6;
+  // The school-local day, "YYYY-MM-DD" (ADR 0035). Empty on snapshots
+  // written before it was kept: read paid_at's date then.
+  string paid_on = 7;
 }
 
 // SnapshotLine is what a deposit put on one charge.

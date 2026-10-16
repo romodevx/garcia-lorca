@@ -1,11 +1,12 @@
+import { schoolISODate } from "./schoolDay";
+
 /**
- * The local calendar day as aaaa-mm-dd — the office's day, not UTC's. At 19:00
- * in Mexico City UTC is already tomorrow, and what is typed then belongs to
- * today (see the "school day is UTC day" note on finance).
+ * The office's calendar day as aaaa-mm-dd — the school's day (Morelia), not
+ * UTC's nor the device's. At 19:00 in Mexico City UTC is already tomorrow, and
+ * what is typed then belongs to today (ADR 0035). One rule: schoolISODate.
  */
 export function localISODate(at: Date = new Date()): string {
-  const pad = (n: number): string => String(n).padStart(2, "0");
-  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`;
+  return schoolISODate(at);
 }
 
 function calendarDay(isoDate: string): Date {

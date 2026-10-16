@@ -32,12 +32,15 @@ type SnapshotLine struct {
 
 // DepositSnapshot is a deposit as it stood on one side of a correction.
 type DepositSnapshot struct {
-	DepositID   string         `json:"depositId"`
-	Folio       string         `json:"folio"`
-	AmountCents int64          `json:"amountCents"`
-	PaidAt      string         `json:"paidAt,omitempty"`
-	Tenders     []Tender       `json:"tenders"`
-	Lines       []SnapshotLine `json:"lines"`
+	DepositID   string `json:"depositId"`
+	Folio       string `json:"folio"`
+	AmountCents int64  `json:"amountCents"`
+	PaidAt      string `json:"paidAt,omitempty"`
+	// PaidOn is the school-local day (ADR 0035); empty on snapshots written
+	// before it was kept.
+	PaidOn  string         `json:"paidOn,omitempty"`
+	Tenders []Tender       `json:"tenders"`
+	Lines   []SnapshotLine `json:"lines"`
 }
 
 // DepositCorrection is one correction: before, after, who, when and why.
@@ -124,7 +127,7 @@ func toCorrection(c *financev1.DepositCorrection) DepositCorrection {
 
 func toSnapshot(s *financev1.DepositSnapshot) DepositSnapshot {
 	out := DepositSnapshot{
-		DepositID: s.GetDepositId(), Folio: s.GetFolio(), AmountCents: s.GetAmountCents(),
+		DepositID: s.GetDepositId(), Folio: s.GetFolio(), AmountCents: s.GetAmountCents(), PaidOn: s.GetPaidOn(),
 		Tenders: fromProtoTenders(s.GetTenders()), Lines: make([]SnapshotLine, 0, len(s.GetLines())),
 	}
 	if ts := s.GetPaidAt(); ts != nil {

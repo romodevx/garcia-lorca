@@ -167,4 +167,12 @@ describe("CorrectPaymentDrawer (T9)", () => {
 
     await waitFor(() => expect(api.correctDeposit).toHaveBeenCalledTimes(1));
   });
+
+  // ADR 0035: the recorded day is the deposit's school-local day (paidOn), not
+  // the UTC date of its instant — 19:30 on 1 Oct in Morelia is 2 Oct UTC.
+  it("opens on the deposit's own day", async () => {
+    api.listDeposits.mockResolvedValue([{ ...deposit, paidAt: "2026-10-02T01:30:00Z", paidOn: "2026-10-01" }]);
+    const dialog = await open();
+    expect(within(dialog).getByLabelText(/Fecha de pago/)).toHaveValue("2026-10-01");
+  });
 });
