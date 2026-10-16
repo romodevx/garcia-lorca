@@ -536,7 +536,11 @@ message GetAccountRequest {
 }
 
 // GetAccountResponse is the student's account statement.
-// total_balance_cents is the sum of remaining_cents across non-cancelled charges.
+// total_balance_cents is THE balance (T5): the statement's balance to the cent —
+// opened, non-cancelled charges at the counter's price (ladder, scholarship),
+// plus the surcharge accrued to today, less discounts and every payment.
+// Negative is the family's credit. Charges not yet open are listed to the office
+// but are in nobody's balance, so office and family views read one number.
 message GetAccountResponse {
   repeated Charge charges = 1;
   repeated Payment payments = 2;
@@ -548,9 +552,9 @@ message GetAccountResponse {
   // have come due, already carrying the surcharge the daily rule has earned and
   // net of the early-payment reward.
   //
-  // total_balance_cents above is the plain arithmetic of charge minus paid, and
-  // stays that way — it is what the year still owes. This is what the family
-  // must hand over now, and it is the number the school quotes at the counter.
+  // total_balance_cents above is what the year still owes (the statement's
+  // balance). This is the part of it the family must hand over now, and it is
+  // the number the school quotes at the counter.
   // Before this field the parents' app showed the first and the window showed
   // the second, and the two disagreed by design.
   int64 due_today_cents = 5;
@@ -1122,7 +1126,8 @@ message ExpectedTodayResponse {
   int64 surcharge_cents = 2;
   int64 discount_cents = 3;
   // The whole year still owed, shown beside it so nobody confuses "what is due
-  // today" with "what is left".
+  // today" with "what is left". THE balance (T5): equal to GetAccount's
+  // total_balance_cents and the statement's balance, always as of today.
   int64 annual_balance_cents = 4;
   // The same, concept by concept, oldest due date first (task 8). The lines
   // marked due add up to amount_cents.

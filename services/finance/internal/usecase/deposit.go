@@ -308,8 +308,14 @@ type Expected struct {
 	// ScholarshipCents is what scholarships take off the lines asked for
 	// (T18); already out of AmountCents.
 	ScholarshipCents int64
-	// AnnualBalanceCents is the whole year still owed. Shown beside the expected
-	// figure so nobody confuses "what is due today" with "what is left".
+	// AnnualBalanceCents is the whole year still owed — THE balance (T5 ·
+	// ISSUE-006), the account's TotalBalanceCents and the statement's
+	// Totals.BalanceCents, always as of today (whatever day is quoted):
+	// accrued surcharge in, credit netted, charges not yet open out, and no
+	// early-payment reward (a projection, not a debt). Shown beside the
+	// expected figure so nobody confuses "what is due today" with "what is
+	// left". Set by ExpectedToday; expectedFrom leaves it zero, having no
+	// deposits to net.
 	AnnualBalanceCents int64
 	// Lines are the same figures concept by concept (task 8), oldest due date
 	// first: the counter lists them so the cashier can choose what the money
@@ -375,7 +381,29 @@ func (s *FinanceService) ExpectedToday(ctx context.Context, studentID string, on
 	if err != nil {
 		return Expected{}, err
 	}
-	return expectedFrom(charges, plan, calendar, lateFee.ID(), tuition.ID(), enrolment.ID(), when, s.now(), true, pricer)
+	expected, err := expectedFrom(charges, plan, calendar, lateFee.ID(), tuition.ID(), enrolment.ID(), when, s.now(), true, pricer)
+	if err != nil {
+		return Expected{}, err
+	}
+	payments, err := s.repo.ListPayments(ctx, studentID)
+	if err != nil {
+		return Expected{}, err
+	}
+	deposits, err := s.repo.ListDeposits(ctx, studentID)
+	if err != nil {
+		return Expected{}, err
+	}
+	terms := collectionTerms{plan: plan, calendar: calendar, lateFeeID: lateFee.ID(), tuitionID: tuition.ID(),
+		enrolmentID: enrolment.ID(), scholarships: pricer}
+	// The statement's balance TODAY, never a second sum and never another day's:
+	// a quote for a back-dated payment still shows the balance every other
+	// surface shows (and the ladder is not walked down through a past date).
+	_, totals, err := ledger(charges, payments, deposits, terms, s.now(), false)
+	if err != nil {
+		return Expected{}, err
+	}
+	expected.AnnualBalanceCents = totals.BalanceCents
+	return expected, nil
 }
 
 // expectedFrom is the arithmetic of "what is due today", with NO I/O.
@@ -467,7 +495,6 @@ func expectedFrom(
 		if parent, ok := feeParent(c.Charge.ExternalRef()); isFee && ok && cancelled[parent] {
 			continue
 		}
-		out.AnnualBalanceCents += owed(c)
 		// A written-down surcharge rides on its month's line. One with no month
 		// — a surcharge the office typed by hand — is a debt of its own: its
 		// own line, chosen and paid like any other (partition makes it one).

@@ -43,10 +43,9 @@ func (s *FinanceService) GetFamilyStatement(ctx context.Context, studentID strin
 
 func (s *FinanceService) statement(ctx context.Context, studentID string, family bool) (Statement, error) {
 	now := s.now()
-	inPlay := inPlayOn(now)
 	shown := func(ports.ChargeWithPaid) bool { return true }
 	if family {
-		shown = inPlay
+		shown = inPlayOn(now)
 	}
 	// One instant for the whole read: the accrued line, the ladder price and
 	// the counter's figures are all worked out for the same day.
@@ -54,26 +53,19 @@ func (s *FinanceService) statement(ctx context.Context, studentID string, family
 	if err != nil {
 		return Statement{}, err
 	}
-	deposits, err := s.repo.ListDeposits(ctx, studentID)
-	if err != nil {
-		return Statement{}, err
-	}
 
 	// The ledger prices each charge itself (ladder, then scholarship), from
-	// the charges as stored.
+	// the charges as stored. Names only label lines: the balance is the
+	// account's, worked out by the same ledger.
 	if err := s.learnNames(ctx, terms.scholarships, account.raw); err != nil {
 		return Statement{}, err
 	}
-	movements, err := chargeMovements(account.raw, terms, inPlay, now, family)
+	movements, totals, err := ledger(account.raw, account.Payments, account.deposits, terms, now, family)
 	if err != nil {
 		return Statement{}, err
 	}
-	movements = append(movements, depositMovements(deposits, family)...)
-	movements = append(movements, loosePaymentMovements(account.Payments, account.Charges)...)
-
-	ledger, totals := domain.BuildStatement(movements)
 	return Statement{
-		Movements:          ledger,
+		Movements:          movements,
 		Totals:             totals,
 		DueTodayCents:      account.DueTodayCents,
 		SurchargeCents:     account.SurchargeCents,
@@ -81,6 +73,29 @@ func (s *FinanceService) statement(ctx context.Context, studentID string, family
 		UnallocatedCents:   account.UnallocatedCents,
 		AsOf:               account.AsOf,
 	}, nil
+}
+
+// ledger is THE balance (T5 · ISSUE-006): the statement's lines and totals,
+// worked out on `now`. The account (office and family), the statement and the
+// counter's "del año debe" all read totals.BalanceCents from here, so the five
+// surfaces cannot disagree.
+//
+// charges are as stored (the ledger prices each one); payments are the
+// student's, of which only those outside a deposit become lines of their own.
+// `family` changes labels and which voided deposits are shown — never the
+// balance: a line not counted for one reader is not counted for the other.
+func ledger(
+	charges []ports.ChargeWithPaid, payments []domain.Payment, deposits []domain.Deposit,
+	terms collectionTerms, now time.Time, family bool,
+) ([]domain.Movement, domain.StatementTotals, error) {
+	movements, err := chargeMovements(charges, terms, inPlayOn(now), now, family)
+	if err != nil {
+		return nil, domain.StatementTotals{}, err
+	}
+	movements = append(movements, depositMovements(deposits, family)...)
+	movements = append(movements, loosePaymentMovements(payments, charges)...)
+	lines, totals := domain.BuildStatement(movements)
+	return lines, totals, nil
 }
 
 // chargeMovements turns the charges into ledger lines: the charge (or written

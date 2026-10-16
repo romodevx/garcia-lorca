@@ -92,7 +92,8 @@ type Payment struct {
 }
 
 // AccountStatement is a student's full financial picture: every charge, every
-// payment, and the outstanding balance across non-cancelled charges.
+// payment, and the balance (the statement's, T5: accrued surcharge in, credit
+// netted, charges not yet open out).
 type AccountStatement struct {
 	Charges           []Charge
 	Payments          []Payment
@@ -102,8 +103,7 @@ type AccountStatement struct {
 	UnallocatedCents int64
 	// DueTodayCents is what is being asked for NOW, already carrying the accrued
 	// surcharge and net of the early-payment reward. TotalBalanceCents above is
-	// what the YEAR still owes; before this field the parents' app showed that
-	// one and the counter showed this one.
+	// what the YEAR still owes — the statement's balance (T5), credit netted.
 	DueTodayCents int64
 	// The parts of it, so the statement can explain its own number.
 	SurchargeCents     int64

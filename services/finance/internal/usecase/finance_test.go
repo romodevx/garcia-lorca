@@ -745,7 +745,11 @@ func TestGetAccount(t *testing.T) {
 	}
 }
 
-func TestGetAccountOverpaidChargeNeverGoesNegative(t *testing.T) {
+// T5 (ISSUE-006): the account reads the statement's balance, and the statement
+// counts every peso received. A charge discounted after it was paid leaves the
+// school holding the difference: the family's credit, a negative balance — not
+// a zero that hides it.
+func TestGetAccountOverCollectedChargeIsTheFamilysCredit(t *testing.T) {
 	f := newFixture(t)
 	concept := f.seedConcept(t, "Colegiatura", 250000)
 	charge := f.seedCharge(t, concept.ID(), 100000)
@@ -761,8 +765,11 @@ func TestGetAccountOverpaidChargeNeverGoesNegative(t *testing.T) {
 	got, err := f.svc.GetAccount(ctx, testStudent)
 
 	requireNoError(t, err)
-	if got.TotalBalanceCents != 0 {
-		t.Fatalf("balance = %d, want 0 — a credit never subtracts from the debt", got.TotalBalanceCents)
+	if got.TotalBalanceCents != -20000 {
+		t.Fatalf("balance = %d, want -20000 — the over-collected part is the family's credit", got.TotalBalanceCents)
+	}
+	if st := statementOf(t, f, testStudent); st.Totals.BalanceCents != got.TotalBalanceCents {
+		t.Errorf("statement balance = %d, account %d — one number", st.Totals.BalanceCents, got.TotalBalanceCents)
 	}
 }
 

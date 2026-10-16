@@ -63,10 +63,12 @@ func TestTheStatementQuotesWhatTheCounterAsksFor(t *testing.T) {
 
 	account, err := f.svc.GetAccount(context.Background(), testStudent)
 	requireNoError(t, err)
-	// The year still owed, plus what lateness has earned, less the family's credit.
-	want := account.TotalBalanceCents + 30000 - account.UnallocatedCents
-	if got.Totals.BalanceCents != want {
-		t.Errorf("balance = %d, want %d", got.Totals.BalanceCents, want)
+	// The year's ten months plus the thirty days lateness has earned; the
+	// inscription is paid and there is no credit. The account reads the same
+	// number (T5 · ISSUE-006).
+	const want = 10*320000 + 30000
+	if got.Totals.BalanceCents != want || account.TotalBalanceCents != want {
+		t.Errorf("balance = %d, account %d, want %d", got.Totals.BalanceCents, account.TotalBalanceCents, want)
 	}
 	if last := got.Movements[len(got.Movements)-1]; last.BalanceCents != got.Totals.BalanceCents {
 		t.Errorf("running balance ends at %d, totals say %d", last.BalanceCents, got.Totals.BalanceCents)
@@ -103,8 +105,8 @@ func TestADepositIsOneMovementWithItsFolio(t *testing.T) {
 	}
 	account, err := f.svc.GetAccount(context.Background(), testStudent)
 	requireNoError(t, err)
-	if st.Totals.BalanceCents != account.TotalBalanceCents-account.UnallocatedCents {
-		t.Errorf("balance = %d, want the year's %d", st.Totals.BalanceCents, account.TotalBalanceCents)
+	if st.Totals.BalanceCents != account.TotalBalanceCents {
+		t.Errorf("balance = %d, want the account's %d (T5: one number)", st.Totals.BalanceCents, account.TotalBalanceCents)
 	}
 }
 
@@ -148,7 +150,8 @@ func TestOverpaymentIsANegativeBalance(t *testing.T) {
 
 	account, err := f.svc.GetAccount(context.Background(), testStudent)
 	requireNoError(t, err)
-	if st.Totals.BalanceCents != -account.UnallocatedCents || st.UnallocatedCents != account.UnallocatedCents {
+	if st.Totals.BalanceCents != -account.UnallocatedCents || st.UnallocatedCents != account.UnallocatedCents ||
+		account.TotalBalanceCents != st.Totals.BalanceCents {
 		t.Errorf("balance = %d (credit %d), want -%d", st.Totals.BalanceCents, st.UnallocatedCents, account.UnallocatedCents)
 	}
 }
@@ -242,7 +245,7 @@ func TestACancelledChargeWithMoneyOnItKeepsWhatWasCollected(t *testing.T) {
 
 	account, err := f.svc.GetAccount(context.Background(), testStudent)
 	requireNoError(t, err)
-	if want := account.TotalBalanceCents - account.UnallocatedCents; st.Totals.BalanceCents != want {
+	if want := account.TotalBalanceCents; st.Totals.BalanceCents != want {
 		t.Errorf("balance = %d, want the account's %d — the cancelled charge's money became a false credit", st.Totals.BalanceCents, want)
 	}
 }
@@ -258,7 +261,7 @@ func TestTheStatementPricesAnUnpaidInscriptionAtTheCounters(t *testing.T) {
 
 	counter, err := f.svc.ExpectedToday(context.Background(), testStudent, f.clock)
 	requireNoError(t, err)
-	if want := counter.AnnualBalanceCents - st.UnallocatedCents; st.Totals.BalanceCents != want {
+	if want := counter.AnnualBalanceCents; st.Totals.BalanceCents != want {
 		t.Errorf("balance = %d, the counter's year is %d", st.Totals.BalanceCents, counter.AnnualBalanceCents)
 	}
 }
