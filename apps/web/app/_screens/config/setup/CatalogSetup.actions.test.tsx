@@ -454,16 +454,14 @@ describe("Paso 8 · Calendario (A27–A32)", () => {
       expect(stepButton("Calendario")).toHaveTextContent("1 día cerrado");
     });
 
-    it("A28 · with nobody undoing, the DELETE still reaches the server after the grace window", async () => {
+    it("A28 · with nobody undoing, the DELETE reaches the server once the offer is closed", async () => {
       installSchool(freshSchool({ closedDays: [HOLIDAY] }));
       const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
       renderSetup();
       await settled();
       const step = await openStep(user, "Calendario");
       await user.click(await within(step).findByRole("button", { name: "Quitar PATRIA" }));
-      await act(async () => {
-        vi.advanceTimersByTime(UNDO_WINDOW_MS);
-      });
+      await user.click(screen.getByRole("button", { name: "Cerrar aviso" }));
       await waitFor(() => expect(config.deleteNonWorkingPeriod).toHaveBeenCalledWith(API, "d1"));
     });
   });

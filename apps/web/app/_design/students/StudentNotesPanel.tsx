@@ -277,6 +277,7 @@ export function StudentNotesPanel({
         <UndoToast
           message="Se anuló la nota"
           onUndo={() => state.unhide(removal.undo() ?? [], true)}
+          onDismiss={removal.dismiss}
         />
       )}
     </div>

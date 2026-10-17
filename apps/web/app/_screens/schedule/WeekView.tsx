@@ -66,6 +66,7 @@ export function WeekView({ board, mode, canWrite, now, onChanged, version = 0 }:
   };
 
   const saved = (message: string): void => {
+    removal.flush();
     setTarget(null);
     setToast(message);
     onChanged();
@@ -112,7 +113,7 @@ export function WeekView({ board, mode, canWrite, now, onChanged, version = 0 }:
       {target !== null && (
         <BlockDrawer target={target} board={board} index={index} grid={grid} today={today} onClose={() => setTarget(null)} onSaved={saved} onRemove={remove} />
       )}
-      {removal.latest !== undefined && <UndoToast message="Clase quitada" onUndo={() => removal.undo()} />}
+      {removal.latest !== undefined && <UndoToast message="Clase quitada" onUndo={() => removal.undo()} onDismiss={removal.dismiss} />}
       {toast !== undefined && removal.latest === undefined && <Toast>{toast}</Toast>}
     </div>
   );

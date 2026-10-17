@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -21,7 +21,6 @@ const day = (id: string) => ({ id, cycleId: "c1", label: id, kind: "holiday" as 
 afterEach(() => vi.clearAllMocks());
 
 /** useUndoableRemoval's grace window, plus a beat. */
-const UNDO_WINDOW_MS = 8_100;
 
 // Step 8's line ("3 días cerrados") comes from the panel's own read: no second GET.
 describe("CalendarPanel onLoaded", () => {
@@ -75,9 +74,7 @@ describe("CalendarPanel onLoaded", () => {
       await waitFor(() => expect(onLoaded).toHaveBeenCalledWith("c1", 2));
 
       await user.click(screen.getByRole("button", { name: "Quitar a" }));
-      await act(async () => {
-        vi.advanceTimersByTime(UNDO_WINDOW_MS);
-      });
+      await user.click(screen.getByRole("button", { name: "Cerrar aviso" }));
 
       await waitFor(() => expect(onLoaded).toHaveBeenLastCalledWith("c1", 1));
     });

@@ -97,7 +97,7 @@ export function LevelPeriodsScreen({ levelId, canWrite, onBack }: LevelPeriodsSc
         </div>
       )}
 
-      {p.undo !== undefined && <UndoToast message={p.undo.message} onUndo={() => void p.takeBack()} />}
+      {p.undo !== undefined && <UndoToast message={p.undo.message} onUndo={() => void p.takeBack()} onDismiss={p.dismissUndo} />}
       {p.undo === undefined && p.notice !== undefined && <Toast>{p.notice}</Toast>}
     </Page>
   );

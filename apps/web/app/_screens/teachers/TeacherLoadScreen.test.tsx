@@ -580,7 +580,8 @@ describe("TeacherLoadScreen", () => {
     });
   });
 
-  it("restarts the 8 s undo window on each removal, and starts afresh once it expires", async () => {
+  // ISSUE-CC-105: Deshacer never leaves on its own; closing it starts afresh.
+  it("keeps Deshacer until the person closes it, and starts afresh after", async () => {
     useFakeClock();
     try {
       withAssignments([ta("a1", "s1A", "mat-s1", "ada"), ta("a2", "s2A", "mat-s2", "ada"), ta("a3", "s1B", "fis-s1", "ada")]);
@@ -593,9 +594,9 @@ describe("TeacherLoadScreen", () => {
       await user.click(screen.getByRole("button", { name: "Quitar Matemáticas de 2° Secundaria · A" }));
       await screen.findByText("Quitaste 2 clases");
 
-      act(() => vi.advanceTimersByTime(5000));
+      act(() => vi.advanceTimersByTime(60_000));
       expect(screen.getByRole("button", { name: "Deshacer" })).toBeInTheDocument();
-      act(() => vi.advanceTimersByTime(3500));
+      await user.click(screen.getByRole("button", { name: "Cerrar aviso" }));
       expect(screen.queryByRole("button", { name: "Deshacer" })).not.toBeInTheDocument();
 
       await user.click(screen.getByRole("button", { name: "Quitar Física de 1° Secundaria · B" }));

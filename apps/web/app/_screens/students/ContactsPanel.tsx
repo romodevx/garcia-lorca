@@ -283,6 +283,7 @@ export function ContactsPanel({ studentId }: ContactsPanelProps): ReactElement {
             const back = removal.undo() ?? [];
             setContacts((prev) => [...prev, ...back]);
           }}
+          onDismiss={removal.dismiss}
         />
       )}
     </div>

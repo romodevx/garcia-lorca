@@ -196,7 +196,8 @@ describe("SubjectsPanel — the level's subjects, grade by grade (T13)", () => {
     expect(await within(block).findByText("ESPAÑOL")).toBeInTheDocument();
   });
 
-  it("the undo offer leaves on its own after eight seconds", async () => {
+  // ISSUE-CC-105: the undo offer never leaves on its own; the person closes it.
+  it("the undo offer stays until the person closes it", async () => {
     mocked.deleteSubject.mockResolvedValue(undefined);
     renderPanel();
     const block = await screen.findByRole("region", { name: "Materias de 1° PRIMARIA" });
@@ -209,8 +210,11 @@ describe("SubjectsPanel — the level's subjects, grade by grade (T13)", () => {
     });
     expect(screen.getByRole("button", { name: /deshacer/i })).toBeInTheDocument();
     await act(async () => {
-      vi.advanceTimersByTime(8_100);
+      vi.advanceTimersByTime(60_000);
     });
+    expect(screen.getByRole("button", { name: /deshacer/i })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Cerrar aviso" }));
     expect(screen.queryByRole("button", { name: /deshacer/i })).toBeNull();
   });
 

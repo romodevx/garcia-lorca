@@ -192,6 +192,7 @@ export function CalendarPanel({ cycle, onLoaded }: CalendarPanelProps): ReactEle
             <button
               onClick={() => {
                 setPeriods((prev) => prev.filter((x) => x.id !== p.id));
+                eventRemoval.flush();
                 dayRemoval.remove(p, () => {
                   void deleteNonWorkingPeriod(API_URL, p.id)
                     .then(reload)
@@ -238,6 +239,7 @@ export function CalendarPanel({ cycle, onLoaded }: CalendarPanelProps): ReactEle
               <button
                 onClick={() => {
                   setEvents((prev) => prev.filter((x) => x.id !== ev.id));
+                  dayRemoval.flush();
                   eventRemoval.remove(ev, () => {
                     void deleteSchoolEvent(API_URL, ev.id)
                       .then(reload)
@@ -276,6 +278,7 @@ export function CalendarPanel({ cycle, onLoaded }: CalendarPanelProps): ReactEle
             // Notify-only, like the reads: the count is back without asking the server again.
             notify.current?.(cycle.id, restored.length);
           }}
+          onDismiss={dayRemoval.dismiss}
         />
       )}
 
@@ -288,6 +291,7 @@ export function CalendarPanel({ cycle, onLoaded }: CalendarPanelProps): ReactEle
               [...prev, ...devueltas].sort((a, b) => a.startsOn.localeCompare(b.startsOn)),
             );
           }}
+          onDismiss={eventRemoval.dismiss}
         />
       )}
     </Section>

@@ -101,7 +101,7 @@ describe("CalendarPanel", () => {
     expect(config.deleteNonWorkingPeriod).not.toHaveBeenCalled();
   });
 
-  it("si nadie deshace, el borrado sí llega al servidor", async () => {
+  it("si nadie deshace, el borrado llega al servidor al cerrar el aviso", async () => {
     useFakeClock();
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     config.deleteNonWorkingPeriod.mockResolvedValue(undefined);
@@ -109,7 +109,10 @@ describe("CalendarPanel", () => {
     await screen.findByText("Independencia");
 
     await user.click(screen.getByRole("button", { name: /Quitar Independencia/ }));
-    await act(async () => { vi.advanceTimersByTime(8000); });
+    // ISSUE-CC-105: no clock. Closing the offer is what commits the delete.
+    await act(async () => { vi.advanceTimersByTime(60_000); });
+    expect(config.deleteNonWorkingPeriod).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Cerrar aviso" }));
 
     expect(config.deleteNonWorkingPeriod).toHaveBeenCalledWith(expect.anything(), "per-1");
     useRealClock();
@@ -218,9 +221,10 @@ describe("quitar varios días dentro del mismo plazo", () => {
     await screen.findByText("INDEPENDENCIA");
 
     await user.click(screen.getByRole("button", { name: /Quitar INDEPENDENCIA/ }));
-    await act(async () => { vi.advanceTimersByTime(3000); });
     await user.click(screen.getByRole("button", { name: /Quitar REVOLUCIÓN/ }));
-    await act(async () => { vi.advanceTimersByTime(8000); });
+    // Quitar el segundo es otra acción: el primero ya no se ofrece y se borra.
+    expect(config.deleteNonWorkingPeriod).toHaveBeenCalledWith(expect.anything(), "per-1");
+    await user.click(screen.getByRole("button", { name: "Cerrar aviso" }));
 
     expect(config.deleteNonWorkingPeriod).toHaveBeenCalledWith(expect.anything(), "per-1");
     expect(config.deleteNonWorkingPeriod).toHaveBeenCalledWith(expect.anything(), "per-2");

@@ -33,8 +33,6 @@ export interface SubjectsPanelProps {
 const LOCALE = "es-MX";
 const NO_NAME = "Escribe el nombre de la materia.";
 const NO_GRADE = "Elige al menos un grado.";
-/** How long the undo offer stays after a delete. */
-const UNDO_MS = 8_000;
 
 /**
  * Las materias de un nivel, grado por grado (T13).
@@ -68,13 +66,6 @@ export function SubjectsPanel({ level, gradeLevels, selectedGradeLevelId }: Subj
       active = false;
     };
   }, [gradeKey]);
-
-  // The undo offer leaves on its own (≥ 8 s, like every undo toast).
-  useEffect(() => {
-    if (deleted === undefined) return;
-    const timer = setTimeout(() => setDeleted(undefined), UNDO_MS);
-    return () => clearTimeout(timer);
-  }, [deleted]);
 
   const onCreated = (name: string, res: SubjectsInGrades): void => {
     setSubjects((prev) => [...prev, ...res.created]);
@@ -149,7 +140,7 @@ export function SubjectsPanel({ level, gradeLevels, selectedGradeLevelId }: Subj
         </div>
       )}
 
-      {deleted !== undefined && <UndoToast message={`Se eliminó ${deleted.name}`} onUndo={() => void undo(deleted)} />}
+      {deleted !== undefined && <UndoToast message={`Se eliminó ${deleted.name}`} onUndo={() => void undo(deleted)} onDismiss={() => setDeleted(undefined)} />}
     </Section>
   );
 }

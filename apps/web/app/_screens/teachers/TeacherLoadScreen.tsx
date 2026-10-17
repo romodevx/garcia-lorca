@@ -102,7 +102,7 @@ export function TeacherLoadScreen({ teacherId: rawTeacherId, onBack, canWrite = 
       )}
 
       {writes.undoable.length > 0 ? (
-        <UndoToast message={removedMessage(writes.undoable)} onUndo={() => void writes.undo()} />
+        <UndoToast message={removedMessage(writes.undoable)} onUndo={() => void writes.undo()} onDismiss={writes.dismissUndo} />
       ) : (
         writes.toast !== undefined && <Toast>{writes.toast}</Toast>
       )}
