@@ -1,9 +1,11 @@
 package handler_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -434,10 +436,19 @@ func TestDeleteGroupRefusalKeepsTheBareNameWhenTheGradeCannotBeRead(t *testing.T
 	g := newGroupFixture()
 	g.config.usage = client.ConfigGroupUsage{TeachingAssignments: 1}
 	g.config.gradeErr = connect.NewError(connect.CodeUnavailable, errors.New("down"))
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
 
 	rec := doPathReq(t, g.handler().DeleteGroup, http.MethodDelete, "/api/v1/config/groups/"+grpT8, grpT8, "")
 
 	assert.Equal(t, http.StatusConflict, rec.Code)
 	assert.Equal(t, "No se puede borrar el grupo A: tiene 1 clase asignada. Quita primero sus clases asignadas.",
 		strings.TrimSpace(rec.Body.String()))
+	// Gate nit on #142: the fallback is visible when debugging, and says which
+	// group by id only (no names, no PII).
+	assert.Contains(t, logs.String(), "group label falls back to the bare name")
+	assert.Contains(t, logs.String(), "group_id="+grpT8)
+	assert.NotContains(t, logs.String(), "name=")
 }

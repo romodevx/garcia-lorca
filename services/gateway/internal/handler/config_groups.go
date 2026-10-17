@@ -157,10 +157,12 @@ func (u groupUsage) refusal(groupName string) string {
 func (h *GroupEditHandler) groupLabel(ctx context.Context, g client.GroupResult) string {
 	grade, err := h.deps.Config.GetGradeLevel(ctx, g.GradeLevelID)
 	if err != nil {
+		slog.DebugContext(ctx, "group label falls back to the bare name", "group_id", g.ID, "missing", "grade", "error", err)
 		return g.Name
 	}
 	level, err := h.deps.Config.GetLevel(ctx, grade.LevelID)
 	if err != nil {
+		slog.DebugContext(ctx, "group label falls back to the grade without its level", "group_id", g.ID, "missing", "level", "error", err)
 		return groupLabel(grade.Name, g.Name)
 	}
 	return groupLabel(gradeWithLevel(grade.Name, level.Name), g.Name)
