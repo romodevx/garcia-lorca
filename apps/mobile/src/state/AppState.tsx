@@ -63,8 +63,6 @@ interface AppStateValue {
   unreadCount: number;
   /** Acknowledges one notification (persists via the family API). */
   markRead: (id: string) => void;
-  /** Acknowledges every unread notification. */
-  markAllRead: () => void;
 }
 
 const AppStateContext = createContext<AppStateValue | null>(null);
@@ -171,14 +169,6 @@ export function AppStateProvider({ children }: AppStateProviderProps): ReactNode
     });
   }, []);
 
-  const markAllRead = useCallback(() => {
-    for (const n of notifications) {
-      if (isUnread(n, readIds)) {
-        markRead(n.id);
-      }
-    }
-  }, [notifications, readIds, markRead]);
-
   const unreadCount = useMemo(
     () => notifications.filter((n) => isUnread(n, readIds)).length,
     [notifications, readIds],
@@ -205,7 +195,6 @@ export function AppStateProvider({ children }: AppStateProviderProps): ReactNode
       readIds,
       unreadCount,
       markRead,
-      markAllRead,
     }),
     [
       childList,
@@ -222,7 +211,6 @@ export function AppStateProvider({ children }: AppStateProviderProps): ReactNode
       readIds,
       unreadCount,
       markRead,
-      markAllRead,
     ],
   );
 
