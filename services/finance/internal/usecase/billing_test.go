@@ -1011,3 +1011,34 @@ func TestRunBillingSkipsEveryChargeForWithdrawnEnrollment(t *testing.T) {
 		t.Errorf("ledger has %d charges for withdrawn pupil", len(f.repo.charges))
 	}
 }
+
+// TestRunBillingAccruesPastAPageOfSettledCharges is the regression for the
+// empty-page stop in the run's overdue walk.
+//
+// The repository drops settled charges AFTER it fetches a page, so a page of
+// 500 charges families already paid comes back empty while the walk is not
+// over. The run used to stop there, and every debt ordered after those 500
+// earned no surcharge: the same silent under-billing the keyset walk ended.
+func TestRunBillingAccruesPastAPageOfSettledCharges(t *testing.T) {
+	f := billingFixture(t)
+	concept := f.seedConcept(t, "Colegiatura anterior", 100000)
+	const settled = usecase.MaxPageSize + 1 // a whole page of them, and then some
+	for i := 0; i < settled; i++ {
+		// Due before the run's inscription (2026-08-10), so in (due_date, id)
+		// order every one of them is examined first.
+		c, err := f.svc.CreateCharge(context.Background(), seedChargeInput(concept.ID(), i, "2026-08-01"))
+		requireNoError(t, err)
+		if _, _, err := f.svc.RegisterPayment(context.Background(), c.Charge.ID(), 100000, domain.MethodCash, "", ""); err != nil {
+			t.Fatalf("settle %d: %v", i, err)
+		}
+	}
+
+	// The inscription, still owed and overdue by 15 September, is the one
+	// charge that earns a surcharge (see TestRunBillingAccruesBeyondTheListCap).
+	got := runOn(t, f, "2026-09-15")
+
+	if got.LateFeesCreated != 1 {
+		t.Fatalf("late fees = %d, want 1 — the run stopped on a page of settled charges and skipped the debt behind it",
+			got.LateFeesCreated)
+	}
+}
