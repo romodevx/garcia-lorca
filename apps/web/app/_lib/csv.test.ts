@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { csvName, downloadCsv, toCsv } from "./csv";
+import { csvBlob, csvName, downloadCsv, toCsv } from "./csv";
 
 describe("toCsv", () => {
   it("writes the header from the column labels, in order", () => {
@@ -91,5 +91,20 @@ describe("csvName", () => {
   it("turns at Morelia's midnight", () => {
     const midnight16 = new Date("2026-10-16T06:00:00Z"); // 00:00 on the 16th in Morelia
     expect(csvName("alumnos", midnight16)).toBe("alumnos-2026-10-16.csv");
+  });
+});
+
+// ISSUE-T14-011: Excel on Windows reads a file without the UTF-8 BOM as
+// Windows-1252, and "INSCRIPCIÓN" or "Ñ" come out garbled.
+describe("csvBlob", () => {
+  it("starts with the UTF-8 byte order mark, then the CSV as UTF-8", async () => {
+    const bytes = new Uint8Array(await csvBlob("Concepto\r\nINSCRIPCIÓN").arrayBuffer());
+
+    expect([...bytes.slice(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);
+    expect(new TextDecoder("utf-8", { ignoreBOM: true }).decode(bytes.slice(3))).toBe("Concepto\r\nINSCRIPCIÓN");
+  });
+
+  it("is typed as UTF-8 CSV", () => {
+    expect(csvBlob("a").type).toBe("text/csv;charset=utf-8");
   });
 });

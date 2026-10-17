@@ -32,11 +32,23 @@ export function toCsv<T>(columns: readonly CsvColumn<T>[], rows: readonly T[]): 
   return [header, ...body].join("\r\n");
 }
 
+/**
+ * The UTF-8 byte order mark, written as an escape: an invisible literal is one
+ * editor or formatter away from vanishing, and nothing would notice.
+ */
+const UTF8_BOM = "﻿";
+
+/**
+ * The file's bytes. The BOM is what makes Excel read the file as UTF-8: without
+ * it "Sánchez" opens as "SÃ¡nchez" on a Windows machine, which is most of them.
+ */
+export function csvBlob(csv: string): Blob {
+  return new Blob([UTF8_BOM, csv], { type: "text/csv;charset=utf-8" });
+}
+
 /** Hands the file to the browser under a name a person can find again. */
 export function downloadCsv(filename: string, csv: string): void {
-  // The BOM is what makes Excel read the file as UTF-8. Without it "Sánchez"
-  // opens as "SÃ¡nchez" on a Windows machine, which is most of them.
-  const blob = new Blob(["﻿", csv], { type: "text/csv;charset=utf-8" });
+  const blob = csvBlob(csv);
   const href = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = href;
