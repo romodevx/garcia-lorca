@@ -63,14 +63,19 @@ export function PermissionsUnavailable({ onRetry }: { onRetry?: () => void }): R
   );
 }
 
-const FAMILY_PERMISSION_PREFIX = "family:";
+// The scopes a guardian holds over their own children: their account in the
+// family app, and their own uniform orders (migrations/iam/0014).
+const GUARDIAN_PERMISSION_PREFIXES = ["family:", "uniforms_own:"] as const;
 
 /**
- * A guardian's permissions are all `family:*`: everything they can do lives in
- * the family app, and no administrator will grant them a web module.
+ * A guardian's permissions are all guardian scopes: everything they can do lives
+ * in the family app, and no administrator will grant them a web module.
  */
 function isFamilyOnly(permissions: readonly string[]): boolean {
-  return permissions.length > 0 && permissions.every((p) => p.startsWith(FAMILY_PERMISSION_PREFIX));
+  return (
+    permissions.some((p) => p.startsWith("family:")) &&
+    permissions.every((p) => GUARDIAN_PERMISSION_PREFIXES.some((prefix) => p.startsWith(prefix)))
+  );
 }
 
 // Shown to a signed-in user whose permissions match no module at all.

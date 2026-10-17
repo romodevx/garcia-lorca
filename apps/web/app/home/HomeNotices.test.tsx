@@ -15,6 +15,13 @@ describe("NoModules", () => {
     expect(screen.queryByText(/Solicita acceso/)).toBeNull();
   });
 
+  // ISSUE-T14-301: the seeded guardian role also owns its uniform orders
+  // (migrations/iam/0014), so a real guardian is not "family:*" only.
+  it("recognises the real guardian role, which also orders its own uniforms", () => {
+    render(<NoModules permissions={["family:read", "uniforms_own:read", "uniforms_own:write"]} />);
+    expect(screen.getByText("Tu acceso es desde la app de García Lorca para familias.")).toBeInTheDocument();
+  });
+
   it.each([
     ["no permissions at all", []],
     ["staff permissions that match no module", ["reports:read"]],
