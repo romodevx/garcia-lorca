@@ -32,6 +32,7 @@ import { Checkmark, StudentFilters, StudentSelectionBand } from "../../_design/s
 import { useStudentFilter } from "../../_design/students/useStudentFilter";
 import { EMPTY_FILTER, filterFromParams, filterToParams, type FilterableStudent, type StudentFilterState } from "../../_design/students/studentFilter";
 import { placeStudents } from "../../_design/students/placement";
+import { roomLabelsOf } from "../../_design/students/roomLabels";
 import { StudentNotesDialog } from "../../_design/students/StudentNotesDialog";
 import { StudentStatementDrawer } from "../../_design/students/StudentStatementDrawer";
 import { useIntent } from "../../routing/pendingIntent";
@@ -222,10 +223,13 @@ function StudentSheet({
   // counts before the roll is re-read (ISSUE-T14-009).
   const withdrawn = st.admissionStatus === "withdrawn" || (current !== null && current !== undefined && current !== "failed" && current.status === "withdrawn");
   const admission: AdmissionStatus = withdrawn ? "withdrawn" : st.admissionStatus;
+  // The enrolment's classroom with its grade ("3° PRIMARIA · B"), the one left
+  // included (ISSUE-T14-204); unknown, what the file stores.
+  const enrolledRoom = current !== null && current !== undefined && current !== "failed" ? groups.find((g) => g.id === current.groupId)?.label : undefined;
   const rows: [string, string][] = [
     ["Matrícula", st.enrollmentNumber ?? ""],
     ["CURP", st.curp],
-    ["Nivel", `${levelOf(st)} · ${groupOf(st)}`],
+    ["Nivel", enrolledRoom ?? `${levelOf(st)} · ${groupOf(st)}`],
     ["Tutor", st.guardianName],
     ["Admisión", statusOf(admission).label],
   ];
@@ -619,6 +623,8 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
     const files = students.map((s) => ({ id: s.id, levelId: s.levelId !== "" ? s.levelId : (idOfName.get(fold(s.level)) ?? "") }));
     const placed = placeStudents(files, { enrollments: placementReady ? enrollments : [], groups, grades: gradeLevels });
     const labelOf = new Map(groups.map((g) => [g.id, g.label]));
+    // A withdrawn pupil has no active enrolment: name the classroom they left (ISSUE-T14-204).
+    const roomOf = roomLabelsOf(placementReady ? enrollments : [], groups);
     return students.map((s) => {
       const p = placed.get(s.id) ?? { levelId: s.levelId, gradeLevelId: "", groupId: "" };
       return {
@@ -631,7 +637,7 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
         searchText: [s.curp, s.guardianName, s.bankReference ?? ""],
         levelName: nameOf.get(p.levelId) ?? levelOf(s),
         // Placed: this cycle's classroom, or honestly none. Not yet known: the file's letter.
-        room: placementReady ? (labelOf.get(p.groupId) ?? NO_GROUP) : groupOf(s),
+        room: placementReady ? (labelOf.get(p.groupId) ?? roomOf.get(s.id) ?? NO_GROUP) : groupOf(s),
       };
     });
   }, [students, enrollments, groups, gradeLevels, catalogLevels, placementReady]);

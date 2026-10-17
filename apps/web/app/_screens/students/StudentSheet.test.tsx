@@ -455,4 +455,21 @@ describe("un alumno dado de baja en la lista", () => {
     expect(await screen.findByRole("button", { name: "Ver ficha de Cruz Ana" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Editar ficha de Cruz Ana" })).toBeNull();
   });
+
+  // ISSUE-T14-204: with no active enrollment the list and the ficha said
+  // "Primaria · 1° B"; the classroom they left names it with its grade.
+  it("nombra el salón que dejó, con su grado, en la lista y en la ficha", async () => {
+    const user = userEvent.setup();
+    config.listLabelledGroups.mockResolvedValue(GROUPS.map((g) => ({ ...g, label: `${g.name} PRIMARIA · ${g.name.slice(-1)}` })));
+    students.listStudents.mockResolvedValue([{ ...pupil("lv-pri"), admissionStatus: "withdrawn" }]);
+    students.listEnrollments.mockResolvedValue([
+      { id: "e1", studentId: "stu-1", cycleId: "c1", groupId: "g-pri-b", termId: "", status: "withdrawn", enrolledAt: "2026-08-20", withdrawnOn: "2026-10-17" },
+    ]);
+    render(<StudentsScreen onBack={() => {}} />);
+
+    expect((await screen.findAllByText("1° B PRIMARIA · B")).length).toBeGreaterThan(0);
+    await user.click(screen.getByRole("button", { name: "Ver ficha de Cruz Ana" }));
+    const sheet = screen.getByRole("dialog", { name: "Ficha del alumno" });
+    expect(await within(sheet).findByText("1° B PRIMARIA · B")).toBeInTheDocument();
+  });
 });
