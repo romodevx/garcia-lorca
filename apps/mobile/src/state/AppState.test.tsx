@@ -138,6 +138,59 @@ describe("AppState child slice", () => {
   });
 });
 
+/** Re-runs the child load, like the logout does after clearing tokens. */
+function RefreshProbe(): ReactElement {
+  const { refreshChildren } = useAppState();
+  return (
+    <Pressable accessibilityRole="button" accessibilityLabel="refresh children" onPress={() => void refreshChildren()}>
+      <Text>refresh</Text>
+    </Pressable>
+  );
+}
+
+// CC-303 gate: a slow child load of the guardian who signed out must not paint
+// their children after the logout emptied the slice.
+describe("AppState child load after logout", () => {
+  afterEach(async () => {
+    await clearTokens();
+  });
+
+  it("discards an in-flight child list once the logout has run", async () => {
+    await saveTokens({ accessToken: "a1", refreshToken: "r1" });
+    let answerStudents: (value: unknown) => void = () => undefined;
+    globalThis.fetch = jest.fn((url: string) => {
+      if (!String(url).includes("/family/students")) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => ({ notifications: [] }) });
+      }
+      return new Promise((resolve) => {
+        answerStudents = resolve;
+      });
+    }) as unknown as typeof fetch;
+
+    await renderWithProviders(
+      <>
+        <ChildProbe />
+        <RefreshProbe />
+      </>,
+    );
+    await clearTokens();
+    await fireEvent.press(screen.getByRole("button", { name: "refresh children" }));
+    await waitFor(() => expect(text("childLoading")).toBe("false"));
+
+    await act(async () => {
+      answerStudents({
+        ok: true,
+        status: 200,
+        json: async () => ({ students: [{ id: "s1", firstName: "Mateo", lastName: "Herrera", level: "primaria", gradeGroup: "3° A" }] }),
+      });
+    });
+
+    expect(text("childCount")).toBe("0");
+    expect(text("selected")).toBe("none");
+    expect(text("childLoading")).toBe("false");
+  });
+});
+
 /** Selects a child by id, like the header's switcher does. */
 function SelectProbe({ id }: { id: string }): ReactElement {
   const { selectChild } = useAppState();

@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -86,7 +87,14 @@ export function AppStateProvider({ children }: AppStateProviderProps): ReactNode
   // until the next refetch stamps readAt server-side. Ids are notification ids.
   const [readIds, setReadIds] = useState<ReadonlySet<string>>(() => new Set());
 
+  // Every child load (and the signed-out reset a logout runs) takes a new
+  // generation; a load that is no longer the latest writes nothing, so the
+  // previous guardian's slow list never repaints the slice after a logout.
+  const childGeneration = useRef(0);
+
   const refreshChildren = useCallback(async () => {
+    const generation = (childGeneration.current += 1);
+    const isCurrent = (): boolean => generation === childGeneration.current;
     // Signed out: no token to authenticate the family request, so treat the child
     // list as cleanly empty rather than firing an unauthenticated call. This also
     // empties the slice after logout.
@@ -101,6 +109,7 @@ export function AppStateProvider({ children }: AppStateProviderProps): ReactNode
     setChildError(false);
     try {
       const [list, remembered] = await Promise.all([listChildren(), readSelectedChild()]);
+      if (!isCurrent()) return;
       setChildList(list);
       // Keep the current selection if it still exists; else the child chosen
       // before the app was closed (ISSUE-CC-303); else the first child.
@@ -111,9 +120,9 @@ export function AppStateProvider({ children }: AppStateProviderProps): ReactNode
         return list[0]?.id ?? null;
       });
     } catch {
-      setChildError(true);
+      if (isCurrent()) setChildError(true);
     } finally {
-      setChildLoading(false);
+      if (isCurrent()) setChildLoading(false);
     }
   }, []);
 
