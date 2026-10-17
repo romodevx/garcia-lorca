@@ -170,7 +170,7 @@ func (h *FinanceHandler) ApplyDiscount(ctx context.Context, req *connect.Request
 
 // CancelCharge voids a charge.
 func (h *FinanceHandler) CancelCharge(ctx context.Context, req *connect.Request[financev1.CancelChargeRequest]) (*connect.Response[financev1.CancelChargeResponse], error) {
-	charge, err := h.finance.CancelCharge(ctx, req.Msg.GetChargeId())
+	charge, err := h.finance.CancelCharge(ctx, req.Msg.GetChargeId(), req.Msg.GetReason())
 	if err != nil {
 		return nil, connectErr(err)
 	}

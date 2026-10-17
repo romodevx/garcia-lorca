@@ -68,6 +68,7 @@ type fakeFinance struct {
 	discountReason   string
 
 	cancelChargeID string
+	cancelReason   string
 
 	payChargeID string
 	payAmount   int64
@@ -220,8 +221,8 @@ func (f *fakeFinance) ApplyDiscount(_ context.Context, chargeID string, discount
 	return f.charge, nil
 }
 
-func (f *fakeFinance) CancelCharge(_ context.Context, chargeID string) (client.Charge, error) {
-	f.cancelChargeID = chargeID
+func (f *fakeFinance) CancelCharge(_ context.Context, chargeID, reason string) (client.Charge, error) {
+	f.cancelChargeID, f.cancelReason = chargeID, reason
 	if f.err != nil {
 		return client.Charge{}, f.err
 	}
@@ -551,13 +552,16 @@ func TestFinanceCancelChargeUsesPathID(t *testing.T) {
 	svc := &fakeFinance{charge: cancelled}
 	h := handler.NewFinanceHandler(svc)
 
-	rec := doAdminReq(t, http.HandlerFunc(h.CancelCharge), http.MethodPost, "/api/v1/finance/charges/chg-1/cancel", "", "id", "chg-1")
+	rec := doAdminReq(t, http.HandlerFunc(h.CancelCharge), http.MethodPost, "/api/v1/finance/charges/chg-1/cancel", `{"reason":"Cargo duplicado"}`, "id", "chg-1")
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
 	if svc.cancelChargeID != "chg-1" {
 		t.Errorf("forwarded charge id = %q", svc.cancelChargeID)
+	}
+	if svc.cancelReason != "Cargo duplicado" {
+		t.Errorf("forwarded reason = %q, want the body's", svc.cancelReason)
 	}
 	var out map[string]any
 	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
@@ -571,9 +575,28 @@ func TestFinanceCancelChargeUsesPathID(t *testing.T) {
 func TestFinanceCancelChargeUnknownIs404(t *testing.T) {
 	svc := &fakeFinance{err: connect.NewError(connect.CodeNotFound, nil)}
 	h := handler.NewFinanceHandler(svc)
-	rec := doAdminReq(t, http.HandlerFunc(h.CancelCharge), http.MethodPost, "/api/v1/finance/charges/ghost/cancel", "", "id", "ghost")
+	rec := doAdminReq(t, http.HandlerFunc(h.CancelCharge), http.MethodPost, "/api/v1/finance/charges/ghost/cancel", `{"reason":"Cargo duplicado"}`, "id", "ghost")
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", rec.Code)
+	}
+}
+
+// CC-203: a charge is withdrawn with its reason, like a deposit.
+func TestFinanceCancelChargeRequiresReason(t *testing.T) {
+	for name, body := range map[string]string{"no body": "", "empty": `{}`, "blank": `{"reason":"   "}`} {
+		t.Run(name, func(t *testing.T) {
+			svc := &fakeFinance{charge: sampleCharge}
+			h := handler.NewFinanceHandler(svc)
+
+			rec := doAdminReq(t, http.HandlerFunc(h.CancelCharge), http.MethodPost, "/api/v1/finance/charges/chg-1/cancel", body, "id", "chg-1")
+
+			if rec.Code != http.StatusBadRequest {
+				t.Errorf("status = %d, want 400", rec.Code)
+			}
+			if svc.cancelChargeID != "" {
+				t.Error("a cancel without a reason must not reach finance")
+			}
+		})
 	}
 }
 

@@ -4453,6 +4453,53 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/ModuleDisabled' }
+  /api/v1/finance/charges/{id}/cancel:
+    post:
+      tags: [finance-payments]
+      summary: Withdraw a charge, with the reason
+      description: >
+        Cancellation is terminal: the charge stops counting toward the
+        account, and cancelling it twice is 409. The row survives with its
+        reason, so the ledger can always say why a debt disappeared. Money
+        already collected against it stays on the ledger. Requires
+        `finance:write`.
+      operationId: cancelCharge
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - { $ref: '#/components/parameters/CsrfToken' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  minLength: 1
+                  maxLength: 500
+                  description: Required. Why the school withdrew the debt.
+            examples:
+              duplicated:
+                summary: A charge issued twice
+                value: { reason: Cargo duplicado }
+      responses:
+        '200':
+          description: The charge, now cancelled.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FinanceCharge' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+        '409':
+          description: The charge was already cancelled.
   /api/v1/finance/overdue:
     get:
       tags: [finance-payments]

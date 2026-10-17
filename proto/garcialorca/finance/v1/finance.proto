@@ -481,6 +481,9 @@ message ApplyDiscountResponse {
 
 message CancelChargeRequest {
   string charge_id = 1;
+  // reason is required: a debt that disappears without one cannot be
+  // explained to the family or the auditor.
+  string reason = 2;
 }
 
 message CancelChargeIfUnpaidRequest {

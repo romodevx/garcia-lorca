@@ -451,6 +451,34 @@ func TestRegisterPaymentIsAtomicAndDerivesStatus(t *testing.T) {
 	}
 }
 
+// CC-203: a charge withdrawn from the screen keeps its reason on the row.
+func TestSaveChargePersistsCancellationReason(t *testing.T) {
+	ctx := context.Background()
+	const (
+		conceptID = "c0000000-0000-0000-0000-0000000000c2"
+		chargeID  = "d0000000-0000-0000-0000-0000000000c2"
+		student   = "50000000-0000-0000-0000-0000000000c2"
+	)
+	charge := seedConceptAndCharge(t, tenantA, conceptID, "cancel-reason", chargeID, student, cycleOne, 10000, 0, today)
+	repo := appRepo(t, tenantA)
+
+	cancelled, err := charge.Cancel()
+	if err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	if _, err := repo.SaveCharge(ctx, cancelled.WithCancellationReason("Cargo duplicado")); err != nil {
+		t.Fatalf("SaveCharge: %v", err)
+	}
+
+	after, err := repo.GetCharge(ctx, chargeID)
+	if err != nil {
+		t.Fatalf("GetCharge: %v", err)
+	}
+	if got := after.Charge.CancellationReason(); got != "Cargo duplicado" {
+		t.Errorf("stored reason = %q, want %q", got, "Cargo duplicado")
+	}
+}
+
 // TestRegisterPaymentRejectsCancelled proves a cancelled charge — a status the
 // mapper reconstructs from the stored row — is vetoed under the row lock, and
 // that nothing is written.

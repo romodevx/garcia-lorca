@@ -30,7 +30,7 @@ type FinanceService interface {
 	RunBilling(ctx context.Context, cycleID, asOfDate string) (client.BillingRun, error)
 	ListCharges(ctx context.Context, studentID, cycleID string, page client.PageRequest) (client.ChargePage, error)
 	ApplyDiscount(ctx context.Context, chargeID string, discountCents int64, reason string) (client.Charge, error)
-	CancelCharge(ctx context.Context, chargeID string) (client.Charge, error)
+	CancelCharge(ctx context.Context, chargeID, reason string) (client.Charge, error)
 	RegisterTenderedPayment(ctx context.Context, in client.TenderedPayment) ([]client.Payment, client.Charge, error)
 	GetAccount(ctx context.Context, studentID string) (client.AccountStatement, error)
 	RegisterDeposit(ctx context.Context, studentID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time, grantEarlyPayment bool, cardType string, receiver client.Receiver, chargeIDs []string, tenders []client.Tender) (client.DepositResult, error)
@@ -445,10 +445,24 @@ func (h *FinanceHandler) ApplyDiscount(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toChargeResponse(res))
 }
 
-// CancelCharge handles POST /api/v1/finance/charges/{id}/cancel. It carries no
-// body: the charge id in the path is the whole request.
+// cancelChargeRequest is the body of a charge cancellation.
+type cancelChargeRequest struct {
+	Reason string `json:"reason"`
+}
+
+// CancelCharge handles POST /api/v1/finance/charges/{id}/cancel. The reason is
+// required (CC-203): a debt that disappears without one cannot be explained.
 func (h *FinanceHandler) CancelCharge(w http.ResponseWriter, r *http.Request) {
-	res, err := h.svc.CancelCharge(r.Context(), r.PathValue("id"))
+	var req cancelChargeRequest
+	if err := decodeJSONBody(w, r, &req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(req.Reason) == "" {
+		http.Error(w, "reason is required to cancel a charge", http.StatusBadRequest)
+		return
+	}
+	res, err := h.svc.CancelCharge(r.Context(), r.PathValue("id"), req.Reason)
 	if err != nil {
 		writeConnectError(w, err)
 		return

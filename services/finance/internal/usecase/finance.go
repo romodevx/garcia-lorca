@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
 	"github.com/garcia-lorca/pkg/schoolcal"
@@ -326,10 +327,22 @@ func (s *FinanceService) ApplyDiscount(ctx context.Context, chargeID string, dis
 	return ports.ChargeWithPaid{Charge: saved, PaidCents: current.PaidCents}, nil
 }
 
-// CancelCharge withdraws a charge. Cancellation is terminal: cancelling twice
-// is KindConflict. Payments already collected are left on the ledger — settling
-// them (refund or credit) belongs to a later phase, not to a status change.
-func (s *FinanceService) CancelCharge(ctx context.Context, chargeID string) (ports.ChargeWithPaid, error) {
+// maxCancellationReasonLen bounds the free text a cancellation keeps.
+const maxCancellationReasonLen = 500
+
+// CancelCharge withdraws a charge, recording why. Cancellation is terminal:
+// cancelling twice is KindConflict. The reason is required (CC-203): a debt
+// that disappears without one cannot be explained to the family. Payments
+// already collected are left on the ledger — settling them (refund or credit)
+// belongs to a later phase, not to a status change.
+func (s *FinanceService) CancelCharge(ctx context.Context, chargeID, reason string) (ports.ChargeWithPaid, error) {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return ports.ChargeWithPaid{}, glerrors.New(glerrors.KindInvalid, "a reason is required to cancel a charge")
+	}
+	if utf8.RuneCountInString(reason) > maxCancellationReasonLen {
+		return ports.ChargeWithPaid{}, glerrors.New(glerrors.KindInvalid, "the cancellation reason is too long")
+	}
 	current, err := s.requireCharge(ctx, chargeID)
 	if err != nil {
 		return ports.ChargeWithPaid{}, err
@@ -338,7 +351,7 @@ func (s *FinanceService) CancelCharge(ctx context.Context, chargeID string) (por
 	if err != nil {
 		return ports.ChargeWithPaid{}, err
 	}
-	saved, err := s.repo.SaveCharge(ctx, cancelled)
+	saved, err := s.repo.SaveCharge(ctx, cancelled.WithCancellationReason(reason))
 	if err != nil {
 		return ports.ChargeWithPaid{}, err
 	}
