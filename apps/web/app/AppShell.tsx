@@ -756,6 +756,7 @@ export function AppShell(): ReactElement {
             canRevokeCard={cardEnabled && canEditStudents}
             canReadStatement={financeEnabled && (principal?.permissions?.some((p) => p === "finance:read" || p === "collections:read") === true)}
             canCorrectPayments={canCorrectPayments}
+            canVoidPayments={financeEnabled && principal?.permissions?.includes("finance:write") === true}
             onOpenImport={openStudentImport}
             linkedStudentId={view.screen === "studentSheet" ? view.studentId : undefined}
             onLinkedSheetClosed={leaveStudentSheet}

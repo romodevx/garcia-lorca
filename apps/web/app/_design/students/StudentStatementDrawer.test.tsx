@@ -11,6 +11,15 @@ vi.mock("../payments/CorrectPaymentDrawer", () => ({
   ),
 }));
 
+vi.mock("../payments/VoidDepositDrawer", () => ({
+  VoidDepositDrawer: ({ depositId, folio, onVoided, onCancel }: { depositId: string; folio: string; onVoided: (m: string) => void; onCancel: () => void }) => (
+    <div role="dialog" aria-label={`Anular ${depositId} ${folio}`}>
+      <button type="button" onClick={() => onVoided(`Pago ${folio} anulado.`)}>Confirmar anulación</button>
+      <button type="button" onClick={onCancel}>No anular</button>
+    </div>
+  ),
+}));
+
 vi.mock("../../finance/statement", async (importOriginal) => ({
   ...(await importOriginal<typeof statementApi>()),
   getStatement: vi.fn(),
@@ -190,6 +199,61 @@ describe("StudentStatementDrawer (T7)", () => {
     await user.click(screen.getByRole("button", { name: "Cerrar corrección" }));
     expect(await screen.findByRole("dialog", { name: "Estado de cuenta · Cruz Valentina" })).toBeInTheDocument();
     expect(api.getStatement).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("StudentStatementDrawer · anular (CC-203)", () => {
+  const live: statementApi.Statement = {
+    ...ledger,
+    movements: [
+      { kind: "credit_note", date: "2026-10-10", description: "Nota de crédito", amountCents: 20000, balanceCents: 0, depositId: "d1", folio: "P-2026-000001", accrued: false, notYetDue: false, voided: false },
+      { kind: "payment", date: "2026-10-10", description: "Pago", amountCents: 30000, balanceCents: 0, depositId: "d1", folio: "P-2026-000001", accrued: false, notYetDue: false, voided: false },
+      { kind: "payment", date: "2026-10-09", description: "Pago", amountCents: 30000, balanceCents: 0, depositId: "d0", folio: "P-2026-000000", accrued: false, notYetDue: false, voided: true, voidReason: "duplicado" },
+    ],
+  };
+
+  it("without finance:write there is no way to void", async () => {
+    api.getStatement.mockResolvedValue(live);
+    render(<StudentStatementDrawer studentId="st-1" name="Cruz Valentina" canCorrect onClose={() => {}} />);
+    const dialog = await screen.findByRole("dialog", { name: "Estado de cuenta · Cruz Valentina" });
+    await within(dialog).findAllByText(/P-2026-000001/);
+
+    expect(within(dialog).queryByRole("button", { name: /Anular pago/ })).toBeNull();
+  });
+
+  it("offers to void each live receipt once; voiding re-reads the statement and says so", async () => {
+    const user = userEvent.setup();
+    api.getStatement.mockResolvedValue(live);
+    render(<StudentStatementDrawer studentId="st-1" name="Cruz Valentina" canVoid onClose={() => {}} />);
+    const dialog = await screen.findByRole("dialog", { name: "Estado de cuenta · Cruz Valentina" });
+    await within(dialog).findAllByText(/P-2026-000001/);
+
+    const buttons = within(dialog).getAllByRole("button", { name: /Anular pago/ });
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0]).toHaveAccessibleName("Anular pago P-2026-000001");
+    await user.click(buttons[0] as HTMLElement);
+
+    expect(await screen.findByRole("dialog", { name: "Anular d1 P-2026-000001" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Estado de cuenta · Cruz Valentina" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Confirmar anulación" }));
+
+    const back = await screen.findByRole("dialog", { name: "Estado de cuenta · Cruz Valentina" });
+    expect(within(back).getByRole("status")).toHaveTextContent("Pago P-2026-000001 anulado.");
+    expect(api.getStatement).toHaveBeenCalledTimes(2);
+  });
+
+  it("backing out returns to the statement without re-reading it", async () => {
+    const user = userEvent.setup();
+    api.getStatement.mockResolvedValue(live);
+    render(<StudentStatementDrawer studentId="st-1" name="Cruz Valentina" canVoid onClose={() => {}} />);
+    const dialog = await screen.findByRole("dialog", { name: "Estado de cuenta · Cruz Valentina" });
+    await within(dialog).findAllByText(/P-2026-000001/);
+
+    await user.click(within(dialog).getByRole("button", { name: "Anular pago P-2026-000001" }));
+    await user.click(await screen.findByRole("button", { name: "No anular" }));
+
+    expect(await screen.findByRole("dialog", { name: "Estado de cuenta · Cruz Valentina" })).toBeInTheDocument();
+    expect(api.getStatement).toHaveBeenCalledTimes(1);
   });
 });
 

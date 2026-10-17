@@ -480,6 +480,8 @@ export interface StudentsScreenProps {
   canReadStatement?: boolean;
   /** payments:edit: may correct a payment from the statement (T9). */
   canCorrectPayments?: boolean;
+  /** finance:write: may void a payment from the statement (CC-203). UX only. */
+  canVoidPayments?: boolean;
   /**
    * Opens Migrar alumnos (ADR 0033) from the empty roll. Given only with
    * module_student_import on and students:import held.
@@ -504,7 +506,7 @@ const EXPORT_COLUMNS: readonly CsvColumn<Row>[] = [
   { label: "Estado", value: (r) => statusOf(r.student.admissionStatus).label },
 ];
 
-export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false, canVoidAnyNote = false, userId = "", canVerifyCard = false, canRevokeCard = false, canReadStatement = false, canCorrectPayments = false, onOpenImport, canWithdraw = false, linkedStudentId, onLinkedSheetClosed }: StudentsScreenProps): ReactElement {
+export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false, canVoidAnyNote = false, userId = "", canVerifyCard = false, canRevokeCard = false, canReadStatement = false, canCorrectPayments = false, canVoidPayments = false, onOpenImport, canWithdraw = false, linkedStudentId, onLinkedSheetClosed }: StudentsScreenProps): ReactElement {
   const [verifying, setVerifying] = useState(false);
   const [students, setStudents] = useState<Student[]>([]);
   const [cycles, setCycles] = useState<Cycle[]>([]);
@@ -911,6 +913,7 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
           name={formatStudentName(statementOf)}
           subtitle={roomOf(statementOf)}
           canCorrect={canCorrectPayments}
+          canVoid={canVoidPayments}
           onClose={() => setStatementOf(null)}
         />
       )}

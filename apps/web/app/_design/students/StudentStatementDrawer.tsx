@@ -16,6 +16,7 @@ import { Btn } from "../Controls";
 import { DrawerShell } from "../DrawerShell";
 import { Icon } from "../Icon";
 import { CorrectPaymentDrawer } from "../payments/CorrectPaymentDrawer";
+import { VoidDepositDrawer } from "../payments/VoidDepositDrawer";
 
 export interface StudentStatementDrawerProps {
   studentId: string;
@@ -24,6 +25,8 @@ export interface StudentStatementDrawerProps {
   subtitle?: string;
   /** May correct a registered payment (payments:edit, T9). UX only: the gateway decides. */
   canCorrect?: boolean;
+  /** May void a registered payment (finance:write, CC-203). UX only: the gateway decides. */
+  canVoid?: boolean;
   onClose: () => void;
 }
 
@@ -52,11 +55,14 @@ type Load = { state: "loading" } | { state: "failed"; message: string } | { stat
  * what the counter asks for today — and computes nothing: the parents' app and
  * the PDF read the same numbers.
  */
-export function StudentStatementDrawer({ studentId, name, subtitle, canCorrect = false, onClose }: StudentStatementDrawerProps): ReactElement {
+export function StudentStatementDrawer({ studentId, name, subtitle, canCorrect = false, canVoid = false, onClose }: StudentStatementDrawerProps): ReactElement {
   const [load, setLoad] = useState<Load>({ state: "loading" });
   // The receipt being corrected (T9). One dialog at a time: while it is open
   // the statement steps aside, and comes back re-read.
   const [correcting, setCorrecting] = useState<string | undefined>(undefined);
+  // The receipt being voided (CC-203), the same way: the statement steps aside.
+  const [voiding, setVoiding] = useState<ReceiptRef | undefined>(undefined);
+  const [notice, setNotice] = useState("");
   const [downloading, setDownloading] = useState(false);
   const [pdfProblem, setPdfProblem] = useState<string | undefined>(undefined);
   const request = useRef(0);
@@ -103,6 +109,17 @@ export function StudentStatementDrawer({ studentId, name, subtitle, canCorrect =
     );
   }
 
+  if (voiding !== undefined) {
+    return (
+      <VoidDepositDrawer
+        depositId={voiding.depositId}
+        folio={voiding.folio}
+        onCancel={() => setVoiding(undefined)}
+        onVoided={(message) => { setVoiding(undefined); setNotice(message); read(); }}
+      />
+    );
+  }
+
   return (
     <DrawerShell title={`Estado de cuenta · ${name}`} subtitle={subtitle} icon="finance" size="lg" onClose={onClose} footer={footer}>
       {load.state === "loading" && <p style={{ color: "var(--text-muted)" }}>Cargando estado de cuenta…</p>}
@@ -112,12 +129,19 @@ export function StudentStatementDrawer({ studentId, name, subtitle, canCorrect =
           <Btn kind="ghost" onClick={read}>Reintentar</Btn>
         </div>
       )}
-      {load.state === "ready" && <Ledger statement={load.statement} onCorrect={canCorrect ? setCorrecting : undefined} />}
+      <div role="status" style={{ fontSize: 14.5, fontWeight: 600, color: "var(--ok-fg)", marginBottom: notice === "" ? 0 : 12 }}>{notice}</div>
+      {load.state === "ready" && <Ledger statement={load.statement} onCorrect={canCorrect ? setCorrecting : undefined} onVoid={canVoid ? setVoiding : undefined} />}
     </DrawerShell>
   );
 }
 
-function Ledger({ statement, onCorrect }: { statement: Statement; onCorrect?: (depositId: string) => void }): ReactElement {
+/** One receipt, as the void needs it. */
+interface ReceiptRef {
+  depositId: string;
+  folio: string;
+}
+
+function Ledger({ statement, onCorrect, onVoid }: { statement: Statement; onCorrect?: (depositId: string) => void; onVoid?: (receipt: ReceiptRef) => void }): ReactElement {
   const { totals } = statement;
   // A receipt paid by several methods is several lines: it is corrected once,
   // from its first line. A cancelled or replaced receipt is not corrected.
@@ -155,6 +179,7 @@ function Ledger({ statement, onCorrect }: { statement: Statement; onCorrect?: (d
                   m={m}
                   index={i}
                   onCorrect={onCorrect !== undefined && correctable.has(i) && m.depositId !== undefined ? () => onCorrect(m.depositId ?? "") : undefined}
+                  onVoid={onVoid !== undefined && correctable.has(i) && m.depositId !== undefined ? () => onVoid({ depositId: m.depositId ?? "", folio: m.folio ?? "" }) : undefined}
                 />
               ))}
             </tbody>
@@ -173,7 +198,9 @@ function Ledger({ statement, onCorrect }: { statement: Statement; onCorrect?: (d
 const th: CSSProperties = { padding: "8px 10px", borderBottom: "1px solid var(--border)", fontWeight: 600 };
 const td: CSSProperties = { padding: "10px", borderBottom: "1px solid var(--border)", verticalAlign: "top" };
 
-function MovementRow({ m, index, onCorrect }: { m: StatementMovement; index: number; onCorrect?: () => void }): ReactElement {
+const actionStyle: CSSProperties = { display: "inline-flex", alignItems: "center", gap: 6, minHeight: 44, marginTop: 2, padding: "0 4px", fontSize: 13.5, fontWeight: 600, color: "var(--forest)", background: "none", border: "none", cursor: "pointer", textDecoration: "none" };
+
+function MovementRow({ m, index, onCorrect, onVoid }: { m: StatementMovement; index: number; onCorrect?: () => void; onVoid?: () => void }): ReactElement {
   const struck = m.voided || m.superseded === true;
   const muted = struck || m.notYetDue;
   const amount = formatCents(m.amountCents);
@@ -195,6 +222,11 @@ function MovementRow({ m, index, onCorrect }: { m: StatementMovement; index: num
             style={{ display: "inline-flex", alignItems: "center", gap: 6, minHeight: 44, marginTop: 2, padding: "0 4px", fontSize: 13.5, fontWeight: 600, color: "var(--forest)", background: "none", border: "none", cursor: "pointer", textDecoration: "none" }}
           >
             <Icon name="edit" size={15} />Corregir
+          </button>
+        )}
+        {onVoid !== undefined && (
+          <button type="button" onClick={onVoid} aria-label={`Anular pago ${m.folio ?? ""}`.trim()} style={{ ...actionStyle, color: "var(--bad-fg)" }}>
+            <Icon name="trash" size={15} />Anular
           </button>
         )}
         {m.notYetDue && <Tag>Aún no exigible</Tag>}
