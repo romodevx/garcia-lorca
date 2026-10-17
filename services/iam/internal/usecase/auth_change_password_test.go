@@ -7,6 +7,7 @@ import (
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
 	"github.com/garcia-lorca/services/iam/internal/domain"
+	"github.com/garcia-lorca/services/iam/internal/ports"
 	"github.com/garcia-lorca/services/iam/internal/usecase"
 )
 
@@ -47,8 +48,8 @@ func (f *cpUsers) RemoveRole(context.Context, string, string) error { return nil
 func (f *cpUsers) CreateUser(context.Context, domain.User, string) error          { return nil }
 func (f *cpUsers) ListUsers(context.Context) ([]domain.User, error)               { return nil, nil }
 func (f *cpUsers) SetStatus(context.Context, string, domain.Status, string) error { return nil }
-func (f *cpUsers) StatusOf(context.Context, string) (domain.Status, error) {
-	return f.user.Status(), f.findErr
+func (f *cpUsers) SessionStateOf(context.Context, string) (ports.SessionState, error) {
+	return ports.SessionState{Status: f.user.Status(), PasswordChangedAt: f.user.PasswordChangedAt()}, f.findErr
 }
 func (f *cpUsers) SetUserRoles(context.Context, string, []string) error     { return nil }
 func (f *cpUsers) SoftDelete(context.Context, string, string, string) error { return nil }

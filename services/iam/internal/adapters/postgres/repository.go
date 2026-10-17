@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/lib/pq"
@@ -284,25 +285,29 @@ func (r *UserRepo) SetStatus(ctx context.Context, userID string, status domain.S
 	})
 }
 
-// StatusOf reads just the account's lifecycle state — one primary-key lookup,
-// no roles — for the per-request check in ValidateToken. Unknown is
-// KindNotFound.
-func (r *UserRepo) StatusOf(ctx context.Context, userID string) (domain.Status, error) {
-	var texts []string
+// SessionStateOf reads just the account's lifecycle state and session floor —
+// one primary-key lookup, no roles — for the per-request check in
+// ValidateToken. Unknown is KindNotFound.
+func (r *UserRepo) SessionStateOf(ctx context.Context, userID string) (ports.SessionState, error) {
+	var rows []struct {
+		Status            string
+		PasswordChangedAt time.Time
+	}
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
-		return tx.Model(&userModel{}).Where("id = ?", userID).Limit(1).Pluck("status", &texts).Error
+		return tx.Model(&userModel{}).Select("status", "password_changed_at").
+			Where("id = ?", userID).Limit(1).Scan(&rows).Error
 	})
 	if err != nil {
-		return domain.StatusUnspecified, glerrors.Wrap(glerrors.KindInternal, "reading user status", err)
+		return ports.SessionState{}, glerrors.Wrap(glerrors.KindInternal, "reading user session state", err)
 	}
-	if len(texts) == 0 {
-		return domain.StatusUnspecified, glerrors.ErrNotFound
+	if len(rows) == 0 {
+		return ports.SessionState{}, glerrors.ErrNotFound
 	}
-	status, ok := statusToDomain[texts[0]]
+	status, ok := statusToDomain[rows[0].Status]
 	if !ok {
-		return domain.StatusUnspecified, glerrors.New(glerrors.KindInternal, "unknown user status in the database")
+		return ports.SessionState{}, glerrors.New(glerrors.KindInternal, "unknown user status in the database")
 	}
-	return status, nil
+	return ports.SessionState{Status: status, PasswordChangedAt: rows[0].PasswordChangedAt}, nil
 }
 
 // statusDeleted is the status column's value for a soft-deleted account.

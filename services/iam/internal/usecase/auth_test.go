@@ -9,6 +9,7 @@ import (
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
 	"github.com/garcia-lorca/services/iam/internal/domain"
+	"github.com/garcia-lorca/services/iam/internal/ports"
 	"github.com/garcia-lorca/services/iam/internal/usecase"
 )
 
@@ -170,14 +171,15 @@ func (f *fakeUsers) SetStatus(_ context.Context, userID string, status domain.St
 	return nil
 }
 
-// StatusOf reads the account's lifecycle state the way FindByID finds it,
-// failing with findByIDErr when that stands in for an unavailable database.
-func (f *fakeUsers) StatusOf(ctx context.Context, userID string) (domain.Status, error) {
+// SessionStateOf reads the account's lifecycle state and session floor the way
+// FindByID finds it, failing with findByIDErr when that stands in for an
+// unavailable database.
+func (f *fakeUsers) SessionStateOf(ctx context.Context, userID string) (ports.SessionState, error) {
 	u, err := f.FindByID(ctx, userID)
 	if err != nil {
-		return domain.StatusUnspecified, err
+		return ports.SessionState{}, err
 	}
-	return u.Status(), nil
+	return ports.SessionState{Status: u.Status(), PasswordChangedAt: u.PasswordChangedAt()}, nil
 }
 
 // SoftDelete emulates the repository's atomic rule: the only ACTIVE holder of
@@ -285,6 +287,7 @@ func (fakeHasher) Verify(hash, plain string) error {
 // fakeTokens is both issuer and validator; tokens are inspectable strings.
 type fakeTokens struct {
 	lastClaims      domain.Claims
+	accessIssuedAt  time.Time // issued-at reported by ValidateAccessToken
 	refreshFor      string
 	refreshIssuedAt time.Time // issued-at reported by ParseRefreshToken (zero ⇒ no floor)
 	// lastKind is the session kind the last refresh token was issued for, and
@@ -305,7 +308,7 @@ func (t *fakeTokens) IssueRefreshToken(_ context.Context, userID string, kind do
 }
 func (t *fakeTokens) ValidateAccessToken(_ context.Context, token string) (domain.Claims, error) {
 	if token == "access:u1" {
-		return domain.Claims{Subject: "u1", Permissions: []string{"students:read"}}, nil
+		return domain.Claims{Subject: "u1", Permissions: []string{"students:read"}, IssuedAt: t.accessIssuedAt}, nil
 	}
 	return domain.Claims{}, glerrors.ErrUnauthorized
 }

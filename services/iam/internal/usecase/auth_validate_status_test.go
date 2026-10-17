@@ -3,9 +3,11 @@ package usecase_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
 	"github.com/garcia-lorca/services/iam/internal/domain"
+	"github.com/garcia-lorca/services/iam/internal/usecase"
 )
 
 // ISSUE-CC-116 — suspending somebody did not end their session: the access
@@ -70,4 +72,53 @@ func TestCheckPermissionRefusesASuspendedAccount(t *testing.T) {
 	if _, err := svc.CheckPermission(context.Background(), "access:u1", "students:read"); glerrors.KindOf(err) != glerrors.KindUnauthorized {
 		t.Errorf("err = %v, want KindUnauthorized", err)
 	}
+}
+
+// CC-401 — reactivating an account brought its OLD access token back to life:
+// the status check passed again and the token was still within its fifteen
+// minutes. Suspending moves password_changed_at, so an access token minted
+// before it is refused exactly as RefreshToken refuses a refresh token: compared
+// at whole seconds, so the session re-issued in the same second as the change
+// survives.
+func TestValidateTokenRefusesATokenMintedBeforeTheSessionFloor(t *testing.T) {
+	floor := time.Date(2026, 10, 17, 12, 0, 0, 500_000_000, time.UTC) // sub-second, like the column
+	cases := []struct {
+		name     string
+		floor    time.Time
+		issuedAt time.Time
+		wantOK   bool
+	}{
+		{name: "no floor yet", floor: time.Time{}, issuedAt: floor, wantOK: true},
+		{name: "minted a second before the floor", floor: floor, issuedAt: floor.Truncate(time.Second).Add(-time.Second), wantOK: false},
+		{name: "minted long before the floor", floor: floor, issuedAt: floor.Add(-time.Hour), wantOK: false},
+		{name: "minted in the floor's own second", floor: floor, issuedAt: floor.Truncate(time.Second), wantOK: true},
+		{name: "minted after the floor", floor: floor, issuedAt: floor.Add(time.Minute), wantOK: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, users, tokens := validateFixture(t)
+			users.byID["u1"] = users.byID["u1"].WithPasswordChangedAt(tc.floor)
+			tokens.accessIssuedAt = tc.issuedAt
+
+			_, err := svc.ValidateToken(context.Background(), "access:u1")
+
+			if tc.wantOK && err != nil {
+				t.Fatalf("ValidateToken: %v", err)
+			}
+			if !tc.wantOK && glerrors.KindOf(err) != glerrors.KindUnauthorized {
+				t.Errorf("err = %v, want KindUnauthorized", err)
+			}
+		})
+	}
+}
+
+// validateFixture is fixtureService (active u1) with the token double in reach.
+func validateFixture(t *testing.T) (*usecase.AuthService, *fakeUsers, *fakeTokens) {
+	t.Helper()
+	_, users := fixtureService(t, domain.StatusActive)
+	tokens := &fakeTokens{}
+	roles := &fakeRoles{byID: map[string]domain.Role{}}
+	now := func() time.Time { return time.Date(2026, 10, 17, 12, 5, 0, 0, time.UTC) }
+	svc := usecase.NewAuthService(users, roles, fakeHasher{}, tokens, tokens, nil, nil, testTenant, 15*time.Minute, now)
+	return svc, users, tokens
 }

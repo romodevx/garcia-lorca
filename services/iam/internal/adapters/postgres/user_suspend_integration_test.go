@@ -10,8 +10,10 @@ import (
 	"gorm.io/gorm"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
+	"github.com/garcia-lorca/services/iam/internal/adapters/jwt"
 	pgadapter "github.com/garcia-lorca/services/iam/internal/adapters/postgres"
 	"github.com/garcia-lorca/services/iam/internal/domain"
+	"github.com/garcia-lorca/services/iam/internal/usecase"
 )
 
 // ISSUE-CC-117 — suspending follows the last-holder rule deleting follows, under
@@ -76,25 +78,25 @@ func TestSuspendMovesTheRefreshFloorAndReactivateDoesNot(t *testing.T) {
 	}
 }
 
-func TestStatusOfReadsTheLifecycleStateUnderRLS(t *testing.T) {
+func TestSessionStateOfReadsTheLifecycleStateUnderRLS(t *testing.T) {
 	ctx := context.Background()
 	uid := "e3e3e3e3-0000-0000-0000-000000000001"
 	seedUser(t, uid, tenantA, "susp-status@garcialorca.mx", "x", "suspended")
 
-	got, err := pgadapter.NewUserRepo(appDB(t), tenantA).StatusOf(ctx, uid)
+	got, err := pgadapter.NewUserRepo(appDB(t), tenantA).SessionStateOf(ctx, uid)
 	if err != nil {
-		t.Fatalf("StatusOf: %v", err)
+		t.Fatalf("SessionStateOf: %v", err)
 	}
-	if got != domain.StatusSuspended {
-		t.Errorf("status = %v, want suspended", got)
+	if got.Status != domain.StatusSuspended {
+		t.Errorf("status = %v, want suspended", got.Status)
 	}
 
 	// Another tenant cannot see the row at all.
-	if _, err := pgadapter.NewUserRepo(appDB(t), tenantB).StatusOf(ctx, uid); glerrors.KindOf(err) != glerrors.KindNotFound {
-		t.Errorf("StatusOf from tenant B = %v, want KindNotFound (RLS)", err)
+	if _, err := pgadapter.NewUserRepo(appDB(t), tenantB).SessionStateOf(ctx, uid); glerrors.KindOf(err) != glerrors.KindNotFound {
+		t.Errorf("SessionStateOf from tenant B = %v, want KindNotFound (RLS)", err)
 	}
-	if _, err := pgadapter.NewUserRepo(appDB(t), tenantA).StatusOf(ctx, "e3e3e3e3-0000-0000-0000-0000000000ff"); glerrors.KindOf(err) != glerrors.KindNotFound {
-		t.Errorf("StatusOf of an unknown id = %v, want KindNotFound", err)
+	if _, err := pgadapter.NewUserRepo(appDB(t), tenantA).SessionStateOf(ctx, "e3e3e3e3-0000-0000-0000-0000000000ff"); glerrors.KindOf(err) != glerrors.KindNotFound {
+		t.Errorf("SessionStateOf of an unknown id = %v, want KindNotFound", err)
 	}
 }
 
@@ -173,4 +175,61 @@ func waitForLockWaiters(t *testing.T, db *gorm.DB, n int64) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("timed out waiting for %d lock waiters", n)
+}
+
+// CC-401 end to end against Postgres: an access token minted before a
+// suspension stays dead after the account is reactivated, while a token minted
+// after the reactivation works.
+func TestReactivationDoesNotReviveAnAccessTokenFromBeforeTheSuspension(t *testing.T) {
+	ctx := context.Background()
+	uid := "e5e5e5e5-0000-0000-0000-000000000001"
+	seedUser(t, uid, tenantA, "susp-revive@garcialorca.mx", "x", "active")
+	// The seed stamps the floor at insert; move it back so the old token
+	// predates only the suspension, not the account.
+	if err := superDB.Exec("UPDATE users SET password_changed_at = now() - interval '1 hour' WHERE id = ?", uid).Error; err != nil {
+		t.Fatalf("backdate floor: %v", err)
+	}
+	db := appDB(t)
+	t.Cleanup(func() {
+		if sqlDB, err := db.DB(); err == nil {
+			_ = sqlDB.Close()
+		}
+	})
+	repo := pgadapter.NewUserRepo(db, tenantA)
+	secret := []byte("integration-signing-key-0123456789abcdef")
+	// The old token is minted two seconds in the past, so it falls in an
+	// EARLIER second than the suspension (the floor is compared at seconds).
+	past := jwt.NewHMAC(secret, "garcia-lorca", time.Hour, func() time.Time { return time.Now().Add(-2 * time.Second) })
+	present := jwt.NewHMAC(secret, "garcia-lorca", time.Hour, time.Now)
+	auth := usecase.NewAuthService(repo, pgadapter.NewRoleRepo(db, tenantA), nil, present, present, nil, nil, tenantA, 15*time.Minute, time.Now)
+
+	user, err := repo.FindByID(ctx, uid)
+	if err != nil {
+		t.Fatalf("FindByID: %v", err)
+	}
+	old, err := past.IssueAccessToken(ctx, domain.NewAccessClaims(user, time.Now(), 15*time.Minute))
+	if err != nil {
+		t.Fatalf("issue old token: %v", err)
+	}
+	if _, err := auth.ValidateToken(ctx, old); err != nil {
+		t.Fatalf("the old token must work before the suspension: %v", err)
+	}
+
+	if err := repo.SetStatus(ctx, uid, domain.StatusSuspended, "e5e5e5e5-0000-0000-0000-0000000000ff"); err != nil {
+		t.Fatalf("suspend: %v", err)
+	}
+	if err := repo.SetStatus(ctx, uid, domain.StatusActive, "e5e5e5e5-0000-0000-0000-0000000000ff"); err != nil {
+		t.Fatalf("reactivate: %v", err)
+	}
+
+	if _, err := auth.ValidateToken(ctx, old); glerrors.KindOf(err) != glerrors.KindUnauthorized {
+		t.Errorf("old token after reactivation = %v, want KindUnauthorized", err)
+	}
+	fresh, err := present.IssueAccessToken(ctx, domain.NewAccessClaims(user, time.Now(), 15*time.Minute))
+	if err != nil {
+		t.Fatalf("issue fresh token: %v", err)
+	}
+	if _, err := auth.ValidateToken(ctx, fresh); err != nil {
+		t.Errorf("a token minted after the reactivation must work: %v", err)
+	}
 }

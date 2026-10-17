@@ -16,6 +16,10 @@ type Claims struct {
 	Permissions        []string
 	MustChangePassword bool
 	ExpiresAt          time.Time
+	// IssuedAt is the token's `iat`, set when a token is VALIDATED (the issuer
+	// stamps its own clock when signing). Zero when the token carries none,
+	// which every floor check treats as older than any floor.
+	IssuedAt time.Time
 }
 
 // NewAccessClaims builds the claims for a user's access token, expiring ttl

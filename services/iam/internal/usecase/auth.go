@@ -392,23 +392,37 @@ func (s *AuthService) ValidateToken(ctx context.Context, accessToken string) (do
 	if err != nil {
 		return domain.Claims{}, glerrors.New(glerrors.KindUnauthorized, "invalid access token")
 	}
-	if err := s.requireActive(ctx, claims.Subject); err != nil {
+	if err := s.requireLiveSession(ctx, claims); err != nil {
 		return domain.Claims{}, err
 	}
 	return claims, nil
 }
 
-// requireActive refuses a principal whose account is not active right now.
-func (s *AuthService) requireActive(ctx context.Context, userID string) error {
-	status, err := s.users.StatusOf(ctx, userID)
+// requireLiveSession refuses a token whose account is not active right now, or
+// that was minted before the account's session floor (password_changed_at).
+//
+// The floor is what makes reactivation safe (CC-401): suspending moves it, so
+// a token minted before the suspension stays dead when the account comes back,
+// instead of working out the rest of its fifteen minutes. Same comparison as
+// RefreshToken — whole seconds, so the session re-issued in the second of the
+// change survives. (The refresh path may move to a dedicated
+// credential_version, PR #147; this check deliberately keeps to
+// password_changed_at, which every revoking write already moves, so the two
+// tokens stay revoked by the same events.)
+func (s *AuthService) requireLiveSession(ctx context.Context, claims domain.Claims) error {
+	refused := glerrors.New(glerrors.KindUnauthorized, "invalid access token")
+	state, err := s.users.SessionStateOf(ctx, claims.Subject)
 	if glerrors.KindOf(err) == glerrors.KindNotFound {
-		return glerrors.New(glerrors.KindUnauthorized, "invalid access token")
+		return refused
 	}
 	if err != nil {
 		return err
 	}
-	if status != domain.StatusActive {
-		return glerrors.New(glerrors.KindUnauthorized, "invalid access token")
+	if state.Status != domain.StatusActive {
+		return refused
+	}
+	if claims.IssuedAt.Before(state.PasswordChangedAt.Truncate(time.Second)) {
+		return refused
 	}
 	return nil
 }

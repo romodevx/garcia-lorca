@@ -14,6 +14,7 @@ import (
 	grpcadapter "github.com/garcia-lorca/services/iam/internal/adapters/grpc"
 	"github.com/garcia-lorca/services/iam/internal/adapters/jwt"
 	"github.com/garcia-lorca/services/iam/internal/domain"
+	"github.com/garcia-lorca/services/iam/internal/ports"
 	"github.com/garcia-lorca/services/iam/internal/usecase"
 )
 
@@ -59,12 +60,12 @@ func (f *fakeUsers) FindByID(_ context.Context, id string) (domain.User, error) 
 	}
 	return domain.User{}, glerrors.ErrNotFound
 }
-func (f *fakeUsers) StatusOf(ctx context.Context, id string) (domain.Status, error) {
+func (f *fakeUsers) SessionStateOf(ctx context.Context, id string) (ports.SessionState, error) {
 	u, err := f.FindByID(ctx, id)
 	if err != nil {
-		return domain.StatusUnspecified, err
+		return ports.SessionState{}, err
 	}
-	return u.Status(), nil
+	return ports.SessionState{Status: u.Status(), PasswordChangedAt: u.PasswordChangedAt()}, nil
 }
 func (f *fakeUsers) FindAuthByID(_ context.Context, id string) (domain.User, string, error) {
 	if id == f.user.ID() {
