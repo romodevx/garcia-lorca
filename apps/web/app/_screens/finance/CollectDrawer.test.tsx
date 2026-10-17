@@ -328,7 +328,7 @@ describe("CollectDrawer · fecha de pago (tarea 7)", () => {
     const amount = screen.getByLabelText(/Monto a pagar/, { selector: "input" });
     fireEvent.blur(amount);
     fireEvent.change(screen.getByLabelText("Fecha de pago"), { target: { value: "2026-10-03" } });
-    await waitFor(() => expect(amount).toHaveValue("6400.00"));
+    await waitFor(() => expect(amount).toHaveValue("6,400.00"));
   });
 
   it("takes the focus to a date it cannot use, and says what is wrong", async () => {
@@ -455,14 +455,14 @@ describe("CollectDrawer · el adeudo, concepto por concepto (tarea 8)", () => {
     await user.click(await screen.findByRole("checkbox", { name: "Colegiatura noviembre" }));
 
     expect(screen.getByTestId("debt-selected")).toHaveTextContent("9,900");
-    expect(amount()).toHaveValue("9900.00");
+    expect(amount()).toHaveValue("9,900.00");
     await waitFor(() =>
       expect(finance.previewDeposit).toHaveBeenLastCalledWith(expect.any(String), expect.objectContaining({ chargeIds: ["ch-sep", "ch-oct", "ch-nov"] })),
     );
 
     // Back to what is due: the amount returns to it, and no choice is sent.
     await user.click(screen.getByRole("checkbox", { name: "Colegiatura noviembre" }));
-    expect(amount()).toHaveValue("6700.00");
+    expect(amount()).toHaveValue("6,700.00");
     expect(screen.getByTestId("difference")).toHaveTextContent("$0.00");
     await waitFor(() => expect(finance.previewDeposit).toHaveBeenLastCalledWith(expect.any(String), expect.not.objectContaining({ chargeIds: expect.anything() })));
   });
@@ -475,7 +475,7 @@ describe("CollectDrawer · el adeudo, concepto por concepto (tarea 8)", () => {
     } as unknown as financeApi.DepositResult);
     open();
     await user.click(await screen.findByRole("checkbox", { name: "Colegiatura septiembre" }));
-    expect(screen.getByLabelText(/Monto a pagar/, { selector: "input" })).toHaveValue("3200.00");
+    expect(screen.getByLabelText(/Monto a pagar/, { selector: "input" })).toHaveValue("3,200.00");
     await user.click(screen.getByRole("button", { name: "Cobrar" }));
 
     await waitFor(() => expect(finance.registerDeposit).toHaveBeenCalled());
@@ -522,7 +522,7 @@ describe("CollectDrawer · nota de crédito + pago combinado (tarea 8)", () => {
   it("asks for the amount to pay, prefilled with what is expected", async () => {
     open();
     await screen.findByTestId("amount-expected");
-    expect(screen.getByLabelText("Monto a pagar", { selector: "input" })).toHaveValue("6700.00");
+    expect(screen.getByLabelText("Monto a pagar", { selector: "input" })).toHaveValue("6,700.00");
     expect(screen.queryByLabelText("Monto recibido")).toBeNull();
     expect(screen.getByTestId("tender-total")).toHaveTextContent("$6,700.00");
   });
@@ -564,7 +564,7 @@ describe("CollectDrawer · nota de crédito + pago combinado (tarea 8)", () => {
     await user.type(within(tenderRow(1)).getByLabelText("Monto"), "500");
     await user.type(within(tenderRow(1)).getByLabelText("Referencia"), "NC-7");
     await user.click(screen.getByRole("button", { name: "Agregar método" }));
-    expect(within(tenderRow(2)).getByLabelText("Monto")).toHaveValue("6200.00");
+    expect(within(tenderRow(2)).getByLabelText("Monto")).toHaveValue("6,200.00");
     await user.click(screen.getByRole("button", { name: "Cobrar" }));
 
     await waitFor(() => expect(finance.registerDeposit).toHaveBeenCalled());
