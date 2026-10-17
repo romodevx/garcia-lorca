@@ -5,6 +5,7 @@ package postgres_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -221,6 +222,29 @@ func TestNewLevelsGoLastAndListLevelsAnswersInSortOrder(t *testing.T) {
 	l, err := repo.GetLevel(context.Background(), ids[2])
 	require.NoError(t, err)
 	assert.Equal(t, 3, l.SortOrder())
+}
+
+// ISSUE-T14-205: Horarios' level chips came in alphabetical order because the
+// schedule catalog read levels by name, not by the school's configured order.
+func TestScheduleCatalogListsLevelsInSortOrder(t *testing.T) {
+	repo, ids := orderTenant(t, "a6a6a6a6-0000-4000-8000-000000000000", "Secundaria", "Primaria", "Bachillerato")
+	want := []string{ids[1], ids[0], ids[2]}
+	_, err := repo.ReorderLevels(context.Background(), want)
+	require.NoError(t, err)
+
+	cycle, err := domain.NewCycle("a6a6a6a6-0000-4000-8000-0000000000c1", "a6a6a6a6-0000-4000-8000-000000000000", "2026-2027", domain.CycleStatusDraft,
+		time.Date(2026, time.August, 24, 0, 0, 0, 0, time.UTC), time.Date(2027, time.July, 9, 0, 0, 0, 0, time.UTC))
+	require.NoError(t, err)
+	require.NoError(t, repo.CreateCycle(context.Background(), cycle))
+
+	cat, err := repo.LoadScheduleCatalog(context.Background(), cycle.ID())
+
+	require.NoError(t, err)
+	got := make([]string, 0, len(cat.Levels))
+	for _, l := range cat.Levels {
+		got = append(got, l.ID())
+	}
+	assert.Equal(t, want, got)
 }
 
 func TestReorderLevelsRewritesTheWholeOrder(t *testing.T) {
