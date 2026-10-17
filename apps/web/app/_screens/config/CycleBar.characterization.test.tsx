@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -80,13 +80,27 @@ describe("CycleBar — characterization", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Activar ciclo 2027-2028" })).toBeEnabled());
   });
 
-  it("a failed activation shows the cycle failure message outside any drawer", async () => {
+  // Changed on purpose (PR #141 review): with a live year the activation runs
+  // from the confirmation dialog, so its failure is read there, not behind it.
+  it("a failed activation shows the cycle failure message in the confirmation dialog", async () => {
     const user = userEvent.setup();
     setup({ onActivate: vi.fn().mockRejectedValue(new ConfigError(404, "")) });
 
     await user.click(screen.getByRole("button", { name: "Activar ciclo 2027-2028" }));
-    // A live year (2026-2027) is paused, so it asks first (QA CC-102).
-    await user.click(await screen.findByRole("button", { name: "Activar 2027-2028" }));
+    const dialog = await screen.findByRole("dialog", { name: "¿Activar el ciclo 2027-2028?" });
+    await user.click(within(dialog).getByRole("button", { name: "Activar 2027-2028" }));
+
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("El módulo de configuración está apagado.");
+  });
+
+  it("with no live year, a failed activation shows the message outside any dialog", async () => {
+    const user = userEvent.setup();
+    setup({
+      cycles: cycles.map((c) => (c.status === "active" ? { ...c, status: "closed" as const } : c)),
+      onActivate: vi.fn().mockRejectedValue(new ConfigError(404, "")),
+    });
+
+    await user.click(screen.getByRole("button", { name: "Activar ciclo 2027-2028" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("El módulo de configuración está apagado.");
     expect(screen.queryByRole("dialog")).toBeNull();

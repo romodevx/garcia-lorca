@@ -100,6 +100,17 @@ export function CycleBar({ cycles, selectedCycleId, onSelect, onCreate, onActiva
     }
   };
 
+  // From the confirmation dialog: a refusal is thrown back so the dialog shows it.
+  const confirmActivation = async (id: string): Promise<void> => {
+    setActivating(true);
+    setError(undefined);
+    try {
+      await onActivate(id);
+    } finally {
+      setActivating(false);
+    }
+  };
+
   // Pausing the live year of the whole school is not a one-click thing; with no
   // live year there is nothing to pause, and asking would only be a click more.
   const requestActivate = (): void => {
@@ -178,8 +189,9 @@ export function CycleBar({ cycles, selectedCycleId, onSelect, onCreate, onActiva
         <ActivateCycleDialog
           cycleName={selected.name}
           pausedName={live.name}
-          onConfirm={() => { setConfirmingActivation(false); void activate(); }}
-          onCancel={() => setConfirmingActivation(false)}
+          onConfirm={() => confirmActivation(selected.id)}
+          failureMessage={cycleFailureMessage}
+          onClose={() => setConfirmingActivation(false)}
         />
       )}
       {error !== undefined && !creating && <ErrorAlert message={error} />}

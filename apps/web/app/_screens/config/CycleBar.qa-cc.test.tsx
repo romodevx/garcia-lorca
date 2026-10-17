@@ -59,6 +59,25 @@ describe("CC-102 · activating a year asks first when it pauses the live one", (
     expect(props.onActivate).not.toHaveBeenCalled();
   });
 
+  // PR #141 review: a draft stored before the overlap rule cannot be activated;
+  // the refusal is read where the person is looking — in the dialog.
+  it("a refused activation shows the server's sentence inside the dialog, which stays open", async () => {
+    const sentence = 'Las fechas se traslapan con el ciclo "2026-2027" (del 24 de agosto de 2026 al 9 de julio de 2027)';
+    const user = userEvent.setup();
+    setup({ onActivate: vi.fn().mockRejectedValue(new ConfigError(409, sentence, "CYCLE_OVERLAP")) });
+
+    await user.click(screen.getByRole("button", { name: "Activar ciclo 2027-2028" }));
+    const dialog = await screen.findByRole("dialog", { name: "¿Activar el ciclo 2027-2028?" });
+    await user.click(within(dialog).getByRole("button", { name: "Activar 2027-2028" }));
+
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(sentence);
+    expect(screen.getByRole("dialog", { name: "¿Activar el ciclo 2027-2028?" })).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole("button", { name: "Cancelar" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   it("with no live year there is nothing to pause, so it activates at once", async () => {
     const user = userEvent.setup();
     const props = setup({ cycles: [{ ...live, status: "closed" }, draft] });
