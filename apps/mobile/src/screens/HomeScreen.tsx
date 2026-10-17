@@ -12,7 +12,7 @@ import { AsyncErrorState } from "./AsyncStates";
 import { todayHeadline } from "./attendanceView";
 import { chipTint } from "./attendance/tint";
 import { useSchoolMonth } from "./attendance/useSchoolMonth";
-import { pesos } from "./format";
+import { formatLongDay, pesos } from "./format";
 
 /**
  * Inicio: greeting + actionable summary cards, each routing to its detail. The
@@ -53,7 +53,7 @@ export function HomeScreen(): ReactElement {
   const today = todayHeadline(todayRecord);
   const todayTint = chipTint(theme.colors, today.kind);
 
-  const dateLabel = new Date().toLocaleDateString("es-MX", { weekday: "long", day: "numeric", month: "long" });
+  const dateLabel = formatLongDay(new Date());
 
   return (
     <>

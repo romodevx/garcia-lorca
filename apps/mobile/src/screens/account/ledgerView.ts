@@ -19,7 +19,19 @@ export function splitLedger(movements: readonly FamilyMovement[], asOf: string):
   if (asOf === "") {
     return { happened: [...movements].reverse(), upcoming: [] };
   }
-  const happened = movements.filter((m) => m.date <= asOf).reverse();
-  const upcoming = movements.filter((m) => m.date > asOf);
+  const today = calendarDay(asOf);
+  const happened = movements.filter((m) => calendarDay(m.date) <= today).reverse();
+  const upcoming = movements.filter((m) => calendarDay(m.date) > today);
   return { happened, upcoming };
+}
+
+const ISO_DAY_LENGTH = "YYYY-MM-DD".length;
+
+/**
+ * The "YYYY-MM-DD" part of an ISO value. The wire sends bare days today; a
+ * datetime would otherwise compare after its own day ("2026-10-17T…" >
+ * "2026-10-17"). The day as written is the school's day, so no zone math.
+ */
+function calendarDay(iso: string): string {
+  return iso.slice(0, ISO_DAY_LENGTH);
 }

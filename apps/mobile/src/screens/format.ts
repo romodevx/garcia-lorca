@@ -13,6 +13,13 @@ const MONTHS_LONG = [
   "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
 ];
 
+const WEEKDAYS_LONG = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
+
+/** The home's date line, e.g. "sábado, 17 de octubre", from the tables above. */
+export function formatLongDay(date: Date): string {
+  return `${WEEKDAYS_LONG[date.getDay()]}, ${date.getDate()} de ${MONTHS_LONG[date.getMonth()]}`;
+}
+
 /**
  * es-MX day+month label from an ISO date or datetime (e.g. "2026-06-04" →
  * "4 jun"); empty string on an unparseable value. `style` picks the short or long
