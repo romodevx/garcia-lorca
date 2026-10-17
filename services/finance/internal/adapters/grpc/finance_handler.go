@@ -572,6 +572,7 @@ func (h *FinanceHandler) GetDepositReceipt(ctx context.Context, req *connect.Req
 	}
 	return connect.NewResponse(&financev1.GetDepositReceiptResponse{
 		Deposit: toProtoDeposit(got.Deposit), Lines: lines, UnallocatedCents: got.UnallocatedCents,
+		PendingCents: got.PendingCents,
 	}), nil
 }
 

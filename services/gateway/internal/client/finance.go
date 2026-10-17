@@ -490,6 +490,9 @@ type DepositReceipt struct {
 	Deposit          Deposit
 	Lines            []ReceiptLine
 	UnallocatedCents int64
+	// PendingCents is what the paid charges still owed right after this
+	// deposit, worked out by finance in recording order (T14-020).
+	PendingCents int64
 }
 
 // DepositReceipt reads a deposit back for its receipt.
@@ -506,7 +509,8 @@ func (c *FinanceClient) DepositReceipt(ctx context.Context, depositID string) (D
 			ScholarshipCents: l.GetScholarshipCents(), ScholarshipName: l.GetScholarshipName(),
 		})
 	}
-	return DepositReceipt{Deposit: toDeposit(res.Msg.GetDeposit()), Lines: lines, UnallocatedCents: res.Msg.GetUnallocatedCents()}, nil
+	return DepositReceipt{Deposit: toDeposit(res.Msg.GetDeposit()), Lines: lines,
+		UnallocatedCents: res.Msg.GetUnallocatedCents(), PendingCents: res.Msg.GetPendingCents()}, nil
 }
 
 // DepositResult is what the money did, in the shape a receipt needs.

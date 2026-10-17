@@ -1683,9 +1683,15 @@ func (r *Repository) DepositReceipt(ctx context.Context, id string) (ports.Depos
 				ScholarshipName:  row.ScholarshipName,
 			})
 		}
-		// A voided or superseded deposit's money is gone or moved: no credit.
+		// A voided or superseded deposit's money is gone or moved: no credit,
+		// and nothing it left pending.
 		if d.Counts() {
 			out.UnallocatedCents = d.Amount().Int64() - allocated
+			pending, err := pendingAfterDeposit(tx, id)
+			if err != nil {
+				return err
+			}
+			out.PendingCents = pending
 		}
 		return nil
 	})
@@ -1693,6 +1699,35 @@ func (r *Repository) DepositReceipt(ctx context.Context, id string) (ports.Depos
 		return ports.DepositReceipt{}, err
 	}
 	return out, nil
+}
+
+// pendingAfterDeposit is what the charges a deposit paid still owed right after
+// it (T14-020). Payments are ordered by when they were RECORDED, (created_at,
+// id) — never by the day they are dated — so a later deposit backdated before
+// this one does not change its receipt, and two rows recorded at the same
+// instant still fall on one fixed side. The deposit's own rows count in full.
+// Each charge is priced as it stands now (amount − discount − scholarship);
+// a cancelled one owes nothing.
+func pendingAfterDeposit(tx *gorm.DB, depositID string) (int64, error) {
+	var pending int64
+	err := tx.Raw(`WITH mine AS (
+	                   SELECT created_at, id FROM payments WHERE deposit_id = ?
+	                    ORDER BY created_at, id LIMIT 1),
+	               paid AS (SELECT DISTINCT charge_id FROM payments WHERE deposit_id = ?)
+	               SELECT COALESCE(SUM(GREATEST(0,
+	                        c.amount_cents - c.discount_cents - c.scholarship_cents - upto.cents)), 0)
+	                 FROM charges c
+	                 JOIN paid ON paid.charge_id = c.id
+	                 CROSS JOIN mine
+	                 CROSS JOIN LATERAL (
+	                   SELECT COALESCE(SUM(p.amount_cents), 0) AS cents FROM payments p
+	                    WHERE p.charge_id = c.id
+	                      AND (p.deposit_id = ? OR (p.created_at, p.id) < (mine.created_at, mine.id))) upto
+	                WHERE c.status <> ?`, depositID, depositID, depositID, domain.StatusCancelled).Scan(&pending).Error
+	if err != nil {
+		return 0, glerrors.Wrap(glerrors.KindInternal, "reading what the deposit left pending", err)
+	}
+	return pending, nil
 }
 
 // UnallocatedCents is what a family has paid that no charge has claimed.
