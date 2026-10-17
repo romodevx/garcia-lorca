@@ -15,7 +15,8 @@ const MONTHS_PER_YEAR = 12;
 const TERMS_PER_CYCLE = 3;
 const MS_PER_DAY = 86_400_000;
 
-const TRIMESTER_NAMES = ["1.er trimestre", "2.º trimestre", "3.er trimestre"] as const;
+/** What a trimester is called, by its position in the cycle. */
+export const TRIMESTER_NAMES = ["1.er trimestre", "2.º trimestre", "3.er trimestre"] as const;
 
 function monthKey(year: number, monthIndex: number): string {
   return `${year}-${String(monthIndex + 1).padStart(2, "0")}`;
@@ -77,19 +78,34 @@ function addDays(isoDate: string, days: number): string {
   return new Date(Date.parse(`${isoDate}T00:00:00Z`) + days * MS_PER_DAY).toISOString().slice(0, 10);
 }
 
+/** A stretch of days, both ends included. */
+export interface DaySpan {
+  startsOn: string;
+  endsOn: string;
+}
+
+/** The cycle cut in three contiguous thirds; the last ends on the cycle's last day. */
+export function trimesterSpans(cycle: DaySpan): DaySpan[] {
+  const totalDays = Math.round((Date.parse(cycle.endsOn) - Date.parse(cycle.startsOn)) / MS_PER_DAY) + 1;
+  const boundary = (k: number): number => Math.round((totalDays * k) / TERMS_PER_CYCLE);
+  return TRIMESTER_NAMES.map((_, k) => ({
+    startsOn: addDays(cycle.startsOn, boundary(k)),
+    endsOn: addDays(cycle.startsOn, boundary(k + 1) - 1),
+  }));
+}
+
 /**
  * Three trimesters splitting the cycle in contiguous thirds — the quick start
  * for a level with no terms. The months are assigned afterwards, in the grid.
  */
 export function trimesterInputs(cycle: Pick<Cycle, "id" | "startsOn" | "endsOn">, levelId: string): CreateTermInput[] {
-  const totalDays = Math.round((Date.parse(cycle.endsOn) - Date.parse(cycle.startsOn)) / MS_PER_DAY) + 1;
-  const boundary = (k: number): number => Math.round((totalDays * k) / TERMS_PER_CYCLE);
+  const spans = trimesterSpans(cycle);
   return TRIMESTER_NAMES.map((name, k) => ({
     cycleId: cycle.id,
     levelId,
     name,
     ordinal: k + 1,
-    startsOn: addDays(cycle.startsOn, boundary(k)),
-    endsOn: addDays(cycle.startsOn, boundary(k + 1) - 1),
+    startsOn: spans[k]?.startsOn ?? cycle.startsOn,
+    endsOn: spans[k]?.endsOn ?? cycle.endsOn,
   }));
 }

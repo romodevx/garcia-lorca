@@ -122,9 +122,9 @@ describe("LevelPeriodsScreen — a level's grades with their evaluation periods 
     await waitFor(() => expect(field("1° PRIMARIA", 2, "Fin").value).toBe("2027-03-31"));
 
     await userEvent.click(within(gradeBlock("1° PRIMARIA")).getByRole("button", { name: "Agregar periodo" }));
-    expect(field("1° PRIMARIA", 3, "Nombre").value).toBe("PERIODO 3");
+    expect(field("1° PRIMARIA", 3, "Nombre").value).toBe("3.er trimestre");
     expect(field("1° PRIMARIA", 3, "Inicio").value).toBe("2027-04-01");
-    expect(field("1° PRIMARIA", 3, "Fin").value).toBe("2027-06-30");
+    expect(field("1° PRIMARIA", 3, "Fin").value).toBe("2027-07-09");
     expect(field("1° PRIMARIA", 3, "Nombre")).toHaveFocus();
 
     await userEvent.click(within(gradeBlock("1° PRIMARIA")).getByRole("button", { name: "Guardar periodos" }));
@@ -133,7 +133,7 @@ describe("LevelPeriodsScreen — a level's grades with their evaluation periods 
     expect(mocked.saveGradeEvaluationPeriods).toHaveBeenCalledWith(expect.anything(), "g1", "c1", [
       { id: "p1", ordinal: 1, name: "1.ER TRIMESTRE", startsOn: "2026-08-24", endsOn: "2026-11-30" },
       { id: "p2", ordinal: 2, name: "2.º TRIMESTRE", startsOn: "2026-12-01", endsOn: "2027-03-31" },
-      { ordinal: 3, name: "PERIODO 3", startsOn: "2027-04-01", endsOn: "2027-06-30" },
+      { ordinal: 3, name: "3.er trimestre", startsOn: "2027-04-01", endsOn: "2027-07-09" },
     ]);
     expect(await screen.findByText("Periodos de 1° PRIMARIA guardados.")).toBeInTheDocument();
   });

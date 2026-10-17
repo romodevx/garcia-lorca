@@ -50,6 +50,12 @@ type PeriodProgress struct {
 	Expected            int
 	Captured            int
 	Missing             []MissingGrades
+	// ReportCards / SkippedWithoutGrades: what closing now would publish, and
+	// the active pupils it would skip for having no grade in the term (T10);
+	// WithdrawnReportCards: published cards it would withdraw unreplaced.
+	ReportCards          int
+	SkippedWithoutGrades int
+	WithdrawnReportCards int
 }
 
 // ClosePeriodInput closes a term on behalf of the authenticated director.
@@ -60,11 +66,15 @@ type ClosePeriodInput struct {
 	ActorName string
 }
 
-// ClosePeriodResult is what a close answers.
+// ClosePeriodResult is what a close answers: the report cards it published
+// and the active pupils it skipped for having no grade in the term (T10),
+// and the previously published cards it withdrew without a replacement.
 type ClosePeriodResult struct {
-	Status      string
-	Version     int
-	ReportCards int
+	Status               string
+	Version              int
+	ReportCards          int
+	SkippedWithoutGrades int
+	WithdrawnReportCards int
 }
 
 // ReportCardFilter narrows a report-card list; empty fields do not filter.
@@ -177,6 +187,8 @@ func (c *GradesClient) GetPeriodProgress(ctx context.Context, termID string) (Pe
 	return PeriodProgress{
 		TermID: m.GetTermId(), Unfinished: m.GetUnfinished(), EndsOn: m.GetEndsOn(), GroupsWithoutPeriod: m.GetGroupsWithoutPeriod(),
 		Expected: int(m.GetExpected()), Captured: int(m.GetCaptured()), Missing: missing,
+		ReportCards: int(m.GetReportCards()), SkippedWithoutGrades: int(m.GetSkippedWithoutGrades()),
+		WithdrawnReportCards: int(m.GetWithdrawnReportCards()),
 	}, nil
 }
 
@@ -199,7 +211,9 @@ func (c *GradesClient) ClosePeriod(ctx context.Context, in ClosePeriodInput) (Cl
 	if err != nil {
 		return ClosePeriodResult{}, err
 	}
-	return ClosePeriodResult{Status: res.Msg.GetStatus(), Version: int(res.Msg.GetVersion()), ReportCards: int(res.Msg.GetReportCards())}, nil
+	return ClosePeriodResult{Status: res.Msg.GetStatus(), Version: int(res.Msg.GetVersion()), ReportCards: int(res.Msg.GetReportCards()),
+		SkippedWithoutGrades: int(res.Msg.GetSkippedWithoutGrades()),
+		WithdrawnReportCards: int(res.Msg.GetWithdrawnReportCards())}, nil
 }
 
 // ReopenPeriod reopens a closed term (ALREADY_OPEN otherwise).

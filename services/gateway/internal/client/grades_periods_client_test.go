@@ -45,12 +45,13 @@ func (s *stubPeriodsGrades) ListPeriods(_ context.Context, r *connect.Request[gr
 func (s *stubPeriodsGrades) GetPeriodProgress(_ context.Context, r *connect.Request[gradesv1.GetPeriodProgressRequest]) (*connect.Response[gradesv1.GetPeriodProgressResponse], error) {
 	s.progReq = r.Msg
 	return connect.NewResponse(&gradesv1.GetPeriodProgressResponse{TermId: "term-1", Unfinished: true, EndsOn: "2026-11-30", GroupsWithoutPeriod: []string{"2° · A"}, Expected: 9, Captured: 7,
+		ReportCards: 30, SkippedWithoutGrades: 1, WithdrawnReportCards: 2,
 		Missing: []*gradesv1.MissingGrades{{GroupId: "grp-1", GroupLabel: "1° · A", SubjectId: "sub-1", SubjectName: "Matemáticas", TeacherName: "Gabriela", MissingCount: 2}}}), nil
 }
 
 func (s *stubPeriodsGrades) ClosePeriod(_ context.Context, r *connect.Request[gradesv1.ClosePeriodRequest]) (*connect.Response[gradesv1.ClosePeriodResponse], error) {
 	s.closeReq = r.Msg
-	return connect.NewResponse(&gradesv1.ClosePeriodResponse{Status: "closed", Version: 2, ReportCards: 31}), nil
+	return connect.NewResponse(&gradesv1.ClosePeriodResponse{Status: "closed", Version: 2, ReportCards: 31, SkippedWithoutGrades: 1, WithdrawnReportCards: 1}), nil
 }
 
 func (s *stubPeriodsGrades) ReopenPeriod(_ context.Context, r *connect.Request[gradesv1.ReopenPeriodRequest]) (*connect.Response[gradesv1.ReopenPeriodResponse], error) {
@@ -114,12 +115,13 @@ func TestGradesClientPeriodsRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "term-1", stub.progReq.GetTermId())
 	assert.Equal(t, client.PeriodProgress{TermID: "term-1", Unfinished: true, EndsOn: "2026-11-30", GroupsWithoutPeriod: []string{"2° · A"}, Expected: 9, Captured: 7,
+		ReportCards: 30, SkippedWithoutGrades: 1, WithdrawnReportCards: 2,
 		Missing: []client.MissingGrades{{GroupID: "grp-1", GroupLabel: "1° · A", SubjectID: "sub-1", SubjectName: "Matemáticas", TeacherName: "Gabriela", MissingCount: 2}}}, prog)
 
 	closed, err := c.ClosePeriod(ctx, client.ClosePeriodInput{TermID: "term-1", Force: true, ActorID: "usr-dir", ActorName: "Directora"})
 	require.NoError(t, err)
 	assert.True(t, proto.Equal(&gradesv1.ClosePeriodRequest{TermId: "term-1", Force: true, ActorId: "usr-dir", ActorName: "Directora"}, stub.closeReq), "request = %v", stub.closeReq)
-	assert.Equal(t, client.ClosePeriodResult{Status: "closed", Version: 2, ReportCards: 31}, closed)
+	assert.Equal(t, client.ClosePeriodResult{Status: "closed", Version: 2, ReportCards: 31, SkippedWithoutGrades: 1, WithdrawnReportCards: 1}, closed)
 
 	status, err := c.ReopenPeriod(ctx, "term-1", "usr-dir")
 	require.NoError(t, err)

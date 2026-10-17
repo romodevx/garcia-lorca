@@ -4,9 +4,10 @@ import { useEffect, useMemo, useState, type ReactElement } from "react";
 
 import { Toast } from "../../_design/Toast";
 import { API_URL } from "../../api-url";
-import { periodsClient, type CloseResult, type GradingPeriod } from "../../grades/periods";
+import { periodsClient, type GradingPeriod } from "../../grades/periods";
 import { EmptyHint, ErrorAlert } from "../config/parts";
 import { ClosePeriodDialog } from "./periods/ClosePeriodDialog";
+import { publishedMessage } from "./periods/format";
 import { PeriodCard, type PeriodAction } from "./periods/PeriodCard";
 import { ReopenPeriodDialog } from "./periods/ReopenPeriodDialog";
 import { ReportCardsDialog } from "./periods/ReportCardsDialog";
@@ -29,10 +30,6 @@ interface FocusRequest {
 }
 
 const TOAST_MS = 4000;
-
-function publishedMessage(result: CloseResult): string {
-  return result.reportCards === 1 ? "Se publicó 1 boleta" : `Se publicaron ${result.reportCards} boletas`;
-}
 
 /** Periods grouped by level, in the order the server lists the levels and by ordinal inside each. */
 function byLevel(periods: readonly GradingPeriod[]): { levelId: string; levelName: string; periods: GradingPeriod[] }[] {

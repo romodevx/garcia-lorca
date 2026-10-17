@@ -132,13 +132,26 @@ type PeriodProgress struct {
 	Expected            int
 	Captured            int
 	Missing             []MissingGrades
+	// ReportCards is how many report cards closing now would publish, and
+	// SkippedWithoutGrades how many active pupils would get none because
+	// they have no grade in the term's period (T10). WithdrawnReportCards
+	// is how many cards already published for the term closing now would
+	// withdraw: their enrollment has no grade in the term's period any more
+	// (deleted while reopened, or the pupil left).
+	ReportCards          int
+	SkippedWithoutGrades int
+	WithdrawnReportCards int
 }
 
-// CloseResult is what a close answers.
+// CloseResult is what a close answers: the report cards it published and the
+// active pupils it skipped for having no grade in the term's period (T10),
+// and the previously published cards it withdrew without a replacement.
 type CloseResult struct {
-	Status      domain.PeriodStatus
-	Version     int
-	ReportCards int
+	Status               domain.PeriodStatus
+	Version              int
+	ReportCards          int
+	SkippedWithoutGrades int
+	WithdrawnReportCards int
 }
 
 // levelView is one level of one cycle as a period reads it: the catalog and
@@ -218,6 +231,25 @@ func (v levelView) groupsWithoutPeriod(term ports.TermRef) []string {
 	return out
 }
 
+// gradedInTerm is the set of enrollments with at least one grade in the
+// term's period of their OWN grade: only they get a report card (T10). A
+// grade of another period, or of another grade's period, does not count.
+func (v levelView) gradedInTerm(term ports.TermRef, grades []domain.PeriodGrade) map[string]bool {
+	own := make(map[string]string, len(v.enrollments))
+	for _, e := range v.enrollments {
+		if p, ok := v.termPeriod(term, e.GroupID); ok {
+			own[e.ID] = p.ID
+		}
+	}
+	out := map[string]bool{}
+	for _, g := range grades {
+		if id, ok := own[g.EnrollmentID()]; ok && id == g.PeriodID() {
+			out[g.EnrollmentID()] = true
+		}
+	}
+	return out
+}
+
 // span is the earliest start and latest end of the term's period across the
 // level's grades; zero times when no grade has it.
 func (v levelView) span(term ports.TermRef) (start, end time.Time) {
@@ -267,11 +299,18 @@ func (s *PeriodsService) Progress(ctx context.Context, termID string) (PeriodPro
 		return PeriodProgress{}, err
 	}
 	expected, captured, missing := s.tally(view, term, grades)
+	published, err := s.periods.LatestReportCards(ctx, ports.ReportCardFilter{TermID: term.ID})
+	if err != nil {
+		return PeriodProgress{}, err
+	}
 	_, endsOn := view.span(term)
+	inTerm := view.gradedInTerm(term, grades)
 	return PeriodProgress{
 		TermID: term.ID, Unfinished: s.unfinished(view, term), EndsOn: endsOn,
 		GroupsWithoutPeriod: view.groupsWithoutPeriod(term),
 		Expected:            expected, Captured: captured, Missing: missing,
+		ReportCards: len(inTerm), SkippedWithoutGrades: len(view.enrollments) - len(inTerm),
+		WithdrawnReportCards: withdrawnCount(published, inTerm),
 	}, nil
 }
 
@@ -291,10 +330,13 @@ func (s *PeriodsService) ClosedTerms(ctx context.Context, termIDs []string) ([]s
 	return out, nil
 }
 
-// ListPeriods lists every term of a cycle with its closure and progress. It
-// reads the cycle's terms, their closures, the cycle's enrollments, each
-// level's catalog and periods once and every grade of the terms' periods in
-// ONE query.
+// ListPeriods lists every term of a cycle with its closure and progress,
+// except the terms of a level without numeric grades: there is nothing to
+// capture or close there (T10 ISSUE-019). A level whose numeric grades were
+// turned off after one of its terms closed is still listed (closed once ⇒
+// it has published cards to reach). It reads the cycle's terms, their
+// closures, the cycle's enrollments, each level's catalog and periods once
+// and every grade of the terms' periods in ONE query.
 func (s *PeriodsService) ListPeriods(ctx context.Context, cycleID string) ([]Period, error) {
 	terms, err := s.terms.ListTerms(ctx, cycleID, "")
 	if err != nil {
@@ -329,13 +371,22 @@ func (s *PeriodsService) ListPeriods(ctx context.Context, cycleID string) ([]Per
 	if err != nil {
 		return nil, err
 	}
+	everClosed := map[string]bool{}
+	for _, t := range terms {
+		if _, ok := closures[t.ID]; ok {
+			everClosed[t.LevelID] = true
+		}
+	}
 	out := make([]Period, 0, len(terms))
 	for _, t := range terms {
+		v := views[t.LevelID]
+		if !v.catalog.GradingEnabled && !everClosed[t.LevelID] {
+			continue // no numeric grades and no card ever issued: nothing to list (T10 ISSUE-019)
+		}
 		closure, ok := closures[t.ID]
 		if !ok {
 			closure = domain.NewOpenPeriod(t.ID, t.CycleID, t.LevelID)
 		}
-		v := views[t.LevelID]
 		expected, captured, _ := s.tally(v, t, grades)
 		start, end := v.span(t)
 		out = append(out, Period{
@@ -405,6 +456,7 @@ func (s *PeriodsService) Close(ctx context.Context, termID string, force bool, a
 
 	var closed domain.PeriodClosure
 	var issued []domain.ReportCard
+	var withdrawn int
 	err = s.periods.WithPeriodLock(ctx, termID, func(ctx context.Context, tx ports.PeriodTx) error {
 		current, found, err := tx.Closure(ctx)
 		if err != nil {
@@ -426,10 +478,12 @@ func (s *PeriodsService) Close(ctx context.Context, termID string, force bool, a
 		if issued, err = s.buildReportCards(view, term, closed, actor, names, grades); err != nil {
 			return err
 		}
-		news, err := newsworthy(ctx, tx, issued, closed.Version())
+		previous, err := tx.PublishedReportCards(ctx)
 		if err != nil {
 			return err
 		}
+		withdrawn = withdrawnCount(previous, enrollmentSet(issued))
+		news := newsworthy(previous, issued, closed.Version())
 		if err := tx.IssueReportCards(ctx, issued); err != nil {
 			return err
 		}
@@ -446,7 +500,8 @@ func (s *PeriodsService) Close(ctx context.Context, termID string, force bool, a
 		return CloseResult{}, err
 	}
 	s.drainQuietly(ctx)
-	return CloseResult{Status: closed.Status(), Version: closed.Version(), ReportCards: len(issued)}, nil
+	return CloseResult{Status: closed.Status(), Version: closed.Version(), ReportCards: len(issued),
+		SkippedWithoutGrades: len(view.enrollments) - len(issued), WithdrawnReportCards: withdrawn}, nil
 }
 
 // Reopen opens a closed term so its grades can be corrected. Its report cards
@@ -560,13 +615,9 @@ func (s *PeriodsService) publishQueued(ctx context.Context, e ports.OutboxEvent)
 // (version 1) announces every card. A re-close announces only a pupil whose
 // card differs from their previous published one (SameGradesAs) or who had
 // none; an unchanged pupil still gets the new version, silently.
-func newsworthy(ctx context.Context, tx ports.PeriodTx, issued []domain.ReportCard, version int) ([]domain.ReportCard, error) {
+func newsworthy(previous, issued []domain.ReportCard, version int) []domain.ReportCard {
 	if version <= 1 {
-		return issued, nil
-	}
-	previous, err := tx.PublishedReportCards(ctx)
-	if err != nil {
-		return nil, err
+		return issued
 	}
 	byStudent := make(map[string]domain.ReportCard, len(previous))
 	for _, rc := range previous {
@@ -579,7 +630,28 @@ func newsworthy(ctx context.Context, tx ports.PeriodTx, issued []domain.ReportCa
 		}
 		out = append(out, rc)
 	}
-	return out, nil
+	return out
+}
+
+// withdrawnCount is how many of the term's published cards belong to an
+// enrollment outside graded: a close supersedes them with no replacement
+// (ADR 0020), and the director must hear it.
+func withdrawnCount(published []domain.ReportCard, graded map[string]bool) int {
+	n := 0
+	for _, rc := range published {
+		if !graded[rc.EnrollmentID()] {
+			n++
+		}
+	}
+	return n
+}
+
+func enrollmentSet(cards []domain.ReportCard) map[string]bool {
+	out := make(map[string]bool, len(cards))
+	for _, rc := range cards {
+		out[rc.EnrollmentID()] = true
+	}
+	return out
 }
 
 // issuedEvents is one queued GradesPublished per issued report card.
@@ -772,10 +844,12 @@ func (s *PeriodsService) tally(v levelView, term ports.TermRef, grades []domain.
 	return expected, captured, missing
 }
 
-// buildReportCards freezes one report card per active enrollment of the level.
-// Its columns are the pupil's grade's periods up to the term's ordinal; it
-// lists its group's subjects plus any subject graded in those columns, in
-// Spanish name order. The card is named after the pupil's period (each grade
+// buildReportCards freezes one report card per active enrollment of the level
+// that has a grade in the term's period (T10: a pupil without one — a group
+// with no subjects, say — gets no card and so no notification). Its columns
+// are the pupil's grade's periods up to the term's ordinal; it lists its
+// group's subjects plus any subject graded in those columns, in Spanish name
+// order. The card is named after the pupil's period (each grade
 // may name it its own way).
 func (s *PeriodsService) buildReportCards(v levelView, term ports.TermRef, closed domain.PeriodClosure, actor domain.Actor,
 	names map[string]ports.StudentRef, grades []domain.PeriodGrade) ([]domain.ReportCard, error) {
@@ -783,8 +857,12 @@ func (s *PeriodsService) buildReportCards(v levelView, term ports.TermRef, close
 	for _, g := range grades {
 		graded[g.EnrollmentID()] = append(graded[g.EnrollmentID()], g.SubjectID())
 	}
-	out := make([]domain.ReportCard, 0, len(v.enrollments))
+	inTerm := v.gradedInTerm(term, grades)
+	out := make([]domain.ReportCard, 0, len(inTerm))
 	for _, e := range v.enrollments {
+		if !inTerm[e.ID] {
+			continue
+		}
 		student := names[e.StudentID]
 		termName := term.Name
 		if p, ok := v.termPeriod(term, e.GroupID); ok {

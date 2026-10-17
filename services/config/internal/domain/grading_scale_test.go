@@ -45,8 +45,8 @@ func TestNewGradingScale(t *testing.T) {
 	}
 }
 
-// A new level grades on the school's default scale (5–10, one decimal, 6 to
-// pass) unless its name says it is an early-years level, which takes no numeric
+// A new level grades on the school's default scale (5–10, whole numbers only —
+// owner decision T10, ISSUE-011 —, 6 to pass) unless its name says it is an early-years level, which takes no numeric
 // capture. The name is matched without case, accents or padding.
 func TestNewLevelDefaultsGradingByName(t *testing.T) {
 	tests := []struct {
@@ -71,7 +71,7 @@ func TestNewLevelDefaultsGradingByName(t *testing.T) {
 			assert.Equal(t, 500, g.MinHundredths())
 			assert.Equal(t, 1000, g.MaxHundredths())
 			assert.Equal(t, 600, g.PassingHundredths())
-			assert.Equal(t, 1, g.Decimals())
+			assert.Equal(t, 0, g.Decimals(), "grades are whole numbers: a new level starts «Sin decimales»")
 		})
 	}
 }

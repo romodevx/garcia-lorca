@@ -385,7 +385,8 @@ func TestPeriodProgressSkipsPupilsWhoJoinedAfterThePeriod(t *testing.T) {
 	delete(f.grades.rows, gradeKey("enr-3", subjectID, "gl-2-"+period1))
 	res, err := f.svc.Close(context.Background(), firstTermID, false, dirActor)
 	require.NoError(t, err, "complete for every pupil who owes it: no force needed")
-	assert.Equal(t, 3, res.ReportCards)
+	assert.Equal(t, 2, res.ReportCards)
+	assert.Equal(t, 1, res.SkippedWithoutGrades, "enr-3 has no grade in period 1: no card (T10)")
 }
 
 // --- close -------------------------------------------------------------------
@@ -420,6 +421,8 @@ func TestCloseWithForceIssuesReportCards(t *testing.T) {
 	f.capture(t, "enr-1", subjectID, period2, 8)
 	f.capture(t, "enr-1", subject2, period2, 7)
 	f.capture(t, "enr-1", subjectID, period3, 5) // a later period: not on this card
+	f.capture(t, "enr-2", subjectID, period2, 6)
+	f.capture(t, "enr-3", subjectID, "gl-2-"+period2, 8)
 
 	res, err := f.svc.Close(context.Background(), secondTermID, true, dirActor)
 	require.NoError(t, err)
@@ -464,6 +467,42 @@ func TestCloseWithForceIssuesReportCards(t *testing.T) {
 
 	assert.Len(t, f.publisher.published, 3, "one GradesPublished per report card, after the commit")
 	assert.Equal(t, 1, f.directory.calls, "names read once, before the transaction")
+}
+
+// T10 (QA ISSUE-005): a pupil with NO grade in the term's own period gets no
+// report card and no notification — a group without subjects, or a pupil
+// graded only in another period. The close says how many it published and how
+// many it skipped; the preview (Progress) says the same beforehand.
+func TestCloseSkipsPupilsWithoutGradesInThePeriod(t *testing.T) {
+	f := newPeriodsFixture(t)
+	*f.now = time.Date(2026, 12, 5, 15, 0, 0, 0, time.UTC) // period 1 ended
+	f.capture(t, "enr-1", subjectID, period1, 9)
+	f.capture(t, "enr-2", subjectID, period2, 8) // another period: not this one's
+
+	preview, err := f.svc.Progress(context.Background(), firstTermID)
+	require.NoError(t, err)
+	assert.Equal(t, 1, preview.ReportCards, "the dialog can say it beforehand")
+	assert.Equal(t, 2, preview.SkippedWithoutGrades)
+
+	res, err := f.svc.Close(context.Background(), firstTermID, true, dirActor)
+	require.NoError(t, err)
+	assert.Equal(t, usecase.CloseResult{Status: domain.PeriodClosed, Version: 1, ReportCards: 1, SkippedWithoutGrades: 2}, res)
+	require.Len(t, f.periods.cards, 1)
+	assert.Equal(t, "enr-1", f.periods.cards[0].EnrollmentID())
+	require.Len(t, f.publisher.published, 1, "nobody without grades is notified")
+	assert.Equal(t, "stu-1", f.publisher.published[0].StudentID)
+}
+
+// A level where nobody has a grade still closes (force), publishing nothing.
+func TestCloseWithNoGradesAtAllPublishesNothing(t *testing.T) {
+	f := newPeriodsFixture(t)
+	res, err := f.svc.Close(context.Background(), firstTermID, true, dirActor)
+	require.NoError(t, err)
+	assert.Equal(t, usecase.CloseResult{Status: domain.PeriodClosed, Version: 1, ReportCards: 0, SkippedWithoutGrades: 3}, res)
+	assert.True(t, f.grades.closures[firstTermID].IsClosed())
+	assert.Empty(t, f.periods.cards)
+	assert.Empty(t, f.periods.outbox)
+	assert.Empty(t, f.publisher.published)
 }
 
 func TestCloseRefusals(t *testing.T) {
@@ -618,6 +657,48 @@ func TestReCloseNotifiesAPupilWithoutAPreviousCard(t *testing.T) {
 	assert.Equal(t, "stu-3", f.publisher.published[0].StudentID)
 }
 
+// A pupil whose grades were deleted while the term was reopened gets no new
+// card, and their v1 is superseded (withdrawn, as for a withdrawn pupil, ADR
+// 0020). Nobody is notified, but the director is told beforehand (Progress)
+// and after (Close): WithdrawnReportCards counts the term's published cards
+// whose enrollment is not graded now.
+func TestReCloseCountsTheCardsItWithdraws(t *testing.T) {
+	f := newPeriodsFixture(t)
+	f.captureAll(t)
+	_, err := f.svc.Close(context.Background(), firstTermID, false, dirActor)
+	require.NoError(t, err)
+	_, err = f.svc.Reopen(context.Background(), firstTermID, director)
+	require.NoError(t, err)
+	delete(f.grades.rows, gradeKey("enr-3", subjectID, "gl-2-"+period1))
+
+	preview, err := f.svc.Progress(context.Background(), firstTermID)
+	require.NoError(t, err)
+	assert.Equal(t, 1, preview.WithdrawnReportCards, "the dialog warns before closing")
+
+	res, err := f.svc.Close(context.Background(), firstTermID, true, dirActor)
+	require.NoError(t, err)
+	assert.Equal(t, usecase.CloseResult{Status: domain.PeriodClosed, Version: 2, ReportCards: 2,
+		SkippedWithoutGrades: 1, WithdrawnReportCards: 1}, res)
+	for _, rc := range f.periods.cards {
+		if rc.StudentID() == "stu-3" {
+			assert.Equal(t, domain.ReportCardSuperseded, rc.Status(), "v1 is withdrawn")
+		}
+	}
+	assert.Len(t, f.periods.outbox, 3, "no event queued for the withdrawn card")
+}
+
+// A first close withdraws nothing.
+func TestFirstCloseWithdrawsNothing(t *testing.T) {
+	f := newPeriodsFixture(t)
+	f.capture(t, "enr-1", subjectID, period1, 9)
+	preview, err := f.svc.Progress(context.Background(), firstTermID)
+	require.NoError(t, err)
+	assert.Zero(t, preview.WithdrawnReportCards)
+	res, err := f.svc.Close(context.Background(), firstTermID, true, dirActor)
+	require.NoError(t, err)
+	assert.Zero(t, res.WithdrawnReportCards)
+}
+
 func TestReopenRefusals(t *testing.T) {
 	f := newPeriodsFixture(t)
 	_, err := f.svc.Reopen(context.Background(), firstTermID, director)
@@ -633,6 +714,7 @@ func TestReopenRefusals(t *testing.T) {
 func TestCloseQueuesGradesPublishedInItsTransaction(t *testing.T) {
 	f := newPeriodsFixture(t)
 	f.publisher.err = errors.New("broker down")
+	f.captureAll(t)
 	res, err := f.svc.Close(context.Background(), firstTermID, true, dirActor)
 	require.NoError(t, err)
 	assert.Equal(t, 3, res.ReportCards)
@@ -672,6 +754,7 @@ func TestCloseDrainsDetachedFromTheRequest(t *testing.T) {
 	f := newPeriodsFixture(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	f.periods.cancelAfterLock = cancel
+	f.captureAll(t)
 	_, err := f.svc.Close(ctx, firstTermID, true, dirActor)
 	require.NoError(t, err)
 	assert.NoError(t, f.publisher.ctxErr, "the drain must not inherit the request's cancellation")
@@ -690,7 +773,7 @@ func TestListPeriods(t *testing.T) {
 
 	got, err := f.svc.ListPeriods(context.Background(), cycleID)
 	require.NoError(t, err)
-	require.Len(t, got, 4)
+	require.Len(t, got, 3, "T10 ISSUE-019: a level without numeric grades has no period to close")
 	byTerm := map[string]usecase.Period{}
 	for _, p := range got {
 		byTerm[p.Term.ID] = p
@@ -708,8 +791,29 @@ func TestListPeriods(t *testing.T) {
 	assert.Equal(t, 5, second.Expected, "every pupil owes the period, reached or not")
 	assert.Zero(t, second.Captured)
 	assert.True(t, byTerm["term-fourth"].StartsOn.IsZero(), "no grade has a 4th period")
-	assert.Equal(t, "Preescolar", byTerm["term-kinder"].LevelName)
-	assert.Zero(t, byTerm["term-kinder"].Expected, "a level without numeric grades owes nothing")
+	_, listed := byTerm["term-kinder"]
+	assert.False(t, listed, "Preescolar («Lleva calificación numérica» off) is not listed")
+}
+
+// A level whose numeric grades were turned off AFTER a term of it closed
+// still lists its terms: the published cards stay reachable to reopen.
+func TestListPeriodsKeepsALevelWithAClosedTermAfterGradingIsOff(t *testing.T) {
+	f := newPeriodsFixture(t)
+	closed, err := domain.NewOpenPeriod("term-kinder", cycleID, levelPreescolar).Close(dirActor, periodsNow, nil)
+	require.NoError(t, err)
+	f.grades.closures["term-kinder"] = closed
+
+	got, err := f.svc.ListPeriods(context.Background(), cycleID)
+	require.NoError(t, err)
+	var kinder *usecase.Period
+	for i := range got {
+		if got[i].Term.ID == "term-kinder" {
+			kinder = &got[i]
+		}
+	}
+	require.NotNil(t, kinder, "a closed term never disappears")
+	assert.True(t, kinder.Closure.IsClosed())
+	assert.Zero(t, kinder.Expected, "nothing is owed without numeric grades")
 	assert.Equal(t, 1, f.grades.batchCalls, "every grade of the cycle in ONE read")
 }
 
@@ -720,6 +824,7 @@ func TestStudentReportCardsNewestTermFirst(t *testing.T) {
 	f.captureAll(t)
 	_, err := f.svc.Close(context.Background(), firstTermID, false, dirActor)
 	require.NoError(t, err)
+	f.capture(t, "enr-1", subjectID, period2, 8)
 	_, err = f.svc.Close(context.Background(), secondTermID, true, dirActor)
 	require.NoError(t, err)
 	_, err = f.svc.Reopen(context.Background(), firstTermID, director)

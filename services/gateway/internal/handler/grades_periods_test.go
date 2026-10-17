@@ -107,12 +107,13 @@ func TestListPeriodsShape(t *testing.T) {
 
 func TestPeriodProgressShape(t *testing.T) {
 	f := &fakePeriods{progress: client.PeriodProgress{TermID: pTerm, Unfinished: true, EndsOn: "2026-11-30", GroupsWithoutPeriod: []string{"2° · A"}, Expected: 9, Captured: 7,
+		ReportCards: 30, SkippedWithoutGrades: 1, WithdrawnReportCards: 2,
 		Missing: []client.MissingGrades{{GroupID: "grp-1", GroupLabel: "1° · A", SubjectID: "sub-1", SubjectName: "Matemáticas", TeacherName: "Gabriela Rojas", MissingCount: 2}}}}
 	h := handler.NewGradesPeriodsHandler(f, nil)
 	rec := httptest.NewRecorder()
 	h.Progress(rec, withTerm(closerReq(http.MethodGet, "/x", ""), pTerm))
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-	assert.JSONEq(t, `{"termId":"`+pTerm+`","unfinished":true,"endsOn":"2026-11-30","groupsWithoutPeriod":["2° · A"],"expected":9,"captured":7,
+	assert.JSONEq(t, `{"termId":"`+pTerm+`","unfinished":true,"endsOn":"2026-11-30","groupsWithoutPeriod":["2° · A"],"expected":9,"captured":7,"reportCards":30,"skippedWithoutGrades":1,"withdrawnReportCards":2,
 		"missing":[{"groupId":"grp-1","groupLabel":"1° · A","subjectId":"sub-1","subjectName":"Matemáticas","teacherName":"Gabriela Rojas","missingCount":2}]}`, rec.Body.String())
 
 	rec = httptest.NewRecorder()
@@ -124,12 +125,12 @@ func TestPeriodProgressShape(t *testing.T) {
 // The close carries the authenticated director (id + display name) and the
 // force flag; a refusal is 409 with its machine code.
 func TestClosePeriod(t *testing.T) {
-	f := &fakePeriods{closeRes: client.ClosePeriodResult{Status: "closed", Version: 1, ReportCards: 31}}
+	f := &fakePeriods{closeRes: client.ClosePeriodResult{Status: "closed", Version: 1, ReportCards: 31, SkippedWithoutGrades: 1, WithdrawnReportCards: 1}}
 	h := handler.NewGradesPeriodsHandler(f, fakeUserNames{name: "Directora Ruiz"})
 	rec := httptest.NewRecorder()
 	h.Close(rec, withTerm(closerReq(http.MethodPost, "/x", `{"force":true}`), strings.ToUpper(pTerm)))
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-	assert.JSONEq(t, `{"status":"closed","version":1,"reportCards":31}`, rec.Body.String())
+	assert.JSONEq(t, `{"status":"closed","version":1,"reportCards":31,"skippedWithoutGrades":1,"withdrawnReportCards":1}`, rec.Body.String())
 	assert.Equal(t, client.ClosePeriodInput{TermID: pTerm, Force: true, ActorID: pDir, ActorName: "Directora Ruiz"}, f.gotClose)
 
 	rec = httptest.NewRecorder()

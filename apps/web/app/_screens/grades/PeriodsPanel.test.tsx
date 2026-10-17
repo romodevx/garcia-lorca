@@ -33,6 +33,7 @@ const SECUNDARIA: GradingPeriod = { ...OPEN, termId: "t4", levelId: "l2", levelN
 
 const MISSING: PeriodCaptureProgress = {
   termId: "t1", unfinished: false, endsOn: "2026-11-30", groupsWithoutPeriod: [], expected: 450, captured: 412,
+  reportCards: 24, skippedWithoutGrades: 1, withdrawnReportCards: 0,
   missing: [
     { groupId: "g1", groupLabel: "1° PRIMARIA · A", subjectId: "s1", subjectName: "Matemáticas", teacherName: "Ada Lovelace", missingCount: 30 },
     { groupId: "g1", groupLabel: "1° PRIMARIA · A", subjectId: "s2", subjectName: "Historia", teacherName: "Alan Turing", missingCount: 5 },
@@ -48,7 +49,7 @@ beforeEach(() => {
   client = {
     list: vi.fn().mockResolvedValue([OPEN, CLOSED, SECUNDARIA]),
     progress: vi.fn().mockResolvedValue(MISSING),
-    close: vi.fn().mockResolvedValue({ status: "closed", version: 1, reportCards: 124 }),
+    close: vi.fn().mockResolvedValue({ status: "closed", version: 1, reportCards: 124, skippedWithoutGrades: 0, withdrawnReportCards: 0 }),
     reopen: vi.fn().mockResolvedValue({ status: "open" }),
     reportCards: vi.fn().mockResolvedValue([]),
     reportCardPdf: vi.fn().mockResolvedValue({ blob: new Blob(["%PDF"], { type: "application/pdf" }) }),
@@ -106,6 +107,19 @@ describe("PeriodsPanel — cards", () => {
     expect(within(await card("PRIMARIA · 2.º trimestre")).getByRole("button", { name: "Ver boletas" })).toBeInTheDocument();
   });
 
+  it("shows only the levels the server lists: an ungraded Kínder it omits gets no section (T10)", async () => {
+    config.listGradeLevels.mockResolvedValue([
+      { id: "k1", levelId: "lk", name: "1° KINDER", ordinal: 1 },
+      { id: "p1", levelId: "l1", name: "1° PRIMARIA", ordinal: 1 },
+    ]);
+    client.list.mockResolvedValue([OPEN]);
+    render(<PeriodsPanel canClose />);
+
+    expect(await card("PRIMARIA · 1.er trimestre")).toBeInTheDocument();
+    expect(screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent)).toEqual(["PRIMARIA"]);
+    expect(screen.queryByText(/KINDER/i)).toBeNull();
+  });
+
   it("says so when the list cannot load", async () => {
     client.list.mockRejectedValue(new Error("boom"));
     render(<PeriodsPanel canClose />);
@@ -127,11 +141,14 @@ describe("PeriodsPanel — Revisar y cerrar", () => {
     expect(within(groupA).getByText("Historia · Alan Turing · faltan 5")).toBeInTheDocument();
     expect(within(dialog).getByRole("group", { name: "2° PRIMARIA · A" })).toBeInTheDocument();
     expect(within(dialog).queryByRole("button", { name: "Cerrar periodo" })).toBeNull();
+    expect(within(dialog).getByText("Se publicarán 24 boletas. 1 alumno sin calificaciones no recibirá boleta.")).toBeInTheDocument();
+    expect(within(dialog).queryByText(/una boleta por alumno/)).toBeNull();
 
+    client.close.mockResolvedValueOnce({ status: "closed", version: 1, reportCards: 24, skippedWithoutGrades: 1, withdrawnReportCards: 0 });
     await user.click(within(dialog).getByRole("button", { name: "Cerrar de todos modos" }));
 
     expect(client.close).toHaveBeenCalledWith("t1", true);
-    expect(await screen.findByRole("status")).toHaveTextContent("Se publicaron 124 boletas");
+    expect(await screen.findByRole("status")).toHaveTextContent("Se publicaron 24 boletas. 1 alumno sin calificaciones no recibió boleta.");
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(client.list).toHaveBeenCalledTimes(2);
   });
@@ -148,6 +165,24 @@ describe("PeriodsPanel — Revisar y cerrar", () => {
     expect(within(dialog).queryByRole("button", { name: "Cerrar de todos modos" })).toBeNull();
     expect(client.close).toHaveBeenCalledWith("t1", false);
     expect(await screen.findByRole("status")).toHaveTextContent("Se publicaron 124 boletas");
+  });
+
+  it("a re-close warns before and after that it withdraws a boleta a family already saw", async () => {
+    const user = userEvent.setup();
+    client.progress.mockResolvedValue({ ...COMPLETE, reportCards: 2, skippedWithoutGrades: 0, withdrawnReportCards: 1 });
+    client.close.mockResolvedValueOnce({ status: "closed", version: 2, reportCards: 2, skippedWithoutGrades: 0, withdrawnReportCards: 1 });
+    render(<PeriodsPanel canClose />);
+    await user.click(within(await card("PRIMARIA · 1.er trimestre")).getByRole("button", { name: "Revisar y cerrar" }));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(
+      await within(dialog).findByText("Se publicarán 2 boletas. Se retirará 1 boleta ya publicada a un alumno que ya no tiene calificaciones."),
+    ).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Cerrar periodo" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Se publicaron 2 boletas. Se retiró 1 boleta ya publicada a un alumno que ya no tiene calificaciones.",
+    );
   });
 
   it("a MISSING_GRADES refusal (a capture was deleted meanwhile) shows the server's words and the missing list again", async () => {

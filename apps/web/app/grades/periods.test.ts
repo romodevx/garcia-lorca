@@ -34,7 +34,7 @@ describe("periodsClient", () => {
   });
 
   it("reads a period's capture progress", async () => {
-    const progress = { termId: "t1", unfinished: false, endsOn: "2026-11-30", groupsWithoutPeriod: [], expected: 10, captured: 8, missing: [] };
+    const progress = { termId: "t1", unfinished: false, endsOn: "2026-11-30", groupsWithoutPeriod: [], expected: 10, captured: 8, missing: [], reportCards: 4, skippedWithoutGrades: 1, withdrawnReportCards: 0 };
     const fetchMock = vi.fn().mockResolvedValue(json(progress));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -43,10 +43,10 @@ describe("periodsClient", () => {
   });
 
   it("closes with {force} and returns how many boletas were issued", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(json({ status: "closed", version: 1, reportCards: 124 }));
+    const fetchMock = vi.fn().mockResolvedValue(json({ status: "closed", version: 1, reportCards: 124, skippedWithoutGrades: 1, withdrawnReportCards: 0 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(api.close("t1", true)).resolves.toEqual({ status: "closed", version: 1, reportCards: 124 });
+    await expect(api.close("t1", true)).resolves.toEqual({ status: "closed", version: 1, reportCards: 124, skippedWithoutGrades: 1, withdrawnReportCards: 0 });
     const [url, init] = call(fetchMock);
     expect(url).toBe("http://gw/api/v1/grades/periods/t1/close");
     expect(init.method).toBe("POST");

@@ -111,13 +111,15 @@ service GradesService {
 
   // --- period closing and report cards (T7) ---
   // A period is one config term: exactly one level of one cycle, covering a
-  // set of months. Closing it snapshots a report card per active enrollment of
-  // the level (one transaction with the closure) and locks the term's months
-  // for every writer; reopening unlocks them, and closing again issues the
-  // next version, which supersedes the previous one.
+  // set of months. Closing it snapshots a report card per active enrollment
+  // of the level with a grade in the term's period (T10; one transaction with
+  // the closure) and locks the term's months for every writer; reopening
+  // unlocks them, and closing again issues the next version, which supersedes
+  // the previous one.
 
   // ListPeriods lists every term of a cycle with its closure state and capture
-  // progress.
+  // progress, except the terms of a level without numeric grades (T10) that
+  // never closed one.
   rpc ListPeriods(ListPeriodsRequest) returns (ListPeriodsResponse);
   // GetPeriodProgress is one term's capture progress and what is missing,
   // grouped by group and subject. NotFound for an unknown term.
@@ -548,6 +550,15 @@ message GetPeriodProgressResponse {
   // pupils whose grade has no evaluation period of the term's ordinal: the
   // term cannot close until config gives them one (PERIOD_NOT_CONFIGURED).
   repeated string groups_without_period = 9;
+  // T10: report_cards is how many report cards closing now would publish;
+  // skipped_without_grades how many active pupils would get none (and no
+  // notification) because they have no grade in the term's period.
+  int32 report_cards = 10;
+  int32 skipped_without_grades = 11;
+  // withdrawn_report_cards is how many report cards already published for
+  // the term closing now would withdraw without a replacement: their
+  // enrollment has no grade in the term's period any more.
+  int32 withdrawn_report_cards = 12;
 }
 
 message ClosedTermsRequest {
@@ -572,6 +583,12 @@ message ClosePeriodResponse {
   string status = 1;
   int32 version = 2;
   int32 report_cards = 3;
+  // T10: active pupils with no grade in the term's period: no report card,
+  // no notification.
+  int32 skipped_without_grades = 4;
+  // withdrawn_report_cards: previously published report cards this close
+  // withdrew without a replacement (no grade in the term's period any more).
+  int32 withdrawn_report_cards = 5;
 }
 
 message ReopenPeriodRequest {

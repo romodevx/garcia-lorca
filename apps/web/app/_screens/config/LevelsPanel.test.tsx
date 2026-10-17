@@ -74,7 +74,7 @@ describe("LevelsPanel — grading", () => {
 
     await user.click(screen.getByRole("checkbox", { name: "Lleva calificación numérica" }));
 
-    expect(setGrading).toHaveBeenCalledWith("l1", { enabled: false, min: 5, max: 10, decimals: 1, passing: 6 });
+    expect(setGrading).toHaveBeenCalledWith("l1", { enabled: false, min: 5, max: 10, decimals: 0, passing: 6 });
   });
 
   it("offers nothing until a level is chosen", () => {

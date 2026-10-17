@@ -1,7 +1,7 @@
 import type { LevelGrading } from "../../config/api";
 
-/** Most Mexican levels grade 5–10 with one decimal and pass at 6. */
-export const DEFAULT_GRADING: LevelGrading = { enabled: true, min: 5, max: 10, decimals: 1, passing: 6 };
+/** A new level grades 5–10 in whole numbers and passes at 6 (owner decision, T10). */
+export const DEFAULT_GRADING: LevelGrading = { enabled: true, min: 5, max: 10, decimals: 0, passing: 6 };
 
 /** The form's text, as typed. */
 export interface GradingDraft {

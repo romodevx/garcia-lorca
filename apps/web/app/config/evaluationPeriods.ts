@@ -10,11 +10,12 @@
  */
 
 import type { EvaluationPeriod, EvaluationPeriodInput } from "./api";
+import { TRIMESTER_NAMES, trimesterSpans } from "./termMonths";
 
 /** The most periods a grade may have (the server's limit too). */
 export const MAX_PERIODS = 12;
 
-/** How long a new period is proposed to last: a trimester. */
+/** How long a period past the three trimesters is proposed to last. */
 const DEFAULT_PERIOD_MONTHS = 3;
 
 /**
@@ -104,18 +105,35 @@ export function periodProblems(rows: readonly PeriodDraft[], cycle: CycleSpan): 
   return out;
 }
 
+/** The trimester's name for the first three rows; "4.º periodo" and on after them. */
+function periodName(index: number): string {
+  return TRIMESTER_NAMES[index] ?? `${index + 1}.º periodo`;
+}
+
 /**
- * A new row with everything a person would type anyway: the next number, and
- * dates from the day after the last period to three months later (clamped to
- * the cycle). A cycle already covered leaves the dates to the person.
+ * Where a new row starting on `startsOn` ends: the end of its third of the
+ * cycle, so three rows cover the cycle exactly. When the earlier rows already
+ * ran past that third (or it is a fourth row), three months, clamped.
+ */
+function proposedEnd(index: number, startsOn: string, cycle: CycleSpan): string {
+  const thirdEnd = trimesterSpans(cycle)[index]?.endsOn;
+  if (thirdEnd !== undefined && thirdEnd >= startsOn) return thirdEnd;
+  const threeMonths = addDays(addMonths(startsOn, DEFAULT_PERIOD_MONTHS), -1);
+  return threeMonths > cycle.endsOn ? cycle.endsOn : threeMonths;
+}
+
+/**
+ * A new row with everything a person would type anyway: the trimester's name,
+ * and dates from the day after the last period to the end of its third of the
+ * cycle. A cycle already covered leaves the dates to the person.
  */
 export function nextDraft(rows: readonly PeriodDraft[], cycle: CycleSpan, key: string): PeriodDraft {
-  const name = `PERIODO ${rows.length + 1}`;
+  const index = rows.length;
+  const name = periodName(index);
   const lastEnd = rows.reduce((max, r) => (r.endsOn > max ? r.endsOn : max), "");
   const startsOn = lastEnd === "" ? cycle.startsOn : addDays(lastEnd, 1);
   if (startsOn > cycle.endsOn) return { key, id: "", name, startsOn: "", endsOn: "" };
-  const proposedEnd = addDays(addMonths(startsOn, DEFAULT_PERIOD_MONTHS), -1);
-  return { key, id: "", name, startsOn, endsOn: proposedEnd > cycle.endsOn ? cycle.endsOn : proposedEnd };
+  return { key, id: "", name, startsOn, endsOn: proposedEnd(index, startsOn, cycle) };
 }
 
 /** The server's periods of one grade as editable rows, in ordinal order. */

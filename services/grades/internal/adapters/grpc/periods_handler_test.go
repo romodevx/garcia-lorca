@@ -136,13 +136,16 @@ func TestListPeriodsRPC(t *testing.T) {
 
 func TestGetPeriodProgressRPC(t *testing.T) {
 	p := &stubPeriods{progress: usecase.PeriodProgress{TermID: termID, Unfinished: true, EndsOn: time.Date(2026, 11, 30, 0, 0, 0, 0, time.UTC),
-		GroupsWithoutPeriod: []string{"2° · A"}, Expected: 4, Captured: 1,
+		GroupsWithoutPeriod: []string{"2° · A"}, Expected: 4, Captured: 1, ReportCards: 3, SkippedWithoutGrades: 1, WithdrawnReportCards: 2,
 		Missing: []usecase.MissingGrades{{GroupID: groupID, GroupLabel: "1° · A", SubjectID: subjectID, SubjectName: "Matemáticas", TeacherName: "Gabriela", Missing: 3}}}}
 	res, err := periodsHandler(p).GetPeriodProgress(context.Background(), connect.NewRequest(&gradesv1.GetPeriodProgressRequest{TermId: termID}))
 	require.NoError(t, err)
 	m := res.Msg
 	assert.Equal(t, int32(4), m.GetExpected())
 	assert.Equal(t, int32(1), m.GetCaptured())
+	assert.Equal(t, int32(3), m.GetReportCards())
+	assert.Equal(t, int32(1), m.GetSkippedWithoutGrades())
+	assert.Equal(t, int32(2), m.GetWithdrawnReportCards())
 	assert.True(t, m.GetUnfinished())
 	assert.Equal(t, "2026-11-30", m.GetEndsOn())
 	assert.Equal(t, []string{"2° · A"}, m.GetGroupsWithoutPeriod())
@@ -153,12 +156,12 @@ func TestGetPeriodProgressRPC(t *testing.T) {
 
 // A refusal to close is AlreadyExists (409 at the edge) carrying its code.
 func TestClosePeriodRPC(t *testing.T) {
-	p := &stubPeriods{closeRes: usecase.CloseResult{Status: domain.PeriodClosed, Version: 2, ReportCards: 30}}
+	p := &stubPeriods{closeRes: usecase.CloseResult{Status: domain.PeriodClosed, Version: 2, ReportCards: 30, SkippedWithoutGrades: 2, WithdrawnReportCards: 1}}
 	res, err := periodsHandler(p).ClosePeriod(context.Background(), connect.NewRequest(&gradesv1.ClosePeriodRequest{
 		TermId: termID, Force: true, ActorId: "dir", ActorName: "Directora",
 	}))
 	require.NoError(t, err)
-	assert.Equal(t, &gradesv1.ClosePeriodResponse{Status: "closed", Version: 2, ReportCards: 30}, res.Msg)
+	assert.Equal(t, &gradesv1.ClosePeriodResponse{Status: "closed", Version: 2, ReportCards: 30, SkippedWithoutGrades: 2, WithdrawnReportCards: 1}, res.Msg)
 	assert.True(t, p.closeForce)
 	assert.Equal(t, domain.Actor{ID: "dir", Name: "Directora"}, p.closeActor)
 

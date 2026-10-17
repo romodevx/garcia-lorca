@@ -87,6 +87,12 @@ type progressResponse struct {
 	Expected            int                     `json:"expected"`
 	Captured            int                     `json:"captured"`
 	Missing             []missingGradesResponse `json:"missing"`
+	// ReportCards / SkippedWithoutGrades let the close dialog say beforehand
+	// how many cards it publishes and how many pupils it skips (T10), and
+	// WithdrawnReportCards how many published cards it withdraws unreplaced.
+	ReportCards          int `json:"reportCards"`
+	SkippedWithoutGrades int `json:"skippedWithoutGrades"`
+	WithdrawnReportCards int `json:"withdrawnReportCards"`
 }
 
 type closePeriodRequest struct {
@@ -94,9 +100,11 @@ type closePeriodRequest struct {
 }
 
 type closePeriodResponse struct {
-	Status      string `json:"status"`
-	Version     int    `json:"version"`
-	ReportCards int    `json:"reportCards"`
+	Status               string `json:"status"`
+	Version              int    `json:"version"`
+	ReportCards          int    `json:"reportCards"`
+	SkippedWithoutGrades int    `json:"skippedWithoutGrades"`
+	WithdrawnReportCards int    `json:"withdrawnReportCards"`
 }
 
 type periodStatusResponse struct {
@@ -152,6 +160,8 @@ func (h *GradesPeriodsHandler) Progress(w http.ResponseWriter, r *http.Request) 
 		TermID: p.TermID, Unfinished: p.Unfinished, EndsOn: stringOrNil(p.EndsOn),
 		GroupsWithoutPeriod: nonNilMonths(p.GroupsWithoutPeriod),
 		Expected:            p.Expected, Captured: p.Captured, Missing: missing,
+		ReportCards: p.ReportCards, SkippedWithoutGrades: p.SkippedWithoutGrades,
+		WithdrawnReportCards: p.WithdrawnReportCards,
 	})
 }
 
@@ -180,7 +190,8 @@ func (h *GradesPeriodsHandler) Close(w http.ResponseWriter, r *http.Request) {
 		writeConnectError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, closePeriodResponse{Status: res.Status, Version: res.Version, ReportCards: res.ReportCards})
+	writeJSON(w, http.StatusOK, closePeriodResponse{Status: res.Status, Version: res.Version, ReportCards: res.ReportCards,
+		SkippedWithoutGrades: res.SkippedWithoutGrades, WithdrawnReportCards: res.WithdrawnReportCards})
 }
 
 // Reopen handles POST /api/v1/grades/periods/{termId}/reopen.

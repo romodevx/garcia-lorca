@@ -18,11 +18,13 @@ type GradingScale struct {
 }
 
 // The school's default scale and the hard bounds any scale must respect.
+// Grades are whole numbers (owner decision, T10 ISSUE-011): a new level starts
+// «Sin decimales»; migrations/config/0021 gives the column the same default.
 const (
 	defaultGradeMin      = 500
 	defaultGradeMax      = 1000
 	defaultGradePassing  = 600
-	defaultGradeDecimals = 1
+	defaultGradeDecimals = 0
 
 	gradeCeiling     = 10000 // 100.00: the largest mark numeric(5,2) is allowed to hold
 	maxGradeDecimals = 2     // the mark column stores hundredths
@@ -63,7 +65,7 @@ var earlyYearsLevelNames = map[string]bool{
 }
 
 // DefaultGradingScale is the scale a level of this name starts with: 5 to 10,
-// one decimal, 6 to pass — disabled for the early-years levels.
+// whole numbers, 6 to pass — disabled for the early-years levels.
 func DefaultGradingScale(levelName string) GradingScale {
 	return GradingScale{
 		enabled:  !earlyYearsLevelNames[foldLevelName(levelName)],
