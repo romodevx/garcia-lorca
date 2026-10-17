@@ -173,11 +173,16 @@ func TestCycleRoomLabelsPassesAFailureUp(t *testing.T) {
 type fakeRoomLabels struct {
 	labels map[string]string
 	err    error
+	calls  int
 }
 
-func (f fakeRoomLabels) RoomLabels(context.Context) (map[string]string, error) {
+func (f *fakeRoomLabels) RoomLabels(context.Context) (map[string]string, error) {
+	f.calls++
 	return f.labels, f.err
 }
+
+// withLabels is the list as Registro de pagos and Avisos ask for it.
+const withLabels = "/api/v1/students?include=groupLabel"
 
 type listedRoom struct {
 	ID         string  `json:"id"`
@@ -185,10 +190,10 @@ type listedRoom struct {
 	GroupLabel *string `json:"groupLabel"`
 }
 
-func listRooms(t *testing.T, h *handler.StudentsHandler) []listedRoom {
+func listRooms(t *testing.T, h *handler.StudentsHandler, target string) []listedRoom {
 	t.Helper()
 	rec := httptest.NewRecorder()
-	h.List(rec, httptest.NewRequest(http.MethodGet, "/api/v1/students", nil))
+	h.List(rec, httptest.NewRequest(http.MethodGet, target, nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
@@ -209,9 +214,9 @@ func roomPupils() *fakeCreator {
 }
 
 func TestListStudentsCarriesTheGroupLabelWithItsGrade(t *testing.T) {
-	h := handler.NewStudentsHandler(roomPupils(), handler.WithStudentRoomLabels(fakeRoomLabels{labels: map[string]string{"dos": "3° PRIMARIA · B"}}))
+	h := handler.NewStudentsHandler(roomPupils(), handler.WithStudentRoomLabels(&fakeRoomLabels{labels: map[string]string{"dos": "3° PRIMARIA · B"}}))
 
-	got := listRooms(t, h)
+	got := listRooms(t, h, withLabels)
 
 	if got[0].GroupLabel == nil || *got[0].GroupLabel != "3° PRIMARIA · B" {
 		t.Errorf("dos groupLabel = %v, want 3° PRIMARIA · B", got[0].GroupLabel)
@@ -224,10 +229,36 @@ func TestListStudentsCarriesTheGroupLabelWithItsGrade(t *testing.T) {
 	}
 }
 
-func TestListStudentsStillAnswersWhenTheLabelsFail(t *testing.T) {
-	h := handler.NewStudentsHandler(roomPupils(), handler.WithStudentRoomLabels(fakeRoomLabels{err: errors.New("config down")}))
+// The labels cost five catalog reads: only the screens that show them ask.
+func TestListStudentsReadsTheLabelsOnlyWhenAsked(t *testing.T) {
+	for _, target := range []string{"/api/v1/students", "/api/v1/students?status=enrolled", "/api/v1/students?include=profile"} {
+		t.Run(target, func(t *testing.T) {
+			rooms := &fakeRoomLabels{labels: map[string]string{"dos": "3° PRIMARIA · B"}}
+			got := listRooms(t, handler.NewStudentsHandler(roomPupils(), handler.WithStudentRoomLabels(rooms)), target)
+			if rooms.calls != 0 {
+				t.Errorf("RoomLabels called %d times, want 0", rooms.calls)
+			}
+			for _, s := range got {
+				if s.GroupLabel != nil {
+					t.Errorf("%s groupLabel = %q, want absent", s.ID, *s.GroupLabel)
+				}
+			}
+		})
+	}
+}
 
-	got := listRooms(t, h)
+func TestListStudentsAcceptsGroupLabelAmongOtherIncludes(t *testing.T) {
+	rooms := &fakeRoomLabels{labels: map[string]string{"dos": "3° PRIMARIA · B"}}
+	got := listRooms(t, handler.NewStudentsHandler(roomPupils(), handler.WithStudentRoomLabels(rooms)), "/api/v1/students?status=enrolled&include=other,groupLabel")
+	if got[0].GroupLabel == nil {
+		t.Error("groupLabel absent, want it when include lists it among others")
+	}
+}
+
+func TestListStudentsStillAnswersWhenTheLabelsFail(t *testing.T) {
+	h := handler.NewStudentsHandler(roomPupils(), handler.WithStudentRoomLabels(&fakeRoomLabels{err: errors.New("config down")}))
+
+	got := listRooms(t, h, withLabels)
 
 	if len(got) != 2 {
 		t.Fatalf("listed %d pupils, want 2: a label is a courtesy, never a reason to fail", len(got))
@@ -240,7 +271,7 @@ func TestListStudentsStillAnswersWhenTheLabelsFail(t *testing.T) {
 }
 
 func TestListStudentsWithoutALabelSourceOmitsTheLabel(t *testing.T) {
-	for _, s := range listRooms(t, handler.NewStudentsHandler(roomPupils())) {
+	for _, s := range listRooms(t, handler.NewStudentsHandler(roomPupils()), withLabels) {
 		if s.GroupLabel != nil {
 			t.Errorf("%s groupLabel = %q, want absent", s.ID, *s.GroupLabel)
 		}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 	_ "time/tzdata"
 	"unicode/utf8"
@@ -199,7 +200,10 @@ func (h *StudentsHandler) List(w http.ResponseWriter, r *http.Request) {
 		writeConnectError(w, err)
 		return
 	}
-	rooms := h.roomLabels(r.Context())
+	var rooms map[string]string
+	if includes(r.URL.Query().Get("include"), includeGroupLabel) {
+		rooms = h.roomLabels(r.Context())
+	}
 	out := make([]studentResponse, 0, len(res))
 	for _, s := range res {
 		summary := toStudentSummary(s)
@@ -207,6 +211,20 @@ func (h *StudentsHandler) List(w http.ResponseWriter, r *http.Request) {
 		out = append(out, summary)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"students": out})
+}
+
+// includeGroupLabel asks the list for each pupil's classroom label: five
+// catalog reads, so only the screens that show it ask (?include=groupLabel).
+const includeGroupLabel = "groupLabel"
+
+// includes reports whether the comma-separated include list names want.
+func includes(list, want string) bool {
+	for _, part := range strings.Split(list, ",") {
+		if strings.TrimSpace(part) == want {
+			return true
+		}
+	}
+	return false
 }
 
 // roomLabels is the classroom label of each placed pupil. A label is a name,

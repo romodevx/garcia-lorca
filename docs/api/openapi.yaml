@@ -1147,11 +1147,12 @@ paths:
       description: >
         Every pupil, optionally filtered by admission status, without the
         profile (a picker needs names, not addresses). Requires students:read.
-        groupLabel names the pupil's classroom in the current cycle with its
-        grade ("3° PRIMARIA · B"), so a role without config:read (Cobranza)
-        tells two pupils of the same level and letter apart without being
-        handed the catalog (CC-211). It is absent for a pupil not placed in a
-        group of that cycle, and for every pupil when the catalog cannot be
+        With include=groupLabel, each pupil carries groupLabel: the classroom
+        in the current cycle with its grade ("3° PRIMARIA · B"), so a role
+        without config:read (Cobranza) tells two pupils of the same level and
+        letter apart without being handed the catalog (CC-211). It costs five
+        catalog reads, so it is opt-in. It is absent for a pupil not placed in
+        a group of that cycle, and for every pupil when the catalog cannot be
         read: a label never fails the list. Then show level and gradeGroup.
       operationId: listStudents
       security: [{ sessionCookie: [] }]
@@ -1161,6 +1162,11 @@ paths:
           required: false
           description: Admission status to keep; omitted lists every pupil.
           schema: { type: string, enum: [pending, accepted, enrolled, rejected, withdrawn] }
+        - name: include
+          in: query
+          required: false
+          description: Comma-separated extras; groupLabel is the only one. Unknown values are ignored.
+          schema: { type: string, example: "groupLabel" }
       responses:
         '200':
           description: The pupils.
@@ -8433,7 +8439,7 @@ components:
         groupLabel:
           type: string
           example: "3° PRIMARIA · B"
-          description: The classroom in the current cycle, grade included (CC-211). Absent when unknown.
+          description: Only with include=groupLabel. The classroom in the current cycle, grade included (CC-211). Absent when unknown.
         guardianName: { type: string, example: "AUGUSTA BYRON" }
         admissionStatus: { type: string, enum: [pending, accepted, enrolled, rejected, withdrawn] }
         enrollmentNumber: { type: string, example: "2026-00042", description: "The matrícula; absent when none." }
