@@ -1197,21 +1197,28 @@ func (r *Repository) RegisterDeposit(
 		replayed bool
 	)
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
-		original, found, err := depositByIdempotencyKey(tx, d.IdempotencyKey())
-		if err != nil {
+		stored, found, err := replayOf(tx, d.IdempotencyKey())
+		if err != nil || found {
+			record, replayed = stored, found
 			return err
 		}
-		if found {
-			stored, rerr := rebuildDepositRecord(tx, original)
-			if rerr != nil {
-				return rerr
+		// A double click sends the same key twice at once: both miss the
+		// lookup above and queue on the charges' lock. Looked up again under
+		// it, the second finds the first's committed deposit and answers the
+		// replay — not the CC-202 refusal for a month the first just paid,
+		// nor the unique index's conflict. storeDeposit takes the same locks
+		// again, which a transaction already holding them does at no cost.
+		if d.IdempotencyKey() != "" {
+			if _, err := lockedChargesOf(tx, d.StudentID()); err != nil {
+				return err
 			}
-			record = stored
-			replayed = true
-			return nil
+			if stored, found, err = replayOf(tx, d.IdempotencyKey()); err != nil || found {
+				record, replayed = stored, found
+				return err
+			}
 		}
 
-		stored, err := r.storeDeposit(tx, d, plan)
+		stored, err = r.storeDeposit(tx, d, plan)
 		if err != nil {
 			return err
 		}
@@ -1227,6 +1234,19 @@ func (r *Repository) RegisterDeposit(
 		return ports.DepositRecord{}, false, err
 	}
 	return record, replayed, nil
+}
+
+// replayOf is the deposit already stored under key, as a record, if any.
+func replayOf(tx *gorm.DB, key string) (ports.DepositRecord, bool, error) {
+	original, found, err := depositByIdempotencyKey(tx, key)
+	if err != nil || !found {
+		return ports.DepositRecord{}, false, err
+	}
+	stored, err := rebuildDepositRecord(tx, original)
+	if err != nil {
+		return ports.DepositRecord{}, false, err
+	}
+	return stored, true, nil
 }
 
 // storeDeposit writes a new deposit and what it splits into, inside the

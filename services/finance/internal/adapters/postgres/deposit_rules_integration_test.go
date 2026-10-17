@@ -125,6 +125,68 @@ func TestTwoCashiersOnTheSameChargeOneIsRefused(t *testing.T) {
 	assert.Zero(t, credit, "no orphan credit")
 }
 
+// A double click: two requests with the SAME idempotency key at the same
+// instant. Both look the key up before either has stored it, and both queue on
+// the charges' lock. The second one, let through after the first committed,
+// must find the key again and answer the original — a replay — not a 409 from
+// the unique index nor the CC-202 refusal ("ya está pagado").
+func TestASimultaneousDoubleClickIsAReplay(t *testing.T) {
+	ctx := context.Background()
+	const (
+		tenant  = "cc203000-0000-0000-0000-000000000001"
+		student = "cc203000-0000-0000-0000-0000000000a1"
+		charge  = "cc203000-0000-0000-0000-0000000000c1"
+	)
+	seedConceptAndCharge(t, tenant, "cc203000-0000-0000-0000-0000000000b1", "COLEGIATURA QA", charge, student,
+		"cc203000-0000-0000-0000-0000000000e1", 320000, 0, time.Date(2026, 10, 31, 0, 0, 0, 0, time.UTC))
+	repo := appRepo(t, tenant)
+	svc := depositService(t, repo, tenant)
+
+	locked := superDB.Begin()
+	require.NoError(t, locked.Error)
+	var lockedID string
+	require.NoError(t, locked.Raw("SELECT id FROM charges WHERE id = ? FOR UPDATE", charge).Scan(&lockedID).Error)
+
+	const clicks = 2
+	type outcome struct {
+		res usecase.DepositResult
+		err error
+	}
+	results := make(chan outcome, clicks)
+	var wg sync.WaitGroup
+	for range clicks {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			res, err := payChosen(svc, student, charge, "cc203-same-click", 320000)
+			results <- outcome{res, err}
+		}()
+	}
+	if err := awaitLockWaiters(clicks); err != nil {
+		_ = locked.Rollback().Error
+		t.Fatal(err)
+	}
+	require.NoError(t, locked.Commit().Error)
+	wg.Wait()
+	close(results)
+
+	var ids []string
+	replays := 0
+	for o := range results {
+		require.NoError(t, o.err)
+		ids = append(ids, o.res.Deposit.ID())
+		if o.res.Replayed {
+			replays++
+		}
+	}
+	require.Len(t, ids, clicks)
+	assert.Equal(t, ids[0], ids[1], "both clicks answer the same deposit")
+	assert.Equal(t, 1, replays, "the second click is the replay")
+	deposits, err := repo.ListDeposits(ctx, student)
+	require.NoError(t, err)
+	assert.Len(t, deposits, 1)
+}
+
 // awaitLockWaiters waits until n sessions wait on a row lock of charges.
 func awaitLockWaiters(n int) error {
 	deadline := time.Now().Add(10 * time.Second)
