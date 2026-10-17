@@ -46,7 +46,7 @@ func conceptsPlan(t *testing.T, f *fixture, inscription string) {
 // inscriptionCharges lists the pupil's inscription lines by what they read as.
 func inscriptionCharges(t *testing.T, f *fixture) map[string]int {
 	t.Helper()
-	list, err := f.svc.ListCharges(context.Background(), testStudent, testCycle)
+	list, err := allCharges(context.Background(), f.svc, testStudent, testCycle)
 	if err != nil {
 		t.Fatalf("ListCharges: %v", err)
 	}

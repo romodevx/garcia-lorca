@@ -2,7 +2,9 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"net/url"
 	"regexp"
 	"slices"
 	"strconv"
@@ -26,7 +28,7 @@ type FinanceService interface {
 	UpsertTuitionPlan(ctx context.Context, in client.TuitionPlanInput) (client.TuitionPlan, error)
 	ListTuitionPlans(ctx context.Context, cycleID string) ([]client.TuitionPlan, error)
 	RunBilling(ctx context.Context, cycleID, asOfDate string) (client.BillingRun, error)
-	ListCharges(ctx context.Context, studentID, cycleID string) ([]client.Charge, error)
+	ListCharges(ctx context.Context, studentID, cycleID string, page client.PageRequest) (client.ChargePage, error)
 	ApplyDiscount(ctx context.Context, chargeID string, discountCents int64, reason string) (client.Charge, error)
 	CancelCharge(ctx context.Context, chargeID string) (client.Charge, error)
 	RegisterTenderedPayment(ctx context.Context, in client.TenderedPayment) ([]client.Payment, client.Charge, error)
@@ -40,7 +42,7 @@ type FinanceService interface {
 	VoidDeposit(ctx context.Context, id, reason string) error
 	CorrectDeposit(ctx context.Context, in client.CorrectionInput) (client.CorrectionResult, error)
 	DepositCorrections(ctx context.Context, depositID string) ([]client.DepositCorrection, error)
-	ListOverdue(ctx context.Context, cycleID string) ([]client.Charge, error)
+	ListOverdue(ctx context.Context, cycleID string, page client.PageRequest) (client.ChargePage, error)
 }
 
 // FinanceHandler exposes the front-facing (HTTP/JSON) finance endpoints,
@@ -363,14 +365,64 @@ func (h *FinanceHandler) GenerateCharges(w http.ResponseWriter, r *http.Request)
 }
 
 // ListCharges handles GET /api/v1/finance/charges?studentId=...&cycleId=...
+// &pageToken=...&pageSize=... — one page; nextPageToken is absent on the last.
 func (h *FinanceHandler) ListCharges(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	res, err := h.svc.ListCharges(r.Context(), q.Get("studentId"), q.Get("cycleId"))
+	page, ok := readPageRequest(w, q)
+	if !ok {
+		return
+	}
+	res, err := h.svc.ListCharges(r.Context(), q.Get("studentId"), q.Get("cycleId"), page)
 	if err != nil {
 		writeConnectError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"charges": toChargeResponses(res)})
+	writeJSON(w, http.StatusOK, pagedChargesBody("charges", res))
+}
+
+// maxFinancePageSize is the largest page the finance reads serve. It mirrors
+// finance's ports.MaxChargePageSize (and the contract's pageSize maximum); the
+// gateway cannot import another module's internal package, so a change there
+// must be made here too.
+const maxFinancePageSize = 500
+
+// maxFinancePageTokenLen bounds pageToken as the contract does (maxLength).
+// finance mints ~64 characters (base64 of "YYYY-MM-DD|<uuid>"); the headroom
+// lets the opaque shape grow without a contract change.
+const maxFinancePageTokenLen = 128
+
+// readPageRequest reads pageToken and pageSize. pageToken is at most
+// maxFinancePageTokenLen characters; pageSize, when present, must be a whole
+// number in 1..maxFinancePageSize. Anything else answers 400 in the envelope
+// and reports false. An absent pageSize means the service default.
+func readPageRequest(w http.ResponseWriter, q url.Values) (client.PageRequest, bool) {
+	page := client.PageRequest{Token: q.Get("pageToken")}
+	if len(page.Token) > maxFinancePageTokenLen {
+		middleware.WriteError(w, http.StatusBadRequest, "invalid",
+			fmt.Sprintf("pageToken admite como máximo %d caracteres", maxFinancePageTokenLen), map[string]string{"field": "pageToken"})
+		return client.PageRequest{}, false
+	}
+	if !q.Has("pageSize") {
+		return page, true
+	}
+	size, err := strconv.Atoi(q.Get("pageSize"))
+	if err != nil || size < 1 || size > maxFinancePageSize {
+		middleware.WriteError(w, http.StatusBadRequest, "invalid",
+			fmt.Sprintf("pageSize debe ser un entero entre 1 y %d", maxFinancePageSize), map[string]string{"field": "pageSize"})
+		return client.PageRequest{}, false
+	}
+	page.Size = int32(size)
+	return page, true
+}
+
+// pagedChargesBody is a page of charges under listKey, with nextPageToken only
+// when another page exists.
+func pagedChargesBody(listKey string, page client.ChargePage) map[string]any {
+	body := map[string]any{listKey: toChargeResponses(page.Charges)}
+	if page.NextPageToken != "" {
+		body["nextPageToken"] = page.NextPageToken
+	}
+	return body
 }
 
 // ApplyDiscount handles POST /api/v1/finance/charges/{id}/discount. The
@@ -747,14 +799,20 @@ func (h *FinanceHandler) GetAccount(w http.ResponseWriter, r *http.Request) {
 }
 
 // ListOverdue handles GET /api/v1/finance/overdue?cycleId=... — charges past
-// their due date with a remaining balance.
+// their due date with a remaining balance, one page at a time (&pageToken,
+// &pageSize). A page may be short or empty while nextPageToken is present.
 func (h *FinanceHandler) ListOverdue(w http.ResponseWriter, r *http.Request) {
-	res, err := h.svc.ListOverdue(r.Context(), r.URL.Query().Get("cycleId"))
+	q := r.URL.Query()
+	page, ok := readPageRequest(w, q)
+	if !ok {
+		return
+	}
+	res, err := h.svc.ListOverdue(r.Context(), q.Get("cycleId"), page)
 	if err != nil {
 		writeConnectError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"overdue": toChargeResponses(res)})
+	writeJSON(w, http.StatusOK, pagedChargesBody("overdue", res))
 }
 
 // --- tuition (M15) ----------------------------------------------------------

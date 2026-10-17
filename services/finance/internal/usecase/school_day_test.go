@@ -86,7 +86,7 @@ func TestListOverdueIsCutAtTheSchoolsDay(t *testing.T) {
 			require.NoError(t, err)
 			f.clock = tt.instant
 
-			got, err := f.svc.ListOverdue(context.Background(), testCycle)
+			got, err := allOverdue(context.Background(), f.svc, testCycle)
 			require.NoError(t, err)
 
 			assert.Equal(t, tt.today, f.repo.overdueToday.Format("2006-01-02"), "the cutoff handed to the read")
@@ -152,7 +152,7 @@ func TestTheEarlyPaymentWindowLastsTheWholeLocalDay(t *testing.T) {
 // chargeDueOn is the pupil's tuition charge due on that date.
 func chargeDueOn(t *testing.T, f *fixture, due string) ports.ChargeWithPaid {
 	t.Helper()
-	charges, err := f.svc.ListCharges(context.Background(), testStudent, testCycle)
+	charges, err := allCharges(context.Background(), f.svc, testStudent, testCycle)
 	require.NoError(t, err)
 	tuition := f.repo.conceptIDOfKind(domain.KindTuition)
 	for _, c := range charges {

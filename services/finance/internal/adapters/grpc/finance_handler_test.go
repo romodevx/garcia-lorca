@@ -387,37 +387,61 @@ func (f *fakeRepo) ListPayments(_ context.Context, studentID string) ([]domain.P
 	return out, nil
 }
 
-func (f *fakeRepo) ListOverdue(_ context.Context, cycleID string, today time.Time) ([]ports.ChargeWithPaid, error) {
-	var out []ports.ChargeWithPaid
-	for _, c := range f.charges {
-		if cycleID != "" && c.CycleID() != cycleID {
-			continue
+// ListOverduePage pages over the overdue candidates, then drops the settled
+// ones — the order the real query applies them in.
+func (f *fakeRepo) ListOverduePage(_ context.Context, cycleID string, today time.Time, after ports.ChargeCursor, limit int) (ports.ChargePage, error) {
+	page := f.pageOf(func(c domain.Charge) bool {
+		return (cycleID == "" || c.CycleID() == cycleID) &&
+			c.Status() != domain.StatusCancelled && c.DueDate().Before(today)
+	}, after, limit)
+	owed := page.Charges[:0:0]
+	for _, c := range page.Charges {
+		if c.Charge.Effective().Int64()-c.PaidCents > 0 {
+			owed = append(owed, c)
 		}
-		paid := f.paidFor(c.ID())
-		if c.Status() == domain.StatusCancelled || !c.DueDate().Before(today) || c.Effective().Int64()-paid <= 0 {
-			continue
-		}
-		out = append(out, ports.ChargeWithPaid{Charge: c, PaidCents: paid})
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Charge.ID() < out[j].Charge.ID() })
-	return out, nil
+	page.Charges = owed
+	return page, nil
 }
 
-// ListOverduePage is the uncapped keyset walk the billing run uses. This fake
-// holds a handful of charges, so one page always covers them; the walk semantics
-// are exercised properly in the use-case tests.
-func (f *fakeRepo) ListOverduePage(ctx context.Context, cycleID string, today time.Time, after ports.OverdueCursor, limit int) ([]ports.ChargeWithPaid, error) {
-	if !after.IsZero() {
-		return nil, nil // one page is enough here; a second walk is always empty
+func (f *fakeRepo) ListChargesPage(_ context.Context, studentID, cycleID string, after ports.ChargeCursor, limit int) (ports.ChargePage, error) {
+	return f.pageOf(func(c domain.Charge) bool {
+		return (studentID == "" || c.StudentID() == studentID) && (cycleID == "" || c.CycleID() == cycleID)
+	}, after, limit), nil
+}
+
+// afterCursor reports whether c sorts strictly after the cursor in (due_date, id).
+func afterCursor(c domain.Charge, after ports.ChargeCursor) bool {
+	if !c.DueDate().Equal(after.DueDate) {
+		return c.DueDate().After(after.DueDate)
 	}
-	all, err := f.ListOverdue(ctx, cycleID, today)
-	if err != nil {
-		return nil, err
+	return c.ID() > after.ID
+}
+
+// pageOf is the keyset page, in (due_date, id), of the charges keep accepts.
+func (f *fakeRepo) pageOf(keep func(domain.Charge) bool, after ports.ChargeCursor, limit int) ports.ChargePage {
+	var rows []ports.ChargeWithPaid
+	for _, c := range f.charges {
+		if !keep(c) {
+			continue
+		}
+		if !after.IsZero() && !afterCursor(c, after) {
+			continue
+		}
+		rows = append(rows, ports.ChargeWithPaid{Charge: c, PaidCents: f.paidFor(c.ID())})
 	}
-	if limit > 0 && len(all) > limit {
-		return all[:limit], nil
+	sort.Slice(rows, func(i, j int) bool {
+		a, b := rows[i].Charge, rows[j].Charge
+		if !a.DueDate().Equal(b.DueDate()) {
+			return a.DueDate().Before(b.DueDate())
+		}
+		return a.ID() < b.ID()
+	})
+	if len(rows) <= limit {
+		return ports.ChargePage{Charges: rows}
 	}
-	return all, nil
+	last := rows[limit-1].Charge
+	return ports.ChargePage{Charges: rows[:limit], Next: ports.ChargeCursor{DueDate: last.DueDate(), ID: last.ID()}}
 }
 
 // --- fixture -------------------------------------------------------------------

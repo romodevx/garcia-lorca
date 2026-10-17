@@ -283,33 +283,6 @@ func (s *FinanceService) GenerateCharges(ctx context.Context, conceptID, cycleID
 	return created, len(charges) - created, nil
 }
 
-// ListCharges returns charges with what has been collected against each,
-// narrowed by student and/or cycle (either filter alone is enough; an empty one
-// means "any"). At least one is REQUIRED: an unscoped read would hand the caller
-// the tenant's whole ledger, so it is refused as bad input rather than served.
-// The collected total is resolved by the repository in one query, so listing a
-// cycle never degenerates into a payment lookup per charge. The repository caps
-// the result — see its documented bound.
-func (s *FinanceService) ListCharges(ctx context.Context, studentID, cycleID string) ([]ports.ChargeWithPaid, error) {
-	if studentID == "" && cycleID == "" {
-		return nil, glerrors.New(glerrors.KindInvalid, "specify a student or a cycle")
-	}
-	charges, err := s.repo.ListCharges(ctx, studentID, cycleID)
-	if err != nil {
-		return nil, err
-	}
-	// Priced today, as the counter and the statement read them (T18).
-	ids, err := s.conceptIDs(ctx)
-	if err != nil {
-		return nil, err
-	}
-	pricer, err := s.pricerFor(ctx, studentsOf(studentID, charges), ids)
-	if err != nil {
-		return nil, err
-	}
-	return pricer.priceAll(charges, s.clock.Today())
-}
-
 // studentsOf is the one pupil asked about, or every pupil in the list.
 func studentsOf(studentID string, charges []ports.ChargeWithPaid) []string {
 	if studentID != "" {
@@ -847,25 +820,6 @@ func (s *FinanceService) collectionTermsFor(ctx context.Context, studentID strin
 		}
 	}
 	return terms, nil
-}
-
-// ListOverdue returns the charges past due that still owe money, as of the
-// injected clock. An empty cycleID spans every cycle.
-func (s *FinanceService) ListOverdue(ctx context.Context, cycleID string) ([]ports.ChargeWithPaid, error) {
-	rows, err := s.repo.ListOverdue(ctx, cycleID, s.clock.Today())
-	if err != nil {
-		return nil, err
-	}
-	// A month a scholarship settled is not a debt (T18).
-	ids, err := s.conceptIDs(ctx)
-	if err != nil {
-		return nil, err
-	}
-	pricer, err := s.pricerFor(ctx, studentsOf("", rows), ids)
-	if err != nil {
-		return nil, err
-	}
-	return stillOwed(pricer, rows, s.clock.Today())
 }
 
 // requireStudent asserts the student exists, mapping a NotFound to KindInvalid

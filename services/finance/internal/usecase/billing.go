@@ -579,11 +579,6 @@ func (s *FinanceService) levelsWithoutPlan(ctx context.Context, planByLevel map[
 	return out
 }
 
-// overduePageSize is how many overdue charges one page of the walk fetches. It
-// exists so the run holds a bounded slice in memory per round trip, NOT to bound
-// the total: allOverdue keeps going until the pages run out.
-const overduePageSize = 500
-
 // allOverdue walks every overdue charge of the cycle, not the first page of them.
 //
 // This used to call ListOverdue, which caps at 500 rows — right for a screen,
@@ -592,26 +587,18 @@ const overduePageSize = 500
 // the newest debt without a word. The school under-billed and found out from a
 // parent, if at all.
 //
-// Stops on an EMPTY page, never on a short one: the repository applies the
-// still-owing filter after fetching a page, so a page can come back with fewer
-// rows than requested while later pages still hold debt.
+// Follows the repository's Next cursor, never the last row returned: the
+// still-owing filter runs after a page is fetched, so a page of settled charges
+// comes back empty while later pages still hold debt. Stopping on that empty
+// page was the same silent under-billing again
+// (TestRunBillingAccruesPastAPageOfSettledCharges).
+//
+// It is the same walk ListOverduePage serves the screen, scholarship pricing
+// included: a month its scholarship settled in time is not late (T18).
 func (s *FinanceService) allOverdue(ctx context.Context, cycleID string, asOf time.Time) ([]ports.ChargeWithPaid, error) {
-	var (
-		out    []ports.ChargeWithPaid
-		cursor ports.OverdueCursor
-	)
-	for {
-		page, err := s.repo.ListOverduePage(ctx, cycleID, asOf, cursor, overduePageSize)
-		if err != nil {
-			return nil, err
-		}
-		if len(page) == 0 {
-			return out, nil
-		}
-		out = append(out, page...)
-		last := page[len(page)-1].Charge
-		cursor = ports.OverdueCursor{DueDate: last.DueDate(), ID: last.ID()}
-	}
+	return walkPages(func(after ports.ChargeCursor) (ports.ChargePage, error) {
+		return s.overduePage(ctx, cycleID, asOf, after, ports.MaxChargePageSize)
+	})
 }
 
 // accrueLateFees issues one fixed surcharge per completed overdue month, per
@@ -632,18 +619,6 @@ func (s *FinanceService) accrueLateFees(
 ) ([]domain.Charge, error) {
 	overdue, err := s.allOverdue(ctx, cycleID, asOf)
 	if err != nil {
-		return nil, err
-	}
-	// A month its scholarship settled in time is not late (T18).
-	ids, err := s.conceptIDs(ctx)
-	if err != nil {
-		return nil, err
-	}
-	pricer, err := s.pricerFor(ctx, studentsOf("", overdue), ids)
-	if err != nil {
-		return nil, err
-	}
-	if overdue, err = stillOwed(pricer, overdue, asOf); err != nil {
 		return nil, err
 	}
 	planOfStudent := make(map[string]domain.TuitionPlan, len(enrollments))

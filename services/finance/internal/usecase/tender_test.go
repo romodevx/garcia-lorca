@@ -225,7 +225,7 @@ func TestARegisteredPaymentCombinesTenders(t *testing.T) {
 
 func firstOpenCharge(t *testing.T, f *fixture) ports.ChargeWithPaid {
 	t.Helper()
-	charges, err := f.svc.ListCharges(context.Background(), testStudent, "")
+	charges, err := allCharges(context.Background(), f.svc, testStudent, "")
 	if err != nil {
 		t.Fatalf("ListCharges: %v", err)
 	}

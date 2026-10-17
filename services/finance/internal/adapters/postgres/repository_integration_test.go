@@ -793,10 +793,14 @@ func TestListOverdueSelectsPastDueWithBalance(t *testing.T) {
 		t.Fatalf("SaveCharge(cancelled): %v", err)
 	}
 
-	overdue, err := repo.ListOverdue(ctx, cycleOverdue, today)
+	page, err := repo.ListOverduePage(ctx, cycleOverdue, today, ports.ChargeCursor{}, 0)
 	if err != nil {
-		t.Fatalf("ListOverdue: %v", err)
+		t.Fatalf("ListOverduePage: %v", err)
 	}
+	if !page.Next.IsZero() {
+		t.Errorf("Next = %+v, want zero: four candidates fit one page", page.Next)
+	}
+	overdue := page.Charges
 	if len(overdue) != 1 {
 		ids := make([]string, 0, len(overdue))
 		for _, c := range overdue {

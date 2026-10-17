@@ -407,7 +407,16 @@ type FinanceRepository interface {
 	// ListCharges returns charges with their collected totals, resolved in ONE
 	// tenant-bound query rather than a payment lookup per charge (no N+1). An
 	// empty studentID or cycleID skips that filter.
+	//
+	// It is capped at the repository's list bound and meant for the per-pupil
+	// reads inside the use cases (a pupil holds a few dozen charges). A
+	// cycle-wide read MUST walk ListChargesPage instead: a cycle holds thousands.
 	ListCharges(ctx context.Context, studentID, cycleID string) ([]ChargeWithPaid, error)
+	// ListChargesPage returns one page of charges in (due_date, id) order,
+	// starting strictly after `after` (zero = from the beginning), with the
+	// cursor of the next page — zero on the last one. The repository reads one
+	// row ahead, so the last page is known without an extra empty round trip.
+	ListChargesPage(ctx context.Context, studentID, cycleID string, after ChargeCursor, limit int) (ChargePage, error)
 	// ListIssuedLines returns the inscription and fee lines the billing run has
 	// already issued in a cycle (refs `enrollment:` and `fee:`) and not
 	// cancelled, for one student or — with an empty studentID — for the whole
@@ -541,22 +550,19 @@ type FinanceRepository interface {
 	// ListPayments returns every payment posted against the student's charges,
 	// for the account statement.
 	ListPayments(ctx context.Context, studentID string) ([]domain.Payment, error)
-	// ListOverdue returns the charges past their due date that still owe money
-	// (due_date < today, effective - paid > 0, not cancelled). An empty cycleID
-	// spans every cycle. today is passed in, never read from a clock here, so
-	// the query stays deterministic and testable.
-	ListOverdue(ctx context.Context, cycleID string, today time.Time) ([]ChargeWithPaid, error)
-
-	// ListOverduePage walks the overdue set in (due_date, id) order without a
-	// cap, one page at a time, starting strictly after `after`.
+	// ListOverduePage walks the overdue set (due_date < today, not cancelled,
+	// effective - paid > 0) in (due_date, id) order, one page at a time,
+	// starting strictly after `after`. today is passed in, never read from a
+	// clock here, so the query stays deterministic. An empty cycleID spans
+	// every cycle.
 	//
-	// ListOverdue above is capped for the UI, which is correct there: nobody
-	// reads five thousand rows on a screen. The BILLING RUN is different — it
-	// must see every overdue charge or it silently under-bills the newest debt,
-	// and a school with 400 pupils crosses that cap in its first cycle. Two
-	// readers with genuinely different needs, so two methods rather than one
-	// that is wrong for somebody.
-	ListOverduePage(ctx context.Context, cycleID string, today time.Time, after OverdueCursor, limit int) ([]ChargeWithPaid, error)
+	// A page EXAMINES up to `limit` candidates and returns those still owed, so
+	// it may be short — even empty — while more remain. Next is the position of
+	// the last row EXAMINED, not of the last one returned, and is zero only once
+	// the candidates are exhausted. Callers stop on a zero Next, never on a
+	// short or empty page: stopping on an empty page let a run of settled
+	// charges hide every debt behind it.
+	ListOverduePage(ctx context.Context, cycleID string, today time.Time, after ChargeCursor, limit int) (ChargePage, error)
 
 	// EnsureConceptOfKind returns the tenant's concept for a system kind. The id
 	// is supplied by the caller (ids are minted in the use case, not here) and is
@@ -577,17 +583,32 @@ type FinanceRepository interface {
 	ListTuitionPlans(ctx context.Context, cycleID string) ([]domain.TuitionPlan, error)
 }
 
-// OverdueCursor is the keyset position of a page walk: the last (due_date, id)
-// already consumed. Zero means "from the beginning". Keyset and not OFFSET
-// because the billing run writes surcharges WHILE it reads, and OFFSET would
-// skip or repeat rows as the result set shifts underneath it.
-type OverdueCursor struct {
+// MaxChargePageSize is both the default and the largest page of a charge walk
+// (ListChargesPage, ListOverduePage), in the use case and in the repository
+// alike. It bounds what one round trip holds in memory, NOT what a caller can
+// read: a walk goes on until Next comes back zero. The gateway's
+// maxFinancePageSize and the contract's pageSize maximum mirror it.
+const MaxChargePageSize = 500
+
+// ChargeCursor is the keyset position of a page walk over charges: the last
+// (due_date, id) already examined. Passed in, zero means "from the beginning";
+// handed back, zero means "no more pages". Keyset and not OFFSET because the
+// billing run writes surcharges WHILE it reads, and OFFSET would skip or repeat
+// rows as the result set shifts underneath it.
+type ChargeCursor struct {
 	DueDate time.Time
 	ID      string
 }
 
-// IsZero reports the start-from-the-beginning position.
-func (c OverdueCursor) IsZero() bool { return c.ID == "" && c.DueDate.IsZero() }
+// IsZero reports the start-from-the-beginning (or nothing-left) position.
+func (c ChargeCursor) IsZero() bool { return c.ID == "" && c.DueDate.IsZero() }
+
+// ChargePage is one page of a charge walk and where the next one starts.
+type ChargePage struct {
+	Charges []ChargeWithPaid
+	// Next is zero on the last page.
+	Next ChargeCursor
+}
 
 // IssuedLine is one generated line already in the ledger, as the billing run
 // needs it to tell whether a line it wants to issue exists under another ref.

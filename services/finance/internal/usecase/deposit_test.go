@@ -34,7 +34,7 @@ func depositFixture(t *testing.T) *fixture {
 // settleInscription pays the enrolment charge in full on the day it fell due.
 func settleInscription(t *testing.T, f *fixture) {
 	t.Helper()
-	charges, err := f.svc.ListCharges(context.Background(), testStudent, "")
+	charges, err := allCharges(context.Background(), f.svc, testStudent, "")
 	if err != nil {
 		t.Fatalf("ListCharges: %v", err)
 	}
@@ -187,7 +187,7 @@ func TestAMonthClosedByTheRewardKeepsItsSurcharge(t *testing.T) {
 	f := prontoPagoFixture(t)
 	f.clock = time.Date(2026, time.October, 20, 12, 0, 0, 0, time.UTC)
 	runOn(t, f, "2026-10-20")
-	charges, err := f.svc.ListCharges(context.Background(), testStudent, "")
+	charges, err := allCharges(context.Background(), f.svc, testStudent, "")
 	if err != nil {
 		t.Fatalf("ListCharges: %v", err)
 	}
@@ -515,7 +515,7 @@ func TestDailyCashUpWithoutADayIsTheSchoolsToday(t *testing.T) {
 // $6,500 while the drawer held $1,350 more (QA 2026-09-25, ISSUE-010).
 func TestDailyCashUpCountsPaymentsTakenOutsideADeposit(t *testing.T) {
 	f := depositFixture(t)
-	charges, err := f.svc.ListCharges(context.Background(), testStudent, "")
+	charges, err := allCharges(context.Background(), f.svc, testStudent, "")
 	if err != nil {
 		t.Fatalf("ListCharges: %v", err)
 	}

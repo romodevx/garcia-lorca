@@ -178,6 +178,7 @@ type fakeRepo struct {
 	// Recorded call arguments, for the tests that assert on the call itself.
 	overdueCycleID      string
 	overdueToday        time.Time
+	lastPageLimit       int
 	lastDerivedStatus   string
 	cancelIfUnpaidCalls int
 }
@@ -815,75 +816,71 @@ func (f *fakeRepo) ListPayments(_ context.Context, studentID string) ([]domain.P
 	return out, nil
 }
 
-// overdueCap mirrors the real repository's maxListLimit. The fake used to return
-// everything, which made it MORE capable than production and hid a money bug:
-// past this many overdue charges the billing run silently stopped accruing
-// surcharges. A fake that cannot express the production bound cannot catch it.
-const overdueCap = 500
-
-func (f *fakeRepo) ListOverdue(_ context.Context, cycleID string, today time.Time) ([]ports.ChargeWithPaid, error) {
-	all, err := f.listOverdueFrom(cycleID, today)
-	if err != nil {
-		return nil, err
-	}
-	if len(all) > overdueCap {
-		return all[:overdueCap], nil
-	}
-	return all, nil
-}
-
-// ListOverduePage is the paged read the billing run uses: it walks the whole set
-// in (due_date, id) order instead of stopping at a cap.
-func (f *fakeRepo) ListOverduePage(_ context.Context, cycleID string, today time.Time, after ports.OverdueCursor, limit int) ([]ports.ChargeWithPaid, error) {
-	all, err := f.listOverdueFrom(cycleID, today)
-	if err != nil {
-		return nil, err
-	}
-	var out []ports.ChargeWithPaid
-	for _, c := range all {
-		if !after.IsZero() && !afterCursor(c, after) {
-			continue
-		}
-		out = append(out, c)
-		if len(out) == limit {
-			break
-		}
-	}
-	return out, nil
-}
-
-func afterCursor(c ports.ChargeWithPaid, after ports.OverdueCursor) bool {
-	if c.Charge.DueDate().After(after.DueDate) {
-		return true
-	}
-	return c.Charge.DueDate().Equal(after.DueDate) && c.Charge.ID() > after.ID
-}
-
-func (f *fakeRepo) listOverdueFrom(cycleID string, today time.Time) ([]ports.ChargeWithPaid, error) {
+// ListOverduePage pages over the overdue CANDIDATES (past due, not cancelled)
+// and only then drops the settled ones, exactly as the real query does. A fake
+// that filtered first could never return the empty-but-not-last page that hid
+// debt from the billing run.
+func (f *fakeRepo) ListOverduePage(_ context.Context, cycleID string, today time.Time, after ports.ChargeCursor, limit int) (ports.ChargePage, error) {
 	f.overdueCycleID, f.overdueToday = cycleID, today
+	f.lastPageLimit = limit
+	page := pageOf(f.sortedCharges(func(c domain.Charge) bool {
+		return (cycleID == "" || c.CycleID() == cycleID) &&
+			c.Status() != domain.StatusCancelled && c.DueDate().Before(today)
+	}), after, limit)
+	owed := page.Charges[:0:0]
+	for _, c := range page.Charges {
+		if c.Charge.Effective().Int64()-c.PaidCents > 0 {
+			owed = append(owed, c)
+		}
+	}
+	page.Charges = owed
+	return page, nil
+}
+
+// ListChargesPage is the keyset page of the charges matching the filter.
+func (f *fakeRepo) ListChargesPage(_ context.Context, studentID, cycleID string, after ports.ChargeCursor, limit int) (ports.ChargePage, error) {
+	f.lastPageLimit = limit
+	return pageOf(f.sortedCharges(func(c domain.Charge) bool {
+		return (studentID == "" || c.StudentID() == studentID) && (cycleID == "" || c.CycleID() == cycleID)
+	}), after, limit), nil
+}
+
+// sortedCharges is every charge `keep` accepts, with its collected total, in
+// (due_date, id) — the same total order the real query uses, so a cursor walk
+// over this fake means what it means in production.
+func (f *fakeRepo) sortedCharges(keep func(domain.Charge) bool) []ports.ChargeWithPaid {
 	var out []ports.ChargeWithPaid
 	for _, c := range f.charges {
-		if cycleID != "" && c.CycleID() != cycleID {
-			continue
+		if keep(c) {
+			out = append(out, f.withPaid(c))
 		}
-		if c.Status() == domain.StatusCancelled || !c.DueDate().Before(today) {
-			continue
-		}
-		paid := f.paidFor(c.ID())
-		if c.Effective().Int64()-paid <= 0 {
-			continue
-		}
-		out = append(out, f.withPaid(c))
 	}
-	// (due_date, id) — the same total order the real query uses, so a cursor
-	// walk over this fake means what it means in production.
-	sort.Slice(out, func(i, j int) bool {
-		if !out[i].Charge.DueDate().Equal(out[j].Charge.DueDate()) {
-			return out[i].Charge.DueDate().Before(out[j].Charge.DueDate())
-		}
-		return out[i].Charge.ID() < out[j].Charge.ID()
-	})
-	return out, nil
+	sort.Slice(out, func(i, j int) bool { return chargeBefore(out[i].Charge, out[j].Charge) })
+	return out
+}
+
+func chargeBefore(a, b domain.Charge) bool {
+	if !a.DueDate().Equal(b.DueDate()) {
+		return a.DueDate().Before(b.DueDate())
+	}
+	return a.ID() < b.ID()
+}
+
+// pageOf cuts the page strictly after `after` and says where the next starts.
+func pageOf(sorted []ports.ChargeWithPaid, after ports.ChargeCursor, limit int) ports.ChargePage {
+	start := 0
+	if !after.IsZero() {
+		start = sort.Search(len(sorted), func(i int) bool {
+			c := sorted[i].Charge
+			return c.DueDate().After(after.DueDate) || (c.DueDate().Equal(after.DueDate) && c.ID() > after.ID)
+		})
+	}
+	rest := sorted[start:]
+	if len(rest) <= limit {
+		return ports.ChargePage{Charges: rest}
+	}
+	last := rest[limit-1].Charge
+	return ports.ChargePage{Charges: rest[:limit], Next: ports.ChargeCursor{DueDate: last.DueDate(), ID: last.ID()}}
 }
 
 // --- fixtures ----------------------------------------------------------------

@@ -203,8 +203,8 @@ func TestUpsertTuitionPlanRejectsAnUnknownCycle(t *testing.T) {
 // under-billed and nobody was told.
 //
 // The unit tests could not see it because the fake repository returned
-// everything: the double was MORE capable than production. It now models the cap
-// on ListOverdue and offers the paged read the run actually uses.
+// everything: the double was MORE capable than production. It now offers only
+// the keyset pages the run actually walks, cut the way the real query cuts them.
 func TestRunBillingAccruesBeyondTheListCap(t *testing.T) {
 	f := billingFixture(t)
 	const pupils = 700 // deliberately more than the 500-row cap
@@ -286,7 +286,7 @@ func TestADueDateOnAClosedDayMovesToTheNextWorkingDay(t *testing.T) {
 
 	runOn(t, f, "2026-11-15")
 
-	charges, err := f.svc.ListCharges(context.Background(), testStudent, testCycle)
+	charges, err := allCharges(context.Background(), f.svc, testStudent, testCycle)
 	if err != nil {
 		t.Fatalf("ListCharges: %v", err)
 	}
@@ -321,7 +321,7 @@ func TestALevelDiscountComesOffEveryMonth(t *testing.T) {
 
 	runOn(t, f, "2026-09-15")
 
-	charges, err := f.svc.ListCharges(context.Background(), testStudent, testCycle)
+	charges, err := allCharges(context.Background(), f.svc, testStudent, testCycle)
 	if err != nil {
 		t.Fatalf("ListCharges: %v", err)
 	}
@@ -362,7 +362,7 @@ func TestALevelDiscountDoesNotTouchTheInscription(t *testing.T) {
 
 	runOn(t, f, "2026-09-15")
 
-	charges, err := f.svc.ListCharges(context.Background(), testStudent, testCycle)
+	charges, err := allCharges(context.Background(), f.svc, testStudent, testCycle)
 	if err != nil {
 		t.Fatalf("ListCharges: %v", err)
 	}
@@ -417,7 +417,7 @@ func ladderFixtureFrom(t *testing.T, secondRungFrom time.Time) *fixture {
 // issuedTo maps a pupil's charges by description.
 func issuedTo(t *testing.T, f *fixture, student string) map[string]int64 {
 	t.Helper()
-	list, err := f.svc.ListCharges(context.Background(), student, testCycle)
+	list, err := allCharges(context.Background(), f.svc, student, testCycle)
 	if err != nil {
 		t.Fatalf("ListCharges: %v", err)
 	}
@@ -488,7 +488,7 @@ func TestTheLadderNeverRepricesWhatSomebodyNegotiated(t *testing.T) {
 	f := ladderFixture(t)
 	runOn(t, f, "2026-09-15")
 
-	list, err := f.svc.ListCharges(context.Background(), testStudent, testCycle)
+	list, err := allCharges(context.Background(), f.svc, testStudent, testCycle)
 	if err != nil {
 		t.Fatalf("ListCharges: %v", err)
 	}
@@ -508,7 +508,7 @@ func TestTheLadderNeverRepricesWhatSomebodyNegotiated(t *testing.T) {
 	if got.EnrollmentRepriced != 0 {
 		t.Errorf("repriced %d negotiated charges, want 0", got.EnrollmentRepriced)
 	}
-	after, err := f.svc.ListCharges(context.Background(), testStudent, testCycle)
+	after, err := allCharges(context.Background(), f.svc, testStudent, testCycle)
 	if err != nil {
 		t.Fatalf("ListCharges: %v", err)
 	}
@@ -576,7 +576,7 @@ func TestPayingCollectsTheTierInForceOnTheDayTheMoneyArrives(t *testing.T) {
 		t.Fatalf("RegisterDeposit: %v", err)
 	}
 
-	list, err := f.svc.ListCharges(context.Background(), testStudent, testCycle)
+	list, err := allCharges(context.Background(), f.svc, testStudent, testCycle)
 	if err != nil {
 		t.Fatalf("ListCharges: %v", err)
 	}
@@ -712,7 +712,7 @@ func TestTheQuoteDoesNotRePriceWhatSomebodyNegotiated(t *testing.T) {
 		f := ladderFixtureFrom(t, secondRungFrom)
 		runOn(t, f, "2026-09-15")
 
-		list, err := f.svc.ListCharges(context.Background(), testStudent, testCycle)
+		list, err := allCharges(context.Background(), f.svc, testStudent, testCycle)
 		if err != nil {
 			t.Fatalf("ListCharges: %v", err)
 		}
@@ -888,7 +888,7 @@ func TestAPaymentDatedYearsBackReachesNothingBelowTheFirstTier(t *testing.T) {
 
 func chargeNamed(t *testing.T, f *fixture, student, name string) ports.ChargeWithPaid {
 	t.Helper()
-	list, err := f.svc.ListCharges(context.Background(), student, testCycle)
+	list, err := allCharges(context.Background(), f.svc, student, testCycle)
 	if err != nil {
 		t.Fatalf("ListCharges: %v", err)
 	}
@@ -955,7 +955,7 @@ func TestTheInscriptionOfAMidYearJoinerIsNotBornOverdue(t *testing.T) {
 
 	got := runOn(t, f, "2027-03-25")
 
-	list, err := f.svc.ListCharges(context.Background(), "stu-late", testCycle)
+	list, err := allCharges(context.Background(), f.svc, "stu-late", testCycle)
 	if err != nil {
 		t.Fatalf("ListCharges: %v", err)
 	}
@@ -1009,5 +1009,36 @@ func TestRunBillingSkipsEveryChargeForWithdrawnEnrollment(t *testing.T) {
 	}
 	if len(f.repo.charges) != 0 {
 		t.Errorf("ledger has %d charges for withdrawn pupil", len(f.repo.charges))
+	}
+}
+
+// TestRunBillingAccruesPastAPageOfSettledCharges is the regression for the
+// empty-page stop in the run's overdue walk.
+//
+// The repository drops settled charges AFTER it fetches a page, so a page of
+// 500 charges families already paid comes back empty while the walk is not
+// over. The run used to stop there, and every debt ordered after those 500
+// earned no surcharge: the same silent under-billing the keyset walk ended.
+func TestRunBillingAccruesPastAPageOfSettledCharges(t *testing.T) {
+	f := billingFixture(t)
+	concept := f.seedConcept(t, "Colegiatura anterior", 100000)
+	const settled = ports.MaxChargePageSize + 1 // a whole page of them, and then some
+	for i := 0; i < settled; i++ {
+		// Due before the run's inscription (2026-08-10), so in (due_date, id)
+		// order every one of them is examined first.
+		c, err := f.svc.CreateCharge(context.Background(), seedChargeInput(concept.ID(), i, "2026-08-01"))
+		requireNoError(t, err)
+		if _, _, err := f.svc.RegisterPayment(context.Background(), c.Charge.ID(), 100000, domain.MethodCash, "", ""); err != nil {
+			t.Fatalf("settle %d: %v", i, err)
+		}
+	}
+
+	// The inscription, still owed and overdue by 15 September, is the one
+	// charge that earns a surcharge (see TestRunBillingAccruesBeyondTheListCap).
+	got := runOn(t, f, "2026-09-15")
+
+	if got.LateFeesCreated != 1 {
+		t.Fatalf("late fees = %d, want 1 — the run stopped on a page of settled charges and skipped the debt behind it",
+			got.LateFeesCreated)
 	}
 }

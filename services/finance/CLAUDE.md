@@ -72,6 +72,14 @@ ledger operations run in a single transaction (Unit of Work).
   snapshots — reads `paid_on`. The mapper refuses undated money (`KindInternal`).
   "No future date" compares days: a picked day after `Today()` is refused.
   New code that writes a payment or deposit MUST call `WithPaidOn`.
+- **Cycle-wide charge reads are keyset-paged (T14).** `ListCharges` and
+  `ListOverdue` RPCs take `page_token`/`page_size` (default and max 500) and
+  answer `next_page_token`, an opaque `(due_date, id)` cursor
+  (`adapters/grpc/page_token.go`); a token the service did not mint is
+  InvalidArgument. The overdue cursor is the last row EXAMINED: the still-owed
+  filter runs after the page is read, so a page may be empty while more remain.
+  Walk until the cursor is zero (`walkPages`), never stop on a short page. The
+  repo's unpaged `ListCharges` (capped at 500) is for per-pupil reads only.
 - Bulk `GenerateCharges` is idempotent via `UNIQUE(tenant, student, cycle,
   concept)` + ON CONFLICT DO NOTHING (re-run reports created vs skipped).
 - `RegisterPayment` is idempotent when the caller sends an `idempotency_key`:

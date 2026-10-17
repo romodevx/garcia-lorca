@@ -27,7 +27,7 @@ openapi: 3.1.0
 
 info:
   title: García Lorca API
-  version: 0.17.0
+  version: 0.18.0
   license:
     name: Proprietary
     url: https://garcialorca.edu.mx/legal
@@ -3746,6 +3746,134 @@ paths:
         '404': { $ref: '#/components/responses/ModuleDisabled' }
         '409': { $ref: '#/components/responses/PlainLevelBeingDeleted' }
 
+  /api/v1/finance/charges:
+    get:
+      tags: [finance-payments]
+      summary: One page of charges of a pupil and/or a school year
+      description: >
+        Charges in (dueDate, id) order with their collected and remaining
+        totals, priced as of the school's today. Pass a student and/or a cycle:
+        an unscoped read is refused with 400. A cycle holds thousands of charges
+        (pupils times months), so the read is PAGED: follow `nextPageToken`
+        until it comes back empty or absent. Never treat the first page as the
+        whole ledger. Requires `finance:read` (or `collections:read` scoped to
+        one pupil).
+      operationId: listCharges
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: studentId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: cycleId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: pageToken
+          in: query
+          description: The `nextPageToken` of the previous page; opaque. Omit for the first page.
+          schema: { type: string, maxLength: 128 }
+        - name: pageSize
+          in: query
+          description: Charges per page. Defaults to 500, the maximum.
+          schema: { type: integer, format: int32, minimum: 1, maximum: 500 }
+      responses:
+        '200':
+          description: One page of charges.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [charges]
+                properties:
+                  charges:
+                    type: array
+                    items: { $ref: '#/components/schemas/FinanceCharge' }
+                  nextPageToken:
+                    type: string
+                    description: Absent on the last page.
+              examples:
+                firstOfMany:
+                  summary: A page with more to come
+                  value:
+                    charges:
+                      - id: 61000000-0000-4000-8000-000000000011
+                        studentId: 51000000-0000-4000-8000-000000000001
+                        cycleId: 41000000-0000-4000-8000-000000000001
+                        conceptId: 31000000-0000-4000-8000-000000000001
+                        description: Colegiatura septiembre
+                        amountCents: 250000
+                        discountCents: 0
+                        dueDate: '2026-09-10'
+                        status: partially_paid
+                        paidCents: 100000
+                        remainingCents: 150000
+                        scholarshipCents: 0
+                    nextPageToken: MjAyNi0wOS0xMHw2MTAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMTE
+        '400': { $ref: '#/components/responses/PagedFinanceBadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+  /api/v1/finance/overdue:
+    get:
+      tags: [finance-payments]
+      summary: One page of overdue charges
+      description: >
+        Charges past their due date (before the school's today) that still owe
+        money, in (dueDate, id) order. Each page EXAMINES up to pageSize
+        candidates and returns the ones still owed, so a page can be shorter
+        than pageSize, even empty, while more remain: stop when `nextPageToken`
+        is empty or absent, never on a short page. Requires `finance:read` or
+        `collections:read`.
+      operationId: listOverdue
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: cycleId
+          in: query
+          description: Optional; empty spans every cycle.
+          schema: { type: string, format: uuid }
+        - name: pageToken
+          in: query
+          description: The `nextPageToken` of the previous page; opaque. Omit for the first page.
+          schema: { type: string, maxLength: 128 }
+        - name: pageSize
+          in: query
+          description: Candidates examined per page. Defaults to 500, the maximum.
+          schema: { type: integer, format: int32, minimum: 1, maximum: 500 }
+      responses:
+        '200':
+          description: One page of overdue charges.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [overdue]
+                properties:
+                  overdue:
+                    type: array
+                    items: { $ref: '#/components/schemas/FinanceCharge' }
+                  nextPageToken:
+                    type: string
+                    description: Absent once every candidate has been examined.
+              examples:
+                lastPage:
+                  summary: The last page
+                  value:
+                    overdue:
+                      - id: 61000000-0000-4000-8000-000000000012
+                        studentId: 51000000-0000-4000-8000-000000000001
+                        cycleId: 41000000-0000-4000-8000-000000000001
+                        conceptId: 31000000-0000-4000-8000-000000000001
+                        description: Colegiatura agosto
+                        amountCents: 250000
+                        discountCents: 0
+                        dueDate: '2026-08-10'
+                        status: pending
+                        paidCents: 0
+                        remainingCents: 250000
+                        scholarshipCents: 0
+        '400': { $ref: '#/components/responses/PagedFinanceBadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
   /api/v1/finance/payments:
     post:
       tags: [finance-payments]
@@ -7091,6 +7219,24 @@ components:
         text/plain:
           schema: { type: string }
           example: Este nivel se está eliminando
+    PagedFinanceBadRequest:
+      description: |
+        The paged finance reads refuse a malformed page size, or a page token
+        longer than 128 characters, at the gateway with the envelope (code
+        `invalid`, details.field = pageSize or pageToken). A refusal from
+        the finance service (no scoping filter, a page token it did not mint)
+        is still the older text/plain sentence.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            error:
+              code: invalid
+              message: pageSize debe ser un entero entre 1 y 500
+              details: { field: pageSize }
+        text/plain:
+          schema: { type: string }
+          example: invalid page token
     PlainBadRequest:
       description: The request did not satisfy the contract; the body says which field.
       content:
@@ -7810,6 +7956,26 @@ components:
         enrollmentId: { type: string, format: uuid, description: The row to mark (the pupil's active enrollment in the group). }
         studentId: { type: string, format: uuid }
         name: { type: string, description: '"First Last".' }
+    FinanceCharge:
+      type: object
+      description: >
+        One debt of one pupil. Every amount is integer cents; paidCents,
+        remainingCents, scholarshipCents and status are derived server-side.
+      required: [id, studentId, cycleId, conceptId, description, amountCents, discountCents, dueDate, status, paidCents, remainingCents, scholarshipCents]
+      properties:
+        id: { type: string, format: uuid }
+        studentId: { type: string, format: uuid }
+        cycleId: { type: string, description: Empty for a sale to a pupil not yet placed in a group. }
+        conceptId: { type: string, format: uuid }
+        description: { type: string }
+        amountCents: { type: integer, format: int64 }
+        discountCents: { type: integer, format: int64 }
+        dueDate: { type: string, format: date }
+        startsOn: { type: string, format: date, description: First day the charge opens to the family; absent when open from issue. }
+        status: { type: string, enum: [pending, partially_paid, paid, cancelled] }
+        paidCents: { type: integer, format: int64 }
+        remainingCents: { type: integer, format: int64 }
+        scholarshipCents: { type: integer, format: int64 }
     TuitionPlan:
       type: object
       description: What one level costs in one school year. Every amount is integer cents.
