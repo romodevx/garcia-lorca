@@ -75,6 +75,35 @@ func TestChargeConceptWithUpdate(t *testing.T) {
 	}
 }
 
+// CC-404: billing finds its concepts by kind and ignores `active`, so a
+// system concept that looked deactivated would go on billing. It cannot be.
+func TestChargeConceptWithUpdateSystemKind(t *testing.T) {
+	kinds := []string{domain.KindTuition, domain.KindEnrollment, domain.KindLateFee, domain.KindFee, domain.KindActivity}
+	for _, kind := range kinds {
+		t.Run(kind, func(t *testing.T) {
+			c, err := validConcept(t).WithKind(kind)
+			if err != nil {
+				t.Fatalf("WithKind: %v", err)
+			}
+
+			if _, err := c.WithUpdate("Colegiatura", 250000, domain.RecurrenceMonthly, false); glerrors.KindOf(err) != glerrors.KindInvalid {
+				t.Errorf("deactivating a %s concept: want KindInvalid, got %v", kind, err)
+			}
+			renamed, err := c.WithUpdate("Colegiatura mensual", 260000, domain.RecurrenceMonthly, true)
+			if err != nil {
+				t.Fatalf("editing a system concept must still work: %v", err)
+			}
+			if renamed.Kind() != kind {
+				t.Errorf("kind = %q after an edit, want %q kept", renamed.Kind(), kind)
+			}
+		})
+	}
+	custom := validConcept(t)
+	if _, err := custom.WithUpdate("Colegiatura", 250000, domain.RecurrenceMonthly, false); err != nil {
+		t.Errorf("a custom concept deactivates: %v", err)
+	}
+}
+
 func TestChargeConceptWithUpdateRevalidates(t *testing.T) {
 	c := validConcept(t)
 	cases := []struct {

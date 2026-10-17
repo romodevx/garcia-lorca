@@ -4418,8 +4418,8 @@ paths:
                   summary: Two concepts, one archived
                   value:
                     concepts:
-                      - { id: 31000000-0000-4000-8000-000000000009, name: CREDENCIAL, defaultAmountCents: 8000, recurrence: once, active: true }
-                      - { id: 31000000-0000-4000-8000-000000000010, name: EXAMEN EXTRAORDINARIO, defaultAmountCents: 25000, recurrence: once, active: false }
+                      - { id: 31000000-0000-4000-8000-000000000009, name: CREDENCIAL, defaultAmountCents: 8000, recurrence: once, active: true, kind: custom }
+                      - { id: 31000000-0000-4000-8000-000000000010, name: EXAMEN EXTRAORDINARIO, defaultAmountCents: 25000, recurrence: once, active: false, kind: custom }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -4457,7 +4457,8 @@ paths:
       description: >
         A full replace, `active` included: sending `active: false` archives the
         concept (it is no longer offered for new charges) and `true` brings it
-        back. Charges already issued keep their own amount. Requires
+        back. Charges already issued keep their own amount. A system concept
+        (any kind but `custom`) cannot be deactivated: 400. Requires
         `finance:write`.
       operationId: updateConcept
       security: [{ sessionCookie: [] }]
@@ -9032,13 +9033,20 @@ components:
     ChargeConcept:
       type: object
       description: One entry of the school's catalog. Amounts are integer cents.
-      required: [id, name, defaultAmountCents, recurrence, active]
+      required: [id, name, defaultAmountCents, recurrence, active, kind]
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
         defaultAmountCents: { type: integer, format: int64 }
         recurrence: { type: string, enum: [once, monthly] }
         active: { type: boolean }
+        kind:
+          type: string
+          enum: [custom, tuition, enrollment, late_fee, fee, activity]
+          description: >
+            `custom` is the school's own concept. Any other kind is a system
+            concept billing finds by kind: it can be renamed or repriced but
+            never deactivated (400).
     FinanceCharge:
       type: object
       description: >

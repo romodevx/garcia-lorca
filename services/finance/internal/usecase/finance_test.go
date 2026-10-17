@@ -116,6 +116,21 @@ func TestUpdateConceptReactivatesARetiredConcept(t *testing.T) {
 	}
 }
 
+// CC-404: billing finds tuition by kind and ignores `active`; deactivating it
+// would claim to stop charges that keep coming.
+func TestUpdateConceptRefusesToDeactivateASystemConcept(t *testing.T) {
+	f := newFixture(t)
+	tuition, err := f.repo.EnsureConceptOfKind(context.Background(), "k-tuition", domain.KindTuition, "Colegiatura")
+	requireNoError(t, err)
+
+	_, err = f.svc.UpdateConcept(context.Background(), tuition.ID(), "Colegiatura", 0, domain.RecurrenceMonthly, false)
+
+	requireKind(t, err, glerrors.KindInvalid)
+	if !f.repo.concepts[tuition.ID()].Active() {
+		t.Fatal("the system concept must stay active")
+	}
+}
+
 func TestUpdateConceptMissingIsInvalid(t *testing.T) {
 	f := newFixture(t)
 

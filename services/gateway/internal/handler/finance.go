@@ -181,6 +181,7 @@ type conceptResponse struct {
 	DefaultAmountCents int64  `json:"defaultAmountCents"`
 	Recurrence         string `json:"recurrence"`
 	Active             bool   `json:"active"`
+	Kind               string `json:"kind"`
 }
 
 func toConceptResponse(c client.ChargeConcept) conceptResponse {
@@ -190,7 +191,16 @@ func toConceptResponse(c client.ChargeConcept) conceptResponse {
 		DefaultAmountCents: c.DefaultAmountCents,
 		Recurrence:         c.Recurrence,
 		Active:             c.Active,
+		Kind:               conceptKind(c.Kind),
 	}
+}
+
+// conceptKind defaults an unset kind to "custom", the school's own concept.
+func conceptKind(kind string) string {
+	if kind == "" {
+		return "custom"
+	}
+	return kind
 }
 
 type chargeResponse struct {

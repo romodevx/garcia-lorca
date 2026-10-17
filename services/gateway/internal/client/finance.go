@@ -31,6 +31,9 @@ type ChargeConcept struct {
 	DefaultAmountCents int64
 	Recurrence         string
 	Active             bool
+	// Kind is "custom" for the school's own concepts; any other value is a
+	// system concept billing finds by kind (it cannot be deactivated).
+	Kind string
 }
 
 // Charge is the edge's view of one debt owed by a student for a concept in a
@@ -858,6 +861,7 @@ func toChargeConcept(c *financev1.ChargeConcept) ChargeConcept {
 		DefaultAmountCents: c.GetDefaultAmountCents(),
 		Recurrence:         c.GetRecurrence(),
 		Active:             c.GetActive(),
+		Kind:               c.GetKind(),
 	}
 }
 

@@ -3,6 +3,7 @@ package handler_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -307,6 +308,24 @@ func TestFinanceCreateConceptInvalidArgumentIs400(t *testing.T) {
 	}
 }
 
+// CC-404: finance's Spanish reason for refusing to deactivate a system
+// concept reaches the screen as a 400 with that text.
+func TestFinanceUpdateConceptSystemKindIs400WithReason(t *testing.T) {
+	const reason = "este concepto es del sistema: la facturación lo usa y no se puede desactivar"
+	svc := &fakeFinance{err: connect.NewError(connect.CodeInvalidArgument, errors.New(reason))}
+	h := handler.NewFinanceHandler(svc)
+
+	rec := doAdminReq(t, http.HandlerFunc(h.UpdateConcept), http.MethodPut, "/api/v1/finance/concepts/cpt-1",
+		`{"name":"Colegiatura","defaultAmountCents":350000,"recurrence":"monthly","active":false}`, "id", "cpt-1")
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), reason) {
+		t.Errorf("body = %q, want the reason", rec.Body.String())
+	}
+}
+
 func TestFinanceListConceptsPassesIncludeInactive(t *testing.T) {
 	svc := &fakeFinance{concepts: []client.ChargeConcept{
 		{ID: "cpt-1", Name: "Colegiatura", DefaultAmountCents: 150000, Recurrence: "monthly", Active: true},
@@ -329,6 +348,27 @@ func TestFinanceListConceptsPassesIncludeInactive(t *testing.T) {
 		t.Fatalf("decode body: %v", err)
 	}
 	if len(out.Concepts) != 2 || out.Concepts[1]["defaultAmountCents"] != float64(500000) || out.Concepts[1]["active"] != false {
+		t.Errorf("body = %v", out)
+	}
+}
+
+// CC-404: the screen must know which concepts billing finds by kind.
+func TestFinanceListConceptsSaysTheKind(t *testing.T) {
+	svc := &fakeFinance{concepts: []client.ChargeConcept{
+		{ID: "cpt-1", Name: "Colegiatura", Recurrence: "monthly", Active: true, Kind: "tuition"},
+		{ID: "cpt-2", Name: "Credencial", Recurrence: "once", Active: true, Kind: "custom"},
+	}}
+	h := handler.NewFinanceHandler(svc)
+
+	rec := doReq(t, h.ListConcepts, http.MethodGet, "/api/v1/finance/concepts", "")
+
+	var out struct {
+		Concepts []map[string]any `json:"concepts"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if len(out.Concepts) != 2 || out.Concepts[0]["kind"] != "tuition" || out.Concepts[1]["kind"] != "custom" {
 		t.Errorf("body = %v", out)
 	}
 }
