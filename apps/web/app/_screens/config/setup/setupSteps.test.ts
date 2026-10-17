@@ -283,3 +283,34 @@ describe("deriveSteps: the Siguiente button (§1.3)", () => {
     expect(nextOf(input)).toMatchObject({ profile: "text", cycle: "text", terms: "text" });
   });
 });
+
+describe("ISSUE-024 · what Migrar alumnos still needs, from the catalog itself", () => {
+  const needs = (input: SetupInput) => deriveSteps(input, null).importNeeds;
+
+  it("an empty catalog needs levels, grades and groups", () => {
+    expect(needs({ ...complete(), levels: [], grades: ready([]), groups: ready([]) })).toBe("Necesita niveles, grados y grupos.");
+  });
+
+  it("levels without grades need grades and groups", () => {
+    expect(needs({ ...complete(), grades: ready([]), groups: ready([]) })).toBe("Necesita grados y grupos.");
+  });
+
+  it("grades without groups in the cycle need groups", () => {
+    expect(needs({ ...complete(), groups: ready([]) })).toBe("Necesita grupos.");
+  });
+
+  it("a complete catalog needs nothing", () => {
+    expect(needs(complete())).toBeUndefined();
+  });
+
+  it("a catalog with groups in only some grades can already import (the Grupos step may still be pending)", () => {
+    const input = { ...complete(), groups: ready([group("p1")]) };
+    expect(step(input, "groups").status).toBe("pending");
+    expect(needs(input)).toBeUndefined();
+  });
+
+  it("says nothing while a read is in flight or failed", () => {
+    expect(needs({ ...complete(), grades: LOADING })).toBeUndefined();
+    expect(needs({ ...complete(), groups: FAILED })).toBeUndefined();
+  });
+});

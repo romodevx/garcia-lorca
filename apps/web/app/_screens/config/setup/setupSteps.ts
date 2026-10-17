@@ -91,6 +91,11 @@ export interface SetupView {
   /** No status read is still in flight: the opening step can be decided. */
   settled: boolean;
   initialStepId: StepId;
+  /**
+   * What Migrar alumnos still needs from the catalog ("Necesita grupos."), or
+   * undefined when it has it — or while a read is in flight or failed.
+   */
+  importNeeds: string | undefined;
 }
 
 interface Mark {
@@ -241,6 +246,25 @@ function nextKind(def: StepDef, input: SetupInput): NextKind {
   return isEmptyHere(def.id, input) ? "text" : "primary";
 }
 
+const IMPORT_NEEDS_ALL = "Necesita niveles, grados y grupos.";
+const IMPORT_NEEDS_GRADES = "Necesita grados y grupos.";
+const IMPORT_NEEDS_GROUPS = "Necesita grupos.";
+
+/**
+ * ISSUE-024: an import places each pupil in a group of the catalog, so it needs
+ * a level, a grade and a group to exist — not every step done. A grade still
+ * without a group only rejects that grade's rows, which the preview shows.
+ */
+function importNeeds(input: SetupInput): string | undefined {
+  if (input.levels.length === 0) return IMPORT_NEEDS_ALL;
+  if (input.grades.kind !== "ready") return undefined;
+  const known = input.grades.value.filter((g) => input.levels.some((l) => l.id === g.levelId));
+  if (known.length === 0) return IMPORT_NEEDS_GRADES;
+  if (input.selectedCycleId === undefined) return IMPORT_NEEDS_GROUPS;
+  if (input.groups.kind !== "ready") return undefined;
+  return input.groups.value.some((g) => known.some((k) => k.id === g.gradeLevelId)) ? undefined : IMPORT_NEEDS_GROUPS;
+}
+
 /** "falta Colegiaturas" / "faltan Grupos y Colegiaturas" / "faltan A, B y 2 más". */
 function gapsPhrase(titles: string[]): string | undefined {
   if (titles.length === 0) return undefined;
@@ -288,5 +312,6 @@ export function deriveSteps(input: SetupInput, storedStepId: string | null): Set
     ready,
     settled: steps.every((s) => s.status !== "loading"),
     initialStepId: initialStep(steps, storedStepId),
+    importNeeds: importNeeds(input),
   };
 }
