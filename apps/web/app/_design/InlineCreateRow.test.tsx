@@ -163,6 +163,24 @@ describe("InlineCreateRow", () => {
     expect(screen.getByLabelText("Del día")).toHaveFocus();
   });
 
+  // ISSUE-CC-104: a grade with an empty name + Enter sent nothing and SAID
+  // nothing: the red border was the only clue. The missing cell is named in
+  // words, wired to the cell.
+  it("dice con palabras qué falta, ligado a la celda", async () => {
+    const user = userEvent.setup();
+    setup();
+    await user.click(screen.getByRole("button", { name: "Agregar día cerrado" }));
+
+    await user.keyboard("{Enter}");
+
+    expect(screen.getByText("Falta Nombre.")).toBeInTheDocument();
+    expect(screen.getByText("Falta Del día.")).toBeInTheDocument();
+    expect(screen.getByLabelText("Nombre")).toHaveAccessibleDescription("Falta Nombre.");
+
+    await user.type(screen.getByLabelText("Nombre"), "X");
+    expect(screen.queryByText("Falta Nombre.")).toBeNull();
+  });
+
   it("revisa el dato imposible al salir de la celda, no al teclear", async () => {
     const user = userEvent.setup();
     setup({

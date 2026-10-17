@@ -3,6 +3,7 @@
 import { useMemo, useState, type ReactElement } from "react";
 
 import { InlineCreateRow } from "../../_design/InlineCreateRow";
+import type { FormatRule } from "../../_design/form/useFormatError";
 import type { CreateGroupInput, Cycle, GradeLevel, Group } from "../../config/api";
 import { CorrectableName, type NameCorrections } from "./CorrectableName";
 import { DeletionStatus, useDeletionFeedback } from "./useDeletionFeedback";
@@ -18,6 +19,12 @@ export interface GroupsPanelProps {
 }
 
 const DEFAULT_CAPACITY = 30;
+const NO_CAPACITY = "El cupo del grupo tiene que ser un número mayor que cero.";
+
+/** Checked in the row at save (ISSUE-CC-104): cupo 0 + Enter used to say nothing there. */
+const CAPACITY_RULES: Readonly<Record<string, FormatRule>> = {
+  capacity: (value) => (Number(value) >= 1 ? undefined : NO_CAPACITY),
+};
 
 /** La letra que sigue: A, B, C… */
 function nextLetter(groups: readonly Group[]): string {
@@ -79,6 +86,7 @@ export function GroupsPanel({ cycle, gradeLevel, groups, onCreate, corrections }
         <InlineCreateRow
           addLabel="Nuevo grupo"
           defaults={defaults}
+          rules={CAPACITY_RULES}
           columns={[
             {
               key: "name",
@@ -102,10 +110,10 @@ export function GroupsPanel({ cycle, gradeLevel, groups, onCreate, corrections }
             if (!Number.isFinite(capacity) || capacity < 1) {
               // Number("") es 0, y un cupo 0 que nadie escribió no acepta
               // alumnos: la asignación automática se salta ese grupo en silencio.
-              setError("El cupo del grupo tiene que ser un número mayor que cero.");
+              setError(NO_CAPACITY);
               // También se relanza: para el renglón, "no pasó" es no pasó, sea
               // por la red o por el dato.
-              throw new Error("El cupo del grupo tiene que ser un número mayor que cero.");
+              throw new Error(NO_CAPACITY);
             }
             setError(undefined);
             try {

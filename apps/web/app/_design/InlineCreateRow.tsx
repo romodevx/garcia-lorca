@@ -89,6 +89,19 @@ const etiquetaStyle: CSSProperties = {
 };
 
 const NO_RULES: Readonly<Record<string, FormatRule>> = {};
+
+/** What a cell says when it is empty at save (ISSUE-CC-104: the red border alone said nothing). */
+const missingMessage = (c: InlineColumn): string => `Falta ${c.label}.`;
+
+const errorStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 5,
+  margin: "6px 0 0",
+  fontSize: 12.5,
+  fontWeight: 600,
+  color: "var(--bad-fg)",
+};
 const NO_DEFAULTS: Readonly<Record<string, string>> = {};
 
 const blank = (
@@ -268,6 +281,10 @@ export function InlineCreateRow({
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         {columns.map((c, i) => {
           const invalid = missing[c.key] === true || format.errors[c.key] !== undefined;
+          const describedBy = [
+            c.help !== undefined ? `${uid}-${c.key}-help` : undefined,
+            invalid ? `${uid}-${c.key}-error` : undefined,
+          ].filter((id) => id !== undefined).join(" ") || undefined;
           return (
             <div
               key={c.key}
@@ -291,7 +308,7 @@ export function InlineCreateRow({
                 <select
                   id={`${uid}-${c.key}`}
                   data-cell={c.key}
-                  aria-describedby={c.help !== undefined ? `${uid}-${c.key}-help` : undefined}
+                  aria-describedby={describedBy}
                   aria-invalid={invalid ? "true" : undefined}
                   value={values[c.key] ?? ""}
                   onChange={(e) => {
@@ -314,7 +331,7 @@ export function InlineCreateRow({
                 ref={i === 0 ? firstRef : undefined}
                 id={`${uid}-${c.key}`}
                 data-cell={c.key}
-                aria-describedby={c.help !== undefined ? `${uid}-${c.key}-help` : undefined}
+                aria-describedby={describedBy}
                 aria-invalid={invalid ? "true" : undefined}
                 type={c.kind === "text" ? "text" : c.kind}
                 value={values[c.key] ?? ""}
@@ -360,24 +377,16 @@ export function InlineCreateRow({
         </button>
       </div>
 
-      {Object.entries(format.errors).map(([key, message]) => (
-        <p
-          key={key}
-          role="alert"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 5,
-            margin: "6px 0 0",
-            fontSize: 12.5,
-            fontWeight: 600,
-            color: "var(--bad-fg)",
-          }}
-        >
-          <Icon name="warning" size={14} stroke={2.4} />
-          {message}
-        </p>
-      ))}
+      {columns.map((c) => {
+        const message = format.errors[c.key] ?? (missing[c.key] === true ? missingMessage(c) : undefined);
+        if (message === undefined) return null;
+        return (
+          <p key={c.key} id={`${uid}-${c.key}-error`} role="alert" style={errorStyle}>
+            <Icon name="warning" size={14} stroke={2.4} />
+            {message}
+          </p>
+        );
+      })}
     </div>
   );
 }
