@@ -217,6 +217,10 @@ func (s *Student) ChangeBankReference(ref BankReference) { s.bankReference = ref
 // and its seat count. The first name and the paternal surname stay required, as
 // when the pupil was created; the maternal surname is optional.
 func (s *Student) UpdateDetails(firstName, lastName, maternalLastName string, curp CURP, profile Profile) error {
+	// A withdrawn pupil's file is read-only: the school already closed it.
+	if s.status == AdmissionWithdrawn {
+		return glerrors.New(glerrors.KindConflict, "ese alumno está dado de baja: su ficha es de sólo lectura")
+	}
 	first, last := strings.TrimSpace(firstName), strings.TrimSpace(lastName)
 	if first == "" || last == "" {
 		return glerrors.New(glerrors.KindInvalid, "first and last name are required")

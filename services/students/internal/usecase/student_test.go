@@ -636,3 +636,27 @@ func TestHasPhoto(t *testing.T) {
 		})
 	}
 }
+
+// T14-009: a withdrawn pupil's file is read-only. The web hides "Editar ficha",
+// but the edit page has its own address, so the server refuses the write too.
+func TestUpdateDetailsRefusesAWithdrawnPupil(t *testing.T) {
+	svc, repo, _ := newService(t)
+	svc = svc.WithClock(func() time.Time { return schoolToday })
+	created, err := svc.CreateApplicant(context.Background(), validInput())
+	if err != nil {
+		t.Fatalf("CreateApplicant: %v", err)
+	}
+	if _, err := svc.ChangeAdmissionStatus(context.Background(), usecase.ChangeStatusInput{ID: created.ID(), Target: domain.AdmissionWithdrawn, Reason: "cambio de escuela"}); err != nil {
+		t.Fatalf("withdraw: %v", err)
+	}
+
+	_, err = svc.UpdateDetails(context.Background(), usecase.UpdateDetailsInput{
+		ID: created.ID(), FirstName: "Ana", LastName: "Hernández", CURP: "HEGA050312MDFRNN09",
+	})
+	if glerrors.KindOf(err) != glerrors.KindConflict {
+		t.Fatalf("err = %v, want KindConflict", err)
+	}
+	if len(repo.updated) != 1 { // the withdrawal itself, and nothing after it
+		t.Errorf("a refused correction persisted: %d updates", len(repo.updated))
+	}
+}
