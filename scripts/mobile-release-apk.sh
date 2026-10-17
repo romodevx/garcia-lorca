@@ -74,9 +74,11 @@ cd "$MOBILE_DIR"
 say "expo prebuild (android, clean)"
 # prebuild rewrites package.json's android/ios scripts to `expo run:*`; that is
 # a choice for the repo, not a side effect of a local build. Put it back.
-cp package.json "$OUT_DIR/package.json.before-prebuild"
+# Restored on ANY exit (a failed prebuild or gradle included), not only on success.
+readonly PACKAGE_BACKUP="$OUT_DIR/package.json.before-prebuild"
+cp package.json "$PACKAGE_BACKUP"
+trap 'cp "$PACKAGE_BACKUP" "$MOBILE_DIR/package.json"' EXIT
 CI=1 pnpm exec expo prebuild --platform android --clean --no-install
-cp "$OUT_DIR/package.json.before-prebuild" package.json
 
 manifest=android/app/src/main/AndroidManifest.xml
 [ -f "$manifest" ] || die "prebuild produced no $manifest"

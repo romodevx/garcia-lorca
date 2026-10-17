@@ -30,9 +30,11 @@
 #     Two copies of finance/comms writing one database and relaying one outbox
 #     to two different emulators lose events. Infra (postgres) keeps running.
 #
-# Host ports: 13000 web, 18080 gateway (both 0.0.0.0, so a phone or the Android
-# emulator via 10.0.2.2 reaches them); internal services on 127.0.0.1:18xxx for
-# the health probes only — in Cloud Run they are not public either.
+# Host ports: 13000 web, 18080 gateway, bound to 127.0.0.1 by default. The
+# Android emulator still reaches them: 10.0.2.2 IS the Mac's loopback. Only a
+# physical phone on the LAN needs PROD_LOCAL_BIND=0.0.0.0 (opt-in: it exposes the
+# stack to the whole network). Internal services stay on 127.0.0.1:18xxx for the
+# health probes only — in Cloud Run they are not public either.
 
 name: garcia-lorca-prod
 
@@ -119,7 +121,7 @@ services:
       ATTENDANCE_BASE_URL: "http://attendance:8080"
       COMMS_BASE_URL: "http://comms:8080"
       UNIFORMS_BASE_URL: "http://uniforms:8080"
-    ports: ["0.0.0.0:18080:8080"]
+    ports: ["${PROD_LOCAL_BIND:-127.0.0.1}:18080:8080"]
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -216,7 +218,7 @@ services:
       APP_ENV: prod-local
       # Read per request by app/api/[...path]/route.ts (same as Cloud Run).
       GATEWAY_URL: "http://gateway:8080"
-    ports: ["0.0.0.0:13000:8080"]
+    ports: ["${PROD_LOCAL_BIND:-127.0.0.1}:13000:8080"]
     depends_on:
       gateway:
         condition: service_started

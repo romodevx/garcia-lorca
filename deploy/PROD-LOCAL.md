@@ -36,8 +36,8 @@ imagen fijada `bufbuild/buf:1.50.0` (no hace falta buf en el host).
 
 | Qué | Puerto | Nota |
 | --- | --- | --- |
-| web (Next standalone) | **13000** | `http://localhost:13000` — el navegador sólo habla con este origen |
-| gateway | **18080** | `0.0.0.0`: el emulador Android llega por `http://10.0.2.2:18080` |
+| web (Next standalone) | **13000** | `127.0.0.1`; `http://localhost:13000` — el navegador sólo habla con este origen |
+| gateway | **18080** | `127.0.0.1`; el emulador Android llega por `http://10.0.2.2:18080`, que ES el loopback de la Mac |
 | iam · students · finance · grades | 18091 · 18092 · 18093 · 18094 | sólo `127.0.0.1`, para los sondeos |
 | attendance · comms · uniforms · config | 18095 · 18096 · 18099 · 18101 | ídem |
 | Postgres | la del stack dev (`POSTGRES_HOST_PORT` del `.env`, hoy 5433) | la base es UNA |
@@ -160,7 +160,10 @@ de desarrollo ni Metro, y el script falla si el APK trae un `.map`. Queda en
 Desviaciones locales, aplicadas sólo a lo generado:
 
 - `EXPO_PUBLIC_API_URL=http://10.0.2.2:18080` (el emulador ve el loopback de la
-  Mac como `10.0.2.2`). Para un teléfono físico: la IP LAN de la Mac, que cambia.
+  Mac como `10.0.2.2`, así que basta con que el gateway escuche en 127.0.0.1).
+  Para un teléfono físico: la IP LAN de la Mac, que cambia, **y** levantar con
+  `PROD_LOCAL_BIND=0.0.0.0 make prod-up` (expone web y gateway a toda la red; es
+  opt-in a propósito).
 - `android:usesCleartextTraffic="true"`: Android bloquea `http` en release y el
   gateway local no tiene TLS. Producción usa `https`.
 - Firmado con la llave **debug** de la plantilla (instalable en el emulador). Un

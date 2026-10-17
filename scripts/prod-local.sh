@@ -146,9 +146,14 @@ build_images() {
 # HTTP), so they are counted, not failed.
 check_web_image_has_no_sourcemaps() {
   local found server_maps
+  # A failing `docker run` (no image, daemon down) must stop the build, so no
+  # `|| true` here. Inside, grep exits 1 when it finds NOTHING (the good case),
+  # so only exit codes above 1 are errors and the OUTPUT is the verdict.
   found=$(docker run --rm --entrypoint sh "$IMAGE_PREFIX/web:local" -c \
-    'cd /app/apps/web && { find .next/static public -name "*.map";
-       grep -rlE "sourceMappingURL=" .next/static public 2>/dev/null; } | head -n 10' || true)
+    'cd /app/apps/web || exit 2
+     find .next/static public -name "*.map" || exit 2
+     grep -rlE "sourceMappingURL=" .next/static public; [ $? -le 1 ] || exit 2') \
+    || die "could not inspect the web image (docker run failed)"
   if [ -n "$found" ]; then
     echo "$found" >&2
     die "the web image's CLIENT bundle contains source maps or sourceMappingURL comments"
@@ -165,11 +170,13 @@ check_web_image_has_no_sourcemaps() {
 # HTML shell and a 200. So the test is on the body: a v3 map is JSON that starts
 # with {"version":3.
 check_web_serves_no_sourcemaps() {
-  local base=http://127.0.0.1:13000 chunks chunk body
+  local base=http://127.0.0.1:13000 chunks chunk body chunk_body
   chunks=$(curl -s --max-time 10 "$base/login" | grep -oE '/_next/static/[^"]+\.js' | sort -u)
   [ -n "$chunks" ] || die "could not list the web's JS chunks from /login"
   for chunk in $chunks; do
-    if curl -s --max-time 10 "$base$chunk" | grep -q 'sourceMappingURL='; then
+    # Captured first: `curl | grep -q` under pipefail fails when grep exits early.
+    chunk_body=$(curl -s --max-time 10 "$base$chunk") || die "could not fetch $chunk"
+    if grep -q 'sourceMappingURL=' <<<"$chunk_body"; then
       die "served chunk $chunk carries a sourceMappingURL comment"
     fi
     body=$(curl -s --max-time 10 "$base$chunk.map" | head -c 64 || true)
@@ -298,13 +305,16 @@ cmd_up() {
   say "ENABLED_MODULES=$PROD_LOCAL_ENABLED_MODULES"
   # `run` (not up) for the one-shot, so a failed migration stops here, loudly.
   compose up -d pubsub fake-gcs
-  compose run --rm migrate || die "migrations failed; nothing else was started"
+  if ! compose run --rm migrate; then
+    restore_dev_app_containers
+    die "migrations failed; nothing else was started (dev app containers restored)"
+  fi
   compose up -d --no-deps gateway iam students config finance grades attendance comms uniforms web
   say "waiting for every port to answer (up to ${HEALTH_TIMEOUT_SECONDS} s)"
   wait_healthy
   print_status
   check_web_serves_no_sourcemaps
-  say "UP: web http://localhost:13000  ·  gateway http://localhost:18080  ·  Android emulator: http://10.0.2.2:18080"
+  say "UP: web http://localhost:13000  ·  gateway http://localhost:18080  ·  Android emulator: http://10.0.2.2:18080 (bound to ${PROD_LOCAL_BIND:-127.0.0.1})"
 }
 
 cmd_status() {
