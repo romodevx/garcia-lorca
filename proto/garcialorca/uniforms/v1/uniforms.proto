@@ -293,6 +293,9 @@ message Order {
   // The student's level when the order was placed (config.v1.Level id + name).
   string student_level_id = 16;
   string student_level_name = 17;
+  // Who made the order: the seller of a counter sale, whom its receipt names
+  // under "Recibió" (T14-019). Empty on orders from before it was recorded.
+  string created_by_user_id = 18;
 }
 
 // --- Catalogue ---------------------------------------------------------------

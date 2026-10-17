@@ -153,6 +153,10 @@ func TestOrderLabelIsDerivedOnEveryRead(t *testing.T) {
 	if o.GetStudentLevelId() != "c1000000-0000-0000-0000-000000000002" || o.GetStudentLevelName() != "Primaria" {
 		t.Errorf("student level = (%q, %q)", o.GetStudentLevelId(), o.GetStudentLevelName())
 	}
+	// T14-019: who made it travels too — the sale receipt names the seller.
+	if o.GetCreatedByUserId() != "usr-1" {
+		t.Errorf("created by = %q, want usr-1", o.GetCreatedByUserId())
+	}
 }
 
 // TestOrderTotalIsSummedFromTheLines: the wire total is derived too, so it can

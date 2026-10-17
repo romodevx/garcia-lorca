@@ -13,6 +13,7 @@ import { FinanceScreen } from "./FinanceScreen";
 vi.mock("../../finance/api", () => ({
   listCharges: vi.fn(),
   getOverdue: vi.fn(),
+  getExpected: vi.fn(),
   registerPayment: vi.fn(),
   getAccount: vi.fn(),
   previewDeposit: vi.fn(),
@@ -25,7 +26,18 @@ vi.mock("../../students/api", () => ({ listStudents: vi.fn(), listNotes: vi.fn()
 
 const finance = vi.mocked(financeApi);
 
+const DEPOSIT: financeApi.DepositResult = {
+  deposit: {
+    id: "d0000000-0000-0000-0000-000000000001", studentId: "s1", amountCents: 50000, method: "cash", reference: "",
+    paidAt: "2026-10-12T16:00:00Z", paidOn: "2026-10-12", calendarVersion: "v1",
+    tenders: [{ method: "cash", amountCents: 50000 }], folio: "P-2026-000009",
+  },
+  allocations: [], surcharges: [], unallocatedCents: 0, replayed: false,
+};
+
+
 beforeEach(() => {
+  vi.mocked(financeApi).getExpected.mockResolvedValue({ amountCents: 0, surchargeCents: 0, discountCents: 0, annualBalanceCents: 0, onTimeBalanceCents: 0, lines: [] });
   vi.mocked(configApi).listCycles.mockResolvedValue([{ id: "c1", name: "2026-2027", status: "active", startsOn: "2026-08-01", endsOn: "2027-06-30" }]);
   vi.mocked(studentsApi).listStudents.mockResolvedValue([{
     id: "s1", curp: "Cs1", firstName: "Valentina", lastName: "Cruz", level: "primaria", levelId: "", gradeGroup: "1° A", guardianName: "Tutor", admissionStatus: "enrolled",
@@ -36,7 +48,7 @@ beforeEach(() => {
   }]);
   finance.getOverdue.mockResolvedValue([]);
   finance.getIncome.mockResolvedValue({ lines: [], totalCents: 0, creditNoteCents: 0 });
-  finance.registerPayment.mockResolvedValue({} as financeApi.PaymentResult);
+  finance.registerDeposit.mockResolvedValue(DEPOSIT);
 });
 afterEach(() => vi.clearAllMocks());
 
@@ -50,6 +62,6 @@ it("reads the period's income again after a payment is registered", async () => 
   const dialog = await screen.findByRole("dialog", { name: "Registrar pago" });
   await user.click(within(dialog).getByRole("button", { name: /Registrar pago/ }));
 
-  await waitFor(() => expect(finance.registerPayment).toHaveBeenCalled());
+  await waitFor(() => expect(finance.registerDeposit).toHaveBeenCalled());
   await waitFor(() => expect(finance.getIncome).toHaveBeenCalledTimes(2));
 });

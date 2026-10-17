@@ -1,31 +1,28 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactElement } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
 import { DrawerShell } from "../../_design/DrawerShell";
 import { DateField, MoneyField, useFocusFirstInvalid } from "../../_design/form";
 import { TenderEditor } from "../../_design/payments/TenderEditor";
-import { AMOUNT_ERROR, tenderLabel } from "../../_design/payments/tenders";
+import { AMOUNT_ERROR } from "../../_design/payments/tenders";
+import { depositRequest, newAttemptKey } from "../../_design/payments/depositRequest";
+import { useDepositPreview } from "../../_design/payments/useDepositPreview";
 import { useTenders } from "../../_design/payments/useTenders";
 import { ClosedCutNotice } from "../../_design/payments/ClosedCutNotice";
 import { useClosedCut } from "../../_design/payments/useClosedCut";
 import {
   getAccount,
   getExpected,
-  previewDeposit,
   registerDeposit,
-  type Charge,
   type DepositResult,
   type Expected,
   type ExpectedLine,
-  type Payment,
-  type Tender,
 } from "../../finance/api";
-import { groupByCharge } from "../../finance/allocations";
 import { API_URL } from "../../api-url";
 import { localISODate, shortDayLabel } from "../../_lib/localDate";
 import { DebtList } from "./DebtList";
-import { ReceiptActions } from "../receipts/ReceiptActions";
+import { DepositPreviewCard, DepositReceipt } from "./DepositReceipt";
 import { formatPesosInput, formatCents, pesosToCents } from "../../_lib/money";
 import { formatStudentName } from "../../_design/students/studentName";
 import { StudentNotesBeside, useNotesBeside, type NotesAccess } from "../../_design/students/StudentNotesBeside";
@@ -40,16 +37,6 @@ import { StudentNotesBeside, useNotesBeside, type NotesAccess } from "../../_des
 function difference(captured: number, expectedCents: number): number {
   return expectedCents - (Number.isFinite(captured) ? captured : 0);
 }
-
-/** One key per attempt, kept across retries: a double click must not cost twice. */
-function newAttemptKey(): string {
-  return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
-
-/** How long the typing has to stop before we ask the server what it covers. */
-const PREVIEW_DEBOUNCE_MS = 350;
-
-const lineRow: CSSProperties = { display: "flex", justifyContent: "space-between", padding: "12px 16px", borderTop: "1px solid var(--border)" };
 
 /** The pupil the counter is collecting for. Only what the header needs. */
 export interface CollectStudent {
@@ -172,7 +159,6 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
   // decision somebody makes, which is why it is a switch and not a default.
   const [grantEarly, setGrantEarly] = useState(false);
   const [amountError, setAmountError] = useState<string | undefined>(undefined);
-  const [preview, setPreview] = useState<{ allocations: Payment[]; surcharges: Charge[]; unallocatedCents: number } | null>(null);
   const [receipt, setReceipt] = useState<DepositResult | null>(null);
   const [saving, setSaving] = useState(false);
   // A ref and not the state: two presses inside one render both read `saving` as false.
@@ -185,8 +171,13 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
   const cents = pesosToCents(amount);
   const lines = expected?.lines ?? [];
   const choice = choiceOf(lines, chosen);
-  const choiceKey = choice?.join(",") ?? "";
   const selectedCents = selectedTotal(lines, chosen);
+  // What the typed amount covers, from the planner that takes the money.
+  const preview = useDepositPreview({
+    studentId: student.id, amountCents: cents, paidOn: sentDate,
+    ...(choice !== undefined ? { chargeIds: choice } : {}),
+    enabled: receipt === null && dateOk,
+  });
   // The difference is measured against what was chosen — which, by default, is
   // exactly what is due.
   const target = lines.length > 0 ? selectedCents : (expected?.amountCents ?? 0);
@@ -259,27 +250,6 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
     return () => { live = false; };
   }, [student.id, sentDate, dateOk]);
 
-  // Ask the server what the typed amount covers, once the typing settles. The
-  // rule lives in one place — the same planner that takes the money — so the
-  // preview can never drift from what actually happens.
-  useEffect(() => {
-    if (!Number.isFinite(cents) || cents <= 0 || receipt !== null || !dateOk) {
-      setPreview(null);
-      return;
-    }
-    let live = true;
-    const timer = setTimeout(() => {
-      previewDeposit(API_URL, {
-        studentId: student.id,
-        amountCents: cents,
-        ...(sentDate !== "" ? { paidAt: sentDate } : {}),
-        ...(choiceKey !== "" ? { chargeIds: choiceKey.split(",") } : {}),
-      })
-        .then((p) => { if (live) { setPreview(p); } })
-        .catch(() => { if (live) { setPreview(null); } });
-    }, PREVIEW_DEBOUNCE_MS);
-    return () => { live = false; clearTimeout(timer); };
-  }, [cents, student.id, receipt, sentDate, dateOk, choiceKey]);
 
   // Escape closes. Nothing is at risk: the money has not been taken, and the
   // amount is one field to retype.
@@ -303,26 +273,19 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
       focusFirstInvalid();
       return;
     }
-    const split = tenders.toTenders();
-    const [first] = split;
     inFlight.current = true;
     setSaving(true);
     setError(undefined);
     try {
-      const result = await registerDeposit(API_URL, {
+      const result = await registerDeposit(API_URL, depositRequest({
         studentId: student.id,
         amountCents: cents,
-        // The first tender, for a gateway that reads only one method; with
-        // `tenders` present the server ignores these.
-        method: first?.method ?? "cash",
-        reference: first?.reference ?? "",
-        ...(first?.cardType !== undefined ? { cardType: first.cardType } : {}),
-        tenders: split,
-        idempotencyKey: attemptKey,
-        ...(sentDate !== "" ? { paidAt: sentDate } : {}),
+        tenders: tenders.toTenders(),
+        attemptKey,
+        paidOn: sentDate,
         ...(choice !== undefined ? { chargeIds: choice } : {}),
-        ...(grantEarly ? { grantEarlyPayment: true } : {}),
-      });
+        grantEarlyPayment: grantEarly,
+      }));
       setReceipt(result);
       onCollected();
     } catch (cause) {
@@ -349,7 +312,7 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
     >
       <>
         {receipt !== null
-          ? <Receipt result={receipt} describe={describe.current} onClose={onClose} />
+          ? <DepositReceipt result={receipt} describe={describe.current} onClose={onClose} />
           : (
             <StudentNotesBeside beside={beside} studentId={student.id} bare>
               <form
@@ -404,32 +367,7 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
                     </label>
                   )}
 
-                  {preview !== null && (
-                    <div data-testid="preview" style={{ borderRadius: "var(--r-md)", border: "1px solid var(--border)", overflow: "hidden" }}>
-                      <div style={{ padding: "10px 16px", background: "var(--surface-2)", fontSize: 13, fontWeight: 700, color: "var(--text-muted)", fontFamily: "var(--font-display)" }}>
-                        Cubre
-                      </div>
-                      {groupByCharge(preview.allocations).map((a) => (
-                        <div key={a.chargeId} style={lineRow}>
-                          <span style={{ fontSize: 14.5, color: "var(--text)" }}>{label(a.chargeId, preview.surcharges, describe.current)}</span>
-                          <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 15, color: "var(--text)" }}>{formatCents(a.amountCents)}</span>
-                        </div>
-                      ))}
-                      {preview.allocations.length === 0 && (
-                        <p style={{ padding: "12px 16px", margin: 0, fontSize: 14, color: "var(--text-muted)" }}>
-                          No hay nada vencido; todo queda a favor.
-                        </p>
-                      )}
-                      {preview.unallocatedCents > 0 && (
-                        <div style={{ display: "flex", justifyContent: "space-between", padding: "12px 16px", borderTop: "1px solid var(--border)", background: "var(--surface-2)" }}>
-                          <span style={{ fontSize: 14.5, color: "var(--text-muted)" }}>Queda a favor</span>
-                          <span data-testid="credit" style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 15, color: "var(--forest)" }}>
-                            {formatCents(preview.unallocatedCents)}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  )}
+                  {preview !== null && <DepositPreviewCard preview={preview} describe={describe.current} />}
 
                   <TenderEditor tenders={tenders} />
 
@@ -464,77 +402,6 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
   );
 }
 
-/**
- * What one allocation covered, in words. A surcharge created by this very
- * payment is not in the account read, so its description comes from the result
- * itself.
- */
-function label(chargeId: string, surcharges: Charge[], known: Map<string, string>): string {
-  const fresh = surcharges.find((c) => c.id === chargeId);
-  if (fresh !== undefined) {
-    return fresh.description;
-  }
-  return known.get(chargeId) ?? "Cargo";
-}
-
-/**
- * The receipt. A folio a parent can quote and a list they can check, printable
- * because a school hands over paper.
- */
-function Receipt({ result, describe, onClose }: { result: DepositResult; describe: Map<string, string>; onClose: () => void }): ReactElement {
-  return (
-    <div data-testid="receipt" style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
-      <div style={{ flex: 1, overflowY: "auto", padding: "22px 26px", display: "flex", flexDirection: "column", gap: 18 }}>
-        <div style={{ padding: "18px 20px", borderRadius: "var(--r-md)", background: "var(--ok-bg)", border: "1px solid var(--border)" }}>
-          <span style={{ fontSize: 14, color: "var(--ok-fg)" }}>Cobrado</span>
-          <div style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 34, color: "var(--ok-fg)", marginTop: 4 }}>
-            {formatCents(result.deposit.amountCents)}
-          </div>
-          <p style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 8 }}>
-            Folio {result.deposit.folio ?? idTail(result.deposit.id)}
-            {result.replayed && " · ya estaba registrado, no se cobró de nuevo"}
-          </p>
-        </div>
-        <div style={{ borderRadius: "var(--r-md)", border: "1px solid var(--border)", overflow: "hidden" }}>
-          {groupByCharge(result.allocations).map((a) => (
-            <div key={a.chargeId} style={lineRow}>
-              <span style={{ fontSize: 14.5, color: "var(--text)" }}>{label(a.chargeId, result.surcharges, describe)}</span>
-              <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 15 }}>{formatCents(a.amountCents)}</span>
-            </div>
-          ))}
-        </div>
-        {showsTenders(result.deposit.tenders) && (
-          // Split across methods, or settled with a credit note (T8): the
-          // receipt says how much each covered — the ticket does the same.
-          <div data-testid="receipt-tenders" style={{ borderRadius: "var(--r-md)", border: "1px solid var(--border)", overflow: "hidden" }}>
-            <div style={{ padding: "10px 16px", background: "var(--surface-2)", fontSize: 13, fontWeight: 700, color: "var(--text-muted)", fontFamily: "var(--font-display)" }}>
-              Formas de pago
-            </div>
-            {result.deposit.tenders.map((t, i) => (
-              <div key={i} style={lineRow}>
-                <span style={{ fontSize: 14.5, color: "var(--text)" }}>
-                  {tenderLabel(t.method, t.cardType)}{t.reference !== undefined && ` · ref. ${t.reference}`}
-                </span>
-                <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 15 }}>{formatCents(t.amountCents)}</span>
-              </div>
-            ))}
-          </div>
-        )}
-        {result.unallocatedCents > 0 && (
-          <p style={{ fontSize: 14, color: "var(--text-muted)", margin: 0 }}>
-            Quedan {formatCents(result.unallocatedCents)} a favor de la familia.
-          </p>
-        )}
-      </div>
-      <div style={{ display: "flex", gap: 12, alignItems: "center", padding: "18px 26px", borderTop: "1px solid var(--border)", background: "var(--surface-2)" }}>
-        <ReceiptActions kind="payment" id={result.deposit.id} />
-        <div style={{ flex: 1 }} />
-        <Btn icon="check" type="button" onClick={onClose}>Listo</Btn>
-      </div>
-    </div>
-  );
-}
-
 interface YearBalanceProps {
   /** The one balance; null while unknown. Below zero is the family's credit. */
   balanceCents: number | null;
@@ -559,17 +426,4 @@ function YearBalance({ balanceCents, surchargeCents, creditCents }: YearBalanceP
       {creditCents > 0 && `, ya descontados ${formatCents(creditCents)} a favor`}.
     </>
   );
-}
-
-/** A breakdown is worth showing when there is more than one method, or a credit note that is not money. */
-function showsTenders(tenders: readonly Tender[]): boolean {
-  return tenders.length > 1 || tenders.some((t) => t.method === "credit_note");
-}
-
-/**
- * The deposit's id, shortened, for a deposit that reached the screen without a
- * folio (a gateway older than task 12). Every stored deposit has one.
- */
-function idTail(id: string): string {
-  return id.replace(/-/g, "").slice(-8).toUpperCase();
 }

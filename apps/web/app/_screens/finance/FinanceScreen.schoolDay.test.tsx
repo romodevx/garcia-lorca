@@ -9,6 +9,7 @@ import { FinanceScreen } from "./FinanceScreen";
 vi.mock("../../finance/api", () => ({
   listCharges: vi.fn(),
   getOverdue: vi.fn(),
+  getExpected: vi.fn(),
   registerPayment: vi.fn(),
   getAccount: vi.fn(),
   previewDeposit: vi.fn(),
@@ -24,6 +25,7 @@ const config = vi.mocked(configApi);
 const students = vi.mocked(studentsApi);
 
 beforeEach(() => {
+  vi.mocked(financeApi).getExpected.mockResolvedValue({ amountCents: 0, surchargeCents: 0, discountCents: 0, annualBalanceCents: 0, onTimeBalanceCents: 0, lines: [] });
   // 20:00 on 31 October in Morelia = 02:00 UTC on 1 November (ADR 0035).
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date(Date.UTC(2026, 10, 1, 2, 0)));

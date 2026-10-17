@@ -22,6 +22,7 @@ import { useSetupPresentation } from "./SetupPresentation";
 import { useLatest } from "./useLatest";
 
 import { API_URL } from "../../api-url";
+import { dayRangeLabel } from "../../_lib/localDate";
 
 /**
  * Los días que la escuela no opera.
@@ -184,7 +185,7 @@ export function CalendarPanel({ cycle, onLoaded }: CalendarPanelProps): ReactEle
           <div key={p.id} style={rowStyle}>
             <span style={{ fontSize: 15, fontWeight: 600, color: "var(--text)" }}>{p.label}</span>
             <span style={{ fontSize: 13.5, color: "var(--text-muted)" }}>
-              {p.startsOn === p.endsOn ? p.startsOn : `${p.startsOn} → ${p.endsOn}`}
+              {dayRangeLabel(p.startsOn, p.endsOn)}
               {p.kind === "vacation" && " · vacaciones"}
             </span>
             <div style={{ flex: 1 }} />
@@ -231,7 +232,7 @@ export function CalendarPanel({ cycle, onLoaded }: CalendarPanelProps): ReactEle
             <div key={ev.id} style={rowStyle}>
               <span style={{ fontSize: 15, fontWeight: 600, color: "var(--text)" }}>{ev.title}</span>
               <span style={{ fontSize: 13.5, color: "var(--text-muted)" }}>
-                {ev.startsOn === ev.endsOn ? ev.startsOn : `${ev.startsOn} → ${ev.endsOn}`}
+                {dayRangeLabel(ev.startsOn, ev.endsOn)}
               </span>
               <div style={{ flex: 1 }} />
               <button

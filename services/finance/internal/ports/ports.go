@@ -262,6 +262,11 @@ type DepositReceipt struct {
 	Deposit          domain.Deposit
 	Lines            []ReceiptLine
 	UnallocatedCents int64
+	// PendingCents is what the charges this deposit paid still owed right
+	// after it (T14-020): every payment RECORDED up to it, in recording order.
+	// Each charge is priced as it stands now, so a discount or scholarship
+	// written later shows in a reprint. A cancelled charge owes nothing.
+	PendingCents int64
 }
 
 // DepositRecord is a stored deposit with what it did.

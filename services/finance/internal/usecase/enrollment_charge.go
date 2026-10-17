@@ -89,7 +89,7 @@ func (s *FinanceService) EnsureEnrollmentCharge(ctx context.Context, cycleID, st
 		joined = s.clock.Today()
 	}
 	charges, err := s.enrollmentCharges(studentID, cycleID, concept.ID(),
-		plan, joined, enrollmentDueDate(cycle.StartsOn, plan, joinedOn))
+		plan, joined, inscriptionDueDate(cycle.StartsOn, plan, joinedOn, s.closedDays(ctx, cycleID)))
 	if err != nil {
 		return false, err
 	}

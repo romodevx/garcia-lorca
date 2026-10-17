@@ -258,7 +258,7 @@ func (s *FinanceService) wantedInscriptions(
 		// zero permanent: a family charged nothing, a problem a school
 		// discovers in June.
 		lines, err := s.enrollmentCharges(enr.StudentID, cycleID, conceptID,
-			plan, asOf, calendar.NextWorkingDay(enrollmentDueDate(cycleStart, plan, enr.EnrolledAt)))
+			plan, asOf, inscriptionDueDate(cycleStart, plan, enr.EnrolledAt, calendar))
 		if err != nil {
 			return nil, err
 		}
@@ -778,6 +778,15 @@ func repriceable(charges []domain.Charge) []ports.ChargeReprice {
 		})
 	}
 	return out
+}
+
+// inscriptionDueDate is THE day an inscription falls due, for every path that
+// issues one — the run and the StudentEnrolled consumer (T14-022): the plan's
+// deadline or the join day, moved to the next day the school is open. When the
+// consumer skipped the calendar, a pupil enrolled on a Saturday got a Saturday
+// deadline and the next run "moved" it to Monday.
+func inscriptionDueDate(cycleStart time.Time, plan domain.TuitionPlan, joinedOn time.Time, calendar *schoolcal.Calendar) time.Time {
+	return calendar.NextWorkingDay(enrollmentDueDate(cycleStart, plan, joinedOn))
 }
 
 // enrollmentDueDate is the day the inscription falls due: the plan's due day in

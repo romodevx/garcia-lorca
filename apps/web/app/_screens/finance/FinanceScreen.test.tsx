@@ -11,6 +11,7 @@ import { FinanceScreen } from "./FinanceScreen";
 vi.mock("../../finance/api", () => ({
   listCharges: vi.fn(),
   getOverdue: vi.fn(),
+  getExpected: vi.fn(),
   registerPayment: vi.fn(),
   getAccount: vi.fn(),
   previewDeposit: vi.fn(),
@@ -18,10 +19,20 @@ vi.mock("../../finance/api", () => ({
   getCashUp: vi.fn(),
   getIncome: vi.fn(),
 }));
-vi.mock("../../config/api", () => ({ listCycles: vi.fn() }));
-vi.mock("../../students/api", () => ({ listStudents: vi.fn(), listNotes: vi.fn(), addNote: vi.fn(), editNote: vi.fn(), voidNote: vi.fn(), StudentsError: class extends Error {} }));
+vi.mock("../../config/api", () => ({ listCycles: vi.fn(), listLabelledGroups: vi.fn() }));
+vi.mock("../../students/api", () => ({ listStudents: vi.fn(), listEnrollments: vi.fn(), listNotes: vi.fn(), addNote: vi.fn(), editNote: vi.fn(), voidNote: vi.fn(), StudentsError: class extends Error {} }));
 
 const finance = vi.mocked(financeApi);
+
+const DEPOSIT: financeApi.DepositResult = {
+  deposit: {
+    id: "d0000000-0000-0000-0000-000000000001", studentId: "s1", amountCents: 50000, method: "cash", reference: "",
+    paidAt: "2026-10-12T16:00:00Z", paidOn: "2026-10-12", calendarVersion: "v1",
+    tenders: [{ method: "cash", amountCents: 50000 }], folio: "P-2026-000009",
+  },
+  allocations: [], surcharges: [], unallocatedCents: 0, replayed: false,
+};
+
 const config = vi.mocked(configApi);
 const students = vi.mocked(studentsApi);
 
@@ -42,7 +53,18 @@ const student = (id: string, first: string, last: string): studentsApi.Student =
   id, curp: `C${id}`, firstName: first, lastName: last, level: "primaria", levelId: "", gradeGroup: "1° A", guardianName: "Tutor", admissionStatus: "enrolled",
 });
 
+/** The quote of one charge: what is asked for it today. */
+const quoteFor = (chargeId: string, owed: number, extra: Partial<financeApi.ExpectedLine> = {}): financeApi.Expected => {
+  const line: financeApi.ExpectedLine = {
+    chargeId, description: "Colegiatura", dueDate: "2026-09-05", owedCents: owed, surchargeCents: 0, discountCents: 0,
+    scholarshipCents: 0, totalCents: owed, due: true, inBalance: true, ...extra,
+  };
+  return { amountCents: line.totalCents, surchargeCents: line.surchargeCents, discountCents: line.discountCents,
+    annualBalanceCents: line.totalCents, onTimeBalanceCents: line.totalCents, lines: [line] };
+};
+
 beforeEach(() => {
+  finance.getExpected.mockImplementation(async () => quoteFor("ch1", 100000));
   config.listCycles.mockResolvedValue([{ id: "c1", name: "2026-2027", status: "active", startsOn: "2026-08-01", endsOn: "2027-06-30" }]);
   students.listStudents.mockResolvedValue([student("s1", "Valentina", "Cruz"), student("s2", "Mateo", "Sánchez")]);
   finance.listCharges.mockResolvedValue([charge("ch1", "s1", 100000), charge("ch2", "s2", 0)]);
@@ -51,6 +73,8 @@ beforeEach(() => {
   finance.previewDeposit.mockResolvedValue({ allocations: [], surcharges: [], unallocatedCents: 0 });
   finance.getCashUp.mockResolvedValue({ deposits: [], cancelled: [], superseded: [], payments: [], cashCents: 0, cardCents: 0, transferCents: 0, totalCents: 0, creditNoteCents: 0 });
   finance.getIncome.mockResolvedValue({ lines: [], totalCents: 0, creditNoteCents: 0 });
+  config.listLabelledGroups.mockResolvedValue([]);
+  students.listEnrollments.mockResolvedValue([]);
 });
 afterEach(() => vi.clearAllMocks());
 
@@ -67,7 +91,7 @@ describe("FinanceScreen", () => {
 
   it("registers a payment for a charge from the drawer", async () => {
     const user = userEvent.setup();
-    finance.registerPayment.mockResolvedValue({} as financeApi.PaymentResult);
+    finance.registerDeposit.mockResolvedValue(DEPOSIT);
     render(<FinanceScreen onBack={() => {}} />);
     await screen.findByText("Cruz Valentina");
 
@@ -79,7 +103,7 @@ describe("FinanceScreen", () => {
     await user.click(within(dialog).getByRole("button", { name: /Registrar pago/ }));
 
     await waitFor(() =>
-      expect(finance.registerPayment).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ chargeId: "ch1", amountCents: 50000, method: "cash" })),
+      expect(finance.registerDeposit).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ studentId: "s1", chargeIds: ["ch1"], amountCents: 50000, method: "cash" })),
     );
   });
 });
@@ -106,7 +130,7 @@ describe("FinanceScreen · Registrar pago con el corte cerrado", () => {
       deposits: [], cancelled: [], superseded: [], payments: [], cashCents: 0, cardCents: 0, transferCents: 0, totalCents: 0, creditNoteCents: 0,
       closure: { id: "cut", day: "2026-10-16" } as financeApi.CashUp["closure"],
     });
-    finance.registerPayment.mockResolvedValue({} as financeApi.PaymentResult);
+    finance.registerDeposit.mockResolvedValue(DEPOSIT);
     const user = userEvent.setup();
     render(<FinanceScreen onBack={() => {}} />);
     await screen.findByText("Cruz Valentina");
@@ -115,13 +139,13 @@ describe("FinanceScreen · Registrar pago con el corte cerrado", () => {
 
     expect(await within(dialog).findByText(/El corte de hoy ya se cerró/)).toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: /^Registrar pago$/ }));
-    await waitFor(() => expect(finance.registerPayment).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(finance.registerDeposit).toHaveBeenCalledTimes(1));
   });
 });
 
 describe("FinanceScreen · Registrar pago while saving", () => {
   it("is busy, not disabled, and two presses in one render send one payment", async () => {
-    finance.registerPayment.mockReturnValue(new Promise<financeApi.PaymentResult>(() => {}));
+    finance.registerDeposit.mockReturnValue(new Promise<financeApi.DepositResult>(() => {}));
     const user = userEvent.setup();
     render(<FinanceScreen onBack={() => {}} />);
     await screen.findByText("Cruz Valentina");
@@ -138,7 +162,7 @@ describe("FinanceScreen · Registrar pago while saving", () => {
     const busy = await within(dialog).findByRole("button", { name: "Registrando…" });
     expect(busy).toBeEnabled();
     expect(busy).toHaveAttribute("aria-busy", "true");
-    expect(finance.registerPayment).toHaveBeenCalledTimes(1);
+    expect(finance.registerDeposit).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -190,7 +214,7 @@ describe("PayDrawer — money safety", () => {
     // The proto documents the consequence of an empty key: "Empty ⇒ no
     // deduplication (every call posts a new payment)". The drawer shipped with
     // idempotencyKey: "", so a double click double-charged a family.
-    finance.registerPayment.mockResolvedValue(undefined as never);
+    finance.registerDeposit.mockResolvedValue(DEPOSIT);
     const user = await openDrawer();
 
     const dialog = screen.getByRole("dialog", { name: /Registrar pago/i });
@@ -198,8 +222,8 @@ describe("PayDrawer — money safety", () => {
     await user.type(within(dialog).getByLabelText("Monto a pagar", { selector: "input" }), "500");
     await user.click(within(dialog).getByRole("button", { name: /^Registrar pago$/i }));
 
-    await waitFor(() => expect(finance.registerPayment).toHaveBeenCalled());
-    const sent = finance.registerPayment.mock.calls[0]?.[1];
+    await waitFor(() => expect(finance.registerDeposit).toHaveBeenCalled());
+    const sent = finance.registerDeposit.mock.calls[0]?.[1];
     expect(sent?.idempotencyKey).toBeTruthy();
     expect(sent?.idempotencyKey).not.toBe("");
   });
@@ -207,7 +231,7 @@ describe("PayDrawer — money safety", () => {
   it("reuses the SAME key when a failed attempt is retried", async () => {
     // A retry after a network error must not post a second payment. Minting a
     // fresh key per click would defeat the whole mechanism.
-    finance.registerPayment.mockRejectedValueOnce(new Error("network"));
+    finance.registerDeposit.mockRejectedValueOnce(new Error("network"));
     const user = await openDrawer();
 
     const dialog = screen.getByRole("dialog", { name: /Registrar pago/i });
@@ -217,12 +241,12 @@ describe("PayDrawer — money safety", () => {
     await user.click(save);
     await screen.findByText(/network|No se pudo/i);
 
-    finance.registerPayment.mockResolvedValue(undefined as never);
+    finance.registerDeposit.mockResolvedValue(DEPOSIT);
     await user.click(save);
 
-    await waitFor(() => expect(finance.registerPayment).toHaveBeenCalledTimes(2));
-    const first = finance.registerPayment.mock.calls[0]?.[1]?.idempotencyKey;
-    const second = finance.registerPayment.mock.calls[1]?.[1]?.idempotencyKey;
+    await waitFor(() => expect(finance.registerDeposit).toHaveBeenCalledTimes(2));
+    const first = finance.registerDeposit.mock.calls[0]?.[1]?.idempotencyKey;
+    const second = finance.registerDeposit.mock.calls[1]?.[1]?.idempotencyKey;
     expect(second).toBe(first);
   });
 
@@ -230,7 +254,7 @@ describe("PayDrawer — money safety", () => {
   // on today and cannot be moved into the future.
   it("registers a payment with the day the family paid", async () => {
     const user = userEvent.setup();
-    finance.registerPayment.mockResolvedValue({} as financeApi.PaymentResult);
+    finance.registerDeposit.mockResolvedValue(DEPOSIT);
     render(<FinanceScreen onBack={() => {}} today="2026-10-12" />);
     await screen.findByText("Cruz Valentina");
     await user.click(screen.getAllByRole("button", { name: /Registrar pago/ })[0] as HTMLElement);
@@ -243,7 +267,7 @@ describe("PayDrawer — money safety", () => {
     await user.click(within(dialog).getByRole("button", { name: /Registrar pago/ }));
 
     await waitFor(() =>
-      expect(finance.registerPayment).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ paidAt: "2026-01-05" })),
+      expect(finance.registerDeposit).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ paidAt: "2026-01-05" })),
     );
   });
 
@@ -415,19 +439,19 @@ describe("PayDrawer · nota de crédito + pago combinado (tarea 8)", () => {
     user.click(within(dialog).getByRole("button", { name: /^Registrar pago$/i }));
 
   it("sends one cash tender for the charge's balance on the happy path", async () => {
-    finance.registerPayment.mockResolvedValue({} as financeApi.PaymentResult);
+    finance.registerDeposit.mockResolvedValue(DEPOSIT);
     const { user, dialog } = await openDrawer();
 
     await submit(user, dialog);
 
-    await waitFor(() => expect(finance.registerPayment).toHaveBeenCalled());
-    expect(finance.registerPayment.mock.calls[0]?.[1]).toMatchObject({
+    await waitFor(() => expect(finance.registerDeposit).toHaveBeenCalled());
+    expect(finance.registerDeposit.mock.calls[0]?.[1]).toMatchObject({
       amountCents: 100000, method: "cash", tenders: [{ method: "cash", amountCents: 100000 }],
     });
   });
 
   it("completes a credit note with a transfer", async () => {
-    finance.registerPayment.mockResolvedValue({} as financeApi.PaymentResult);
+    finance.registerDeposit.mockResolvedValue(DEPOSIT);
     const { user, dialog } = await openDrawer();
 
     await user.click(within(tenderRow(dialog, 1)).getByRole("button", { name: "Nota de crédito" }));
@@ -437,8 +461,8 @@ describe("PayDrawer · nota de crédito + pago combinado (tarea 8)", () => {
     await user.click(within(tenderRow(dialog, 2)).getByRole("button", { name: "Transferencia" }));
     await submit(user, dialog);
 
-    await waitFor(() => expect(finance.registerPayment).toHaveBeenCalled());
-    expect(finance.registerPayment.mock.calls[0]?.[1]?.tenders).toEqual([
+    await waitFor(() => expect(finance.registerDeposit).toHaveBeenCalled());
+    expect(finance.registerDeposit.mock.calls[0]?.[1]?.tenders).toEqual([
       { method: "credit_note", amountCents: 30000 },
       { method: "transfer", amountCents: 70000 },
     ]);
@@ -452,9 +476,9 @@ describe("PayDrawer · nota de crédito + pago combinado (tarea 8)", () => {
     await user.type(amount, "1500");
     await submit(user, dialog);
 
-    expect(await within(dialog).findByText(/No puede ser mayor que el saldo del cargo/)).toBeInTheDocument();
+    expect(await within(dialog).findByText(/No puede ser mayor que lo que se paga hoy/)).toBeInTheDocument();
     await waitFor(() => expect(document.activeElement).toBe(amount));
-    expect(finance.registerPayment).not.toHaveBeenCalled();
+    expect(finance.registerDeposit).not.toHaveBeenCalled();
   });
 
   it("refuses tenders that do not add up to the amount to pay", async () => {
@@ -465,7 +489,7 @@ describe("PayDrawer · nota de crédito + pago combinado (tarea 8)", () => {
     await submit(user, dialog);
 
     expect(await within(dialog).findByText("La suma de las formas de pago debe ser igual al monto a pagar.")).toBeInTheDocument();
-    expect(finance.registerPayment).not.toHaveBeenCalled();
+    expect(finance.registerDeposit).not.toHaveBeenCalled();
   });
 });
 
@@ -480,5 +504,158 @@ describe("opened from a shortcut", () => {
     expect(await screen.findByText("Cruz Valentina")).toBeInTheDocument();
     expect(screen.queryByText("Sánchez Mateo")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Vencidos/ })).toHaveAttribute("aria-pressed", "true");
+  });
+});
+
+// ISSUE-T14-003: Registrar pago went through POST /payments, which leaves no
+// deposit behind — no folio, no ticket, and the cut named the concept instead
+// of who collected it. It now takes the counter's path.
+describe("FinanceScreen · Registrar pago deja folio y comprobante (T14-003)", () => {
+  it("registers a deposit for the one charge, then shows its folio and the receipt actions", async () => {
+    const user = userEvent.setup();
+    finance.registerDeposit.mockResolvedValue({
+      ...DEPOSIT,
+      allocations: [{ id: "p1", chargeId: "ch1", amountCents: 50000, method: "cash", reference: "", paidAt: "2026-10-12T16:00:00Z" }],
+    });
+    render(<FinanceScreen onBack={() => {}} />);
+    await screen.findByText("Cruz Valentina");
+    await user.click(screen.getAllByRole("button", { name: /Registrar pago/ })[0] as HTMLElement);
+    const dialog = await screen.findByRole("dialog", { name: "Registrar pago" });
+    const amount = within(dialog).getByLabelText("Monto a pagar", { selector: "input" });
+    await user.clear(amount);
+    await user.type(amount, "500");
+    await user.click(within(dialog).getByRole("button", { name: /^Registrar pago$/ }));
+
+    await waitFor(() => expect(finance.registerDeposit).toHaveBeenCalledTimes(1));
+    expect(finance.registerDeposit.mock.calls[0]?.[1]).toMatchObject({
+      studentId: "s1", chargeIds: ["ch1"], amountCents: 50000, tenders: [{ method: "cash", amountCents: 50000 }],
+    });
+    expect(finance.registerDeposit.mock.calls[0]?.[1]?.idempotencyKey).toBeTruthy();
+    expect(finance.registerPayment).not.toHaveBeenCalled();
+
+    const receipt = await within(dialog).findByTestId("receipt");
+    expect(receipt).toHaveTextContent("P-2026-000009");
+    expect(within(receipt).getByText("Colegiatura")).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Imprimir ticket" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Descargar PDF" })).toBeInTheDocument();
+    // The list is read again behind the receipt, which stays until Listo.
+    await waitFor(() => expect(finance.listCharges).toHaveBeenCalledTimes(2));
+    await user.click(within(dialog).getByRole("button", { name: "Listo" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Registrar pago" })).toBeNull());
+  });
+});
+
+// ISSUE-T14-012: VENCE said "2026-09-05" while the rest of the app says the month in words.
+describe("FinanceScreen · fechas con letra (T14-012)", () => {
+  it("shows the due date with the month in words", async () => {
+    render(<FinanceScreen onBack={() => {}} />);
+    await screen.findByText("Cruz Valentina");
+
+    expect(screen.getAllByText("5 sep 2026").length).toBeGreaterThan(0);
+    expect(screen.queryByText("2026-09-05")).toBeNull();
+  });
+});
+
+// ISSUE-T14-018: NIVEL said "PRIMARIA | B" without the grade.
+describe("FinanceScreen · el grupo con su grado (T14-018)", () => {
+  it("names the pupil's classroom as every screen does", async () => {
+    students.listStudents.mockResolvedValue([{ ...student("s1", "Valentina", "Cruz"), gradeGroup: "B" }]);
+    finance.listCharges.mockResolvedValue([charge("ch1", "s1", 100000)]);
+    config.listLabelledGroups.mockResolvedValue([{ id: "gB", cycleId: "c1", gradeLevelId: "g3", name: "B", capacity: 30, label: "3° PRIMARIA · B" }]);
+    students.listEnrollments.mockResolvedValue([{ id: "e1", studentId: "s1", cycleId: "c1", groupId: "gB", termId: "", status: "active", enrolledAt: "2026-08-20" }]);
+    render(<FinanceScreen onBack={() => {}} />);
+
+    expect(await screen.findByText("3° PRIMARIA · B")).toBeInTheDocument();
+  });
+});
+
+// ISSUE-T14-020: a cancelled charge showed its amount as the balance ("$3,500 · Cancelado").
+describe("FinanceScreen · un cargo cancelado no debe nada (T14-020)", () => {
+  it("shows a cancelled charge's balance as $0", async () => {
+    finance.listCharges.mockResolvedValue([{ ...charge("ch1", "s1", 350000), amountCents: 350000, status: "cancelled" }]);
+    render(<FinanceScreen onBack={() => {}} />);
+    await screen.findByText("Cruz Valentina");
+
+    // Neither the row nor the stat cards ask for the cancelled $3,500.
+    expect(screen.queryByText("$3,500.00")).toBeNull();
+    expect(screen.getAllByText("$0.00").length).toBeGreaterThan(0);
+  });
+});
+
+// Review B1: Registrar pago is a deposit, so the server adds the late fee as a
+// charge of its own and applies pronto pago. The drawer must ask what is owed
+// TODAY for the charge — not its bare balance — prefill and cap with it, and say
+// what the money covers before it is taken.
+describe("PayDrawer · lo que se debe hoy (revisión B1)", () => {
+  async function open(): Promise<{ user: ReturnType<typeof userEvent.setup>; dialog: HTMLElement }> {
+    const user = userEvent.setup();
+    render(<FinanceScreen onBack={() => {}} />);
+    await screen.findByText("Cruz Valentina");
+    await user.click(screen.getAllByRole("button", { name: /Registrar pago/ })[0] as HTMLElement);
+    return { user, dialog: await screen.findByRole("dialog", { name: "Registrar pago" }) };
+  }
+
+  it("on a late charge: prefills with its late fee, takes it all, and says the fee is covered", async () => {
+    finance.getExpected.mockResolvedValue(quoteFor("ch1", 100000, { surchargeCents: 15000, totalCents: 115000 }));
+    finance.previewDeposit.mockResolvedValue({
+      allocations: [
+        { id: "p1", chargeId: "ch1", amountCents: 100000, method: "cash", reference: "", paidAt: "" },
+        { id: "p2", chargeId: "fee-1", amountCents: 15000, method: "cash", reference: "", paidAt: "" },
+      ],
+      surcharges: [{ ...charge("fee-1", "s1", 15000), description: "Recargo · Colegiatura" }],
+      unallocatedCents: 0,
+    });
+    finance.registerDeposit.mockResolvedValue(DEPOSIT);
+    const { user, dialog } = await open();
+
+    const amount = within(dialog).getByLabelText("Monto a pagar", { selector: "input" });
+    await waitFor(() => expect(amount).toHaveValue("1,150.00"));
+    expect(within(dialog).getByTestId("pay-quote")).toHaveTextContent(/Recargo\s*\$150\.00/);
+    const preview = await within(dialog).findByTestId("preview");
+    expect(preview).toHaveTextContent(/Recargo · Colegiatura\s*\$150\.00/);
+    expect(finance.previewDeposit).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ studentId: "s1", chargeIds: ["ch1"], amountCents: 115000 }));
+
+    await user.click(within(dialog).getByRole("button", { name: /^Registrar pago$/ }));
+    await waitFor(() => expect(finance.registerDeposit).toHaveBeenCalledTimes(1));
+    expect(finance.registerDeposit.mock.calls[0]?.[1]).toMatchObject({ amountCents: 115000, chargeIds: ["ch1"] });
+  });
+
+  it("on a pronto-pago charge: prefills net of the reward, says it, and refuses an amount that would turn into credit", async () => {
+    finance.getExpected.mockResolvedValue(quoteFor("ch1", 100000, { discountCents: 5000, totalCents: 95000 }));
+    const { user, dialog } = await open();
+
+    const amount = within(dialog).getByLabelText("Monto a pagar", { selector: "input" });
+    await waitFor(() => expect(amount).toHaveValue("950.00"));
+    expect(within(dialog).getByTestId("pay-quote")).toHaveTextContent(/Pronto pago\s*−\$50\.00/);
+
+    await user.clear(amount);
+    await user.type(amount, "1000");
+    await user.click(within(dialog).getByRole("button", { name: /^Registrar pago$/ }));
+
+    expect(await within(dialog).findByText(/No puede ser mayor que lo que se paga hoy \(\$950\.00\)/)).toBeInTheDocument();
+    expect(finance.registerDeposit).not.toHaveBeenCalled();
+  });
+
+  // Round 2: a quote that cannot be read falls back to the bare balance — and says so.
+  it("falls back to the charge's balance when the quote fails, and tells the cashier", async () => {
+    finance.getExpected.mockRejectedValue(new Error("finance is down"));
+    const { dialog } = await open();
+
+    expect(await within(dialog).findByText(/No se pudo cotizar el cargo para ese día/)).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("Monto a pagar", { selector: "input" })).toHaveValue("1,000.00");
+    expect(within(dialog).getByTestId("pay-quote")).toHaveTextContent(/A pagar hoy\s*\$1,000\.00/);
+  });
+
+  // Round 2: another day is another quote; until it arrives, the previous
+  // day's figure must not cap nor show.
+  it("forgets the previous day's quote while the new day's is read", async () => {
+    finance.getExpected.mockResolvedValueOnce(quoteFor("ch1", 100000, { discountCents: 5000, totalCents: 95000 }));
+    const { dialog } = await open();
+    await waitFor(() => expect(within(dialog).getByTestId("pay-quote")).toHaveTextContent(/A pagar hoy\s*\$950\.00/));
+
+    finance.getExpected.mockReturnValue(new Promise<financeApi.Expected>(() => {}));
+    fireEvent.change(within(dialog).getByLabelText("Fecha de pago"), { target: { value: "2026-01-05" } });
+
+    await waitFor(() => expect(within(dialog).getByTestId("pay-quote")).toHaveTextContent(/A pagar hoy\s*\$1,000\.00/));
   });
 });

@@ -1228,6 +1228,9 @@ message GetDepositReceiptResponse {
   repeated ReceiptLine lines = 2;
   // unallocated_cents is what no charge claimed: the family's credit.
   int64 unallocated_cents = 3;
+  // pending_cents is what the charges this deposit paid still owed right after
+  // it, by recording order (T14-020); 0 on a voided or superseded deposit.
+  int64 pending_cents = 4;
 }
 
 // --- corrections (T9) -------------------------------------------------------

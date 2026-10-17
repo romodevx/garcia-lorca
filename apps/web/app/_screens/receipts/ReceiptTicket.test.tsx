@@ -117,3 +117,27 @@ describe("ReceiptTicket · formas de pago (tarea 8)", () => {
     expect(screen.queryByText(/Beca/)).toBeNull();
   });
 });
+
+// T14-012: the day in words, as every other screen says it.
+describe("ReceiptTicket · fecha con letra (T14-012)", () => {
+  it("says the payment day with the month in words", () => {
+    render(<ReceiptTicket receipt={receipt} />);
+
+    expect(screen.getByText("Fecha de pago: 10 oct 2026")).toBeInTheDocument();
+  });
+});
+
+// T14-020: a partial payment says what is still owed on what it paid.
+describe("ReceiptTicket · saldo pendiente (T14-020)", () => {
+  it("says the balance still pending on the charges it paid", () => {
+    render(<ReceiptTicket receipt={{ ...receipt, pendingCents: 100000 }} />);
+
+    expect(screen.getByTestId("ticket-pending")).toHaveTextContent(/Saldo pendiente\s*\$1,000\.00/);
+  });
+
+  it("says nothing of it when the charges are settled", () => {
+    render(<ReceiptTicket receipt={{ ...receipt, pendingCents: 0 }} />);
+
+    expect(screen.queryByTestId("ticket-pending")).toBeNull();
+  });
+});

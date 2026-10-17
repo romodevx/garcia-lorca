@@ -481,6 +481,39 @@ it("says when it corrected inscription deadlines already issued", async () => {
   expect(await screen.findByRole("status")).toHaveTextContent(/400 inscripciones/);
 });
 
+// T14-022: the move is said in the run's own sentence, right after what it
+// generated — a second paragraph under it read as a footnote, and a moved
+// deadline changes what a withdrawal later treats as "not yet due".
+it("says the deadlines it moved in the same sentence as what it generated", async () => {
+  const user = userEvent.setup();
+  finance.runBilling.mockResolvedValue({
+    tuitionCreated: 27, enrollmentCreated: 0, lateFeesCreated: 0, feesCreated: 0,
+    enrollmentMoved: 3, skipped: 0, levelsWithoutPlan: [],
+  });
+  render(<Host />);
+  await screen.findByText("Primaria");
+
+  await user.click(screen.getByRole("button", { name: /Generar cargos del mes/ }));
+
+  const summary = (await screen.findByRole("status")).querySelector("p");
+  expect(summary).toHaveTextContent(/Se generaron 27 colegiaturas.*Se movió la fecha límite de 3 inscripciones sin pagar/);
+});
+
+// T14-022: re-pricing moves money, not dates — said too, never silently.
+it("says the unpaid inscriptions it re-priced to the tier in force", async () => {
+  const user = userEvent.setup();
+  finance.runBilling.mockResolvedValue({
+    tuitionCreated: 0, enrollmentCreated: 0, lateFeesCreated: 0, feesCreated: 0,
+    enrollmentMoved: 0, enrollmentRepriced: 5, skipped: 0, levelsWithoutPlan: [],
+  });
+  render(<Host />);
+  await screen.findByText("Primaria");
+
+  await user.click(screen.getByRole("button", { name: /Generar cargos del mes/ }));
+
+  expect(await screen.findByRole("status")).toHaveTextContent(/precio de 5 inscripciones sin pagar/);
+});
+
 // And stays quiet when it moved nothing, or the director stops reading it.
 it("says nothing about deadlines when it moved none", async () => {
   const user = userEvent.setup();

@@ -74,8 +74,9 @@ describe("CalendarPanel — characterization", () => {
     config.listSchoolEvents.mockResolvedValue([WEEK]);
     render(<CalendarPanel cycle={cycle} />);
 
-    expect(await screen.findByText("2026-12-21 → 2027-01-06 · vacaciones")).toBeInTheDocument();
-    expect(screen.getByText("2026-12-07 → 2026-12-11")).toBeInTheDocument();
+    // T14-012: the month in words, as every other screen says a date.
+    expect(await screen.findByText("21 dic 2026 → 6 ene 2027 · vacaciones")).toBeInTheDocument();
+    expect(screen.getByText("7 dic 2026 → 11 dic 2026")).toBeInTheDocument();
   });
 
   it("refuses a closure whose last day is before its first, without calling the server", async () => {

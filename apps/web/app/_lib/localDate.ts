@@ -23,3 +23,8 @@ export function shortDayLabel(isoDate: string): string {
 export function dayWithYearLabel(isoDate: string): string {
   return calendarDay(isoDate).toLocaleDateString("es-MX", { day: "numeric", month: "short", year: "numeric" }).replace(".", "");
 }
+
+/** "16 sep 2026" for one day, "21 dic 2026 → 6 ene 2027" for a range. */
+export function dayRangeLabel(startsOn: string, endsOn: string): string {
+  return startsOn === endsOn ? dayWithYearLabel(startsOn) : `${dayWithYearLabel(startsOn)} → ${dayWithYearLabel(endsOn)}`;
+}

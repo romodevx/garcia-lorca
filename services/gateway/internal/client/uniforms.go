@@ -103,6 +103,9 @@ type UniformOrder struct {
 	Lines             []UniformOrderLine   `json:"lines"`
 	Fulfillments      []UniformFulfillment `json:"fulfillments"`
 	CreatedAt         string               `json:"createdAt,omitempty"`
+	// CreatedByUserID is who made the order (the seller of a counter sale).
+	// Kept off the wire: the receipt prints the name, never a staff id.
+	CreatedByUserID string `json:"-"`
 }
 
 // UniformSizeSpec is one row of a size run being created or updated.
@@ -502,6 +505,7 @@ func toUniformOrder(o *uniformsv1.Order) UniformOrder {
 		StudentGradeGroup: o.GetStudentGradeGroup(), Source: o.GetSource(),
 		Label: orderLabelNames[o.GetLabel()], TotalCents: o.GetTotalCents(),
 		Lines: lines, Fulfillments: fulfillments, CreatedAt: created,
+		CreatedByUserID: o.GetCreatedByUserId(),
 	}
 }
 

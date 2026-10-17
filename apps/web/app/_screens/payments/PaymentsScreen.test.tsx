@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as financeApi from "../../finance/api";
 import * as studentsApi from "../../students/api";
+import * as configApi from "../../config/api";
 import { PaymentsScreen } from "./PaymentsScreen";
 
 vi.mock("../../finance/api", () => ({
@@ -13,10 +14,12 @@ vi.mock("../../finance/api", () => ({
   registerDeposit: vi.fn(),
   getCashUp: vi.fn(),
 }));
-vi.mock("../../students/api", () => ({ listStudents: vi.fn() }));
+vi.mock("../../students/api", () => ({ listStudents: vi.fn(), listEnrollments: vi.fn() }));
+vi.mock("../../config/api", () => ({ listCycles: vi.fn(), listLabelledGroups: vi.fn() }));
 
 const finance = vi.mocked(financeApi);
 const students = vi.mocked(studentsApi);
+const config = vi.mocked(configApi);
 
 const student = (id: string, first: string, last: string): studentsApi.Student => ({
   id, curp: `C${id}`, firstName: first, lastName: last, level: "primaria", levelId: "",
@@ -28,6 +31,11 @@ beforeEach(() => {
   finance.getExpected.mockResolvedValue({ amountCents: 670000, surchargeCents: 0, discountCents: 0, annualBalanceCents: 1300000, onTimeBalanceCents: 1300000, lines: [] });
   finance.getAccount.mockResolvedValue({ charges: [], payments: [], totalBalanceCents: 1300000, unallocatedCents: 0, dueTodayCents: 0, surchargeCents: 0, earlyDiscountCents: 0, asOf: "" });
   finance.previewDeposit.mockResolvedValue({ allocations: [], surcharges: [], unallocatedCents: 0 });
+});
+beforeEach(() => {
+  config.listCycles.mockResolvedValue([{ id: "c1", name: "2026-2027", status: "active", startsOn: "2026-08-01", endsOn: "2027-06-30" }]);
+  config.listLabelledGroups.mockResolvedValue([]);
+  students.listEnrollments.mockResolvedValue([]);
 });
 afterEach(() => vi.clearAllMocks());
 
@@ -145,5 +153,25 @@ describe("PaymentsScreen · corte de caja", () => {
     await user.click(await screen.findByRole("button", { name: /Corte de caja/ }));
     expect(await screen.findByTestId("cash-up-total")).toHaveTextContent("3,200");
     expect(screen.getByLabelText("Día del corte")).toBeInTheDocument();
+  });
+});
+
+// ISSUE-T14-018: the search and the counter's header said "PRIMARIA · A";
+// the receipt said "3° PRIMARIA · A". Two A's are told apart by the grade.
+describe("PaymentsScreen · el grupo con su grado (T14-018)", () => {
+  it("names the classroom with its grade in the results and the counter's header", async () => {
+    students.listStudents.mockResolvedValue([{ ...student("s1", "Valentina", "Cruz"), gradeGroup: "A" }]);
+    config.listLabelledGroups.mockResolvedValue([{ id: "gA", cycleId: "c1", gradeLevelId: "g3", name: "A", capacity: 30, label: "3° PRIMARIA · A" }]);
+    students.listEnrollments.mockResolvedValue([{ id: "e1", studentId: "s1", cycleId: "c1", groupId: "gA", termId: "", status: "active", enrolledAt: "2026-08-20" }]);
+    const user = userEvent.setup();
+    render(<PaymentsScreen onBack={() => {}} />);
+    await screen.findByLabelText("Buscar alumno");
+
+    await user.type(screen.getByLabelText("Buscar alumno"), "Valen");
+
+    expect(await screen.findByText("3° PRIMARIA · A")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Cruz Valentina/ }));
+    const dialog = await screen.findByRole("dialog", { name: /^Cobrar/ });
+    expect(dialog).toHaveTextContent("3° PRIMARIA · A");
   });
 });
