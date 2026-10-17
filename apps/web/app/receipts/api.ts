@@ -52,6 +52,11 @@ export interface Receipt {
   scholarshipCents?: number;
   creditCents: number;
   totalCents: number;
+  /**
+   * What the charges this payment paid still owed right after it (T14-020):
+   * an abono says how much is left. Absent on a sale and from older gateways.
+   */
+  pendingCents?: number;
   /** The single method, or the methods joined with " + " when it was split. */
   method: string;
   reference?: string;

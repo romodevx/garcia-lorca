@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/signintech/gopdf"
 
@@ -139,8 +140,21 @@ func (w *writer) header(r Receipt) {
 	}
 }
 
+// shortMonths are the months as every screen abbreviates them ("17 oct 2026").
+var shortMonths = [...]string{"ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"}
+
+// DayLabel is a YYYY-MM-DD day as the office reads it, "17 oct 2026" (T14-012):
+// the format of the web's dayWithYearLabel. Anything else is kept as it came.
+func DayLabel(day string) string {
+	t, err := time.Parse(time.DateOnly, day)
+	if err != nil {
+		return day
+	}
+	return fmt.Sprintf("%d %s %d", t.Day(), shortMonths[t.Month()-1], t.Year())
+}
+
 func (w *writer) parties(r Receipt) {
-	w.text(familyRegular, 10, "Fecha de pago: "+r.PaidOn)
+	w.text(familyRegular, 10, "Fecha de pago: "+DayLabel(r.PaidOn))
 	w.text(familyRegular, 10, prefixed("Alumno: ", joinNonEmpty(" · ", r.Buyer, r.BuyerDetail)))
 	if len(r.Tenders) > 1 {
 		// A combined payment (T8): one line per method, with its amount.
@@ -194,6 +208,10 @@ func (w *writer) totals(r Receipt) {
 		row(familyRegular, 10, "Saldo a favor", r.CreditCents)
 	}
 	row(familyBold, 13, "Total", r.TotalCents)
+	if r.PendingCents > 0 {
+		// An abono says what is left on what it paid (T14-020).
+		row(familyBold, 10, "Saldo pendiente", r.PendingCents)
+	}
 }
 
 func (w *writer) foot(r Receipt) {

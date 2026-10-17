@@ -983,6 +983,8 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	receiptOptions := []receipt.Option{
 		receipt.WithSchoolLocation(receiptZone),
 		receipt.WithGroupLabeler(handler.NewStudentGroupLabeler(studentsClient, configClient, receiptZone)),
+		// The sale receipt says who collected (T14-019), as the payment one does.
+		receipt.WithUserNamer(authClient),
 	}
 	receiptsH := handler.NewReceiptsHandler(receipt.NewBuilder(financeClient, uniformsClient, studentsClient, financeClient, configClient, receiptOptions...))
 	paymentReceipt := func(h http.HandlerFunc) http.Handler {

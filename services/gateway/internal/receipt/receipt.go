@@ -53,6 +53,10 @@ type Receipt struct {
 	ScholarshipCents int64 `json:"scholarshipCents"`
 	CreditCents      int64 `json:"creditCents"`
 	TotalCents       int64 `json:"totalCents"`
+	// PendingCents is what the charges this payment paid still owed right
+	// after it (T14-020): an abono says how much is left. Zero on a sale, on a
+	// settled payment, and when the account could not be read.
+	PendingCents int64 `json:"pendingCents,omitempty"`
 	// Method is how it was paid, in words: the one method, or every method
 	// joined with " + " when several were combined (T8).
 	Method    string `json:"method"`
@@ -123,6 +127,10 @@ type (
 	GroupLabeler interface {
 		StudentGroupLabel(ctx context.Context, studentID, day string) (label string, found bool, err error)
 	}
+	// UserNamer names the staff member who made a counter sale.
+	UserNamer interface {
+		GetUser(ctx context.Context, id string) (client.User, error)
+	}
 )
 
 // counterSource is the order source of a counter sale.
@@ -139,6 +147,8 @@ type Builder struct {
 	profiles ProfileReader
 	// groups names the pupil's group in full; nil keeps the stored letter.
 	groups GroupLabeler
+	// users names who made a counter sale; nil leaves "Recibió" out.
+	users UserNamer
 	// zone is the school's time zone, whose calendar day a sale prints
 	// (D8). UTC unless WithSchoolLocation says otherwise.
 	zone *time.Location
@@ -161,6 +171,12 @@ func WithSchoolLocation(location *time.Location) Option {
 // and level (ISSUE-017) instead of the bare letter the pupil's row stores.
 func WithGroupLabeler(groups GroupLabeler) Option {
 	return func(b *Builder) { b.groups = groups }
+}
+
+// WithUserNamer names who made a counter sale on its receipt (T14-019), the
+// "Recibió" a payment's receipt already prints.
+func WithUserNamer(users UserNamer) Option {
+	return func(b *Builder) { b.users = users }
 }
 
 // NewBuilder wires a Builder.
@@ -215,7 +231,58 @@ func (b *Builder) Payment(ctx context.Context, depositID string) (Receipt, error
 			r.SurchargeCents += l.AmountCents
 		}
 	}
+	if !r.Voided {
+		r.PendingCents = b.pendingAfter(ctx, got)
+	}
 	return r, nil
+}
+
+// pendingAfter is what the charges a deposit paid still owed right after it:
+// each one's balance today plus whatever later deposits paid on it, so a
+// receipt printed again next month still says what it said the day it was
+// handed over. A cancelled charge owes nothing. A courtesy, never a gate: an
+// account that cannot be read prints the receipt without it (logged, ids only).
+func (b *Builder) pendingAfter(ctx context.Context, got client.DepositReceipt) int64 {
+	paid := make(map[string]bool, len(got.Lines))
+	for _, l := range got.Lines {
+		if l.ChargeID != "" {
+			paid[l.ChargeID] = true
+		}
+	}
+	if len(paid) == 0 {
+		return 0
+	}
+	account, err := b.accounts.GetAccount(ctx, got.Deposit.StudentID)
+	if err != nil {
+		slog.WarnContext(ctx, "account read failed; the receipt prints without its pending balance",
+			"deposit_id", got.Deposit.ID, "error", err)
+		return 0
+	}
+	at, _ := time.Parse(time.RFC3339, got.Deposit.PaidAt)
+	later := make(map[string]int64, len(paid))
+	for _, p := range account.Payments {
+		if paid[p.ChargeID] && p.DepositID != got.Deposit.ID && recordedAfter(p.PaidAt, at) {
+			later[p.ChargeID] += p.AmountCents
+		}
+	}
+	var pending int64
+	for _, c := range account.Charges {
+		if !paid[c.ID] || c.Status == chargeCancelled {
+			continue
+		}
+		pending += max(0, c.RemainingCents+later[c.ID])
+	}
+	return pending
+}
+
+// chargeCancelled is the status of a charge nobody owes any more.
+const chargeCancelled = "cancelled"
+
+// recordedAfter says whether an RFC 3339 instant falls after `at`. One that
+// does not parse is not counted: the receipt then shows today's balance.
+func recordedAfter(instant string, at time.Time) bool {
+	t, err := time.Parse(time.RFC3339, instant)
+	return err == nil && !at.IsZero() && t.After(at)
 }
 
 // Sale is the receipt of a uniforms sale. How it was paid is finance's to
@@ -238,7 +305,8 @@ func (b *Builder) Sale(ctx context.Context, orderID string) (Receipt, error) {
 		Kind: KindSale, Folio: order.Folio, School: school, PaidOn: b.schoolDayOf(order.CreatedAt),
 		Buyer: buyerOf(order), BuyerDetail: b.groupOf(ctx, order.StudentID, b.schoolDayOf(order.CreatedAt), order.StudentGradeGroup),
 		Lines: make([]Line, 0, len(order.Lines)), TotalCents: order.TotalCents,
-		Tenders: []TenderLine{},
+		Tenders:    []TenderLine{},
+		ReceivedBy: b.sellerOf(ctx, order.CreatedByUserID),
 	}
 	for _, l := range order.Lines {
 		r.Lines = append(r.Lines, Line{
@@ -278,6 +346,24 @@ func (b *Builder) groupOf(ctx context.Context, studentID, day, stored string) st
 		return stored
 	}
 	return label
+}
+
+// sellerOf is who made a counter sale, as the receipt prints it: the display
+// name, else the email. Empty when unknown — a directory that cannot answer
+// never stops the receipt (logged, ids only).
+func (b *Builder) sellerOf(ctx context.Context, userID string) string {
+	if b.users == nil || userID == "" {
+		return ""
+	}
+	u, err := b.users.GetUser(ctx, userID)
+	if err != nil {
+		slog.WarnContext(ctx, "seller lookup failed; the sale receipt prints without Recibió", "user_id", userID, "error", err)
+		return ""
+	}
+	if name := strings.TrimSpace(u.DisplayName); name != "" {
+		return name
+	}
+	return strings.TrimSpace(u.Email)
 }
 
 func (b *Builder) school(ctx context.Context) (client.SchoolProfile, error) {

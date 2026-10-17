@@ -443,6 +443,7 @@ func toProtoOrder(agg ports.OrderAggregate) *uniformsv1.Order {
 		Label:      labelToProto[domain.DeriveOrderLabel(statuses, live)],
 		TotalCents: total, Lines: lines, Fulfillments: fulfillments,
 		CreatedAt: toProtoTime(agg.Order.CreatedAt()), ClosedAt: toProtoTime(agg.Order.ClosedAt()),
+		CreatedByUserId: agg.Order.CreatedByUserID(),
 	}
 }
 

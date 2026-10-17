@@ -1,5 +1,6 @@
 import type { CSSProperties, ReactElement } from "react";
 
+import { dayWithYearLabel } from "../../_lib/localDate";
 import { formatCents } from "../../_lib/money";
 import type { Receipt } from "../../receipts/api";
 import { scholarshipTitle } from "../../scholarships/format";
@@ -57,7 +58,7 @@ export function ReceiptTicket({ receipt: r }: { receipt: Receipt }): ReactElemen
       )}
       {r.correctsFolio !== undefined && r.correctsFolio !== "" && <p style={{ ...center, fontWeight: 700 }}>Corrige a {r.correctsFolio}</p>}
       <hr style={rule} />
-      <p>Fecha de pago: {r.paidOn}</p>
+      <p>Fecha de pago: {dayWithYearLabel(r.paidOn)}</p>
       <p>Alumno: {[r.buyer, r.buyerDetail].filter((x) => x !== undefined && x !== "").join(" · ")}</p>
       <hr style={rule} />
       {r.lines.map((l, i) => (
@@ -81,6 +82,13 @@ export function ReceiptTicket({ receipt: r }: { receipt: Receipt }): ReactElemen
         <span>Total</span>
         <span data-testid="ticket-total">{formatCents(r.totalCents)}</span>
       </div>
+      {(r.pendingCents ?? 0) > 0 && (
+        // An abono says what is left on what it paid (T14-020).
+        <div data-testid="ticket-pending" style={{ ...row, fontWeight: 700, marginTop: 2 }}>
+          <span>Saldo pendiente</span>
+          <span>{formatCents(r.pendingCents ?? 0)}</span>
+        </div>
+      )}
       <hr style={rule} />
       {byTender(r) ? (
         // Split across methods, or a credit note (T8): one row per tender.
