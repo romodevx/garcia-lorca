@@ -25,7 +25,7 @@ describe("useTenders with the recorded tenders", () => {
     rerender({ total: 100000 });
     expect(result.current.rows).toHaveLength(1);
     expect(result.current.rows[0]?.method).toBe("transfer");
-    expect(result.current.rows[0]?.amount).toBe("1000.00");
+    expect(result.current.rows[0]?.amount).toBe("1,000.00");
     act(() => result.current.add());
     expect(result.current.rows).toHaveLength(2);
     expect(new Set(result.current.rows.map((r) => r.key)).size).toBe(2);

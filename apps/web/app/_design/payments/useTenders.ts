@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 
 import type { CardType, PaymentMethod, Tender } from "../../finance/api";
-import { centsToPesosInput, pesosToCents } from "../../_lib/money";
+import { formatPesosInput, pesosToCents } from "../../_lib/money";
 import {
   MAX_TENDERS,
   amountError,
@@ -37,7 +37,7 @@ export interface TendersState {
 
 /** The amount a following row shows: the total, once it is readable money. */
 function followed(totalCents: number): string {
-  return Number.isFinite(totalCents) && totalCents > 0 ? centsToPesosInput(totalCents) : "";
+  return Number.isFinite(totalCents) && totalCents > 0 ? formatPesosInput(totalCents) : "";
 }
 
 /**
@@ -105,7 +105,7 @@ export function useTenders(totalCents: number, initial?: readonly Tender[]): Ten
     // The new row offers what is left, so completing a credit note is one click.
     const left = (Number.isFinite(totalCents) ? totalCents : 0) - coveredCents(rows);
     setFollowing(false);
-    commit([...rows, { ...blank(mint(), nextMethod(rows)), amount: left > 0 ? centsToPesosInput(left) : "" }]);
+    commit([...rows, { ...blank(mint(), nextMethod(rows)), amount: left > 0 ? formatPesosInput(left) : "" }]);
   }, [commit, mint, rows, totalCents]);
 
   const remove = useCallback((key: string): void => {
@@ -144,7 +144,7 @@ export function useTenders(totalCents: number, initial?: readonly Tender[]): Ten
 }
 
 function fromTender(t: Tender, i: number): TenderRow {
-  return { key: `t${i}`, method: t.method, cardType: t.cardType ?? "debit", amount: centsToPesosInput(t.amountCents), reference: t.reference ?? "" };
+  return { key: `t${i}`, method: t.method, cardType: t.cardType ?? "debit", amount: formatPesosInput(t.amountCents), reference: t.reference ?? "" };
 }
 
 function blank(key: string, method: PaymentMethod): TenderRow {

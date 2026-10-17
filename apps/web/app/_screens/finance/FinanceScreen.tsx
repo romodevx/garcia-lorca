@@ -18,7 +18,7 @@ import { getOverdue, listCharges, registerPayment, type Charge } from "../../fin
 import { pendingCents } from "../../finance/pending";
 import { localISODate } from "../../_lib/localDate";
 import { schoolISODate, schoolMonthStart } from "../../_lib/schoolDay";
-import { centsToPesosInput, formatCents, pesosToCents } from "../../_lib/money";
+import { centsToPesosInput, formatCents, formatPesosInput, pesosToCents } from "../../_lib/money";
 import { listStudents, type Student } from "../../students/api";
 import { useIntent } from "../../routing/pendingIntent";
 
@@ -78,7 +78,7 @@ export function chargeAmountError(cents: number, remainingCents: number): string
 function PayDrawer({ charge, name, today, notes, onClose, onPaid }: { charge: Charge; name: string; today?: string; notes?: NotesAccess; onClose: () => void; onPaid: () => void }): ReactElement {
   // The pupil's notes on the left, as at the counter (T6).
   const beside = useNotesBeside(charge.studentId, notes);
-  const [amount, setAmount] = useState(centsToPesosInput(charge.remainingCents));
+  const [amount, setAmount] = useState(formatPesosInput(charge.remainingCents));
   const [amountError, setAmountError] = useState<string | undefined>(undefined);
   // The day the family paid (task 7): not always the day it is keyed.
   const day = today ?? localISODate();

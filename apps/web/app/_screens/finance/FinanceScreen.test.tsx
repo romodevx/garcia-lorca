@@ -84,6 +84,20 @@ describe("FinanceScreen", () => {
   });
 });
 
+// T12 (from T7's review): the balance opened as "1000.00" until the blur.
+describe("FinanceScreen · el monto al abrir", () => {
+  it("pre-fills the charge's balance with its thousands separator", async () => {
+    const user = userEvent.setup();
+    render(<FinanceScreen onBack={() => {}} />);
+    await screen.findByText("Cruz Valentina");
+
+    await user.click(screen.getAllByRole("button", { name: /Registrar pago/ })[0] as HTMLElement);
+    const dialog = await screen.findByRole("dialog", { name: "Registrar pago" });
+
+    expect(within(dialog).getByLabelText("Monto a pagar", { selector: "input" })).toHaveValue("1,000.00");
+  });
+});
+
 // T6: Registrar pago of one charge shows that pupil's notes on its left.
 describe("FinanceScreen · notas al registrar pago", () => {
   it("shows the charge's pupil's notes beside the payment, in a wider drawer", async () => {

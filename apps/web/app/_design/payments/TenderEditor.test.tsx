@@ -27,7 +27,7 @@ describe("TenderEditor (tarea 8)", () => {
     const { rerender } = render(<Harness totalCents={150000} />);
 
     expect(within(row(1)).getByRole("button", { name: "Efectivo" })).toHaveAttribute("aria-pressed", "true");
-    expect(amountOf(1)).toHaveValue("1500.00");
+    expect(amountOf(1)).toHaveValue("1,500.00");
 
     rerender(<Harness totalCents={90000} />);
     expect(amountOf(1)).toHaveValue("900.00");
@@ -76,7 +76,7 @@ describe("TenderEditor (tarea 8)", () => {
     await user.click(screen.getByRole("button", { name: "Agregar método" }));
 
     expect(within(row(2)).getByRole("button", { name: "Efectivo" })).toHaveAttribute("aria-pressed", "true");
-    expect(amountOf(2)).toHaveValue("1000.00");
+    expect(amountOf(2)).toHaveValue("1,000.00");
     expect(screen.getByTestId("tender-remaining")).toHaveTextContent("$0.00");
 
     await user.click(screen.getByRole("button", { name: "Guardar" }));

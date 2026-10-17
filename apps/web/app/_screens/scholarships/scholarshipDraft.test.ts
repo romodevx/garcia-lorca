@@ -49,6 +49,6 @@ describe("scholarship draft (T18)", () => {
   it("edits a stored scholarship as typed text", () => {
     const stored: Scholarship = { id: "b1", name: "X", kind: "percent", value: 1250, targets: ["enrollment"], active: false, assignedCount: 3 };
     expect(draftFromScholarship(stored)).toEqual({ name: "X", kind: "percent", value: "12.5", targets: ["enrollment"], active: false });
-    expect(draftFromScholarship({ ...stored, kind: "fixed_price", value: 100000 }).value).toBe("1000.00");
+    expect(draftFromScholarship({ ...stored, kind: "fixed_price", value: 100000 }).value).toBe("1,000.00");
   });
 });

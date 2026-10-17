@@ -363,7 +363,7 @@ describe("Paso 7 · Colegiaturas (A13, A14, A25, A26)", () => {
     await screen.findByRole("heading", { name: "Precios de PRIMARIA · 2026-2027" });
     expect(screen.queryByRole("navigation")).toBeNull();
     expect(screen.queryByRole("heading", { level: 1, name: "Configuración académica" })).toBeNull();
-    expect(screen.getByLabelText("Colegiatura mensual")).toHaveValue("2800.00");
+    expect(screen.getByLabelText("Colegiatura mensual")).toHaveValue("2,800.00");
     expect(screen.getByLabelText("Mensualidades")).toHaveValue(11);
     expect(screen.getByLabelText("Día límite")).toHaveValue(7);
 

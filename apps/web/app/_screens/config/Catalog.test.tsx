@@ -505,7 +505,7 @@ describe("editar un tabulador existente", () => {
     await user.click(await screen.findByRole("button", { name: /Editar/ }));
     await screen.findByRole("heading", { name: /^Precios de / });
 
-    expect(screen.getByLabelText("Colegiatura mensual")).toHaveValue("2800.00");
+    expect(screen.getByLabelText("Colegiatura mensual")).toHaveValue("2,800.00");
     expect(screen.getByLabelText("Mensualidades")).toHaveValue(11);
     expect(screen.getByLabelText("Día límite")).toHaveValue(7);
     expect(screen.getByLabelText("Fecha límite de inscripción")).toHaveValue("2026-06-30");
