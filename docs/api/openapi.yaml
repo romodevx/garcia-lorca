@@ -4689,10 +4689,10 @@ paths:
       summary: Move or change a class of the base timetable (T16)
       description: >
         Same rules as creating one, except that once the cycle has started a
-        `reason` is required (400 `SCHEDULE_REASON_REQUIRED`). Moving a class to another weekday while it
-        has date-specific changes on future dates is 409
-        `SCHEDULE_BLOCK_HAS_OVERRIDES` (remove those changes first). Requires
-        `schedule:write`.
+        `reason` is required (400 `SCHEDULE_REASON_REQUIRED`). Moving a class
+        to another weekday while it has date-specific changes on future dates
+        is 409 `SCHEDULE_BLOCK_HAS_OVERRIDES` (remove those changes first).
+        Requires `schedule:write`.
       operationId: updateScheduleBlock
       security: [{ sessionCookie: [] }]
       parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
@@ -7502,7 +7502,12 @@ components:
         weekday: { type: integer, minimum: 1, maximum: 5 }
         startsAt: { type: string, pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$', example: '08:00' }
         endsAt: { type: string, pattern: '^([01][0-9]|2[0-4]):[0-5][0-9]$', example: '08:50' }
-        reason: { type: string, maxLength: 200, description: 'Required to change a class (PUT) once the cycle has started; optional when adding one.' }
+        reason:
+          type: string
+          maxLength: 200
+          description: >
+            Required to change a class (PUT) once the cycle has started;
+            optional when adding one.
     ScheduleDay:
       type: object
       required: [date, weekday, nonWorking, classes]

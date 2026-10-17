@@ -10,7 +10,7 @@ function section(title: string | undefined, ...ids: string[]): TargetSection {
 }
 
 /** A level's header: a real button (ISSUE-T14-021), named by the level and its count. */
-const level = (name: string): HTMLElement => screen.getByRole("button", { name: new RegExp(`^${name} · `) });
+const level = (name: string): HTMLElement => screen.getByRole("button", { name });
 const expanded = (): (string | null)[] =>
   screen.queryAllByRole("button").filter((b) => b.hasAttribute("aria-expanded")).map((b) => b.getAttribute("aria-expanded"));
 
@@ -45,8 +45,10 @@ describe("GroupedTargets", () => {
 
   it("counts a level's groups, and how many of them are picked", () => {
     renderTargets(TWO_LEVELS, ["1° B"]);
+    // Named by the level alone; the count is its description.
     expect(level("Primaria")).toHaveTextContent("1 de 2");
-    expect(level("Secundaria")).toHaveTextContent("1");
+    expect(level("Primaria")).toHaveAccessibleDescription("1 de 2");
+    expect(level("Secundaria")).toHaveAccessibleDescription("1");
   });
 
   it("opens every level when the school has three or fewer", () => {
