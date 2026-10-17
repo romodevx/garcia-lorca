@@ -58,7 +58,7 @@ func TestTeachingAttendanceRosterSaysWhyItIsReadOnly(t *testing.T) {
 			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 
 			out := decodeRosterMeta(t, rec)
-			assert.Equal(t, "2026-09-15", out.Today, "today is the server's UTC school day")
+			assert.Equal(t, "2026-09-15", out.Today, "today is the school's day")
 			if tt.wantReason == "" {
 				assert.True(t, out.Editable)
 				assert.Nil(t, out.ReadOnlyReason, "an editable list carries no readOnlyReason")
@@ -72,18 +72,28 @@ func TestTeachingAttendanceRosterSaysWhyItIsReadOnly(t *testing.T) {
 	}
 }
 
-// today follows the UTC school day: 01:00 UTC on the 16th is still the 15th in
-// the school, but the system (like finance) is already on the 16th.
-func TestTeachingAttendanceRosterTodayIsTheUTCDay(t *testing.T) {
+// today is the school's day (Morelia, ADR 0035): 19:30 on 16-oct in Morelia is
+// 01:30Z on the 17th, and the school is still on the 16th. The 17th is in the
+// future for the teacher, never the editable "today".
+func TestTeachingAttendanceRosterTodayIsTheSchoolDay(t *testing.T) {
 	scope := handler.NewTeachingHandler(listTeacher(), &fakeTeachingGrades{}, &fakeTeachingStudents{})
-	lateNight := func() time.Time { return time.Date(2026, 9, 15, 19, 30, 0, 0, time.FixedZone("CST", -6*3600)) }
+	lateNight := func() time.Time { return time.Date(2026, 10, 17, 1, 30, 0, 0, time.UTC) }
 	h := handler.NewTeachingAttendanceHandler(scope, &fakeTeachingAttendance{}, teacherUsers, handler.WithAttendanceClock(lateNight))
+
 	rec := httptest.NewRecorder()
-	h.Roster(rec, teacherGET("/api/v1/teaching/attendance/roster?groupId=grp-prim&date=2026-09-16", "usr-t"))
+	h.Roster(rec, teacherGET("/api/v1/teaching/attendance/roster?groupId=grp-prim&date=2026-10-16", "usr-t"))
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	out := decodeRosterMeta(t, rec)
-	assert.Equal(t, "2026-09-16", out.Today)
+	assert.Equal(t, "2026-10-16", out.Today)
 	assert.True(t, out.Editable)
+
+	rec = httptest.NewRecorder()
+	h.Roster(rec, teacherGET("/api/v1/teaching/attendance/roster?groupId=grp-prim&date=2026-10-17", "usr-t"))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	out = decodeRosterMeta(t, rec)
+	assert.False(t, out.Editable)
+	require.NotNil(t, out.ReadOnlyReason)
+	assert.Equal(t, "future", *out.ReadOnlyReason)
 }
 
 // The director has no window: every list is editable, no reason, and the same

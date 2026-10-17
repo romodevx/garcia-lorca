@@ -18,6 +18,8 @@ import (
 type ScheduleService interface {
 	Board(ctx context.Context, cycleID, teacherID string) (usecase.ScheduleBoard, error)
 	Day(ctx context.Context, cycleID string, date time.Time, teacherID string) (usecase.ScheduleDay, error)
+	// SchoolDay is the calendar rule alone (T14): does date have classes?
+	SchoolDay(ctx context.Context, groupID string, date time.Time) (usecase.SchoolDayStatus, error)
 	CreateBlock(ctx context.Context, in usecase.BlockInput, by domain.Actor) (domain.ScheduleBlock, error)
 	UpdateBlock(ctx context.Context, id string, in usecase.BlockInput, by domain.Actor) (domain.ScheduleBlock, error)
 	DeleteBlock(ctx context.Context, id, reason string, by domain.Actor) error
@@ -75,6 +77,21 @@ func (h *ConfigHandler) GetScheduleDay(ctx context.Context, req *connect.Request
 	return connect.NewResponse(&configv1.GetScheduleDayResponse{
 		Date: timestamppb.New(d.Date), Weekday: int32(d.Weekday), Classes: classes, NonWorking: d.NonWorking, //nolint:gosec // 1..7
 	}), nil
+}
+
+// GetSchoolDay says whether a group has classes on a date (T14).
+func (h *ConfigHandler) GetSchoolDay(ctx context.Context, req *connect.Request[configv1.GetSchoolDayRequest]) (*connect.Response[configv1.GetSchoolDayResponse], error) {
+	if h.schedule == nil {
+		return nil, errScheduleUnwired
+	}
+	if req.Msg.GetDate() == nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("date is required"))
+	}
+	d, err := h.schedule.SchoolDay(ctx, req.Msg.GetGroupId(), req.Msg.GetDate().AsTime().UTC())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&configv1.GetSchoolDayResponse{Open: d.Open, ClosedLabel: d.Closed}), nil
 }
 
 // CreateScheduleBlock adds a class to the base timetable.

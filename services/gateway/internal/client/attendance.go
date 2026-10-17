@@ -38,6 +38,8 @@ type AttendanceRosterRow struct {
 type AttendanceRoster struct {
 	Rows    []AttendanceRosterRow
 	Session *AttendanceSession
+	// NoClasses: the date has no classes for the group (T14) — readable, not savable.
+	NoClasses bool
 }
 
 // AttendanceSession records that a list was taken: TakenAt/TakenByName are the
@@ -106,7 +108,7 @@ func (c *AttendanceClient) GetDailyRoster(ctx context.Context, groupID, date, su
 	if err != nil {
 		return AttendanceRoster{}, err
 	}
-	out := AttendanceRoster{Rows: make([]AttendanceRosterRow, 0, len(res.Msg.GetRows()))}
+	out := AttendanceRoster{Rows: make([]AttendanceRosterRow, 0, len(res.Msg.GetRows())), NoClasses: res.Msg.GetNoClasses()}
 	for _, row := range res.Msg.GetRows() {
 		out.Rows = append(out.Rows, toAttendanceRosterRow(row))
 	}

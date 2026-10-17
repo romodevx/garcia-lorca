@@ -40,6 +40,8 @@ type ScheduleCatalog struct {
 //     the database trips anyway is domain.ScheduleChangedMeanwhile.
 type ScheduleRepository interface {
 	GetCycle(ctx context.Context, id string) (domain.Cycle, error)
+	// GetGroup resolves a group (its cycle carries the school calendar, T14).
+	GetGroup(ctx context.Context, id string) (domain.Group, error)
 	ListCycles(ctx context.Context) ([]domain.Cycle, error)
 	GetLevel(ctx context.Context, id string) (domain.Level, error)
 	GetTeachingAssignment(ctx context.Context, id string) (domain.TeachingAssignment, error)

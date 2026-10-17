@@ -144,7 +144,8 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 		return nil, nil, err
 	}
 	newID := func() string { return uuid.NewString() }
-	svc := service.NewAttendanceService(repo, enrollments, groups, publisher, tenantID, newID, log, service.WithSchoolLocation(school))
+	svc := service.NewAttendanceService(repo, enrollments, groups, publisher, tenantID, newID, log,
+		service.WithSchoolLocation(school), service.WithSchoolCalendar(groups))
 	// The level-deletion trash (ADR 0021): the gateway's saga archives and
 	// restores through it, and the gateway's hourly sweep (always warm, unlike
 	// this scale-to-zero service) purges each batch past config's

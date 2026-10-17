@@ -348,6 +348,13 @@ func newService(t *testing.T, repo *fakeRepo, pub service.Publisher, ids ...stri
 // withdrawn, and a second group holds an unrelated enrollment.
 func newLoggingService(t *testing.T, repo *fakeRepo, pub service.Publisher, log *slog.Logger, ids ...string) *service.AttendanceService {
 	t.Helper()
+	return newServiceWith(t, repo, pub, log, ids)
+}
+
+// newServiceWith is newLoggingService with service options (e.g. the school
+// calendar seam).
+func newServiceWith(t *testing.T, repo *fakeRepo, pub service.Publisher, log *slog.Logger, ids []string, opts ...service.Option) *service.AttendanceService {
+	t.Helper()
 	enrollments := &fakeEnrollments{byGroup: map[string][]service.EnrollmentRef{
 		groupID: {
 			{ID: enrollmentCruz, StudentID: studentCruz, GroupID: groupID, Status: "active"},
@@ -363,7 +370,7 @@ func newLoggingService(t *testing.T, repo *fakeRepo, pub service.Publisher, log 
 	if len(ids) == 0 {
 		ids = []string{"rec-1", "rec-2", "rec-3"}
 	}
-	return service.NewAttendanceService(repo, enrollments, groups, pub, testTenant, fixedIDs(ids...), log)
+	return service.NewAttendanceService(repo, enrollments, groups, pub, testTenant, fixedIDs(ids...), log, opts...)
 }
 
 // captureLogs returns a logger writing into the buffer it also returns, so a

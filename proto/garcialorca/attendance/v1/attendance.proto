@@ -178,6 +178,10 @@ message GetDailyRosterRequest {
 message GetDailyRosterResponse {
   repeated RosterRow rows = 1;
   AttendanceSession session = 2;
+  // no_classes is true when the date is not a school day of the group's cycle
+  // (weekend, outside the cycle, or a closed day): the list may be read but a
+  // save is refused (InvalidArgument, X-Error-Code NO_CLASSES).
+  bool no_classes = 3;
 }
 
 // SaveDailyAttendanceRequest reconciles one group·day. `marks` is the COMPLETE

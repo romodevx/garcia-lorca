@@ -4,6 +4,7 @@ import { useMemo, useState, type CSSProperties, type ReactElement } from "react"
 
 import { API_URL } from "../../api-url";
 import { Page } from "../../_design/Page";
+import { schoolISODate } from "../../_lib/schoolDay";
 import { getAttendanceSheet, saveAttendanceSheet, scanAttendanceCard } from "../../attendance/api";
 import { downloadAttendanceReport, getAttendanceReport, type AttendanceReportQuery, type ReportFormat } from "../../attendance/report";
 import type { ScanCardInput } from "../../attendance/scan";
@@ -12,13 +13,12 @@ import { EmptyHint, ErrorAlert, SelectChip } from "../config/parts";
 import { AttendanceHeader } from "./AttendanceHeader";
 import { AttendanceReportPanel } from "./AttendanceReportPanel";
 import { PassSheet } from "./PassSheet";
-import { todayISO } from "./sheetModel";
 import { useDirectorClasses, type DirectorClasses } from "./useDirectorClasses";
 import { useLeaveGuard } from "./useLeaveGuard";
 
 export interface DirectorAttendanceProps {
   onBack: () => void;
-  /** Pins the day (tests, deep links); defaults to the local today. */
+  /** Pins the day (tests, deep links); defaults to the school's day (Morelia, ADR 0035). */
   today?: string;
   /** module_student_card is on: the list offers "Escanear QR". */
   canScanCards?: boolean;
@@ -95,7 +95,7 @@ export function DirectorAttendance({ onBack, today, canScanCards = false }: Dire
         <div className="fade-up">
           <ViewSwitch view={view} onChange={(v) => v !== view && guard.canLeave() && setView(v)} />
           {view === "report" ? (
-            <AttendanceReportPanel catalog={catalog} today={today ?? todayISO()} load={loadReport} download={downloadReport} />
+            <AttendanceReportPanel catalog={catalog} today={today ?? schoolISODate()} load={loadReport} download={downloadReport} />
           ) : (
           <>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginBottom: 16 }}>
@@ -115,7 +115,7 @@ export function DirectorAttendance({ onBack, today, canScanCards = false }: Dire
               title={subjectName !== undefined ? `${group.label} · ${subjectName}` : group.label}
               groupId={group.id}
               subjectId={mode === "per_class" ? subjectId : undefined}
-              today={today ?? todayISO()}
+              today={today ?? schoolISODate()}
               restrictDates={false}
               load={loadSheet}
               save={saveSheet}

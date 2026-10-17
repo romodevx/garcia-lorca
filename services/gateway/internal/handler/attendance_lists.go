@@ -53,6 +53,9 @@ var msgOutsideWindow = fmt.Sprintf("Solo puedes corregir hasta %d días atrás",
 const (
 	readOnlyFuture = "future"
 	readOnlyWindow = "window"
+	// readOnlyNoClasses: the school calendar has no classes that day (T14);
+	// the attendance service refuses its save with NO_CLASSES.
+	readOnlyNoClasses = "no_classes"
 )
 
 const (
@@ -332,13 +335,11 @@ func rosterTaken(roster client.AttendanceRoster) bool {
 	return false
 }
 
-// schoolToday is the system's school day: the UTC date. It is a known,
-// fleet-wide offset (the school is UTC-6, so after 18:00 local the system is
-// already on tomorrow — see finance's resolveAsOf); attendance follows it rather
-// than diverging from every other date the school sees.
+// schoolToday is the school's day (America/Mexico_City, ADR 0035), as the
+// midnight-UTC date the lists are keyed by: at 19:30 in Morelia the school is
+// still on today, though UTC already turned.
 func schoolToday(now time.Time) time.Time {
-	y, m, d := now.UTC().Date()
-	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+	return schoolDate(now, defaultSchoolLocation)
 }
 
 // teacherReadOnlyReason is why a teacher may not capture date — readOnlyFuture
@@ -405,9 +406,9 @@ func clampRunes(s string, n int) string {
 // --- roster JSON ---------------------------------------------------------------
 
 // attendanceListResponse is the roster both surfaces answer with.
-// ReadOnlyReason says why a non-editable list is read-only (readOnlyFuture |
-// readOnlyWindow) and is omitted when the list is editable. Today is the
-// server's school day (UTC, see schoolToday), so the web's date picker starts
+// ReadOnlyReason says why a non-editable list is read-only (readOnlyFuture,
+// readOnlyWindow, readOnlyNoClasses) and is omitted when editable. Today is the
+// school's day (Morelia, see schoolToday), so the web's date picker starts
 // from the same day the window is measured against.
 type attendanceListResponse struct {
 	Mode           string                     `json:"mode"`
@@ -445,6 +446,9 @@ type attendanceListRow struct {
 }
 
 func toAttendanceListResponse(view listView, roster client.AttendanceRoster, students studentDirectory) attendanceListResponse {
+	if view.ReadOnlyReason == "" && roster.NoClasses {
+		view.ReadOnlyReason = readOnlyNoClasses
+	}
 	out := attendanceListResponse{
 		Mode:           view.Mode,
 		Date:           view.Date,
