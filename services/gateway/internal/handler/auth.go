@@ -438,6 +438,10 @@ const minNewPasswordLen = 8
 // floor. Clients may display it verbatim (the web does), so it is user-facing Spanish.
 const newPasswordTooShortMessage = "La nueva contraseña debe tener al menos 8 caracteres." // keep in step with minNewPasswordLen
 
+// wrongCurrentPasswordMessage is the 401 REAUTH_FAILED body of a change-password
+// whose current password iam refused.
+const wrongCurrentPasswordMessage = "La contraseña actual no es correcta."
+
 // ChangePassword handles POST /api/v1/auth/change-password for the authenticated
 // principal. RequireAuth injects the principal; iam derives the subject from the
 // forwarded access token, so the gateway forwards the caller's token — never a
@@ -459,6 +463,14 @@ func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.auth.ChangePassword(r.Context(), middleware.TokenFrom(r), req.CurrentPassword, req.NewPassword); err != nil {
+		// RequireAuth accepted the token moments ago, so iam refusing it now
+		// means the CURRENT password is wrong. Coded (REAUTH_FAILED, as the
+		// level deletion's password check) so a client tells it apart from a
+		// 401 without a code: a session that is gone.
+		if connect.CodeOf(err) == connect.CodeUnauthenticated {
+			writeCodedError(w, http.StatusUnauthorized, codeReauthFailed, wrongCurrentPasswordMessage)
+			return
+		}
 		http.Error(w, http.StatusText(httpStatusFor(err)), httpStatusFor(err))
 		return
 	}

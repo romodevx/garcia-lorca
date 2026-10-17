@@ -254,3 +254,33 @@ func TestRateLimiterEvictionBoundsMap(t *testing.T) {
 		t.Errorf("bucket map holds %d entries, want <= %d (eviction must bound memory)", n, maxKeys)
 	}
 }
+
+// Behind Cloud Run every request comes from the Google front end, so an
+// IP-keyed bucket is one budget for the whole school. A password check that
+// sits behind a session is throttled per PRINCIPAL instead: one person's
+// guesses never spend anybody else's tries.
+func TestRateLimiterPerPrincipalMiddleware(t *testing.T) {
+	clk := newClock()
+	rl := middleware.NewRateLimiter(1, 1, clk.now)
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
+	h := rl.PerPrincipalMiddleware(next)
+
+	call := func(userID string) int {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/change-password", nil)
+		req.RemoteAddr = "10.0.0.1:1111" // same front end for everybody
+		req = req.WithContext(middleware.WithPrincipal(req.Context(), middleware.Principal{UserID: userID}))
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec.Code
+	}
+
+	if code := call("ana"); code != http.StatusOK {
+		t.Fatalf("ana first: code = %d, want 200", code)
+	}
+	if code := call("ana"); code != http.StatusTooManyRequests {
+		t.Fatalf("ana second: code = %d, want 429", code)
+	}
+	if code := call("luis"); code != http.StatusOK {
+		t.Fatalf("luis first, same IP: code = %d, want 200 (independent principal)", code)
+	}
+}

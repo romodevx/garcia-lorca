@@ -170,7 +170,81 @@ tags:
       linked to answers 404 — never 403 — so nothing says whether it exists.
       Each route is guarded on every module it composes (either flag OFF ⇒ 404).
 
+  - name: auth
+    description: >
+      Signing in and the caller's own credentials. Only the routes whose error
+      contract a client branches on are described here.
+
 paths:
+  /api/v1/auth/change-password:
+    post:
+      tags: [auth]
+      summary: Change the caller's own password
+      description: >
+        Verifies `currentPassword` and sets `newPassword` (at least 8
+        characters). Reachable while a forced change is pending. The change
+        revokes every session issued before it, the caller's included; the
+        gateway then signs the caller in again with the new password and sets
+        fresh cookies (200). If that re-login fails the password IS changed but
+        no session comes back (204): the client must send the person to sign
+        in. Throttled per signed-in user on the re-authentication bucket (429).
+      operationId: changePassword
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currentPassword, newPassword]
+              properties:
+                currentPassword: { type: string, format: password }
+                newPassword: { type: string, format: password, minLength: 8 }
+            example: { currentPassword: '••••••••', newPassword: '••••••••••' }
+      responses:
+        '200':
+          description: Changed; a fresh session is set in the cookies.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [expiresIn, mustChangePassword]
+                properties:
+                  expiresIn: { type: integer, description: Access token lifetime in seconds. }
+                  mustChangePassword: { type: boolean }
+              example: { expiresIn: 900, mustChangePassword: false }
+        '204': { description: 'Changed, but no fresh session; sign in again.' }
+        '400':
+          description: >
+            A malformed body, or a new password under 8 characters (the body is
+            then a Spanish sentence a client may show as-is).
+          content:
+            text/plain:
+              schema: { type: string }
+              example: La nueva contraseña debe tener al menos 8 caracteres.
+        '401':
+          description: >
+            `REAUTH_FAILED`: the current password is not the caller's. Without
+            the header, the session itself is missing or expired.
+          headers:
+            X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
+          content:
+            text/plain:
+              schema: { type: string }
+              example: La contraseña actual no es correcta.
+        '429':
+          description: Too many attempts; wait before trying again.
+          content:
+            text/plain:
+              schema: { type: string }
+              example: too many requests
+        '500':
+          description: iam failed.
+          content:
+            text/plain:
+              schema: { type: string }
+              example: Internal Server Error
+
   /api/v1/family/devices:
     post:
       tags: [family]

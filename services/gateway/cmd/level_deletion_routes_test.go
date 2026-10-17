@@ -226,3 +226,18 @@ func TestLevelDeletionIsRateLimitedLikeLogin(t *testing.T) {
 	res := doGateway(t, gw, http.MethodPost, path, "level-deleter", `{"confirmName":"Maternal","confirmToken":"x","password":"director-pw"}`)
 	assert.Equal(t, http.StatusTooManyRequests, res.StatusCode)
 }
+
+// Changing the password checks the current one, so it is throttled like a
+// re-authentication: per signed-in user, on the reauth bucket.
+func TestChangePasswordIsRateLimitedPerUser(t *testing.T) {
+	frozen := time.Date(2026, 10, 17, 10, 0, 0, 0, time.UTC)
+	limiter := middleware.NewRateLimiter(2, 0.0001, func() time.Time { return frozen })
+	gw := newTestGatewayWithReauth(t, allModulesOn, limiter)
+	body := `{"currentPassword":"guess","newPassword":"newlongpass"}`
+	for i := 0; i < 2; i++ {
+		res := doGateway(t, gw, http.MethodPost, "/api/v1/auth/change-password", "maestro", body)
+		assert.NotEqual(t, http.StatusTooManyRequests, res.StatusCode)
+	}
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/auth/change-password", "maestro", body)
+	assert.Equal(t, http.StatusTooManyRequests, res.StatusCode)
+}
