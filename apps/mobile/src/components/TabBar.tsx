@@ -19,7 +19,7 @@ interface TabMeta {
  * design's bottom navigation.
  */
 const TABS: TabMeta[] = [
-  { name: "index", label: "Inicio", icon: "home" },
+  { name: "inicio", label: "Inicio", icon: "home" },
   { name: "asistencia", label: "Asistencia", icon: "calendar-check" },
   { name: "calificaciones", label: "Notas", icon: "award" },
   { name: "cuenta", label: "Cuenta", icon: "wallet" },

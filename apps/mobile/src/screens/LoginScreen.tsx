@@ -11,6 +11,8 @@ export interface LoginScreenProps {
    * owns the loading + error UI so the caller only wires the network call.
    */
   onSubmit: (email: string, password: string) => Promise<void>;
+  /** Why the family is here when they did not sign out (e.g. their session ended). */
+  notice?: string;
 }
 
 // The official school logo (299×168 lockup). Shown on a white rounded backing so
@@ -56,7 +58,7 @@ function normalizeEmail(typed: string): string {
 }
 
 /** Login screen — consistent with the web portal (logo, lime primary, fields). */
-export function LoginScreen({ onSubmit }: LoginScreenProps): ReactElement {
+export function LoginScreen({ onSubmit, notice }: LoginScreenProps): ReactElement {
   const theme = useTheme();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -89,6 +91,15 @@ export function LoginScreen({ onSubmit }: LoginScreenProps): ReactElement {
           Portal para padres y tutores
         </Text>
       </View>
+
+      {notice ? (
+        <Text
+          accessibilityLiveRegion="polite"
+          style={[styles.notice, { color: theme.colors.text, backgroundColor: theme.colors.surface2, fontFamily: theme.fonts.uiSemi }]}
+        >
+          {notice}
+        </Text>
+      ) : null}
 
       <Text style={[styles.label, { color: theme.colors.text2, fontFamily: theme.fonts.uiExtra }]}>
         Correo electrónico
@@ -187,6 +198,7 @@ const styles = StyleSheet.create({
   input: { flex: 1, fontSize: 16, fontWeight: "600", padding: 0 },
   forgot: { alignSelf: "flex-end", marginVertical: 12, marginRight: 4 },
   error: { textAlign: "center", fontSize: 13, fontWeight: "700", marginBottom: 12, marginHorizontal: 4 },
+  notice: { textAlign: "center", fontSize: 16, fontWeight: "600", borderRadius: 12, padding: 12, marginBottom: 16 },
   divider: { flexDirection: "row", alignItems: "center", gap: 12, marginVertical: 18 },
   line: { flex: 1, height: 1 },
   help: { textAlign: "center", fontSize: 12.5, fontWeight: "700", marginTop: 22 },

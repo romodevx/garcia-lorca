@@ -1,4 +1,4 @@
-import { balanceLine, formatDate, formatDayWithYear, pesos } from "./format";
+import { balanceLine, formatDate, formatDayWithYear, formatLongDay, pesos, totalBalanceLine } from "./format";
 
 describe("pesos", () => {
   it("formats integer cents as an es-MX peso string", () => {
@@ -37,5 +37,43 @@ describe("balanceLine", () => {
 
   it("names a positive balance as pending", () => {
     expect(balanceLine(320000)).toBe("Saldo pendiente $3,200.00");
+  });
+});
+
+// ISSUE-T14-106: on the phone (Hermes) toLocaleDateString ignored the es-MX
+// options and the account read "Al 2026-10-17". Dates are built from a table,
+// like attendanceView, so the device's Intl cannot change them.
+describe("dates do not depend on the device's Intl", () => {
+  let spy: jest.SpyInstance;
+  beforeEach(() => {
+    spy = jest.spyOn(Date.prototype, "toLocaleDateString").mockImplementation(function (this: Date) {
+      return this.toISOString().slice(0, 10);
+    });
+  });
+  afterEach(() => spy.mockRestore());
+
+  it("writes the account's day with the month in words", () => {
+    expect(formatDayWithYear("2026-10-17")).toBe("17 oct 2026");
+  });
+
+  it("writes the home's date with weekday and month in words", () => {
+    expect(formatLongDay(new Date(2026, 9, 17))).toBe("sábado, 17 de octubre");
+    expect(formatLongDay(new Date(2026, 9, 19))).toBe("lunes, 19 de octubre");
+  });
+
+  it("writes a row's day with the month in words, short and long", () => {
+    expect(formatDate("2026-06-04")).toBe("4 jun");
+    expect(formatDate("2026-06-04", "long")).toBe("4 de junio");
+  });
+});
+
+// ISSUE-T14-106: the header amount is the whole account, and says so.
+describe("totalBalanceLine", () => {
+  it("labels the account's balance as the total", () => {
+    expect(totalBalanceLine(2520000)).toBe("Saldo total $25,200.00");
+  });
+
+  it("still names a balance below zero as credit", () => {
+    expect(totalBalanceLine(-50000)).toBe("Saldo a favor $500.00");
   });
 });

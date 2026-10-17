@@ -4,6 +4,7 @@ import { type ReactElement } from "react";
 import { clearTokens, emitSessionLost, saveTokens } from "@/src/api";
 import { renderWithProviders } from "@/src/test/renderWithProviders";
 import { readPendingUnregisters, readRegisteredToken, saveRegisteredToken } from "@/src/push/pushStore";
+import { SESSION_ENDED_ROUTE } from "@/src/navigation/routes";
 import { useSessionLostRedirect } from "./useSessionLostRedirect";
 
 /** Mounts the hook under test; renders nothing itself. */
@@ -28,7 +29,7 @@ describe("useSessionLostRedirect", () => {
       emitSessionLost();
     });
 
-    expect(router.replace).toHaveBeenCalledWith("/");
+    expect(router.replace).toHaveBeenCalledWith(SESSION_ENDED_ROUTE);
   });
 
   it("refreshes BOTH the child slice and notifications on session-lost (bug_006)", async () => {
@@ -57,7 +58,7 @@ describe("useSessionLostRedirect", () => {
       expect(urls.some((u) => u.includes("/family/students"))).toBe(true);
       expect(urls.some((u) => u.includes("/family/notifications"))).toBe(true);
     });
-    expect(router.replace).toHaveBeenCalledWith("/");
+    expect(router.replace).toHaveBeenCalledWith(SESSION_ENDED_ROUTE);
 
     await clearTokens();
   });

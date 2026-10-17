@@ -1,6 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { apiFetch } from "./client";
-import { clearTokens, saveTokens } from "./tokenStore";
+import { onSessionLost } from "./session";
+import { clearTokens, getRefreshToken, saveTokens } from "./tokenStore";
 
 function response(status: number, body: unknown): Response {
   return {
@@ -56,5 +57,37 @@ describe("apiFetch", () => {
 
     expect(res.status).toBe(401);
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  // ISSUE-T14-102: the whole client path a screen takes — data call 401, refresh
+  // rejected — must end the session, not leave the stored pair behind.
+  it("signals session-lost and clears the stored pair when a data call's refresh is rejected", async () => {
+    await saveTokens({ accessToken: "stale", refreshToken: "revoked" });
+    globalThis.fetch = jest.fn().mockResolvedValue(response(401, {})) as unknown as typeof fetch;
+    const onLost = jest.fn();
+    const unsubscribe = onSessionLost(onLost);
+
+    const res = await apiFetch("/api/v1/family/students");
+
+    expect(res.status).toBe(401);
+    expect(onLost).toHaveBeenCalledTimes(1);
+    expect(getRefreshToken()).toBeNull();
+    unsubscribe();
+  });
+
+  it("rejects without ending the session when the refresh cannot reach a healthy gateway", async () => {
+    await saveTokens({ accessToken: "stale", refreshToken: "r1" });
+    globalThis.fetch = jest
+      .fn()
+      .mockResolvedValueOnce(response(401, {})) // original request: token expired
+      .mockResolvedValueOnce(response(502, {})) as unknown as typeof fetch; // refresh: gateway down
+    const onLost = jest.fn();
+    const unsubscribe = onSessionLost(onLost);
+
+    await expect(apiFetch("/api/v1/family/students")).rejects.toMatchObject({ status: 502 });
+
+    expect(onLost).not.toHaveBeenCalled();
+    expect(getRefreshToken()).toBe("r1");
+    unsubscribe();
   });
 });

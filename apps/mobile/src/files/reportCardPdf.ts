@@ -2,6 +2,7 @@ import { Directory, File, Paths } from "expo-file-system";
 import * as Sharing from "expo-sharing";
 import { refreshOnce } from "../api/client";
 import { apiUrl } from "../api/config";
+import { ApiError } from "../api/errors";
 import { getAccessToken } from "../api/tokenStore";
 
 /**
@@ -71,7 +72,9 @@ function httpStatusOf(message: string): number | null {
 function classify(failure: unknown): PdfError {
   if (failure instanceof PdfError) return failure;
   const message = messageOf(failure);
-  const status = httpStatusOf(message);
+  // A refresh that failed on a 5xx rejects with an ApiError, which carries its
+  // status as a field rather than in the native layer's message.
+  const status = failure instanceof ApiError ? failure.status : httpStatusOf(message);
   if (status === HTTP_UNAUTHORIZED) return new PdfError("session", message);
   if (status === HTTP_NOT_FOUND) return new PdfError("not_found", message);
   if (status !== null) return new PdfError("server", message);
@@ -127,12 +130,21 @@ async function downloadOnce(request: PdfDownloadRequest, folder: Directory): Pro
   });
 }
 
+/** Rotates the session; a refresh that fails (5xx, offline) is classified like a download. */
+async function refreshOrClassify(): Promise<boolean> {
+  try {
+    return await refreshOnce();
+  } catch (failure) {
+    throw classify(failure);
+  }
+}
+
 async function downloadWithSessionRetry(request: PdfDownloadRequest, folder: Directory): Promise<File> {
   try {
     return await downloadOnce(request, folder);
   } catch (failure) {
     const error = classify(failure);
-    if (error.kind !== "session" || !(await refreshOnce())) {
+    if (error.kind !== "session" || !(await refreshOrClassify())) {
       throw error;
     }
   }

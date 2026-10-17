@@ -5,6 +5,7 @@ import { signOut } from "@/src/api";
 import { DetailHeader } from "@/src/components/DetailHeader";
 import { ScreenScroll } from "@/src/components/ScreenScroll";
 import { unregisterPush } from "@/src/push/unregister";
+import { LOGIN_ROUTE } from "@/src/navigation/routes";
 import { MoreScreen } from "@/src/screens/MoreScreen";
 import { useAppState } from "@/src/state/AppState";
 import { useTheme } from "@/src/theme";
@@ -26,7 +27,7 @@ export default function MasRoute(): ReactNode {
     await signOut();
     await refreshChildren();
     await refreshNotifications();
-    router.replace("/");
+    router.replace(LOGIN_ROUTE);
   };
 
   return (

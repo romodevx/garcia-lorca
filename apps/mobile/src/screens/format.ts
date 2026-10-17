@@ -5,6 +5,21 @@ export function pesos(cents: number): string {
   return money(cents / 100);
 }
 
+// Month names from a table, not Intl: on the phone (Hermes) toLocaleDateString
+// ignored the es-MX options and the account read "Al 2026-10-17" (ISSUE-T14-106).
+const MONTHS_SHORT = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
+const MONTHS_LONG = [
+  "enero", "febrero", "marzo", "abril", "mayo", "junio",
+  "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
+];
+
+const WEEKDAYS_LONG = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
+
+/** The home's date line, e.g. "sábado, 17 de octubre", from the tables above. */
+export function formatLongDay(date: Date): string {
+  return `${WEEKDAYS_LONG[date.getDay()]}, ${date.getDate()} de ${MONTHS_LONG[date.getMonth()]}`;
+}
+
 /**
  * es-MX day+month label from an ISO date or datetime (e.g. "2026-06-04" →
  * "4 jun"); empty string on an unparseable value. `style` picks the short or long
@@ -15,7 +30,8 @@ export function formatDate(iso: string, style: "short" | "long" = "short"): stri
   if (date === null) {
     return "";
   }
-  return date.toLocaleDateString("es-MX", { day: "numeric", month: style });
+  const day = date.getDate();
+  return style === "long" ? `${day} de ${MONTHS_LONG[date.getMonth()]}` : `${day} ${MONTHS_SHORT[date.getMonth()]}`;
 }
 
 /**
@@ -27,7 +43,7 @@ export function formatDayWithYear(iso: string): string {
   if (date === null) {
     return "";
   }
-  return date.toLocaleDateString("es-MX", { day: "numeric", month: "short", year: "numeric" }).replace(".", "");
+  return `${date.getDate()} ${MONTHS_SHORT[date.getMonth()]} ${date.getFullYear()}`;
 }
 
 /**
@@ -36,6 +52,15 @@ export function formatDayWithYear(iso: string): string {
  */
 export function balanceLine(cents: number): string {
   return cents < 0 ? `Saldo a favor ${pesos(-cents)}` : `Saldo pendiente ${pesos(cents)}`;
+}
+
+/**
+ * The account's whole balance, labelled as the total (ISSUE-T14-106): it sits
+ * beside today's figure, and a bare amount there reads as a second "to pay".
+ * Below zero it is credit, as everywhere (T5).
+ */
+export function totalBalanceLine(cents: number): string {
+  return cents < 0 ? balanceLine(cents) : `Saldo total ${pesos(cents)}`;
 }
 
 /**

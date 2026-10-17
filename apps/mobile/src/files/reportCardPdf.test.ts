@@ -213,6 +213,25 @@ describe("downloadPdf", () => {
     expect((mockDownload.mock.calls[1] as [string, unknown, DownloadOptions])[2].headers).toEqual({ Authorization: "Bearer a2" });
   });
 
+  // The refresh keeps the session on a 5xx and rejects with an ApiError; the
+  // download must read that as the school's server, not as "no connection".
+  it("fails as server (not network) when the refresh hits a 5xx", async () => {
+    globalThis.fetch = jest.fn(async () => ({ ok: false, status: 503, json: async () => ({}) })) as unknown as typeof fetch;
+    mockDownload.mockRejectedValueOnce(new Error(ANDROID_401));
+
+    await expect(downloadPdf(REQUEST)).rejects.toMatchObject({ kind: "server" });
+    expect(mockDownload).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails as network when the refresh cannot reach the gateway", async () => {
+    globalThis.fetch = jest.fn(async () => {
+      throw new TypeError("Network request failed");
+    }) as unknown as typeof fetch;
+    mockDownload.mockRejectedValueOnce(new Error(ANDROID_401));
+
+    await expect(downloadPdf(REQUEST)).rejects.toMatchObject({ kind: "network" });
+  });
+
   it("fails as session when the retry is still refused", async () => {
     refreshSucceeds();
     mockDownload.mockRejectedValue(new Error(ANDROID_401));

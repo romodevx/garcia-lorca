@@ -55,10 +55,16 @@ export async function login(email: string, password: string): Promise<LoginResul
   return { mustChangePassword: Boolean(data.mustChangePassword) };
 }
 
+/** The answers that say the refresh token itself is no good (revoked, unknown). */
+const SESSION_REJECTED: ReadonlySet<number> = new Set([401, 403]);
+
 /**
  * Rotates the token pair using the stored refresh token. Returns false (without a
  * network call) when there is no refresh token, and clears the stored pair when
- * the gateway rejects it — a rejected refresh means the session is dead.
+ * the gateway rejects it (401/403) — a rejected refresh means the session is
+ * dead. Any other failure (a 5xx while the gateway wakes up, no network) says
+ * nothing about the token: it rejects and keeps the session, so the screen asks
+ * the family to check their connection instead of signing them out.
  */
 export async function refresh(): Promise<boolean> {
   const refreshToken = getRefreshToken();
@@ -73,7 +79,7 @@ export async function refresh(): Promise<boolean> {
     headers: JSON_HEADERS,
     body: JSON.stringify({ refreshToken }),
   });
-  if (!res.ok) {
+  if (SESSION_REJECTED.has(res.status)) {
     await clearTokens();
     // A rejected refresh token is the one true dead-session moment: signal it so
     // the app root forces navigation back to Login (bug_007). This never fires
@@ -81,6 +87,9 @@ export async function refresh(): Promise<boolean> {
     // reaching the network.
     emitSessionLost();
     return false;
+  }
+  if (!res.ok) {
+    throw new ApiError(res.status, "refresh failed");
   }
   const data = (await res.json()) as MobileRefreshResponse;
   // A cleared session must never be resurrected by an in-flight refresh: if a
