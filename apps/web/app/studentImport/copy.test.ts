@@ -87,7 +87,7 @@ describe("failureText", () => {
 describe("the confirmation and the button", () => {
   it("states the O5 terms with the cycle's name", () => {
     expect(confirmationText("2026–2027")).toBe(
-      "Se inscribirán en el ciclo 2026–2027 desde su primer día, sin cargo de inscripción. Las colegiaturas mensuales sí se les cobrarán como a todos, desde el primer mes del ciclo. Una importación no se deshace de golpe: cada alumno se da de baja uno por uno.",
+      "Se inscribirán en el ciclo 2026–2027 desde su primer día, sin cargo de inscripción. Las colegiaturas mensuales sí se les cobrarán como a todos, desde el primer mes del ciclo; lo que ya venció antes de hoy, sin recargo. Una importación no se deshace de golpe: cada alumno se da de baja uno por uno.",
     );
   });
 
@@ -113,10 +113,10 @@ describe("a cut commit", () => {
 describe("earlier imports moved to the cycle start (T14)", () => {
   it("says in the preview how many enrollments would move, and why it matters", () => {
     expect(toMoveText(12)).toBe(
-      "12 inscripciones de una importación anterior se moverán al inicio del ciclo: esos alumnos se cobrarán desde el primer mes, como a todos.",
+      "12 inscripciones de una importación anterior se moverán al inicio del ciclo, contando a los alumnos dados de baja. Los activos se cobrarán desde el primer mes, como a todos; lo que venció antes de su importación, sin recargo.",
     );
     expect(toMoveText(1)).toBe(
-      "1 inscripción de una importación anterior se moverá al inicio del ciclo: ese alumno se cobrará desde el primer mes, como a todos.",
+      "1 inscripción de una importación anterior se moverá al inicio del ciclo, contando a los alumnos dados de baja. Los activos se cobrarán desde el primer mes, como a todos; lo que venció antes de su importación, sin recargo.",
     );
   });
 

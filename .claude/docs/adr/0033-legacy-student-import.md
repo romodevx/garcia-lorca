@@ -103,6 +103,20 @@ día y **se cobran desde septiembre como todos**. Reemplaza O8 y la línea
   `enrolled_at` posterior al primer día se mueve a ese día, en una sola sentencia
   por ciclo (idempotente; nunca toca inscripciones `manual` ni `withdrawn_on`). La
   vista previa dice cuántas se moverían y el resultado cuántas se movieron.
-- Efecto en dinero: la siguiente corrida emite septiembre (y la parte de
-  septiembre de cada cuota) ya vencido, y el recargo fijo se acumula por cada mes
-  vencido completo. Queda a decisión del dueño; las reglas de recargo no cambiaron.
+  **También se mueven las de alumnos dados de baja** (cuenta su asistencia desde
+  el inicio); su fecha de baja no cambia, ni el `updated_at` que fecha el fin de
+  una inscripción no activa. Ojo: la corrida sólo cobra inscripciones
+  **activas**, así que a un dado de baja no se le emite septiembre nuevo; lo ya
+  emitido mientras estuvo activo se queda como estaba. Cada movimiento real se
+  registra en el log con el lote (`batch`) y los ids de los alumnos, sin datos
+  personales.
+- **Sin recargo lo que venció antes de importarlos** (decisión del dueño,
+  17-oct). Los meses (colegiatura y partes de cuotas) cuyo vencimiento es
+  anterior al día de la importación se deben a precio normal, sin recargo fijo
+  mensual ni recargo diario; tampoco ganan pronto pago (no se pagaron a tiempo).
+  Desde el día de la importación rigen las reglas normales. El día viaja en
+  `Enrollment.imported_at` (el `created_at` de la inscripción `import`; el
+  movimiento al inicio del ciclo no lo toca) y finance lo lee como día de
+  Morelia: `CollectionPolicy.SurchargeFree` es la única regla, y se aplica en
+  `pricedFor` (estado de cuenta, cuenta familiar, ventanilla, depósito) y en la
+  corrida mensual (`accrueLateFees`).

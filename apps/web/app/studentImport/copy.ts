@@ -100,7 +100,7 @@ export function failureText(err: unknown): string {
 
 /** The O5 box above the primary button. */
 export function confirmationText(cycleName: string): string {
-  return `Se inscribirán en el ciclo ${cycleName} desde su primer día, sin cargo de inscripción. Las colegiaturas mensuales sí se les cobrarán como a todos, desde el primer mes del ciclo. Una importación no se deshace de golpe: cada alumno se da de baja uno por uno.`;
+  return `Se inscribirán en el ciclo ${cycleName} desde su primer día, sin cargo de inscripción. Las colegiaturas mensuales sí se les cobrarán como a todos, desde el primer mes del ciclo; lo que ya venció antes de hoy, sin recargo. Una importación no se deshace de golpe: cada alumno se da de baja uno por uno.`;
 }
 
 function enrollments(n: number): string {
@@ -110,7 +110,7 @@ function enrollments(n: number): string {
 /** T14, in the preview: earlier imports dated after the cycle's first day. */
 export function toMoveText(count: number): string {
   const one = count === 1;
-  return `${enrollments(count)} de una importación anterior ${one ? "se moverá" : "se moverán"} al inicio del ciclo: ${one ? "ese alumno se cobrará" : "esos alumnos se cobrarán"} desde el primer mes, como a todos.`;
+  return `${enrollments(count)} de una importación anterior ${one ? "se moverá" : "se moverán"} al inicio del ciclo, contando a los alumnos dados de baja. Los activos se cobrarán desde el primer mes, como a todos; lo que venció antes de su importación, sin recargo.`;
 }
 
 /** The primary button when the file only repairs earlier imports. */

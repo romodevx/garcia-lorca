@@ -62,7 +62,7 @@ describe("the preview's frame", () => {
   it("offers to move earlier imports to the cycle start even when nobody is new (T14)", async () => {
     const { user, onImport } = renderPreview(ALREADY_TO_MOVE);
     expect(
-      screen.getByText("2 inscripciones de una importación anterior se moverán al inicio del ciclo: esos alumnos se cobrarán desde el primer mes, como a todos."),
+      screen.getByText("2 inscripciones de una importación anterior se moverán al inicio del ciclo, contando a los alumnos dados de baja. Los activos se cobrarán desde el primer mes, como a todos; lo que venció antes de su importación, sin recargo."),
     ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Importar/ })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Mover 2 inscripciones al inicio del ciclo" }));
