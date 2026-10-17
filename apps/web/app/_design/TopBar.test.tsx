@@ -13,7 +13,7 @@ describe("TopBar", () => {
   it("its own elements carry no inline style, so the stylesheet owns the look", () => {
     const { container } = render(
       <Providers>
-        <TopBar user={USERS.admin} theme="light" onToggle={() => {}} onHome={() => {}} onLogout={() => {}} onOpenPalette={() => {}} />
+        <TopBar user={USERS.admin} theme="light" onToggle={() => {}} onHome={() => {}} onLogout={() => {}} onChangePassword={() => {}} onOpenPalette={() => {}} />
       </Providers>
     );
     const own = container.querySelectorAll(
@@ -29,7 +29,7 @@ describe("TopBar", () => {
   it("wraps the theme toggle so the stylesheet can drop it on a narrow window", () => {
     const { container } = render(
       <Providers>
-        <TopBar user={USERS.admin} theme="light" onToggle={() => {}} onHome={() => {}} onLogout={() => {}} onOpenPalette={() => {}} />
+        <TopBar user={USERS.admin} theme="light" onToggle={() => {}} onHome={() => {}} onLogout={() => {}} onChangePassword={() => {}} onOpenPalette={() => {}} />
       </Providers>
     );
     const wrapper = container.querySelector(".topbar-actions > .topbar-theme");
@@ -48,7 +48,7 @@ describe("TopBar", () => {
     try {
       const { container } = render(
         <Providers>
-          <TopBar user={USERS.admin} theme="light" onToggle={() => {}} onHome={() => {}} onLogout={() => {}} onOpenPalette={() => {}} />
+          <TopBar user={USERS.admin} theme="light" onToggle={() => {}} onHome={() => {}} onLogout={() => {}} onChangePassword={() => {}} onOpenPalette={() => {}} />
         </Providers>
       );
       const text = container.querySelector(".topbar-search-text");
@@ -58,5 +58,28 @@ describe("TopBar", () => {
     } finally {
       document.documentElement.removeAttribute("data-look");
     }
+  });
+
+  // ISSUE-T14-104: the bell had no onClick and nothing feeds it — comms has no
+  // staff inbox (its notifications are per pupil, for families). A button that
+  // does nothing is not rendered at all.
+  it("renders no notifications bell, since nothing feeds one", () => {
+    const { queryByRole } = render(
+      <Providers>
+        <TopBar user={USERS.admin} theme="light" onToggle={() => {}} onHome={() => {}} onLogout={() => {}} onChangePassword={() => {}} onOpenPalette={() => {}} />
+      </Providers>
+    );
+    expect(queryByRole("button", { name: /Notificaciones/ })).toBeNull();
+  });
+
+  // ISSUE-T14-103: the name chip opens the account menu; it no longer logs out.
+  it("the name chip is the account menu button, not a logout button", () => {
+    const { getByRole, queryByRole } = render(
+      <Providers>
+        <TopBar user={USERS.admin} theme="light" onToggle={() => {}} onHome={() => {}} onLogout={() => {}} onChangePassword={() => {}} onOpenPalette={() => {}} />
+      </Providers>
+    );
+    expect(getByRole("button", { name: /Mi cuenta/ })).toHaveAttribute("aria-haspopup", "menu");
+    expect(queryByRole("button", { name: "Cerrar sesión" })).toBeNull();
   });
 });

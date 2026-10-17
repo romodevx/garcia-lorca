@@ -54,7 +54,7 @@ export function HomeView({ user, onOpen, permissions, permissionsFailed = false,
         ) : !resolved ? (
           <HomeModulesSkeleton />
         ) : visibleModules.length === 0 ? (
-          <NoModules />
+          <NoModules permissions={permissions} />
         ) : (
           <HomeModules modules={visibleModules} permissions={permissions} onOpen={onOpen} />
         )}

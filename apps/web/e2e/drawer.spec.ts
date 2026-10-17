@@ -42,7 +42,7 @@ test.describe("el cajón cubre la pantalla", () => {
     await page.getByRole("button", { name: /Nuevo ciclo/ }).first().click();
     await expect(page.getByRole("dialog")).toBeVisible();
 
-    const cerrar = page.getByRole("button", { name: "Cerrar sesión" });
+    const cerrar = page.getByRole("button", { name: /Mi cuenta/ });
     const caja = await cerrar.boundingBox();
     expect(caja, "el botón de cerrar sesión existe").not.toBeNull();
 

@@ -320,7 +320,9 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("GET /api/v1/me", requireAuthChanged(http.HandlerFunc(authH.Me)))
 	// change-password is the one deliberate exception: it stays reachable while
 	// the must-change flag is set, so it authenticates but does NOT enforce.
-	mux.Handle("POST /api/v1/auth/change-password", requireAuth(http.HandlerFunc(authH.ChangePassword)))
+	// It also checks the current password, so it is throttled like a
+	// re-authentication: on the reauth bucket, keyed by the signed-in user.
+	mux.Handle("POST /api/v1/auth/change-password", requireAuth(reauthLimiter.PerPrincipalMiddleware(http.HandlerFunc(authH.ChangePassword))))
 	mux.HandleFunc("POST /api/v1/auth/logout", authH.Logout)
 	mux.HandleFunc("GET /api/v1/features", handler.NewFeaturesHandler(flags).Features)
 

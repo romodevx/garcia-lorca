@@ -224,8 +224,29 @@ func (rl *RateLimiter) Len() int {
 // Middleware throttles requests per client IP. On denial it sets Retry-After
 // (whole seconds, rounded up) and returns 429; otherwise it calls next.
 func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
+	return rl.middlewareKeyedBy(rl.clientIP, next)
+}
+
+// principalKeyPrefix keeps principal keys apart from IP keys in a shared bucket map.
+const principalKeyPrefix = "principal:"
+
+// PerPrincipalMiddleware throttles by the authenticated principal instead of
+// the client IP. Behind Cloud Run every request arrives from the Google front
+// end, so an IP key is one budget for the whole school; for a password check
+// that already sits behind a session, the person is the right key. It must
+// run AFTER RequireAuth; with no principal it falls back to the client IP.
+func (rl *RateLimiter) PerPrincipalMiddleware(next http.Handler) http.Handler {
+	return rl.middlewareKeyedBy(func(r *http.Request) string {
+		if p, ok := PrincipalFrom(r.Context()); ok && p.UserID != "" {
+			return principalKeyPrefix + p.UserID
+		}
+		return rl.clientIP(r)
+	}, next)
+}
+
+func (rl *RateLimiter) middlewareKeyedBy(key func(*http.Request) string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ok, retryAfter := rl.Allow(rl.clientIP(r))
+		ok, retryAfter := rl.Allow(key(r))
 		if !ok {
 			seconds := int(math.Ceil(retryAfter.Seconds()))
 			if seconds < 1 {

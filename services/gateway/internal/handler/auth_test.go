@@ -440,6 +440,11 @@ func TestChangePasswordShortNewPasswordRejectedAtEdge(t *testing.T) {
 	if fake.cpGotCalled {
 		t.Error("iam ChangePassword was called; the edge guard must short-circuit before iam")
 	}
+	// Clients may show this body as-is, so it is the sentence a person reads.
+	const want = "La nueva contraseña debe tener al menos 8 caracteres."
+	if got := strings.TrimSpace(rec.Body.String()); got != want {
+		t.Errorf("body=%q, want %q", got, want)
+	}
 }
 
 func TestLogoutClearsCookie(t *testing.T) {
@@ -650,5 +655,32 @@ func TestTheStaffSessionSurvivesClosingTheBrowser(t *testing.T) {
 
 	if got := refreshCookieFrom(t, rec).MaxAge; got <= 0 {
 		t.Errorf("refresh cookie Max-Age = %d: the browser would drop it on exit", got)
+	}
+}
+
+// A wrong current password and an expired session are both 401. RequireAuth
+// has already accepted the token by the time iam is asked, so iam refusing
+// here means the CURRENT PASSWORD is wrong: say so with REAUTH_FAILED (the
+// code the level deletion already uses for the same thing). A 401 without the
+// code stays "your session is gone".
+func TestChangePasswordWrongCurrentPasswordIsCoded(t *testing.T) {
+	fake := &fakeLogin{cpErr: connect.NewError(connect.CodeUnauthenticated, errString("invalid credentials"))}
+	h := handler.NewAuthHandler(fake)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/change-password", strings.NewReader(`{"currentPassword":"wrong","newPassword":"newlongpass"}`))
+	ctx := middleware.WithPrincipal(req.Context(), middleware.Principal{UserID: "u1", Email: "ana@garcialorca.mx"})
+	h.ChangePassword(rec, req.WithContext(ctx))
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("code=%d, want 401", rec.Code)
+	}
+	if got := rec.Header().Get("X-Error-Code"); got != "REAUTH_FAILED" {
+		t.Errorf("X-Error-Code=%q, want REAUTH_FAILED", got)
+	}
+	if got := strings.TrimSpace(rec.Body.String()); got != "La contraseña actual no es correcta." {
+		t.Errorf("body=%q", got)
+	}
+	if fake.gotEmail != "" {
+		t.Error("no re-login may be attempted after a refused change")
 	}
 }

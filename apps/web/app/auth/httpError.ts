@@ -12,11 +12,17 @@
  */
 export class HttpError extends Error {
   readonly status: number;
+  /** The body the gateway sent with the refusal, when it sent one. */
+  readonly serverText?: string;
+  /** The gateway's machine code for the refusal (X-Error-Code), when it sent one. */
+  readonly errorCode?: string;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, detail: { serverText?: string; errorCode?: string } = {}) {
     super(message);
     this.name = "HttpError";
     this.status = status;
+    this.serverText = detail.serverText;
+    this.errorCode = detail.errorCode;
   }
 }
 

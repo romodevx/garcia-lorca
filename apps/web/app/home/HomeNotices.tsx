@@ -63,8 +63,24 @@ export function PermissionsUnavailable({ onRetry }: { onRetry?: () => void }): R
   );
 }
 
+// The scopes a guardian holds over their own children: their account in the
+// family app, and their own uniform orders (migrations/iam/0014).
+const GUARDIAN_PERMISSION_PREFIXES = ["family:", "uniforms_own:"] as const;
+
+/**
+ * A guardian's permissions are all guardian scopes: everything they can do lives
+ * in the family app, and no administrator will grant them a web module.
+ */
+function isFamilyOnly(permissions: readonly string[]): boolean {
+  return (
+    permissions.some((p) => p.startsWith("family:")) &&
+    permissions.every((p) => GUARDIAN_PERMISSION_PREFIXES.some((prefix) => p.startsWith(prefix)))
+  );
+}
+
 // Shown to a signed-in user whose permissions match no module at all.
-export function NoModules(): ReactElement {
+export function NoModules({ permissions }: { permissions: readonly string[] }): ReactElement {
+  const family = isFamilyOnly(permissions);
   return (
     <div
       style={{
@@ -82,9 +98,13 @@ export function NoModules(): ReactElement {
     >
       <Icon name="shield" size={30} stroke={2} />
       <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 18, color: "var(--text)" }}>
-        No tienes módulos asignados
+        {family ? "Aquí no hay módulos para familias" : "No tienes módulos asignados"}
       </div>
-      <div style={{ fontSize: 13.5 }}>Solicita acceso a tu administrador para ver tus módulos aquí.</div>
+      <div style={{ fontSize: 13.5 }}>
+        {family
+          ? "Tu acceso es desde la app de García Lorca para familias."
+          : "Solicita acceso a tu administrador para ver tus módulos aquí."}
+      </div>
     </div>
   );
 }

@@ -52,8 +52,35 @@ describe("changePassword", () => {
     // A 204 response must have a null body per the Fetch spec (undici enforces it).
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
     vi.stubGlobal("fetch", fetchMock);
-    await expect(changePassword("http://gw", "old", "newlongpass")).resolves.toBeUndefined();
+    await expect(changePassword("http://gw", "old", "newlongpass")).resolves.toEqual({ sessionRenewed: false });
     expect(fetchMock).toHaveBeenCalledWith("http://gw/api/v1/auth/change-password", expect.objectContaining({ method: "POST", credentials: "include" }));
+  });
+
+  // The gateway re-logs the caller in with the new password and sets fresh
+  // cookies (200). A 204 means the password changed but that re-login failed:
+  // the old session is revoked and the caller must sign in again.
+  it("reports a renewed session on 200 and a dead one on 204", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ expiresIn: 900, mustChangePassword: false }), { status: 200, headers: { "Content-Type": "application/json" } }),
+    ));
+    await expect(changePassword("http://gw", "old", "newlongpass")).resolves.toEqual({ sessionRenewed: true });
+  });
+});
+
+describe("changePassword refusals", () => {
+  it("keeps the gateway's text with the status", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("La nueva contraseña debe tener al menos 8 caracteres.\n", { status: 400 })));
+    await expect(changePassword("http://gw", "old", "short")).rejects.toMatchObject({
+      status: 400,
+      serverText: "La nueva contraseña debe tener al menos 8 caracteres.",
+    });
+  });
+
+  it("keeps the gateway's machine code (X-Error-Code)", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response("La contraseña actual no es correcta.", { status: 401, headers: { "X-Error-Code": "REAUTH_FAILED" } }),
+    ));
+    await expect(changePassword("http://gw", "wrong", "newlongpass")).rejects.toMatchObject({ status: 401, errorCode: "REAUTH_FAILED" });
   });
 });
 
