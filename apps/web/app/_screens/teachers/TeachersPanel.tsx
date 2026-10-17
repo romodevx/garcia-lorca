@@ -5,6 +5,7 @@ import { Btn } from "../../_design/Controls";
 import { Toast } from "../../_design/Toast";
 import type { UserStatus } from "../../admin/api";
 import type { CreateTeacherInput, Teacher } from "../../teachers/api";
+import { describeCreateTeacherError } from "../../teachers/writeErrors";
 import { EmailField, TextField, useEmailShapeOnSave, useRequired } from "../../_design/form";
 import { EmptyHint, ErrorAlert, Section } from "../config/parts";
 import { TeacherRow } from "./TeacherRow";
@@ -76,8 +77,8 @@ export function TeachersPanel({ teachers, onCreate, onOpenLoad, onGrantAccess, a
       setFirstName("");
       setLastName("");
       setEmail("");
-    } catch {
-      setError("No se pudo crear al profesor. Intenta de nuevo.");
+    } catch (cause) {
+      setError(describeCreateTeacherError(cause));
     } finally {
       setPending(false);
     }

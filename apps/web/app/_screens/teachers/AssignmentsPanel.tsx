@@ -8,6 +8,7 @@ import type {
   Teacher,
   TeachingAssignment,
 } from "../../teachers/api";
+import { describeAssignTeacherError } from "../../teachers/writeErrors";
 import { SelectField, useRequired, type SelectOption } from "../../_design/form";
 import { EmptyHint, ErrorAlert, Section } from "../config/parts";
 
@@ -107,12 +108,19 @@ export function AssignmentsPanel({
     setError(undefined);
     try {
       await onCreate({ groupId, subjectId, teacherId });
-      setSubjectId("");
-      setTeacherId("");
-      const refreshed = await loadAssignments(groupId);
-      setAssignments(refreshed);
+    } catch (cause) {
+      setError(describeAssignTeacherError(cause));
+      pending.current = false;
+      return;
+    }
+    setSubjectId("");
+    setTeacherId("");
+    // Saved by now: a failed re-read must not read as a failed assignment, or
+    // the retry it invites lands on the slot it already took.
+    try {
+      setAssignments(await loadAssignments(groupId));
     } catch {
-      setError("No se pudo asignar al profesor. Intenta de nuevo.");
+      setError("Se asignó, pero no pudimos releer la lista. Recarga la página.");
     } finally {
       pending.current = false;
     }
