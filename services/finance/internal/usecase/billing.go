@@ -624,7 +624,7 @@ func (s *FinanceService) accrueLateFees(
 	planOfStudent := make(map[string]domain.TuitionPlan, len(enrollments))
 	for _, enr := range enrollments {
 		if plan, ok := planByLevel[levelOfGroup[enr.GroupID]]; ok {
-			planOfStudent[enr.StudentID] = plan
+			planOfStudent[enr.StudentID] = pricedFor(plan, enr)
 		}
 	}
 
@@ -647,6 +647,10 @@ func (s *FinanceService) accrueLateFees(
 		}
 		plan, ok := planOfStudent[c.Charge.StudentID()]
 		if !ok || plan.LateFeeCents() == 0 {
+			continue
+		}
+		if plan.Policy().SurchargeFree(c.Charge.DueDate()) {
+			// Due before the pupil was imported: normal price, no surcharge (T14).
 			continue
 		}
 		if plan.Policy().DailyMode {

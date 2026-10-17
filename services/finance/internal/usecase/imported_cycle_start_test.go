@@ -6,27 +6,39 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/garcia-lorca/services/finance/internal/domain"
 	"github.com/garcia-lorca/services/finance/internal/ports"
 	"github.com/garcia-lorca/services/finance/internal/usecase"
 )
 
-// T14 (owner decision 2026-10-17): students now dates an imported pupil's
-// enrollment on the cycle's first day. Finance needs no change for it — these
-// pin what that date means for the money, the late fees included, so the
-// owner decides on numbers and not on a guess.
+// T14 (owner decisions 2026-10-17): an imported pupil is enrolled from the
+// cycle's first day and billed from September like everybody else, but the
+// months that fell due BEFORE the day of the import are owed at the normal
+// price with no surcharge — no fixed monthly fee, no daily accrual, fee shares
+// included. From the import day on, the normal rules apply.
+
+// importDay is the instant students reports for the import: 10:00 in Morelia
+// on 17 October.
+var importDay = time.Date(2026, time.October, 17, 16, 0, 0, 0, time.UTC)
 
 // importedFromStartFixture is the billing school (cycle from 1 August, tuition
 // September..June due on the 10th, $150 fixed surcharge) with its one pupil
-// imported and enrolled from the cycle's first day.
-func importedFromStartFixture(t *testing.T, enrolledAt time.Time) *fixture {
+// imported on importedAt and enrolled from enrolledAt.
+func importedFromStartFixture(t *testing.T, enrolledAt, importedAt time.Time) *fixture {
 	t.Helper()
 	f := billingFixture(t)
+	importPupil(f, enrolledAt, importedAt)
+	return f
+}
+
+func importPupil(f *fixture, enrolledAt, importedAt time.Time) {
 	f.enrollments.byCycle[testCycle] = []ports.EnrollmentRef{{
 		ID: "enr-imp", StudentID: testStudent, GroupID: testGroup, CycleID: testCycle,
-		Status: "active", EnrolledAt: enrolledAt, Origin: ports.EnrollmentOriginImport,
+		Status: "active", EnrolledAt: enrolledAt, Origin: ports.EnrollmentOriginImport, ImportedOn: importedAt,
 	}}
-	return f
 }
 
 func lateFeeDescriptions(t *testing.T, f *fixture) []string {
@@ -37,7 +49,7 @@ func lateFeeDescriptions(t *testing.T, f *fixture) []string {
 // Enrolled from the start, an imported pupil owes the whole year from
 // September and still no inscription.
 func TestRunBillingChargesAnImportedPupilFromTheCycleStartSeptember(t *testing.T) {
-	f := importedFromStartFixture(t, aug(2026, time.August, 1))
+	f := importedFromStartFixture(t, aug(2026, time.August, 1), importDay)
 
 	got := runOn(t, f, "2026-10-17")
 
@@ -49,28 +61,26 @@ func TestRunBillingChargesAnImportedPupilFromTheCycleStartSeptember(t *testing.T
 	}
 }
 
-// The money side effect, made visible (not decided): issued on 17 October,
-// September (due the 10th) has one COMPLETED overdue month, so the same run
-// adds ONE fixed surcharge for it. October is overdue but not a completed
-// month, so it adds none yet.
-func TestRunBillingSurchargesTheImportedPupilsSeptemberOnTheSameRun(t *testing.T) {
-	f := importedFromStartFixture(t, aug(2026, time.August, 1))
+// September and October fell due before the import (10 Sep, 10 Oct < 17 Oct):
+// the monthly run never surcharges them. November, due after, is late as usual.
+func TestRunBillingNeverSurchargesAMonthDueBeforeTheImport(t *testing.T) {
+	f := importedFromStartFixture(t, aug(2026, time.August, 1), importDay)
 
-	got := runOn(t, f, "2026-10-17")
+	if got := runOn(t, f, "2026-10-17"); got.LateFeesCreated != 0 {
+		t.Fatalf("late fees on the import day = %d %v; want none", got.LateFeesCreated, lateFeeDescriptions(t, f))
+	}
+	runOn(t, f, "2026-12-15")
 
 	fees := lateFeeDescriptions(t, f)
-	if got.LateFeesCreated != 1 || len(fees) != 1 || !strings.Contains(fees[0], "septiembre") {
-		t.Fatalf("late fees = %d %v; want exactly one, on September", got.LateFeesCreated, fees)
-	}
-	if amount := issuedTo(t, f, testStudent)[fees[0]]; amount != 15000 {
-		t.Errorf("surcharge = %d cents; want the plan's fixed $150", amount)
+	if len(fees) != 1 || !strings.Contains(fees[0], "noviembre") {
+		t.Fatalf("late fees by 15 Dec = %v; want only November's", fees)
 	}
 }
 
-// A fee split September/October is owed whole from the start too, and its
-// September share is late the same way as the tuition month.
-func TestRunBillingSurchargesTheImportedPupilsSeptemberFeeShare(t *testing.T) {
-	f := importedFromStartFixture(t, aug(2026, time.August, 1))
+// A fee split September/October is owed whole from the start, and its shares
+// due before the import are not surcharged either.
+func TestRunBillingNeverSurchargesAFeeShareDueBeforeTheImport(t *testing.T) {
+	f := importedFromStartFixture(t, aug(2026, time.August, 1), importDay)
 	if _, err := f.svc.UpsertTuitionPlan(context.Background(), usecase.TuitionPlanInput{
 		CycleID: testCycle, LevelID: testLevel, EnrollmentCents: 50000, MonthlyCents: 320000,
 		Months: 10, FirstBilledMonth: 9, DueDay: 10, LateFeeCents: 15000, Active: true,
@@ -79,21 +89,32 @@ func TestRunBillingSurchargesTheImportedPupilsSeptemberFeeShare(t *testing.T) {
 		t.Fatalf("seed plan with a fee: %v", err)
 	}
 
-	got := runOn(t, f, "2026-10-17")
+	got := runOn(t, f, "2026-11-11")
 
 	if shares := chargeDescriptions(t, f, domain.KindFee); len(shares) != 2 {
 		t.Fatalf("fee shares = %v; want both (September and October)", shares)
 	}
-	if got.LateFeesCreated != 2 {
-		t.Fatalf("late fees = %d %v; want 2 — September's tuition and September's fee share", got.LateFeesCreated, lateFeeDescriptions(t, f))
+	if got.LateFeesCreated != 0 {
+		t.Fatalf("late fees = %d %v; want none — every overdue line fell due before the import", got.LateFeesCreated, lateFeeDescriptions(t, f))
+	}
+}
+
+// An enrollment without an import instant (a students that does not send it
+// yet) keeps the normal rule: no grace is invented.
+func TestRunBillingWithoutAnImportDaySurchargesAsUsual(t *testing.T) {
+	f := importedFromStartFixture(t, aug(2026, time.August, 1), time.Time{})
+
+	if got := runOn(t, f, "2026-10-17"); got.LateFeesCreated != 1 {
+		t.Fatalf("late fees = %d; want September's one", got.LateFeesCreated)
 	}
 }
 
 // The repaired pupil: billed on 7 October from an import dated the 6th, then
-// moved to the cycle start by the re-upload. The next run adds only September
-// and its one surcharge; October, already issued, is not issued again.
-func TestRunBillingAfterTheMoveAddsOnlySeptemberAndItsSurcharge(t *testing.T) {
-	f := importedFromStartFixture(t, aug(2026, time.October, 6))
+// moved to the cycle start by the re-upload. The next run adds only September,
+// without a surcharge; October, already issued, is not issued again.
+func TestRunBillingAfterTheMoveAddsOnlySeptemberWithoutASurcharge(t *testing.T) {
+	importedOn6 := time.Date(2026, time.October, 6, 16, 0, 0, 0, time.UTC)
+	f := importedFromStartFixture(t, importedOn6, importedOn6)
 	if first := runOn(t, f, "2026-10-07"); first.TuitionCreated != 9 || first.LateFeesCreated != 0 {
 		t.Fatalf("first run = %+v; want October..June and no surcharge", first)
 	}
@@ -101,12 +122,53 @@ func TestRunBillingAfterTheMoveAddsOnlySeptemberAndItsSurcharge(t *testing.T) {
 
 	got := runOn(t, f, "2026-10-17")
 
-	if got.TuitionCreated != 1 || got.LateFeesCreated != 1 {
-		t.Fatalf("after the move = %+v; want September only and its one surcharge", got)
+	if got.TuitionCreated != 1 || got.LateFeesCreated != 0 {
+		t.Fatalf("after the move = %+v; want September only, with no surcharge", got)
 	}
 	if again := runOn(t, f, "2026-10-17"); again.TuitionCreated != 0 || again.LateFeesCreated != 0 {
 		t.Fatalf("second run = %+v; want nothing new", again)
 	}
+}
+
+// importedDailyFixture is the owner's daily rule ($10 a day, every day) with
+// only September billed, the pupil imported on 17 October and the clock there.
+func importedDailyFixture(t *testing.T, importedAt time.Time) *fixture {
+	t.Helper()
+	f := dailyFixture(t)
+	onlySeptember(t, f, usecase.TuitionPlanInput{
+		EnrollmentCents: 50000, MonthlyCents: 320000,
+		Policy: domain.CollectionPolicy{DailyMode: true, LateFeeDailyCents: 1000, SurchargeCountsAllDays: true},
+	})
+	importPupil(f, aug(2026, time.August, 1), importedAt)
+	runOn(t, f, "2026-10-17")
+	f.clock = noon(2026, time.October, 17)
+	return f
+}
+
+// Every surface that prices the daily surcharge on read — the account, the
+// statement, the family's account and statement, the counter — owes
+// September at its normal price and nothing more.
+func TestEverySurfaceOwesTheImportedPupilsSeptemberWithoutASurcharge(t *testing.T) {
+	requireOneBalance(t, importedDailyFixture(t, importDay), 320000)
+}
+
+// The same pupil without an import day is 37 days late (11 Sep..17 Oct): the
+// grace is the import's, not a change to the daily rule.
+func TestWithoutAnImportDayTheDailyRuleStillAccrues(t *testing.T) {
+	requireOneBalance(t, importedDailyFixture(t, time.Time{}), 320000+37*1000)
+}
+
+// Paying it at the counter writes no surcharge row and earns no early-payment
+// reward: the normal price, exactly.
+func TestADepositSettlesTheImportedPupilsSeptemberAtTheNormalPrice(t *testing.T) {
+	f := importedDailyFixture(t, importDay)
+
+	got := deposit(t, f, 320000, "2026-10-17")
+
+	assert.Empty(t, got.Surcharges, "a surcharge row was written for a month due before the import")
+	assert.Zero(t, got.UnallocatedCents)
+	require.NotEmpty(t, got.Allocations)
+	requireOneBalance(t, f, 0)
 }
 
 func issuedInMonth(issued map[string]int64, month string) bool {

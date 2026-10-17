@@ -43,6 +43,26 @@ type CollectionPolicy struct {
 	// the start of the month being paid. Working days and not calendar days so a
 	// window ending on a Sunday does not quietly cost a family the discount.
 	EarlyPaymentDays int
+	// surchargeFreeBefore is the day a legacy-imported pupil arrived (T14):
+	// a charge that fell due before it accrues no surcharge. Zero for everybody
+	// else. Per pupil, never stored with the plan — see WithSurchargeFreeBefore.
+	surchargeFreeBefore time.Time
+}
+
+// WithSurchargeFreeBefore is the policy as it applies to a pupil the legacy
+// import brought in on `day` (owner decision 2026-10-17): the months that fell
+// due before they arrived are owed at the normal price, with no surcharge of
+// either rule. From that day on the policy is unchanged.
+func (p CollectionPolicy) WithSurchargeFreeBefore(day time.Time) CollectionPolicy {
+	p.surchargeFreeBefore = day
+	return p
+}
+
+// SurchargeFree reports whether a charge due on dueOn is spared every
+// surcharge: it fell due strictly before the pupil was imported. The ONE rule
+// the monthly run (accrueLateFees) and the daily derivation (Surcharge) read.
+func (p CollectionPolicy) SurchargeFree(dueOn time.Time) bool {
+	return !p.surchargeFreeBefore.IsZero() && dueOn.Before(p.surchargeFreeBefore)
 }
 
 // Surcharge is what a charge has accrued for being late, as of paidOn.
@@ -65,7 +85,7 @@ type CollectionPolicy struct {
 // wrong the moment the rate changed. The ledger materialises it as one real
 // charge at the moment money is applied to it, so rows exist where money moved.
 func Surcharge(p CollectionPolicy, cal *schoolcal.Calendar, dueOn, paidOn time.Time) int64 {
-	if p.LateFeeDailyCents <= 0 {
+	if p.LateFeeDailyCents <= 0 || p.SurchargeFree(dueOn) {
 		return 0
 	}
 	var days int

@@ -33,6 +33,7 @@ func (r schoolDayEnrollments) ListByStudent(ctx context.Context, studentID strin
 func (r schoolDayEnrollments) inSchoolDays(rows []ports.EnrollmentRef) []ports.EnrollmentRef {
 	for i := range rows {
 		rows[i].EnrolledAt = r.clock.DayOf(rows[i].EnrolledAt)
+		rows[i].ImportedOn = r.clock.DayOf(rows[i].ImportedOn)
 	}
 	return rows
 }

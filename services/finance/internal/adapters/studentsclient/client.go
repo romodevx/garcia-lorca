@@ -118,6 +118,7 @@ func toRef(e *studentsv1.Enrollment) ports.EnrollmentRef {
 		// same answer as zero here, but by accident rather than on purpose.
 		EnrolledAt: enrolledAt(e.GetEnrolledAt()),
 		Origin:     e.GetOrigin(),
+		ImportedOn: enrolledAt(e.GetImportedAt()),
 	}
 }
 

@@ -4,8 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	connect "connectrpc.com/connect"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	studentsv1 "github.com/garcia-lorca/gen/go/garcialorca/students/v1"
 	glerrors "github.com/garcia-lorca/pkg/errors"
@@ -131,5 +133,17 @@ func TestToRefCarriesTheEnrollmentOrigin(t *testing.T) {
 	}
 	if !toRef(&studentsv1.Enrollment{Origin: "import"}).Imported() {
 		t.Error("an import enrolment must read as imported")
+	}
+}
+
+// T14: the import's own instant travels apart from enrolled_at (now the cycle
+// start); absent stays the zero time, never 1970.
+func TestToRefCarriesWhenThePupilWasImported(t *testing.T) {
+	at := time.Date(2026, 10, 17, 16, 0, 0, 0, time.UTC)
+	if got := toRef(&studentsv1.Enrollment{Origin: "import", ImportedAt: timestamppb.New(at)}).ImportedOn; !got.Equal(at) {
+		t.Errorf("imported on = %v, want %v", got, at)
+	}
+	if got := toRef(&studentsv1.Enrollment{Origin: "manual"}).ImportedOn; !got.IsZero() {
+		t.Errorf("an absent import instant read as %v", got)
 	}
 }

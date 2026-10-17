@@ -39,6 +39,28 @@ func TestTheOwnersExample(t *testing.T) {
 	}
 }
 
+// T14 (owner decision 2026-10-17): a pupil brought over by the legacy import
+// owes the months that fell due before they arrived at the normal price, with
+// no surcharge. From the import day on the normal rule applies — a month due
+// ON the import day is late from the next day like any other.
+func TestNoSurchargeOnAMonthDueBeforeThePupilWasImported(t *testing.T) {
+	cal := schoolcal.New(nil)
+	p := policy().WithSurchargeFreeBefore(on(2026, time.October, 17))
+
+	if got := domain.Surcharge(p, cal, on(2026, time.September, 10), on(2026, time.October, 30)); got != 0 {
+		t.Errorf("September surcharge = %d; want 0, it fell due before the import", got)
+	}
+	if got := domain.Surcharge(p, cal, on(2026, time.October, 17), on(2026, time.October, 20)); got != 3*1000 {
+		t.Errorf("a month due on the import day = %d; want the normal 3 days", got)
+	}
+	if !p.SurchargeFree(on(2026, time.October, 16)) || p.SurchargeFree(on(2026, time.October, 17)) {
+		t.Error("SurchargeFree must hold strictly before the import day")
+	}
+	if policy().SurchargeFree(on(2026, time.September, 10)) {
+		t.Error("a pupil who was not imported has no surcharge-free months")
+	}
+}
+
 func TestSurchargeRunsOnWeekendsAndHolidays(t *testing.T) {
 	// Independence day plus a weekend inside the span. The owner was explicit:
 	// the surcharge runs on all of them.

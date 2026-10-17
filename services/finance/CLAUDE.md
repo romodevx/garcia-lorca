@@ -137,6 +137,20 @@ ledger operations run in a single transaction (Unit of Work).
   one arbiter. Naming only the keyless one made the second run of every month
   fail outright.
 
+## T14 — alumnos migrados (ADR 0033, enmienda 2026-10-17)
+- An imported enrolment (`origin = import`) is dated the cycle's first day, so
+  tuition and fees run from September; no inscription (unchanged).
+- **No surcharge on what fell due before the import.** `EnrollmentRef.ImportedOn`
+  (students' `imported_at`, turned into the Morelia day by
+  `schoolDayEnrollments`) is the day the pupil arrived. ONE rule,
+  `CollectionPolicy.SurchargeFree(dueOn)` (strictly before that day), read by
+  `domain.Surcharge` (daily) and `accrueLateFees` (monthly fixed fee). The grace
+  is attached in ONE place, `pricedFor(plan, enrollment)`, used by `planFor`
+  (statement, family account, counter quote, deposit, `policyFor`) and by the
+  run's `planOfStudent`. It is per pupil and never stored with the plan. Such a
+  month earns no early-payment reward either (it was not paid in time). An
+  imported enrolment without `imported_at` keeps the normal rules.
+
 ## T17 — actividades (ADR 0031)
 - `Activity` (schedule descriptive, periodicity `monthly|weekly|per_cycle`,
   first billing date + first due date repeated per period, fixed late fee,
