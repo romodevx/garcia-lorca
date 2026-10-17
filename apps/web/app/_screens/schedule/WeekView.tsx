@@ -35,7 +35,10 @@ export interface WeekViewProps {
 /** The week: filters, the grid, the level's hours, and the drawer to add or change a class. */
 export function WeekView({ board, mode, canWrite, now, onChanged, version = 0 }: WeekViewProps): ReactElement {
   const index = useMemo(() => indexBoard(board), [board]);
-  const [filter, setFilter] = useState<WeekFilter>(() => ({ ...NO_WEEK_FILTER, levelId: mode === "manage" ? (board.levels[0]?.id ?? "") : "" }));
+  // Only a school with ONE level starts on it: picking "the first" showed its
+  // grades as if someone had chosen it (ISSUE-T14-016).
+  const onlyLevel = board.levels.length === 1 ? board.levels[0]!.id : "";
+  const [filter, setFilter] = useState<WeekFilter>(() => ({ ...NO_WEEK_FILTER, levelId: mode === "manage" ? onlyLevel : "" }));
   const [target, setTarget] = useState<DrawerTarget | null>(null);
   const [toast, setToast] = useState<string | undefined>(undefined);
   const removal = useUndoableRemoval<ScheduleBlock>();
