@@ -1763,3 +1763,6 @@ html:has(.announce-footer) { scroll-padding-bottom: var(--announce-footer-h); }
   .home-card,
   .home-kpi { border: 1px solid CanvasText; }
 }
+
+/* Native confirmation dialogs (ActivateCycleDialog): a dimmed solid backdrop, no blur. */
+dialog.gl-confirm::backdrop { background: rgba(0, 0, 0, 0.45); }

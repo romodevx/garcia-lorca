@@ -374,6 +374,11 @@ export function activateCycle(baseURL: string, id: string): Promise<Cycle> {
   return postJSON<Cycle>(baseURL, `/cycles/${encodeURIComponent(id)}/activate`, {});
 }
 
+/** Gives a cycle a new name; its dates and status stay. */
+export function renameCycle(baseURL: string, id: string, name: string): Promise<Cycle> {
+  return sendJSON<Cycle>(baseURL, "PATCH", `/cycles/${encodeURIComponent(id)}`, { name });
+}
+
 export function listCycles(baseURL: string): Promise<Cycle[]> {
   return getList<Cycle>(baseURL, "/cycles", "cycles");
 }

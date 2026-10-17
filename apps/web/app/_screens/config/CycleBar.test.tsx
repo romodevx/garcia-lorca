@@ -52,6 +52,8 @@ describe("putting a school year into service", () => {
     );
 
     await user.click(screen.getByRole("button", { name: /Activar ciclo/ }));
+    // The live 2025-2026 is paused, so it asks first (QA CC-102).
+    await user.click(await screen.findByRole("button", { name: "Activar 2026-2027" }));
 
     expect(onActivate).toHaveBeenCalledWith("c2");
   });
@@ -75,6 +77,8 @@ describe("putting a school year into service", () => {
     );
 
     await user.click(screen.getByRole("button", { name: /Activar ciclo/ }));
+    // The live 2025-2026 is paused, so it asks first (QA CC-102).
+    await user.click(await screen.findByRole("button", { name: "Activar 2026-2027" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/permiso/i);
   });

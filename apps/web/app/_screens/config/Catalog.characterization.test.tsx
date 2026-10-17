@@ -251,6 +251,8 @@ describe("Catalog — which cycle is selected (D1, handleActivateCycle)", () => 
 
     await user.click(screen.getByRole("button", { name: "2027-2028 · Borrador" }));
     await user.click(screen.getByRole("button", { name: "Activar ciclo 2027-2028" }));
+    // 2026-2027 is live, so it asks first (QA CC-102).
+    await user.click(await screen.findByRole("button", { name: "Activar 2027-2028" }));
 
     expect(mocked.activateCycle).toHaveBeenCalledWith(expect.any(String), "c2");
     expect(await screen.findByText("2027-2028 es el ciclo en curso.")).toBeInTheDocument();

@@ -9,6 +9,8 @@ import { schoolISODate } from "../../_lib/schoolDay";
 import { proposeCycle } from "./cycleProposal";
 import { EmptyHint, ErrorAlert, Section, SelectChip } from "./parts";
 import { useSetupPresentation } from "./SetupPresentation";
+import { ActivateCycleDialog } from "./ActivateCycleDialog";
+import { CycleRenameForm } from "./CycleRenameForm";
 
 export interface CycleBarProps {
   cycles: readonly Cycle[];
@@ -19,7 +21,12 @@ export interface CycleBarProps {
   today?: string;
   /** Puts the selected draft year into service, standing down the previous one. */
   onActivate: (id: string) => Promise<void>;
+  /** Renames a year (config:write); without it the pencil is not offered. */
+  onRename?: (id: string, name: string) => Promise<void>;
 }
+
+/** The refusal of a year whose dates share a day with another (QA CC-101). */
+const CYCLE_OVERLAP = "CYCLE_OVERLAP";
 
 /**
  * What went wrong, in words that point at a fix.
@@ -30,6 +37,8 @@ export interface CycleBarProps {
  */
 export function cycleFailureMessage(err: unknown): string {
   if (err instanceof ConfigError) {
+    // The server names the year it collides with and its dates; nothing here can say it better.
+    if (err.code === CYCLE_OVERLAP && err.detail !== "") return err.detail;
     if (err.isConflict) return "Ya existe un ciclo con ese nombre. Usa otro.";
     if (err.isInvalid) return "Revisa las fechas: el fin del ciclo debe ser posterior al inicio.";
     if (err.status === 401) return "Tu sesión expiró. Vuelve a entrar.";
@@ -56,7 +65,7 @@ const STATUS_LABEL: Record<string, string> = {
 /** Fuera del componente: useRequired los toma como dependencia. */
 const CYCLE_REQUIRED = ["name", "startsOn", "endsOn"] as const;
 
-export function CycleBar({ cycles, selectedCycleId, onSelect, onCreate, onActivate, today }: CycleBarProps): ReactElement {
+export function CycleBar({ cycles, selectedCycleId, onSelect, onCreate, onActivate, onRename, today }: CycleBarProps): ReactElement {
   const [creating, setCreating] = useState(false);
   const form = useRequired(CYCLE_REQUIRED);
   const [name, setName] = useState("");
@@ -65,8 +74,12 @@ export function CycleBar({ cycles, selectedCycleId, onSelect, onCreate, onActiva
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
   const [activating, setActivating] = useState(false);
+  const [confirmingActivation, setConfirmingActivation] = useState(false);
+  const [renaming, setRenaming] = useState(false);
 
   const selected = cycles.find((c) => c.id === selectedCycleId);
+  // The year activating `selected` would pause, if any (QA CC-102).
+  const live = cycles.find((c) => c.status === "active" && c.id !== selectedCycleId);
   // Inside a setup step "Nuevo ciclo" is the step's lime only while there is no
   // cycle yet; after that "Siguiente" is, and one step never shows two (§1.3).
   const { inSetup } = useSetupPresentation();
@@ -85,6 +98,17 @@ export function CycleBar({ cycles, selectedCycleId, onSelect, onCreate, onActiva
     } finally {
       setActivating(false);
     }
+  };
+
+  // Pausing the live year of the whole school is not a one-click thing; with no
+  // live year there is nothing to pause, and asking would only be a click more.
+  const requestActivate = (): void => {
+    setError(undefined);
+    if (live === undefined) {
+      void activate();
+      return;
+    }
+    setConfirmingActivation(true);
   };
 
   // Opens on the proposed school year, so the happy path is one click (ISSUE-T14-023).
@@ -130,10 +154,14 @@ export function CycleBar({ cycles, selectedCycleId, onSelect, onCreate, onActiva
         <EmptyHint>Todavía no hay ciclos. Crea el primero para empezar.</EmptyHint>
       )}
 
+      {renaming && selected !== undefined && onRename !== undefined && (
+        <CycleRenameForm key={selected.id} name={selected.name} onRename={(name) => onRename(selected.id, name)} onDone={() => setRenaming(false)} />
+      )}
+
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
         <Btn icon="plus" kind={newCycleKind} onClick={startCreating}>Nuevo ciclo</Btn>
         {selected !== undefined && selected.status !== "active" && (
-          <Btn kind="ghost" icon="check" onClick={() => void activate()} disabled={activating}>
+          <Btn kind="ghost" icon="check" onClick={requestActivate} disabled={activating}>
             {activating ? "Activando…" : `Activar ciclo ${selected.name}`}
           </Btn>
         )}
@@ -142,7 +170,18 @@ export function CycleBar({ cycles, selectedCycleId, onSelect, onCreate, onActiva
             {selected.name} es el ciclo en curso.
           </p>
         )}
+        {selected !== undefined && onRename !== undefined && !renaming && (
+          <Btn kind="ghost" icon="edit" aria-label={`Renombrar ciclo ${selected.name}`} onClick={() => setRenaming(true)}>Renombrar</Btn>
+        )}
       </div>
+      {confirmingActivation && selected !== undefined && live !== undefined && (
+        <ActivateCycleDialog
+          cycleName={selected.name}
+          pausedName={live.name}
+          onConfirm={() => { setConfirmingActivation(false); void activate(); }}
+          onCancel={() => setConfirmingActivation(false)}
+        />
+      )}
       {error !== undefined && !creating && <ErrorAlert message={error} />}
 
       {creating && (

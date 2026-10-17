@@ -145,6 +145,8 @@ describe("Paso 2 · Ciclo escolar (A7–A11)", () => {
     config.listTerms.mockClear();
     config.listGroups.mockClear();
     await user.click(within(step).getByRole("button", { name: "Activar ciclo 2027-2028" }));
+    // A live year is paused, so it asks first (QA CC-102).
+    await user.click(await screen.findByRole("button", { name: "Activar 2027-2028" }));
 
     await waitFor(() => expect(config.activateCycle).toHaveBeenCalledWith(API, "c2"));
     await waitFor(() => expect(config.listTerms).toHaveBeenCalledWith(API, "c2"));

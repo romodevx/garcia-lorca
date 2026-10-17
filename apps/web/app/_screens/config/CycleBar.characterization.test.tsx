@@ -69,6 +69,8 @@ describe("CycleBar — characterization", () => {
     setup({ onActivate });
 
     await user.click(screen.getByRole("button", { name: "Activar ciclo 2027-2028" }));
+    // A live year (2026-2027) is paused, so it asks first (QA CC-102).
+    await user.click(await screen.findByRole("button", { name: "Activar 2027-2028" }));
 
     const busy = await screen.findByRole("button", { name: "Activando…" });
     expect(busy).toBeDisabled();
@@ -83,6 +85,8 @@ describe("CycleBar — characterization", () => {
     setup({ onActivate: vi.fn().mockRejectedValue(new ConfigError(404, "")) });
 
     await user.click(screen.getByRole("button", { name: "Activar ciclo 2027-2028" }));
+    // A live year (2026-2027) is paused, so it asks first (QA CC-102).
+    await user.click(await screen.findByRole("button", { name: "Activar 2027-2028" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("El módulo de configuración está apagado.");
     expect(screen.queryByRole("dialog")).toBeNull();
