@@ -1963,6 +1963,13 @@ func (r *Repository) VoidDeposit(ctx context.Context, d domain.Deposit) error {
 		if _, err := lockedDeposit(tx, d.ID()); err != nil {
 			return err
 		}
+		// Then the pupil's charges in due-date order, as a deposit and a
+		// correction take them: releaseDeposit visits the charges it touched
+		// in map order, and two transactions locking the same rows in
+		// different orders deadlock.
+		if _, err := lockedChargesOf(tx, d.StudentID()); err != nil {
+			return err
+		}
 		if _, err := releaseDeposit(tx, d, false); err != nil {
 			return err
 		}
