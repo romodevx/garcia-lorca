@@ -7,6 +7,7 @@ import { field } from "./parts";
 import { API_URL } from "../../api-url";
 import { matchesSearch } from "../../_design/textSearch";
 import { formatStudentName, sortStudents, studentNameSearchKeys } from "../../_design/students/studentName";
+import { useRoomLabels } from "../../_design/students/roomLabels";
 
 
 /**
@@ -35,6 +36,9 @@ export function StudentPicker({
   const [students, setStudents] = useState<Student[] | null>(null);
   const [term, setTerm] = useState("");
   const [failed, setFailed] = useState(false);
+  const roomLabels = useRoomLabels();
+  // "3º PRIMARIA · B" from the cycle's enrolment (ISSUE-T14-204); else what the file stores.
+  const roomOf = (s: Student): string => roomLabels.get(s.id) ?? (s.gradeGroup !== "" ? s.gradeGroup : s.level);
 
   useEffect(() => {
     let alive = true;
@@ -64,7 +68,7 @@ export function StudentPicker({
         <div style={{ flex: 1, minWidth: 0 }}>
           <p style={{ fontWeight: 700, fontSize: 15 }}>{formatStudentName(value)}</p>
           <p style={{ fontSize: 13, color: "var(--text-muted)" }}>
-            {value.gradeGroup !== "" ? value.gradeGroup : value.level}
+            {roomOf(value)}
           </p>
         </div>
         <button
@@ -121,7 +125,7 @@ export function StudentPicker({
                 <span style={{ fontWeight: 600, fontSize: 14.5 }}>{formatStudentName(student)}</span>
                 <span style={{ fontSize: 13, color: "var(--text-muted)" }}>
                   {" · "}
-                  {student.gradeGroup !== "" ? student.gradeGroup : student.level}
+                  {roomOf(student)}
                 </span>
               </button>
             </li>
