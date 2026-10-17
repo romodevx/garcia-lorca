@@ -68,7 +68,7 @@ func (s *StudentService) GetMedical(ctx context.Context, studentID string) (doma
 
 // UpdateMedical validates and saves a pupil's medical record.
 func (s *StudentService) UpdateMedical(ctx context.Context, studentID, bloodType, allergies, conditions string) (domain.MedicalRecord, error) {
-	if _, err := s.repo.FindByID(ctx, studentID); err != nil {
+	if err := s.requireEditable(ctx, studentID); err != nil {
 		return domain.MedicalRecord{}, err
 	}
 	rec, err := domain.NewMedicalRecord(bloodType, allergies, conditions)
@@ -79,6 +79,17 @@ func (s *StudentService) UpdateMedical(ctx context.Context, studentID, bloodType
 		return domain.MedicalRecord{}, err
 	}
 	return rec, nil
+}
+
+// requireEditable is KindNotFound for an unknown pupil and
+// domain.ErrWithdrawnReadOnly for a withdrawn one (T14-009). The repository
+// re-checks inside the write, so a withdrawal committed meanwhile still wins.
+func (s *StudentService) requireEditable(ctx context.Context, studentID string) error {
+	student, err := s.repo.FindByID(ctx, studentID)
+	if err != nil {
+		return err
+	}
+	return student.RequireEditable()
 }
 
 // WithPhotos returns the service keeping photos in `store`. Without it, photo
@@ -99,7 +110,7 @@ func (s *StudentService) UploadPhoto(ctx context.Context, studentID string, data
 	if s.photos == nil {
 		return ports.PhotoRef{}, errPhotosUnavailable
 	}
-	if _, err := s.repo.FindByID(ctx, studentID); err != nil {
+	if err := s.requireEditable(ctx, studentID); err != nil {
 		return ports.PhotoRef{}, err
 	}
 	photo, err := domain.NewPhoto(data)
@@ -171,6 +182,9 @@ func (s *StudentService) HasPhoto(ctx context.Context, studentID string) (bool, 
 func (s *StudentService) DeletePhoto(ctx context.Context, studentID string) error {
 	if s.photos == nil {
 		return errPhotosUnavailable
+	}
+	if err := s.requireEditable(ctx, studentID); err != nil {
+		return err
 	}
 	ref, err := s.repo.PhotoRef(ctx, studentID)
 	if err != nil {

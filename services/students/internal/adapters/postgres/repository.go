@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/garcia-lorca/pkg/authctx"
 	"github.com/garcia-lorca/pkg/authctx/gormtx"
@@ -140,15 +141,39 @@ func (r *Repository) UpdateDetails(ctx context.Context, s *domain.Student) error
 	cols["bank_reference"] = nullableText(s.BankReference().String())
 	cols["updated_at"] = gorm.Expr("now()")
 	return r.withTenant(ctx, func(tx *gorm.DB) error {
-		res := tx.Model(&studentModel{}).Where("id = ?", s.ID()).Updates(cols)
+		// The guard rides in the WHERE: a withdrawal committed after the use
+		// case read the pupil still wins (T14-009).
+		res := tx.Model(&studentModel{}).
+			Where("id = ? AND admission_status <> ?", s.ID(), domain.AdmissionWithdrawn.String()).
+			Updates(cols)
 		if res.Error != nil {
 			return translateStudentWriteErr(res.Error, "updating student details")
 		}
 		if res.RowsAffected == 0 {
-			return glerrors.ErrNotFound
+			return lockEditable(tx, s.ID())
 		}
 		return nil
 	})
+}
+
+// lockEditable holds the pupil's row FOR SHARE until the transaction ends, so
+// no withdrawal can commit under a write to their medical record or photo.
+// Unknown (or another tenant's) pupil: KindNotFound; withdrawn:
+// domain.ErrWithdrawnReadOnly. Nil means the file may be written.
+func lockEditable(tx *gorm.DB, studentID string) error {
+	var statuses []string
+	err := tx.Model(&studentModel{}).Clauses(clause.Locking{Strength: "SHARE"}).
+		Where("id = ?", studentID).Pluck("admission_status", &statuses).Error
+	if err != nil {
+		return glerrors.Wrap(glerrors.KindInternal, "checking the pupil", err)
+	}
+	if len(statuses) == 0 {
+		return glerrors.ErrNotFound
+	}
+	if statuses[0] == domain.AdmissionWithdrawn.String() {
+		return domain.ErrWithdrawnReadOnly
+	}
+	return nil
 }
 
 // FindByID returns a student or KindNotFound.

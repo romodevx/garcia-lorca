@@ -36,12 +36,8 @@ func (r *Repository) GetMedical(ctx context.Context, studentID string) (domain.M
 // pupil.
 func (r *Repository) SaveMedical(ctx context.Context, studentID string, rec domain.MedicalRecord) error {
 	return r.withTenant(ctx, func(tx *gorm.DB) error {
-		var visible int64
-		if err := tx.Model(&studentModel{}).Where("id = ?", studentID).Count(&visible).Error; err != nil {
-			return glerrors.Wrap(glerrors.KindInternal, "checking the pupil", err)
-		}
-		if visible == 0 {
-			return glerrors.ErrNotFound
+		if err := lockEditable(tx, studentID); err != nil {
+			return err
 		}
 		row := medicalModel{
 			TenantID: r.tenantID, StudentID: studentID,

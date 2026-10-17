@@ -581,6 +581,9 @@ func connectErr(err error) *connect.Error {
 	if code := levelarchive.CodeOf(err); code != "" {
 		ce.Meta().Set(ErrorCodeMeta, code)
 	}
+	if errors.Is(err, domain.ErrWithdrawnReadOnly) {
+		ce.Meta().Set(ErrorCodeMeta, domain.CodeStudentWithdrawn)
+	}
 	return ce
 }
 
