@@ -743,3 +743,24 @@ describe("la inscripción mientras se captura (ISSUE-T14-007)", () => {
     expect(screen.getByLabelText("Monto")).toHaveFocus();
   });
 });
+
+// ISSUE-T14-203: the tier line read "desde el 2026-06-01, sin fecha de fin".
+describe("las vigencias de un monto", () => {
+  it("dicen el mes con letra", () => {
+    open({
+      plan: {
+        ...PREVIOUS,
+        enrollmentConcepts: [{
+          name: "INSCRIPCIÓN",
+          tiers: [
+            { effectiveFrom: "2025-06-01", effectiveTo: "2025-08-30", amountCents: 400000 },
+            { effectiveFrom: "2025-08-31", effectiveTo: "", amountCents: 450000 },
+          ],
+        }],
+      },
+    });
+
+    expect(screen.getByText("del 1 jun 2025 al 30 ago 2025")).toBeInTheDocument();
+    expect(screen.getByText("desde el 31 ago 2025, sin fecha de fin")).toBeInTheDocument();
+  });
+});

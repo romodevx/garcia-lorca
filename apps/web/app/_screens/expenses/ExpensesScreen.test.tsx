@@ -83,7 +83,9 @@ describe("ExpensesScreen (T10)", () => {
     renderScreen();
     const row = (await screen.findAllByTestId("expense-row"))[0] as HTMLElement;
     expect(row).not.toHaveAttribute("tabindex");
-    const open = within(row).getByRole("button", { name: "Abrir egreso: Papelería, $1,250.50, 2026-10-01" });
+    const open = within(row).getByRole("button", { name: "Abrir egreso: Papelería, $1,250.50, 1 oct 2026" });
+    // ISSUE-T14-203: a screen reader spelled the ISO date out.
+    expect(open).toHaveTextContent("1 oct 2026");
 
     open.focus();
     await user.keyboard(" ");

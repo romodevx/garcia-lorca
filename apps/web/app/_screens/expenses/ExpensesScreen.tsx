@@ -9,7 +9,7 @@ import { Toast } from "../../_design/Toast";
 import { API_URL } from "../../api-url";
 import { getSummary, listCategories, listExpenses, type Expense, type ExpenseCategory, type FinanceSummary } from "../../expenses/api";
 import { formatCents } from "../../_lib/money";
-import { localISODate } from "../../_lib/localDate";
+import { dayWithYearLabel, localISODate } from "../../_lib/localDate";
 import { StatCards } from "../uniforms/parts";
 import { CategoriesPanel } from "./CategoriesPanel";
 import { useIntent } from "../../routing/pendingIntent";
@@ -275,8 +275,8 @@ function ExpensesTable({
               <tr key={e.id} data-testid="expense-row" onClick={() => onOpen(e)}
                 style={{ cursor: "pointer", boxShadow: `inset 3px 0 0 ${e.status === "cancelled" ? "var(--red)" : "var(--forest)"}` }}>
                 <td style={td}>
-                  <button type="button" aria-label={`Abrir egreso: ${e.categoryName}, ${formatCents(e.amountCents)}, ${e.spentOn}`} style={rowButton}>
-                    {e.spentOn}
+                  <button type="button" aria-label={`Abrir egreso: ${e.categoryName}, ${formatCents(e.amountCents)}, ${dayWithYearLabel(e.spentOn)}`} style={rowButton}>
+                    {dayWithYearLabel(e.spentOn)}
                   </button>
                 </td>
                 <td style={td}>{e.categoryName}</td>
