@@ -125,10 +125,11 @@ describe("StudentsScreen — filtros encadenados (T4)", () => {
 
     await user.click(chipIn("Nivel", /^Preescolar/));
     await user.click(screen.getByRole("button", { name: "Seleccionar todos (4)" }));
-    expect(screen.getByRole("status")).toHaveTextContent("4 seleccionados");
+    // The screen's own live region is always mounted too; the band is the one with the count.
+    expect(screen.getByText(/4 seleccionados/).closest('[role="status"]')).not.toBeNull();
 
     await user.click(screen.getByRole("checkbox", { name: "Seleccionar a Arce Ana" }));
-    expect(screen.getByRole("status")).toHaveTextContent("3 seleccionados");
+    expect(screen.getByText(/3 seleccionados/).closest('[role="status"]')).not.toBeNull();
 
     await user.click(screen.getByRole("button", { name: "Exportar selección" }));
     const file = vi.mocked(csv.downloadCsv).mock.calls[0]?.[1] ?? "";

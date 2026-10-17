@@ -430,9 +430,11 @@ describe("la liga directa a un alumno que no existe", () => {
       students.listEnrollments.mockResolvedValue([]);
       const onLinkedSheetClosed = vi.fn();
       render(<StudentsScreen onBack={() => {}} linkedStudentId="no-such-id" onLinkedSheetClosed={onLinkedSheetClosed} />);
+      // Gate nit: the live region is there, empty, before the text arrives, so it is announced.
+      expect(screen.getByRole("status")).toBeEmptyDOMElement();
 
-      const notice = await screen.findByRole("status");
-      expect(notice).toHaveTextContent("No encontramos ese alumno.");
+      await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("No encontramos ese alumno."));
+      expect(screen.getByTestId("link-notice")).toHaveTextContent("No encontramos ese alumno.");
       expect(screen.getByRole("button", { name: "Ver ficha de Cruz Ana" })).toBeInTheDocument();
       expect(screen.queryByRole("dialog", { name: "Ficha del alumno" })).toBeNull();
       expect(onLinkedSheetClosed).toHaveBeenCalled();
@@ -454,6 +456,19 @@ describe("un alumno dado de baja en la lista", () => {
 
     expect(await screen.findByRole("button", { name: "Ver ficha de Cruz Ana" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Editar ficha de Cruz Ana" })).toBeNull();
+  });
+
+  // Gate nit: the same rule as the ficha — a withdrawn enrollment this cycle
+  // counts even before the file's admission status catches up.
+  it("tampoco ofrece Editar ficha si su inscripción del ciclo es una baja", async () => {
+    students.listStudents.mockResolvedValue([{ ...pupil("lv-pri"), admissionStatus: "enrolled" }]);
+    students.listEnrollments.mockResolvedValue([
+      { id: "e1", studentId: "stu-1", cycleId: "c1", groupId: "g-pri-b", termId: "", status: "withdrawn", enrolledAt: "2026-08-20" },
+    ]);
+    render(<StudentsScreen onBack={() => {}} onEdit={() => {}} />);
+
+    await screen.findByRole("button", { name: "Ver ficha de Cruz Ana" });
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Editar ficha de Cruz Ana" })).toBeNull());
   });
 
   // ISSUE-T14-204: with no active enrollment the list and the ficha said

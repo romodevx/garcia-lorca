@@ -221,7 +221,7 @@ function StudentSheet({
   const [current, setCurrent] = useState<Enrollment | null | undefined | "failed">(undefined);
   // A withdrawn file is read-only (plan T2): the withdrawal just made here
   // counts before the roll is re-read (ISSUE-T14-009).
-  const withdrawn = st.admissionStatus === "withdrawn" || (current !== null && current !== undefined && current !== "failed" && current.status === "withdrawn");
+  const withdrawn = isWithdrawn(st, current);
   const admission: AdmissionStatus = withdrawn ? "withdrawn" : st.admissionStatus;
   // The enrolment's classroom with its grade ("3° PRIMARIA · B"), the one left
   // included (ISSUE-T14-204); unknown, what the file stores.
@@ -260,7 +260,7 @@ function StudentSheet({
     listEnrollments(API_URL, { studentId: st.id, cycleId })
       .then((all) => {
         if (!alive) return;
-        setCurrent(all.find((e) => e.status === "active") ?? all.find((e) => e.status === "withdrawn") ?? null);
+        setCurrent(currentEnrollment(all, st.id));
       })
       // Not knowing is not "no group": offering "Inscribir" then would bring
       // back the second-enrolment 409 this sheet was fixed for.
@@ -783,7 +783,7 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
             </div>
           }
         />
-        {linkMissed && <LinkMissedNotice onDismiss={() => setLinkMissed(false)} />}
+        <LinkMissedNotice shown={linkMissed} onDismiss={() => setLinkMissed(false)} />
         {placementStatus === "failed" && (
           <p role="alert" style={{ color: "var(--bad-fg)", fontSize: 13.5, margin: "10px 0 0" }}>
             No pudimos leer los grupos de este ciclo: por ahora sólo se filtra por nivel. Recarga la página en un momento.
@@ -854,7 +854,7 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
                 selected={filter.selected.has(row.id)}
                 onToggle={() => filter.toggle(row.id)}
                 onOpen={() => setSheet(row.student)}
-                onEdit={onEdit === undefined || row.student.admissionStatus === "withdrawn" ? undefined : () => onEdit(row.id)}
+                onEdit={onEdit === undefined || isWithdrawn(row.student, currentEnrollment(placementReady ? enrollments : [], row.id)) ? undefined : () => onEdit(row.id)}
                 onNotes={() => setNotesOf(row.student)}
                 onStatement={canReadStatement ? () => setStatementOf(row.student) : undefined}
               />
@@ -911,9 +911,12 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
         />
       )}
       {verifying && <VerifyCardDrawer onClose={() => setVerifying(false)} />}
+      {/* ONE live region, always mounted and empty until a message is set into
+          it, so every message is announced (ISSUE-T14-013, T14-202 gate nit).
+          The pill and the banner below paint it; they do not announce it twice. */}
+      <div role="status" data-testid="students-live" style={SR_ONLY}>{toast ?? (linkMissed ? LINK_MISSED : "")}</div>
       {toast !== null && (
-        // role=status: the confirmation is announced, not only painted (ISSUE-T14-013).
-        <div role="status" style={{ position: "fixed", bottom: 28, left: "50%", transform: "translateX(-50%)", zIndex: 80, display: "flex", alignItems: "center", gap: 11, padding: "14px 22px", borderRadius: "var(--r-pill)", background: "var(--forest)", color: "#fff", fontWeight: 600, fontSize: 15, boxShadow: "var(--shadow-pop)", animation: "pop .25s var(--ease) both" }}>
+        <div aria-hidden="true" style={{ position: "fixed", bottom: 28, left: "50%", transform: "translateX(-50%)", zIndex: 80, display: "flex", alignItems: "center", gap: 11, padding: "14px 22px", borderRadius: "var(--r-pill)", background: "var(--forest)", color: "#fff", fontWeight: 600, fontSize: 15, boxShadow: "var(--shadow-pop)", animation: "pop .25s var(--ease) both" }}>
           <Icon name="check" size={20} stroke={2.6} />{toast}
         </div>
       )}
@@ -921,12 +924,39 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
   );
 }
 
-/** A direct link named no pupil on the roll; the list stays, the notice says so until dismissed. */
-function LinkMissedNotice({ onDismiss }: { onDismiss: () => void }): ReactElement {
+/** The pupil's enrolment of the cycle that counts: the active one, else the one they withdrew from. */
+function currentEnrollment(all: readonly Enrollment[], studentId: string): Enrollment | null {
+  const own = all.filter((e) => e.studentId === studentId);
+  return own.find((e) => e.status === "active") ?? own.find((e) => e.status === "withdrawn") ?? null;
+}
+
+/**
+ * A withdrawn file is read-only (plan T2): the file says so, or this cycle's
+ * enrolment is a withdrawal not yet reflected on it (ISSUE-T14-009). One rule
+ * for the ficha and the list.
+ */
+function isWithdrawn(st: Student, current: Enrollment | null | undefined | "failed"): boolean {
+  return st.admissionStatus === "withdrawn" || (current !== null && current !== undefined && current !== "failed" && current.status === "withdrawn");
+}
+
+const LINK_MISSED = "No encontramos ese alumno.";
+
+/** Read by assistive tech, not painted. */
+const SR_ONLY: CSSProperties = { position: "absolute", width: 1, height: 1, padding: 0, margin: -1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap", border: 0 };
+
+/**
+ * A direct link named no pupil on the roll; the list stays, the notice says so
+ * until dismissed. Painted only: the screen's live region announces it.
+ */
+function LinkMissedNotice({ shown, onDismiss }: { shown: boolean; onDismiss: () => void }): ReactElement {
   return (
-    <div role="status" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginTop: 10, padding: "10px 16px", borderRadius: "var(--r-md)", background: "var(--surface-3)", border: "1px solid var(--border)", color: "var(--text)", fontSize: 14.5 }}>
-      No encontramos ese alumno.
-      <button type="button" onClick={onDismiss} style={{ minHeight: 44, padding: "0 12px", background: "transparent", border: "none", color: "var(--text-muted)", fontWeight: 600, cursor: "pointer" }}>Cerrar aviso</button>
+    <div data-testid="link-notice" style={shown ? { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginTop: 10, padding: "10px 16px", borderRadius: "var(--r-md)", background: "var(--surface-3)", border: "1px solid var(--border)", color: "var(--text)", fontSize: 14.5 } : undefined}>
+      {shown && (
+        <>
+          <span aria-hidden="true">{LINK_MISSED}</span>
+          <button type="button" onClick={onDismiss} style={{ minHeight: 44, padding: "0 12px", background: "transparent", border: "none", color: "var(--text-muted)", fontWeight: 600, cursor: "pointer" }}>Cerrar aviso</button>
+        </>
+      )}
     </div>
   );
 }
