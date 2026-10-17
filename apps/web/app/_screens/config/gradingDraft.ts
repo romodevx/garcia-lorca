@@ -3,11 +3,16 @@ import type { LevelGrading } from "../../config/api";
 /** A new level grades 5–10 in whole numbers and passes at 6 (owner decision, T10). */
 export const DEFAULT_GRADING: LevelGrading = { enabled: true, min: 5, max: 10, decimals: 0, passing: 6 };
 
+/**
+ * Grades are whole numbers only (owner decision): the UI never offers decimals
+ * and every scale it saves says so, whatever an older level had stored.
+ */
+const WHOLE_NUMBERS = 0;
+
 /** The form's text, as typed. */
 export interface GradingDraft {
   min: string;
   max: string;
-  decimals: string;
   passing: string;
 }
 
@@ -15,7 +20,7 @@ export type GradingField = "min" | "max" | "passing";
 export type GradingErrors = Partial<Record<GradingField, string>>;
 
 export function toDraft(g: LevelGrading): GradingDraft {
-  return { min: String(g.min), max: String(g.max), decimals: String(g.decimals), passing: String(g.passing) };
+  return { min: String(g.min), max: String(g.max), passing: String(g.passing) };
 }
 
 /** Digits with at most two decimals: no sign (so never below 0), exponent, hex or inner space. */
@@ -45,5 +50,5 @@ export function gradingErrors(d: GradingDraft): GradingErrors {
 }
 
 export function fromDraft(d: GradingDraft, enabled: boolean): LevelGrading {
-  return { enabled, min: number(d.min), max: number(d.max), decimals: Number(d.decimals), passing: number(d.passing) };
+  return { enabled, min: number(d.min), max: number(d.max), decimals: WHOLE_NUMBERS, passing: number(d.passing) };
 }

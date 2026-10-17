@@ -7,7 +7,7 @@ import { Toast } from "../../_design/Toast";
 import { NumberField, useFocusFirstInvalid } from "../../_design/form";
 import { ConfigError, type Level, type LevelGrading } from "../../config/api";
 import { DEFAULT_GRADING, fromDraft, gradingErrors, toDraft, type GradingDraft, type GradingErrors, type GradingField } from "./gradingDraft";
-import { ErrorAlert, RadioGroup } from "./parts";
+import { ErrorAlert } from "./parts";
 import { useSecondaryInSetup } from "./SetupPresentation";
 import { useSerialGrading } from "./useSerialGrading";
 
@@ -16,11 +16,6 @@ const TOAST_MS = 2600;
 const SCALE_TIGHTENING = "SCALE_TIGHTENING";
 
 const isScaleTightening = (err: unknown): err is ConfigError => err instanceof ConfigError && err.code === SCALE_TIGHTENING && err.detail !== "";
-const DECIMAL_OPTIONS = [
-  { value: "0", label: "Sin decimales" },
-  { value: "1", label: "1 decimal" },
-  { value: "2", label: "2 decimales" },
-] as const;
 
 export interface GradingControlProps {
   level: Level;
@@ -70,11 +65,11 @@ export function GradingControl({ level, onChange }: GradingControlProps): ReactE
 
   const { enabled, toggle, saveScale } = useSerialGrading(initial, persist);
 
-  const edit = (field: keyof GradingDraft, value: string): void => {
+  const edit = (field: GradingField, value: string): void => {
     const next = { ...draft, [field]: value };
     setDraft(next);
     // A shown error clears the moment the field is right; nothing new is raised while typing.
-    if (field !== "decimals" && errors[field] !== undefined && gradingErrors(next)[field] === undefined) {
+    if (errors[field] !== undefined && gradingErrors(next)[field] === undefined) {
       setErrors((prev) => ({ ...prev, [field]: undefined }));
     }
   };
@@ -104,7 +99,6 @@ export function GradingControl({ level, onChange }: GradingControlProps): ReactE
             <NumberField label="Calificación mínima" value={draft.min} onChange={(v) => edit("min", v)} onBlur={() => check("min")} error={errors.min} />
             <NumberField label="Calificación máxima" value={draft.max} onChange={(v) => edit("max", v)} onBlur={() => check("max")} error={errors.max} />
           </div>
-          <RadioGroup legend="Decimales" options={DECIMAL_OPTIONS} value={draft.decimals as (typeof DECIMAL_OPTIONS)[number]["value"]} onChange={(v) => edit("decimals", v)} />
           <NumberField label="Mínimo aprobatorio" value={draft.passing} onChange={(v) => edit("passing", v)} onBlur={() => check("passing")} error={errors.passing} help="Debajo de esta calificación el alumno reprueba el mes." />
           <div>
             <Btn type="submit" icon="check" kind={saveKind}>Guardar calificación</Btn>

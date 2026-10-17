@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { DEFAULT_GRADING, fromDraft, gradingErrors, type GradingDraft } from "./gradingDraft";
 
-const OK: GradingDraft = { min: "5", max: "10", decimals: "1", passing: "6" };
+const OK: GradingDraft = { min: "5", max: "10", passing: "6" };
 
 describe("DEFAULT_GRADING", () => {
   it("grades a new level in whole numbers: 5 to 10, passing at 6, no decimals", () => {
@@ -34,6 +34,6 @@ describe("gradingErrors", () => {
 
 describe("fromDraft", () => {
   it("reads the typed text strictly", () => {
-    expect(fromDraft({ ...OK, passing: "6,5" }, true)).toEqual({ enabled: true, min: 5, max: 10, decimals: 1, passing: 6.5 });
+    expect(fromDraft({ ...OK, passing: "6,5" }, true)).toEqual({ enabled: true, min: 5, max: 10, decimals: 0, passing: 6.5 });
   });
 });
