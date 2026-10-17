@@ -28,6 +28,20 @@ export function easProjectConfig(projectId: string | undefined, config: Partial<
   };
 }
 
+/**
+ * Android application id from the build environment (ANDROID_PACKAGE).
+ *
+ * `expo prebuild` refuses to run non-interactively without one, and app.json
+ * deliberately does not fix it yet: the store id is permanent once published and
+ * is the owner's call. A local release build (scripts/mobile-release-apk.sh)
+ * passes a local-only id; with none set, nothing is added.
+ */
+export function androidPackageConfig(androidPackage: string | undefined, config: Partial<ExpoConfig>): Pick<ExpoConfig, "android"> | Record<string, never> {
+  const trimmed = androidPackage?.trim();
+  if (!trimmed) return {};
+  return { android: { ...config.android, package: trimmed } };
+}
+
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
   name: config.name ?? "García Lorca",
@@ -39,4 +53,5 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   // source maps never leave the build machine. (Intentionally absent — there is
   // nothing to add here; this comment documents the deliberate omission.)
   ...easProjectConfig(process.env.EAS_PROJECT_ID, config),
+  ...androidPackageConfig(process.env.ANDROID_PACKAGE, config),
 });

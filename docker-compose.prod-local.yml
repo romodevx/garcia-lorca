@@ -1,0 +1,230 @@
+# García Lorca — the whole system LOCALLY, "as in production".
+#
+# Runs the SAME images Cloud Run runs (built from each service's Dockerfile:
+# distroless, static, stripped; the web as a `next build` standalone image with
+# no source maps), with production-shaped env, against the dev stack's local
+# Postgres. Drive it with `scripts/prod-local.sh up|down|status|logs|build`,
+# never by hand: the script builds the images one at a time, stops the dev app
+# containers first and probes every port. See deploy/PROD-LOCAL.md.
+#
+# DESIGN — why it is shaped like this (read before changing it):
+#
+#   * SEPARATE compose project (`garcia-lorca-prod`). Every container, network
+#     and volume here is its own; nothing in the dev project (`garcia-lorca`) is
+#     recreated or clobbered by `up`/`down` of this file.
+#
+#   * ONE database. The data lives in the dev stack's Postgres (volume
+#     garcia-lorca_pgdata), reached through its PUBLISHED host port
+#     (host.docker.internal:${POSTGRES_HOST_PORT}). This file never declares a
+#     postgres service: two Postgres containers on one data volume corrupt it.
+#
+#   * NOT on the dev network. Joining garcia-lorca_gl would register the same
+#     DNS names (iam, students, …) twice, and a dev container started later
+#     would silently answer half of the gateway's calls. Our own network, our
+#     own names.
+#
+#   * OWN Pub/Sub emulator and fake-gcs. Both are in-memory. A shared emulator
+#     would split events between two `comms` consumers on the same subscription.
+#
+#   * The dev APP containers are stopped while this runs (the script does it).
+#     Two copies of finance/comms writing one database and relaying one outbox
+#     to two different emulators lose events. Infra (postgres) keeps running.
+#
+# Host ports: 13000 web, 18080 gateway, bound to 127.0.0.1 by default. The
+# Android emulator still reaches them: 10.0.2.2 IS the Mac's loopback. Only a
+# physical phone on the LAN needs PROD_LOCAL_BIND=0.0.0.0 (opt-in: it exposes the
+# stack to the whole network). Internal services stay on 127.0.0.1:18xxx for the
+# health probes only — in Cloud Run they are not public either.
+
+name: garcia-lorca-prod
+
+x-prod-env: &prod-env
+  # Not "local": with APP_ENV set to anything else iam REFUSES to boot without
+  # IAM_JWT_SECRET instead of minting an ephemeral key (services/iam/cmd/main.go).
+  APP_ENV: prod-local
+  OTEL_SERVICE_ENV: prod-local
+  PORT: "8080"
+  ADDR: ":8080"
+  DATABASE_URL: "postgres://app:${APP_DB_PASSWORD:?APP_DB_PASSWORD missing from .env}@host.docker.internal:${POSTGRES_HOST_PORT:-5432}/garcia_lorca?sslmode=disable"
+  # Same pool caps terraform gives every service (services.tf common_env).
+  DB_MAX_OPEN_CONNS: "2"
+  DB_MAX_IDLE_CONNS: "1"
+  SCHOOL_TIMEZONE: America/Mexico_City
+  PUBSUB_EMULATOR_HOST: "pubsub:8085"
+  PUBSUB_PROJECT_ID: "garcia-lorca-local"
+
+x-prod-service: &prod-service
+  restart: unless-stopped
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  depends_on:
+    migrate:
+      condition: service_completed_successfully
+    pubsub:
+      condition: service_started
+  networks: [prod]
+
+services:
+  # ---- Infra (in-memory only; the database is the dev stack's) -------------
+  pubsub:
+    image: google/cloud-sdk:emulators
+    command: >
+      gcloud beta emulators pubsub start
+      --project=garcia-lorca-local --host-port=0.0.0.0:8085
+    networks: [prod]
+    restart: unless-stopped
+
+  fake-gcs:
+    image: fsouza/fake-gcs-server:1.52.2
+    command: ["-scheme", "http", "-port", "4443"]
+    networks: [prod]
+    restart: unless-stopped
+
+  # ---- Migrations (one-shot, the real ledger) ------------------------------
+  # Same script and ledger as the dev stack's `migrate` and as
+  # scripts/migrate-cloud.sh: applies only what schema_migrations lacks.
+  migrate:
+    image: postgres:16-bookworm
+    entrypoint: ["/bin/sh", "/apply-migrations.sh"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      PGHOST: host.docker.internal
+      PGPORT: "${POSTGRES_HOST_PORT:-5432}"
+      PGUSER: postgres
+      PGDATABASE: garcia_lorca
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD missing from .env}
+      OWNER_TEMP_PASSWORD: ${OWNER_TEMP_PASSWORD:-}
+    volumes:
+      - ./migrations:/migrations:ro
+      - ./docker/apply-migrations.sh:/apply-migrations.sh:ro
+      - ./docker/seed-owner.sql:/seed/owner.sql:ro
+    networks: [prod]
+    restart: "no"
+
+  # ---- Go services: the production images ---------------------------------
+  gateway:
+    <<: *prod-service
+    image: garcia-lorca-prod/gateway:local
+    environment:
+      <<: *prod-env
+      # Resolved by scripts/prod-local.sh from deploy/terraform/services.tf
+      # (+ the flags dev enabled out of band). Refuse to boot without it.
+      ENABLED_MODULES: "${PROD_LOCAL_ENABLED_MODULES:?run through scripts/prod-local.sh}"
+      WEB_ORIGIN: "http://localhost:13000"
+      LEVEL_DELETION_TOKEN_KEY: "${PROD_LOCAL_LEVEL_DELETION_TOKEN_KEY:?run through scripts/prod-local.sh}"
+      IAM_BASE_URL: "http://iam:8080"
+      STUDENTS_BASE_URL: "http://students:8080"
+      CONFIG_BASE_URL: "http://config:8080"
+      GRADES_BASE_URL: "http://grades:8080"
+      FINANCE_BASE_URL: "http://finance:8080"
+      ATTENDANCE_BASE_URL: "http://attendance:8080"
+      COMMS_BASE_URL: "http://comms:8080"
+      UNIFORMS_BASE_URL: "http://uniforms:8080"
+    ports: ["${PROD_LOCAL_BIND:-127.0.0.1}:18080:8080"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      iam:
+        condition: service_started
+
+  iam:
+    <<: *prod-service
+    image: garcia-lorca-prod/iam:local
+    environment:
+      <<: *prod-env
+      # STABLE key from .env.prod-local, never ephemeral: restarts keep sessions.
+      IAM_JWT_SECRET: "${PROD_LOCAL_IAM_JWT_SECRET:?run through scripts/prod-local.sh}"
+      # Password login only. dev GCP signs in through Identity Platform; see
+      # deploy/PROD-LOCAL.md "Diferencias".
+      IDENTITY_PLATFORM_PROJECT: ""
+      IDENTITY_PLATFORM_API_KEY: ""
+      PUBLIC_WEB_URL: "http://localhost:13000"
+      # No relay: invitations return the link to hand over by hand.
+      SMTP_HOST: ""
+    ports: ["127.0.0.1:18091:8080"]
+
+  students:
+    <<: *prod-service
+    image: garcia-lorca-prod/students:local
+    environment:
+      <<: *prod-env
+      CONFIG_BASE_URL: "http://config:8080"
+      IAM_BASE_URL: "http://iam:8080"
+      PHOTOS_BUCKET: "garcia-lorca-student-photos-local"
+      STORAGE_EMULATOR_HOST: "http://fake-gcs:4443"
+    ports: ["127.0.0.1:18092:8080"]
+
+  config:
+    <<: *prod-service
+    image: garcia-lorca-prod/config:local
+    environment: { <<: *prod-env }
+    ports: ["127.0.0.1:18101:8080"]
+
+  finance:
+    <<: *prod-service
+    image: garcia-lorca-prod/finance:local
+    environment:
+      <<: *prod-env
+      CONFIG_BASE_URL: "http://config:8080"
+      STUDENTS_BASE_URL: "http://students:8080"
+      EXPENSE_RECEIPTS_BUCKET: "garcia-lorca-expense-receipts-local"
+      STORAGE_EMULATOR_HOST: "http://fake-gcs:4443"
+    ports: ["127.0.0.1:18093:8080"]
+
+  grades:
+    <<: *prod-service
+    image: garcia-lorca-prod/grades:local
+    environment:
+      <<: *prod-env
+      CONFIG_BASE_URL: "http://config:8080"
+      STUDENTS_BASE_URL: "http://students:8080"
+    ports: ["127.0.0.1:18094:8080"]
+
+  attendance:
+    <<: *prod-service
+    image: garcia-lorca-prod/attendance:local
+    environment:
+      <<: *prod-env
+      CONFIG_BASE_URL: "http://config:8080"
+      STUDENTS_BASE_URL: "http://students:8080"
+    ports: ["127.0.0.1:18095:8080"]
+
+  comms:
+    <<: *prod-service
+    image: garcia-lorca-prod/comms:local
+    environment:
+      <<: *prod-env
+      COMMS_TENANT_ID: "00000000-0000-0000-0000-000000000001"
+      STUDENTS_BASE_URL: "http://students:8080"
+      # Same default as terraform's var.push_provider: log, do not deliver.
+      PUSH_PROVIDER: log
+    ports: ["127.0.0.1:18096:8080"]
+
+  uniforms:
+    <<: *prod-service
+    image: garcia-lorca-prod/uniforms:local
+    environment:
+      <<: *prod-env
+      FINANCE_BASE_URL: "http://finance:8080"
+      STUDENTS_BASE_URL: "http://students:8080"
+      CONFIG_BASE_URL: "http://config:8080"
+    ports: ["127.0.0.1:18099:8080"]
+
+  # ---- Web: the production `next build` standalone image -------------------
+  web:
+    image: garcia-lorca-prod/web:local
+    environment:
+      APP_ENV: prod-local
+      # Read per request by app/api/[...path]/route.ts (same as Cloud Run).
+      GATEWAY_URL: "http://gateway:8080"
+    ports: ["${PROD_LOCAL_BIND:-127.0.0.1}:13000:8080"]
+    depends_on:
+      gateway:
+        condition: service_started
+    networks: [prod]
+    restart: unless-stopped
+
+networks:
+  prod:
+    driver: bridge
