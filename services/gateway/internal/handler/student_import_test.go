@@ -99,6 +99,9 @@ func (f *fakeImportRoster) ImportStudents(_ context.Context, rows []client.Impor
 		if r.CURP == "KNOWN000000000000A" {
 			res.Outcome = client.ImportAlreadyExists
 		}
+		if r.CURP == "MOVED000000000000A" {
+			res.Outcome, res.MovedToCycleStart = client.ImportAlreadyImported, true
+		}
 		if !validate {
 			res.EnrollmentNumber = "2026-00001"
 		}
@@ -368,6 +371,28 @@ func TestCommitImportsWhatThePreviewShowed(t *testing.T) {
 	}
 	if got.Summary.New != 1 || got.Summary.Skipped != 1 || got.Rows[0].EnrollmentNumber != "2026-00001" || got.BatchID != "batch-1" {
 		t.Errorf("result = %+v", got)
+	}
+}
+
+// T14: a re-upload repairs earlier imports dated after the cycle's first day.
+// The preview counts who would move and the commit who moved — a subset of
+// "ya estaban", so the summary still adds up.
+func TestImportCountsTheEnrollmentsMovedToTheCycleStart(t *testing.T) {
+	f := newImportFixture()
+	file := importFile(t,
+		pupil("Primaria", "A", "Activo", "MOVED000000000000A"),
+		pupil("Primaria", "A", "Activo", "KNOWN000000000000A"))
+	req := importRequest{FileBase64: file}
+	preview := decodePreview(t, post(t, f.h.Preview, req))
+	if preview.Summary.Already != 2 || preview.Summary.MovedToCycleStart != 1 {
+		t.Fatalf("preview summary = %+v; want 2 already, 1 of them moved", preview.Summary)
+	}
+
+	req.PlanHash = preview.PlanHash
+	got := decodePreview(t, post(t, f.h.Commit, req))
+
+	if got.Summary.Already != 2 || got.Summary.MovedToCycleStart != 1 || got.Summary.New != 0 {
+		t.Fatalf("commit summary = %+v; want the move reported", got.Summary)
 	}
 }
 

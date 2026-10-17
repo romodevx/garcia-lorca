@@ -100,6 +100,9 @@ type ImportRowResult struct {
 	EnrollmentNumber string
 	Warnings         []string
 	Reason           string
+	// MovedToCycleStart: an earlier import of this pupil was moved back to the
+	// cycle's first day (validating: would be).
+	MovedToCycleStart bool
 }
 
 // ImportStudents creates (or, validating, judges) the pupils of a legacy file.
@@ -130,6 +133,7 @@ func fromImportResults(src []*studentsv1.ImportRowResult) []ImportRowResult {
 			RowNumber: int(r.GetRowNumber()), Outcome: importOutcomeName(r.GetOutcome()),
 			StudentID: r.GetStudentId(), EnrollmentNumber: r.GetEnrollmentNumber(),
 			Warnings: r.GetWarnings(), Reason: r.GetReason(),
+			MovedToCycleStart: r.GetMovedToCycleStart(),
 		})
 	}
 	return out

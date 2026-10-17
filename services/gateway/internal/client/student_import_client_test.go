@@ -48,13 +48,13 @@ func TestImportRowsTravelAndComeBack(t *testing.T) {
 	got := fromImportResults([]*studentsv1.ImportRowResult{
 		{RowNumber: 7, Outcome: studentsv1.ImportRowOutcome_IMPORT_ROW_OUTCOME_IMPORTED, EnrollmentNumber: "2026-00042",
 			Warnings: []string{"phone_invalid"}},
-		{RowNumber: 8, Outcome: studentsv1.ImportRowOutcome_IMPORT_ROW_OUTCOME_ALREADY_IMPORTED},
+		{RowNumber: 8, Outcome: studentsv1.ImportRowOutcome_IMPORT_ROW_OUTCOME_ALREADY_IMPORTED, MovedToCycleStart: true},
 		{RowNumber: 9, Outcome: studentsv1.ImportRowOutcome_IMPORT_ROW_OUTCOME_UNSPECIFIED},
 	})
 	if got[0].Outcome != ImportImported || got[0].EnrollmentNumber != "2026-00042" || !slices.Equal(got[0].Warnings, []string{"phone_invalid"}) {
 		t.Errorf("row 7 = %+v", got[0])
 	}
-	if got[1].Outcome != ImportAlreadyImported {
+	if got[1].Outcome != ImportAlreadyImported || !got[1].MovedToCycleStart || got[0].MovedToCycleStart {
 		t.Errorf("row 8 = %+v", got[1])
 	}
 	if got[2].Outcome != ImportRejected {
