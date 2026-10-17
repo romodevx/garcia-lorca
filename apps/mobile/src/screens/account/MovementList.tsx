@@ -22,10 +22,13 @@ const METHOD_LABEL: Record<string, string> = { cash: "Efectivo", card: "Tarjeta"
 
 /** The row's second line: what the line is, its day, and how money came. */
 function subOf(m: FamilyMovement): string {
-  const parts = [KIND_LOOK[m.kind]?.label ?? m.kind, formatDate(m.date)];
+  const kind = KIND_LOOK[m.kind]?.label ?? m.kind;
+  // "Pago · Inscripción" already says what it is (ISSUE-T14-402): not twice.
+  const named = m.description.startsWith(`${kind} · `);
+  const parts = [named ? "" : kind, formatDate(m.date)];
   const method = m.method ? (METHOD_LABEL[m.method] ?? m.method) : "";
   // A credit note's method is its kind (T8): said once, not twice.
-  if (method !== parts[0]) parts.push(method);
+  if (method !== kind) parts.push(method);
   if (m.folio) parts.push(m.folio);
   return parts.filter(Boolean).join(" · ");
 }
