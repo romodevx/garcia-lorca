@@ -5,7 +5,8 @@ import { Btn } from "../../_design/Controls";
 import { DrawerShell } from "../../_design/DrawerShell";
 import { DateField, MoneyField, useFocusFirstInvalid } from "../../_design/form";
 import { TenderEditor } from "../../_design/payments/TenderEditor";
-import { AMOUNT_ERROR, tenderLabel } from "../../_design/payments/tenders";
+import { AMOUNT_ERROR } from "../../_design/payments/tenders";
+import { depositRequest, newAttemptKey } from "../../_design/payments/depositRequest";
 import { useTenders } from "../../_design/payments/useTenders";
 import { ClosedCutNotice } from "../../_design/payments/ClosedCutNotice";
 import { useClosedCut } from "../../_design/payments/useClosedCut";
@@ -19,13 +20,12 @@ import {
   type Expected,
   type ExpectedLine,
   type Payment,
-  type Tender,
 } from "../../finance/api";
 import { groupByCharge } from "../../finance/allocations";
 import { API_URL } from "../../api-url";
 import { localISODate, shortDayLabel } from "../../_lib/localDate";
 import { DebtList } from "./DebtList";
-import { ReceiptActions } from "../receipts/ReceiptActions";
+import { allocationLabel, DepositReceipt } from "./DepositReceipt";
 import { formatPesosInput, formatCents, pesosToCents } from "../../_lib/money";
 import { formatStudentName } from "../../_design/students/studentName";
 import { StudentNotesBeside, useNotesBeside, type NotesAccess } from "../../_design/students/StudentNotesBeside";
@@ -39,11 +39,6 @@ import { StudentNotesBeside, useNotesBeside, type NotesAccess } from "../../_des
  */
 function difference(captured: number, expectedCents: number): number {
   return expectedCents - (Number.isFinite(captured) ? captured : 0);
-}
-
-/** One key per attempt, kept across retries: a double click must not cost twice. */
-function newAttemptKey(): string {
-  return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
 /** How long the typing has to stop before we ask the server what it covers. */
@@ -303,26 +298,19 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
       focusFirstInvalid();
       return;
     }
-    const split = tenders.toTenders();
-    const [first] = split;
     inFlight.current = true;
     setSaving(true);
     setError(undefined);
     try {
-      const result = await registerDeposit(API_URL, {
+      const result = await registerDeposit(API_URL, depositRequest({
         studentId: student.id,
         amountCents: cents,
-        // The first tender, for a gateway that reads only one method; with
-        // `tenders` present the server ignores these.
-        method: first?.method ?? "cash",
-        reference: first?.reference ?? "",
-        ...(first?.cardType !== undefined ? { cardType: first.cardType } : {}),
-        tenders: split,
-        idempotencyKey: attemptKey,
-        ...(sentDate !== "" ? { paidAt: sentDate } : {}),
+        tenders: tenders.toTenders(),
+        attemptKey,
+        paidOn: sentDate,
         ...(choice !== undefined ? { chargeIds: choice } : {}),
-        ...(grantEarly ? { grantEarlyPayment: true } : {}),
-      });
+        grantEarlyPayment: grantEarly,
+      }));
       setReceipt(result);
       onCollected();
     } catch (cause) {
@@ -349,7 +337,7 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
     >
       <>
         {receipt !== null
-          ? <Receipt result={receipt} describe={describe.current} onClose={onClose} />
+          ? <DepositReceipt result={receipt} describe={describe.current} onClose={onClose} />
           : (
             <StudentNotesBeside beside={beside} studentId={student.id} bare>
               <form
@@ -411,7 +399,7 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
                       </div>
                       {groupByCharge(preview.allocations).map((a) => (
                         <div key={a.chargeId} style={lineRow}>
-                          <span style={{ fontSize: 14.5, color: "var(--text)" }}>{label(a.chargeId, preview.surcharges, describe.current)}</span>
+                          <span style={{ fontSize: 14.5, color: "var(--text)" }}>{allocationLabel(a.chargeId, preview.surcharges, describe.current)}</span>
                           <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 15, color: "var(--text)" }}>{formatCents(a.amountCents)}</span>
                         </div>
                       ))}
@@ -464,77 +452,6 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
   );
 }
 
-/**
- * What one allocation covered, in words. A surcharge created by this very
- * payment is not in the account read, so its description comes from the result
- * itself.
- */
-function label(chargeId: string, surcharges: Charge[], known: Map<string, string>): string {
-  const fresh = surcharges.find((c) => c.id === chargeId);
-  if (fresh !== undefined) {
-    return fresh.description;
-  }
-  return known.get(chargeId) ?? "Cargo";
-}
-
-/**
- * The receipt. A folio a parent can quote and a list they can check, printable
- * because a school hands over paper.
- */
-function Receipt({ result, describe, onClose }: { result: DepositResult; describe: Map<string, string>; onClose: () => void }): ReactElement {
-  return (
-    <div data-testid="receipt" style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
-      <div style={{ flex: 1, overflowY: "auto", padding: "22px 26px", display: "flex", flexDirection: "column", gap: 18 }}>
-        <div style={{ padding: "18px 20px", borderRadius: "var(--r-md)", background: "var(--ok-bg)", border: "1px solid var(--border)" }}>
-          <span style={{ fontSize: 14, color: "var(--ok-fg)" }}>Cobrado</span>
-          <div style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 34, color: "var(--ok-fg)", marginTop: 4 }}>
-            {formatCents(result.deposit.amountCents)}
-          </div>
-          <p style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 8 }}>
-            Folio {result.deposit.folio ?? idTail(result.deposit.id)}
-            {result.replayed && " · ya estaba registrado, no se cobró de nuevo"}
-          </p>
-        </div>
-        <div style={{ borderRadius: "var(--r-md)", border: "1px solid var(--border)", overflow: "hidden" }}>
-          {groupByCharge(result.allocations).map((a) => (
-            <div key={a.chargeId} style={lineRow}>
-              <span style={{ fontSize: 14.5, color: "var(--text)" }}>{label(a.chargeId, result.surcharges, describe)}</span>
-              <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 15 }}>{formatCents(a.amountCents)}</span>
-            </div>
-          ))}
-        </div>
-        {showsTenders(result.deposit.tenders) && (
-          // Split across methods, or settled with a credit note (T8): the
-          // receipt says how much each covered — the ticket does the same.
-          <div data-testid="receipt-tenders" style={{ borderRadius: "var(--r-md)", border: "1px solid var(--border)", overflow: "hidden" }}>
-            <div style={{ padding: "10px 16px", background: "var(--surface-2)", fontSize: 13, fontWeight: 700, color: "var(--text-muted)", fontFamily: "var(--font-display)" }}>
-              Formas de pago
-            </div>
-            {result.deposit.tenders.map((t, i) => (
-              <div key={i} style={lineRow}>
-                <span style={{ fontSize: 14.5, color: "var(--text)" }}>
-                  {tenderLabel(t.method, t.cardType)}{t.reference !== undefined && ` · ref. ${t.reference}`}
-                </span>
-                <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 15 }}>{formatCents(t.amountCents)}</span>
-              </div>
-            ))}
-          </div>
-        )}
-        {result.unallocatedCents > 0 && (
-          <p style={{ fontSize: 14, color: "var(--text-muted)", margin: 0 }}>
-            Quedan {formatCents(result.unallocatedCents)} a favor de la familia.
-          </p>
-        )}
-      </div>
-      <div style={{ display: "flex", gap: 12, alignItems: "center", padding: "18px 26px", borderTop: "1px solid var(--border)", background: "var(--surface-2)" }}>
-        <ReceiptActions kind="payment" id={result.deposit.id} />
-        <div style={{ flex: 1 }} />
-        <Btn icon="check" type="button" onClick={onClose}>Listo</Btn>
-      </div>
-    </div>
-  );
-}
-
 interface YearBalanceProps {
   /** The one balance; null while unknown. Below zero is the family's credit. */
   balanceCents: number | null;
@@ -559,17 +476,4 @@ function YearBalance({ balanceCents, surchargeCents, creditCents }: YearBalanceP
       {creditCents > 0 && `, ya descontados ${formatCents(creditCents)} a favor`}.
     </>
   );
-}
-
-/** A breakdown is worth showing when there is more than one method, or a credit note that is not money. */
-function showsTenders(tenders: readonly Tender[]): boolean {
-  return tenders.length > 1 || tenders.some((t) => t.method === "credit_note");
-}
-
-/**
- * The deposit's id, shortened, for a deposit that reached the screen without a
- * folio (a gateway older than task 12). Every stored deposit has one.
- */
-function idTail(id: string): string {
-  return id.replace(/-/g, "").slice(-8).toUpperCase();
 }

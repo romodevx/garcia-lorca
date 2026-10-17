@@ -1,26 +1,19 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactElement } from "react";
+import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactElement } from "react";
 import { Avatar } from "../../_design/Brand";
 import { Btn } from "../../_design/Controls";
-import { DrawerShell } from "../../_design/DrawerShell";
 import { Icon, type IconName } from "../../_design/Icon";
 import { Page } from "../../_design/Page";
 import type { ColorKey } from "../../_design/colors";
-import { DateField, MoneyField, useFocusFirstInvalid } from "../../_design/form";
-import { TenderEditor } from "../../_design/payments/TenderEditor";
-import { AMOUNT_ERROR } from "../../_design/payments/tenders";
-import { useTenders } from "../../_design/payments/useTenders";
-import { ClosedCutNotice } from "../../_design/payments/ClosedCutNotice";
-import { useClosedCut } from "../../_design/payments/useClosedCut";
-import { paymentDateError } from "./CollectDrawer";
-import { StudentNotesBeside, useNotesBeside, type NotesAccess } from "../../_design/students/StudentNotesBeside";
+import type { NotesAccess } from "../../_design/students/StudentNotesBeside";
+import { useRoomLabels } from "../../_design/students/roomLabels";
 import { listCycles, type Cycle } from "../../config/api";
-import { getOverdue, listCharges, registerPayment, type Charge } from "../../finance/api";
-import { pendingCents } from "../../finance/pending";
-import { localISODate } from "../../_lib/localDate";
+import { getOverdue, listCharges, type Charge } from "../../finance/api";
+import { owedCents, pendingCents } from "../../finance/pending";
+import { dayWithYearLabel } from "../../_lib/localDate";
 import { schoolISODate, schoolMonthStart } from "../../_lib/schoolDay";
-import { centsToPesosInput, formatCents, formatPesosInput, pesosToCents } from "../../_lib/money";
+import { centsToPesosInput, formatCents } from "../../_lib/money";
 import { listStudents, type Student } from "../../students/api";
 import { useIntent } from "../../routing/pendingIntent";
 
@@ -28,16 +21,11 @@ import { API_URL } from "../../api-url";
 import type { CutAccess } from "./CashCutClosing";
 import { CashUpDrawer } from "./CashUpDrawer";
 import { IncomePanel } from "./IncomePanel";
+import { PayDrawer } from "./PayDrawer";
 import { csvName, downloadCsv, toCsv, type CsvColumn } from "../../_lib/csv";
 import { matchesSearch } from "../../_design/textSearch";
 import { compareStudentNames, formatStudentName } from "../../_design/students/studentName";
 import { ModuleHeaderIcon } from "../../_design/ModuleHeaderIcon";
-
-/** One key per payment attempt: a retried submit is the same payment, never a second one. */
-function newAttemptKey(): string {
-  return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
-
 
 // Money crosses the boundary as integer cents; formatting/parsing goes through
 // the tested money helpers (locale-aware, cents-exact) — never a naive parseFloat.
@@ -58,6 +46,8 @@ interface Row {
   name: string;
   level: string;
   grade: string;
+  /** The classroom as every screen names it ("3° PRIMARIA · A"); absent until read (T14-018). */
+  room?: string;
   visual: VisualStatus;
 }
 
@@ -67,143 +57,6 @@ function StatusPill({ status }: { status: VisualStatus }): ReactElement {
     <span style={{ display: "inline-flex", alignItems: "center", gap: 7, padding: "5px 12px 5px 10px", borderRadius: 99, background: s.bg, color: s.fg, fontWeight: 700, fontSize: 13, fontFamily: "var(--font-display)", whiteSpace: "nowrap" }}>
       <span style={{ width: 9, height: 9, borderRadius: 99, background: s.dot, boxShadow: `0 0 0 3px color-mix(in oklab, ${s.dot} 22%, transparent)` }} />{s.label}
     </span>
-  );
-}
-
-/** What is wrong with the amount paid against one charge, if anything: never more than it still owes. */
-export function chargeAmountError(cents: number, remainingCents: number): string | undefined {
-  if (!Number.isFinite(cents) || cents <= 0) return AMOUNT_ERROR;
-  return cents > remainingCents ? `No puede ser mayor que el saldo del cargo (${money(remainingCents)}).` : undefined;
-}
-
-// ── payment slide-over: pay a charge in one panel ──
-function PayDrawer({ charge, name, today, notes, onClose, onPaid }: { charge: Charge; name: string; today?: string; notes?: NotesAccess; onClose: () => void; onPaid: () => void }): ReactElement {
-  // The pupil's notes on the left, as at the counter (T6).
-  const beside = useNotesBeside(charge.studentId, notes);
-  const [amount, setAmount] = useState(formatPesosInput(charge.remainingCents));
-  const [amountError, setAmountError] = useState<string | undefined>(undefined);
-  // The day the family paid (task 7): not always the day it is keyed.
-  const day = today ?? localISODate();
-  const [paidOn, setPaidOn] = useState(day);
-  // Only a payment dated earlier travels with its date (see CollectDrawer).
-  const sentDate = paidOn === day ? "" : paidOn;
-  const focusFirstInvalid = useFocusFirstInvalid();
-  const [dateError, setDateError] = useState<string | undefined>(undefined);
-  // The payment enters the cut of the day it is dated: said before it is taken (ISSUE-026).
-  const cutClosed = useClosedCut(sentDate, paymentDateError(paidOn, day) === undefined);
-  const [saving, setSaving] = useState(false);
-  // A ref and not the state: two presses inside one render both read `saving` as false.
-  const inFlight = useRef(false);
-  const [error, setError] = useState<string | undefined>(undefined);
-  // One key per ATTEMPT, minted when the drawer opens and kept across retries.
-  // The gateway dedupes on it, so a retry after a network error returns the
-  // original payment instead of charging the family twice. This shipped as ""
-  // — which the proto documents as "no deduplication (every call posts a new
-  // payment)" — so a double click double-charged.
-  const [attemptKey] = useState(newAttemptKey);
-  // Anything typed makes the drawer dirty: a stray click on the backdrop then
-  // stops closing it. Losing a captured amount at counter speed, with a parent
-  // waiting, is worse than an extra click on the X.
-  // pesosToCents is locale-aware (handles thousands commas) and returns NaN for
-  // anything ambiguous — never a truncated parseFloat.
-  const cents = pesosToCents(amount);
-  // How it is paid, method by method (T8): the rows must add up to the amount.
-  const tenders = useTenders(cents);
-  const dirty = amount.trim() !== "" || tenders.dirty;
-
-  const submit = async (): Promise<void> => {
-    if (inFlight.current) return;
-    const wrongDate = paymentDateError(paidOn, day);
-    const wrongAmount = chargeAmountError(cents, charge.remainingCents);
-    setDateError(wrongDate);
-    setAmountError(wrongAmount);
-    const tendersOk = wrongAmount === undefined && tenders.validate();
-    if (wrongDate !== undefined || !tendersOk) {
-      focusFirstInvalid();
-      return;
-    }
-    const split = tenders.toTenders();
-    const [first] = split;
-    inFlight.current = true;
-    setSaving(true);
-    setError(undefined);
-    try {
-      await registerPayment(API_URL, {
-        chargeId: charge.id,
-        amountCents: cents,
-        // The first tender, for a gateway that reads only one method.
-        method: first?.method ?? "cash",
-        reference: first?.reference ?? "",
-        tenders: split,
-        idempotencyKey: attemptKey,
-        ...(sentDate !== "" ? { paidAt: sentDate } : {}),
-      });
-      onPaid();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "No se pudo registrar el pago.");
-      inFlight.current = false;
-      setSaving(false);
-    }
-  };
-
-  return (
-    <DrawerShell
-      title="Registrar pago"
-      subtitle={`${name} · ${charge.description}`}
-      icon="card"
-      // Con la forma empezada, el velo y Esc dejan de cerrar: perder un pago a
-      // medio capturar por un clic perdido es la forma más rápida de que alguien
-      // deje de usar la pantalla.
-      //
-      // `onClose` sigue siendo el de verdad. Pasarle un () => {} apagaba también
-      // el ✕ y el botón Cancelar, porque DrawerShell usa esa misma función para
-      // las cuatro vías: la protección contra el accidente dejaba a la persona
-      // encerrada, que es peor.
-      dismissible={!dirty && !beside.dirty}
-      size={beside.wide ? "lg" : "md"}
-      onClose={onClose}
-      footer={
-        <>
-          <Btn kind="ghost" onClick={onClose}>Cancelar</Btn>
-          <div style={{ flex: 1 }} />
-          <Btn icon="check" onClick={() => void submit()} busy={saving} style={{ height: 52, fontSize: 16 }}>{saving ? "Registrando…" : "Registrar pago"}</Btn>
-        </>
-      }
-    >
-      <StudentNotesBeside beside={beside} studentId={charge.studentId}>
-            <div style={{ display: "flex", justifyContent: "space-between", padding: "14px 16px", borderRadius: "var(--r-md)", background: "var(--surface-3)", border: "1px solid var(--border)" }}>
-              <span style={{ fontSize: 14, color: "var(--text-muted)" }}>Saldo del cargo</span>
-              <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 18, color: "var(--text)" }}>{money(charge.remainingCents)}</span>
-            </div>
-            <MoneyField
-              label="Monto a pagar"
-              value={amount}
-              onChange={(v) => {
-                setAmount(v);
-                if (chargeAmountError(pesosToCents(v), charge.remainingCents) === undefined) setAmountError(undefined);
-              }}
-              onBlur={() => setAmountError(chargeAmountError(cents, charge.remainingCents))}
-              error={amountError}
-              help="Lo que la familia paga ahora de este cargo: puede ser un abono, nunca más que su saldo."
-              required
-            />
-            <TenderEditor tenders={tenders} />
-            <DateField
-              label="Fecha de pago"
-              value={paidOn}
-              max={day}
-              onChange={(v) => {
-                setPaidOn(v);
-                if (paymentDateError(v, day) === undefined) setDateError(undefined);
-              }}
-              onBlur={() => setDateError(paymentDateError(paidOn, day))}
-              error={dateError}
-              help="El día en que la familia pagó. Si capturas tarde, pon ese día: el recargo y el pronto pago se calculan con él."
-            />
-            <ClosedCutNotice closed={cutClosed} day={sentDate} />
-            {error !== undefined && <p role="alert" style={{ color: "var(--bad-fg)", fontSize: 14, margin: 0 }}>{error}</p>}
-      </StudentNotesBeside>
-    </DrawerShell>
   );
 }
 
@@ -221,7 +74,7 @@ function monthName(iso: string): string {
 const EXPORT_COLUMNS: readonly CsvColumn<Row>[] = [
   { label: "Alumno", value: (r) => r.name },
   { label: "Nivel", value: (r) => r.level },
-  { label: "Grupo", value: (r) => r.grade },
+  { label: "Grupo", value: (r) => r.room ?? r.grade },
   { label: "Concepto", value: (r) => r.charge.description },
   { label: "Vence", value: (r) => r.charge.dueDate },
   // Pesos with two decimals, not cents: the file is read by a person, and the
@@ -232,7 +85,7 @@ const EXPORT_COLUMNS: readonly CsvColumn<Row>[] = [
   // T18: Saldo is net of it, so without this column the file would not add up.
   { label: "Beca", value: (r) => centsToPesosInput(r.charge.scholarshipCents ?? 0) },
   { label: "Pagado", value: (r) => centsToPesosInput(r.charge.paidCents) },
-  { label: "Saldo", value: (r) => centsToPesosInput(r.charge.remainingCents) },
+  { label: "Saldo", value: (r) => centsToPesosInput(owedCents(r.charge)) },
   { label: "Estado", value: (r) => STATUS[r.visual].label },
 ];
 
@@ -264,6 +117,7 @@ export function FinanceScreen({ onBack, today: officeDay, notes, canCorrectPayme
   const [pay, setPay] = useState<Row | null>(null);
   // Bumped by every payment so the period's income is read again (QA ISSUE-001).
   const [paidCount, setPaidCount] = useState(0);
+  const rooms = useRoomLabels();
   // The counter: pick a pupil, then take whatever the parent hands over. Kept
   // separate from `pay`, which is the older per-charge path.
   /*
@@ -309,8 +163,8 @@ export function FinanceScreen({ onBack, today: officeDay, notes, canCorrectPayme
 
   const rows: Row[] = useMemo(() => charges.map((c) => {
     const s = studentMap.get(c.studentId);
-    return { charge: c, name: s !== undefined ? formatStudentName(s) : c.studentId, level: s?.level ?? "", grade: s?.gradeGroup ?? "", visual: visual(c) };
-  }), [charges, studentMap, visual]);
+    return { charge: c, name: s !== undefined ? formatStudentName(s) : c.studentId, level: s?.level ?? "", grade: s?.gradeGroup ?? "", room: rooms.get(c.studentId), visual: visual(c) };
+  }), [charges, studentMap, visual, rooms]);
 
   const counts = useMemo(() => ({
     all: rows.length,
@@ -356,7 +210,7 @@ export function FinanceScreen({ onBack, today: officeDay, notes, canCorrectPayme
     say(`${filtered.length} renglones exportados`);
   };
 
-  const onPaid = (): void => { setPay(null); setPaidCount((n) => n + 1); if (activeCycleId !== undefined) load(activeCycleId); say("Pago registrado"); };
+  const onPaid = (): void => { setPaidCount((n) => n + 1); if (activeCycleId !== undefined) load(activeCycleId); };
 
   const tabs: [typeof tab, string][] = [["all", "Todos"], ["overdue", "Vencidos"], ["due", "Por vencer"], ["paid", "Pagados"]];
   const stats: { icon: IconName; c: string; label: string; val: string; sub: string }[] = [
@@ -502,11 +356,13 @@ function FinRow({ r, i, onPay }: { r: Row; i: number; onPay: () => void }): Reac
           <div style={{ fontSize: 12.5, color: "var(--text-faint)", fontFamily: "monospace" }}>{r.charge.studentId.slice(0, 8)}</div>
         </div>
       </div>
-      <div style={{ fontSize: 14, color: "var(--text-muted)", textTransform: "capitalize" }}>{r.level}<div style={{ fontSize: 12.5, color: "var(--text-faint)" }}>{r.grade}</div></div>
+      {r.room !== undefined
+        ? <div style={{ fontSize: 14, color: "var(--text-muted)" }}>{r.room}</div>
+        : <div style={{ fontSize: 14, color: "var(--text-muted)", textTransform: "capitalize" }}>{r.level}<div style={{ fontSize: 12.5, color: "var(--text-faint)" }}>{r.grade}</div></div>}
       <div style={{ fontSize: 14, color: "var(--text-muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.charge.description}</div>
-      <div style={{ fontSize: 14, color: r.visual === "overdue" ? "var(--bad-fg)" : "var(--text-muted)", fontWeight: r.visual === "overdue" ? 600 : 400 }}>{r.charge.dueDate}</div>
+      <div style={{ fontSize: 14, color: r.visual === "overdue" ? "var(--bad-fg)" : "var(--text-muted)", fontWeight: r.visual === "overdue" ? 600 : 400 }}>{dayWithYearLabel(r.charge.dueDate)}</div>
       <div>
-        <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 16, color: r.charge.remainingCents > 0 ? "var(--text)" : "var(--text-faint)" }}>{money(r.charge.remainingCents)}</div>
+        <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 16, color: owedCents(r.charge) > 0 ? "var(--text)" : "var(--text-faint)" }}>{money(owedCents(r.charge))}</div>
         <div style={{ marginTop: 4 }}><StatusPill status={r.visual} /></div>
       </div>
       <div style={{ display: "flex", justifyContent: "flex-end", width: 148 }}>
