@@ -67,6 +67,16 @@ describe("changePassword", () => {
   });
 });
 
+describe("changePassword refusals", () => {
+  it("keeps the gateway's text with the status", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("La nueva contraseña debe tener al menos 8 caracteres.\n", { status: 400 })));
+    await expect(changePassword("http://gw", "old", "short")).rejects.toMatchObject({
+      status: 400,
+      serverText: "La nueva contraseña debe tener al menos 8 caracteres.",
+    });
+  });
+});
+
 describe("logout", () => {
   it("posts to the logout endpoint and resolves on 204", async () => {
     // A 204 response must have a null body per the Fetch spec (undici enforces it).

@@ -427,29 +427,18 @@ export function AppShell(): ReactElement {
     }
   };
 
-  const handleChangePassword = async (current: string, next: string): Promise<void> => {
-    setPending(true);
+  // The forced change succeeded AND the gateway re-issued a fresh session in
+  // the same response (new gl_access / gl_refresh cookies, must_change
+  // cleared), so we just land on the dashboard — no extra refresh round-trip.
+  // A 204 (no fresh session) goes through endSessionAfterPasswordChange.
+  const finishForcedPasswordChange = async (): Promise<void> => {
     setAuthError(undefined);
-    try {
-      await apiChangePassword(API_URL, current, next);
-    } catch {
-      // Only the change itself can be blamed on the current password.
-      setAuthError("No se pudo cambiar la contraseña. Verifica la actual.");
-      setPending(false);
-      return;
-    }
-    // The password IS changed. The gateway revoked the old refresh token and
-    // re-issued a fresh session in the SAME change-password response (new
-    // gl_access / gl_refresh cookies, must_change cleared), so we just land on
-    // the dashboard — no extra refresh round-trip, and the user is never trapped
-    // re-typing a password that no longer exists.
     try {
       setPrincipal(await apiMe(API_URL));
     } catch {
       // Keep the fallback chrome; the fresh session is still valid.
     }
     goReplacing({ screen: "dashboard" });
-    setPending(false);
   };
 
   const logout = (): void => {
@@ -655,7 +644,15 @@ export function AppShell(): ReactElement {
     return <Login theme={theme} onToggle={toggle} onSubmit={handleLogin} error={authError} pending={pending} />;
   }
   if (view.screen === "changePassword") {
-    return <ChangePassword theme={theme} onToggle={toggle} onSubmit={handleChangePassword} error={authError} pending={pending} />;
+    return (
+      <ChangePassword
+        theme={theme}
+        onToggle={toggle}
+        onSubmit={(current, next) => apiChangePassword(API_URL, current, next)}
+        onDone={() => void finishForcedPasswordChange()}
+        onSessionEnded={endSessionAfterPasswordChange}
+      />
+    );
   }
 
   return (

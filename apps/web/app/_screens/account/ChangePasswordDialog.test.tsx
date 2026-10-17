@@ -86,6 +86,10 @@ describe("ChangePasswordDialog", () => {
 
   it.each([
     [new HttpError(400, "changePassword: HTTP 400"), "La nueva contraseña no cumple los requisitos: usa al menos 8 caracteres."],
+    // The gateway's own Spanish sentence wins over the fallback...
+    [new HttpError(400, "changePassword: HTTP 400", "La nueva contraseña debe tener al menos 8 caracteres."), "La nueva contraseña debe tener al menos 8 caracteres."],
+    // ...but an unknown (English, generic) body is never shown verbatim.
+    [new HttpError(400, "changePassword: HTTP 400", "Bad Request"), "La nueva contraseña no cumple los requisitos: usa al menos 8 caracteres."],
     [new TypeError("Failed to fetch"), "No pudimos contactar al servidor. Revisa tu conexión e intenta de nuevo."],
     [new HttpError(500, "changePassword: HTTP 500"), "No se pudo cambiar la contraseña. Intenta de nuevo en un momento."],
   ])("explains a failed change in words (%s)", async (err, message) => {

@@ -187,6 +187,26 @@ describe("AppShell navigation flow", () => {
     expect(mockLogout).toHaveBeenCalledWith(expect.any(String));
   });
 
+  it("a forced change that could not renew the session (204) goes back to sign-in, saying why", async () => {
+    mockLogin.mockResolvedValue({ expiresIn: 900, mustChangePassword: true });
+    mockChangePassword.mockResolvedValue({ sessionRenewed: false });
+    mockLogout.mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    render(
+      <Providers flags={{}}>
+        <AppShell />
+      </Providers>
+    );
+    await submitLogin(user);
+    await screen.findByRole("heading", { name: "Crea tu contraseña" });
+    await user.type(screen.getByLabelText("Contraseña temporal"), "test-owner-pw");
+    await user.type(screen.getByLabelText("Nueva contraseña"), "test-new-pw-123");
+    await user.type(screen.getByLabelText("Confirmar contraseña"), "test-new-pw-123");
+    await user.click(screen.getByRole("button", { name: "Guardar y entrar" }));
+    expect(await screen.findByText("Tu contraseña cambió. Entra con la nueva.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Entrar al sistema" })).toBeInTheDocument();
+  });
+
   it("routes to the forced change-password screen and then to the dashboard", async () => {
     mockLogin.mockResolvedValue({ expiresIn: 900, mustChangePassword: true });
     mockChangePassword.mockResolvedValue({ sessionRenewed: true });

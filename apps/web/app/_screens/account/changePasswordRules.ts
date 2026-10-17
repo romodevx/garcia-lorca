@@ -36,16 +36,21 @@ const UNAUTHORIZED = 401;
 const BAD_REQUEST = 400;
 
 /**
- * Says why the change failed, in Spanish. The gateway's 400 body is a terse
- * English line ("new password is too short", "Bad Request"), so it is mapped
- * to the one rule a person can act on rather than shown verbatim.
+ * The 400 bodies the gateway writes for people (services/gateway handler
+ * auth.go). Anything else — iam's bare "Bad Request" — is never shown verbatim.
  */
+const KNOWN_SERVER_MESSAGES: ReadonlySet<string> = new Set([
+  `La nueva contraseña debe tener al menos ${MIN_PASSWORD_LENGTH} caracteres.`,
+]);
+
+/** Says why the change failed, in Spanish. */
 export function describeChangeFailure(err: unknown): ChangeFailure {
   if (!(err instanceof HttpError)) {
     return { message: "No pudimos contactar al servidor. Revisa tu conexión e intenta de nuevo." };
   }
   if (err.status === UNAUTHORIZED) return { field: "current", message: "La contraseña actual no es correcta." };
   if (err.status === BAD_REQUEST) {
+    if (err.serverText !== undefined && KNOWN_SERVER_MESSAGES.has(err.serverText)) return { message: err.serverText };
     return { message: `La nueva contraseña no cumple los requisitos: usa al menos ${MIN_PASSWORD_LENGTH} caracteres.` };
   }
   return { message: "No se pudo cambiar la contraseña. Intenta de nuevo en un momento." };

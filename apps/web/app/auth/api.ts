@@ -97,7 +97,8 @@ export async function changePassword(baseURL: string, currentPassword: string, n
     body: JSON.stringify({ currentPassword, newPassword }),
   });
   if (!res.ok) {
-    throw new HttpError(res.status, `changePassword: HTTP ${res.status}`);
+    const serverText = (await res.text().catch(() => "")).trim();
+    throw new HttpError(res.status, `changePassword: HTTP ${res.status}`, serverText === "" ? undefined : serverText);
   }
   return { sessionRenewed: res.status !== NO_CONTENT };
 }
