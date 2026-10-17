@@ -407,12 +407,12 @@ func (h *StudentImportHandler) resolveLevels(ctx context.Context, req importRequ
 		case choice.LevelID != "" && ok:
 			lv.Status, lv.LevelID, lv.LevelName = levelChosen, existing.ID, existing.Name
 		case choice.Create:
-			lv.Status, lv.LevelName = levelCreate, createdLevelName(name)
+			lv.Status, lv.LevelName = levelCreate, name
 		default:
 			if match, ok := byFold[foldName(name)]; ok {
 				lv.Status, lv.LevelID, lv.LevelName = levelMatched, match.ID, match.Name
 			} else {
-				lv.Status, lv.LevelName = levelCreate, createdLevelName(name)
+				lv.Status, lv.LevelName = levelCreate, name
 			}
 		}
 		if lv.Status != levelUnresolved && priced != nil && !priced[lv.LevelID] {
@@ -484,6 +484,7 @@ func (run *importRun) recordPlacements(results []client.PlacementResult) error {
 	for i, key := range run.keys {
 		p := results[i]
 		run.placements[key] = p
+		run.adoptCreatedLevelName(key.Level, p)
 		run.resp.Placements = append(run.resp.Placements, importPlacement{
 			Key: placementKey(key), Level: run.levelOf[key.Level].LevelName, Grade: gradeName(p, key.Ordinal),
 			Group: key.Group, Students: run.planned.Placements[key], Capacity: p.Capacity,
@@ -491,6 +492,23 @@ func (run *importRun) recordPlacements(results []client.PlacementResult) error {
 		})
 	}
 	return nil
+}
+
+// adoptCreatedLevelName shows a level the file brings under the name config
+// creates it with (capitals, tidied spaces: ISSUE-T14-008), not the file's
+// spelling. Config owns that rule; the gateway never recomputes it.
+func (run *importRun) adoptCreatedLevelName(fileName string, p client.PlacementResult) {
+	lv, ok := run.levelOf[fileName]
+	if !ok || lv.Status != levelCreate || !p.LevelCreated || p.LevelName == "" || lv.LevelName == p.LevelName {
+		return
+	}
+	lv.LevelName = p.LevelName
+	run.levelOf[fileName] = lv
+	for i := range run.resp.Levels {
+		if run.resp.Levels[i].FileName == fileName {
+			run.resp.Levels[i].LevelName = p.LevelName
+		}
+	}
 }
 
 // judgeRows sends every row that has somewhere to go to students. groups maps
@@ -785,13 +803,6 @@ func gradeName(p client.PlacementResult, ordinal int) string {
 		return p.GradeName
 	}
 	return fmt.Sprintf("%d°", ordinal)
-}
-
-// createdLevelName is the name a level the file brings is created with: in
-// capitals, as config's placements write it and as the office types one
-// (ISSUE-T14-008). Matching never depends on it: foldName ignores case.
-func createdLevelName(fileName string) string {
-	return strings.ToUpper(strings.Join(strings.Fields(fileName), " "))
 }
 
 // foldName compares level names the way config's unique index does: case,

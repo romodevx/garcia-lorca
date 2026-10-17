@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -49,7 +50,7 @@ func (f *fakeImportCatalog) EnsurePlacements(_ context.Context, cycleID string, 
 	f.placements = append(f.placements, placementCall{cycleID, in, dry})
 	out := make([]client.PlacementResult, 0, len(in))
 	for _, p := range in {
-		r := client.PlacementResult{LevelID: p.LevelID, LevelName: p.NewLevelName, GroupName: p.Group,
+		r := client.PlacementResult{LevelID: p.LevelID, LevelName: configLevelName(p.NewLevelName), GroupName: p.Group,
 			GradeName: "1°", Capacity: p.Capacity, GroupCreated: true, GradeCreated: true}
 		if p.LevelID == "" {
 			r.LevelCreated = true
@@ -68,6 +69,16 @@ func (f *fakeImportCatalog) EnsurePlacements(_ context.Context, cycleID string, 
 		out = append(out, r)
 	}
 	return out, nil
+}
+
+// configLevelName stands in for the name config gives a level it creates. It
+// is deliberately unlike anything the gateway computes (a marker suffix), so a
+// preview that shows it can only have taken it from config's answer.
+func configLevelName(fileName string) string {
+	if fileName == "" {
+		return ""
+	}
+	return strings.ToUpper(fileName) + " (CONFIG)"
 }
 
 type fakeImportRoster struct {
@@ -216,8 +227,11 @@ func TestPreviewCreatesALevelTheSchoolDoesNotHave(t *testing.T) {
 
 	got := decodePreview(t, post(t, f.h.Preview, importRequest{FileBase64: file}))
 
-	if got.Levels[0].Status != levelCreate || got.Levels[0].LevelName != "PREPARATORIA" || len(got.Unresolved) != 0 {
-		t.Fatalf("levels = %+v unresolved %v, want PREPARATORIA created, in capitals like a typed level (ISSUE-T14-008)", got.Levels, got.Unresolved)
+	if got.Levels[0].Status != levelCreate || got.Levels[0].LevelName != "PREPARATORIA (CONFIG)" || len(got.Unresolved) != 0 {
+		t.Fatalf("levels = %+v unresolved %v, want it created under the name config gives it (ISSUE-T14-008)", got.Levels, got.Unresolved)
+	}
+	if len(got.Placements) != 1 || got.Placements[0].Level != "PREPARATORIA (CONFIG)" {
+		t.Errorf("placements = %+v, want the level named as config answered", got.Placements)
 	}
 	if got.Rows[0].Status != rowNew {
 		t.Errorf("row = %+v, want new", got.Rows[0])
