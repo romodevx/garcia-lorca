@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"time"
 	_ "time/tzdata"
@@ -29,11 +30,27 @@ type StudentsService interface {
 // write (create) gated on students:create and reads (list/get) on students:read.
 type StudentsHandler struct {
 	svc StudentsService
+	// rooms names each pupil's classroom in the list; nil leaves it out.
+	rooms RoomLabelSource
+}
+
+// StudentsOption configures optional behavior of the students endpoints.
+type StudentsOption func(*StudentsHandler)
+
+// WithStudentRoomLabels makes the list carry each pupil's groupLabel ("3°
+// PRIMARIA · B"), so a role with students:read but not config:read names the
+// classroom with its grade (CC-211, CC-313).
+func WithStudentRoomLabels(rooms RoomLabelSource) StudentsOption {
+	return func(h *StudentsHandler) { h.rooms = rooms }
 }
 
 // NewStudentsHandler wires the handler to a students service.
-func NewStudentsHandler(svc StudentsService) *StudentsHandler {
-	return &StudentsHandler{svc: svc}
+func NewStudentsHandler(svc StudentsService, opts ...StudentsOption) *StudentsHandler {
+	h := &StudentsHandler{svc: svc}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h
 }
 
 type createStudentRequest struct {
@@ -59,8 +76,11 @@ type studentResponse struct {
 	Level            string `json:"level"`   // the school's name for the level
 	LevelID          string `json:"levelId"` // the config level id
 	GradeGroup       string `json:"gradeGroup"`
-	GuardianName     string `json:"guardianName"`
-	AdmissionStatus  string `json:"admissionStatus"`
+	// GroupLabel is the classroom with its grade, "3° PRIMARIA · B", only in
+	// the list and only for a pupil placed in the current cycle (CC-211).
+	GroupLabel      string `json:"groupLabel,omitempty"`
+	GuardianName    string `json:"guardianName"`
+	AdmissionStatus string `json:"admissionStatus"`
 	// EnrollmentNumber is the matrícula (task 13).
 	EnrollmentNumber string `json:"enrollmentNumber,omitempty"`
 	// BankReference is the BBVA payment reference (ADR 0033); "" when none.
@@ -179,11 +199,29 @@ func (h *StudentsHandler) List(w http.ResponseWriter, r *http.Request) {
 		writeConnectError(w, err)
 		return
 	}
+	rooms := h.roomLabels(r.Context())
 	out := make([]studentResponse, 0, len(res))
 	for _, s := range res {
-		out = append(out, toStudentSummary(s))
+		summary := toStudentSummary(s)
+		summary.GroupLabel = rooms[s.ID]
+		out = append(out, summary)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"students": out})
+}
+
+// roomLabels is the classroom label of each placed pupil. A label is a name,
+// not a reason to fail the list: without a source, or when it fails, there are
+// none and the screens show the stored level and letter.
+func (h *StudentsHandler) roomLabels(ctx context.Context) map[string]string {
+	if h.rooms == nil {
+		return nil
+	}
+	labels, err := h.rooms.RoomLabels(ctx)
+	if err != nil {
+		slog.WarnContext(ctx, "room labels failed; the list carries the stored group", "error", err)
+		return nil
+	}
+	return labels
 }
 
 // Get handles GET /api/v1/students/{id}: fetches a single student.
