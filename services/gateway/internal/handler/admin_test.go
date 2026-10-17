@@ -40,14 +40,14 @@ type fakeAdmin struct {
 		email, display, temp string
 		roleIDs              []string
 	}
-	statusUserID, statusValue string
-	assigned, revoked         []string // "userID:roleID" pairs
-	getUser                   client.User
-	roleName                  string
-	rolePerms                 []string
-	setPermsRole              string
-	setPerms                  []string
-	rolesList                 []client.Role // when set, ListRoles returns this
+	statusToken, statusUserID, statusValue string
+	assigned, revoked                      []string // "userID:roleID" pairs
+	getUser                                client.User
+	roleName                               string
+	rolePerms                              []string
+	setPermsRole                           string
+	setPerms                               []string
+	rolesList                              []client.Role // when set, ListRoles returns this
 
 	err        error
 	getUserErr error
@@ -96,8 +96,8 @@ func (f *fakeAdmin) ListUsers(_ context.Context) ([]client.User, error) {
 	return []client.User{{ID: "usr-1", Email: "prof@example.com", Status: "active", RoleIDs: []string{"rol-1"}}}, nil
 }
 
-func (f *fakeAdmin) SetUserStatus(_ context.Context, userID, status string) (client.User, error) {
-	f.statusUserID, f.statusValue = userID, status
+func (f *fakeAdmin) SetUserStatus(_ context.Context, accessToken, userID, status string) (client.User, error) {
+	f.statusToken, f.statusUserID, f.statusValue = accessToken, userID, status
 	if f.err != nil {
 		return client.User{}, f.err
 	}

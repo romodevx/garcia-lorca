@@ -46,6 +46,9 @@ func (stubIAM) ListUsers(_ context.Context, _ *connect.Request[iamv1.ListUsersRe
 }
 
 func (stubIAM) SetUserStatus(_ context.Context, req *connect.Request[iamv1.SetUserStatusRequest]) (*connect.Response[iamv1.SetUserStatusResponse], error) {
+	if req.Msg.GetAccessToken() != "caller-token" {
+		return nil, connect.NewError(connect.CodeUnauthenticated, errString("invalid access token"))
+	}
 	return connect.NewResponse(&iamv1.SetUserStatusResponse{User: &iamv1.User{
 		Id:     req.Msg.GetUserId(),
 		Status: req.Msg.GetStatus(),
@@ -160,12 +163,39 @@ func TestAuthClientSetUserStatusSuspend(t *testing.T) {
 	c, stop := newStubServer(t)
 	defer stop()
 
-	u, err := c.SetUserStatus(context.Background(), "usr-1", "suspended")
+	u, err := c.SetUserStatus(context.Background(), "caller-token", "usr-1", "suspended")
 	if err != nil {
 		t.Fatalf("SetUserStatus: %v", err)
 	}
 	if u.Status != "suspended" {
 		t.Errorf("status = %q, want suspended", u.Status)
+	}
+	// The caller's token travels as given: iam reads who is asking from it.
+	if _, err := c.SetUserStatus(context.Background(), "someone-else", "usr-1", "suspended"); connect.CodeOf(err) != connect.CodeUnauthenticated {
+		t.Errorf("code = %v, want Unauthenticated — the token must be forwarded as given", connect.CodeOf(err))
+	}
+}
+
+func (stubIAM) InviteGuardian(_ context.Context, req *connect.Request[iamv1.InviteGuardianRequest]) (*connect.Response[iamv1.InviteGuardianResponse], error) {
+	return connect.NewResponse(&iamv1.InviteGuardianResponse{
+		User:       &iamv1.User{Id: "usr-g", Email: req.Msg.GetEmail(), DisplayName: req.Msg.GetDisplayName(), Status: iamv1.UserStatus_USER_STATUS_INVITED},
+		Invitation: &iamv1.Invitation{Url: "https://x/activar?t=abc", Sent: false},
+	}), nil
+}
+
+func TestAuthClientInviteGuardian(t *testing.T) {
+	c, stop := newStubServer(t)
+	defer stop()
+
+	u, inv, err := c.InviteGuardian(context.Background(), "mama@example.com", "Mamá")
+	if err != nil {
+		t.Fatalf("InviteGuardian: %v", err)
+	}
+	if u.ID != "usr-g" || u.Email != "mama@example.com" || u.Status != "invited" {
+		t.Errorf("user = %+v", u)
+	}
+	if inv.URL != "https://x/activar?t=abc" || inv.Sent {
+		t.Errorf("invitation = %+v", inv)
 	}
 }
 

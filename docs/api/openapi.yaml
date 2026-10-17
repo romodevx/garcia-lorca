@@ -2089,7 +2089,8 @@ paths:
         provider, refresh) and leaves `GET /api/v1/users`; its row stays,
         because payments, grades and the audit trail reference it by id and a
         name snapshot. Every session it held is revoked (its refresh tokens die
-        at once; an access token already issued lives out its short life), its
+        at once, and an access token already issued stops validating at its
+        next request), its
         pending invitation and reset links are revoked, and it is disabled at
         the identity provider. Refused: deleting your own account (403) and the
         last active account holding the owner role (409). An id that is not a
@@ -2137,6 +2138,84 @@ paths:
             text/plain:
               schema: { type: string }
               example: internal error
+
+  /api/v1/users/{id}/status:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      tags: [iam-users]
+      summary: Suspend or reactivate a login account
+      description: >
+        A suspended account cannot sign in, cannot refresh, and every access
+        token it already holds stops validating at its next request; its
+        pending invitation and reset links are revoked and its refresh tokens
+        die for good (reactivating means signing in again). Refused: suspending
+        your own account (403) and the last active account holding the owner
+        role (409), the same rules as deleting. The caller is read from its own
+        session, never from the request. Only `active` and `suspended` may be
+        set; anything else is 400. An id that is not a uuid or names no
+        undeleted account is 404. Requires `users:write`; `module_iam`.
+      operationId: setUserStatus
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [status]
+              properties:
+                status: { type: string, enum: [active, suspended] }
+            example: { status: suspended }
+      responses:
+        '200':
+          description: The account as it is now.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, email, displayName, status, mustChangePassword, roleIds]
+                properties:
+                  id: { type: string, format: uuid }
+                  email: { type: string, format: email }
+                  displayName: { type: string }
+                  status: { type: string, enum: [active, suspended, invited, deleted] }
+                  mustChangePassword: { type: boolean }
+                  roleIds:
+                    type: array
+                    items: { type: string, format: uuid }
+              example:
+                id: 0b8a1c0e-0000-4000-8000-000000000002
+                email: maestra@garcialorca.edu.mx
+                displayName: GABRIELA ROJAS
+                status: suspended
+                mustChangePassword: false
+                roleIds: [00000000-0000-0000-0000-0000000000a4]
+        '400':
+          description: The body is malformed or the status is not one that may be set.
+          content:
+            text/plain:
+              schema: { type: string }
+              example: user status is required
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403':
+          description: The caller lacks `users:write` or is suspending their own account.
+          content:
+            text/plain:
+              schema: { type: string }
+              example: no puedes suspender tu propia cuenta
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409':
+          description: The account is the last active one holding the owner role.
+          content:
+            text/plain:
+              schema: { type: string }
+              example: no se puede suspender al último director activo
 
   /api/v1/teachers/{id}/access:
     post:
