@@ -45,6 +45,16 @@ type StatementMovement struct {
 	Superseded        bool   `json:"superseded"`
 	SupersededByFolio string `json:"supersededByFolio,omitempty"`
 	CorrectsFolio     string `json:"correctsFolio,omitempty"`
+	// AppliedTo is, on a deposit's lines, what that deposit paid
+	// (ISSUE-T14-106); absent on every other line.
+	AppliedTo []StatementAppliedPart `json:"appliedTo,omitempty"`
+}
+
+// StatementAppliedPart is the part of a deposit one charge took.
+type StatementAppliedPart struct {
+	ChargeID    string `json:"chargeId"`
+	Description string `json:"description"`
+	AmountCents int64  `json:"amountCents"`
 }
 
 // StatementTotals: BalanceCents = ChargedCents − DiscountCents − PaidCents.
@@ -78,6 +88,19 @@ func (c *FinanceClient) statement(ctx context.Context, studentID string, familyV
 	return toStatement(res.Msg), nil
 }
 
+// toAppliedParts maps what a deposit's line paid; nil when it paid nothing
+// named, so the JSON omits it.
+func toAppliedParts(parts []*financev1.StatementAppliedPart) []StatementAppliedPart {
+	if len(parts) == 0 {
+		return nil
+	}
+	out := make([]StatementAppliedPart, 0, len(parts))
+	for _, p := range parts {
+		out = append(out, StatementAppliedPart{ChargeID: p.GetChargeId(), Description: p.GetDescription(), AmountCents: p.GetAmountCents()})
+	}
+	return out
+}
+
 func toStatement(m *financev1.GetStatementResponse) Statement {
 	movements := make([]StatementMovement, 0, len(m.GetMovements()))
 	for _, mv := range m.GetMovements() {
@@ -88,6 +111,7 @@ func toStatement(m *financev1.GetStatementResponse) Statement {
 			Method: mv.GetMethod(), CardType: mv.GetCardType(), Reference: mv.GetReference(), Folio: mv.GetFolio(),
 			Accrued: mv.GetAccrued(), NotYetDue: mv.GetNotYetDue(), Voided: mv.GetVoided(), VoidReason: mv.GetVoidReason(),
 			Superseded: mv.GetSuperseded(), SupersededByFolio: mv.GetSupersededByFolio(), CorrectsFolio: mv.GetCorrectsFolio(),
+			AppliedTo: toAppliedParts(mv.GetAppliedTo()),
 		})
 	}
 	t := m.GetTotals()

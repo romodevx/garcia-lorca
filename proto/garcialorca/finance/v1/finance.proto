@@ -624,6 +624,16 @@ message StatementMovement {
   string superseded_by_folio = 17;
   // On a correction's lines: the folio it corrects.
   string corrects_folio = 18;
+  // On a deposit's lines: what that deposit's money paid, each charge with
+  // its part, in due-date order (ISSUE-T14-106). Credit is not in it.
+  repeated StatementAppliedPart applied_to = 19;
+}
+
+// StatementAppliedPart is the part of a deposit one charge took.
+message StatementAppliedPart {
+  string charge_id = 1;
+  string description = 2;
+  int64 amount_cents = 3;
 }
 
 // StatementTotals: balance = charged - discount - paid.

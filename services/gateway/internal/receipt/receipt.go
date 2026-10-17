@@ -197,6 +197,33 @@ func (b *Builder) Payment(ctx context.Context, depositID string) (Receipt, error
 	if err != nil {
 		return Receipt{}, err
 	}
+	return b.payment(ctx, got)
+}
+
+// errNotThePupils hides a deposit the family has no receipt of.
+var errNotThePupils = errors.New("no such receipt for this pupil")
+
+// FamilyPayment is the receipt of a deposit of studentID's (ISSUE-T14-107),
+// for the family's self-scoped route: the office's receipt, but a deposit of
+// any other pupil is NotFound — the answer a missing one gets — and so is a
+// voided or superseded one, which the family's statement does not show
+// either. The caller has already checked that studentID is the principal's
+// own child (ADR 0004).
+func (b *Builder) FamilyPayment(ctx context.Context, studentID, depositID string) (Receipt, error) {
+	got, err := b.deposits.DepositReceipt(ctx, depositID)
+	if err != nil {
+		return Receipt{}, err
+	}
+	d := got.Deposit
+	if d.StudentID != studentID || d.VoidedAt != "" || d.SupersededBy != "" {
+		return Receipt{}, connect.NewError(connect.CodeNotFound, errNotThePupils)
+	}
+	return b.payment(ctx, got)
+}
+
+// payment builds a deposit's receipt from what finance read back.
+func (b *Builder) payment(ctx context.Context, got client.DepositReceipt) (Receipt, error) {
+	depositID := got.Deposit.ID
 	school, err := b.school(ctx)
 	if err != nil {
 		return Receipt{}, err

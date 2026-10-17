@@ -104,6 +104,43 @@ func TestAVoidedPaymentSaysSo(t *testing.T) {
 	}
 }
 
+// ISSUE-T14-107 · the family's receipt is the office's, for a deposit of THAT
+// pupil only: another pupil's deposit is "no such receipt", never a hint that
+// it exists.
+func TestAFamilyReceiptIsOnlyOfItsOwnPupil(t *testing.T) {
+	f := fakeSources{profile: school, found: true,
+		student: client.StudentResult{FirstName: "Alumna", LastName: "Dos"},
+		deposit: client.DepositReceipt{Deposit: client.Deposit{
+			ID: "dep-1", StudentID: "stu-1", AmountCents: 300000, Method: "cash", PaidAt: "2026-10-17T00:00:00Z", Folio: "P-2026-000002",
+		}}}
+
+	got, err := builder(f).FamilyPayment(context.Background(), "stu-1", "dep-1")
+	if err != nil || got.Folio != "P-2026-000002" || got.TotalCents != 300000 {
+		t.Fatalf("own pupil: %+v, %v", got, err)
+	}
+	_, err = builder(f).FamilyPayment(context.Background(), "stu-2", "dep-1")
+	if connect.CodeOf(err) != connect.CodeNotFound {
+		t.Errorf("another pupil's deposit: %v, want NotFound", err)
+	}
+}
+
+// A voided or superseded deposit is not on the family's statement, so the
+// family has no receipt of it either: NotFound, like a missing one.
+func TestAFamilyReceiptOfAVoidedOrSupersededDepositIsNotFound(t *testing.T) {
+	for name, d := range map[string]client.Deposit{
+		"voided": {ID: "dep-2", StudentID: "stu-1", AmountCents: 100, Method: "cash", PaidAt: "2026-10-10T00:00:00Z",
+			Folio: "P-2026-000043", VoidedAt: "2026-10-11T00:00:00Z", VoidReason: "capturado mal"},
+		"superseded": {ID: "dep-3", StudentID: "stu-1", AmountCents: 100, Method: "cash", PaidAt: "2026-10-10T00:00:00Z",
+			Folio: "P-2026-000044", SupersededBy: "dep-4", SupersededByFolio: "P-2026-000045"},
+	} {
+		f := fakeSources{deposit: client.DepositReceipt{Deposit: d}}
+		_, err := builder(f).FamilyPayment(context.Background(), "stu-1", d.ID)
+		if connect.CodeOf(err) != connect.CodeNotFound {
+			t.Errorf("%s: %v, want NotFound", name, err)
+		}
+	}
+}
+
 // A uniforms sale's receipt: the order's folio and lines (garment, size,
 // quantity), its total, and how it was paid, read from finance by the delivery's
 // charge.

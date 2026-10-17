@@ -2,6 +2,8 @@ package usecase
 
 import (
 	"context"
+	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -92,7 +94,7 @@ func ledger(
 	if err != nil {
 		return nil, domain.StatementTotals{}, err
 	}
-	movements = append(movements, depositMovements(deposits, family)...)
+	movements = append(movements, depositMovements(deposits, depositAllocations(payments, charges), family)...)
 	movements = append(movements, loosePaymentMovements(payments, charges)...)
 	lines, totals := domain.BuildStatement(movements)
 	return lines, totals, nil
@@ -196,7 +198,7 @@ func chargeMovements(
 // deposit's folio on both. A voided deposit, or one superseded by its
 // correction (T9), is shown to the office with no effect on the balance; the
 // family is not shown it.
-func depositMovements(deposits []domain.Deposit, family bool) []domain.Movement {
+func depositMovements(deposits []domain.Deposit, allocations map[string][]domain.AppliedPart, family bool) []domain.Movement {
 	out := make([]domain.Movement, 0, len(deposits))
 	for _, d := range deposits {
 		// The family reads the money as it stands: neither a cancelled receipt
@@ -210,10 +212,11 @@ func depositMovements(deposits []domain.Deposit, family bool) []domain.Movement 
 			// point at a folio missing from their own ledger.
 			corrects = ""
 		}
+		applied := allocations[d.ID()]
 		for _, t := range d.Tenders() {
 			out = append(out, domain.Movement{
-				Kind: tenderKind(t.Method()), Date: d.PaidOn(), Description: tenderDescription(t.Method()),
-				AmountCents: t.Amount().Int64(), DepositID: d.ID(),
+				Kind: tenderKind(t.Method()), Date: d.PaidOn(), Description: depositDescription(t.Method(), applied),
+				AmountCents: t.Amount().Int64(), DepositID: d.ID(), AppliedTo: applied,
 				Method: t.Method(), CardType: t.CardType(), Reference: t.Reference(), Folio: d.Folio(),
 				Voided: d.Voided(), VoidReason: d.VoidReason(),
 				Superseded: d.Superseded(), SupersededByFolio: d.SupersededByFolio(),
@@ -222,6 +225,59 @@ func depositMovements(deposits []domain.Deposit, family bool) []domain.Movement 
 		}
 	}
 	return out
+}
+
+// depositAllocations is, per deposit, what its money paid (ISSUE-T14-106):
+// the deposit's payment rows summed per charge — allocations are cut per
+// tender, so one charge can take two rows — in the charges' due-date order.
+// A payment whose charge is not among `charges` is left out: it cannot be
+// named, and the line still reads as "Pago".
+func depositAllocations(payments []domain.Payment, charges []ports.ChargeWithPaid) map[string][]domain.AppliedPart {
+	byID := make(map[string]domain.Charge, len(charges))
+	for _, c := range charges {
+		byID[c.Charge.ID()] = c.Charge
+	}
+	parts := map[string]map[string]int64{}
+	for _, p := range payments {
+		if _, known := byID[p.ChargeID()]; !known || p.DepositID() == "" {
+			continue
+		}
+		if parts[p.DepositID()] == nil {
+			parts[p.DepositID()] = map[string]int64{}
+		}
+		parts[p.DepositID()][p.ChargeID()] += p.Amount().Int64()
+	}
+	out := make(map[string][]domain.AppliedPart, len(parts))
+	for depositID, perCharge := range parts {
+		list := make([]domain.AppliedPart, 0, len(perCharge))
+		for chargeID, cents := range perCharge {
+			list = append(list, domain.AppliedPart{ChargeID: chargeID, Description: byID[chargeID].Description(), AmountCents: cents})
+		}
+		sort.Slice(list, func(i, j int) bool {
+			a, b := byID[list[i].ChargeID], byID[list[j].ChargeID]
+			if !a.DueDate().Equal(b.DueDate()) {
+				return a.DueDate().Before(b.DueDate())
+			}
+			return a.ID() < b.ID()
+		})
+		out[depositID] = list
+	}
+	return out
+}
+
+// depositDescription names a deposit's line after what it paid, the way a
+// loose payment is named after its charge: "Pago · Inscripción", or
+// "Pago · Colegiatura septiembre y 2 más" when it paid several.
+func depositDescription(method string, applied []domain.AppliedPart) string {
+	base := tenderDescription(method)
+	switch len(applied) {
+	case 0:
+		return base
+	case 1:
+		return base + " · " + applied[0].Description
+	default:
+		return fmt.Sprintf("%s · %s y %d más", base, applied[0].Description, len(applied)-1)
+	}
 }
 
 // tenderKind: a credit note lowers the balance like money does, but it is its
