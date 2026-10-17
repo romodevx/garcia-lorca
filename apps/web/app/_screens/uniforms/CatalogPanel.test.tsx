@@ -67,6 +67,37 @@ describe("CatalogPanel — un artículo sin tallas es talla única", () => {
     expect(onChanged).toHaveBeenCalled();
   });
 
+  // Gate nit on #142: once the article exists, editing its fields would change
+  // nothing; the drawer says what is left and only retries the size.
+  it("says the article already exists when only its size failed, and retries just the size", async () => {
+    let sizeAttempts = 0;
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/uniforms/items")) return Promise.resolve(jsonResponse(book));
+      sizeAttempts += 1;
+      return Promise.resolve(sizeAttempts === 1
+        ? jsonResponse({ error: { code: "internal", message: "Algo salió mal. Ya lo estamos revisando" } }, 500)
+        : jsonResponse({ createdCount: 1, updatedCount: 0 }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<CatalogPanel items={[]} levels={[]} onChanged={vi.fn()} />);
+
+    await user.click(screen.getAllByRole("button", { name: /Nuevo artículo/ })[0]!);
+    await user.click(screen.getByRole("button", { name: "Libro" }));
+    await user.type(screen.getByLabelText(/Nombre/, CAMPO), "Libro 3°");
+    await user.type(screen.getByLabelText(/Precio/, CAMPO), "450");
+    await user.click(screen.getByRole("button", { name: "Crear" }));
+
+    const drawer = await screen.findByRole("dialog", { name: "Nuevo artículo" });
+    expect(await within(drawer).findByText("El artículo ya se creó; falta la talla. Vuelve a intentarlo.")).toBeInTheDocument();
+    expect(within(drawer).getByLabelText(/Nombre/, CAMPO)).toBeDisabled();
+    await user.click(within(drawer).getByRole("button", { name: "Poner talla única" }));
+
+    await waitFor(() => expect(posts(fetchMock, "/items/it-book/sizes")).toHaveLength(2));
+    expect(posts(fetchMock, "/uniforms/items")).toHaveLength(1);
+  });
+
   it("still asks a garment for its size run", async () => {
     stubWrites({ "/uniforms/items": jsonResponse({ ...book, id: "it-polo", name: "POLO", category: "uniform" }) });
     const user = userEvent.setup();

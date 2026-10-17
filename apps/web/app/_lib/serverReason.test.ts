@@ -33,6 +33,18 @@ describe("spanishServerReason", () => {
     expect(spanishServerReason(spanish)).toBe(spanish);
   });
 
+  // Gate nit on #142: a Spanish lead-in can carry a driver's English after a colon.
+  it("se queda con lo que va antes de los dos puntos", () => {
+    expect(spanishServerReason("no se pudo guardar: duplicate key value violates unique constraint")).toBe("no se pudo guardar");
+  });
+
+  it("no deja pasar un texto larguísimo", () => {
+    const long = `la venta no cuadra ${"de nuevo ".repeat(40)}`;
+    const shown = spanishServerReason(long) ?? "";
+    expect(shown.length).toBeLessThanOrEqual(200);
+    expect(shown.endsWith("…")).toBe(true);
+  });
+
   it("nada que decir cuando no vino nada", () => {
     expect(spanishServerReason(undefined)).toBeUndefined();
     expect(spanishServerReason("  ")).toBeUndefined();

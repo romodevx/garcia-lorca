@@ -28,6 +28,8 @@ const CATEGORIES: { id: ItemCategory; label: string }[] = [
 export const ONE_SIZE = "ÚNICA";
 const ONE_SIZE_SPEC: SizeSpec = { sizeLabel: ONE_SIZE, sizeOrder: 1, minStock: 0 };
 
+const SIZE_MISSING = "El artículo ya se creó; falta la talla. Vuelve a intentarlo.";
+
 /** Only a garment comes in a size run; everything else is sold as one size. */
 const hasSizeRun = (category: ItemCategory): boolean => category === "uniform";
 
@@ -203,6 +205,9 @@ function CreateDrawer({
   const [pending, setPending] = useState(false);
   const [failure, setFailure] = useState<UniformsError | null>(null);
   const createdRef = useRef<UniformItem | undefined>(undefined);
+  // The article exists and only its one size is missing: its fields are past
+  // changing here, and the retry only puts the size (gate nit on #142).
+  const [awaitingSize, setAwaitingSize] = useState(false);
   // Un ref y no el estado: dos clics llegan antes de que `pending` repinte, y
   // sin clave única nada en el servidor frena un segundo artículo igual.
   const inFlight = useRef(false);
@@ -234,6 +239,7 @@ function CreateDrawer({
       // A retry after the one size failed must not create the article twice.
       const created = createdRef.current ?? (await createItem(API_URL, { name: name.trim(), levelId: level, priceCents, category }));
       createdRef.current = created;
+      setAwaitingSize(!hasSizeRun(created.category));
       if (!hasSizeRun(created.category)) await upsertSizes(API_URL, created.id, [ONE_SIZE_SPEC]);
       onDone(created);
     } catch (err) {
@@ -248,65 +254,70 @@ function CreateDrawer({
   return (
     <Drawer title="Nuevo artículo" icon="plus" onClose={onClose}>
       {failure !== null && <ErrorNote message={failure.message} detail={failure.detail} />}
-      <p style={label}>Tipo</p>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
-        {CATEGORIES.map((option) => (
-          <button
-            key={option.id}
-            aria-pressed={category === option.id}
-            aria-label={option.label}
-            onClick={() => setCategory(option.id)}
-            style={{
-              height: 38,
-              padding: "0 14px",
-              borderRadius: 99,
-              fontSize: 13.5,
-              fontWeight: 600,
-              cursor: "pointer",
-              border: `1.5px solid ${category === option.id ? "var(--purple)" : "var(--border)"}`,
-              background: category === option.id ? "color-mix(in oklab, var(--purple) 12%, var(--surface))" : "var(--surface)",
-              color: category === option.id ? "var(--purple)" : "var(--text-muted)",
-            }}>
-            {option.label}
-          </button>
-        ))}
-      </div>
+      {awaitingSize && failure !== null && (
+        <p role="status" style={{ fontWeight: 600, fontSize: 14, margin: "10px 0" }}>{SIZE_MISSING}</p>
+      )}
+      <fieldset disabled={awaitingSize} style={{ border: "none", padding: 0, margin: 0 }}>
+        <p style={label}>Tipo</p>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
+          {CATEGORIES.map((option) => (
+            <button
+              key={option.id}
+              aria-pressed={category === option.id}
+              aria-label={option.label}
+              onClick={() => setCategory(option.id)}
+              style={{
+                height: 38,
+                padding: "0 14px",
+                borderRadius: 99,
+                fontSize: 13.5,
+                fontWeight: 600,
+                cursor: "pointer",
+                border: `1.5px solid ${category === option.id ? "var(--purple)" : "var(--border)"}`,
+                background: category === option.id ? "color-mix(in oklab, var(--purple) 12%, var(--surface))" : "var(--surface)",
+                color: category === option.id ? "var(--purple)" : "var(--text-muted)",
+              }}>
+              {option.label}
+            </button>
+          ))}
+        </div>
 
-      <TextField
-        label="Nombre"
-        value={name}
-        onChange={setName}
-        uppercase
-        required
-        error={form.errors.name}
-        onClearError={() => form.clear("name")}
-        help="Cómo se llama la prenda o el libro. Es lo que verá la familia."
-      />
-
-      <p style={{ ...label, marginTop: 16 }}>Nivel</p>
-      <LevelChips levels={levels} value={level} onChange={setLevel} allLabel="Todos los niveles" />
-
-      <div style={{ marginTop: 16 }}>
-        <MoneyField
-          label="Precio"
-          value={pesos}
-          onChange={setPesos}
+        <TextField
+          label="Nombre"
+          value={name}
+          onChange={setName}
+          uppercase
           required
-          error={form.errors.price ?? priceError}
-          onClearError={() => {
-            form.clear("price");
-            setPriceError(undefined);
-          }}
-          help="Lo que cuesta una pieza."
+          error={form.errors.name}
+          onClearError={() => form.clear("name")}
+          help="Cómo se llama la prenda o el libro. Es lo que verá la familia."
         />
-      </div>
+
+        <p style={{ ...label, marginTop: 16 }}>Nivel</p>
+        <LevelChips levels={levels} value={level} onChange={setLevel} allLabel="Todos los niveles" />
+
+        <div style={{ marginTop: 16 }}>
+          <MoneyField
+            label="Precio"
+            value={pesos}
+            onChange={setPesos}
+            required
+            error={form.errors.price ?? priceError}
+            onClearError={() => {
+              form.clear("price");
+              setPriceError(undefined);
+            }}
+            help="Lo que cuesta una pieza."
+          />
+        </div>
+      </fieldset>
 
       <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
         <Btn kind="ghost" onClick={onClose}>
           Cancelar
         </Btn>
         <Btn icon="check" onClick={() => void save()} busy={pending}>
-          {pending ? "Guardando…" : hasSizeRun(category) ? "Crear y poner tallas" : "Crear"}
+          {pending ? "Guardando…" : awaitingSize ? "Poner talla única" : hasSizeRun(category) ? "Crear y poner tallas" : "Crear"}
         </Btn>
       </div>
     </Drawer>

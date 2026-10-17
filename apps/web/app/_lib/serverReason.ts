@@ -57,6 +57,20 @@ function normalise(raw: string): string {
   return raw.trim().replace(/[.\s]+$/, "").toLowerCase();
 }
 
+/** The longest reason a screen shows as the server wrote it. */
+const MAX_SHOWN = 200;
+const ELLIPSIS = "…";
+
+/**
+ * The service's own sentence, without what it wrapped: a Spanish lead-in can
+ * carry a driver's English after a colon ("no se pudo guardar: duplicate key
+ * value…"), and a very long text is a dump, not a reason (gate nit on #142).
+ */
+function ownSentence(raw: string): string {
+  const head = raw.split(":")[0]?.trim() ?? "";
+  return head.length <= MAX_SHOWN ? head : `${head.slice(0, MAX_SHOWN - ELLIPSIS.length).trimEnd()}${ELLIPSIS}`;
+}
+
 /**
  * The reason, safe to show, or undefined when there is nothing safe to say.
  */
@@ -64,5 +78,7 @@ export function spanishServerReason(raw: string | undefined): string | undefined
   if (raw === undefined || raw.trim() === "") return undefined;
   const known = KNOWN[normalise(raw)];
   if (known !== undefined) return known;
-  return SPANISH.test(raw) && !ENGLISH.test(raw) ? raw.trim() : undefined;
+  const sentence = ownSentence(raw);
+  if (sentence === "") return undefined;
+  return KNOWN[normalise(sentence)] ?? (SPANISH.test(sentence) && !ENGLISH.test(sentence) ? sentence : undefined);
 }
