@@ -100,9 +100,9 @@ describe("setup small text contrast (design review N7)", () => {
 
 describe("setup small text uses those colours", () => {
   it("the pending line and the Herramientas helper", () => {
-    render(<SetupStepList steps={stepViews()} cardTitle="Puesta en marcha" openId="groups" onOpen={vi.fn()} onOpenStudentImport={vi.fn()} importNeeds="Necesita niveles, grados y grupos." showTrash={false} narrow={false} />);
+    render(<SetupStepList steps={stepViews()} cardTitle="Puesta en marcha" openId="groups" onOpen={vi.fn()} onOpenStudentImport={vi.fn()} importHint="Crea los niveles, grados y grupos que falten." showTrash={false} narrow={false} />);
     expect(screen.getByText("Falta Grupos")).toHaveStyle({ color: PENDING_TEXT });
-    expect(screen.getByText("Necesita niveles, grados y grupos.")).toHaveStyle({ color: QUIET_TEXT });
+    expect(screen.getByText("Crea los niveles, grados y grupos que falten.")).toHaveStyle({ color: QUIET_TEXT });
   });
 
   it("the 'Paso N de 8' eyebrow", () => {

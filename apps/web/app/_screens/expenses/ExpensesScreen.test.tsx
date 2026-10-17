@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -92,6 +92,26 @@ describe("ExpensesScreen (T10)", () => {
       spentOn: "2026-10-15", categoryId: CAT, amountCents: 125050, method: "cash", description: "Tóner",
     });
     expect(await screen.findByRole("status")).toHaveTextContent(/registrado/i);
+  });
+
+  // The drawer's form is noValidate (T13): the date's max no longer stops a
+  // future day by itself, so the screen says it — on blur and on save.
+  it("refuses a future date on blur and on save, without sending it", async () => {
+    const user = userEvent.setup();
+    renderScreen();
+    await user.click(await screen.findByRole("button", { name: /Registrar egreso/ }));
+    const dialog = await screen.findByRole("dialog");
+    const date = within(dialog).getByLabelText(/^Fecha/);
+    await user.click(date);
+    fireEvent.change(date, { target: { value: "2026-10-16" } });
+    await user.tab();
+    expect(date).toHaveAccessibleDescription("La fecha no puede ser posterior a hoy.");
+    await user.selectOptions(within(dialog).getByRole("combobox", { name: /Categoría/ }), CAT);
+    await user.type(within(dialog).getByRole("textbox", { name: /Monto/ }), "100");
+    await user.click(within(dialog).getByRole("button", { name: "Registrar egreso" }));
+    expect(m.createExpense).not.toHaveBeenCalled();
+    fireEvent.change(date, { target: { value: "2026-10-15" } });
+    expect(date).not.toHaveAttribute("aria-invalid");
   });
 
   it("asks for what is missing instead of sending it", async () => {

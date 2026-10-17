@@ -6,7 +6,7 @@ import { SelectField, TextField, TimeField, useRequired, type RequiredState } fr
 import { API_URL } from "../../api-url";
 import { createBlock, updateBlock, type ScheduleBlock, type ScheduleBoard } from "../../schedule/api";
 import { assignmentsOfGroup, WEEKDAYS, type ScheduleIndex } from "../../schedule/catalog";
-import { defaultEnd, SLOT_MINUTES, timeError, toHHMM, toMinutes } from "../../schedule/time";
+import { defaultEnd, gridBounds, SLOT_MINUTES, timeError, toHHMM, toMinutes } from "../../schedule/time";
 
 /** What the drawer was opened on: an empty slot, or a class. */
 export type DrawerTarget =
@@ -30,6 +30,8 @@ export interface BlockForm {
   timeErrors: TimeErrors;
   /** Judges both times: the fields' blur. */
   judgeTimes: () => void;
+  /** The hours of the chosen group's level: what the times are held to. */
+  span: GridSpan;
   /** Valid: the values the gateway takes. Invalid: marks the fields and gives null. */
   valid: () => Values | null;
 }
@@ -45,6 +47,18 @@ export interface TimeErrors {
 export interface GridSpan {
   start: number;
   end: number;
+}
+
+/**
+ * The hours a class of `groupId` may take: its level's day, widened to that
+ * level's classes as the week grid is. A group not chosen yet keeps `shown`,
+ * the grid on screen.
+ */
+export function levelSpan(board: ScheduleBoard, index: ScheduleIndex, groupId: string, shown: GridSpan): GridSpan {
+  const level = index.levelOfGroup(groupId);
+  if (level === "") return shown;
+  const classes = board.blocks.filter((b) => index.levelOfGroup(b.groupId) === level);
+  return gridBounds(board.settings.find((s) => s.levelId === level), classes);
 }
 
 /** The bounds of each time: a start leaves room for one slot, an end follows one. */
@@ -72,15 +86,16 @@ function initial(target: DrawerTarget, board: ScheduleBoard, gridEnd: number): V
   };
 }
 
-export function useBlockForm(target: DrawerTarget, board: ScheduleBoard, grid: GridSpan): BlockForm {
+export function useBlockForm(target: DrawerTarget, board: ScheduleBoard, index: ScheduleIndex, grid: GridSpan): BlockForm {
   const [saved] = useState<Values>(() => initial(target, board, grid.end));
   const [values, setValues] = useState<Values>(saved);
   const [timeErrors, setTimeErrors] = useState<TimeErrors>({});
   const required = useRequired(board.started ? ["weekday", "startsAt", "endsAt", "groupId", "assignmentId", "reason"] : ["weekday", "startsAt", "endsAt", "groupId", "assignmentId"]);
 
   // A time already saved is kept as it is, even where the picker would not reach (ISSUE-028).
+  const spanOf = (v: Values): GridSpan => levelSpan(board, index, v.groupId, grid);
   const judge = (v: Values): TimeErrors => {
-    const bounds = timeBounds(grid);
+    const bounds = timeBounds(spanOf(v));
     const startsAt = timeError(v.startsAt, { ...bounds.startsAt, kept: saved.startsAt });
     const endsAt = timeError(v.endsAt, { ...bounds.endsAt, kept: saved.endsAt });
     const order = v.startsAt !== "" && v.endsAt !== "" && toMinutes(v.endsAt) <= toMinutes(v.startsAt) ? END_BEFORE_START : undefined;
@@ -92,7 +107,7 @@ export function useBlockForm(target: DrawerTarget, board: ScheduleBoard, grid: G
     const next = { ...values, ...patch };
     setValues(next);
     // A typed time is judged on blur; once an error shows, every change re-checks it.
-    if (showing && (patch.startsAt !== undefined || patch.endsAt !== undefined)) setTimeErrors(judge(next));
+    if (showing && (patch.startsAt !== undefined || patch.endsAt !== undefined || patch.groupId !== undefined)) setTimeErrors(judge(next));
   };
 
   const valid = (): Values | null => {
@@ -102,7 +117,7 @@ export function useBlockForm(target: DrawerTarget, board: ScheduleBoard, grid: G
     return ok && problems.startsAt === undefined && problems.endsAt === undefined ? values : null;
   };
 
-  return { values, set, required, timeErrors, judgeTimes: () => setTimeErrors(judge(values)), valid };
+  return { values, set, required, timeErrors, judgeTimes: () => setTimeErrors(judge(values)), span: spanOf(values), valid };
 }
 
 /** Saves the form; null when it did not validate (nothing was sent). */
@@ -119,9 +134,9 @@ export async function saveBlock(form: BlockForm, target: DrawerTarget, started: 
 }
 
 /** Day, start, end, group, "Asignatura — Docente" and, once the cycle started, the reason. */
-export function BlockFields({ form, board, index, grid }: { form: BlockForm; board: ScheduleBoard; index: ScheduleIndex; grid: GridSpan }): ReactElement {
+export function BlockFields({ form, board, index }: { form: BlockForm; board: ScheduleBoard; index: ScheduleIndex }): ReactElement {
   const { values, set, required, timeErrors, judgeTimes } = form;
-  const bounds = timeBounds(grid);
+  const bounds = timeBounds(form.span);
   const groups = board.groups
     .map((g) => ({ value: g.id, label: index.groupLabel(g.id) }))
     .sort((a, b) => a.label.localeCompare(b.label, "es-MX", { numeric: true }));

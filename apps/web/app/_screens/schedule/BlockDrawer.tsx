@@ -45,7 +45,7 @@ export function BlockDrawer({ target, board, index, grid, today, onClose, onSave
   const [section, setSection] = useState<Section>("class");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
-  const blockForm = useBlockForm(target, board, grid);
+  const blockForm = useBlockForm(target, board, index, grid);
   const overrideForm = useOverrideForm(anchor, board, today, section === "override");
 
   const submit = async (): Promise<void> => {
@@ -95,7 +95,7 @@ export function BlockDrawer({ target, board, index, grid, today, onClose, onSave
         )}
         {section === "class" ? (
           <>
-            <BlockFields form={blockForm} board={board} index={index} grid={grid} />
+            <BlockFields form={blockForm} board={board} index={index} />
             {editing !== undefined && (
               <div>
                 <Btn kind="outline" icon="trash" onClick={remove} style={{ color: "var(--bad-fg)", borderColor: "var(--bad-fg)" }}>Quitar clase</Btn>

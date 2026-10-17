@@ -2,8 +2,13 @@ package handler
 
 import (
 	"context"
+	"fmt"
+	"sort"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
+	"github.com/garcia-lorca/pkg/schoolcal"
 	"github.com/garcia-lorca/services/gateway/internal/client"
 )
 
@@ -39,18 +44,33 @@ func NewStudentGroupLabeler(students EnrollmentHistoryReader, groups AttendanceG
 // status. found is false for a pupil with no enrollment, or whose group the
 // catalog no longer holds.
 func (l StudentGroupLabeler) StudentGroupLabel(ctx context.Context, studentID, day string) (string, bool, error) {
-	enrollments, err := l.students.ListEnrollments(ctx, studentID, "", "")
-	if err != nil || len(enrollments) == 0 {
+	var (
+		enrollments []client.Enrollment
+		transfers   []client.Transfer
+	)
+	g, gctx := errgroup.WithContext(ctx)
+	g.Go(func() (err error) {
+		if enrollments, err = l.students.ListEnrollments(gctx, studentID, "", ""); err != nil {
+			return fmt.Errorf("listing the enrollments of pupil %s: %w", studentID, err)
+		}
+		return nil
+	})
+	g.Go(func() (err error) {
+		if transfers, err = l.students.ListTransfers(gctx, studentID); err != nil {
+			return fmt.Errorf("listing the transfers of pupil %s: %w", studentID, err)
+		}
+		return nil
+	})
+	if err := g.Wait(); err != nil || len(enrollments) == 0 {
 		return "", false, err
 	}
 	chosen := l.enrollmentOn(enrollments, day)
-	transfers, err := l.students.ListTransfers(ctx, studentID)
-	if err != nil {
-		return "", false, err
-	}
 	group, found, err := resolveListGroup(ctx, l.groups, l.groupOn(chosen, transfers, day))
-	if err != nil || !found {
-		return "", false, err
+	if err != nil {
+		return "", false, fmt.Errorf("resolving the group of pupil %s on %s: %w", studentID, day, err)
+	}
+	if !found {
+		return "", false, nil
 	}
 	return group.Label, true, nil
 }
@@ -79,6 +99,7 @@ func (l StudentGroupLabeler) enrollmentOn(enrollments []client.Enrollment, day s
 }
 
 // inForceOn: begun on or before day, and not ended — or ended on or after it.
+// Without withdrawn_on the end is ended_at's day in the school's zone.
 func (l StudentGroupLabeler) inForceOn(e client.Enrollment, day string) bool {
 	if l.dayOf(e.EnrolledAt) > day {
 		return false
@@ -93,22 +114,30 @@ func (l StudentGroupLabeler) inForceOn(e client.Enrollment, day string) bool {
 // groupOn undoes, newest first, the moves of the enrollment made after day: a
 // transfer rewrites the enrollment's group in place, so the moves are the only
 // record of the group it had then. A move on the day itself already counts.
+// The moves are ordered here, not trusted to arrive in order.
 func (l StudentGroupLabeler) groupOn(e client.Enrollment, transfers []client.Transfer, day string) string {
-	group := e.GroupID
-	for i := len(transfers) - 1; i >= 0; i-- {
-		t := transfers[i]
-		if t.EnrollmentID == e.ID && l.dayOf(t.MovedAt) > day {
-			group = t.FromGroupID
+	moves := make([]client.Transfer, 0, len(transfers))
+	for _, t := range transfers {
+		if t.EnrollmentID == e.ID {
+			moves = append(moves, t)
 		}
+	}
+	sort.SliceStable(moves, func(i, j int) bool { return moves[i].MovedAt.After(moves[j].MovedAt) })
+	group := e.GroupID
+	for _, t := range moves {
+		if l.dayOf(t.MovedAt) <= day {
+			break
+		}
+		group = t.FromGroupID
 	}
 	return group
 }
 
-// dayOf is the school's calendar day of an instant ("" for an unknown one,
-// which then sorts before every day).
+// dayOf is the school's calendar day of an instant (schoolcal.Date, ADR
+// 0035), as YYYY-MM-DD; "" for an unknown one, which sorts before every day.
 func (l StudentGroupLabeler) dayOf(instant time.Time) string {
 	if instant.IsZero() {
 		return ""
 	}
-	return instant.In(l.zone).Format(time.DateOnly)
+	return schoolcal.Date(instant, l.zone).Format(time.DateOnly)
 }

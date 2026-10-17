@@ -45,8 +45,13 @@ export function useOverrideForm(block: ScheduleBlock, board: ScheduleBoard, toda
   const [available, setAvailable] = useState<AvailableTeacher[] | null>(null);
   const extra = values.kind === "substitute" ? ["teacherId"] : values.kind === "swap" ? ["swapBlockId"] : [];
   const required = useRequired(["date", ...extra, "reason"]);
-  const wrongDay = (date: string): string | undefined =>
-    date !== "" && weekdayOf(date) !== block.weekday ? `Esta clase es los ${dayName(block.weekday)}: elige un ${dayName(block.weekday)}.` : undefined;
+  const { startsOn, endsOn } = board.cycle;
+  // The form is noValidate: the field's min/max only guide, this judges (T13).
+  const wrongDay = (date: string): string | undefined => {
+    if (date === "") return undefined;
+    if (date < startsOn || date > endsOn) return `Elige un día del ciclo: del ${startsOn} al ${endsOn}.`;
+    return weekdayOf(date) !== block.weekday ? `Esta clase es los ${dayName(block.weekday)}: elige un ${dayName(block.weekday)}.` : undefined;
+  };
 
   useEffect(() => {
     if (!open || values.kind !== "substitute" || values.date === "" || weekdayOf(values.date) !== block.weekday) return;

@@ -24,8 +24,8 @@ export interface SetupStepListProps {
   onOpen: (id: OpenTarget) => void;
   /** Migrar alumnos; given only when the caller may import (A2/A12). */
   onOpenStudentImport?: () => void;
-  /** What the import still needs from the catalog; undefined says nothing (ISSUE-024). */
-  importNeeds?: string;
+  /** What the import will create of the catalog; undefined says nothing (ISSUE-024). */
+  importHint?: string;
   /** The Papelera; only with levels:delete. */
   showTrash: boolean;
   narrow: boolean;
@@ -76,7 +76,7 @@ interface StepListProps extends SetupStepListProps {
   armed: ReadonlySet<StepId>;
 }
 
-function StepList({ steps, cardTitle, openId, onOpen, onOpenStudentImport, importNeeds, showTrash, armed }: StepListProps): ReactElement {
+function StepList({ steps, cardTitle, openId, onOpen, onOpenStudentImport, importHint, showTrash, armed }: StepListProps): ReactElement {
   return (
     <>
       <nav aria-label={cardTitle}>
@@ -89,7 +89,7 @@ function StepList({ steps, cardTitle, openId, onOpen, onOpenStudentImport, impor
           ))}
         </ol>
       </nav>
-      <Tools importNeeds={importNeeds} onOpenStudentImport={onOpenStudentImport} showTrash={showTrash} trashOpen={openId === "trash"} onOpenTrash={() => onOpen("trash")} />
+      <Tools importHint={importHint} onOpenStudentImport={onOpenStudentImport} showTrash={showTrash} trashOpen={openId === "trash"} onOpenTrash={() => onOpen("trash")} />
     </>
   );
 }
@@ -153,14 +153,14 @@ function StepMark({ step, open, animateCheck }: { step: StepView; open: boolean;
 const toolStyle: CSSProperties = { display: "flex", alignItems: "center", gap: 10, width: "100%", minHeight: 48, padding: "8px 10px", borderRadius: 12, textAlign: "left", color: "var(--text-muted)", fontWeight: 600, fontSize: 14.5, cursor: "pointer" };
 
 interface ToolsProps {
-  importNeeds: string | undefined;
+  importHint: string | undefined;
   onOpenStudentImport?: () => void;
   showTrash: boolean;
   trashOpen: boolean;
   onOpenTrash: () => void;
 }
 
-function Tools({ importNeeds, onOpenStudentImport, showTrash, trashOpen, onOpenTrash }: ToolsProps): ReactElement | null {
+function Tools({ importHint, onOpenStudentImport, showTrash, trashOpen, onOpenTrash }: ToolsProps): ReactElement | null {
   if (onOpenStudentImport === undefined && !showTrash) return null;
   return (
     <div style={{ borderTop: "1px solid var(--border)", margin: "12px 10px 0", paddingTop: 10 }}>
@@ -170,7 +170,7 @@ function Tools({ importNeeds, onOpenStudentImport, showTrash, trashOpen, onOpenT
           <Icon name="upload" size={18} />
           <span style={{ display: "grid" }}>
             Migrar alumnos del sistema anterior
-            {importNeeds !== undefined && <span style={{ fontSize: 13, fontWeight: 500, color: QUIET_TEXT }}>{importNeeds}</span>}
+            {importHint !== undefined && <span style={{ fontSize: 13, fontWeight: 500, color: QUIET_TEXT }}>{importHint}</span>}
           </span>
         </button>
       )}

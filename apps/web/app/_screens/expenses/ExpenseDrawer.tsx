@@ -27,6 +27,12 @@ import { FirstCategoryInvite } from "./FirstCategoryInvite";
 export const METHOD_LABEL: Record<ExpenseMethod, string> = { cash: "Efectivo", card: "Tarjeta", transfer: "Transferencia" };
 const METHODS: readonly ExpenseMethod[] = ["cash", "card", "transfer"];
 const RECEIPT_TYPES = "image/jpeg,image/png,application/pdf";
+const FUTURE_DATE = "La fecha no puede ser posterior a hoy.";
+
+/** What is wrong with an expense's day, if anything: never after the office's today. */
+export function spentOnError(spentOn: string, today: string): string | undefined {
+  return spentOn !== "" && spentOn > today ? FUTURE_DATE : undefined;
+}
 
 const EVENT_LABEL: Record<string, string> = {
   created: "Registrado",
@@ -73,6 +79,7 @@ export function ExpenseDrawer({ expense, categories, today, canWrite, onClose, o
   const [error, setError] = useState<string | undefined>(undefined);
   const [events, setEvents] = useState<ExpenseEvent[]>([]);
   const [current, setCurrent] = useState<Expense | undefined>(expense);
+  const [dateError, setDateError] = useState<string | undefined>(undefined);
   const [cancelling, setCancelling] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
   const required = useRequired(["spentOn", "categoryId", "amount"]);
@@ -109,7 +116,9 @@ export function ExpenseDrawer({ expense, categories, today, canWrite, onClose, o
   };
 
   const save = async (keepOpen: boolean): Promise<void> => {
-    if (!required.check({ spentOn, categoryId, amount })) return;
+    const wrongDate = spentOnError(spentOn, today);
+    setDateError(wrongDate);
+    if (!required.check({ spentOn, categoryId, amount }) || wrongDate !== undefined) return;
     const amountCents = pesosToCents(amount);
     if (Number.isNaN(amountCents) || amountCents <= 0) {
       setError("Escribe el monto en pesos, por ejemplo 1,250.50");
@@ -208,8 +217,13 @@ export function ExpenseDrawer({ expense, categories, today, canWrite, onClose, o
           {`Cancelado: ${current?.cancelReason ?? ""}. Ya no cuenta en el balance ni en el corte.`}
         </p>
       )}
-      <DateField label="Fecha" required value={spentOn} max={today} onChange={setSpentOn} disabled={readOnly}
-        error={required.errors.spentOn} onClearError={() => required.clear("spentOn")} />
+      <DateField label="Fecha" required value={spentOn} max={today} disabled={readOnly}
+        onChange={(v) => {
+          setSpentOn(v);
+          if (spentOnError(v, today) === undefined) setDateError(undefined);
+        }}
+        onBlur={() => setDateError(spentOnError(spentOn, today))}
+        error={required.errors.spentOn ?? dateError} onClearError={() => required.clear("spentOn")} />
       <SelectField label="Categoría" required value={categoryId} onChange={setCategoryId} options={options} disabled={readOnly}
         error={required.errors.categoryId} onClearError={() => required.clear("categoryId")}
         help="Se configuran en la pestaña Categorías." />

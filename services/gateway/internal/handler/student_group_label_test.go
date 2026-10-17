@@ -3,6 +3,7 @@ package handler_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -63,6 +64,7 @@ func TestStudentGroupLabelOnTheDay(t *testing.T) {
 		groups: map[string]client.GroupResult{
 			"g-a": {ID: "g-a", GradeLevelID: "gr-1", Name: "A"},
 			"g-b": {ID: "g-b", GradeLevelID: "gr-1", Name: "B"},
+			"g-c": {ID: "g-c", GradeLevelID: "gr-1", Name: "C"},
 			"g-2": {ID: "g-2", GradeLevelID: "gr-2", Name: "A"},
 		},
 		grades: map[string]client.GradeLevelResult{"gr-1": {ID: "gr-1", LevelID: "lv-p", Name: "1°"}, "gr-2": {ID: "gr-2", LevelID: "lv-p", Name: "2°"}},
@@ -96,6 +98,35 @@ func TestStudentGroupLabelOnTheDay(t *testing.T) {
 		}, []client.Transfer{
 			{EnrollmentID: "e-1", FromGroupID: "g-a", ToGroupID: "g-b", MovedAt: at("2026-09-01")},
 		}, "1° Primaria · B", true},
+		{"moved twice after the payment (A→B→C): the first group", []client.Enrollment{
+			{ID: "e-1", GroupID: "g-c", Status: "active", EnrolledAt: at("2026-08-24")},
+		}, []client.Transfer{
+			{EnrollmentID: "e-1", FromGroupID: "g-a", ToGroupID: "g-b", MovedAt: at("2026-10-10")},
+			{EnrollmentID: "e-1", FromGroupID: "g-b", ToGroupID: "g-c", MovedAt: at("2026-10-20")},
+		}, "1° Primaria · A", true},
+		{"moves listed newest first are still undone in order", []client.Enrollment{
+			{ID: "e-1", GroupID: "g-c", Status: "active", EnrolledAt: at("2026-08-24")},
+		}, []client.Transfer{
+			{EnrollmentID: "e-1", FromGroupID: "g-b", ToGroupID: "g-c", MovedAt: at("2026-10-20")},
+			{EnrollmentID: "e-1", FromGroupID: "g-a", ToGroupID: "g-b", MovedAt: at("2026-10-10")},
+		}, "1° Primaria · A", true},
+		{"moved on the day of the payment: the new group", []client.Enrollment{
+			{ID: "e-1", GroupID: "g-b", Status: "active", EnrolledAt: at("2026-08-24")},
+		}, []client.Transfer{
+			{EnrollmentID: "e-1", FromGroupID: "g-a", ToGroupID: "g-b", MovedAt: at(paidOn)},
+		}, "1° Primaria · B", true},
+		{"another enrollment's moves are not this one's", []client.Enrollment{
+			{ID: "e-1", GroupID: "g-b", Status: "active", EnrolledAt: at("2026-08-24")},
+		}, []client.Transfer{
+			{EnrollmentID: "e-other", FromGroupID: "g-a", ToGroupID: "g-b", MovedAt: at("2026-10-20")},
+		}, "1° Primaria · B", true},
+		// Ended at 21:00 in Morelia on the 4th — 03:00 UTC on the 5th. In the
+		// school's day it ended BEFORE the payment of the 5th; the newer
+		// enrollment had not begun, so the most recent one names the group.
+		{"an end without withdrawn_on is judged in the school's day", []client.Enrollment{
+			{ID: "e-old", GroupID: "g-b", Status: "transferred", EnrolledAt: at("2026-08-24"), EndedAt: time.Date(2026, 10, 5, 3, 0, 0, 0, time.UTC)},
+			{ID: "e-new", GroupID: "g-a", Status: "active", EnrolledAt: at("2026-10-12")},
+		}, nil, "1° Primaria · A", true},
 		{"none on the day: the most recent of any status", []client.Enrollment{
 			{ID: "e-old", GroupID: "g-2", Status: "withdrawn", EnrolledAt: at("2025-08-25"), WithdrawnOn: "2026-01-10"},
 			{ID: "e-new", GroupID: "g-b", Status: "withdrawn", EnrolledAt: at("2026-02-01"), WithdrawnOn: "2026-06-30"},
@@ -118,8 +149,10 @@ func TestStudentGroupLabelOnTheDay(t *testing.T) {
 }
 
 func TestStudentGroupLabelWhenStudentsCannotAnswer(t *testing.T) {
-	src := fakeLabelSources{listErr: errors.New("down")}
-	if _, _, err := handler.NewStudentGroupLabeler(src, src, morelia).StudentGroupLabel(context.Background(), "stu-1", "2026-10-05"); err == nil {
-		t.Error("want the students error")
+	down := errors.New("down")
+	src := fakeLabelSources{listErr: down}
+	_, _, err := handler.NewStudentGroupLabeler(src, src, morelia).StudentGroupLabel(context.Background(), "stu-1", "2026-10-05")
+	if !errors.Is(err, down) || !strings.Contains(err.Error(), "stu-1") {
+		t.Errorf("err = %v; want the students error, wrapped with the pupil", err)
 	}
 }

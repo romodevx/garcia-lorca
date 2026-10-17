@@ -92,10 +92,10 @@ export interface SetupView {
   settled: boolean;
   initialStepId: StepId;
   /**
-   * What Migrar alumnos still needs from the catalog ("Necesita grupos."), or
-   * undefined when it has it — or while a read is in flight or failed.
+   * What Migrar alumnos will create ("Crea los grupos que falten."), or
+   * undefined for a complete catalog — or while a read is in flight or failed.
    */
-  importNeeds: string | undefined;
+  importHint: string | undefined;
 }
 
 interface Mark {
@@ -246,23 +246,26 @@ function nextKind(def: StepDef, input: SetupInput): NextKind {
   return isEmptyHere(def.id, input) ? "text" : "primary";
 }
 
-const IMPORT_NEEDS_ALL = "Necesita niveles, grados y grupos.";
-const IMPORT_NEEDS_GRADES = "Necesita grados y grupos.";
-const IMPORT_NEEDS_GROUPS = "Necesita grupos.";
+const IMPORT_CREATES_ALL = "Crea los niveles, grados y grupos que falten.";
+const IMPORT_CREATES_GRADES = "Crea los grados y grupos que falten.";
+const IMPORT_CREATES_GROUPS = "Crea los grupos que falten.";
 
 /**
- * ISSUE-024: an import places each pupil in a group of the catalog, so it needs
- * a level, a grade and a group to exist — not every step done. A grade still
- * without a group only rejects that grade's rows, which the preview shows.
+ * ISSUE-024: what Migrar alumnos will create. The import CREATES the levels,
+ * grades and groups it does not find (config placements, ADR 0033), so a gap
+ * is said as what it fills — never as something it needs first. A complete
+ * catalog (every level with grades, every grade with a group) needs no hint.
  */
-function importNeeds(input: SetupInput): string | undefined {
-  if (input.levels.length === 0) return IMPORT_NEEDS_ALL;
+function importHint(input: SetupInput): string | undefined {
+  if (input.levels.length === 0) return IMPORT_CREATES_ALL;
   if (input.grades.kind !== "ready") return undefined;
-  const known = input.grades.value.filter((g) => input.levels.some((l) => l.id === g.levelId));
-  if (known.length === 0) return IMPORT_NEEDS_GRADES;
-  if (input.selectedCycleId === undefined) return IMPORT_NEEDS_GROUPS;
+  const grades = input.grades.value;
+  if (input.levels.some((l) => !grades.some((g) => g.levelId === l.id))) return IMPORT_CREATES_GRADES;
+  if (input.selectedCycleId === undefined) return IMPORT_CREATES_GROUPS;
   if (input.groups.kind !== "ready") return undefined;
-  return input.groups.value.some((g) => known.some((k) => k.id === g.gradeLevelId)) ? undefined : IMPORT_NEEDS_GROUPS;
+  const groups = input.groups.value;
+  const known = orderedGrades(input.levels, grades);
+  return known.some(({ grade }) => !groups.some((g) => g.gradeLevelId === grade.id)) ? IMPORT_CREATES_GROUPS : undefined;
 }
 
 /** "falta Colegiaturas" / "faltan Grupos y Colegiaturas" / "faltan A, B y 2 más". */
@@ -312,6 +315,6 @@ export function deriveSteps(input: SetupInput, storedStepId: string | null): Set
     ready,
     settled: steps.every((s) => s.status !== "loading"),
     initialStepId: initialStep(steps, storedStepId),
-    importNeeds: importNeeds(input),
+    importHint: importHint(input),
   };
 }

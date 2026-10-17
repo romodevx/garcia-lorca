@@ -284,33 +284,38 @@ describe("deriveSteps: the Siguiente button (§1.3)", () => {
   });
 });
 
-describe("ISSUE-024 · what Migrar alumnos still needs, from the catalog itself", () => {
-  const needs = (input: SetupInput) => deriveSteps(input, null).importNeeds;
+describe("ISSUE-024 · what Migrar alumnos will create, from the catalog itself", () => {
+  // The import CREATES the catalog it does not find (config placements, ADR
+  // 0033): a gap is something it will fill, never something it needs first.
+  const hint = (input: SetupInput) => deriveSteps(input, null).importHint;
 
-  it("an empty catalog needs levels, grades and groups", () => {
-    expect(needs({ ...complete(), levels: [], grades: ready([]), groups: ready([]) })).toBe("Necesita niveles, grados y grupos.");
+  it("an empty catalog: it creates levels, grades and groups", () => {
+    expect(hint({ ...complete(), levels: [], grades: ready([]), groups: ready([]) })).toBe("Crea los niveles, grados y grupos que falten.");
   });
 
-  it("levels without grades need grades and groups", () => {
-    expect(needs({ ...complete(), grades: ready([]), groups: ready([]) })).toBe("Necesita grados y grupos.");
+  it("a level without grades: it creates grades and groups", () => {
+    expect(hint({ ...complete(), grades: ready([P1]), groups: ready([group("p1")]) })).toBe("Crea los grados y grupos que falten.");
   });
 
-  it("grades without groups in the cycle need groups", () => {
-    expect(needs({ ...complete(), groups: ready([]) })).toBe("Necesita grupos.");
+  it("a grade without a group in the cycle: it creates groups", () => {
+    expect(hint({ ...complete(), groups: ready([group("p1")]) })).toBe("Crea los grupos que falten.");
   });
 
-  it("a complete catalog needs nothing", () => {
-    expect(needs(complete())).toBeUndefined();
+  it("no cycle chosen: groups are what it would create", () => {
+    expect(hint({ ...complete(), selectedCycleId: undefined, groups: ready([]) })).toBe("Crea los grupos que falten.");
   });
 
-  it("a catalog with groups in only some grades can already import (the Grupos step may still be pending)", () => {
-    const input = { ...complete(), groups: ready([group("p1")]) };
-    expect(step(input, "groups").status).toBe("pending");
-    expect(needs(input)).toBeUndefined();
+  it("a complete catalog: no hint", () => {
+    expect(hint(complete())).toBeUndefined();
+  });
+
+  it("never asks for anything first", () => {
+    const inputs = [{ ...complete(), levels: [], grades: ready([]), groups: ready([]) }, { ...complete(), groups: ready([]) }];
+    for (const input of inputs) expect(hint(input)).not.toMatch(/Necesita/);
   });
 
   it("says nothing while a read is in flight or failed", () => {
-    expect(needs({ ...complete(), grades: LOADING })).toBeUndefined();
-    expect(needs({ ...complete(), groups: FAILED })).toBeUndefined();
+    expect(hint({ ...complete(), grades: LOADING })).toBeUndefined();
+    expect(hint({ ...complete(), groups: FAILED })).toBeUndefined();
   });
 });

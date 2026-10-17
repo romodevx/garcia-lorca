@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as api from "../../schedule/api";
-import { ANA, G3A, LUIS, MATE, sampleBoard } from "../../schedule/__fixtures__/board";
+import { ANA, G1SA, G3A, LUIS, MATE, PRIMARIA, SECUNDARIA, sampleBoard } from "../../schedule/__fixtures__/board";
 import { ScheduleEntry } from "./ScheduleEntry";
 import { ScheduleScreen } from "./ScheduleScreen";
 
@@ -129,6 +129,21 @@ describe("Horarios — la semana (T16)", () => {
     expect(m.createBlock).not.toHaveBeenCalled();
   });
 
+  it("ISSUE-028 · the class's hours follow the level of the group chosen in the drawer", async () => {
+    m.getBoard.mockResolvedValue(sampleBoard({ settings: [
+      { levelId: PRIMARIA, gridStart: "07:00", gridEnd: "14:00" },
+      { levelId: SECUNDARIA, gridStart: "13:00", gridEnd: "20:00" },
+    ] }));
+    const user = renderManager();
+    await chooseGroup3A(user);
+    await user.click(screen.getByRole("button", { name: "Agregar clase el martes a las 09:00" }));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByLabelText("Inicio")).toHaveAttribute("min", "07:00");
+    await user.selectOptions(within(dialog).getByLabelText("Grupo"), G1SA);
+    expect(within(dialog).getByLabelText("Inicio")).toHaveAttribute("min", "13:00");
+    expect(within(dialog).getByLabelText("Fin")).toHaveAttribute("max", "20:00");
+  });
+
   it("ISSUE-028 · a class saved at an hour the picker would not offer keeps it", async () => {
     const board = sampleBoard();
     const early = { ...board.blocks[0]!, startsAt: "06:32", endsAt: "07:20" };
@@ -165,6 +180,25 @@ describe("Horarios — la semana (T16)", () => {
     await user.click(within(dialog).getByRole("button", { name: "Guardar clase" }));
     expect(within(dialog).getByLabelText("Motivo del cambio")).toHaveAttribute("aria-invalid", "true");
     expect(m.createBlock).not.toHaveBeenCalled();
+  });
+
+  // The drawer's form is noValidate (T13): the date's min/max no longer stop a
+  // day outside the cycle by themselves, so the screen says it.
+  it("refuses a one-date change outside the cycle, on blur and on save", async () => {
+    const user = renderManager();
+    await chooseGroup3A(user);
+    await user.click(screen.getByRole("button", { name: /^Matemáticas, 3.º A/ }));
+    const dialog = screen.getByRole("dialog");
+    await user.click(within(dialog).getByRole("tab", { name: "Cambio solo para una fecha" }));
+    const date = within(dialog).getByLabelText("Fecha");
+    // A Monday, as the class, but after the cycle ends.
+    await user.click(date);
+    fireEvent.change(date, { target: { value: "2027-07-12" } });
+    await user.tab();
+    expect(date).toHaveAccessibleDescription("Elige un día del ciclo: del 2026-08-24 al 2027-07-09.");
+    await user.type(within(dialog).getByLabelText(/Motivo/), "Consulta médica");
+    await user.click(within(dialog).getByRole("button", { name: "Registrar cambio" }));
+    expect(m.createOverride).not.toHaveBeenCalled();
   });
 
   it("opens a class to edit it and to change it for one date", async () => {

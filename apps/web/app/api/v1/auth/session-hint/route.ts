@@ -1,5 +1,7 @@
 import { type NextRequest } from "next/server";
 
+import { ACCESS_COOKIE, REFRESH_COOKIE } from "../../../../auth/cookiePaths";
+
 /**
  * Whether this browser carries a session cookie at all (T13).
  *
@@ -22,8 +24,7 @@ import { type NextRequest } from "next/server";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-/** The gateway's session cookies (services/gateway/internal/handler/auth.go). */
-const SESSION_COOKIES = ["gl_access", "gl_refresh"] as const;
+const SESSION_COOKIES = [ACCESS_COOKIE, REFRESH_COOKIE] as const;
 
 export function GET(request: NextRequest): Response {
   const present = SESSION_COOKIES.some((name) => request.cookies.has(name));

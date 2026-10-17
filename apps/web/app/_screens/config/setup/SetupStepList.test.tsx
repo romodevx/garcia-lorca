@@ -98,21 +98,24 @@ describe("SetupStepList — each status (§4.3)", () => {
 });
 
 describe("SetupStepList — Herramientas (§1.5)", () => {
-  it("offers Migrar alumnos once, with what it still needs, only when the caller may", async () => {
+  it("offers Migrar alumnos once, saying what it will create, only when the caller may", async () => {
     const onOpenStudentImport = vi.fn();
     const user = userEvent.setup();
-    renderSteps({ onOpenStudentImport, importNeeds: "Necesita grupos." });
+    renderSteps({ onOpenStudentImport, importHint: "Crea los grupos que falten." });
 
     const migrate = screen.getByRole("button", { name: /Migrar alumnos del sistema anterior/ });
-    expect(migrate).toHaveTextContent("Necesita grupos.");
+    expect(migrate).toHaveTextContent("Crea los grupos que falten.");
+    // A gap in the catalog is what the import fills: it never blocks the tool.
+    expect(migrate).toBeEnabled();
+    expect(migrate).not.toHaveAttribute("aria-disabled");
     await user.click(migrate);
     expect(onOpenStudentImport).toHaveBeenCalledTimes(1);
     expect(screen.getAllByRole("button", { name: /Migrar alumnos/ })).toHaveLength(1);
   });
 
-  it("ISSUE-024 · asks for nothing once the catalog has what the import needs", () => {
-    renderSteps({ onOpenStudentImport: vi.fn(), importNeeds: undefined });
-    expect(screen.getByRole("button", { name: /Migrar alumnos del sistema anterior/ })).not.toHaveTextContent(/Necesita/);
+  it("ISSUE-024 · no hint once the catalog is complete", () => {
+    renderSteps({ onOpenStudentImport: vi.fn(), importHint: undefined });
+    expect(screen.getByRole("button", { name: /Migrar alumnos del sistema anterior/ })).toHaveTextContent(/^Migrar alumnos del sistema anterior$/);
   });
 
   it("shows neither tool without its permission", () => {
