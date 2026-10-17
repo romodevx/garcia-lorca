@@ -980,9 +980,10 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	if len(schoolLocations) > 0 {
 		receiptZone = schoolLocations[0]
 	}
+	groupLabeler := handler.NewStudentGroupLabeler(studentsClient, configClient, receiptZone)
 	receiptOptions := []receipt.Option{
 		receipt.WithSchoolLocation(receiptZone),
-		receipt.WithGroupLabeler(handler.NewStudentGroupLabeler(studentsClient, configClient, receiptZone)),
+		receipt.WithGroupLabeler(groupLabeler),
 		// The sale receipt says who collected (T14-019), as the payment one does.
 		receipt.WithUserNamer(authClient),
 	}
@@ -1018,7 +1019,9 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	// configClient (the same one backing the /config/* routes) is reused here only
 	// to resolve grade subject/term ids to names for the family grades screen.
 	familyH := handler.NewFamilyHandler(studentsClient, commsClient, financeClient, gradesClient, attendanceClient, configClient,
-		handler.WithFamilyStatements(statements), handler.WithFamilyReceipts(receiptBuilder))
+		handler.WithFamilyStatements(statements), handler.WithFamilyReceipts(receiptBuilder),
+		// ISSUE-T14-108: the child's group named as the receipts name it.
+		handler.WithFamilyGroupLabeler(groupLabeler, receiptZone))
 	// familyReadModules composes family:read behind the given module guards, in
 	// addition to module_students which every family route needs for the ownership
 	// check. The guards nest right-to-left, so the outermost listed module is

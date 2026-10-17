@@ -2,10 +2,12 @@ package handler
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"sort"
 	"time"
 
+	"github.com/garcia-lorca/pkg/schoolcal"
 	"github.com/garcia-lorca/services/gateway/internal/client"
 	"github.com/garcia-lorca/services/gateway/internal/middleware"
 )
@@ -127,7 +129,29 @@ type FamilyHandler struct {
 	catalog    FamilyCatalogReader
 	statements StatementSource
 	receipts   FamilyReceiptSource
-	now        func() time.Time
+	// groups names a child's group in full; zone is the school's, whose
+	// calendar day "today" is (ADR 0035).
+	groups FamilyGroupLabeler
+	zone   *time.Location
+	now    func() time.Time
+}
+
+// FamilyGroupLabeler names the group a pupil was in on a school day
+// (YYYY-MM-DD), "3° PRIMARIA · B"; found is false with no enrollment the
+// catalog resolves. StudentGroupLabeler satisfies it.
+type FamilyGroupLabeler interface {
+	StudentGroupLabel(ctx context.Context, studentID, day string) (label string, found bool, err error)
+}
+
+// WithFamilyGroupLabeler names each child's group in full (ISSUE-T14-108) for
+// the school's day in zone (nil reads as UTC).
+func WithFamilyGroupLabeler(groups FamilyGroupLabeler, zone *time.Location) FamilyOption {
+	return func(h *FamilyHandler) {
+		h.groups = groups
+		if zone != nil {
+			h.zone = zone
+		}
+	}
 }
 
 // FamilyOption configures a FamilyHandler (functional options).
@@ -150,7 +174,7 @@ func WithFamilyStatements(src StatementSource) FamilyOption {
 // finance/grades/attendance/catalog may be nil for a handler that only serves
 // the routes that do not use them.
 func NewFamilyHandler(students FamilyStudentsReader, comms FamilyCommsReader, finance AccountReader, grades GradeEntriesReader, attendance AttendanceRangeReader, catalog FamilyCatalogReader, opts ...FamilyOption) *FamilyHandler {
-	h := &FamilyHandler{students: students, comms: comms, finance: finance, grades: grades, attendance: attendance, catalog: catalog, now: time.Now}
+	h := &FamilyHandler{students: students, comms: comms, finance: finance, grades: grades, attendance: attendance, catalog: catalog, zone: time.UTC, now: time.Now}
 	for _, opt := range opts {
 		opt(h)
 	}
@@ -227,7 +251,7 @@ func (h *FamilyHandler) ListStudents(w http.ResponseWriter, r *http.Request) {
 			writeConnectError(w, err)
 			return
 		}
-		out = append(out, toFamilyStudentResponse(student))
+		out = append(out, h.familyStudent(r.Context(), student))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"students": out})
 }
@@ -405,10 +429,16 @@ type familyStudentResponse struct {
 	MaternalLastName string `json:"maternalLastName"`
 	Level            string `json:"level"`   // the school's name for the level
 	LevelID          string `json:"levelId"` // the config level id
-	GradeGroup       string `json:"gradeGroup"`
+	// GradeGroup is the bare letter stored on the pupil, kept for older apps.
+	GradeGroup string `json:"gradeGroup"`
+	// GroupLabel is the group as every screen and receipt names it,
+	// "3° PRIMARIA · B" (ISSUE-T14-108); the letter when there is no label.
+	GroupLabel string `json:"groupLabel"`
 }
 
-func toFamilyStudentResponse(s client.StudentResult) familyStudentResponse {
+// familyStudent is a child's record as the family reads it, its group named
+// in full for the school's today.
+func (h *FamilyHandler) familyStudent(ctx context.Context, s client.StudentResult) familyStudentResponse {
 	return familyStudentResponse{
 		ID:               s.ID,
 		FirstName:        s.FirstName,
@@ -417,7 +447,27 @@ func toFamilyStudentResponse(s client.StudentResult) familyStudentResponse {
 		Level:            s.Level,
 		LevelID:          s.LevelID,
 		GradeGroup:       s.GradeGroup,
+		GroupLabel:       h.groupLabel(ctx, s),
 	}
+}
+
+// groupLabel names the child's group on the school's today through the same
+// labeler the receipts use. It is a name, not a reason to fail the read: with
+// no labeler, no label, or a lookup that failed, it is the stored letter.
+func (h *FamilyHandler) groupLabel(ctx context.Context, s client.StudentResult) string {
+	if h.groups == nil {
+		return s.GradeGroup
+	}
+	today := schoolcal.Date(h.now(), h.zone).Format(time.DateOnly)
+	label, found, err := h.groups.StudentGroupLabel(ctx, s.ID, today)
+	if err != nil {
+		slog.WarnContext(ctx, "group lookup failed; the family reads the stored group", "student_id", s.ID, "error", err)
+		return s.GradeGroup
+	}
+	if !found || label == "" {
+		return s.GradeGroup
+	}
+	return label
 }
 
 // familyProfileResponse is the child's core record plus the current active
@@ -455,7 +505,7 @@ func (h *FamilyHandler) Profile(w http.ResponseWriter, r *http.Request) {
 		writeConnectError(w, err)
 		return
 	}
-	profile := familyProfileResponse{familyStudentResponse: toFamilyStudentResponse(student)}
+	profile := familyProfileResponse{familyStudentResponse: h.familyStudent(r.Context(), student)}
 	if current, ok := currentEnrollment(enrollments); ok {
 		res := toEnrollmentResponse(current)
 		profile.CurrentEnrollment = &res
