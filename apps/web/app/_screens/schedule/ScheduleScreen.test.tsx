@@ -166,6 +166,19 @@ describe("Horarios — la semana (T16)", () => {
     expect(within(dialog).getByLabelText("Fin")).toHaveAttribute("max", "20:00");
   });
 
+  // ISSUE-T14-205: imported data mixes "1° B" and "1º B"; without the level two
+  // groups read alike. Every option names grade, level and letter, school order.
+  it("T14-205 · the group picker names each group with its level, in school order", async () => {
+    m.getBoard.mockResolvedValue(sampleBoard());
+    const user = renderManager();
+    await chooseGroup3A(user);
+    await user.click(screen.getByRole("button", { name: "Agregar clase el martes a las 09:00" }));
+    const picker = within(screen.getByRole("dialog")).getByLabelText("Grupo");
+    const labels = within(picker).getAllByRole("option").map((o) => o.textContent).filter((t) => t !== "" && t !== "Elige una opción");
+
+    expect(labels).toEqual(["3.º Primaria · A", "3.º Primaria · B", "1.º Secundaria · A"]);
+  });
+
   it("ISSUE-028 · a class saved at an hour the picker would not offer keeps it", async () => {
     const board = sampleBoard();
     const early = { ...board.blocks[0]!, startsAt: "06:32", endsAt: "07:20" };

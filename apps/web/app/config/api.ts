@@ -735,8 +735,11 @@ export function deleteGroup(baseURL: string, id: string): Promise<void> {
   return deleteResource(baseURL, `/groups/${encodeURIComponent(id)}`);
 }
 
-/** A group named for a picker: its grade and its letter, "1° PRIMARIA · A". */
-export interface LabelledGroup extends Group {
+/** What labelGroups reads of a group; the schedule board's slim copy fits too. */
+export type GroupRef = Pick<Group, "id" | "gradeLevelId" | "name">;
+
+/** The names labelGroups adds to a group. */
+export interface GroupLabelFields {
   label: string;
   /** The grade's own name ("1°"); absent when the grade is unknown. */
   gradeName?: string;
@@ -745,6 +748,9 @@ export interface LabelledGroup extends Group {
   /** The grade's ordinal; absent when the grade is unknown. */
   ordinal?: number;
 }
+
+/** A group named for a picker: its grade and its letter, "1° PRIMARIA · A". */
+export interface LabelledGroup extends Group, GroupLabelFields {}
 
 /**
  * The cycle's groups, each labelled with its grade. Every grade has an "A", so
@@ -768,11 +774,11 @@ export async function listLabelledGroups(baseURL: string, cycleId: string, grade
  * not already carry its level, the level is added ("1° PRIMARIA · A").
  * They come back in school order: level, grade, then name.
  */
-export function labelGroups(
-  groups: readonly Group[],
+export function labelGroups<G extends GroupRef>(
+  groups: readonly G[],
   grades: readonly GradeLevel[],
   levels: readonly Pick<Level, "id" | "name" | "sortOrder">[] = [],
-): LabelledGroup[] {
+): (G & GroupLabelFields)[] {
   const levelName = new Map(levels.map((l) => [l.id, l.name]));
   const gradeById = new Map(grades.map((g) => [g.id, g]));
   // In school order (ISSUE-018): every picker of groups reads them from here.
