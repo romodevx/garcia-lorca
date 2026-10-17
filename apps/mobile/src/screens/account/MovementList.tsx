@@ -5,6 +5,8 @@ import type { IconName } from "../../icons";
 import { useTheme, type TintName } from "../../theme";
 import { Card, Chip, ListRow, TintIcon } from "../../ui";
 import { formatDate, pesos } from "../format";
+import { PdfStatus } from "./PdfStatus";
+import type { ReceiptStatus } from "./useReceiptDownload";
 
 /** How each kind of ledger line looks. The ledger itself is finance's (T7). */
 const KIND_LOOK: Record<MovementKind, { icon: IconName; tint: TintName; label: string; credit: boolean }> = {
@@ -42,19 +44,29 @@ interface MovementListProps {
   movements: readonly FamilyMovement[];
   /** Opens a payment's receipt; rows without a deposit are not offered one. */
   onOpenReceipt?: (movement: FamilyMovement) => void;
+  /** The tapped receipt's download: shown under its own row. */
+  receiptStatus?: ReceiptStatus | null;
 }
 
 /** A card of ledger lines, in the order given. */
-export function MovementList({ movements, onOpenReceipt }: MovementListProps): ReactElement {
+export function MovementList({ movements, onOpenReceipt, receiptStatus }: MovementListProps): ReactElement {
+  // A deposit paid in two tenders has two lines: its status sits under the first.
+  const statusAt = receiptStatus ? movements.findIndex((m) => m.depositId === receiptStatus.depositId) : -1;
   return (
     <Card>
       {movements.map((m, i) => (
-        <MovementRow
-          key={`${m.kind}-${m.date}-${i}`}
-          movement={m}
-          divider={i > 0}
-          onOpenReceipt={onOpenReceipt !== undefined && m.depositId ? () => onOpenReceipt(m) : undefined}
-        />
+        <View key={`${m.kind}-${m.date}-${i}`}>
+          <MovementRow
+            movement={m}
+            divider={i > 0}
+            onOpenReceipt={onOpenReceipt !== undefined && m.depositId ? () => onOpenReceipt(m) : undefined}
+          />
+          {i === statusAt && receiptStatus && receiptStatus.state.status !== "idle" ? (
+            <View testID={`receipt-status-${receiptStatus.depositId}`} style={styles.rowStatus}>
+              <PdfStatus state={receiptStatus.state} />
+            </View>
+          ) : null}
+        </View>
       ))}
     </Card>
   );
@@ -112,5 +124,6 @@ const styles = StyleSheet.create({
   rowSub: { fontSize: 12.5, fontWeight: "600", marginTop: 3 },
   trail: { alignItems: "flex-end", gap: 4 },
   amountVal: { fontSize: 16, fontWeight: "700", letterSpacing: -0.2 },
+  rowStatus: { paddingHorizontal: 16, paddingBottom: 12 },
   receiptCue: { fontSize: 13, fontWeight: "800", textDecorationLine: "underline" },
 });

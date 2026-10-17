@@ -12,7 +12,8 @@ import { MovementList } from "./account/MovementList";
 import { splitLedger } from "./account/ledgerView";
 import { useReceiptDownload } from "./account/useReceiptDownload";
 import { AsyncErrorState, AsyncLoading, StaleNotice } from "./AsyncStates";
-import { usePdfDownload, type PdfDownloadState } from "./grades/usePdfDownload";
+import { usePdfDownload } from "./grades/usePdfDownload";
+import { PdfStatus } from "./account/PdfStatus";
 import { formatDayWithYear, pesos, totalBalanceLine } from "./format";
 
 const PDF_MESSAGES = {
@@ -42,6 +43,7 @@ export function AccountScreen(): ReactElement {
         ? null
         : {
             path: statementPdfPath(selectedChildId),
+            kind: "estado-de-cuenta",
             studentId: selectedChildId,
             fallbackName: "estado-de-cuenta.pdf",
             title: "Estado de cuenta",
@@ -166,8 +168,9 @@ export function AccountScreen(): ReactElement {
       {ledger.happened.length === 0 && ledger.upcoming.length === 0 ? (
         <EmptyState icon="receipt" title="Sin movimientos" subtitle="Aquí verás los cargos y pagos de tu cuenta." />
       ) : null}
-      <PdfStatus state={receipt.state} />
-      {ledger.happened.length > 0 ? <MovementList movements={ledger.happened} onOpenReceipt={receipt.openReceipt} /> : null}
+      {ledger.happened.length > 0 ? (
+        <MovementList movements={ledger.happened} onOpenReceipt={receipt.openReceipt} receiptStatus={receipt.status} />
+      ) : null}
       {ledger.upcoming.length > 0 ? (
         <>
           <SectionLabel>Próximos cargos</SectionLabel>
@@ -183,26 +186,6 @@ export function AccountScreen(): ReactElement {
   );
 }
 
-/** A download's progress or failure, in words; nothing while idle. */
-function PdfStatus({ state }: { state: PdfDownloadState }): ReactElement | null {
-  const theme = useTheme();
-  if (state.status === "downloading") {
-    return (
-      <Text accessibilityLiveRegion="polite" style={[styles.status, { color: theme.colors.text2, fontFamily: theme.fonts.uiSemi }]}>
-        Descargando…
-      </Text>
-    );
-  }
-  if (state.status === "failed") {
-    return (
-      <Text accessibilityRole="alert" style={[styles.status, { color: theme.colors.bad, fontFamily: theme.fonts.uiSemi }]}>
-        {state.message}
-      </Text>
-    );
-  }
-  return null;
-}
-
 const styles = StyleSheet.create({
   balanceHero: { padding: 22, alignItems: "center" },
   cardLink: { fontSize: 16, marginLeft: 12 },
@@ -212,5 +195,4 @@ const styles = StyleSheet.create({
   amount: { fontSize: 44, fontWeight: "800", letterSpacing: -1.5 },
   center: { alignItems: "center", marginTop: 12 },
   action: { marginTop: 18, gap: 10 },
-  status: { fontSize: 16, fontWeight: "600", textAlign: "center" },
 });

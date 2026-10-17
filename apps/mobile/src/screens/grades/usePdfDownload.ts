@@ -8,6 +8,8 @@ export type PdfDownloadState =
 
 export interface PdfDownloadTarget {
   path: string;
+  /** The kind of document: each kind keeps its own cache folder. */
+  kind: string;
   studentId: string;
   /** Used when the server's filename is unavailable, from fallbackPdfName. */
   fallbackName: string;
@@ -61,6 +63,7 @@ export function usePdfDownload(
       try {
         const uri = await downloadPdf({
           path: target.path,
+          kind: target.kind,
           studentId: target.studentId,
           fallbackName: target.fallbackName,
           onProgress: (progress) => update({ status: "downloading", progress }),

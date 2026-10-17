@@ -7,7 +7,7 @@ jest.mock("../../files/reportCardPdf", () => {
   return { ...actual, downloadPdf: jest.fn(), sharePdf: jest.fn(async () => undefined) };
 });
 
-const target = { path: "/p", studentId: "s1", fallbackName: "boleta-t1-v1.pdf", title: "Boleta T1" };
+const target = { path: "/p", kind: "boleta", studentId: "s1", fallbackName: "boleta-t1-v1.pdf", title: "Boleta T1" };
 
 describe("usePdfDownload", () => {
   beforeEach(() => jest.clearAllMocks());
