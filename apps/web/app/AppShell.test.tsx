@@ -84,6 +84,7 @@ vi.mock("./admin/api", async (importOriginal) => ({
 
 vi.mock("./students/api", () => ({
   listStudents: vi.fn().mockResolvedValue([]),
+  listStudentsWithRooms: vi.fn().mockResolvedValue([]),
   listEnrollments: vi.fn().mockResolvedValue([]),
   listContacts: vi.fn().mockResolvedValue([]),
   listNotes: vi.fn().mockResolvedValue([]),
@@ -818,6 +819,25 @@ describe("la dirección manda sobre la pantalla", () => {
     await submitLogin(user);
     await screen.findByRole("heading", { name: /Módulos/ });
     expect(fakePath()).toBe("/");
+  });
+
+  it("cerrar sesión borra el destino pendiente: la siguiente persona en la pestaña no hereda la liga (revisión #146)", async () => {
+    resetFakeRouter("/finanzas");
+    mockMe.mockResolvedValue(OWNER_ME);
+    mockLogout.mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    render(
+      <Providers flags={{ module_finance: true }}>
+        <AppShell />
+      </Providers>
+    );
+    await screen.findByRole("heading", { name: "Finanzas" });
+    window.sessionStorage.setItem("gl.pendingDestination", "/horarios");
+
+    await clickLogout(user);
+
+    await screen.findByRole("button", { name: "Entrar al sistema" });
+    expect(window.sessionStorage.getItem("gl.pendingDestination")).toBeNull();
   });
 
   it("cerrar sesión no deja el tablero en el historial", async () => {

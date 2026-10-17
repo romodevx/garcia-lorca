@@ -440,6 +440,9 @@ export function AppShell(): ReactElement {
     // The SDK is imported lazily and only when it is in use — signing out of a
     // session that was never started is not worth 468 KB.
     void endSession(API_URL, apiLogout, providerLoginEnabled(), () => import("./auth/firebase"));
+    // A link left pending in this tab belongs to whoever opened it, not to the
+    // next person who signs in at the same desk.
+    forgetPendingDestination();
     setPrincipal(undefined);
     setAuthenticated(false);
     goReplacing({ screen: "login" });
