@@ -152,6 +152,6 @@ describe("draftFromActivity", () => {
     };
     const draft = draftFromActivity(activity);
     expect(draft.lateFee).toBe("1,250.00");
-    expect(draft.options[0].amount).toBe("1,200.00");
+    expect(draft.options[0]?.amount).toBe("1,200.00");
   });
 });

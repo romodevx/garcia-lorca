@@ -36,10 +36,11 @@ const jumper: UniformItem = {
 const bare: UniformItem = { ...jumper, id: "it-2", name: "Playera polo", sizes: [] };
 
 /** Answers every read; a write waits on `hold` when given, so "busy" can be seen. */
-function stub(items: UniformItem[], hold?: Promise<Response>): ReturnType<typeof vi.fn> {
+function stub(items: UniformItem[], hold?: Promise<Response>, cutClosed = false): ReturnType<typeof vi.fn> {
   const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     if (init?.method === "POST" || init?.method === "PUT") return hold ?? Promise.resolve(jsonResponse({}));
+    if (url.includes("/cash-up")) return Promise.resolve(jsonResponse(cutClosed ? { closure: { id: "cut", day: "2026-10-16" } } : {}));
     if (url.includes("/students")) return Promise.resolve(jsonResponse({ students: [] }));
     if (url.includes("/uniforms/levels")) return Promise.resolve(jsonResponse({ levels: [] }));
     return Promise.resolve(jsonResponse({ items }));
@@ -187,5 +188,25 @@ describe("Cobrar y entregar", () => {
     expect(screen.getByRole("button", { name: /Cobrando/ })).toHaveAttribute("aria-busy", "true");
     expect(writes(fetchMock)).toBe(1);
     await act(async () => release(jsonResponse({ id: "ord-1", folio: "U-1", totalCents: 65000, lines: [], fulfillments: [] }, 201)));
+  });
+});
+
+// ISSUE-026 (found again in /qa): a counter sale enters the day's cut too.
+describe("Cobrar y entregar con el corte cerrado", () => {
+  it("warns at the till, without blocking the sale", async () => {
+    stub([jumper], undefined, true);
+    render(<UniformsScreen onBack={() => {}} permissions={ALL} />);
+
+    expect(await screen.findByText(/El corte de hoy ya se cerró/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Cobrar y entregar/ })).toBeEnabled();
+  });
+
+  it("says nothing while the day is open", async () => {
+    const fetchMock = stub([jumper]);
+    render(<UniformsScreen onBack={() => {}} permissions={ALL} />);
+    await waitFor(() => expect(screen.getByText("Suéter verde")).toBeInTheDocument());
+    await waitFor(() => expect(fetchMock.mock.calls.some(([u]) => String(u).includes("/cash-up"))).toBe(true));
+
+    expect(screen.queryByText(/ya se cerró/)).toBeNull();
   });
 });

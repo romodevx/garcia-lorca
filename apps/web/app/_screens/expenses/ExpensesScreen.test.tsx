@@ -195,6 +195,25 @@ describe("ExpensesScreen (T10)", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: /Nueva categoría/ })).toHaveFocus());
   });
 
+  // Tech-lead: the focus request is spent once; a later visit to Categorías
+  // must not pull the cursor onto "Nueva categoría" again.
+  it("takes the focus to Nueva categoría once, not on every later visit", async () => {
+    m.listCategories.mockResolvedValue([]);
+    const user = userEvent.setup();
+    renderScreen();
+    await screen.findAllByTestId("expense-row");
+    await user.click(screen.getByRole("button", { name: /Registrar egreso/ }));
+    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Crear la primera categoría" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: /Nueva categoría/ })).toHaveFocus());
+
+    await user.click(screen.getByRole("tab", { name: /^Egresos$/ }));
+    const backTab = screen.getByRole("tab", { name: /Categorías/ });
+    await user.click(backTab);
+
+    expect(screen.getByRole("button", { name: /Nueva categoría/ })).not.toHaveFocus();
+    expect(backTab).toHaveFocus();
+  });
+
   it("only retired categories count as none", async () => {
     m.listCategories.mockResolvedValue([{ id: CAT, name: "Papelería", active: false }]);
     const user = userEvent.setup();

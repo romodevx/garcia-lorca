@@ -50,7 +50,9 @@ export function AssignmentsPanel({
   const [subjectId, setSubjectId] = useState("");
   const [teacherId, setTeacherId] = useState("");
   const [assignments, setAssignments] = useState<TeachingAssignment[]>([]);
+  // The ref stops a second press inside one render; the state shows it.
   const pending = useRef(false);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
   const required = useRequired(REQUIRED);
 
@@ -105,12 +107,14 @@ export function AssignmentsPanel({
     if (pending.current) return;
     if (!required.check({ cycleId, groupId, subjectId, teacherId })) return;
     pending.current = true;
+    setSaving(true);
     setError(undefined);
     try {
       await onCreate({ groupId, subjectId, teacherId });
     } catch (cause) {
       setError(describeAssignTeacherError(cause));
       pending.current = false;
+      setSaving(false);
       return;
     }
     setSubjectId("");
@@ -123,6 +127,7 @@ export function AssignmentsPanel({
       setError("Se asignó, pero no pudimos releer la lista. Recarga la página.");
     } finally {
       pending.current = false;
+      setSaving(false);
     }
   };
 
@@ -203,8 +208,8 @@ export function AssignmentsPanel({
             help="Quién la imparte. Sólo aparecen los docentes dados de alta."
           />
         </div>
-        <Btn type="submit" icon="plus">
-          Asignar profesor
+        <Btn type="submit" icon="plus" busy={saving}>
+          {saving ? "Asignando…" : "Asignar profesor"}
         </Btn>
       </form>
       {error !== undefined && <ErrorAlert message={error} />}

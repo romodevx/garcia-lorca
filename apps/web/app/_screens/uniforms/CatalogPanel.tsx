@@ -284,7 +284,7 @@ function CreateDrawer({
         <Btn kind="ghost" onClick={onClose}>
           Cancelar
         </Btn>
-        <Btn icon="check" onClick={() => void save()} busy={pending} style={{ opacity: pending ? 0.6 : 1 }}>
+        <Btn icon="check" onClick={() => void save()} busy={pending}>
           {pending ? "Guardando…" : "Crear y poner tallas"}
         </Btn>
       </div>

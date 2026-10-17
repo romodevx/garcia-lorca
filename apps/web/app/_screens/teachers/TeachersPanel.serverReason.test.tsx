@@ -56,3 +56,16 @@ describe("TeachersPanel — the server's reason (ISSUE-012)", () => {
     expect(await screen.findByText("No se pudo crear al profesor. Revisa tu conexión e intenta de nuevo.")).toBeInTheDocument();
   });
 });
+
+describe("TeachersPanel — Crear profesor while saving", () => {
+  it("is busy, not disabled", async () => {
+    const user = userEvent.setup();
+    render(<TeachersPanel teachers={[]} onCreate={vi.fn(() => new Promise<void>(() => {}))} />);
+
+    await fillAndSave(user, "ana@colegio.mx");
+
+    const busy = screen.getByRole("button", { name: /Guardando/ });
+    expect(busy).toBeEnabled();
+    expect(busy).toHaveAttribute("aria-busy", "true");
+  });
+});

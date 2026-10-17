@@ -16,20 +16,23 @@ export function CategoriesPanel({
   canWrite,
   onChanged,
   focusNew = false,
+  onFocused,
 }: {
   categories: readonly ExpenseCategory[];
   canWrite: boolean;
   onChanged: () => void;
   /** Arrived from "Crear la primera categoría": the cursor waits on "Nueva categoría". */
   focusNew?: boolean;
+  /** The focus request was spent: the screen clears it, so a later visit keeps its own focus. */
+  onFocused?: () => void;
 }): ReactElement {
   const [error, setError] = useState<string | undefined>(undefined);
-  const root = useRef<HTMLDivElement>(null);
+  const addButton = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (!focusNew) return;
-    const add = [...(root.current?.querySelectorAll("button") ?? [])].find((b) => b.textContent?.includes("Nueva categoría"));
-    add?.focus();
-  }, [focusNew]);
+    addButton.current?.focus();
+    onFocused?.();
+  }, [focusNew, onFocused]);
 
   const add = async (values: Record<string, string>): Promise<void> => {
     setError(undefined);
@@ -53,7 +56,7 @@ export function CategoriesPanel({
   };
 
   return (
-    <div ref={root} style={{ display: "flex", flexDirection: "column", gap: 12, padding: 20, borderRadius: "var(--r-xl)", background: "var(--surface)", border: "1px solid var(--border)", boxShadow: "var(--shadow-card)" }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 12, padding: 20, borderRadius: "var(--r-xl)", background: "var(--surface)", border: "1px solid var(--border)", boxShadow: "var(--shadow-card)" }}>
       <p style={{ margin: 0, fontSize: 14, color: "var(--text-muted)" }}>
         Las categorías ordenan los egresos en el balance y los reportes. Una categoría desactivada ya no se ofrece al registrar, pero sus egresos se conservan.
       </p>
@@ -77,6 +80,7 @@ export function CategoriesPanel({
       {canWrite && (
         <InlineCreateRow
           addLabel="Nueva categoría"
+          addButtonRef={addButton}
           columns={[{ key: "name", label: "Nombre", kind: "text", uppercase: true, required: true, help: "Cómo se llama el tipo de gasto: PAPELERÍA, MANTENIMIENTO, NÓMINA." }]}
           onCreate={add}
         />

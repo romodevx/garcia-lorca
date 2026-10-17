@@ -105,6 +105,7 @@ export function ExpensesScreen({ onBack, permissions, today: injectedToday }: Ex
   ];
 
   const noActiveCategory = categories !== null && !categories.some((c) => c.active);
+  const clearFocusNewCategory = useCallback(() => setFocusNewCategory(false), []);
   const createFirstCategory = (): void => {
     setDrawer(null);
     setTab("categories");
@@ -182,7 +183,7 @@ export function ExpensesScreen({ onBack, permissions, today: injectedToday }: Ex
           />
         )}
         {tab === "reports" && <ReportsPanel today={today} />}
-        {tab === "categories" && <CategoriesPanel categories={categories ?? []} canWrite={canWrite} onChanged={loadCategories} focusNew={focusNewCategory} />}
+        {tab === "categories" && <CategoriesPanel categories={categories ?? []} canWrite={canWrite} onChanged={loadCategories} focusNew={focusNewCategory} onFocused={clearFocusNewCategory} />}
       </div>
 
       {canWrite && (

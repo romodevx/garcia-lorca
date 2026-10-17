@@ -17,7 +17,7 @@ export interface SchoolCatalogue {
 
 /** Comparator: level → grade → name; a group whose grade/level is unknown sorts last. */
 export function schoolOrder(cat: SchoolCatalogue): (a: Group, b: Group) => number {
-  const levelRank = new Map(cat.levels.map((l, i) => [l.id, l.sortOrder ?? i]));
+  const levelRank = new Map(cat.levels.map((l, i) => [l.id, l.sortOrder ?? i + 1]));
   const gradeById = new Map(cat.grades.map((g) => [g.id, g]));
   const rank = (g: Group): { orphan: number; level: number; levelId: string; ordinal: number } => {
     const grade = gradeById.get(g.gradeLevelId);

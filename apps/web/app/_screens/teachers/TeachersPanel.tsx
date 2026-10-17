@@ -128,8 +128,8 @@ export function TeachersPanel({ teachers, onCreate, onOpenLoad, onGrantAccess, a
             help="El correo donde el docente recibirá su acceso."
             error={required.errors.email ?? emailShape.error}
           />
-          <Btn type="submit" icon="plus">
-            Crear profesor
+          <Btn type="submit" icon="plus" busy={pending}>
+            {pending ? "Guardando…" : "Crear profesor"}
           </Btn>
         </div>
       </form>

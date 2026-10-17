@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -71,6 +71,22 @@ describe("CollectDrawer — the day's cut already closed (ISSUE-026)", () => {
     await waitFor(() => expect(finance.registerDeposit).toHaveBeenCalledTimes(1));
   });
 
+  // Tech-lead: a live region announces a change only when it is already in
+  // the page; mounting it with its text reads as nothing on some readers.
+  it("keeps the status region mounted and only changes its text", async () => {
+    const answer = { resolve: (_c: financeApi.CashUp): void => {} };
+    finance.getCashUp.mockReturnValue(new Promise<financeApi.CashUp>((r) => { answer.resolve = r; }));
+    open();
+
+    const region = screen.getByTestId("closed-cut-status");
+    expect(region).toHaveAttribute("role", "status");
+    expect(region).toHaveTextContent("");
+    await act(async () => answer.resolve(dayCut(true)));
+
+    expect(screen.getByTestId("closed-cut-status")).toBe(region);
+    expect(region).toHaveTextContent(CLOSED_TODAY);
+  });
+
   it("says nothing while the day is open", async () => {
     finance.getCashUp.mockResolvedValue(dayCut(false));
     open();
@@ -95,5 +111,26 @@ describe("CollectDrawer — the day's cut already closed (ISSUE-026)", () => {
 
     await screen.findAllByDisplayValue("3,200.00");
     expect(screen.queryByText(/ya se cerró/)).toBeNull();
+  });
+});
+
+describe("CollectDrawer — Cobrar while saving", () => {
+  it("is busy, not disabled, and a double click sends one payment", async () => {
+    finance.getCashUp.mockResolvedValue(dayCut(false));
+    finance.registerDeposit.mockReturnValue(new Promise<financeApi.DepositResult>(() => {}));
+    open();
+    await screen.findAllByDisplayValue("3,200.00");
+
+    // Two presses inside one render: state cannot see the first, a ref can.
+    const cobrar = screen.getByRole("button", { name: "Cobrar" });
+    act(() => {
+      cobrar.click();
+      cobrar.click();
+    });
+
+    const busy = await screen.findByRole("button", { name: "Cobrando…" });
+    expect(busy).toBeEnabled();
+    expect(busy).toHaveAttribute("aria-busy", "true");
+    expect(finance.registerDeposit).toHaveBeenCalledTimes(1);
   });
 });

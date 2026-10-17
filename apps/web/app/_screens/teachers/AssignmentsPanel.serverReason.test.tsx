@@ -77,3 +77,16 @@ describe("AssignmentsPanel — the server's reason (ISSUE-012)", () => {
     expect(screen.queryByText(/No se pudo asignar/)).toBeNull();
   });
 });
+
+describe("AssignmentsPanel — Asignar profesor while saving", () => {
+  it("is busy, not disabled", async () => {
+    const user = userEvent.setup();
+    renderPanel(vi.fn(() => new Promise<void>(() => {})));
+
+    await chooseAndAssign(user);
+
+    const busy = screen.getByRole("button", { name: /Asignando/ });
+    expect(busy).toBeEnabled();
+    expect(busy).toHaveAttribute("aria-busy", "true");
+  });
+});

@@ -7,6 +7,8 @@ import { DateField, MoneyField, useFocusFirstInvalid } from "../../_design/form"
 import { TenderEditor } from "../../_design/payments/TenderEditor";
 import { AMOUNT_ERROR, tenderLabel } from "../../_design/payments/tenders";
 import { useTenders } from "../../_design/payments/useTenders";
+import { ClosedCutNotice } from "../../_design/payments/ClosedCutNotice";
+import { useClosedCut } from "../../_design/payments/useClosedCut";
 import {
   getAccount,
   getExpected,
@@ -23,7 +25,6 @@ import { groupByCharge } from "../../finance/allocations";
 import { API_URL } from "../../api-url";
 import { localISODate, shortDayLabel } from "../../_lib/localDate";
 import { DebtList } from "./DebtList";
-import { useClosedCut } from "./useClosedCut";
 import { ReceiptActions } from "../receipts/ReceiptActions";
 import { formatPesosInput, formatCents, pesosToCents } from "../../_lib/money";
 import { formatStudentName } from "../../_design/students/studentName";
@@ -174,6 +175,8 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
   const [preview, setPreview] = useState<{ allocations: Payment[]; surcharges: Charge[]; unallocatedCents: number } | null>(null);
   const [receipt, setReceipt] = useState<DepositResult | null>(null);
   const [saving, setSaving] = useState(false);
+  // A ref and not the state: two presses inside one render both read `saving` as false.
+  const inFlight = useRef(false);
   const [error, setError] = useState<string | undefined>(undefined);
   const [attemptKey] = useState(newAttemptKey);
   const describe = useRef<Map<string, string>>(new Map());
@@ -287,7 +290,7 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
   }, [onClose]);
 
   const submit = useCallback(async (): Promise<void> => {
-    if (saving) {
+    if (inFlight.current) {
       return;
     }
     // Every problem is marked at once, then the view goes to the first of them.
@@ -302,6 +305,7 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
     }
     const split = tenders.toTenders();
     const [first] = split;
+    inFlight.current = true;
     setSaving(true);
     setError(undefined);
     try {
@@ -324,9 +328,10 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "No se pudo registrar el cobro.");
     } finally {
+      inFlight.current = false;
       setSaving(false);
     }
-  }, [saving, student.id, cents, capCents, tenders, attemptKey, grantEarly, sentDate, paidOn, day, choice, focusFirstInvalid, onCollected]);
+  }, [student.id, cents, capCents, tenders, attemptKey, grantEarly, sentDate, paidOn, day, choice, focusFirstInvalid, onCollected]);
 
   return (
     <DrawerShell
@@ -441,7 +446,7 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
                     help="El día en que la familia pagó. Si capturas tarde, pon ese día: los recargos, el pronto pago y el precio de la inscripción se calculan con él."
                   />
 
-                  {cutClosed && <ClosedCutNotice day={sentDate} />}
+                  <ClosedCutNotice closed={cutClosed} day={sentDate} />
 
                   {error !== undefined && <p role="alert" style={{ color: "var(--bad-fg)", fontSize: 14, margin: 0 }}>{error}</p>}
                 </div>
@@ -456,16 +461,6 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
           )}
       </>
     </DrawerShell>
-  );
-}
-
-/** The day's cut is closed: collecting is allowed, and this is what it does to the cut. */
-function ClosedCutNotice({ day }: { day: string }): ReactElement {
-  const which = day === "" ? "El corte de hoy" : `El corte del ${shortDayLabel(day)}`;
-  return (
-    <p role="status" style={{ margin: 0, padding: "12px 16px", borderRadius: "var(--r-md)", background: "var(--warn-bg)", color: "var(--warn-fg)", fontSize: 14, fontWeight: 600 }}>
-      {`${which} ya se cerró. Este cobro lo dejará marcado como modificado después del cierre.`}
-    </p>
   );
 }
 

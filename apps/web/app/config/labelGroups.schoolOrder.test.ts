@@ -35,4 +35,15 @@ describe("labelGroups — school order (ISSUE-018)", () => {
     const runs = ids.map(levelOf).filter((l, i, all) => i === 0 || all[i - 1] !== l);
     expect(runs).toHaveLength(3);
   });
+
+  // sortOrder is 1-based ("first = 1"): a level without one ranks by its
+  // 1-based list position, so it never jumps ahead of the level the school
+  // numbered first just by being listed first.
+  it("ranks a level without sortOrder on the same 1-based scale", () => {
+    const levels = [level("z", "SIN ORDEN"), level("a", "PRIMERO", 1)];
+    const twoGrades = [grade("z1", "z", 1), grade("a1", "a", 1)];
+    const ids = labelGroups([group("zg", "z1", "A"), group("ag", "a1", "A")], twoGrades, levels).map((g) => g.id);
+
+    expect(ids).toEqual(["ag", "zg"]);
+  });
 });
