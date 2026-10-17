@@ -52,7 +52,11 @@ All go to the single per-domain topic **`student-events`** (mirrors finance's
 The legacy import (`ImportStudents`, ADR 0033) publishes **neither**: the
 `ImportService` has no publisher. Its pupils enter ENROLLED and their
 enrollments carry `origin = 'import'`, which is what finance reads to never bill
-their inscription. One transaction per pupil; group capacity is not counted
+their inscription. The import enrollment is dated the cycle's first day (00:00
+school time; owner decision 2026-10-17, ADR 0033 amendment), so tuition runs
+from September; a re-upload moves earlier imports dated later back to it
+(`MoveImportedToCycleStart`, idempotent, never `withdrawn_on`). One
+transaction per pupil; group capacity is not counted
 (the import sizes its groups in config first). Permission (`students:import`)
 and flags are enforced by the gateway.
 

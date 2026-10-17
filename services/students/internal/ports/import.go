@@ -2,6 +2,7 @@ package ports
 
 import (
 	"context"
+	"time"
 
 	"github.com/garcia-lorca/services/students/internal/domain"
 )
@@ -33,6 +34,18 @@ type ImportedPupil struct {
 	BankReferenceDropped bool
 }
 
+// CycleStartMove asks to move earlier imports back to the first day of their
+// cycle (owner decision 2026-10-17): the import enrollments (origin import) of
+// these pupils in CycleID dated after StartsAt get StartsAt. Every other
+// enrollment, and a withdrawn one's end date, is left alone. DryRun only
+// reports who would move.
+type CycleStartMove struct {
+	CycleID    string
+	StartsAt   time.Time
+	StudentIDs []string
+	DryRun     bool
+}
+
 // ImportRepository is the store side of the legacy import. All access is
 // tenant-scoped for RLS.
 //
@@ -45,8 +58,11 @@ type ImportedPupil struct {
 //     taken meanwhile is domain.ErrCURPTaken; a reference taken between the
 //     check and the insert is domain.ErrBankReferenceTaken. Group capacity is
 //     NOT checked: the import planned its seats in config beforehand.
+//   - MoveImportedToCycleStart applies (or, dry, previews) a CycleStartMove in
+//     one statement and returns the pupils it moved; a second run moves nobody.
 type ImportRepository interface {
 	StudentsByCURP(ctx context.Context, curps []string) (map[string]ExistingPupil, error)
 	BankReferencesTaken(ctx context.Context, refs []string) (map[string]bool, error)
 	ImportStudent(ctx context.Context, cmd ImportCommand) (ImportedPupil, error)
+	MoveImportedToCycleStart(ctx context.Context, move CycleStartMove) ([]string, error)
 }
