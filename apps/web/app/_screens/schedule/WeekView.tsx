@@ -9,19 +9,21 @@ import { Toast } from "../../_design/Toast";
 import { UndoToast } from "../../_design/UndoToast";
 import { useUndoableRemoval } from "../../_design/useUndoableRemoval";
 import { byFullName, fullName } from "../../_lib/personName";
+import { spanishServerReason } from "../../_lib/serverReason";
 import { API_URL } from "../../api-url";
 import { deleteBlock, type ScheduleBoard, type ScheduleBlock } from "../../schedule/api";
 import { filterBlocks, indexBoard, NO_WEEK_FILTER, type WeekFilter } from "../../schedule/catalog";
 import { gridBounds, nowInSchoolZone } from "../../schedule/time";
 import { BlockDrawer, type DrawerTarget } from "./BlockDrawer";
 import { GridSettings } from "./GridSettings";
-import { EmptyState } from "./parts";
 import { WeekStepper } from "./UncoveredView";
 import type { ScheduleMode } from "./useScheduleBoard";
 import { useWeekChanges } from "./useWeekChanges";
+import { WeekEmptyState } from "./WeekEmptyState";
 import { WeekGrid } from "./WeekGrid";
 
 const TOAST_MS = 3000;
+const REMOVE_FAILED = "No se pudo quitar la clase.";
 
 export interface WeekViewProps {
   board: ScheduleBoard;
@@ -62,11 +64,19 @@ export function WeekView({ board, mode, canWrite, now, onChanged, version = 0 }:
   const remove = (block: ScheduleBlock, reason: string): void => {
     setTarget(null);
     removal.remove(block, ({ keepalive }) => {
-      // Hidden for good once sent: until the board is read again it still lists
-      // it, and a class back on screen invites a second DELETE (gate #142).
+      // Hidden while sent: until the board is read again it still lists it, and
+      // a class back on screen invites a second DELETE (gate #142). A refused
+      // DELETE gives it back (gate B4).
       setGone((prev) => new Set(prev).add(block.id));
       deleteBlock(API_URL, block.id, reason === "" ? undefined : reason, { keepalive })
-        .catch((err: unknown) => setToast(err instanceof Error ? err.message : "No se pudo quitar la clase."))
+        .catch((err: unknown) => {
+          setGone((prev) => {
+            const next = new Set(prev);
+            next.delete(block.id);
+            return next;
+          });
+          setToast((err instanceof Error ? spanishServerReason(err.message) : undefined) ?? REMOVE_FAILED);
+        })
         .finally(onChanged);
     });
   };
@@ -123,23 +133,3 @@ export function WeekView({ board, mode, canWrite, now, onChanged, version = 0 }:
     </div>
   );
 }
-
-/** Why the grid is empty, and what to do about it. */
-function WeekEmptyState({ board, mode, filter, shownCount, canWrite }: { board: ScheduleBoard; mode: ScheduleMode; filter: WeekFilter; shownCount: number; canWrite: boolean }): ReactElement | null {
-  if (mode === "teacher") return shownCount === 0 ? <EmptyState>Aún no tienes clases en el horario de este ciclo.</EmptyState> : null;
-  if (board.assignments.length === 0) {
-    return (
-      <EmptyState>
-        Este ciclo aún no tiene asignaciones de docentes. Una clase se arma con una de ellas: primero asigna a cada docente
-        sus materias y grupos en Docentes (carga académica) y vuelve aquí.
-      </EmptyState>
-    );
-  }
-  if (shownCount > 0) return null;
-  if (filter.groupId !== "") {
-    return <EmptyState>{canWrite ? "Este grupo aún no tiene clases — haz clic en un hueco para agregar una." : "Este grupo aún no tiene clases."}</EmptyState>;
-  }
-  if (filter.teacherId !== "") return <EmptyState>Este docente aún no tiene clases en el horario.</EmptyState>;
-  return <EmptyState>No hay clases con estos filtros. Elige un grupo para ver o armar su semana.</EmptyState>;
-}
-

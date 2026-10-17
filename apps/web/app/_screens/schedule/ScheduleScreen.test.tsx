@@ -383,6 +383,19 @@ describe("Horarios — cambios reversibles (T16)", () => {
     expect(screen.queryByRole("button", { name: /^Matemáticas, 3.º A/ })).not.toBeInTheDocument();
   });
 
+  // Gate B4 on #142: a refused DELETE must give the class back, not hide it for good.
+  it("shows a class again when its delete is refused", async () => {
+    m.deleteBlock.mockRejectedValue(new Error("No se pudo quitar la clase."));
+    const user = renderManager();
+    await chooseGroup3A(user);
+    await user.click(screen.getByRole("button", { name: /^Matemáticas, 3.º A/ }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Quitar clase" }));
+
+    await user.click(screen.getByRole("button", { name: "Cerrar aviso" }));
+
+    expect(await screen.findByRole("button", { name: /^Matemáticas, 3.º A/ })).toBeInTheDocument();
+  });
+
   it("undoes a date's change from the day list", async () => {
     m.deleteOverride.mockResolvedValue(undefined);
     m.getDay.mockResolvedValue({
