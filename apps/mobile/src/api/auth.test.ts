@@ -101,6 +101,48 @@ describe("auth.refresh", () => {
     unsubscribe();
   });
 
+  it("treats a 403 on refresh as a dead session too: clears the pair and emits session-lost", async () => {
+    await saveTokens({ accessToken: "stale", refreshToken: "r1" });
+    globalThis.fetch = jest.fn().mockResolvedValue(response(403, {})) as unknown as typeof fetch;
+    const onLost = jest.fn();
+    const unsubscribe = onSessionLost(onLost);
+
+    expect(await refresh()).toBe(false);
+
+    expect(getRefreshToken()).toBeNull();
+    expect(onLost).toHaveBeenCalledTimes(1);
+    unsubscribe();
+  });
+
+  // ISSUE-T14-102: a gateway waking from scale-to-zero answers 5xx. That says
+  // nothing about the refresh token, so it must not sign the family out; it
+  // surfaces as a failure the screens read as "Revisa tu conexión".
+  it("keeps the session and rejects (no session-lost) when the gateway fails with a 5xx", async () => {
+    await saveTokens({ accessToken: "stale", refreshToken: "r1" });
+    globalThis.fetch = jest.fn().mockResolvedValue(response(503, {})) as unknown as typeof fetch;
+    const onLost = jest.fn();
+    const unsubscribe = onSessionLost(onLost);
+
+    await expect(refresh()).rejects.toMatchObject({ name: "ApiError", status: 503 });
+
+    expect(getRefreshToken()).toBe("r1");
+    expect(onLost).not.toHaveBeenCalled();
+    unsubscribe();
+  });
+
+  it("keeps the session and rejects (no session-lost) when the network is down", async () => {
+    await saveTokens({ accessToken: "stale", refreshToken: "r1" });
+    globalThis.fetch = jest.fn().mockRejectedValue(new TypeError("Network request failed")) as unknown as typeof fetch;
+    const onLost = jest.fn();
+    const unsubscribe = onSessionLost(onLost);
+
+    await expect(refresh()).rejects.toThrow("Network request failed");
+
+    expect(getRefreshToken()).toBe("r1");
+    expect(onLost).not.toHaveBeenCalled();
+    unsubscribe();
+  });
+
   it("drops the refreshed pair when a logout happens mid-refresh (no resurrection)", async () => {
     await saveTokens({ accessToken: "stale", refreshToken: "r1" });
     // Hold the network response open so we can log out while the POST is in flight.

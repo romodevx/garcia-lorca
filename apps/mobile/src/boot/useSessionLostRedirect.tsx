@@ -1,6 +1,7 @@
 import { router } from "expo-router";
 import { useEffect } from "react";
 import { onSessionLost } from "@/src/api";
+import { SESSION_ENDED_ROUTE } from "@/src/navigation/routes";
 import { unregisterPush } from "@/src/push/unregister";
 import { useAppState } from "@/src/state/AppState";
 
@@ -23,7 +24,9 @@ export function useSessionLostRedirect(): void {
   const { refreshChildren, refreshNotifications } = useAppState();
   useEffect(() => {
     return onSessionLost(() => {
-      router.replace("/");
+      // The login screen, saying why: a family that did not sign out must not
+      // be left guessing (ISSUE-T14-102).
+      router.replace(SESSION_ENDED_ROUTE);
       void unregisterPush();
       // Tokens are already cleared by refresh(), so both short-circuit to an empty
       // slice without firing a request.

@@ -1,8 +1,14 @@
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, type ReactNode } from "react";
 import { ScrollView } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { getAccessToken, signIn } from "@/src/api";
+import {
+  HOME_ROUTE,
+  SESSION_ENDED_NOTICE,
+  SESSION_ENDED_REASON,
+  SIGN_IN_REASON_PARAM,
+} from "@/src/navigation/routes";
 import { LoginScreen } from "@/src/screens/LoginScreen";
 import { useAppState } from "@/src/state/AppState";
 import { useTheme } from "@/src/theme";
@@ -19,12 +25,14 @@ export default function IndexRoute(): ReactNode {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const { refreshNotifications, refreshChildren } = useAppState();
+  const params = useLocalSearchParams<{ [SIGN_IN_REASON_PARAM]?: string }>();
+  const notice = params[SIGN_IN_REASON_PARAM] === SESSION_ENDED_REASON ? SESSION_ENDED_NOTICE : undefined;
 
   // RootLayout has hydrated SecureStore before providers and routes mount. A
   // saved guardian session can therefore resume without showing the login form.
   useEffect(() => {
     if (getAccessToken() !== null) {
-      router.replace("/(tabs)");
+      router.replace(HOME_ROUTE);
     }
   }, []);
 
@@ -41,7 +49,7 @@ export default function IndexRoute(): ReactNode {
     // notifications, not a stuck empty/error state.
     void refreshChildren();
     void refreshNotifications();
-    router.replace("/(tabs)");
+    router.replace(HOME_ROUTE);
   };
 
   return (
@@ -50,7 +58,7 @@ export default function IndexRoute(): ReactNode {
       contentContainerStyle={{ flexGrow: 1, paddingTop: insets.top }}
       keyboardShouldPersistTaps="handled"
     >
-      <LoginScreen onSubmit={onSubmit} />
+      <LoginScreen onSubmit={onSubmit} notice={notice} />
     </ScrollView>
   );
 }

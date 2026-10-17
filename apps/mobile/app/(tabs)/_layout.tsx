@@ -23,7 +23,7 @@ export default function TabsLayout(): ReactNode {
         tabBar={(props) => <TabBar {...props} />}
         screenOptions={{ headerShown: false, sceneStyle: { backgroundColor: theme.colors.bg } }}
       >
-        <Tabs.Screen name="index" options={{ title: "Inicio" }} />
+        <Tabs.Screen name="inicio" options={{ title: "Inicio" }} />
         <Tabs.Screen name="asistencia" options={{ title: "Asistencia" }} />
         <Tabs.Screen name="calificaciones" options={{ title: "Calificaciones" }} />
         <Tabs.Screen name="cuenta" options={{ title: "Cuenta" }} />

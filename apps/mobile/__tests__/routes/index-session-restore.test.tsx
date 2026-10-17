@@ -27,6 +27,6 @@ describe("IndexRoute session restoration", () => {
 
     await renderWithProviders(<IndexRoute />);
 
-    await waitFor(() => expect(router.replace).toHaveBeenCalledWith("/(tabs)"));
+    await waitFor(() => expect(router.replace).toHaveBeenCalledWith("/inicio"));
   });
 });
