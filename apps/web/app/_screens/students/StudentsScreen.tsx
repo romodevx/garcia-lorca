@@ -689,14 +689,19 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
   // A direct link opens its pupil's ficha once, as soon as the roll is read;
   // following another link while one is open opens that one.
   const [linked, setLinked] = useState(linkedStudentId);
+  // An unknown id stays said until dismissed: a 2.6 s toast went unseen (ISSUE-T14-202).
+  const [linkMissed, setLinkMissed] = useState(false);
   useEffect(() => { if (linkedStudentId !== undefined) setLinked(linkedStudentId); }, [linkedStudentId]);
   useEffect(() => {
     if (linked === undefined || loading) return;
     const found = students.find((s) => s.id === linked);
     if (found !== undefined) setSheet(found);
-    else if (!loadFailed) say("No encontramos a ese alumno en el padrón.");
+    else if (!loadFailed) {
+      setLinkMissed(true);
+      onLinkedSheetClosed?.();
+    }
     setLinked(undefined);
-  }, [linked, loading, loadFailed, students, say]);
+  }, [linked, loading, loadFailed, students, onLinkedSheetClosed]);
   const closeSheet = (): void => {
     setSheet(null);
     onLinkedSheetClosed?.();
@@ -772,6 +777,7 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
             </div>
           }
         />
+        {linkMissed && <LinkMissedNotice onDismiss={() => setLinkMissed(false)} />}
         {placementStatus === "failed" && (
           <p role="alert" style={{ color: "var(--bad-fg)", fontSize: 13.5, margin: "10px 0 0" }}>
             No pudimos leer los grupos de este ciclo: por ahora sólo se filtra por nivel. Recarga la página en un momento.
@@ -842,7 +848,7 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
                 selected={filter.selected.has(row.id)}
                 onToggle={() => filter.toggle(row.id)}
                 onOpen={() => setSheet(row.student)}
-                onEdit={onEdit === undefined ? undefined : () => onEdit(row.id)}
+                onEdit={onEdit === undefined || row.student.admissionStatus === "withdrawn" ? undefined : () => onEdit(row.id)}
                 onNotes={() => setNotesOf(row.student)}
                 onStatement={canReadStatement ? () => setStatementOf(row.student) : undefined}
               />
@@ -906,6 +912,16 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
         </div>
       )}
     </Page>
+  );
+}
+
+/** A direct link named no pupil on the roll; the list stays, the notice says so until dismissed. */
+function LinkMissedNotice({ onDismiss }: { onDismiss: () => void }): ReactElement {
+  return (
+    <div role="status" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginTop: 10, padding: "10px 16px", borderRadius: "var(--r-md)", background: "var(--surface-3)", border: "1px solid var(--border)", color: "var(--text)", fontSize: 14.5 }}>
+      No encontramos ese alumno.
+      <button type="button" onClick={onDismiss} style={{ minHeight: 44, padding: "0 12px", background: "transparent", border: "none", color: "var(--text-muted)", fontWeight: 600, cursor: "pointer" }}>Cerrar aviso</button>
+    </div>
   );
 }
 

@@ -420,3 +420,39 @@ describe("la liga directa a una ficha", () => {
     expect(await within(screen.getByRole("dialog", { name: "Ficha del alumno" })).findByRole("heading", { name: "Díaz Berta" })).toBeInTheDocument();
   });
 });
+
+// ISSUE-T14-202: /alumnos/<unknown id> painted the list and said nothing.
+describe("la liga directa a un alumno que no existe", () => {
+  it("avisa que no lo encontramos, se queda en la lista y el aviso no se va solo", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      students.listStudents.mockResolvedValue([pupil("lv-pri")]);
+      students.listEnrollments.mockResolvedValue([]);
+      const onLinkedSheetClosed = vi.fn();
+      render(<StudentsScreen onBack={() => {}} linkedStudentId="no-such-id" onLinkedSheetClosed={onLinkedSheetClosed} />);
+
+      const notice = await screen.findByRole("status");
+      expect(notice).toHaveTextContent("No encontramos ese alumno.");
+      expect(screen.getByRole("button", { name: "Ver ficha de Cruz Ana" })).toBeInTheDocument();
+      expect(screen.queryByRole("dialog", { name: "Ficha del alumno" })).toBeNull();
+      expect(onLinkedSheetClosed).toHaveBeenCalled();
+
+      vi.advanceTimersByTime(10_000);
+      expect(screen.getByRole("status")).toHaveTextContent("No encontramos ese alumno.");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+// ISSUE-T14-201: the Bajas list still offered "Editar ficha" on a withdrawn pupil.
+describe("un alumno dado de baja en la lista", () => {
+  it("no ofrece Editar ficha, sólo Ver ficha", async () => {
+    students.listStudents.mockResolvedValue([{ ...pupil("lv-pri"), admissionStatus: "withdrawn" }]);
+    students.listEnrollments.mockResolvedValue([]);
+    render(<StudentsScreen onBack={() => {}} onEdit={() => {}} />);
+
+    expect(await screen.findByRole("button", { name: "Ver ficha de Cruz Ana" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Editar ficha de Cruz Ana" })).toBeNull();
+  });
+});
