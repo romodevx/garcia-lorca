@@ -254,6 +254,10 @@ func (r *Repository) List(ctx context.Context, f ports.ListFilter) ([]*domain.St
 		if f.Birthday != nil {
 			q = whereBornOn(q, *f.Birthday)
 		}
+		if f.ActiveEnrollment {
+			q = q.Where("EXISTS (SELECT 1 FROM enrollments e WHERE e.student_id = students.id AND e.status = ?)",
+				domain.EnrollmentStatusActive.String())
+		}
 		if f.PageToken != "" {
 			var err error
 			if q, err = afterToken(q, f.PageToken); err != nil {

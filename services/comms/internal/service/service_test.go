@@ -806,6 +806,13 @@ func TestHandleEventUnhandledMessagesAreAcked(t *testing.T) {
 			"eeeeeeee-0000-0000-0000-000000000012", studentID, tenantID, "2026-08-06", "sick"), levelWrong},
 		{"an absence arriving as AttendanceMarked (AbsenceRecorded already covers it)",
 			absentMarked, levelSkipped},
+		// T11 / ISSUE-023: finance publishes ChargeSettled on payment-events
+		// next to every payment; the family already got "Pago recibido", so it
+		// is skipped at Debug, not a Warn per payment.
+		{"a ChargeSettled riding next to every payment", pubsub.Message{
+			Topic: "payment-events", Data: []byte{},
+			Attributes: map[string]string{"type": "ChargeSettled", "tenant_id": tenantID},
+		}, levelSkipped},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

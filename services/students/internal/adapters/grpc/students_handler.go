@@ -169,13 +169,14 @@ func (h *StudentsHandler) GetStudent(ctx context.Context, req *connect.Request[s
 func (h *StudentsHandler) ListStudents(ctx context.Context, req *connect.Request[studentsv1.ListStudentsRequest]) (*connect.Response[studentsv1.ListStudentsResponse], error) {
 	m := req.Msg
 	students, next, err := h.svc.ListStudents(ctx, ports.ListFilter{
-		LevelID:    m.GetLevelId(),
-		Status:     protoconv.ToDomainStatus(m.GetStatus()),
-		GradeGroup: m.GetGradeGroup(),
-		IDs:        m.GetIds(),
-		PageSize:   int(m.GetPageSize()),
-		PageToken:  m.GetPageToken(),
-		Birthday:   toBirthdayFilter(m.GetBirthday()),
+		LevelID:          m.GetLevelId(),
+		Status:           protoconv.ToDomainStatus(m.GetStatus()),
+		GradeGroup:       m.GetGradeGroup(),
+		IDs:              m.GetIds(),
+		PageSize:         int(m.GetPageSize()),
+		PageToken:        m.GetPageToken(),
+		Birthday:         toBirthdayFilter(m.GetBirthday()),
+		ActiveEnrollment: m.GetActiveEnrollment(),
 	})
 	if err != nil {
 		return nil, connectErr(err)

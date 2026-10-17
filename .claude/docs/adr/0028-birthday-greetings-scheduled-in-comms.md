@@ -22,7 +22,10 @@
   fix to make where finance turns `now()` into a date.
 - **Students answers "who was born on this day".** `ListStudents` gains a
   `BirthdayFilter{month, day, include_feb_29}`, paginated and tenant-scoped like
-  every list. comms asks for ENROLLED pupils only and walks the pages (bounded).
+  every list. comms asks for pupils with an ACTIVE ENROLLMENT, whatever their
+  admission status, and walks the pages (bounded). *(Amended 2026-10-16, owner
+  decision D4 / plan T11: it used to ask for admission "Inscrito" only, so a
+  pupil "en trámite" who already attends got no greeting.)*
 - **February 29:** in a non-leap year those pupils are greeted on February 28
   (owner decision: still in their own month). The rule lives in comms; students
   only answers the question it is asked.

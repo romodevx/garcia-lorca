@@ -25,6 +25,8 @@ const (
 	eventAbsenceRecorded   = "AbsenceRecorded"
 	eventAttendanceMarked  = "AttendanceMarked"
 	eventPaymentRegistered = "PaymentRegistered"
+	// eventChargeSettled rides on payment-events but is never notified.
+	eventChargeSettled = "ChargeSettled"
 	// eventPaymentCorrected is a registered payment the office corrected (T9).
 	eventPaymentCorrected = "PaymentCorrected"
 	eventGradesPublished  = "GradesPublished"
@@ -598,6 +600,10 @@ func (s *CommsService) decode(eventType string, data []byte) (decodedEvent, erro
 			kind: kindReportCard, termName: e.GetTermName(), reportCardID: e.GetReportCardId(), version: e.GetVersion(),
 		})
 
+	case eventChargeSettled:
+		// Finance publishes it next to every payment on payment-events; the
+		// family was already told by PaymentRegistered (ISSUE-023, T11).
+		return decodedEvent{}, fmt.Errorf("%w: %s", errNotNotifiable, eventType)
 	default:
 		return decodedEvent{}, fmt.Errorf("%w: unknown event type %q", errUndeliverable, eventType)
 	}
