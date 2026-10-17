@@ -7,6 +7,7 @@ import { authFetch } from "./auth/authFetch";
 import { HttpError } from "./auth/httpError";
 import { Providers, fakePath, fakeRouter, resetFakeRouter, useFakePathname } from "./test-utils";
 import { changePassword as apiChangePassword, login as apiLogin, logout as apiLogout, me as apiMe, refresh as apiRefresh } from "./auth/api";
+import { mayHaveSession } from "./auth/sessionHint";
 
 // La navegación ES la barra de direcciones. El router falso tiene estado real
 // (test-utils.tsx) para que un clic que navega vuelva a pintar, como en el
@@ -25,6 +26,9 @@ vi.mock("./auth/api", () => ({
   refresh: vi.fn(() => Promise.reject(new Error("no session"))),
   me: vi.fn(() => Promise.reject(new Error("no session"))),
 }));
+
+// Default: a session cookie MAY be there, so boot asks the gateway as before.
+vi.mock("./auth/sessionHint", () => ({ mayHaveSession: vi.fn(() => Promise.resolve(true)) }));
 
 // The finance surface is the only screen these flows mount that fetches on boot;
 // stub its clients so navigation is tested without touching the network (the
@@ -103,6 +107,7 @@ const mockChangePassword = vi.mocked(apiChangePassword);
 const mockLogout = vi.mocked(apiLogout);
 const mockRefresh = vi.mocked(apiRefresh);
 const mockMe = vi.mocked(apiMe);
+const mockMayHaveSession = vi.mocked(mayHaveSession);
 
 // A persistent `mockResolvedValue` (used by the nav flows below) survives
 // clearAllMocks, so reset the session probes to their default "no session"
@@ -116,6 +121,8 @@ beforeEach(() => {
   mockRefresh.mockReset();
   mockMe.mockRejectedValue(new Error("no session"));
   mockRefresh.mockRejectedValue(new Error("no session"));
+  mockMayHaveSession.mockReset();
+  mockMayHaveSession.mockResolvedValue(true);
 });
 
 afterEach(() => vi.clearAllMocks());
@@ -201,6 +208,21 @@ describe("AppShell navigation flow", () => {
     expect(mockChangePassword).toHaveBeenCalledWith(expect.any(String), "test-owner-pw", "test-new-pw-123");
     expect(await screen.findByRole("heading", { name: /Módulos/ })).toBeInTheDocument();
     expect(mockRefresh.mock.calls.length).toBe(refreshCallsBeforeChange);
+  });
+
+  // T13: before anyone signed in there is no cookie to probe with, and the two
+  // 401s (/me, /auth/refresh) were logged as console errors on /entrar.
+  it("does not probe /me nor /auth/refresh when the browser holds no session cookie", async () => {
+    mockMayHaveSession.mockResolvedValue(false);
+    render(
+      <Providers flags={{}}>
+        <AppShell />
+      </Providers>
+    );
+
+    expect(await screen.findByRole("button", { name: "Entrar al sistema" })).toBeInTheDocument();
+    expect(mockMe).not.toHaveBeenCalled();
+    expect(mockRefresh).not.toHaveBeenCalled();
   });
 
   it("restores the session on reload when the cookie is still live (me → dashboard, no re-login)", async () => {

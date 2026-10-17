@@ -52,6 +52,7 @@ import { login as apiLogin, changePassword as apiChangePassword, logout as apiLo
 
 import { API_URL } from "./api-url";
 import { onSessionLost } from "./auth/authFetch";
+import { mayHaveSession } from "./auth/sessionHint";
 import { isRefusal } from "./auth/httpError";
 import { useSessionKeepAlive } from "./auth/useSessionKeepAlive";
 
@@ -296,6 +297,9 @@ export function AppShell(): ReactElement {
     // Distingue "no hay sesión" de "no pude preguntar". Ambas terminan en la
     // pantalla de entrada, pero sólo una de las dos es culpa de quien mira.
     const restore = async (): Promise<boolean> => {
+      // Sin cookie de sesión no hay nada que preguntar: el sondeo sólo dejaría
+      // dos 401 en la consola de quien todavía no entra (T13).
+      if (!(await mayHaveSession())) return false;
       try {
         const m = await apiMe(API_URL);
         if (active) setPrincipal(m);
