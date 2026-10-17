@@ -17,6 +17,19 @@ import { type Command as GLCommand, type CommandKind, KIND_ORDER } from "./types
  *   query ──> matchCommands (fold+fuzzy+kind-rank) ──> groups by kind ──> cmdk items
  */
 
+/** Read by assistive tech, not drawn: the screen already says it. */
+const VISUALLY_HIDDEN = {
+  position: "absolute",
+  width: 1,
+  height: 1,
+  margin: -1,
+  padding: 0,
+  overflow: "hidden",
+  clip: "rect(0 0 0 0)",
+  whiteSpace: "nowrap",
+  border: 0,
+} as const;
+
 export interface CommandPaletteLabels {
   readonly placeholder: string;
   readonly empty: string;
@@ -104,21 +117,16 @@ export function CommandPalette({
         because the input's placeholder already says this on screen) is what
         makes the reference resolve.
       */}
-      <Dialog.Title
-        style={{
-          position: "absolute",
-          width: 1,
-          height: 1,
-          margin: -1,
-          padding: 0,
-          overflow: "hidden",
-          clip: "rect(0 0 0 0)",
-          whiteSpace: "nowrap",
-          border: 0,
-        }}
-      >
+      <Dialog.Title style={VISUALLY_HIDDEN}>
         {labels.placeholder}
       </Dialog.Title>
+      {/*
+        Radix also points `aria-describedby` at a Description and warns when
+        there is none (ISSUE-T14-021). cmdk does not forward props to the
+        content, so the description is rendered, off-screen: the hint says what
+        the box is for; without one, the placeholder does.
+      */}
+      <Dialog.Description style={VISUALLY_HIDDEN}>{labels.hint ?? labels.placeholder}</Dialog.Description>
       <Command.Input
         placeholder={labels.placeholder}
         value={activeQuery}

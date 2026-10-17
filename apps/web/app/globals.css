@@ -1122,19 +1122,22 @@ html:has(.announce-footer) { scroll-padding-bottom: var(--announce-footer-h); }
   display: flex;
   align-items: center;
   gap: 6px;
+  width: 100%;
   min-height: 44px;
   padding: 0 6px;
+  border: 0;
+  background: none;
+  font: inherit;
   font-size: 14px;
   font-weight: 700;
+  text-align: left;
   color: var(--text);
   cursor: pointer;
-  list-style: none;
 }
-.announce-level__summary::-webkit-details-marker { display: none; }
 .announce-level__title { flex: 1; }
 .announce-level__count { font-weight: 600; color: var(--text-muted); }
 .announce-level__chevron { transition: transform 160ms var(--ease); }
-.announce-level[open] > .announce-level__summary .announce-level__chevron { transform: rotate(90deg); }
+.announce-level__summary[aria-expanded="true"] .announce-level__chevron { transform: rotate(90deg); }
 
 .announce-search { display: grid; gap: 6px; margin-top: 8px; }
 .announce-search__label { margin: 0 6px; font-size: 13.5px; font-weight: 600; color: var(--text-muted); }

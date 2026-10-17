@@ -49,7 +49,7 @@ describe("AnnouncementsCompose", () => {
     renderView();
     const row = await screen.findByRole("button", { name: "1° PRIMARIA · A" });
     expect(row).toHaveTextContent(/^1° A$/);
-    expect(row.closest("details")).toHaveTextContent("Primaria");
+    expect(row.closest(".announce-level")).toHaveTextContent("Primaria");
   });
 
   // E2: one node of each at any width; CSS moves them, never a copy.
