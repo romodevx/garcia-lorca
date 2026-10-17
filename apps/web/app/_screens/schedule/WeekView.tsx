@@ -8,6 +8,7 @@ import { GroupChain } from "../../_design/students/GroupChain";
 import { Toast } from "../../_design/Toast";
 import { UndoToast } from "../../_design/UndoToast";
 import { useUndoableRemoval } from "../../_design/useUndoableRemoval";
+import { byFullName, fullName } from "../../_lib/personName";
 import { API_URL } from "../../api-url";
 import { deleteBlock, type ScheduleBoard, type ScheduleBlock } from "../../schedule/api";
 import { filterBlocks, indexBoard, NO_WEEK_FILTER, type WeekFilter } from "../../schedule/catalog";
@@ -84,9 +85,7 @@ export function WeekView({ board, mode, canWrite, now, onChanged, version = 0 }:
                 label="Docente"
                 value={filter.teacherId}
                 onChange={(teacherId) => setFilter({ ...filter, teacherId })}
-                options={[...board.teachers]
-                  .sort((a, b) => a.lastName.localeCompare(b.lastName, "es-MX"))
-                  .map((t) => ({ value: t.id, label: `${t.firstName} ${t.lastName}` }))}
+                options={byFullName(board.teachers).map((t) => ({ value: t.id, label: fullName(t) }))}
               />
             </div>
             {canWrite && filter.levelId !== "" && (

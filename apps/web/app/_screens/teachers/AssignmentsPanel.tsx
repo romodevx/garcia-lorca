@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type FormEvent, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
+import { byFullName, fullName } from "../../_lib/personName";
 import type { Cycle, LabelledGroup, Subject } from "../../config/api";
 import type {
   CreateTeachingAssignmentInput,
@@ -142,7 +143,7 @@ export function AssignmentsPanel({
   const cycleOptions: SelectOption[] = cycles.map((c) => ({ value: c.id, label: c.name }));
   const groupOptions: SelectOption[] = groups.map((g) => ({ value: g.id, label: g.label }));
   const subjectOptions: SelectOption[] = subjects.map((s) => ({ value: s.id, label: s.name }));
-  const teacherOptions: SelectOption[] = teachers.map((t) => ({ value: t.id, label: `${t.firstName} ${t.lastName}` }));
+  const teacherOptions: SelectOption[] = byFullName(teachers).map((t) => ({ value: t.id, label: fullName(t) }));
 
   const subjectName = (id: string): string => subjects.find((s) => s.id === id)?.name ?? id;
   const teacherName = (id: string): string => {

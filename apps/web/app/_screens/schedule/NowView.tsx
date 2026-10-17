@@ -8,14 +8,24 @@ import { Toast } from "../../_design/Toast";
 import { API_URL } from "../../api-url";
 import { deleteOverride, type ScheduleBoard, type ScheduleClass, type ScheduleDay } from "../../schedule/api";
 import { indexBoard } from "../../schedule/catalog";
-import { nowInSchoolZone, runningAt, timeOptions } from "../../schedule/time";
+import { gridBounds, nowInSchoolZone, runningAt, timeOptions } from "../../schedule/time";
 import { ClassCard, DayList } from "./ClassCard";
 import { CoverDrawer } from "./CoverDrawer";
 import { chipOption, EmptyState } from "./parts";
 import type { ScheduleSource } from "./useScheduleBoard";
 
 const TOAST_MS = 3000;
-const LAST_SLOT = 23 * 60 + 55;
+
+/**
+ * The school day the hour picker spans (ISSUE-CC-122: it offered every five
+ * minutes from 00:00): the chosen level's grid, or every level's together,
+ * widened to the day's own classes the way the week grid is.
+ */
+function dayBounds(board: ScheduleBoard, levelId: string, classes: readonly ScheduleClass[]): { start: number; end: number } {
+  const grids = board.settings.filter((s) => levelId === "" || s.levelId === levelId);
+  const bounds = (grids.length > 0 ? grids : [undefined]).map((g) => gridBounds(g, classes));
+  return { start: Math.min(...bounds.map((b) => b.start)), end: Math.max(...bounds.map((b) => b.end)) };
+}
 
 export interface NowViewProps {
   board: ScheduleBoard;
@@ -69,7 +79,8 @@ export function NowView({ board, source, canWrite, now }: NowViewProps): ReactEl
   // A cancelled class still shows, struck through: "why is 3.º A free?" is the question.
   const running = runningAt(classes, time);
   // The exact minute ("08:07") stays choosable beside the 5-minute steps.
-  const times = [...new Set([...timeOptions(0, LAST_SLOT), time])].sort().map((t) => ({ value: t, label: t }));
+  const bounds = dayBounds(board, levelId, classes);
+  const times = [...new Set([...timeOptions(bounds.start, bounds.end), time])].sort().map((t) => ({ value: t, label: t }));
 
   const undo = (overrideId: string): void => {
     deleteOverride(API_URL, overrideId)

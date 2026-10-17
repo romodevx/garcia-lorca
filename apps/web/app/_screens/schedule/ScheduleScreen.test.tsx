@@ -101,6 +101,14 @@ describe("Horarios — la semana (T16)", () => {
     expect(blocks().every((b) => /Ana Ruiz/.test(b.getAttribute("aria-label") ?? ""))).toBe(true);
   });
 
+  // ISSUE-CC-122: sorted by last name but shown "first last", the list read as unsorted.
+  it("lists the teachers in the order their names are shown", async () => {
+    renderManager();
+    await screen.findByRole("button", { name: "Primaria" });
+    const names = within(screen.getByLabelText("Docente")).getAllByRole("option").map((o) => o.textContent).filter((t) => t !== "");
+    expect(names).toEqual(["Ana Ruiz", "Luis Pérez"]);
+  });
+
   it("says what to do when a group has no classes yet", async () => {
     m.getBoard.mockResolvedValue(sampleBoard({ blocks: [] }));
     const user = renderManager();
@@ -290,6 +298,16 @@ describe("Horarios — ¿Qué está pasando ahora? (T16)", () => {
     expect(cards[0]).toHaveTextContent("Suplente: Luis Pérez (en lugar de Ana Ruiz)");
     expect(cards[0]).toHaveTextContent("Suplencia");
     expect(m.getDay).toHaveBeenCalledWith(expect.any(String), sampleBoard().cycle.id, "2026-10-05");
+  });
+
+  // ISSUE-CC-122: the hour picker offered every five minutes from 00:00.
+  it("offers only the hours of the school day, plus the current minute", async () => {
+    const user = renderManager();
+    await user.click(await screen.findByRole("tab", { name: "¿Qué está pasando ahora?" }));
+    const hours = within(await screen.findByLabelText("Hora", { selector: "select" })).getAllByRole("option").map((o) => o.textContent).filter((t) => t !== "");
+    expect(hours[0]).toBe("07:00");
+    expect(hours.at(-1)).toBe("14:00");
+    expect(hours).not.toContain("00:00");
   });
 
   it("says so when nothing is happening", async () => {
