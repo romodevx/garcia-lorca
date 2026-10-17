@@ -440,6 +440,11 @@ func TestChangePasswordShortNewPasswordRejectedAtEdge(t *testing.T) {
 	if fake.cpGotCalled {
 		t.Error("iam ChangePassword was called; the edge guard must short-circuit before iam")
 	}
+	// Clients may show this body as-is, so it is the sentence a person reads.
+	const want = "La nueva contraseña debe tener al menos 8 caracteres."
+	if got := strings.TrimSpace(rec.Body.String()); got != want {
+		t.Errorf("body=%q, want %q", got, want)
+	}
 }
 
 func TestLogoutClearsCookie(t *testing.T) {

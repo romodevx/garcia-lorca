@@ -434,6 +434,10 @@ type changePasswordRequest struct {
 // authoritative validator.
 const minNewPasswordLen = 8
 
+// newPasswordTooShortMessage is the 400 body for a new password under the
+// floor. Clients may display it verbatim (the web does), so it is user-facing Spanish.
+const newPasswordTooShortMessage = "La nueva contraseña debe tener al menos 8 caracteres." // keep in step with minNewPasswordLen
+
 // ChangePassword handles POST /api/v1/auth/change-password for the authenticated
 // principal. RequireAuth injects the principal; iam derives the subject from the
 // forwarded access token, so the gateway forwards the caller's token — never a
@@ -450,7 +454,8 @@ func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(req.NewPassword) < minNewPasswordLen {
-		http.Error(w, "new password is too short", http.StatusBadRequest)
+		// Spanish on purpose: clients may show this text as-is.
+		http.Error(w, newPasswordTooShortMessage, http.StatusBadRequest)
 		return
 	}
 	if err := h.auth.ChangePassword(r.Context(), middleware.TokenFrom(r), req.CurrentPassword, req.NewPassword); err != nil {
