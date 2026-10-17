@@ -105,7 +105,7 @@ func TestEnsurePlacementsCreatesOnceAndThenFinds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetLevel: %v", err)
 	}
-	if level.Granularity() != domain.GranularityCycle || level.SEPCode() != "" || level.Name() != "Prepa Import Uno" {
+	if level.Granularity() != domain.GranularityCycle || level.SEPCode() != "" || level.Name() != "PREPA IMPORT UNO" {
 		t.Errorf("created level: %+v", level)
 	}
 
@@ -124,11 +124,11 @@ func TestEnsurePlacementsCreatesOnceAndThenFinds(t *testing.T) {
 func TestEnsurePlacementsDryRunWritesNothing(t *testing.T) {
 	s := newPlacementSchool(t, tenantA)
 	got := s.ensure(t, true, usecase.PlacementRequest{NewLevelName: "Dry Run Nivel", GradeOrdinal: 1, GroupName: "A", Capacity: 30})
-	want := usecase.Placement{LevelName: "Dry Run Nivel", LevelCreated: true, GradeName: "1°", GradeCreated: true, GroupName: "A", GroupCreated: true, Capacity: 30}
+	want := usecase.Placement{LevelName: "DRY RUN NIVEL", LevelCreated: true, GradeName: "1°", GradeCreated: true, GroupName: "A", GroupCreated: true, Capacity: 30}
 	if got[0] != want {
 		t.Errorf("dry run\n got: %+v\nwant: %+v", got[0], want)
 	}
-	if n := levelsNamed(t, tenantA, "Dry Run Nivel"); n != 0 {
+	if n := levelsNamed(t, tenantA, "DRY RUN NIVEL"); n != 0 {
 		t.Errorf("a dry run created %d levels", n)
 	}
 	if n := countAs(t, tenantA, "groups", "cycle_id = ?", s.cycleID); n != 0 {

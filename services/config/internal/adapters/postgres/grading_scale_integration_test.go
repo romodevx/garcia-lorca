@@ -79,7 +79,7 @@ func TestLevelGradingRoundTrip(t *testing.T) {
 
 	first, err := domain.NewGradingScale(true, 0, 10000, 7000, 2)
 	require.NoError(t, err)
-	second, err := domain.NewGradingScale(false, 550, 950, 725, 0)
+	second, err := domain.NewGradingScale(false, 500, 900, 700, 0)
 	require.NoError(t, err)
 	for _, scale := range []domain.GradingScale{first, second} {
 		require.NoError(t, repo.UpdateLevelGrading(ctx, prim.ID(), scale))
