@@ -35,6 +35,8 @@ type fakeUsers struct {
 	// actors are further accounts FindByID / StatusOf can see — the caller
 	// of an admin action, who is never the account it acts on.
 	actors map[string]domain.User
+
+	addedRoles []string // AddRole calls: "user:role"
 }
 
 type createdUser struct {
@@ -76,7 +78,10 @@ func (f *fakeUsers) UpdatePassword(_ context.Context, _, _ string) error {
 	f.updated = true
 	return nil
 }
-func (f *fakeUsers) AddRole(context.Context, string, string) error    { return nil }
+func (f *fakeUsers) AddRole(_ context.Context, userID, roleID string) error {
+	f.addedRoles = append(f.addedRoles, userID+":"+roleID)
+	return nil
+}
 func (f *fakeUsers) RemoveRole(context.Context, string, string) error { return nil }
 
 func (f *fakeUsers) CreateUser(_ context.Context, user domain.User, passwordHash string) error {

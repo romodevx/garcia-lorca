@@ -86,13 +86,14 @@ service IamService {
   // Use ResendInvitation for the person who never got their mail.
   rpc InviteUser(InviteUserRequest) returns (InviteUserResponse);
 
-  // InviteGuardian invites a family contact into the `guardian` role — the
+  // InviteGuardian ENSURES a family contact holds the `guardian` role — the
   // ONLY road to that role. InviteUser, CreateUser and AssignRole refuse it:
   // a guardian account means nothing without the guardian↔student link that
   // students owns, so it is born from "Dar acceso a la app" on the pupil's
   // record (gateway composes students + iam), never from the staff screen.
-  // An address that already has a deleted account is restored, as InviteUser
-  // does.
+  // Keyed on the address (one login per person): no account -> invited into
+  // the role; a deleted one -> restored as an invited guardian; a live one ->
+  // the role is added and nothing is sent.
   rpc InviteGuardian(InviteGuardianRequest) returns (InviteGuardianResponse);
 
   // ResendInvitation mails the account's owner a fresh link to set a password.
@@ -381,7 +382,8 @@ message InviteGuardianRequest {
   string display_name = 2;
 }
 
-// InviteGuardianResponse mirrors InviteUserResponse.
+// InviteGuardianResponse returns the account now holding the role. invitation
+// is ABSENT when the address already had a live account: nothing was sent.
 message InviteGuardianResponse {
   User user = 1;
   Invitation invitation = 2;

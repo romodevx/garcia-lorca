@@ -49,3 +49,26 @@ func TestInviteGuardianAssignsTheGuardianRole(t *testing.T) {
 		t.Error("no invitation came back")
 	}
 }
+
+// An address that already has an account (a teacher who is also a parent)
+// keeps its one login and gains the role; nothing is sent, so no invitation.
+func TestInviteGuardianOnAnExistingAccountAddsTheRoleWithoutAnInvitation(t *testing.T) {
+	h, users := newHandlerWithUsers(t, false)
+	h = handlerWithMailer(t, users, &fakeRoles{known: domain.GuardianRoleID}, &recordingProvisioner{}, &recordingMailer{})
+
+	res, err := h.InviteGuardian(context.Background(), connect.NewRequest(&iamv1.InviteGuardianRequest{
+		Email: "ana@garcialorca.mx", DisplayName: "Ana",
+	}))
+	if err != nil {
+		t.Fatalf("InviteGuardian: %v", err)
+	}
+	if res.Msg.GetUser().GetId() != "u1" {
+		t.Errorf("user = %q, want the existing account u1", res.Msg.GetUser().GetId())
+	}
+	if len(users.addedRoles) != 1 || users.addedRoles[0] != "u1:"+domain.GuardianRoleID {
+		t.Errorf("added = %v, want the guardian role on u1", users.addedRoles)
+	}
+	if res.Msg.GetInvitation() != nil {
+		t.Errorf("invitation = %+v, want none", res.Msg.GetInvitation())
+	}
+}

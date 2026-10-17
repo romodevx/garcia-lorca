@@ -59,6 +59,8 @@ type fakeInvitations struct {
 	issueErr error
 	consume  domain.Invitation
 	consErr  error
+	// revokeErr, when set, is what Revoke fails with.
+	revokeErr error
 }
 
 func (f *fakeInvitations) Issue(_ context.Context, inv domain.Invitation) error {
@@ -83,6 +85,9 @@ func (f *fakeInvitations) Release(_ context.Context, id string) error {
 }
 
 func (f *fakeInvitations) Revoke(_ context.Context, userID string) error {
+	if f.revokeErr != nil {
+		return f.revokeErr
+	}
 	f.revoked = append(f.revoked, userID)
 	return nil
 }

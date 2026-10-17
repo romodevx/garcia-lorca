@@ -114,8 +114,62 @@ func TestInviteGuardianCreatesAnInvitedGuardian(t *testing.T) {
 	if roles := users.rolesSet[got.User.ID()]; len(roles) != 1 || roles[0] != domain.GuardianRoleID {
 		t.Errorf("roles = %v, want exactly the guardian role", roles)
 	}
-	if got.URL == "" {
+	if got.Invitation == nil || got.Invitation.URL == "" {
 		t.Error("no invitation link was issued")
+	}
+}
+
+// InviteGuardian ENSURES the role. A teacher who is also a parent already has
+// an account: it is reused — one login — and gains the guardian role, with no
+// new invitation, because the person can already sign in. Before this the
+// gateway reused the account without the role, and with the manual roads
+// closed (CC-115) that parent could never open the app.
+func TestInviteGuardianAddsTheRoleToALiveAccount(t *testing.T) {
+	f := newDeleteFixture(t)
+
+	got, err := newGuardianService(t, f.users, true).InviteGuardian(context.Background(), "MAESTRA@gl.mx", "Maestra")
+	if err != nil {
+		t.Fatalf("InviteGuardian: %v", err)
+	}
+
+	if got.User.ID() != teacherID {
+		t.Errorf("user = %q, want the existing account %q", got.User.ID(), teacherID)
+	}
+	if len(f.users.added) != 1 || f.users.added[0] != [2]string{teacherID, domain.GuardianRoleID} {
+		t.Errorf("added roles %v, want the guardian role on the existing account", f.users.added)
+	}
+	if got.Invitation != nil {
+		t.Errorf("invitation = %+v, want none — the account already signs in", got.Invitation)
+	}
+	if len(f.users.created) != 0 {
+		t.Errorf("a second account was created: %v", f.users.created)
+	}
+}
+
+func TestInviteGuardianOnAnAccountThatIsAlreadyGuardianChangesNothing(t *testing.T) {
+	f := newDeleteFixture(t, mustUserUC(t, "u-mama", "mama@gl.mx", domain.StatusActive, guardianRole(t)))
+
+	got, err := newGuardianService(t, f.users, true).InviteGuardian(context.Background(), "mama@gl.mx", "Mamá")
+	if err != nil {
+		t.Fatalf("InviteGuardian: %v", err)
+	}
+	if got.User.ID() != "u-mama" || got.Invitation != nil || len(f.users.added) != 0 {
+		t.Errorf("got (%q, %+v), added %v; want the same account untouched", got.User.ID(), got.Invitation, f.users.added)
+	}
+}
+
+func TestInviteGuardianRestoresADeletedAccountAsGuardian(t *testing.T) {
+	f := newDeleteFixture(t, mustUserUC(t, "u-gone", "gone@gl.mx", domain.StatusDeleted, teacherRole(t)))
+
+	got, err := newGuardianService(t, f.users, true).InviteGuardian(context.Background(), "gone@gl.mx", "Mamá")
+	if err != nil {
+		t.Fatalf("InviteGuardian: %v", err)
+	}
+	if roles := f.users.restoredRole["u-gone"]; len(roles) != 1 || roles[0] != domain.GuardianRoleID {
+		t.Errorf("restored with roles %v, want exactly guardian", roles)
+	}
+	if got.Invitation == nil {
+		t.Error("a restored account needs a fresh link")
 	}
 }
 

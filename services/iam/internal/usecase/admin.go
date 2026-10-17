@@ -152,23 +152,67 @@ func (s *AdminService) InviteUser(ctx context.Context, rawEmail, displayName str
 	return s.invite(ctx, email, displayName, roleIDs, assigned)
 }
 
-// InviteGuardian invites a family contact into the guardian role — the ONLY
+// GuardianAccess is what InviteGuardian did: the account that now holds the
+// guardian role and, when a link had to be issued for it, that link. Invitation
+// is nil for an account that already existed and can already sign in.
+type GuardianAccess struct {
+	User       domain.User
+	Invitation *Invitation
+}
+
+// InviteGuardian ENSURES a family contact holds the guardian role — the ONLY
 // road to it (ISSUE-CC-115). The role is chosen here, never by the caller: the
 // gateway reaches this from "Dar acceso a la app", which links the account to
 // the pupil right after, and that link is what gives the role any meaning.
 //
+// Keyed on the address, so a person has ONE login:
+//
+//   - no account: invite one into the guardian role;
+//   - a deleted account: restore it as an invited guardian (as InviteUser does);
+//   - a live account (a teacher who is also a parent): add the role, no new
+//     link — they can already sign in. The manual roads refuse the role, so
+//     reusing the account WITHOUT it would leave that parent locked out of the
+//     app for good.
+//
 // A deployment without the seeded role (migrations/iam/0010) is OUR fault, not
 // the caller's: inviting into no role would create a login that sees nothing.
-func (s *AdminService) InviteGuardian(ctx context.Context, rawEmail, displayName string) (Invitation, error) {
+func (s *AdminService) InviteGuardian(ctx context.Context, rawEmail, displayName string) (GuardianAccess, error) {
 	email, err := domain.NewEmail(rawEmail)
 	if err != nil {
-		return Invitation{}, err
+		return GuardianAccess{}, err
 	}
 	guardian, err := s.roles.FindByID(ctx, domain.GuardianRoleID)
 	if err != nil {
-		return Invitation{}, glerrors.Wrap(glerrors.KindInternal, "the guardian role is missing from this deployment", err)
+		return GuardianAccess{}, glerrors.Wrap(glerrors.KindInternal, "the guardian role is missing from this deployment", err)
 	}
-	return s.invite(ctx, email, displayName, []string{guardian.ID()}, []domain.Role{guardian})
+	existing, _, err := s.users.FindAuthByEmail(ctx, s.tenantID, email)
+	switch {
+	case err == nil && !existing.IsDeleted():
+		return s.ensureGuardianRole(ctx, existing, guardian)
+	case err != nil && glerrors.KindOf(err) != glerrors.KindNotFound:
+		return GuardianAccess{}, err
+	}
+	out, err := s.invite(ctx, email, displayName, []string{guardian.ID()}, []domain.Role{guardian})
+	if err != nil {
+		return GuardianAccess{}, err
+	}
+	return GuardianAccess{User: out.User, Invitation: &out}, nil
+}
+
+// ensureGuardianRole adds the guardian role to a live account that lacks it.
+// AddRole is idempotent, but skipping the write keeps a repeat press free.
+func (s *AdminService) ensureGuardianRole(ctx context.Context, user domain.User, guardian domain.Role) (GuardianAccess, error) {
+	if slices.ContainsFunc(user.RoleIDs(), domain.IsGuardianRoleID) {
+		return GuardianAccess{User: user}, nil
+	}
+	if err := s.users.AddRole(ctx, user.ID(), guardian.ID()); err != nil {
+		return GuardianAccess{}, err
+	}
+	updated, err := s.users.FindByID(ctx, user.ID())
+	if err != nil {
+		return GuardianAccess{}, err
+	}
+	return GuardianAccess{User: updated}, nil
 }
 
 // invite is InviteUser after the roles are settled: restore a deleted address,
@@ -838,7 +882,7 @@ func (s *AdminService) SetUserStatus(ctx context.Context, actorID, targetID stri
 		return glerrors.New(glerrors.KindUnauthorized, "invalid access token")
 	}
 	if status == domain.StatusSuspended {
-		if err := s.refuseSelfSuspension(ctx, actorID, targetID); err != nil {
+		if err := s.guardSuspension(ctx, actorID, targetID); err != nil {
 			return err
 		}
 	}
@@ -852,14 +896,23 @@ func (s *AdminService) SetUserStatus(ctx context.Context, actorID, targetID stri
 	// Otherwise the invitation sitting in their mailbox outlives the decision,
 	// and the guard in AcceptInvitation is the only thing standing between it
 	// and a way back in. Two locks on the same door, deliberately.
+	//
+	// The suspension is already written, so a failed revoke is reported rather
+	// than swallowed: suspending again repeats only idempotent steps.
 	if status == domain.StatusSuspended && s.invitations != nil {
-		_ = s.invitations.Revoke(ctx, targetID)
+		if err := s.invitations.Revoke(ctx, targetID); err != nil {
+			return glerrors.Wrap(glerrors.KindInternal,
+				"la cuenta quedó suspendida, pero no se anularon sus enlaces pendientes; vuelve a intentarlo", err)
+		}
 	}
 	return nil
 }
 
-// refuseSelfSuspension loads the target and refuses when it is the caller.
-func (s *AdminService) refuseSelfSuspension(ctx context.Context, actorID, targetID string) error {
+// guardSuspension loads the target and refuses suspending yourself, and
+// suspending a director unless the caller is one too: users:write is
+// delegable, and a delegated administrator must not be able to lock the owner
+// out of the school.
+func (s *AdminService) guardSuspension(ctx context.Context, actorID, targetID string) error {
 	target, err := s.users.FindByID(ctx, targetID)
 	if err != nil {
 		return err
@@ -867,7 +920,14 @@ func (s *AdminService) refuseSelfSuspension(ctx context.Context, actorID, target
 	if target.ID() == actorID {
 		return domain.ErrSelfSuspension
 	}
-	return nil
+	if !slices.Contains(target.RoleIDs(), domain.OwnerRoleID) {
+		return nil
+	}
+	actor, err := s.users.FindByID(ctx, actorID)
+	if glerrors.KindOf(err) == glerrors.KindNotFound || (err == nil && !slices.Contains(actor.RoleIDs(), domain.OwnerRoleID)) {
+		return domain.ErrOwnerSuspensionByNonOwner
+	}
+	return err
 }
 
 // CreateRole creates a role from a name and a set of "resource:action"

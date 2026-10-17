@@ -192,17 +192,19 @@ func toProtoInvitation(inv usecase.Invitation) *iamv1.Invitation {
 	}
 }
 
-// InviteGuardian invites a family contact into the guardian role, which only
-// this RPC hands out (the role is chosen by iam, never the request).
+// InviteGuardian ensures a family contact holds the guardian role, which only
+// this RPC hands out (the role is chosen by iam, never the request). The
+// invitation is absent when the address already had a live account.
 func (h *IAMHandler) InviteGuardian(ctx context.Context, req *connect.Request[iamv1.InviteGuardianRequest]) (*connect.Response[iamv1.InviteGuardianResponse], error) {
 	out, err := h.admin.InviteGuardian(ctx, req.Msg.GetEmail(), req.Msg.GetDisplayName())
 	if err != nil {
 		return nil, connectErr(err)
 	}
-	return connect.NewResponse(&iamv1.InviteGuardianResponse{
-		User:       toProtoUser(out.User),
-		Invitation: toProtoInvitation(out),
-	}), nil
+	res := &iamv1.InviteGuardianResponse{User: toProtoUser(out.User)}
+	if out.Invitation != nil {
+		res.Invitation = toProtoInvitation(*out.Invitation)
+	}
+	return connect.NewResponse(res), nil
 }
 
 func (h *IAMHandler) CreateUser(ctx context.Context, req *connect.Request[iamv1.CreateUserRequest]) (*connect.Response[iamv1.CreateUserResponse], error) {

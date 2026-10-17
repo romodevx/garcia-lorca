@@ -42,12 +42,21 @@ func TestSetUserStatusSuspensionRefusals(t *testing.T) {
 			wantText: "no puedes suspender tu propia cuenta",
 		},
 		{
-			// A delegated administrator holding users:write is not the owner,
-			// so the self rule does not catch it: the repository's last-holder
-			// rule does.
-			name:     "the last active owner cannot be suspended by somebody else",
+			// users:write is delegable; suspending a director is not. A
+			// delegated administrator could otherwise lock the owner out.
+			name:     "a non-owner cannot suspend an owner",
 			extra:    []domain.User{mustUserUC(t, "u-admin", "admin@gl.mx", domain.StatusActive, adminRole)},
 			actor:    "u-admin",
+			target:   directorID,
+			wantKind: glerrors.KindForbidden,
+			wantText: "sólo un director puede suspender a otro director",
+		},
+		{
+			// The repository's last-holder rule, reached here through an
+			// owner caller the fake does not count as active.
+			name:     "the last active owner cannot be suspended",
+			extra:    []domain.User{mustUserUC(t, otherDirectorID, "otro@gl.mx", domain.StatusSuspended, ownerRole(t))},
+			actor:    otherDirectorID,
 			target:   directorID,
 			wantKind: glerrors.KindConflict,
 			wantText: "no se puede suspender al último director activo",
@@ -122,5 +131,24 @@ func TestSetUserStatusReactivationSkipsTheSuspensionGuards(t *testing.T) {
 	}
 	if got := f.users.statusSet[otherDirectorID]; got != domain.StatusActive {
 		t.Errorf("status = %v, want active", got)
+	}
+}
+
+// The suspension is written before the links are revoked; a failed revoke is
+// reported, not swallowed, and suspending again finishes the job.
+func TestSetUserStatusReportsAFailedLinkRevocation(t *testing.T) {
+	f := newDeleteFixture(t)
+	f.inv.revokeErr = glerrors.New(glerrors.KindInternal, "store down")
+
+	err := f.service(t).SetUserStatus(context.Background(), directorID, teacherID, domain.StatusSuspended)
+
+	if glerrors.KindOf(err) != glerrors.KindInternal {
+		t.Fatalf("err = %v, want KindInternal", err)
+	}
+	if !strings.Contains(glerrors.SafeMessage(err), "vuelve a intentarlo") {
+		t.Errorf("message = %q, want it to tell the director to retry", glerrors.SafeMessage(err))
+	}
+	if got := f.users.statusSet[teacherID]; got != domain.StatusSuspended {
+		t.Errorf("status = %v, want suspended — the lock-out itself happened", got)
 	}
 }
