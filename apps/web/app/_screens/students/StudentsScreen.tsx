@@ -269,7 +269,10 @@ function StudentSheet({
   const ownLevel = groups.filter((g) => st.levelId === "" || levelOfGrade.get(g.gradeLevelId) === st.levelId);
   const placed = current !== null && current !== undefined && current !== "failed" ? current : undefined;
   const currentGroup = placed === undefined ? undefined : groups.find((g) => g.id === placed.groupId);
-  const choices = placed !== undefined ? ownLevel.filter((g) => g.id !== placed.groupId) : ownLevel;
+  // A change of group stays in the pupil's grade (ISSUE-T14-013): moving them
+  // to another grade is not a group change. Unknown current group: the level.
+  const sameGrade = (g: LabelledGroup): boolean => currentGroup === undefined || g.gradeLevelId === currentGroup.gradeLevelId;
+  const choices = placed !== undefined ? ownLevel.filter((g) => g.id !== placed.groupId && sameGrade(g)) : ownLevel;
   const transferring = placed !== undefined;
   const ready = current !== undefined && current !== "failed" && !gradeLevelsFailed;
 
@@ -292,7 +295,7 @@ function StudentSheet({
     try {
       if (placed !== undefined) {
         await transfer(API_URL, { enrollmentId: placed.id, toGroupId: gid, reason: reason.trim() });
-        onPlaced("Alumno cambiado de grupo");
+        onPlaced(`Cambiado a ${groups.find((g) => g.id === gid)?.label ?? "otro grupo"}`);
       } else {
         await enroll(API_URL, { studentId: st.id, groupId: gid });
         onPlaced("Alumno inscrito en el grupo");
@@ -367,7 +370,7 @@ function StudentSheet({
               </span>
               {choices.length === 0 ? (
                 <p style={{ fontSize: 13.5, color: "var(--text-faint)" }}>
-                  {transferring ? "No hay otro grupo de su nivel en este ciclo." : "No hay grupos de su nivel en este ciclo: créalos en Configuración."}
+                  {transferring ? "No hay otro grupo de su grado en este ciclo." : "No hay grupos de su nivel en este ciclo: créalos en Configuración."}
                 </p>
               ) : (
                 <div role="group" aria-label={transferring ? "Cambiar a" : "Inscribir en"} style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -853,7 +856,8 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
       )}
       {verifying && <VerifyCardDrawer onClose={() => setVerifying(false)} />}
       {toast !== null && (
-        <div style={{ position: "fixed", bottom: 28, left: "50%", transform: "translateX(-50%)", zIndex: 80, display: "flex", alignItems: "center", gap: 11, padding: "14px 22px", borderRadius: "var(--r-pill)", background: "var(--forest)", color: "#fff", fontWeight: 600, fontSize: 15, boxShadow: "var(--shadow-pop)", animation: "pop .25s var(--ease) both" }}>
+        // role=status: the confirmation is announced, not only painted (ISSUE-T14-013).
+        <div role="status" style={{ position: "fixed", bottom: 28, left: "50%", transform: "translateX(-50%)", zIndex: 80, display: "flex", alignItems: "center", gap: 11, padding: "14px 22px", borderRadius: "var(--r-pill)", background: "var(--forest)", color: "#fff", fontWeight: 600, fontSize: 15, boxShadow: "var(--shadow-pop)", animation: "pop .25s var(--ease) both" }}>
           <Icon name="check" size={20} stroke={2.6} />{toast}
         </div>
       )}

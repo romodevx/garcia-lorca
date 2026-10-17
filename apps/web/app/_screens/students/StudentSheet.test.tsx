@@ -49,10 +49,12 @@ const GROUPS = [
   { id: "g-pri-a", cycleId: "c1", gradeLevelId: "gl-pri-1", name: "1° A", capacity: 30 },
   { id: "g-pri-b", cycleId: "c1", gradeLevelId: "gl-pri-1", name: "1° B", capacity: 30 },
   { id: "g-kin-a", cycleId: "c1", gradeLevelId: "gl-kin-1", name: "1° A", capacity: 30 },
+  { id: "g-pri-2a", cycleId: "c1", gradeLevelId: "gl-pri-2", name: "2° A", capacity: 30 },
 ];
 const GRADES = [
   { id: "gl-pri-1", levelId: "lv-pri", name: "1° Primaria", ordinal: 1 },
   { id: "gl-kin-1", levelId: "lv-kin", name: "1° Kínder", ordinal: 1 },
+  { id: "gl-pri-2", levelId: "lv-pri", name: "2° Primaria", ordinal: 2 },
 ];
 
 beforeEach(() => {
@@ -92,13 +94,15 @@ describe("la ficha de un alumno que ya tiene grupo", () => {
     expect(within(sheet).getByRole("button", { name: "Cambiar de grupo" })).toBeInTheDocument();
   });
 
-  it("solo ofrece grupos de su nivel, y no el que ya tiene", async () => {
+  // ISSUE-T14-013: a change of group stays in the pupil's grade; 2° A is
+  // another grade of the same level, and moving grade is not a group change.
+  it("solo ofrece grupos de su mismo grado, y no el que ya tiene", async () => {
     const user = userEvent.setup();
     const sheet = await openSheet(user);
     const group = await within(sheet).findByRole("group", { name: "Cambiar a" });
 
     const offered = within(group).getAllByRole("button").map((b) => b.textContent);
-    expect(offered).toEqual(["1° A"]); // primaria's 1° A only — not kínder's, not its own 1° B
+    expect(offered).toEqual(["1° A"]); // primaria's 1° A only — not kínder's, not 2° A, not its own 1° B
   });
 
   it("cambia de grupo con el motivo capturado", async () => {
@@ -114,6 +118,8 @@ describe("la ficha de un alumno que ya tiene grupo", () => {
         enrollmentId: "enr-1", toGroupId: "g-pri-a", reason: "Cambio de turno",
       }),
     );
+    // ISSUE-T14-013: the panel closed with no word of what happened.
+    expect(await screen.findByRole("status")).toHaveTextContent("Cambiado a 1° A");
   });
 
   it("un doble clic no manda dos cambios de grupo", async () => {
@@ -215,7 +221,8 @@ describe("la ficha de un alumno sin grupo", () => {
     const sheet = await openSheet(user);
     const group = await within(sheet).findByRole("group", { name: "Inscribir en" });
 
-    expect(within(group).getAllByRole("button").map((b) => b.textContent)).toEqual(["1° A", "1° B"]);
+    // An enrolment may pick any grade of the level: it is where the pupil starts.
+    expect(within(group).getAllByRole("button").map((b) => b.textContent)).toEqual(["1° A", "1° B", "2° A"]);
   });
 
   it("dice lo que respondió el servidor, no un «No se pudo» a secas", async () => {
