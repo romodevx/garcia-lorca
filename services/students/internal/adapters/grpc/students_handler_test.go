@@ -456,6 +456,35 @@ func TestStudentPhotoRoundTrips(t *testing.T) {
 	assertCode(t, err, connect.CodeInvalidArgument)
 }
 
+// T13: GetStudent says whether the pupil has a photo, so the file page asks
+// for it only then (no 404 per file opened without one).
+func TestGetStudentSaysWhetherThereIsAPhoto(t *testing.T) {
+	repo := newFakeRepo()
+	svc := usecase.NewStudentService(repo, &fakePublisher{}, testLevels, testTenant, func() string { return "stu-1" }).
+		WithPhotos(memPhotoStore{})
+	h := grpcadapter.NewStudentsHandler(svc, nil, nil, usecase.NewHealthService("students"))
+	createValid(t, h)
+	get := func() *studentsv1.GetStudentResponse {
+		t.Helper()
+		res, err := h.GetStudent(context.Background(), connect.NewRequest(&studentsv1.GetStudentRequest{Id: "stu-1"}))
+		if err != nil {
+			t.Fatalf("GetStudent: %v", err)
+		}
+		return res.Msg
+	}
+
+	if got := get(); got.HasPhoto == nil || got.GetHasPhoto() {
+		t.Errorf("without a photo: has_photo = %v, want false (set)", got.HasPhoto)
+	}
+	png := []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n', 1}
+	if _, err := h.UploadStudentPhoto(context.Background(), connect.NewRequest(&studentsv1.UploadStudentPhotoRequest{StudentId: "stu-1", Data: png})); err != nil {
+		t.Fatalf("Upload: %v", err)
+	}
+	if !get().GetHasPhoto() {
+		t.Error("with a photo: has_photo = false, want true")
+	}
+}
+
 // Task 13: the student on the wire carries its matrícula.
 func TestAStudentCarriesItsMatricula(t *testing.T) {
 	h, _ := newHandler(t)

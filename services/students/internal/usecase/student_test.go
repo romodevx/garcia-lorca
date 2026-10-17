@@ -603,3 +603,36 @@ func newStudentSvcForIDs(t *testing.T) *usecase.StudentService {
 	t.Helper()
 	return usecase.NewStudentService(newRepo(), &fakePub{}, levelsMustNotBeAsked{t}, tenant, func() string { return "id-1" })
 }
+
+// T13: the file says whether it has a photo, so the page asks for one only
+// when there is one — a 404 per file opened is a console error per file.
+func TestHasPhoto(t *testing.T) {
+	cases := []struct {
+		name   string
+		bucket bool
+		upload bool
+		want   bool
+	}{
+		{"a pupil with a photo", true, true, true},
+		{"a pupil without one", true, false, false},
+		{"a deployment without a bucket", false, false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, _, _ := newService(t)
+			if tc.bucket {
+				svc = svc.WithPhotos(memPhotos{})
+			}
+			created, _ := svc.CreateApplicant(context.Background(), validInput())
+			if tc.upload {
+				if _, err := svc.UploadPhoto(context.Background(), created.ID(), jpegBytes); err != nil {
+					t.Fatalf("UploadPhoto: %v", err)
+				}
+			}
+			got, err := svc.HasPhoto(context.Background(), created.ID())
+			if err != nil || got != tc.want {
+				t.Errorf("HasPhoto = %v, %v; want %v", got, err, tc.want)
+			}
+		})
+	}
+}

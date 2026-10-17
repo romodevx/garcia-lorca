@@ -450,6 +450,10 @@ message GetStudentRequest {
 
 message GetStudentResponse {
   Student student = 1;
+  // Whether GetStudentPhoto would find a photo, so a client asks for it only
+  // when there is one (T13: no 404 per file opened without a photo). Unset
+  // means unknown — a client then asks, as before.
+  optional bool has_photo = 2;
 }
 
 message ListStudentsRequest {

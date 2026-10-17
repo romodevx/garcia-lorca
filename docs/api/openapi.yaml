@@ -1196,6 +1196,24 @@ paths:
         '409': { $ref: '#/components/responses/PlainTextError' }
 
   /api/v1/students/{id}:
+    get:
+      tags: [students]
+      summary: A pupil's file
+      description: >
+        The pupil with the profile, and whether the pupil has a photo, so the
+        file page asks GET /api/v1/students/{id}/photo only when there is one.
+      operationId: getStudent
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/StudentIdPath' }]
+      responses:
+        '200':
+          description: The pupil, profile included.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StudentWithProfile' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
     put:
       tags: [students]
       summary: Correct a pupil's file
@@ -7953,6 +7971,7 @@ components:
         guardianName: { type: string }
         admissionStatus: { type: string, enum: [pending, accepted, enrolled, rejected, withdrawn] }
         bankReference: { type: string, example: "231076", description: "BBVA payment reference (ADR 0033); empty when the pupil has none." }
+        hasPhoto: { type: boolean, example: false, description: "Only on GET /api/v1/students/{id}: whether the pupil has a photo (T13). Absent means unknown; a client then asks for the photo." }
         profile: { $ref: '#/components/schemas/StudentProfile' }
 
     Enrollment:

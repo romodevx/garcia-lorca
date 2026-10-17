@@ -3,6 +3,7 @@ package grpcadapter
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"time"
 
 	connect "connectrpc.com/connect"
@@ -163,7 +164,15 @@ func (h *StudentsHandler) GetStudent(ctx context.Context, req *connect.Request[s
 	if err != nil {
 		return nil, connectErr(err)
 	}
-	return connect.NewResponse(&studentsv1.GetStudentResponse{Student: toProtoStudent(student)}), nil
+	res := &studentsv1.GetStudentResponse{Student: toProtoStudent(student)}
+	// Whether there is a photo is a courtesy, never a gate on the file: when it
+	// cannot be read it stays unset, and the client asks for the photo as before.
+	if hasPhoto, err := h.svc.HasPhoto(ctx, student.ID()); err != nil {
+		slog.WarnContext(ctx, "photo reference lookup failed; has_photo left unset", "student_id", student.ID(), "error", err)
+	} else {
+		res.HasPhoto = &hasPhoto
+	}
+	return connect.NewResponse(res), nil
 }
 
 func (h *StudentsHandler) ListStudents(ctx context.Context, req *connect.Request[studentsv1.ListStudentsRequest]) (*connect.Response[studentsv1.ListStudentsResponse], error) {

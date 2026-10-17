@@ -291,6 +291,21 @@ describe("StudentEditScreen", () => {
     });
   });
 
+  // T13: a pupil without a photo cost a 404 — a console error — per file opened.
+  describe("asks for the photo only when there is one", () => {
+    it.each([
+      ["the file says there is none", false, false],
+      ["the file says there is one", true, true],
+      ["a gateway that does not say", undefined, true],
+    ])("%s → asks %s", async (_name, hasPhoto, asks) => {
+      api.getStudent.mockResolvedValue(hasPhoto === undefined ? student : { ...student, hasPhoto });
+      renderScreen();
+      expect(await screen.findByLabelText("Nombre(s)")).toHaveValue("ADA");
+      if (asks) await waitFor(() => expect(api.getPhotoBlob).toHaveBeenCalledWith(expect.any(String), "st1"));
+      else expect(api.getPhotoBlob).not.toHaveBeenCalled();
+    });
+  });
+
   // Task 6: the file carries its notes, under their own permissions.
   it("shows the pupil's notes with what the caller may do", async () => {
     renderScreen(["students:read", "students:update", "students:notes_write"]);

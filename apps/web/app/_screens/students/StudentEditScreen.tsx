@@ -193,11 +193,13 @@ export function StudentEditScreen({ studentId, userId, permissions, onBack, toda
         setEmail(p?.email ?? "");
         setPhones(p?.phones ?? []);
         setAddress({ ...EMPTY_ADDRESS, ...p?.address });
+        // Only a photo that is there is asked for: a 404 is a console error (T13).
+        if (st.hasPhoto === false) return;
+        getPhotoBlob(API_URL, studentId)
+          .then((blob) => live && setSavedPhoto(blob))
+          .catch(() => undefined); // no photo is shown; the rest of the file still works
       })
       .catch(() => live && setLoadFailed(true));
-    getPhotoBlob(API_URL, studentId)
-      .then((blob) => live && setSavedPhoto(blob))
-      .catch(() => undefined); // no photo is shown; the rest of the file still works
     if (canReadMedical) {
       getMedical(API_URL, studentId)
         .then((record) => {

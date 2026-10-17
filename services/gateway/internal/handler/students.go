@@ -67,6 +67,8 @@ type studentResponse struct {
 	BankReference string `json:"bankReference"`
 	// Nil in lists: a picker needs names, not every pupil's address and phones.
 	Profile *client.StudentProfile `json:"profile,omitempty"`
+	// HasPhoto is only on the single file (T13); absent means unknown.
+	HasPhoto *bool `json:"hasPhoto,omitempty"`
 }
 
 func toStudentResponse(s client.StudentResult) studentResponse {
@@ -191,7 +193,9 @@ func (h *StudentsHandler) Get(w http.ResponseWriter, r *http.Request) {
 		writeConnectError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, toStudentResponse(res))
+	out := toStudentResponse(res)
+	out.HasPhoto = res.HasPhoto
+	writeJSON(w, http.StatusOK, out)
 }
 
 // --- enrollments ----------------------------------------------------------
