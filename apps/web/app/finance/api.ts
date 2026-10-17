@@ -63,6 +63,8 @@ export interface Charge {
   remainingCents: number;
   /** What a scholarship takes off it (T18). Absent from a gateway older than T18. */
   scholarshipCents?: number;
+  /** The part of paidCents credit notes settled (CC-207): not money. Absent from a gateway older than it. */
+  creditNoteCents?: number;
 }
 
 /**

@@ -37,6 +37,10 @@ type ChargeWithPaid struct {
 	// due date (T18): what decides whether a scholarship was kept by paying in
 	// time (domain.ApplyScholarship). Set by the list reads that price debts.
 	PaidByDueCents int64
+	// CreditNoteCents is the part of PaidCents settled by credit notes (T8,
+	// CC-207): it settles the debt but no money came in, so "Cobrado" leaves
+	// it out, like the income report and the cash-up. Set by the list reads.
+	CreditNoteCents int64
 }
 
 // StudentRef is the finance-owned view of a students record: identity and

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { isOwed, owedCents, pendingCents } from "./pending";
+import { collectedCents, isOwed, owedCents, pendingCents } from "./pending";
 
 // ISSUE-T14-020: Finanzas showed a cancelled charge's amount as its balance.
 describe("owedCents", () => {
@@ -24,5 +24,20 @@ describe("isOwed", () => {
     expect(isOwed(charge("pending", 1))).toBe(true);
     expect(isOwed(charge("cancelled", 1000))).toBe(false);
     expect(isOwed(charge("paid", 0))).toBe(false);
+  });
+});
+
+// CC-207 (QA 2026-10-17): "Cobrado" said $17,800 while Ingresos said $17,700 —
+// the $100 credit note. A credit note settles the debt but no money came in.
+describe("collectedCents", () => {
+  it("sums what was paid, less what credit notes settled", () => {
+    expect(collectedCents([
+      { paidCents: 1_755_000, creditNoteCents: 10_000 },
+      { paidCents: 25_000, creditNoteCents: 0 },
+    ])).toBe(1_770_000);
+  });
+
+  it("reads a charge from a gateway older than CC-207 as all money", () => {
+    expect(collectedCents([{ paidCents: 5_000 }])).toBe(5_000);
   });
 });

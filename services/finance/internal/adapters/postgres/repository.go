@@ -971,23 +971,27 @@ func withPaidTotals(tx *gorm.DB, rows []chargeModel) ([]ports.ChargeWithPaid, er
 	}
 
 	type chargePaid struct {
-		ChargeID  string `gorm:"column:charge_id"`
-		Paid      int64  `gorm:"column:paid"`
-		PaidByDue int64  `gorm:"column:paid_by_due"`
+		ChargeID   string `gorm:"column:charge_id"`
+		Paid       int64  `gorm:"column:paid"`
+		PaidByDue  int64  `gorm:"column:paid_by_due"`
+		CreditNote int64  `gorm:"column:credit_note"`
 	}
 	// paid_by_due is what was paid on or before the due date, by the payment's
 	// school-local day (paid_on, ADR 0035) — never paid_at, whose UTC date is
 	// the next day for a live payment after 18:00 in Morelia: what decides
-	// whether a scholarship was kept (T18).
+	// whether a scholarship was kept (T18). credit_note is what credit notes
+	// settled (CC-207): not money.
 	var sums []chargePaid
 	if err := tx.Raw(`SELECT p.charge_id,
 	                         COALESCE(SUM(p.amount_cents), 0) AS paid,
 	                         COALESCE(SUM(p.amount_cents) FILTER (
-	                             WHERE p.paid_on <= c.due_date), 0) AS paid_by_due
+	                             WHERE p.paid_on <= c.due_date), 0) AS paid_by_due,
+	                         COALESCE(SUM(p.amount_cents) FILTER (
+	                             WHERE p.method = ?), 0) AS credit_note
 	                    FROM payments p
 	                    JOIN charges c ON c.id = p.charge_id
 	                   WHERE p.charge_id IN ?
-	                   GROUP BY p.charge_id`, ids).
+	                   GROUP BY p.charge_id`, domain.MethodCreditNote, ids).
 		Scan(&sums).Error; err != nil {
 		return nil, glerrors.Wrap(glerrors.KindInternal, "summing payments", err)
 	}
@@ -1003,7 +1007,9 @@ func withPaidTotals(tx *gorm.DB, rows []chargeModel) ([]ports.ChargeWithPaid, er
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, ports.ChargeWithPaid{Charge: charge, PaidCents: sum.Paid, PaidByDueCents: sum.PaidByDue})
+		out = append(out, ports.ChargeWithPaid{
+			Charge: charge, PaidCents: sum.Paid, PaidByDueCents: sum.PaidByDue, CreditNoteCents: sum.CreditNote,
+		})
 	}
 	return out, nil
 }

@@ -15,6 +15,14 @@ func TestWithdrawalChargeUsesEffectiveAmount(t *testing.T) {
 	assert.Equal(t, int64(6500), charge.AmountCents)
 }
 
+// CC-207: what credit notes settled crosses the wire, so "Cobrado" can leave
+// it out.
+func TestChargeCarriesWhatCreditNotesSettled(t *testing.T) {
+	charge := toCharge(&financev1.Charge{Id: "ch-1", PaidCents: 32000, CreditNoteCents: 10000})
+
+	assert.Equal(t, int64(10000), charge.CreditNoteCents)
+}
+
 // The mapping this pins was silently missing twice: a field existed on the
 // struct, carried a JSON tag, and was never copied to the proto. The screen
 // saved a plan, the API answered zeros, and everything compiled and linted.

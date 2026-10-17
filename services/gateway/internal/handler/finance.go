@@ -212,6 +212,9 @@ type chargeResponse struct {
 	// ScholarshipCents is the scholarship's part (T18), already out of
 	// RemainingCents.
 	ScholarshipCents int64 `json:"scholarshipCents"`
+	// CreditNoteCents is the part of PaidCents credit notes settled (CC-207):
+	// it settles the debt but is not money, so "Cobrado" leaves it out.
+	CreditNoteCents int64 `json:"creditNoteCents"`
 }
 
 func toChargeResponse(c client.Charge) chargeResponse {
@@ -229,6 +232,7 @@ func toChargeResponse(c client.Charge) chargeResponse {
 		PaidCents:        c.PaidCents,
 		RemainingCents:   c.RemainingCents,
 		ScholarshipCents: c.ScholarshipCents,
+		CreditNoteCents:  c.CreditNoteCents,
 	}
 }
 

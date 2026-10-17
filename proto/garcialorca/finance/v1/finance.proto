@@ -323,6 +323,10 @@ message Charge {
   // already net of it.
   int64 scholarship_cents = 15;
   string scholarship_id = 16;
+  // credit_note_cents is the part of paid_cents settled by credit notes (T8,
+  // CC-207): it settles the debt but is not money, so "Cobrado" leaves it out,
+  // as the income report and the cash-up do. Set on list reads.
+  int64 credit_note_cents = 17;
 }
 
 // Payment is one amount applied to a charge. `method` is one of:

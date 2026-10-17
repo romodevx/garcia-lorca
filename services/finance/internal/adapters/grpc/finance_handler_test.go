@@ -204,6 +204,17 @@ func (f *fakeRepo) paidFor(chargeID string) int64 {
 	return total
 }
 
+// creditNoteFor is what credit notes settled on a charge, as the list read sums it.
+func (f *fakeRepo) creditNoteFor(chargeID string) int64 {
+	var total int64
+	for _, p := range f.payments[chargeID] {
+		if p.Method() == domain.MethodCreditNote {
+			total += p.Amount().Int64()
+		}
+	}
+	return total
+}
+
 func (f *fakeRepo) hasChargeKey(key string) bool {
 	for _, existing := range f.charges {
 		if chargeKey(existing) == key {
@@ -431,7 +442,7 @@ func (f *fakeRepo) pageOf(keep func(domain.Charge) bool, after ports.ChargeCurso
 		if !after.IsZero() && !afterCursor(c, after) {
 			continue
 		}
-		rows = append(rows, ports.ChargeWithPaid{Charge: c, PaidCents: f.paidFor(c.ID())})
+		rows = append(rows, ports.ChargeWithPaid{Charge: c, PaidCents: f.paidFor(c.ID()), CreditNoteCents: f.creditNoteFor(c.ID())})
 	}
 	sort.Slice(rows, func(i, j int) bool {
 		a, b := rows[i].Charge, rows[j].Charge
@@ -799,6 +810,32 @@ func TestCancelChargeThenPayingItIsInvalidArgument(t *testing.T) {
 	}))
 	if connect.CodeOf(err) != connect.CodeInvalidArgument {
 		t.Errorf("want InvalidArgument paying a cancelled charge, got %v", connect.CodeOf(err))
+	}
+}
+
+// CC-207: a listed charge says how much of what was paid came by credit note,
+// so "Cobrado" can leave out what is not money.
+func TestListChargesSaysWhatCreditNotesSettled(t *testing.T) {
+	f := newFixture(t)
+	concept := f.seedConcept(t, "Colegiatura", 250000)
+	charge := f.seedCharge(t, concept.GetId(), 100000)
+	if _, err := f.h.RegisterPayment(context.Background(), connect.NewRequest(&financev1.RegisterPaymentRequest{
+		ChargeId: charge.GetId(), AmountCents: 100000,
+		Tenders: []*financev1.Tender{
+			{Method: domain.MethodCreditNote, AmountCents: 40000, Reference: "NC-1"},
+			{Method: domain.MethodCash, AmountCents: 60000},
+		},
+	})); err != nil {
+		t.Fatalf("RegisterPayment: %v", err)
+	}
+
+	res, err := f.h.ListCharges(context.Background(), connect.NewRequest(&financev1.ListChargesRequest{StudentId: testStudent}))
+	if err != nil {
+		t.Fatalf("ListCharges: %v", err)
+	}
+	got := res.Msg.GetCharges()
+	if len(got) != 1 || got[0].GetPaidCents() != 100000 || got[0].GetCreditNoteCents() != 40000 {
+		t.Errorf("charges = %+v, want paid 100000 of which 40000 by credit note", got)
 	}
 }
 

@@ -66,6 +66,18 @@ describe("useHomeKpis", () => {
     expect(result.current.cycle).toEqual({ name: "2026-2027", active: true });
   });
 
+  // CC-207: a credit note is not money — "Cobrado" agrees with Ingresos.
+  it("leaves what credit notes settled out of what was collected", async () => {
+    vi.mocked(listCharges).mockResolvedValue([
+      { status: "paid", paidCents: 1000, creditNoteCents: 400, remainingCents: 0 },
+      { status: "partial", paidCents: 300, creditNoteCents: 0, remainingCents: 700 },
+    ] as never);
+    const { result } = renderHook(() => useHomeKpis(ALL));
+    await waitFor(() =>
+      expect(result.current.ledger).toEqual({ status: "ready", value: { pendingCents: 700, collectedCents: 900, withBalance: 1, charges: 2 } }),
+    );
+  });
+
   // T5: a cancelled charge is never owed — "Por cobrar" reads like Finanzas.
   it("leaves cancelled charges out of what is still owed", async () => {
     vi.mocked(listCharges).mockResolvedValue([

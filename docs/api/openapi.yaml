@@ -4135,6 +4135,7 @@ paths:
                         paidCents: 100000
                         remainingCents: 150000
                         scholarshipCents: 0
+                        creditNoteCents: 0
                     nextPageToken: MjAyNi0wOS0xMHw2MTAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMTE
         '400': { $ref: '#/components/responses/PagedFinanceBadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
@@ -4198,6 +4199,7 @@ paths:
                         paidCents: 0
                         remainingCents: 250000
                         scholarshipCents: 0
+                        creditNoteCents: 0
         '400': { $ref: '#/components/responses/PagedFinanceBadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -8372,8 +8374,9 @@ components:
       type: object
       description: >
         One debt of one pupil. Every amount is integer cents; paidCents,
-        remainingCents, scholarshipCents and status are derived server-side.
-      required: [id, studentId, cycleId, conceptId, description, amountCents, discountCents, dueDate, status, paidCents, remainingCents, scholarshipCents]
+        remainingCents, scholarshipCents, creditNoteCents and status are derived
+        server-side.
+      required: [id, studentId, cycleId, conceptId, description, amountCents, discountCents, dueDate, status, paidCents, remainingCents, scholarshipCents, creditNoteCents]
       properties:
         id: { type: string, format: uuid }
         studentId: { type: string, format: uuid }
@@ -8388,6 +8391,16 @@ components:
         paidCents: { type: integer, format: int64 }
         remainingCents: { type: integer, format: int64 }
         scholarshipCents: { type: integer, format: int64 }
+        creditNoteCents:
+          type: integer
+          format: int64
+          minimum: 0
+          example: 10000
+          description: >
+            The part of paidCents settled by credit notes (T8, CC-207). It
+            settles the debt but no money came in, so "Cobrado" is paidCents
+            minus this — like the income report and the cash-up. Filled on list
+            reads; 0 on a charge a write returns.
     TuitionPlan:
       type: object
       description: What one level costs in one school year. Every amount is integer cents.

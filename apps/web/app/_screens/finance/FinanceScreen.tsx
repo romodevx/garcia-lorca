@@ -10,7 +10,7 @@ import type { NotesAccess } from "../../_design/students/StudentNotesBeside";
 import { useRoomLabels } from "../../_design/students/roomLabels";
 import { listCycles, type Cycle } from "../../config/api";
 import { getOverdue, listCharges, type Charge } from "../../finance/api";
-import { owedCents, pendingCents } from "../../finance/pending";
+import { collectedCents, owedCents, pendingCents } from "../../finance/pending";
 import { dayWithYearLabel } from "../../_lib/localDate";
 import { schoolISODate, schoolMonthStart } from "../../_lib/schoolDay";
 import { centsToPesosInput, formatCents } from "../../_lib/money";
@@ -173,7 +173,8 @@ export function FinanceScreen({ onBack, today: officeDay, notes, canCorrectPayme
     paid: rows.filter((r) => r.visual === "paid").length,
   }), [rows]);
   const totals = useMemo(() => ({
-    collected: charges.reduce((a, c) => a + c.paidCents, 0),
+    // A credit note settles debt but is not money: "Cobrado" agrees with Ingresos (CC-207).
+    collected: collectedCents(charges),
     // A cancelled (voided) charge is never owed, so it must not count as pending debt.
     pending: pendingCents(charges),
   }), [charges]);
