@@ -137,12 +137,18 @@ func TestEverInGroupReadsMovedOutPupilsAndBothSidesOfTheMoves(t *testing.T) {
 	}
 	assert.True(t, found, "the move OUT of the group is part of its history")
 
-	none, err := appRepo(t, tenantB).ListEnrollmentsEverInGroup(ctx, groupOne)
+	// The container is shared: tenant B may hold its own rows in the group,
+	// never tenant A's.
+	theirs, err := appRepo(t, tenantB).ListEnrollmentsEverInGroup(ctx, groupOne)
 	require.NoError(t, err)
-	assert.Empty(t, none, "RLS hides another tenant's enrollments")
-	noMoves, err := appRepo(t, tenantB).ListTransfersTouchingGroup(ctx, groupOne)
+	for _, e := range theirs {
+		assert.NotContains(t, []string{enrStayed, enrLeft}, e.ID(), "RLS hides another tenant's enrollments")
+	}
+	theirMoves, err := appRepo(t, tenantB).ListTransfersTouchingGroup(ctx, groupOne)
 	require.NoError(t, err)
-	assert.Empty(t, noMoves, "RLS hides another tenant's moves")
+	for _, m := range theirMoves {
+		assert.NotEqual(t, "70000000-0000-0000-0000-000000000621", m.ID(), "RLS hides another tenant's moves")
+	}
 }
 
 func indexOf(ids []string, id string) int {
