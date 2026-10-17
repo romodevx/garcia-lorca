@@ -3989,8 +3989,12 @@ paths:
       tags: [attendance]
       summary: A pass list (director)
       description: >
-        One row per active enrollment of the group; a row with no stored mark
-        reads `present`. The director has no date window, so `editable` is
+        One row per pupil who was in the group ON THAT DATE (CC-301): enrolled
+        on or before it, not withdrawn before it (the withdrawal day still
+        counts) and in the group that day by the transfer history — never by
+        today's enrollments, so a later enrollment or group change does not
+        rewrite a past list. On a transfer day the pupil is on both groups'
+        lists. A row with no stored mark reads `present`. The director has no date window, so `editable` is
         always true. The level's mode still applies: a `per_class` group needs
         `subjectId` (400 "Esta lista es por clase: elige la asignatura"), a
         `daily` group refuses one (400 "Esta lista es por día"), and the
@@ -4025,7 +4029,10 @@ paths:
         Reconciles the whole list: `marks` is the COMPLETE set of exceptions,
         so every enrollment missing from it (or marked `present`) ends present.
         Stored rows are corrected in place and events go out only for what
-        changed, so re-saving never re-notifies the family. The caller is
+        changed, so re-saving never re-notifies the family. A mark for a pupil
+        who was not in the group on that date (enrolled later, withdrawn
+        before, or in another group that day) is 400 "enrollment not in
+        group" and nothing is stored (CC-301). The caller is
         stamped as the list's taker. Same mode rules as the roster; any date
         with classes: a weekend, a date outside the group's cycle or a day the
         school calendar closes is 400 `X-Error-Code: NO_CLASSES` ("Ese día no
@@ -4232,7 +4239,8 @@ paths:
       tags: [attendance]
       summary: One of the caller's pass lists (teacher)
       description: >
-        Any date may be read; `editable` says whether the caller may still save
+        The rows are who was in the group on that date, as on the director
+        route (CC-301). Any date may be read; `editable` says whether the caller may still save
         it (`today` and up to `windowDays` back, never the future) and
         `readOnlyReason` why not. As on the director route, a list taken before
         its level changed mode stays readable and correctable. A group the
@@ -4267,8 +4275,9 @@ paths:
         lists (404 otherwise) and to today (the school's day, America/Mexico_City) and up
         to 7 days back: 400 "No puedes registrar una fecha futura" for a date
         after today, "Solo puedes corregir hasta 7 días atrás" for one before
-        the window. An enrollment of another group is refused by the attendance
-        service (400). A day without classes is 400 `X-Error-Code:
+        the window. An enrollment that was not in the group on that date
+        (another group, enrolled later, withdrawn before) is refused by the
+        attendance service (400 "enrollment not in group", CC-301). A day without classes is 400 `X-Error-Code:
         NO_CLASSES` ("Ese día no hay clases."), as on the director route. The
         caller is stamped as the list's taker. Requires
         `attendance_own:write`.
