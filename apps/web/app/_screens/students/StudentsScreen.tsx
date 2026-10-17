@@ -437,6 +437,10 @@ export interface StudentsScreenProps {
    */
   onOpenImport?: () => void;
   canWithdraw?: boolean;
+  /** /alumnos/{id}: the pupil whose ficha opens once the roll is read (T14-010). */
+  linkedStudentId?: string;
+  /** The linked ficha was closed: the address goes back to the list. */
+  onLinkedSheetClosed?: () => void;
 }
 
 /** What the school reads in Excel, in the order the table shows it. */
@@ -451,7 +455,7 @@ const EXPORT_COLUMNS: readonly CsvColumn<Row>[] = [
   { label: "Estado", value: (r) => statusOf(r.student.admissionStatus).label },
 ];
 
-export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false, canVoidAnyNote = false, userId = "", canVerifyCard = false, canRevokeCard = false, canReadStatement = false, canCorrectPayments = false, onOpenImport, canWithdraw = false }: StudentsScreenProps): ReactElement {
+export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false, canVoidAnyNote = false, userId = "", canVerifyCard = false, canRevokeCard = false, canReadStatement = false, canCorrectPayments = false, onOpenImport, canWithdraw = false, linkedStudentId, onLinkedSheetClosed }: StudentsScreenProps): ReactElement {
   const [verifying, setVerifying] = useState(false);
   const [students, setStudents] = useState<Student[]>([]);
   const [cycles, setCycles] = useState<Cycle[]>([]);
@@ -637,8 +641,22 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
   const cycleName = activeCycle?.name ?? "—";
   const clear = (): void => { setTab("all"); filter.clear(); };
 
+  // A direct link opens its pupil's ficha once, as soon as the roll is read.
+  const [linked, setLinked] = useState(linkedStudentId);
+  useEffect(() => {
+    if (linked === undefined || loading) return;
+    const found = students.find((s) => s.id === linked);
+    if (found !== undefined) setSheet(found);
+    else if (!loadFailed) say("No encontramos a ese alumno en el padrón.");
+    setLinked(undefined);
+  }, [linked, loading, loadFailed, students, say]);
+  const closeSheet = (): void => {
+    setSheet(null);
+    onLinkedSheetClosed?.();
+  };
+
   const onPlaced = (message: string, keepSheet = false): void => {
-    if (!keepSheet) setSheet(null);
+    if (!keepSheet) closeSheet();
     reload();
     say(message);
   };
@@ -812,7 +830,7 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
 
       {onCreate !== undefined && <button onClick={onCreate} title="Nuevo alumno" style={{ position: "fixed", right: 32, bottom: FAB_BOTTOM, zIndex: 50, height: FAB_HEIGHT, padding: "0 26px", borderRadius: 99, display: "inline-flex", alignItems: "center", gap: 10, background: "var(--primary)", color: "var(--primary-ink)", fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 16.5, cursor: "pointer", boxShadow: "var(--shadow-fab)" }}><Icon name="plus" size={22} stroke={2.6} />Nuevo alumno</button>}
 
-      {sheet !== null && <StudentSheet st={students.find((s) => s.id === sheet.id) ?? sheet} groups={groups} cycleId={groupsCycleId} gradeLevels={gradeLevels} gradeLevelsFailed={gradeLevelsFailed} onClose={() => setSheet(null)} onPlaced={onPlaced} onEdit={onEdit === undefined ? undefined : () => onEdit(sheet.id)} canRevokeCard={canRevokeCard} canWithdraw={canWithdraw} />}
+      {sheet !== null && <StudentSheet st={students.find((s) => s.id === sheet.id) ?? sheet} groups={groups} cycleId={groupsCycleId} gradeLevels={gradeLevels} gradeLevelsFailed={gradeLevelsFailed} onClose={closeSheet} onPlaced={onPlaced} onEdit={onEdit === undefined ? undefined : () => onEdit(sheet.id)} canRevokeCard={canRevokeCard} canWithdraw={canWithdraw} />}
       {notesOf !== null && (
         <StudentNotesDialog
           studentId={notesOf.id}

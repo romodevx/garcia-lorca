@@ -112,7 +112,7 @@ const RESTORE_ATTEMPTS = 3;
 const RESTORE_BACKOFF_MS = 300;
 
 /** Modules with a screen of their own; any other module id opens the placeholder. */
-type ModuleScreen = Exclude<View["screen"], "module" | "studentEdit" | "studentNew" | "teacherLoad" | "levelDelete" | "levelPeriods">;
+type ModuleScreen = Exclude<View["screen"], "module" | "studentEdit" | "studentSheet" | "studentNew" | "teacherLoad" | "levelDelete" | "levelPeriods">;
 const MODULE_SCREENS: Readonly<Record<string, ModuleScreen>> = {
   finance: "finance",
   settings: "config",
@@ -504,6 +504,13 @@ export function AppShell(): ReactElement {
   const newStudent = (): void => go({ screen: "studentNew" });
   // Back to the list as it was left; a saved alta leaves its toast for it.
   const backToStudents = (): void => router.push(studentsListPath());
+  // A ficha opened from /alumnos/{id} leaves the list's own address when it
+  // closes, filters kept; no history entry, "atrás" still leaves the list.
+  const leaveStudentSheet = (): void => {
+    if (addressedView.screen === "studentSheet") {
+      router.replace(`${viewToPath({ screen: "students" })}${window.location.search}`);
+    }
+  };
   const finishStudentAlta = (message: string): void => {
     leaveStudentsNotice(message);
     backToStudents();
@@ -720,6 +727,7 @@ export function AppShell(): ReactElement {
         />
       )}
       {(view.screen === "students" ||
+        view.screen === "studentSheet" ||
         (view.screen === "studentEdit" && !(studentsEnabled && canEditStudents)) ||
         (view.screen === "studentNew" && !(studentsEnabled && canCreateStudents))) &&
         (studentsEnabled ? (
@@ -737,6 +745,8 @@ export function AppShell(): ReactElement {
             canReadStatement={financeEnabled && (principal?.permissions?.some((p) => p === "finance:read" || p === "collections:read") === true)}
             canCorrectPayments={canCorrectPayments}
             onOpenImport={openStudentImport}
+            linkedStudentId={view.screen === "studentSheet" ? view.studentId : undefined}
+            onLinkedSheetClosed={leaveStudentSheet}
           />
         ) : (
           // Flag OFF: never render the enrollment surface; show the friendly stub
