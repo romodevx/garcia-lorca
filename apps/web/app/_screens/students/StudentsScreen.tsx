@@ -35,6 +35,7 @@ import { placeStudents } from "../../_design/students/placement";
 import { roomLabelsOf } from "../../_design/students/roomLabels";
 import { StudentNotesDialog } from "../../_design/students/StudentNotesDialog";
 import { StudentStatementDrawer } from "../../_design/students/StudentStatementDrawer";
+import { roomLabelsOf } from "../../_design/students/roomLabels";
 import { useIntent } from "../../routing/pendingIntent";
 import { fold } from "@garcia-lorca/ui/command-core";
 import { ModuleHeaderIcon } from "../../_design/ModuleHeaderIcon";
@@ -641,6 +642,10 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
       };
     });
   }, [students, enrollments, groups, gradeLevels, catalogLevels, placementReady]);
+  // Each pupil's classroom with its grade ("3° PRIMARIA · B"), from the reads
+  // already made; the file's bare letter until they land (ISSUE-T14-303).
+  const rooms = useMemo(() => roomLabelsOf(enrollments, groups), [enrollments, groups]);
+  const roomOf = (s: Student): string => rooms.get(s.id) ?? s.gradeGroup;
   const rows = useMemo(
     () => placedRows.filter((r) => tab === "all" || statusOf(r.student.admissionStatus).tab === tab),
     [placedRows, tab],
@@ -894,7 +899,7 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
         <StudentNotesDialog
           studentId={notesOf.id}
           name={formatStudentName(notesOf)}
-          subtitle={notesOf.gradeGroup}
+          subtitle={roomOf(notesOf)}
           userId={userId}
           canWrite={canWriteNotes}
           canVoidAny={canVoidAnyNote}
@@ -905,7 +910,7 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
         <StudentStatementDrawer
           studentId={statementOf.id}
           name={formatStudentName(statementOf)}
-          subtitle={statementOf.gradeGroup}
+          subtitle={roomOf(statementOf)}
           canCorrect={canCorrectPayments}
           onClose={() => setStatementOf(null)}
         />
