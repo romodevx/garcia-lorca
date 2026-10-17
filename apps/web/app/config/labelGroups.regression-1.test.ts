@@ -33,7 +33,8 @@ function jsonResponse(body: unknown, status = 200): Response {
 describe("labelGroups with grades named the same in two levels", () => {
   it("adds the level when the grade's name does not already carry it", () => {
     const labels = labelGroups(groups, grades, levels).map((g) => g.label);
-    expect(labels).toEqual(["1° PRIMARIA · A", "1° SECUNDARIA · A", "1° Kínder · A", "2° Primaria · A"]);
+    // In school order since ISSUE-018: the level's place, then the grade.
+    expect(labels).toEqual(["1° PRIMARIA · A", "2° Primaria · A", "1° SECUNDARIA · A", "1° Kínder · A"]);
   });
 
   it("keeps the grade-only label when no levels are given", () => {

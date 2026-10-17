@@ -15,6 +15,7 @@
 import { matchesSearch } from "../_design/textSearch";
 import { authFetch } from "../auth/authFetch";
 import type { AttendanceMode } from "../attendance/sheet";
+import { sortBySchoolOrder } from "./schoolOrder";
 
 export type CycleStatus = "draft" | "active" | "closed";
 
@@ -765,15 +766,17 @@ export async function listLabelledGroups(baseURL: string, cycleId: string, grade
  * The config screen asks for the grade "as the school names it", so "1°" under
  * PRIMARIA and "1°" under SECUNDARIA are both normal: when the grade's name does
  * not already carry its level, the level is added ("1° PRIMARIA · A").
+ * They come back in school order: level, grade, then name.
  */
 export function labelGroups(
   groups: readonly Group[],
   grades: readonly GradeLevel[],
-  levels: readonly Pick<Level, "id" | "name">[] = [],
+  levels: readonly Pick<Level, "id" | "name" | "sortOrder">[] = [],
 ): LabelledGroup[] {
   const levelName = new Map(levels.map((l) => [l.id, l.name]));
   const gradeById = new Map(grades.map((g) => [g.id, g]));
-  return groups.map((g) => {
+  // In school order (ISSUE-018): every picker of groups reads them from here.
+  return sortBySchoolOrder(groups, { levels, grades }).map((g) => {
     const grade = gradeById.get(g.gradeLevelId);
     if (grade === undefined) return { ...g, label: g.name };
     return {
