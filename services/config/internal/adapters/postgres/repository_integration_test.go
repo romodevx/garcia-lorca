@@ -194,8 +194,8 @@ func TestCatalogRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewCycle: %v", err)
 	}
-	if err := repo.CreateCycle(ctx, cycle); err != nil {
-		t.Fatalf("CreateCycle (clean insert, no CHECK violation expected): %v", err)
+	if err := insertCycleFixture(t, cycle); err != nil {
+		t.Fatalf("cycle fixture: %v", err)
 	}
 	gotCycle, err := repo.GetCycle(ctx, cycleID)
 	if err != nil {
@@ -310,7 +310,7 @@ func TestListGroupsEmptyFiltersReturnAll(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewCycle: %v", err)
 	}
-	if err := repo.CreateCycle(ctx, cycle); err != nil {
+	if err := insertCycleFixture(t, cycle); err != nil {
 		t.Fatalf("CreateCycle: %v", err)
 	}
 	level, err := domain.NewLevel(levelID, tenantE, "Level-Groups-E", "", domain.GranularityTerm)
@@ -532,7 +532,7 @@ func TestListTermsEmptyFiltersReturnAll(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewCycle: %v", err)
 	}
-	if err := repo.CreateCycle(ctx, cycle); err != nil {
+	if err := insertCycleFixture(t, cycle); err != nil {
 		t.Fatalf("CreateCycle: %v", err)
 	}
 	level, err := domain.NewLevel(levelID, tenantC, "Level-Terms-C", "", domain.GranularityTerm)
@@ -593,7 +593,7 @@ func TestRLSIsolatesTenants(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewCycle: %v", err)
 	}
-	if err := repoA.CreateCycle(ctx, cycle); err != nil {
+	if err := insertCycleFixture(t, cycle); err != nil {
 		t.Fatalf("tenant A CreateCycle: %v", err)
 	}
 
@@ -642,7 +642,7 @@ func TestCreateGroupMissingGradeLevelIsInvalid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewCycle: %v", err)
 	}
-	if err := repo.CreateCycle(ctx, cycle); err != nil {
+	if err := insertCycleFixture(t, cycle); err != nil {
 		t.Fatalf("CreateCycle: %v", err)
 	}
 
@@ -824,7 +824,7 @@ func teachingAssignmentFixture(t *testing.T, tenantID, prefix string) (cycleID, 
 	if err != nil {
 		t.Fatalf("fixture NewCycle: %v", err)
 	}
-	if err := repo.CreateCycle(ctx, cycle); err != nil {
+	if err := insertCycleFixture(t, cycle); err != nil {
 		t.Fatalf("fixture CreateCycle: %v", err)
 	}
 	level, err := domain.NewLevel(levelID, tenantID, "Level-"+prefix, "", domain.GranularityTerm)

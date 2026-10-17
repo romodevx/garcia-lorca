@@ -235,7 +235,7 @@ func TestScheduleCatalogListsLevelsInSortOrder(t *testing.T) {
 	cycle, err := domain.NewCycle("a6a6a6a6-0000-4000-8000-0000000000c1", "a6a6a6a6-0000-4000-8000-000000000000", "2026-2027", domain.CycleStatusDraft,
 		time.Date(2026, time.August, 24, 0, 0, 0, 0, time.UTC), time.Date(2027, time.July, 9, 0, 0, 0, 0, time.UTC))
 	require.NoError(t, err)
-	require.NoError(t, repo.CreateCycle(context.Background(), cycle))
+	require.NoError(t, insertCycleFixture(t, cycle))
 
 	cat, err := repo.LoadScheduleCatalog(context.Background(), cycle.ID())
 
