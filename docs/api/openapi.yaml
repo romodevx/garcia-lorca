@@ -8616,7 +8616,12 @@ components:
         dueTodayCents:
           type: integer
           format: int64
-          description: What the counter asks for today (Registrar pago's figure).
+          description: >
+            What the counter asks for today (Registrar pago's figure): what has
+            fallen due PLUS the charges falling due later THIS calendar month,
+            so a family can pay the month on time and earn the early-payment
+            reward (ISSUE-T14-106). It is "what to pay to be current this
+            month", not "what is overdue": label it that way.
           example: 350000
         surchargeCents:
           type: integer
@@ -8688,6 +8693,23 @@ components:
           type: string
           description: On a correction's lines, the receipt it replaces.
           example: 'P-2026-000123'
+        appliedTo:
+          type: array
+          description: >
+            On a deposit's lines (ISSUE-T14-106): what that deposit's money
+            paid, each charge with its part, in due-date order. Every tender
+            line of one deposit carries the same list; money no charge claimed
+            (credit) is not in it. Absent on every other line. The line's
+            `description` names them too ("Pago · Inscripción", or
+            "Pago · <first> y N más").
+          items: { $ref: '#/components/schemas/StatementAppliedPart' }
+    StatementAppliedPart:
+      type: object
+      required: [chargeId, description, amountCents]
+      properties:
+        chargeId: { type: string, format: uuid }
+        description: { type: string, example: 'Inscripción 2026-2027' }
+        amountCents: { type: integer, format: int64, minimum: 0, example: 300000 }
     StatementTotals:
       type: object
       required: [chargedCents, discountCents, paidCents, balanceCents, notYetDueCents]

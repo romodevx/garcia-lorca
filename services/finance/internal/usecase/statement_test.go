@@ -2,6 +2,7 @@ package usecase_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -108,6 +109,71 @@ func TestADepositIsOneMovementWithItsFolio(t *testing.T) {
 	if st.Totals.BalanceCents != account.TotalBalanceCents {
 		t.Errorf("balance = %d, want the account's %d (T5: one number)", st.Totals.BalanceCents, account.TotalBalanceCents)
 	}
+}
+
+// ISSUE-T14-106 · a deposit's line says what it paid: the charges its money
+// went to, each with its part, in due-date order, and a description naming
+// them ("Pago · <first> y N más"), for the office and the family alike.
+func TestADepositLineSaysWhatItPaid(t *testing.T) {
+	f := depositFixture(t)
+	got := deposit(t, f, 670000, "2026-10-10")
+	charges, err := allCharges(context.Background(), f.svc, testStudent, "")
+	requireNoError(t, err)
+	descriptions := map[string]string{}
+	for _, c := range charges {
+		descriptions[c.Charge.ID()] = c.Charge.Description()
+	}
+
+	for name, st := range map[string]usecase.Statement{
+		"office": statementOf(t, f, testStudent), "family": familyStatementOf(t, f, testStudent),
+	} {
+		var line *domain.Movement
+		for i, m := range st.Movements {
+			if m.DepositID == got.Deposit.ID() {
+				line = &st.Movements[i]
+			}
+		}
+		if line == nil {
+			t.Fatalf("%s: no line for the deposit", name)
+		}
+		if len(line.AppliedTo) < 2 {
+			t.Fatalf("%s: applied to %+v, want September, its surcharge and October", name, line.AppliedTo)
+		}
+		var sum int64
+		for _, a := range line.AppliedTo {
+			sum += a.AmountCents
+			if a.Description == "" || a.Description != descriptions[a.ChargeID] {
+				t.Errorf("%s: allocation %+v does not carry its charge's description %q", name, a, descriptions[a.ChargeID])
+			}
+		}
+		if sum != 670000 {
+			t.Errorf("%s: allocations add up to %d, want the deposit's 670000", name, sum)
+		}
+		want := fmt.Sprintf("Pago · %s y %d más", line.AppliedTo[0].Description, len(line.AppliedTo)-1)
+		if line.Description != want {
+			t.Errorf("%s: description = %q, want %q", name, line.Description, want)
+		}
+	}
+}
+
+// A deposit that paid one charge is named after it, the way a loose payment is.
+func TestADepositThatPaidOneChargeIsNamedAfterIt(t *testing.T) {
+	f := depositFixture(t)
+	got := deposit(t, f, 100000, "2026-10-10")
+
+	for _, m := range familyStatementOf(t, f, testStudent).Movements {
+		if m.DepositID != got.Deposit.ID() {
+			continue
+		}
+		if len(m.AppliedTo) != 1 || m.AppliedTo[0].AmountCents != 100000 {
+			t.Fatalf("applied to %+v, want one allocation of 100000", m.AppliedTo)
+		}
+		if want := "Pago · " + m.AppliedTo[0].Description; m.Description != want {
+			t.Errorf("description = %q, want %q", m.Description, want)
+		}
+		return
+	}
+	t.Fatal("no line for the deposit")
 }
 
 // A voided deposit: the office sees it struck through, the family does not see
@@ -283,5 +349,30 @@ func TestTheFamilyDoesNotReadAReasonTypedByTheOffice(t *testing.T) {
 	}
 	if len(family) != 1 || family[0].Description != "Descuento · "+charge.Description() {
 		t.Errorf("family reads %+v", family)
+	}
+}
+
+// ISSUE-T14-106 · "A pagar hoy" is what to pay to be current THIS MONTH, not
+// only what has already fallen due (expectedBy): on Saturday a family is asked
+// for the month due on Monday, so it can still pay it on time and earn the
+// early-payment reward where the plan has one. Next month's charge is billed
+// but not asked for. The app labels the figure accordingly.
+func TestDueTodayAsksForThisMonthBeforeItsDueDateButNotNextMonth(t *testing.T) {
+	f := dailyFixture(t)
+	runOn(t, f, "2026-09-01")
+	settleInscription(t, f)
+	// Saturday 5 September; September falls due on the 10th, October on
+	// 10 October.
+	f.clock = time.Date(2026, time.September, 5, 12, 0, 0, 0, time.UTC)
+
+	got := familyStatementOf(t, f, testStudent)
+
+	const september = 320000
+	if got.DueTodayCents != september {
+		t.Errorf("due today = %d, want September's %d alone: this month counts before its due date, next month does not",
+			got.DueTodayCents, september)
+	}
+	if got.SurchargeCents != 0 {
+		t.Errorf("surcharge = %d, want 0: nothing is late yet", got.SurchargeCents)
 	}
 }

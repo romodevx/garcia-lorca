@@ -94,9 +94,21 @@ type Movement struct {
 	SupersededByFolio string
 	// CorrectsFolio is, on the correction's lines, the receipt it replaces.
 	CorrectsFolio string
+	// AppliedTo is, on a deposit's lines, what that deposit's money paid:
+	// each charge with its part, in due-date order (ISSUE-T14-106). It is the
+	// deposit's, so every tender line of one deposit carries the same list.
+	// Money no charge claimed (credit) is not in it.
+	AppliedTo []AppliedPart
 	// BalanceCents is the running balance after this line, set by
 	// BuildStatement. Negative is money the school holds for the family.
 	BalanceCents int64
+}
+
+// AppliedPart is the part of a deposit one charge took.
+type AppliedPart struct {
+	ChargeID    string
+	Description string
+	AmountCents int64
 }
 
 // counts reports whether the line moves the balance.

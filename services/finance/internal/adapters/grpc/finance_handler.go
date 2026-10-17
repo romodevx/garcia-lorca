@@ -305,7 +305,20 @@ func toProtoMovement(m domain.Movement) *financev1.StatementMovement {
 		Superseded:        m.Superseded,
 		SupersededByFolio: m.SupersededByFolio,
 		CorrectsFolio:     m.CorrectsFolio,
+		AppliedTo:         toProtoAppliedParts(m.AppliedTo),
 	}
+}
+
+// toProtoAppliedParts projects what a deposit's line paid (ISSUE-T14-106).
+func toProtoAppliedParts(parts []domain.AppliedPart) []*financev1.StatementAppliedPart {
+	if len(parts) == 0 {
+		return nil
+	}
+	out := make([]*financev1.StatementAppliedPart, 0, len(parts))
+	for _, p := range parts {
+		out = append(out, &financev1.StatementAppliedPart{ChargeId: p.ChargeID, Description: p.Description, AmountCents: p.AmountCents})
+	}
+	return out
 }
 
 // ListOverdue lists one page of the charges past their due date that still owe
