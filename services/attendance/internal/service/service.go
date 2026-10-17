@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
+	"golang.org/x/sync/errgroup"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
 )
@@ -706,12 +707,22 @@ func (p pupilInGroup) inGroupOn(day time.Time) bool {
 // on D according to the moves. On a move day the pupil is on BOTH groups'
 // lists; whichever list marks them first holds the mark (attendance/0004).
 func (s *AttendanceService) membership(ctx context.Context, groupID string) ([]pupilInGroup, error) {
-	enrollments, err := s.enrollments.EverInGroup(ctx, groupID)
-	if err != nil {
-		return nil, err
-	}
-	moves, err := s.enrollments.MovesOf(ctx, groupID)
-	if err != nil {
+	// The two reads are independent RPCs: run them side by side, and the
+	// first failure cancels the other.
+	var (
+		enrollments []EnrollmentRef
+		moves       []Move
+	)
+	g, gctx := errgroup.WithContext(ctx)
+	g.Go(func() (err error) {
+		enrollments, err = s.enrollments.EverInGroup(gctx, groupID)
+		return err
+	})
+	g.Go(func() (err error) {
+		moves, err = s.enrollments.MovesOf(gctx, groupID)
+		return err
+	})
+	if err := g.Wait(); err != nil {
 		return nil, err
 	}
 	movesOf := make(map[string][]Move, len(moves))

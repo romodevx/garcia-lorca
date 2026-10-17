@@ -146,6 +146,45 @@ func TestAPastListKeepsAPupilWhoMovedLater(t *testing.T) {
 	assert.Equal(t, "stu-mia", rows[0].StudentID)
 }
 
+// rendezvousEnrollments answers each read only once the OTHER one has started:
+// two sequential RPCs would wait forever (bounded by the test's timeout).
+type rendezvousEnrollments struct {
+	everStarted, movesStarted chan struct{}
+}
+
+func (r rendezvousEnrollments) EverInGroup(ctx context.Context, _ string) ([]service.EnrollmentRef, error) {
+	close(r.everStarted)
+	select {
+	case <-r.movesStarted:
+		return []service.EnrollmentRef{{ID: enrTono, StudentID: "stu-tono", Status: "active"}}, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (r rendezvousEnrollments) MovesOf(ctx context.Context, _ string) ([]service.Move, error) {
+	close(r.movesStarted)
+	select {
+	case <-r.everStarted:
+		return nil, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// Review nit: the two membership reads are independent RPCs, so they run in
+// parallel (errgroup), not one after the other.
+func TestMembershipReadsBothRPCsInParallel(t *testing.T) {
+	enrollments := rendezvousEnrollments{everStarted: make(chan struct{}), movesStarted: make(chan struct{})}
+	svc := service.NewAttendanceService(newFakeRepo(), enrollments, &fakeGroups{existing: map[string]bool{histGroupA: true}}, nil, testTenant, fixedIDs(), nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	rows, err := roster(svc, ctx, histGroupA, "2026-10-14")
+	require.NoError(t, err, "the reads ran one after the other")
+	require.Len(t, rows, 1)
+}
+
 // The report reads the same membership: a pupil moved out of the group is
 // still on its report for the days she sat in it, and no longer active there.
 func TestSummaryCountsAMovedOutPupilUntilTheMove(t *testing.T) {
