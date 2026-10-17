@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { dayWithYearLabel, localISODate, shortDayLabel } from "./localDate";
+import { dayRangeLabel, dayWithYearLabel, localISODate, shortDayLabel } from "./localDate";
 
 describe("localISODate", () => {
   // The school's day, not UTC's nor the device's: at 19:30 in Mexico City UTC
@@ -16,5 +16,13 @@ describe("day labels of an aaaa-mm-dd date", () => {
   it("read the calendar day it names, whatever the time zone", () => {
     expect(shortDayLabel("2026-08-24")).toBe("24 ago");
     expect(dayWithYearLabel("2027-07-09")).toBe("9 jul 2027");
+  });
+});
+
+// T14-012: a closed period or an activity, said with the month in words.
+describe("dayRangeLabel", () => {
+  it("says one day once, and a range from its first to its last day", () => {
+    expect(dayRangeLabel("2026-09-16", "2026-09-16")).toBe("16 sep 2026");
+    expect(dayRangeLabel("2026-12-21", "2027-01-06")).toBe("21 dic 2026 → 6 ene 2027");
   });
 });
