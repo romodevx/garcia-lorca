@@ -1687,11 +1687,11 @@ func (r *Repository) DepositReceipt(ctx context.Context, id string) (ports.Depos
 		// and nothing it left pending.
 		if d.Counts() {
 			out.UnallocatedCents = d.Amount().Int64() - allocated
-			pending, err := pendingAfterDeposit(tx, id)
+			after, err := chargesAfterDeposit(tx, id)
 			if err != nil {
 				return err
 			}
-			out.PendingCents = pending
+			out.After = after
 		}
 		return nil
 	})
@@ -1701,33 +1701,63 @@ func (r *Repository) DepositReceipt(ctx context.Context, id string) (ports.Depos
 	return out, nil
 }
 
-// pendingAfterDeposit is what the charges a deposit paid still owed right after
-// it (T14-020). Payments are ordered by when they were RECORDED, (created_at,
+// chargesAfterDeposit is each charge a deposit paid as it stood right after it
+// (T14-020). Payments are ordered by when they were RECORDED, (created_at,
 // id) — never by the day they are dated — so a later deposit backdated before
 // this one does not change its receipt, and two rows recorded at the same
 // instant still fall on one fixed side. The deposit's own rows count in full.
-// Each charge is priced as it stands now (amount − discount − scholarship);
-// a cancelled one owes nothing.
-func pendingAfterDeposit(tx *gorm.DB, depositID string) (int64, error) {
-	var pending int64
+// paid_by_due is the part of that dated on or before the due date (paid_on,
+// ADR 0035), what decides whether a scholarship was kept. Pricing the charges
+// is the use case's: a scholarship not yet written is not on the row.
+func chargesAfterDeposit(tx *gorm.DB, depositID string) ([]ports.ChargeWithPaid, error) {
+	type paidUpTo struct {
+		ChargeID  string `gorm:"column:charge_id"`
+		Paid      int64  `gorm:"column:paid"`
+		PaidByDue int64  `gorm:"column:paid_by_due"`
+	}
+	var sums []paidUpTo
 	err := tx.Raw(`WITH mine AS (
 	                   SELECT created_at, id FROM payments WHERE deposit_id = ?
 	                    ORDER BY created_at, id LIMIT 1),
 	               paid AS (SELECT DISTINCT charge_id FROM payments WHERE deposit_id = ?)
-	               SELECT COALESCE(SUM(GREATEST(0,
-	                        c.amount_cents - c.discount_cents - c.scholarship_cents - upto.cents)), 0)
+	               SELECT c.id AS charge_id, upto.paid, upto.paid_by_due
 	                 FROM charges c
 	                 JOIN paid ON paid.charge_id = c.id
 	                 CROSS JOIN mine
 	                 CROSS JOIN LATERAL (
-	                   SELECT COALESCE(SUM(p.amount_cents), 0) AS cents FROM payments p
+	                   SELECT COALESCE(SUM(p.amount_cents), 0) AS paid,
+	                          COALESCE(SUM(p.amount_cents) FILTER (WHERE p.paid_on <= c.due_date), 0) AS paid_by_due
+	                     FROM payments p
 	                    WHERE p.charge_id = c.id
 	                      AND (p.deposit_id = ? OR (p.created_at, p.id) < (mine.created_at, mine.id))) upto
-	                WHERE c.status <> ?`, depositID, depositID, depositID, domain.StatusCancelled).Scan(&pending).Error
+	                ORDER BY c.due_date, c.id`, depositID, depositID, depositID).Scan(&sums).Error
 	if err != nil {
-		return 0, glerrors.Wrap(glerrors.KindInternal, "reading what the deposit left pending", err)
+		return nil, glerrors.Wrap(glerrors.KindInternal, "reading what the deposit left pending", err)
 	}
-	return pending, nil
+	if len(sums) == 0 {
+		return nil, nil
+	}
+	ids := make([]string, 0, len(sums))
+	for _, s := range sums {
+		ids = append(ids, s.ChargeID)
+	}
+	var rows []chargeModel
+	if err := tx.Where("id IN ?", ids).Find(&rows).Error; err != nil {
+		return nil, glerrors.Wrap(glerrors.KindInternal, "reading the deposit's charges", err)
+	}
+	byID := make(map[string]chargeModel, len(rows))
+	for _, m := range rows {
+		byID[m.ID] = m
+	}
+	out := make([]ports.ChargeWithPaid, 0, len(sums))
+	for _, s := range sums {
+		charge, err := toDomainCharge(byID[s.ChargeID], s.Paid)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, ports.ChargeWithPaid{Charge: charge, PaidCents: s.Paid, PaidByDueCents: s.PaidByDue})
+	}
+	return out, nil
 }
 
 // UnallocatedCents is what a family has paid that no charge has claimed.

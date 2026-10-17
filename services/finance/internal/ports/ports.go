@@ -268,10 +268,17 @@ type DepositReceipt struct {
 	Deposit          domain.Deposit
 	Lines            []ReceiptLine
 	UnallocatedCents int64
-	// PendingCents is what the charges this deposit paid still owed right
-	// after it (T14-020): every payment RECORDED up to it, in recording order.
-	// Each charge is priced as it stands now, so a discount or scholarship
-	// written later shows in a reprint. A cancelled charge owes nothing.
+	// After is each charge this deposit paid as it stood right after it
+	// (T14-020): PaidCents and PaidByDueCents count every payment RECORDED up
+	// to it, in recording order, and the status is derived from them. The
+	// charge's discount and written scholarship are as stored now, so one
+	// written later shows in a reprint. Empty for a voided or superseded
+	// deposit, which leaves nothing pending.
+	After []ChargeWithPaid
+	// PendingCents is what those charges still owed: the use case prices After
+	// by the statement's rule, scholarship pending included (CC-201 · ADR
+	// 0022). The repository never sets it — a price read off the stored row
+	// misses a scholarship not yet written.
 	PendingCents int64
 }
 
