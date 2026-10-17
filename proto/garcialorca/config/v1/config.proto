@@ -221,6 +221,10 @@ service ConfigService {
   // GetScheduleDay is the effective timetable of a date (base + changes);
   // teacher_id narrows it to the classes that teacher gives or was replaced in.
   rpc GetScheduleDay(GetScheduleDayRequest) returns (GetScheduleDayResponse);
+  // GetSchoolDay says whether a date has classes in a cycle: a weekday inside
+  // the cycle's dates that no non-working period closes. Attendance asks it
+  // before taking a list (T14), so the rule lives here once.
+  rpc GetSchoolDay(GetSchoolDayRequest) returns (GetSchoolDayResponse);
   // CreateScheduleBlock places a teaching assignment on a weekday and time.
   // A double-booked teacher or group is AlreadyExists (X-Error-Code
   // SCHEDULE_TEACHER_BUSY / SCHEDULE_GROUP_BUSY) naming the class.
@@ -1472,6 +1476,18 @@ message GetScheduleDayResponse {
   // non_working is the school-calendar label closing the date ("" on a
   // school day); a closed date has no classes.
   string non_working = 4;
+}
+
+message GetSchoolDayRequest {
+  string cycle_id = 1;
+  google.protobuf.Timestamp date = 2;
+}
+
+// GetSchoolDayResponse: open is false on a weekend, outside the cycle, or on a
+// closed day; closed_label names the non-working period ("" otherwise).
+message GetSchoolDayResponse {
+  bool open = 1;
+  string closed_label = 2;
 }
 
 // ScheduleBlockInput places a teaching assignment; once the cycle has started

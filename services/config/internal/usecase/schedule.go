@@ -175,6 +175,32 @@ func (s *ScheduleService) Day(ctx context.Context, cycleID string, date time.Tim
 	return day, nil
 }
 
+// SchoolDayStatus says whether a date has classes. Closed names the period
+// that closes it; a weekend or a date outside the cycle is closed with no label.
+type SchoolDayStatus struct {
+	Open   bool
+	Closed string
+}
+
+// SchoolDay applies the school-calendar rule to one date of a cycle — the
+// same rule the timetable uses (dayTimetable.schoolDay), offered to the other
+// services that must not act on a day without classes (attendance, T14).
+func (s *ScheduleService) SchoolDay(ctx context.Context, cycleID string, date time.Time) (SchoolDayStatus, error) {
+	if strings.TrimSpace(cycleID) == "" {
+		return SchoolDayStatus{}, glerrors.New(glerrors.KindInvalid, "cycle id is required")
+	}
+	cycle, err := s.repo.GetCycle(ctx, cycleID)
+	if err != nil {
+		return SchoolDayStatus{}, err
+	}
+	t, err := s.loadCalendar(ctx, cycle)
+	if err != nil {
+		return SchoolDayStatus{}, err
+	}
+	open, closed := t.schoolDay(asDate(date))
+	return SchoolDayStatus{Open: open, Closed: closed}, nil
+}
+
 // CreateBlock adds a class to the base timetable.
 func (s *ScheduleService) CreateBlock(ctx context.Context, in BlockInput, by domain.Actor) (domain.ScheduleBlock, error) {
 	p, err := s.placement(ctx, s.newID(), in, addition)
