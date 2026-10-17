@@ -268,7 +268,7 @@ describe("AppShell navigation flow", () => {
     );
 
     // No login submit — the boot restore lands straight on the dashboard.
-    expect(await screen.findByRole("heading", { name: /Módulos/ })).toBeInTheDocument();
+    expect(await screen.findByText("No tienes módulos asignados")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Entrar al sistema" })).not.toBeInTheDocument();
   });
 
@@ -283,7 +283,7 @@ describe("AppShell navigation flow", () => {
       </Providers>
     );
 
-    await screen.findByRole("heading", { name: /Módulos/ });
+    await screen.findByText("No tienes módulos asignados");
     expect(screen.queryByRole("button", { name: /Notificaciones/ })).toBeNull();
   });
 
@@ -354,7 +354,7 @@ describe("AppShell navigation flow", () => {
       </Providers>
     );
 
-    expect(await screen.findByRole("heading", { name: /Módulos/ })).toBeInTheDocument();
+    expect(await screen.findByText("No tienes módulos asignados")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Entrar al sistema" })).not.toBeInTheDocument();
   });
 
