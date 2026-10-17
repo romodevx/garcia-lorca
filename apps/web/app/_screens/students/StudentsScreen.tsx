@@ -35,7 +35,6 @@ import { placeStudents } from "../../_design/students/placement";
 import { roomLabelsOf } from "../../_design/students/roomLabels";
 import { StudentNotesDialog } from "../../_design/students/StudentNotesDialog";
 import { StudentStatementDrawer } from "../../_design/students/StudentStatementDrawer";
-import { roomLabelsOf } from "../../_design/students/roomLabels";
 import { useIntent } from "../../routing/pendingIntent";
 import { fold } from "@garcia-lorca/ui/command-core";
 import { ModuleHeaderIcon } from "../../_design/ModuleHeaderIcon";
