@@ -11,13 +11,14 @@ describe("DEFAULT_GRADING", () => {
 });
 
 describe("gradingErrors", () => {
-  it("accepts a sound scale, with a decimal comma and surrounding spaces", () => {
+  it("accepts a sound scale, with surrounding spaces", () => {
     expect(gradingErrors(OK)).toEqual({});
-    expect(gradingErrors({ ...OK, passing: " 6,5 " })).toEqual({});
+    expect(gradingErrors({ ...OK, passing: " 7 " })).toEqual({});
   });
 
-  it.each(["1e1", "0x6", "6 5", "-1", "abc", "6.555"])("refuses %j as a number", (text) => {
-    expect(gradingErrors({ ...OK, min: text }).min).toBe("Escribe un número, como 5 o 5,5 (hasta 2 decimales).");
+  // ISSUE-T14-005: grades are whole numbers, so the scale's bounds are too.
+  it.each(["1e1", "0x6", "6 5", "-1", "abc", "6.555", "6,5", "5.5"])("refuses %j: whole numbers only", (text) => {
+    expect(gradingErrors({ ...OK, min: text }).min).toBe("Escribe un número entero, como 5 o 6.");
   });
 
   it("keeps the minimum at 0 or more and the maximum at 100 or less", () => {
@@ -33,7 +34,8 @@ describe("gradingErrors", () => {
 });
 
 describe("fromDraft", () => {
-  it("reads the typed text strictly", () => {
-    expect(fromDraft({ ...OK, passing: "6,5" }, true)).toEqual({ enabled: true, min: 5, max: 10, decimals: 0, passing: 6.5 });
+  it("reads the typed text strictly, in whole numbers", () => {
+    expect(fromDraft({ ...OK, passing: " 7 " }, true)).toEqual({ enabled: true, min: 5, max: 10, decimals: 0, passing: 7 });
+    expect(fromDraft({ ...OK, passing: "6,5" }, true).passing).toBeNaN();
   });
 });

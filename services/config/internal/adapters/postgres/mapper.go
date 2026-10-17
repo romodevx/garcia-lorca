@@ -76,7 +76,7 @@ func toDomainLevel(m levelModel) (domain.Level, error) {
 	if err != nil {
 		return domain.Level{}, glerrors.Wrap(glerrors.KindInternal, "unknown attendance mode in db: "+m.AttendanceMode, err)
 	}
-	scale, err := domain.NewGradingScale(m.GradingEnabled, toHundredths(m.GradeMin), toHundredths(m.GradeMax), toHundredths(m.GradePassing), m.GradeDecimals)
+	scale, err := domain.RestoreGradingScale(m.GradingEnabled, toHundredths(m.GradeMin), toHundredths(m.GradeMax), toHundredths(m.GradePassing), m.GradeDecimals)
 	if err != nil {
 		return domain.Level{}, glerrors.Wrap(glerrors.KindInternal, "inconsistent grading scale in db", err)
 	}

@@ -27,6 +27,11 @@ func TestNewGradingScale(t *testing.T) {
 		{"max above one hundred", true, 500, 10100, 600, 1, true},
 		{"three decimals", true, 500, 1000, 600, 3, true},
 		{"negative decimals", true, 500, 1000, 600, -1, true},
+		// ISSUE-T14-005: whole-number scales take whole-number bounds.
+		{"whole numbers, passing 6.5", true, 500, 1000, 650, 0, true},
+		{"whole numbers, min 5.5", true, 550, 1000, 600, 0, true},
+		{"whole numbers, max 9.5", true, 500, 950, 600, 0, true},
+		{"one decimal, passing 6.5", true, 500, 1000, 650, 1, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -89,4 +94,15 @@ func TestLevelWithGrading(t *testing.T) {
 
 	_, err = l.WithGrading(domain.GradingScale{})
 	assert.Equal(t, glerrors.KindInvalid, glerrors.KindOf(err), "a zero scale is not a scale")
+}
+
+// A row stored before the whole-number rule (decimals 0, passing 6.5) still
+// loads: refusing it on read would hide the level instead of fixing it.
+func TestRestoreGradingScaleKeepsAnOlderFractionalBound(t *testing.T) {
+	s, err := domain.RestoreGradingScale(true, 500, 1000, 650, 0)
+	require.NoError(t, err)
+	assert.Equal(t, 650, s.PassingHundredths())
+
+	_, err = domain.RestoreGradingScale(true, 600, 1000, 600, 0)
+	assert.Equal(t, glerrors.KindInvalid, glerrors.KindOf(err))
 }

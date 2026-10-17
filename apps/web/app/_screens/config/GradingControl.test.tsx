@@ -248,7 +248,7 @@ describe("GradingControl", () => {
       renderControl(primaria, vi.fn().mockRejectedValue(tightening()));
 
       await user.clear(screen.getByLabelText("Calificación mínima", CAMPO));
-      await user.type(screen.getByLabelText("Calificación mínima", CAMPO), "5.5");
+      await user.type(screen.getByLabelText("Calificación mínima", CAMPO), "4");
       await user.click(screen.getByRole("button", { name: "Guardar calificación" }));
 
       expect(await screen.findByRole("alert")).toHaveTextContent(TEXT);

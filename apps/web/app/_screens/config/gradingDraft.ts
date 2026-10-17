@@ -23,14 +23,14 @@ export function toDraft(g: LevelGrading): GradingDraft {
   return { min: String(g.min), max: String(g.max), passing: String(g.passing) };
 }
 
-/** Digits with at most two decimals: no sign (so never below 0), exponent, hex or inner space. */
-const STRICT_NUMBER = /^\d+(?:\.\d{1,2})?$/;
+/** Digits only: a whole number, no sign (so never below 0), decimal, exponent, hex or inner space (ISSUE-T14-005). */
+const STRICT_NUMBER = /^\d+$/;
 const MAX_ALLOWED = 100;
-const NOT_A_NUMBER = "Escribe un número, como 5 o 5,5 (hasta 2 decimales).";
+const NOT_A_NUMBER = "Escribe un número entero, como 5 o 6.";
 
 /** The typed text as a number, or NaN when it is not one we accept. */
 const number = (text: string): number => {
-  const normalized = text.trim().replace(",", ".");
+  const normalized = text.trim();
   return STRICT_NUMBER.test(normalized) ? Number(normalized) : Number.NaN;
 };
 
