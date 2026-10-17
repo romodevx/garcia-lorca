@@ -13,6 +13,7 @@ import { FinanceScreen } from "./FinanceScreen";
 vi.mock("../../finance/api", () => ({
   listCharges: vi.fn(),
   getOverdue: vi.fn(),
+  getExpected: vi.fn(),
   registerPayment: vi.fn(),
   getAccount: vi.fn(),
   previewDeposit: vi.fn(),
@@ -36,6 +37,7 @@ const DEPOSIT: financeApi.DepositResult = {
 
 
 beforeEach(() => {
+  vi.mocked(financeApi).getExpected.mockResolvedValue({ amountCents: 0, surchargeCents: 0, discountCents: 0, annualBalanceCents: 0, onTimeBalanceCents: 0, lines: [] });
   vi.mocked(configApi).listCycles.mockResolvedValue([{ id: "c1", name: "2026-2027", status: "active", startsOn: "2026-08-01", endsOn: "2027-06-30" }]);
   vi.mocked(studentsApi).listStudents.mockResolvedValue([{
     id: "s1", curp: "Cs1", firstName: "Valentina", lastName: "Cruz", level: "primaria", levelId: "", gradeGroup: "1° A", guardianName: "Tutor", admissionStatus: "enrolled",

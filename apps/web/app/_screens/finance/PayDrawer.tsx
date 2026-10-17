@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, type ReactElement } from "react";
+import { useEffect, useRef, useState, type ReactElement } from "react";
 
 import { Btn } from "../../_design/Controls";
 import { DrawerShell } from "../../_design/DrawerShell";
@@ -11,13 +11,15 @@ import { TenderEditor } from "../../_design/payments/TenderEditor";
 import { AMOUNT_ERROR } from "../../_design/payments/tenders";
 import { useClosedCut } from "../../_design/payments/useClosedCut";
 import { useTenders } from "../../_design/payments/useTenders";
+import { useDepositPreview } from "../../_design/payments/useDepositPreview";
 import { StudentNotesBeside, useNotesBeside, type NotesAccess } from "../../_design/students/StudentNotesBeside";
 import { API_URL } from "../../api-url";
 import { registerDeposit, type Charge, type DepositResult } from "../../finance/api";
 import { localISODate } from "../../_lib/localDate";
 import { formatCents, formatPesosInput, pesosToCents } from "../../_lib/money";
 import { paymentDateError } from "./CollectDrawer";
-import { DepositReceipt } from "./DepositReceipt";
+import { ChargeQuote, useChargeQuote } from "./ChargeQuote";
+import { DepositPreviewCard, DepositReceipt } from "./DepositReceipt";
 
 /** What is wrong with the amount paid against one charge, if anything: never more than it still owes. */
 export function chargeAmountError(cents: number, remainingCents: number): string | undefined {
@@ -53,7 +55,8 @@ export function PayDrawer({ charge, name, today, notes, onClose, onPaid }: PayDr
   const focusFirstInvalid = useFocusFirstInvalid();
   const [dateError, setDateError] = useState<string | undefined>(undefined);
   // The payment enters the cut of the day it is dated: said before it is taken (ISSUE-026).
-  const cutClosed = useClosedCut(sentDate, paymentDateError(paidOn, day) === undefined);
+  const dateOk = paymentDateError(paidOn, day) === undefined;
+  const cutClosed = useClosedCut(sentDate, dateOk);
   const [saving, setSaving] = useState(false);
   // A ref and not the state: two presses inside one render both read `saving` as false.
   const inFlight = useRef(false);
@@ -62,8 +65,20 @@ export function PayDrawer({ charge, name, today, notes, onClose, onPaid }: PayDr
   // One key per ATTEMPT, kept across retries: a retry after a network error
   // returns the deposit already stored instead of charging the family twice.
   const [attemptKey] = useState(newAttemptKey);
+  const [describe] = useState<ReadonlyMap<string, string>>(() => new Map([[charge.id, charge.description]]));
   // pesosToCents is locale-aware and returns NaN for anything ambiguous.
   const cents = pesosToCents(amount);
+  // What the charge asks for on that day (review B1): the deposit adds its late
+  // fee and applies pronto pago, so its bare balance is neither the amount to
+  // prefill nor the most it may take.
+  const quote = useChargeQuote(charge.studentId, charge.id, sentDate, dateOk);
+  const capCents = quote?.totalCents ?? charge.remainingCents;
+  const amountEdited = useRef(false);
+  useEffect(() => {
+    if (quote !== undefined && !amountEdited.current) setAmount(formatPesosInput(quote.totalCents));
+  }, [quote]);
+  // What the amount covers, from the planner that takes the money.
+  const preview = useDepositPreview({ studentId: charge.studentId, amountCents: cents, paidOn: sentDate, chargeIds: [charge.id], enabled: receipt === null && dateOk });
   // How it is paid, method by method (T8): the rows must add up to the amount.
   const tenders = useTenders(cents);
   // Anything typed makes the drawer dirty: a stray click on the backdrop then
@@ -73,7 +88,7 @@ export function PayDrawer({ charge, name, today, notes, onClose, onPaid }: PayDr
   const submit = async (): Promise<void> => {
     if (inFlight.current) return;
     const wrongDate = paymentDateError(paidOn, day);
-    const wrongAmount = chargeAmountError(cents, charge.remainingCents);
+    const wrongAmount = chargeAmountError(cents, capCents);
     setDateError(wrongDate);
     setAmountError(wrongAmount);
     const tendersOk = wrongAmount === undefined && tenders.validate();
@@ -105,7 +120,7 @@ export function PayDrawer({ charge, name, today, notes, onClose, onPaid }: PayDr
   if (receipt !== null) {
     return (
       <DrawerShell title="Registrar pago" subtitle={`${name} · ${charge.description}`} icon="card" size="md" onClose={onClose} padded={false}>
-        <DepositReceipt result={receipt} describe={new Map([[charge.id, charge.description]])} onClose={onClose} />
+        <DepositReceipt result={receipt} describe={describe} onClose={onClose} />
       </DrawerShell>
     );
   }
@@ -129,22 +144,21 @@ export function PayDrawer({ charge, name, today, notes, onClose, onPaid }: PayDr
       }
     >
       <StudentNotesBeside beside={beside} studentId={charge.studentId}>
-        <div style={{ display: "flex", justifyContent: "space-between", padding: "14px 16px", borderRadius: "var(--r-md)", background: "var(--surface-3)", border: "1px solid var(--border)" }}>
-          <span style={{ fontSize: 14, color: "var(--text-muted)" }}>Saldo del cargo</span>
-          <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 18, color: "var(--text)" }}>{formatCents(charge.remainingCents)}</span>
-        </div>
+        <ChargeQuote line={quote} balanceCents={charge.remainingCents} />
         <MoneyField
           label="Monto a pagar"
           value={amount}
           onChange={(v) => {
+            amountEdited.current = true;
             setAmount(v);
-            if (chargeAmountError(pesosToCents(v), charge.remainingCents) === undefined) setAmountError(undefined);
+            if (chargeAmountError(pesosToCents(v), capCents) === undefined) setAmountError(undefined);
           }}
-          onBlur={() => setAmountError(chargeAmountError(cents, charge.remainingCents))}
+          onBlur={() => setAmountError(chargeAmountError(cents, capCents))}
           error={amountError}
           help="Lo que la familia paga ahora de este cargo: puede ser un abono, nunca más que su saldo."
           required
         />
+        {preview !== null && <DepositPreviewCard preview={preview} describe={describe} fallback={`Recargo · ${charge.description}`} />}
         <TenderEditor tenders={tenders} />
         <DateField
           label="Fecha de pago"

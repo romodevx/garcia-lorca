@@ -11,6 +11,7 @@ import { FinanceScreen } from "./FinanceScreen";
 vi.mock("../../finance/api", () => ({
   listCharges: vi.fn(),
   getOverdue: vi.fn(),
+  getExpected: vi.fn(),
   registerPayment: vi.fn(),
   getAccount: vi.fn(),
   previewDeposit: vi.fn(),
@@ -52,7 +53,18 @@ const student = (id: string, first: string, last: string): studentsApi.Student =
   id, curp: `C${id}`, firstName: first, lastName: last, level: "primaria", levelId: "", gradeGroup: "1° A", guardianName: "Tutor", admissionStatus: "enrolled",
 });
 
+/** The quote of one charge: what is asked for it today. */
+const quoteFor = (chargeId: string, owed: number, extra: Partial<financeApi.ExpectedLine> = {}): financeApi.Expected => {
+  const line: financeApi.ExpectedLine = {
+    chargeId, description: "Colegiatura", dueDate: "2026-09-05", owedCents: owed, surchargeCents: 0, discountCents: 0,
+    scholarshipCents: 0, totalCents: owed, due: true, inBalance: true, ...extra,
+  };
+  return { amountCents: line.totalCents, surchargeCents: line.surchargeCents, discountCents: line.discountCents,
+    annualBalanceCents: line.totalCents, onTimeBalanceCents: line.totalCents, lines: [line] };
+};
+
 beforeEach(() => {
+  finance.getExpected.mockImplementation(async () => quoteFor("ch1", 100000));
   config.listCycles.mockResolvedValue([{ id: "c1", name: "2026-2027", status: "active", startsOn: "2026-08-01", endsOn: "2027-06-30" }]);
   students.listStudents.mockResolvedValue([student("s1", "Valentina", "Cruz"), student("s2", "Mateo", "Sánchez")]);
   finance.listCharges.mockResolvedValue([charge("ch1", "s1", 100000), charge("ch2", "s2", 0)]);
@@ -567,5 +579,60 @@ describe("FinanceScreen · un cargo cancelado no debe nada (T14-020)", () => {
     // Neither the row nor the stat cards ask for the cancelled $3,500.
     expect(screen.queryByText("$3,500.00")).toBeNull();
     expect(screen.getAllByText("$0.00").length).toBeGreaterThan(0);
+  });
+});
+
+// Review B1: Registrar pago is a deposit, so the server adds the late fee as a
+// charge of its own and applies pronto pago. The drawer must ask what is owed
+// TODAY for the charge — not its bare balance — prefill and cap with it, and say
+// what the money covers before it is taken.
+describe("PayDrawer · lo que se debe hoy (revisión B1)", () => {
+  async function open(): Promise<{ user: ReturnType<typeof userEvent.setup>; dialog: HTMLElement }> {
+    const user = userEvent.setup();
+    render(<FinanceScreen onBack={() => {}} />);
+    await screen.findByText("Cruz Valentina");
+    await user.click(screen.getAllByRole("button", { name: /Registrar pago/ })[0] as HTMLElement);
+    return { user, dialog: await screen.findByRole("dialog", { name: "Registrar pago" }) };
+  }
+
+  it("on a late charge: prefills with its late fee, takes it all, and says the fee is covered", async () => {
+    finance.getExpected.mockResolvedValue(quoteFor("ch1", 100000, { surchargeCents: 15000, totalCents: 115000 }));
+    finance.previewDeposit.mockResolvedValue({
+      allocations: [
+        { id: "p1", chargeId: "ch1", amountCents: 100000, method: "cash", reference: "", paidAt: "" },
+        { id: "p2", chargeId: "fee-1", amountCents: 15000, method: "cash", reference: "", paidAt: "" },
+      ],
+      surcharges: [{ ...charge("fee-1", "s1", 15000), description: "Recargo · Colegiatura" }],
+      unallocatedCents: 0,
+    });
+    finance.registerDeposit.mockResolvedValue(DEPOSIT);
+    const { user, dialog } = await open();
+
+    const amount = within(dialog).getByLabelText("Monto a pagar", { selector: "input" });
+    await waitFor(() => expect(amount).toHaveValue("1,150.00"));
+    expect(within(dialog).getByTestId("pay-quote")).toHaveTextContent(/Recargo\s*\$150\.00/);
+    const preview = await within(dialog).findByTestId("preview");
+    expect(preview).toHaveTextContent(/Recargo · Colegiatura\s*\$150\.00/);
+    expect(finance.previewDeposit).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ studentId: "s1", chargeIds: ["ch1"], amountCents: 115000 }));
+
+    await user.click(within(dialog).getByRole("button", { name: /^Registrar pago$/ }));
+    await waitFor(() => expect(finance.registerDeposit).toHaveBeenCalledTimes(1));
+    expect(finance.registerDeposit.mock.calls[0]?.[1]).toMatchObject({ amountCents: 115000, chargeIds: ["ch1"] });
+  });
+
+  it("on a pronto-pago charge: prefills net of the reward, says it, and refuses an amount that would turn into credit", async () => {
+    finance.getExpected.mockResolvedValue(quoteFor("ch1", 100000, { discountCents: 5000, totalCents: 95000 }));
+    const { user, dialog } = await open();
+
+    const amount = within(dialog).getByLabelText("Monto a pagar", { selector: "input" });
+    await waitFor(() => expect(amount).toHaveValue("950.00"));
+    expect(within(dialog).getByTestId("pay-quote")).toHaveTextContent(/Pronto pago\s*−\$50\.00/);
+
+    await user.clear(amount);
+    await user.type(amount, "1000");
+    await user.click(within(dialog).getByRole("button", { name: /^Registrar pago$/ }));
+
+    expect(await within(dialog).findByText(/No puede ser mayor que el saldo del cargo \(\$950\.00\)/)).toBeInTheDocument();
+    expect(finance.registerDeposit).not.toHaveBeenCalled();
   });
 });

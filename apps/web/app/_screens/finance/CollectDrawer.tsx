@@ -1,31 +1,28 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactElement } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
 import { DrawerShell } from "../../_design/DrawerShell";
 import { DateField, MoneyField, useFocusFirstInvalid } from "../../_design/form";
 import { TenderEditor } from "../../_design/payments/TenderEditor";
 import { AMOUNT_ERROR } from "../../_design/payments/tenders";
 import { depositRequest, newAttemptKey } from "../../_design/payments/depositRequest";
+import { useDepositPreview } from "../../_design/payments/useDepositPreview";
 import { useTenders } from "../../_design/payments/useTenders";
 import { ClosedCutNotice } from "../../_design/payments/ClosedCutNotice";
 import { useClosedCut } from "../../_design/payments/useClosedCut";
 import {
   getAccount,
   getExpected,
-  previewDeposit,
   registerDeposit,
-  type Charge,
   type DepositResult,
   type Expected,
   type ExpectedLine,
-  type Payment,
 } from "../../finance/api";
-import { groupByCharge } from "../../finance/allocations";
 import { API_URL } from "../../api-url";
 import { localISODate, shortDayLabel } from "../../_lib/localDate";
 import { DebtList } from "./DebtList";
-import { allocationLabel, DepositReceipt } from "./DepositReceipt";
+import { DepositPreviewCard, DepositReceipt } from "./DepositReceipt";
 import { formatPesosInput, formatCents, pesosToCents } from "../../_lib/money";
 import { formatStudentName } from "../../_design/students/studentName";
 import { StudentNotesBeside, useNotesBeside, type NotesAccess } from "../../_design/students/StudentNotesBeside";
@@ -40,11 +37,6 @@ import { StudentNotesBeside, useNotesBeside, type NotesAccess } from "../../_des
 function difference(captured: number, expectedCents: number): number {
   return expectedCents - (Number.isFinite(captured) ? captured : 0);
 }
-
-/** How long the typing has to stop before we ask the server what it covers. */
-const PREVIEW_DEBOUNCE_MS = 350;
-
-const lineRow: CSSProperties = { display: "flex", justifyContent: "space-between", padding: "12px 16px", borderTop: "1px solid var(--border)" };
 
 /** The pupil the counter is collecting for. Only what the header needs. */
 export interface CollectStudent {
@@ -167,7 +159,6 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
   // decision somebody makes, which is why it is a switch and not a default.
   const [grantEarly, setGrantEarly] = useState(false);
   const [amountError, setAmountError] = useState<string | undefined>(undefined);
-  const [preview, setPreview] = useState<{ allocations: Payment[]; surcharges: Charge[]; unallocatedCents: number } | null>(null);
   const [receipt, setReceipt] = useState<DepositResult | null>(null);
   const [saving, setSaving] = useState(false);
   // A ref and not the state: two presses inside one render both read `saving` as false.
@@ -180,8 +171,13 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
   const cents = pesosToCents(amount);
   const lines = expected?.lines ?? [];
   const choice = choiceOf(lines, chosen);
-  const choiceKey = choice?.join(",") ?? "";
   const selectedCents = selectedTotal(lines, chosen);
+  // What the typed amount covers, from the planner that takes the money.
+  const preview = useDepositPreview({
+    studentId: student.id, amountCents: cents, paidOn: sentDate,
+    ...(choice !== undefined ? { chargeIds: choice } : {}),
+    enabled: receipt === null && dateOk,
+  });
   // The difference is measured against what was chosen — which, by default, is
   // exactly what is due.
   const target = lines.length > 0 ? selectedCents : (expected?.amountCents ?? 0);
@@ -254,27 +250,6 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
     return () => { live = false; };
   }, [student.id, sentDate, dateOk]);
 
-  // Ask the server what the typed amount covers, once the typing settles. The
-  // rule lives in one place — the same planner that takes the money — so the
-  // preview can never drift from what actually happens.
-  useEffect(() => {
-    if (!Number.isFinite(cents) || cents <= 0 || receipt !== null || !dateOk) {
-      setPreview(null);
-      return;
-    }
-    let live = true;
-    const timer = setTimeout(() => {
-      previewDeposit(API_URL, {
-        studentId: student.id,
-        amountCents: cents,
-        ...(sentDate !== "" ? { paidAt: sentDate } : {}),
-        ...(choiceKey !== "" ? { chargeIds: choiceKey.split(",") } : {}),
-      })
-        .then((p) => { if (live) { setPreview(p); } })
-        .catch(() => { if (live) { setPreview(null); } });
-    }, PREVIEW_DEBOUNCE_MS);
-    return () => { live = false; clearTimeout(timer); };
-  }, [cents, student.id, receipt, sentDate, dateOk, choiceKey]);
 
   // Escape closes. Nothing is at risk: the money has not been taken, and the
   // amount is one field to retype.
@@ -392,32 +367,7 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
                     </label>
                   )}
 
-                  {preview !== null && (
-                    <div data-testid="preview" style={{ borderRadius: "var(--r-md)", border: "1px solid var(--border)", overflow: "hidden" }}>
-                      <div style={{ padding: "10px 16px", background: "var(--surface-2)", fontSize: 13, fontWeight: 700, color: "var(--text-muted)", fontFamily: "var(--font-display)" }}>
-                        Cubre
-                      </div>
-                      {groupByCharge(preview.allocations).map((a) => (
-                        <div key={a.chargeId} style={lineRow}>
-                          <span style={{ fontSize: 14.5, color: "var(--text)" }}>{allocationLabel(a.chargeId, preview.surcharges, describe.current)}</span>
-                          <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 15, color: "var(--text)" }}>{formatCents(a.amountCents)}</span>
-                        </div>
-                      ))}
-                      {preview.allocations.length === 0 && (
-                        <p style={{ padding: "12px 16px", margin: 0, fontSize: 14, color: "var(--text-muted)" }}>
-                          No hay nada vencido; todo queda a favor.
-                        </p>
-                      )}
-                      {preview.unallocatedCents > 0 && (
-                        <div style={{ display: "flex", justifyContent: "space-between", padding: "12px 16px", borderTop: "1px solid var(--border)", background: "var(--surface-2)" }}>
-                          <span style={{ fontSize: 14.5, color: "var(--text-muted)" }}>Queda a favor</span>
-                          <span data-testid="credit" style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 15, color: "var(--forest)" }}>
-                            {formatCents(preview.unallocatedCents)}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  )}
+                  {preview !== null && <DepositPreviewCard preview={preview} describe={describe.current} />}
 
                   <TenderEditor tenders={tenders} />
 

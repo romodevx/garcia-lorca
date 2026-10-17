@@ -5,7 +5,7 @@ import type { CSSProperties, ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
 import { tenderLabel } from "../../_design/payments/tenders";
 import { groupByCharge } from "../../finance/allocations";
-import type { Charge, DepositResult, Tender } from "../../finance/api";
+import type { Charge, DepositPreview, DepositResult, Tender } from "../../finance/api";
 import { formatCents } from "../../_lib/money";
 import { ReceiptActions } from "../receipts/ReceiptActions";
 
@@ -16,12 +16,49 @@ const lineRow: CSSProperties = { display: "flex", justifyContent: "space-between
  * payment is not in the account read, so its description comes from the result
  * itself.
  */
-export function allocationLabel(chargeId: string, surcharges: readonly Charge[], known: ReadonlyMap<string, string>): string {
+export function allocationLabel(chargeId: string, surcharges: readonly Charge[], known: ReadonlyMap<string, string>, fallback = "Cargo"): string {
   const fresh = surcharges.find((c) => c.id === chargeId);
   if (fresh !== undefined) {
     return fresh.description;
   }
-  return known.get(chargeId) ?? "Cargo";
+  return known.get(chargeId) ?? fallback;
+}
+
+export interface DepositPreviewCardProps {
+  preview: DepositPreview;
+  describe: ReadonlyMap<string, string>;
+  /** The name of a covered charge nobody described (Finanzas: its surcharge). */
+  fallback?: string;
+}
+
+/** "Cubre": what an amount would pay, line by line, and the credit it would leave. */
+export function DepositPreviewCard({ preview, describe, fallback }: DepositPreviewCardProps): ReactElement {
+  return (
+    <div data-testid="preview" style={{ borderRadius: "var(--r-md)", border: "1px solid var(--border)", overflow: "hidden" }}>
+      <div style={{ padding: "10px 16px", background: "var(--surface-2)", fontSize: 13, fontWeight: 700, color: "var(--text-muted)", fontFamily: "var(--font-display)" }}>
+        Cubre
+      </div>
+      {groupByCharge(preview.allocations).map((a) => (
+        <div key={a.chargeId} style={lineRow}>
+          <span style={{ fontSize: 14.5, color: "var(--text)" }}>{allocationLabel(a.chargeId, preview.surcharges, describe, fallback)}</span>
+          <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 15, color: "var(--text)" }}>{formatCents(a.amountCents)}</span>
+        </div>
+      ))}
+      {preview.allocations.length === 0 && (
+        <p style={{ padding: "12px 16px", margin: 0, fontSize: 14, color: "var(--text-muted)" }}>
+          No hay nada vencido; todo queda a favor.
+        </p>
+      )}
+      {preview.unallocatedCents > 0 && (
+        <div style={{ display: "flex", justifyContent: "space-between", padding: "12px 16px", borderTop: "1px solid var(--border)", background: "var(--surface-2)" }}>
+          <span style={{ fontSize: 14.5, color: "var(--text-muted)" }}>Queda a favor</span>
+          <span data-testid="credit" style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 15, color: "var(--forest)" }}>
+            {formatCents(preview.unallocatedCents)}
+          </span>
+        </div>
+      )}
+    </div>
+  );
 }
 
 /** A breakdown is worth showing when there is more than one method, or a credit note that is not money. */
