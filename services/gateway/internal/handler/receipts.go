@@ -55,9 +55,7 @@ func (h *ReceiptsHandler) serveJSON(w http.ResponseWriter, r *http.Request, get 
 		writeConnectError(w, err)
 		return
 	}
-	// It names a family's money: no shared cache keeps a copy.
-	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusOK, got)
+	writeReceiptJSON(w, got)
 }
 
 func (h *ReceiptsHandler) servePDF(w http.ResponseWriter, r *http.Request, get build) {
@@ -66,6 +64,18 @@ func (h *ReceiptsHandler) servePDF(w http.ResponseWriter, r *http.Request, get b
 		writeConnectError(w, err)
 		return
 	}
+	writeReceiptPDF(w, got)
+}
+
+// writeReceiptJSON answers a receipt as the ticket's JSON.
+func writeReceiptJSON(w http.ResponseWriter, got receipt.Receipt) {
+	// It names a family's money: no shared cache keeps a copy.
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, got)
+}
+
+// writeReceiptPDF answers a receipt as a PDF download named after its folio.
+func writeReceiptPDF(w http.ResponseWriter, got receipt.Receipt) {
 	doc, err := receipt.PDF(got)
 	if err != nil {
 		http.Error(w, "the receipt could not be rendered", http.StatusInternalServerError)

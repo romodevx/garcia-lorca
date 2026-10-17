@@ -126,6 +126,7 @@ type FamilyHandler struct {
 	attendance AttendanceRangeReader
 	catalog    FamilyCatalogReader
 	statements StatementSource
+	receipts   FamilyReceiptSource
 	now        func() time.Time
 }
 

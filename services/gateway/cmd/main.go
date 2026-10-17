@@ -986,7 +986,8 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 		// The sale receipt says who collected (T14-019), as the payment one does.
 		receipt.WithUserNamer(authClient),
 	}
-	receiptsH := handler.NewReceiptsHandler(receipt.NewBuilder(financeClient, uniformsClient, studentsClient, financeClient, configClient, receiptOptions...))
+	receiptBuilder := receipt.NewBuilder(financeClient, uniformsClient, studentsClient, financeClient, configClient, receiptOptions...)
+	receiptsH := handler.NewReceiptsHandler(receiptBuilder)
 	paymentReceipt := func(h http.HandlerFunc) http.Handler {
 		return guard.Protect("finance", requireAuthChanged(middleware.RequireAnyPermission("finance:read", "collections:read")(h)))
 	}
@@ -1017,7 +1018,7 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	// configClient (the same one backing the /config/* routes) is reused here only
 	// to resolve grade subject/term ids to names for the family grades screen.
 	familyH := handler.NewFamilyHandler(studentsClient, commsClient, financeClient, gradesClient, attendanceClient, configClient,
-		handler.WithFamilyStatements(statements))
+		handler.WithFamilyStatements(statements), handler.WithFamilyReceipts(receiptBuilder))
 	// familyReadModules composes family:read behind the given module guards, in
 	// addition to module_students which every family route needs for the ownership
 	// check. The guards nest right-to-left, so the outermost listed module is
@@ -1057,6 +1058,13 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 		familyReadModules([]string{"finance", "students"}, familyH.Statement))
 	mux.Handle("GET /api/v1/family/students/{studentId}/statement/pdf",
 		familyReadModules([]string{"finance", "students"}, familyH.StatementPDF))
+	// ISSUE-T14-107: the receipt of one of the child's payments, the office's
+	// receipt in the family's view. The handler checks the child is the
+	// caller's; the builder that the deposit is that child's (404 either way).
+	mux.Handle("GET /api/v1/family/students/{studentId}/receipts/{depositId}",
+		familyReadModules([]string{"finance", "students"}, familyH.ReceiptJSON))
+	mux.Handle("GET /api/v1/family/students/{studentId}/receipts/{depositId}/pdf",
+		familyReadModules([]string{"finance", "students"}, familyH.ReceiptPDF))
 	mux.Handle("GET /api/v1/family/students/{studentId}/profile",
 		familyReadModules([]string{"students"}, familyH.Profile))
 	mux.Handle("GET /api/v1/family/students/{studentId}/grades",

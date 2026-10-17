@@ -104,6 +104,42 @@ func TestAVoidedPaymentSaysSo(t *testing.T) {
 	}
 }
 
+// ISSUE-T14-107 · the family's receipt is the office's, for a deposit of THAT
+// pupil only: another pupil's deposit is "no such receipt", never a hint that
+// it exists.
+func TestAFamilyReceiptIsOnlyOfItsOwnPupil(t *testing.T) {
+	f := fakeSources{profile: school, found: true,
+		student: client.StudentResult{FirstName: "Alumna", LastName: "Dos"},
+		deposit: client.DepositReceipt{Deposit: client.Deposit{
+			ID: "dep-1", StudentID: "stu-1", AmountCents: 300000, Method: "cash", PaidAt: "2026-10-17T00:00:00Z", Folio: "P-2026-000002",
+		}}}
+
+	got, err := builder(f).FamilyPayment(context.Background(), "stu-1", "dep-1")
+	if err != nil || got.Folio != "P-2026-000002" || got.TotalCents != 300000 {
+		t.Fatalf("own pupil: %+v, %v", got, err)
+	}
+	_, err = builder(f).FamilyPayment(context.Background(), "stu-2", "dep-1")
+	if connect.CodeOf(err) != connect.CodeNotFound {
+		t.Errorf("another pupil's deposit: %v, want NotFound", err)
+	}
+}
+
+// A voided deposit answers the family as the office's receipt does — marked —
+// but without the office's reason: that note is internal (as on the statement).
+func TestAFamilyReceiptOfAVoidedDepositHidesTheReason(t *testing.T) {
+	f := fakeSources{deposit: client.DepositReceipt{Deposit: client.Deposit{
+		ID: "dep-2", StudentID: "stu-1", AmountCents: 100, Method: "cash", PaidAt: "2026-10-10T00:00:00Z",
+		Folio: "P-2026-000043", VoidedAt: "2026-10-11T00:00:00Z", VoidReason: "capturado mal",
+	}}}
+	got, err := builder(f).FamilyPayment(context.Background(), "stu-1", "dep-2")
+	if err != nil {
+		t.Fatalf("FamilyPayment: %v", err)
+	}
+	if !got.Voided || got.VoidReason != "" {
+		t.Errorf("voided = %v, reason %q; want marked, no reason", got.Voided, got.VoidReason)
+	}
+}
+
 // A uniforms sale's receipt: the order's folio and lines (garment, size,
 // quantity), its total, and how it was paid, read from finance by the delivery's
 // charge.

@@ -309,6 +309,102 @@ paths:
         '403': { $ref: '#/components/responses/PlainForbidden' }
         '404': { $ref: '#/components/responses/PlainNotFound' }
 
+  /api/v1/family/students:
+    get:
+      tags: [family]
+      summary: The caller's own children
+      description: >
+        Phase 9b. Every child the CALLER is linked to as a guardian, derived
+        from the principal alone (no request field widens it; ADR 0004). An
+        unlinked guardian gets an empty list. Behind `module_students`.
+        Requires `family:read`.
+      operationId: listFamilyStudents
+      security: [{ familyBearer: [] }]
+      responses:
+        '200':
+          description: The caller's children.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [students]
+                properties:
+                  students:
+                    type: array
+                    items: { $ref: '#/components/schemas/FamilyStudent' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
+  /api/v1/family/students/{studentId}/profile:
+    get:
+      tags: [family]
+      summary: A child's record and current enrollment
+      description: >
+        The child's core record plus the active enrollment, if any. A child
+        that is not the caller's is 404. Behind `module_students`. Requires
+        `family:read`.
+      operationId: getFamilyStudentProfile
+      security: [{ familyBearer: [] }]
+      parameters: [{ $ref: '#/components/parameters/FamilyStudentIdPath' }]
+      responses:
+        '200':
+          description: The child.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FamilyStudentProfile' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
+  /api/v1/family/students/{studentId}/receipts/{depositId}:
+    get:
+      tags: [family]
+      summary: The receipt of one of a child's payments
+      description: >
+        ISSUE-T14-107. The same receipt the office prints (see the
+        statement's `depositId` on a payment line), for a deposit of the
+        caller's OWN child. A child that is not the caller's, a deposit of
+        another pupil, or one that does not exist are all 404 — never 403,
+        so nothing tells whether it exists. A voided or superseded deposit
+        answers like the office's receipt (marked), without the office's
+        internal void reason. Behind `module_finance` AND `module_students`.
+        Requires `family:read`.
+      operationId: getFamilyPaymentReceipt
+      security: [{ familyBearer: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/FamilyStudentIdPath' }
+        - { $ref: '#/components/parameters/FamilyDepositIdPath' }
+      responses:
+        '200':
+          description: The receipt.
+          headers:
+            Cache-Control: { $ref: '#/components/headers/NoStore' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaymentReceipt' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
+  /api/v1/family/students/{studentId}/receipts/{depositId}/pdf:
+    get:
+      tags: [family]
+      summary: The receipt of one of a child's payments, as a PDF
+      description: >
+        The receipt above as a PDF, same rules. Behind `module_finance` AND
+        `module_students`. Requires `family:read`.
+      operationId: getFamilyPaymentReceiptPdf
+      security: [{ familyBearer: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/FamilyStudentIdPath' }
+        - { $ref: '#/components/parameters/FamilyDepositIdPath' }
+      responses:
+        '200': { $ref: '#/components/responses/ReceiptPDF' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
   /api/v1/uniforms/items:
     get:
       tags: [uniforms-catalogue]
@@ -6955,6 +7051,12 @@ components:
       in: path
       required: true
       schema: { type: string, format: uuid }
+    FamilyDepositIdPath:
+      name: depositId
+      in: path
+      required: true
+      description: The `depositId` of a payment line of the child's statement.
+      schema: { type: string, format: uuid }
     TermIdPath:
       name: termId
       in: path
@@ -7069,6 +7171,16 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/ReportCard' }
+    ReceiptPDF:
+      description: The payment receipt as a PDF, downloaded as an attachment.
+      headers:
+        Cache-Control: { $ref: '#/components/headers/NoStore' }
+        Content-Disposition:
+          description: attachment; filename="comprobante-<folio>.pdf"
+          schema: { type: string, example: 'attachment; filename="comprobante-P-2026-000042.pdf"' }
+      content:
+        application/pdf:
+          schema: { type: string, format: binary }
     StatementPDF:
       description: The account statement as a letter-size PDF, downloaded as an attachment.
       headers:
@@ -8639,6 +8751,107 @@ components:
           description: Money handed over that no charge has claimed (the family's credit).
           example: 0
         asOf: { type: string, format: date, example: '2026-10-01' }
+    FamilyStudent:
+      type: object
+      required: [id, firstName, lastName, maternalLastName, level, levelId, gradeGroup, groupLabel]
+      properties:
+        id: { type: string, format: uuid }
+        firstName: { type: string, example: 'Alumna' }
+        lastName: { type: string, example: 'Dos' }
+        maternalLastName: { type: string, description: Empty when not captured. }
+        level: { type: string, example: 'Primaria' }
+        levelId: { type: string, format: uuid }
+        gradeGroup:
+          type: string
+          description: The group's bare letter as stored on the pupil. Kept for older apps; show groupLabel.
+          example: 'B'
+        groupLabel:
+          type: string
+          description: >
+            ISSUE-T14-108. The group as every screen and receipt names it, the
+            one of the school's today: grade, level and letter. Falls back to
+            gradeGroup when the pupil has no enrollment the catalog resolves.
+          example: '3° PRIMARIA · B'
+    FamilyStudentProfile:
+      allOf:
+        - { $ref: '#/components/schemas/FamilyStudent' }
+        - type: object
+          required: [currentEnrollment]
+          properties:
+            currentEnrollment:
+              description: The active enrollment; null when none is active.
+              oneOf:
+                - type: 'null'
+                - type: object
+                  required: [id, studentId, cycleId, groupId, termId, status, enrolledAt]
+                  properties:
+                    id: { type: string, format: uuid }
+                    studentId: { type: string, format: uuid }
+                    cycleId: { type: string, format: uuid }
+                    groupId: { type: string, format: uuid }
+                    termId: { type: string }
+                    status: { type: string, example: 'active' }
+                    enrolledAt: { type: string, format: date-time }
+                    withdrawnOn: { type: string, format: date }
+                    withdrawalReason: { type: string }
+    PaymentReceipt:
+      type: object
+      description: >
+        The proof of a counter deposit, in the office's words (task 12): what
+        the 80 mm ticket and the PDF print.
+      required: [kind, folio, school, paidOn, buyer, lines, surchargeCents, discountCents,
+        scholarshipCents, creditCents, totalCents, method, tenders]
+      properties:
+        kind: { type: string, enum: [payment], example: payment }
+        folio: { type: string, example: 'P-2026-000042' }
+        school:
+          type: object
+          properties:
+            name: { type: string }
+            legalName: { type: string }
+            rfc: { type: string }
+            cct: { type: string }
+            address: { type: string }
+            phone: { type: string }
+            legend: { type: string }
+        paidOn: { type: string, format: date, example: '2026-10-17' }
+        buyer: { type: string, example: 'Alumna Dos' }
+        buyerDetail: { type: string, example: '3° PRIMARIA · B' }
+        lines:
+          type: array
+          items:
+            type: object
+            required: [description, amountCents]
+            properties:
+              description: { type: string, example: 'Inscripción 2026-2027' }
+              amountCents: { type: integer, format: int64, example: 300000 }
+              surcharge: { type: boolean }
+              discountCents: { type: integer, format: int64 }
+              scholarshipCents: { type: integer, format: int64 }
+              scholarshipName: { type: string }
+        surchargeCents: { type: integer, format: int64 }
+        discountCents: { type: integer, format: int64 }
+        scholarshipCents: { type: integer, format: int64 }
+        creditCents: { type: integer, format: int64, description: Money no concept claimed. }
+        totalCents: { type: integer, format: int64, example: 300000 }
+        method: { type: string, example: 'Efectivo' }
+        reference: { type: string }
+        tenders:
+          type: array
+          items:
+            type: object
+            required: [code, method, amountCents]
+            properties:
+              code: { type: string, enum: [cash, card, transfer, credit_note] }
+              method: { type: string, example: 'Efectivo' }
+              amountCents: { type: integer, format: int64 }
+              reference: { type: string }
+        receivedBy: { type: string }
+        voided: { type: boolean }
+        voidReason: { type: string, description: Office only; never sent to a family. }
+        superseded: { type: boolean }
+        supersededByFolio: { type: string }
+        correctsFolio: { type: string }
     StatementMovement:
       type: object
       required: [kind, date, description, amountCents, balanceCents, accrued, notYetDue, voided]
