@@ -442,6 +442,7 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("POST /api/v1/config/cycles", configWrite(configH.CreateCycle))
 	mux.Handle("GET /api/v1/config/cycles", configRead(configH.ListCycles))
 	mux.Handle("POST /api/v1/config/cycles/{id}/activate", configWrite(configH.ActivateCycle))
+	mux.Handle("PATCH /api/v1/config/cycles/{id}", configWrite(configH.RenameCycle))
 	mux.Handle("POST /api/v1/config/levels", configWrite(configH.CreateLevel))
 	mux.Handle("GET /api/v1/config/levels", configRead(configH.ListLevels))
 	mux.Handle("PATCH /api/v1/config/levels/{id}", configWrite(configH.PatchLevel))

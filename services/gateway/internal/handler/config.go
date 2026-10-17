@@ -20,6 +20,7 @@ type ConfigService interface {
 	CreateCycle(ctx context.Context, in client.CreateCycleInput) (client.CycleResult, error)
 	ListCycles(ctx context.Context) ([]client.CycleResult, error)
 	ActivateCycle(ctx context.Context, id string) (client.CycleResult, error)
+	RenameCycle(ctx context.Context, id, name string) (client.CycleResult, error)
 	CreateLevel(ctx context.Context, in client.CreateLevelInput) (client.LevelResult, error)
 	ListLevels(ctx context.Context) ([]client.LevelResult, error)
 	ReorderLevels(ctx context.Context, levelIDs []string) ([]client.LevelResult, error)
@@ -205,6 +206,36 @@ func (h *ConfigHandler) CreateCycle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, toCycleResponse(res))
+}
+
+type renameCycleRequest struct {
+	Name string `json:"name"`
+}
+
+// RenameCycle handles PATCH /api/v1/config/cycles/{id} with {name}: the same
+// year (id, dates, status) under a new name. A blank name never reaches config;
+// config judges the rest (unknown → 404, a name another cycle has → 409).
+func (h *ConfigHandler) RenameCycle(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !uuidShape.MatchString(id) {
+		http.Error(w, "id must be a cycle id", http.StatusBadRequest)
+		return
+	}
+	var req renameCycleRequest
+	if err := decodeJSONBody(w, r, &req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(req.Name) == "" {
+		http.Error(w, "Escribe el nombre del ciclo", http.StatusBadRequest)
+		return
+	}
+	res, err := h.svc.RenameCycle(r.Context(), id, req.Name)
+	if err != nil {
+		writeConnectError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toCycleResponse(res))
 }
 
 // ListCycles handles GET /api/v1/config/cycles.

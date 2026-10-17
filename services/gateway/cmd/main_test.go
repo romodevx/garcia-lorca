@@ -371,6 +371,12 @@ func (stubConfig) ActivateCycle(_ context.Context, req *connect.Request[configv1
 	}), nil
 }
 
+func (stubConfig) RenameCycle(_ context.Context, req *connect.Request[configv1.RenameCycleRequest]) (*connect.Response[configv1.RenameCycleResponse], error) {
+	return connect.NewResponse(&configv1.RenameCycleResponse{
+		Cycle: &configv1.Cycle{Id: req.Msg.GetId(), Name: req.Msg.GetName(), Status: configv1.CycleStatus_CYCLE_STATUS_DRAFT},
+	}), nil
+}
+
 func (stubConfig) CreateTeacher(_ context.Context, req *connect.Request[configv1.CreateTeacherRequest]) (*connect.Response[configv1.CreateTeacherResponse], error) {
 	return connect.NewResponse(&configv1.CreateTeacherResponse{Teacher: &configv1.Teacher{
 		Id:        "tch-1",
@@ -3034,6 +3040,29 @@ func TestUniformsWritesRefuseAReadOnlyCaller(t *testing.T) {
 // A cycle was created as a draft and had no way out, so every school year read
 // "Borrador" and the panel resolved "the active cycle" to whichever came first.
 // The route is a config WRITE: it changes which year the whole product is about.
+
+// CC-103: renaming a year is a config write behind module_config.
+func TestRenameCycleRoute(t *testing.T) {
+	const path = "/api/v1/config/cycles/00000000-0000-4000-8000-0000000000c1"
+	cases := map[string]struct {
+		flags  map[string]bool
+		caller string
+		want   int
+	}{
+		"module off":   {map[string]bool{}, "config-writer", http.StatusNotFound},
+		"read only":    {map[string]bool{"module_config": true}, "config-reader", http.StatusForbidden},
+		"config:write": {map[string]bool{"module_config": true}, "config-writer", http.StatusOK},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			gw := newTestGateway(t, tc.flags)
+			res := doGateway(t, gw, http.MethodPatch, path, tc.caller, `{"name":"2027-2028"}`)
+			if res.StatusCode != tc.want {
+				t.Errorf("status = %d, want %d", res.StatusCode, tc.want)
+			}
+		})
+	}
+}
 
 func TestActivateCycleDisabledModuleIs404(t *testing.T) {
 	gw := newTestGateway(t, map[string]bool{}) // module_config OFF
