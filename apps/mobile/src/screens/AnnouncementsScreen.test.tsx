@@ -136,6 +136,23 @@ describe("AnnouncementsScreen", () => {
       expect(screen.getByText("Junta de padres 3º B")).toBeTruthy();
     });
 
+    // CC-303 gate: "Marcar leídos" acts on what the family is looking at.
+    it("marks only the filtered child's notices as read", async () => {
+      mockSiblings([junta, recordatorio]);
+      await renderWithProviders(<AnnouncementsScreen />);
+      await screen.findByText("Junta de padres 3º B");
+
+      await fireEvent.press(screen.getByRole("tab", { name: "Alumna Dos" }));
+      await fireEvent.press(screen.getByRole("button", { name: "Marcar leídos" }));
+
+      const posts = (): string[] =>
+        (globalThis.fetch as jest.Mock).mock.calls
+          .filter(([, init]) => (init as RequestInit | undefined)?.method === "POST")
+          .map(([url]) => String(url));
+      await waitFor(() => expect(posts().some((u) => u.includes("/family/notifications/n2/read"))).toBe(true));
+      expect(posts().some((u) => u.includes("/family/notifications/n4/read"))).toBe(false);
+    });
+
     it("neither labels nor filters for a single child", async () => {
       mockSiblings([junta], [students[0]]);
       await renderWithProviders(<AnnouncementsScreen />);

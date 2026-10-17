@@ -31,9 +31,7 @@ export function AnnouncementsScreen(): ReactElement {
     notificationsError,
     refreshNotifications,
     readIds,
-    unreadCount,
     markRead,
-    markAllRead,
   } = useAppState();
   useRefreshHandler(refreshNotifications);
   const names = useMemo(() => siblingNames(linkedChildren), [linkedChildren]);
@@ -42,6 +40,10 @@ export function AnnouncementsScreen(): ReactElement {
   const activeFilter = names.has(filter) ? filter : ALL_CHILDREN;
   const visible =
     activeFilter === ALL_CHILDREN ? notifications : notifications.filter((n) => n.studentId === activeFilter);
+  // "Marcar leídos" acts on what is on screen: with one child filtered, the
+  // other child's news stays unread.
+  const visibleUnread = visible.filter((n) => isUnread(n, readIds));
+  const markVisibleRead = (): void => visibleUnread.forEach((n) => markRead(n.id));
 
   const open = (id: string): void => {
     markRead(id);
@@ -52,7 +54,7 @@ export function AnnouncementsScreen(): ReactElement {
     <>
       <View style={styles.titleRow}>
         <ScreenTitle>Avisos</ScreenTitle>
-        {unreadCount > 0 ? <MarkAllAction onPress={markAllRead} /> : null}
+        {visibleUnread.length > 0 ? <MarkAllAction onPress={markVisibleRead} /> : null}
       </View>
 
       {names.size > 0 ? (
