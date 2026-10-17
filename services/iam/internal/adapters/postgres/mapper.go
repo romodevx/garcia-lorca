@@ -103,6 +103,6 @@ func toDomainUser(m userModel, roleRows []roleModel) (domain.User, string, error
 	}
 	// Hydrate the credential-rotation instant so RefreshToken can revoke tokens
 	// minted before the last password change.
-	user = user.WithPasswordChangedAt(m.PasswordChangedAt)
+	user = user.WithPasswordChangedAt(m.PasswordChangedAt).WithCredentialVersion(m.CredentialVersion)
 	return user, m.PasswordHash, nil
 }

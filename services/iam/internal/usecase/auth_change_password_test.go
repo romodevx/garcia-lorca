@@ -77,8 +77,8 @@ func (cpValidator) ValidateAccessToken(_ context.Context, token string) (domain.
 	}
 	return domain.Claims{}, glerrors.New(glerrors.KindUnauthorized, "invalid access token")
 }
-func (cpValidator) ParseRefreshToken(context.Context, string) (string, time.Time, domain.SessionKind, error) {
-	return "", time.Time{}, domain.SessionStaff, glerrors.New(glerrors.KindUnauthorized, "not a refresh token")
+func (cpValidator) ParseRefreshToken(context.Context, string) (domain.RefreshClaims, error) {
+	return domain.RefreshClaims{}, glerrors.New(glerrors.KindUnauthorized, "not a refresh token")
 }
 
 func newCPService(users *cpUsers) *usecase.AuthService {

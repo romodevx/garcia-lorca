@@ -138,6 +138,12 @@ func (r *UserRepo) FindAuthByID(ctx context.Context, userID string) (domain.User
 	return user, hash, nil
 }
 
+// bumpCredentialVersion moves the user's credential version with every write
+// that stamps password_changed_at: RefreshToken honors only a token minted
+// under the current version, so the bump revokes every earlier one exactly,
+// even one minted in the same second (CC-302).
+var bumpCredentialVersion = gorm.Expr("credential_version + 1")
+
 // UpdatePassword sets a new hash, clears must_change_password, and stamps
 // password_changed_at = now() in one write. The stamp is what revokes every
 // refresh token issued before this rotation (RefreshToken rejects an earlier
@@ -146,7 +152,7 @@ func (r *UserRepo) UpdatePassword(ctx context.Context, userID, newHash string) e
 	return r.withTenant(ctx, func(tx *gorm.DB) error {
 		res := tx.Model(&userModel{}).
 			Where("id = ?", userID).
-			Updates(map[string]any{"password_hash": newHash, "must_change_password": false, "password_changed_at": gorm.Expr("now()")})
+			Updates(map[string]any{"password_hash": newHash, "must_change_password": false, "password_changed_at": gorm.Expr("now()"), "credential_version": bumpCredentialVersion})
 		if res.Error != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "updating password", res.Error)
 		}
@@ -167,7 +173,7 @@ func (r *UserRepo) TouchPasswordChangedAt(ctx context.Context, userID string) er
 	return r.withTenant(ctx, func(tx *gorm.DB) error {
 		res := tx.Model(&userModel{}).
 			Where("id = ?", userID).
-			Update("password_changed_at", gorm.Expr("now()"))
+			Updates(map[string]any{"password_changed_at": gorm.Expr("now()"), "credential_version": bumpCredentialVersion})
 		if res.Error != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "stamping the password rotation", res.Error)
 		}
@@ -338,6 +344,7 @@ func (r *UserRepo) SoftDelete(ctx context.Context, userID, deletedBy, keepActive
 				"deleted_at":          gorm.Expr("now()"),
 				"deleted_by":          deletedBy,
 				"password_changed_at": gorm.Expr("now()"),
+				"credential_version":  bumpCredentialVersion,
 			})
 		if res.Error != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "deleting user", res.Error)

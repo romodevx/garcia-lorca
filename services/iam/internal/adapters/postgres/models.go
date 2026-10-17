@@ -24,6 +24,9 @@ type userModel struct {
 	// PasswordChangedAt is the instant the credential was last rotated; refresh
 	// tokens issued before it are revoked. Filled by the DB default on insert.
 	PasswordChangedAt time.Time `gorm:"column:password_changed_at"`
+	// CredentialVersion counts the rotations; every write that stamps
+	// password_changed_at bumps it (CC-302, iam/0032).
+	CredentialVersion int64 `gorm:"column:credential_version"`
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 }

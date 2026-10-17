@@ -295,15 +295,20 @@ type fakeTokens struct {
 	// how "a rotation keeps its kind" is observable.
 	lastKind    domain.SessionKind
 	refreshKind domain.SessionKind
+	// lastVersion is the credential version the last refresh token was
+	// stamped with; refreshVersion is what ParseRefreshToken reports back.
+	lastVersion    int64
+	refreshVersion int64
 }
 
 func (t *fakeTokens) IssueAccessToken(_ context.Context, claims domain.Claims) (string, error) {
 	t.lastClaims = claims
 	return "access:" + claims.Subject, nil
 }
-func (t *fakeTokens) IssueRefreshToken(_ context.Context, userID string, kind domain.SessionKind) (string, error) {
+func (t *fakeTokens) IssueRefreshToken(_ context.Context, userID string, kind domain.SessionKind, credentialVersion int64) (string, error) {
 	t.lastKind = kind
 	t.refreshKind = kind
+	t.lastVersion = credentialVersion
 	return "refresh:" + userID, nil
 }
 func (t *fakeTokens) ValidateAccessToken(_ context.Context, token string) (domain.Claims, error) {
@@ -312,11 +317,11 @@ func (t *fakeTokens) ValidateAccessToken(_ context.Context, token string) (domai
 	}
 	return domain.Claims{}, glerrors.ErrUnauthorized
 }
-func (t *fakeTokens) ParseRefreshToken(_ context.Context, token string) (string, time.Time, domain.SessionKind, error) {
+func (t *fakeTokens) ParseRefreshToken(_ context.Context, token string) (domain.RefreshClaims, error) {
 	if token == "refresh:u1" {
-		return "u1", t.refreshIssuedAt, t.refreshKind, nil
+		return domain.RefreshClaims{UserID: "u1", IssuedAt: t.refreshIssuedAt, Kind: t.refreshKind, CredentialVersion: t.refreshVersion}, nil
 	}
-	return "", time.Time{}, domain.SessionStaff, glerrors.ErrUnauthorized
+	return domain.RefreshClaims{}, glerrors.ErrUnauthorized
 }
 
 // --- fixtures --------------------------------------------------------------
@@ -530,10 +535,19 @@ func TestRefreshTokenSuspendedIsForbidden(t *testing.T) {
 // revocation-on-password-change cutoff.
 func refreshFixture(t *testing.T, changedAt, refreshIssuedAt time.Time) *usecase.AuthService {
 	t.Helper()
+	svc, _ := versionedRefreshFixture(t, changedAt, refreshIssuedAt, 0, 0)
+	return svc
+}
+
+// versionedRefreshFixture is refreshFixture with a credential version on the
+// user (bumped by every rotation) and on the presented refresh token; it also
+// returns the issuer, whose lastVersion says what the rotated token carries.
+func versionedRefreshFixture(t *testing.T, changedAt, refreshIssuedAt time.Time, userVersion, tokenVersion int64) (*usecase.AuthService, *fakeTokens) {
+	t.Helper()
 	email, _ := domain.NewEmail("ana@garcialorca.mx")
 	role, _ := domain.NewRole("r1", "Docente", []string{"students:read"})
 	user, _ := domain.NewUser("u1", testTenant, email, "Ana", domain.StatusActive, false, []domain.Role{role})
-	user = user.WithPasswordChangedAt(changedAt)
+	user = user.WithPasswordChangedAt(changedAt).WithCredentialVersion(userVersion)
 	users := &fakeUsers{
 		byEmail: map[domain.Email]struct {
 			user domain.User
@@ -543,8 +557,39 @@ func refreshFixture(t *testing.T, changedAt, refreshIssuedAt time.Time) *usecase
 	}
 	roles := &fakeRoles{byID: map[string]domain.Role{"r1": role}}
 	now := func() time.Time { return changedAt.Add(time.Hour) }
-	validator := &fakeTokens{refreshIssuedAt: refreshIssuedAt}
-	return usecase.NewAuthService(users, roles, fakeHasher{}, &fakeTokens{}, validator, nil, nil, testTenant, 15*time.Minute, now)
+	validator := &fakeTokens{refreshIssuedAt: refreshIssuedAt, refreshVersion: tokenVersion}
+	issuer := &fakeTokens{}
+	return usecase.NewAuthService(users, roles, fakeHasher{}, issuer, validator, nil, nil, testTenant, 15*time.Minute, now), issuer
+}
+
+// CC-302 (SECURITY): a refresh token minted by a ROTATION in the same second
+// as the password change, but BEFORE it, carries the old credential version
+// and is revoked. The second-granularity iat floor alone let it survive — and
+// a stolen token rotated more than once a second survived every change.
+func TestRefreshTokenFromBeforeTheChangeInTheSameSecondIsRevoked(t *testing.T) {
+	changedAt := time.Date(2026, 7, 1, 12, 0, 0, 862_000_000, time.UTC)
+	issuedAt := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC) // same second, before the change
+	svc, _ := versionedRefreshFixture(t, changedAt, issuedAt, 1, 0)
+
+	_, err := svc.RefreshToken(context.Background(), "refresh:u1")
+	if glerrors.KindOf(err) != glerrors.KindUnauthorized {
+		t.Fatalf("a token from before the change must be Unauthorized even in the same second, got %v", err)
+	}
+}
+
+// The session re-issued after the change carries the new version, so it keeps
+// rotating — and every token it rotates into carries the user's CURRENT one.
+func TestRefreshTokenOfTheCurrentCredentialRotatesWithIt(t *testing.T) {
+	changedAt := time.Date(2026, 7, 1, 12, 0, 0, 862_000_000, time.UTC)
+	issuedAt := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+	svc, issuer := versionedRefreshFixture(t, changedAt, issuedAt, 3, 3)
+
+	if _, err := svc.RefreshToken(context.Background(), "refresh:u1"); err != nil {
+		t.Fatalf("a token of the current credential must rotate: %v", err)
+	}
+	if issuer.lastVersion != 3 {
+		t.Errorf("rotated token carries version %d, want the user's 3", issuer.lastVersion)
+	}
 }
 
 // SECURITY: a refresh token minted BEFORE the last password change is revoked —
@@ -631,7 +676,7 @@ type failingIssuer struct{}
 func (failingIssuer) IssueAccessToken(context.Context, domain.Claims) (string, error) {
 	return "", glerrors.New(glerrors.KindInternal, "signing failed")
 }
-func (failingIssuer) IssueRefreshToken(context.Context, string, domain.SessionKind) (string, error) {
+func (failingIssuer) IssueRefreshToken(context.Context, string, domain.SessionKind, int64) (string, error) {
 	return "refresh", nil
 }
 

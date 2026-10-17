@@ -338,6 +338,21 @@ func TestOwnerUserAuthAndPasswordUpdate(t *testing.T) {
 	if userAfter.MustChangePassword() {
 		t.Error("must_change_password still true after UpdatePassword")
 	}
+	// CC-302: every rotation bumps the credential version, the exact counter
+	// RefreshToken compares (a clock comparison let same-second tokens live).
+	if got, want := userAfter.CredentialVersion(), user.CredentialVersion()+1; got != want {
+		t.Errorf("credential version after UpdatePassword = %d, want %d", got, want)
+	}
+	if err := repo.TouchPasswordChangedAt(context.Background(), user.ID()); err != nil {
+		t.Fatalf("TouchPasswordChangedAt: %v", err)
+	}
+	touched, err := repo.FindByID(context.Background(), user.ID())
+	if err != nil {
+		t.Fatalf("FindByID after touch: %v", err)
+	}
+	if got, want := touched.CredentialVersion(), user.CredentialVersion()+2; got != want {
+		t.Errorf("credential version after TouchPasswordChangedAt = %d, want %d", got, want)
+	}
 }
 
 // TestCreateUserRoundTripWithRoles provisions a user AS THE NON-OWNER app role

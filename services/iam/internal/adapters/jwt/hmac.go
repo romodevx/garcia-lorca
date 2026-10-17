@@ -46,6 +46,10 @@ type refreshClaims struct {
 	// rotation gives the new token the SAME life. A session that could ask for
 	// a longer one would be a session choosing its own security policy.
 	SessionKind string `json:"skind,omitempty"`
+	// CredentialVersion is the user's credential version at minting: a later
+	// rotation bumps the user's, and the token stops refreshing (CC-302).
+	// Absent (a token minted before versions existed) reads as 0.
+	CredentialVersion int64 `json:"cv,omitempty"`
 }
 
 // HMAC signs and verifies tokens with a shared secret. `now` is injectable so
@@ -90,7 +94,7 @@ func (h *HMAC) IssueAccessToken(_ context.Context, claims domain.Claims) (string
 // The kind is in the token, not in this service's configuration, because
 // rotating a token has to reproduce the same lifetime and the only thing that
 // survives between the two calls is the token itself.
-func (h *HMAC) IssueRefreshToken(_ context.Context, userID string, kind domain.SessionKind) (string, error) {
+func (h *HMAC) IssueRefreshToken(_ context.Context, userID string, kind domain.SessionKind, credentialVersion int64) (string, error) {
 	body := refreshClaims{
 		RegisteredClaims: gojwt.RegisteredClaims{
 			Subject:   userID,
@@ -98,8 +102,9 @@ func (h *HMAC) IssueRefreshToken(_ context.Context, userID string, kind domain.S
 			IssuedAt:  gojwt.NewNumericDate(h.now()),
 			ExpiresAt: gojwt.NewNumericDate(h.now().Add(kind.RefreshTTL())),
 		},
-		TokenType:   typeRefresh,
-		SessionKind: kind.String(),
+		TokenType:         typeRefresh,
+		SessionKind:       kind.String(),
+		CredentialVersion: credentialVersion,
 	}
 	return h.sign(body)
 }
@@ -133,16 +138,16 @@ func (h *HMAC) ValidateAccessToken(_ context.Context, token string) (domain.Clai
 	}, nil
 }
 
-// ParseRefreshToken verifies a refresh token and returns its subject (user id)
-// and issued-at instant. The issued-at lets the use case revoke tokens minted
+// ParseRefreshToken verifies a refresh token and returns its claims. The
+// issued-at and credential version let the use case revoke tokens minted
 // before the user's last password change.
-func (h *HMAC) ParseRefreshToken(_ context.Context, token string) (string, time.Time, domain.SessionKind, error) {
+func (h *HMAC) ParseRefreshToken(_ context.Context, token string) (domain.RefreshClaims, error) {
 	var body refreshClaims
 	if err := h.parse(token, &body); err != nil {
-		return "", time.Time{}, domain.SessionStaff, err
+		return domain.RefreshClaims{}, err
 	}
 	if body.TokenType != typeRefresh {
-		return "", time.Time{}, domain.SessionStaff, glerrors.New(glerrors.KindUnauthorized, "not a refresh token")
+		return domain.RefreshClaims{}, glerrors.New(glerrors.KindUnauthorized, "not a refresh token")
 	}
 	issuedAt := time.Time{}
 	if body.IssuedAt != nil {
@@ -151,7 +156,12 @@ func (h *HMAC) ParseRefreshToken(_ context.Context, token string) (string, time.
 	// A token minted before kinds existed carries none, and reads as staff —
 	// the shorter life. Erring the other way would leave an office session open
 	// for a day on the strength of an old cookie.
-	return body.Subject, issuedAt, domain.ParseSessionKind(body.SessionKind), nil
+	return domain.RefreshClaims{
+		UserID:            body.Subject,
+		IssuedAt:          issuedAt,
+		Kind:              domain.ParseSessionKind(body.SessionKind),
+		CredentialVersion: body.CredentialVersion,
+	}, nil
 }
 
 func (h *HMAC) sign(claims gojwt.Claims) (string, error) {
