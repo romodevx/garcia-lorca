@@ -269,10 +269,21 @@ function StudentSheet({
   const ownLevel = groups.filter((g) => st.levelId === "" || levelOfGrade.get(g.gradeLevelId) === st.levelId);
   const placed = current !== null && current !== undefined && current !== "failed" ? current : undefined;
   const currentGroup = placed === undefined ? undefined : groups.find((g) => g.id === placed.groupId);
-  // A change of group stays in the pupil's grade (ISSUE-T14-013): moving them
-  // to another grade is not a group change. Unknown current group: the level.
+  // A change of group offers the pupil's own grade first (ISSUE-T14-013); the
+  // level's other grades sit behind a disclosure, because an imported pupil
+  // may have landed in the wrong grade and this is where the office fixes it.
+  // Unknown current group: the whole level, nothing hidden.
   const sameGrade = (g: LabelledGroup): boolean => currentGroup === undefined || g.gradeLevelId === currentGroup.gradeLevelId;
   const choices = placed !== undefined ? ownLevel.filter((g) => g.id !== placed.groupId && sameGrade(g)) : ownLevel;
+  const otherGrades = placed !== undefined ? ownLevel.filter((g) => !sameGrade(g)) : [];
+  const [showOtherGrades, setShowOtherGrades] = useState(false);
+  const changingGrade = otherGrades.some((g) => g.id === gid);
+  const pick = (id: string): void => { setGid(id); setRefusal(undefined); };
+  const toggleOtherGrades = (): void => {
+    // Folding them away drops a choice the office can no longer see.
+    if (showOtherGrades && changingGrade) setGid("");
+    setShowOtherGrades((v) => !v);
+  };
   const transferring = placed !== undefined;
   const ready = current !== undefined && current !== "failed" && !gradeLevelsFailed;
 
@@ -332,7 +343,7 @@ function StudentSheet({
           {canWithdraw && current !== null && current !== undefined && current !== "failed" && current.status === "active" && !withdrawn && <Btn ref={withdrawTrigger} kind="ghost" onClick={() => setWithdrawOpen(true)} style={{ flex: 1, color: "var(--bad-fg)" }}>Dar de baja</Btn>}
           {ready && !withdrawn && (
             <Btn icon="check" onClick={() => void save()} style={{ flex: 1, opacity: saving ? 0.6 : 1 }}>
-              {transferring ? "Cambiar de grupo" : "Inscribir"}
+              {transferring ? (changingGrade ? "Cambiar de grado" : "Cambiar de grupo") : "Inscribir"}
             </Btn>
           )}
         </>
@@ -373,12 +384,15 @@ function StudentSheet({
                   {transferring ? "No hay otro grupo de su grado en este ciclo." : "No hay grupos de su nivel en este ciclo: créalos en Configuración."}
                 </p>
               ) : (
-                <div role="group" aria-label={transferring ? "Cambiar a" : "Inscribir en"} style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  {choices.map((g) => {
-                    const on = gid === g.id;
-                    return <button key={g.id} type="button" aria-pressed={on} onClick={() => { setGid(g.id); setRefusal(undefined); }} style={{ height: 44, padding: "0 15px", borderRadius: 99, fontSize: 13.5, fontWeight: 600, fontFamily: "var(--font-display)", cursor: "pointer", border: `1.5px solid ${on ? "var(--lime)" : "var(--border)"}`, background: on ? "color-mix(in oklab, var(--lime) 12%, var(--surface))" : "var(--surface)", color: on ? "var(--forest)" : "var(--text-muted)" }}>{g.label}</button>;
-                  })}
-                </div>
+                <GroupChips label={transferring ? "Cambiar a" : "Inscribir en"} groups={choices} chosen={gid} onPick={pick} />
+              )}
+              {otherGrades.length > 0 && (
+                <>
+                  <button type="button" aria-expanded={showOtherGrades} aria-controls="other-grade-groups" onClick={toggleOtherGrades} style={{ justifySelf: "start", minHeight: 44, padding: 0, fontSize: 13.5, fontWeight: 600, color: "var(--forest)", textDecoration: "underline", cursor: "pointer" }}>
+                    Ver grupos de otros grados
+                  </button>
+                  {showOtherGrades && <div id="other-grade-groups"><GroupChips label="Otros grados" groups={otherGrades} chosen={gid} onPick={pick} /></div>}
+                </>
               )}
               {transferring && (
                 <TextField
@@ -399,6 +413,18 @@ function StudentSheet({
           {withdrawn && <p ref={withdrawnLine} tabIndex={-1} style={{ paddingTop: 18, color: "var(--text-muted)" }}>{withdrawnNote(current)}</p>}
       </>}
     </DrawerShell>
+  );
+}
+
+/** Pickable groups as pills; `groups` arrive in school order (level, grade, name). */
+function GroupChips({ label, groups, chosen, onPick }: { label: string; groups: readonly LabelledGroup[]; chosen: string; onPick: (id: string) => void }): ReactElement {
+  return (
+    <div role="group" aria-label={label} style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+      {groups.map((g) => {
+        const on = chosen === g.id;
+        return <button key={g.id} type="button" aria-pressed={on} onClick={() => onPick(g.id)} style={{ height: 44, padding: "0 15px", borderRadius: 99, fontSize: 13.5, fontWeight: 600, fontFamily: "var(--font-display)", cursor: "pointer", border: `1.5px solid ${on ? "var(--lime)" : "var(--border)"}`, background: on ? "color-mix(in oklab, var(--lime) 12%, var(--surface))" : "var(--surface)", color: on ? "var(--forest)" : "var(--text-muted)" }}>{g.label}</button>;
+      })}
+    </div>
   );
 }
 

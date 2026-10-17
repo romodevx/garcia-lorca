@@ -105,6 +105,33 @@ describe("la ficha de un alumno que ya tiene grupo", () => {
     expect(offered).toEqual(["1° A"]); // primaria's 1° A only — not kínder's, not 2° A, not its own 1° B
   });
 
+  // An imported pupil may sit in the wrong grade and the ficha is the only
+  // place to fix it: the other grades are one disclosure away, never gone.
+  it("deja cambiar de grado tras «Ver grupos de otros grados»", async () => {
+    const user = userEvent.setup();
+    students.transfer.mockResolvedValue({ id: "enr-1", studentId: "stu-1", cycleId: "c1", groupId: "g-pri-2a", termId: "", status: "active", enrolledAt: "2026-08-31" });
+    const sheet = await openSheet(user);
+    const disclose = await within(sheet).findByRole("button", { name: "Ver grupos de otros grados" });
+    expect(disclose).toHaveAttribute("aria-expanded", "false");
+    expect(within(sheet).queryByRole("button", { name: "2° A" })).not.toBeInTheDocument();
+
+    await user.click(disclose);
+    expect(disclose).toHaveAttribute("aria-expanded", "true");
+    const others = within(sheet).getByRole("group", { name: "Otros grados" });
+    expect(within(others).getAllByRole("button").map((b) => b.textContent)).toEqual(["2° A"]);
+    await user.click(within(others).getByRole("button", { name: "2° A" }));
+    expect(within(sheet).queryByRole("button", { name: "Cambiar de grupo" })).not.toBeInTheDocument();
+    await user.type(within(sheet).getByLabelText(/^Motivo/), "Venía mal del Excel");
+    await user.click(within(sheet).getByRole("button", { name: "Cambiar de grado" }));
+
+    await waitFor(() =>
+      expect(students.transfer).toHaveBeenCalledWith(expect.any(String), {
+        enrollmentId: "enr-1", toGroupId: "g-pri-2a", reason: "Venía mal del Excel",
+      }),
+    );
+    expect(await screen.findByRole("status")).toHaveTextContent("Cambiado a 2° A");
+  });
+
   it("cambia de grupo con el motivo capturado", async () => {
     const user = userEvent.setup();
     students.transfer.mockResolvedValue({ id: "enr-1", studentId: "stu-1", cycleId: "c1", groupId: "g-pri-a", termId: "", status: "active", enrolledAt: "2026-08-31" });
