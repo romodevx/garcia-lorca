@@ -124,19 +124,20 @@ func TestAFamilyReceiptIsOnlyOfItsOwnPupil(t *testing.T) {
 	}
 }
 
-// A voided deposit answers the family as the office's receipt does — marked —
-// but without the office's reason: that note is internal (as on the statement).
-func TestAFamilyReceiptOfAVoidedDepositHidesTheReason(t *testing.T) {
-	f := fakeSources{deposit: client.DepositReceipt{Deposit: client.Deposit{
-		ID: "dep-2", StudentID: "stu-1", AmountCents: 100, Method: "cash", PaidAt: "2026-10-10T00:00:00Z",
-		Folio: "P-2026-000043", VoidedAt: "2026-10-11T00:00:00Z", VoidReason: "capturado mal",
-	}}}
-	got, err := builder(f).FamilyPayment(context.Background(), "stu-1", "dep-2")
-	if err != nil {
-		t.Fatalf("FamilyPayment: %v", err)
-	}
-	if !got.Voided || got.VoidReason != "" {
-		t.Errorf("voided = %v, reason %q; want marked, no reason", got.Voided, got.VoidReason)
+// A voided or superseded deposit is not on the family's statement, so the
+// family has no receipt of it either: NotFound, like a missing one.
+func TestAFamilyReceiptOfAVoidedOrSupersededDepositIsNotFound(t *testing.T) {
+	for name, d := range map[string]client.Deposit{
+		"voided": {ID: "dep-2", StudentID: "stu-1", AmountCents: 100, Method: "cash", PaidAt: "2026-10-10T00:00:00Z",
+			Folio: "P-2026-000043", VoidedAt: "2026-10-11T00:00:00Z", VoidReason: "capturado mal"},
+		"superseded": {ID: "dep-3", StudentID: "stu-1", AmountCents: 100, Method: "cash", PaidAt: "2026-10-10T00:00:00Z",
+			Folio: "P-2026-000044", SupersededBy: "dep-4", SupersededByFolio: "P-2026-000045"},
+	} {
+		f := fakeSources{deposit: client.DepositReceipt{Deposit: d}}
+		_, err := builder(f).FamilyPayment(context.Background(), "stu-1", d.ID)
+		if connect.CodeOf(err) != connect.CodeNotFound {
+			t.Errorf("%s: %v, want NotFound", name, err)
+		}
 	}
 }
 

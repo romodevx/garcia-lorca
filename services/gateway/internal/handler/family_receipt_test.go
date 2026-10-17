@@ -58,6 +58,8 @@ func familyReceiptFixture() (*handler.FamilyHandler, *receiptSources) {
 			PaidAt: "2026-10-17T00:00:00Z", Folio: "P-2026-000009"}},
 		"dep-void": {Deposit: client.Deposit{ID: "dep-void", StudentID: "stu-1", AmountCents: 60000, Method: "cash",
 			PaidAt: "2026-10-16T00:00:00Z", Folio: "P-2026-000003", VoidedAt: "2026-10-16T18:00:00Z", VoidReason: "importe capturado mal"}},
+		"dep-superseded": {Deposit: client.Deposit{ID: "dep-superseded", StudentID: "stu-1", AmountCents: 60000, Method: "cash",
+			PaidAt: "2026-10-16T00:00:00Z", Folio: "P-2026-000004", SupersededBy: "dep-own", SupersededByFolio: "P-2026-000002"}},
 	}}
 	builder := receipt.NewBuilder(src, src, src, src, src)
 	h := handler.NewFamilyHandler(oneChild(), &fakeFamilyComms{}, nil, nil, nil, nil, handler.WithFamilyReceipts(builder))
@@ -100,7 +102,8 @@ func TestTheFamilyOpensItsOwnChildsReceipt(t *testing.T) {
 
 // Another family's child is 404 and finance is never asked; a deposit of
 // another pupil under the caller's own child's id is 404 too, as is one that
-// does not exist — the three read the same, so nothing leaks.
+// does not exist, and so is a voided or superseded one (the family's statement
+// does not show them) — all read the same, so nothing leaks.
 func TestAFamilyReceiptNotOfTheChildIs404(t *testing.T) {
 	cases := []struct {
 		name, studentID, depositID string
@@ -109,6 +112,8 @@ func TestAFamilyReceiptNotOfTheChildIs404(t *testing.T) {
 		{"another family's child", "stu-2", "dep-other", false},
 		{"another pupil's deposit under the own child", "stu-1", "dep-other", true},
 		{"a deposit that does not exist", "stu-1", "dep-missing", true},
+		{"a voided deposit", "stu-1", "dep-void", true},
+		{"a superseded deposit", "stu-1", "dep-superseded", true},
 	}
 	for _, tc := range cases {
 		for name, serve := range map[string]func(*handler.FamilyHandler) http.HandlerFunc{
@@ -125,24 +130,6 @@ func TestAFamilyReceiptNotOfTheChildIs404(t *testing.T) {
 				t.Errorf("%s (%s): finance read = %v, want %v", tc.name, name, got, tc.financeRead)
 			}
 		}
-	}
-}
-
-// A voided deposit answers as the office's receipt does — marked voided — but
-// the office's reason is internal and is not sent to the family.
-func TestAFamilyReceiptOfAVoidedDepositIsMarkedWithoutTheReason(t *testing.T) {
-	h, _ := familyReceiptFixture()
-	rec := httptest.NewRecorder()
-	h.ReceiptJSON(rec, familyReceiptRequest("stu-1", "dep-void"))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status %d", rec.Code)
-	}
-	if bytes.Contains(rec.Body.Bytes(), []byte("importe capturado mal")) {
-		t.Errorf("the office's void reason reached the family: %s", rec.Body.String())
-	}
-	var body receipt.Receipt
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || !body.Voided {
-		t.Errorf("body = %s (%v), want it marked voided", rec.Body.String(), err)
 	}
 }
 

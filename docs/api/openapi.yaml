@@ -365,10 +365,10 @@ paths:
         ISSUE-T14-107. The same receipt the office prints (see the
         statement's `depositId` on a payment line), for a deposit of the
         caller's OWN child. A child that is not the caller's, a deposit of
-        another pupil, or one that does not exist are all 404 — never 403,
-        so nothing tells whether it exists. A voided or superseded deposit
-        answers like the office's receipt (marked), without the office's
-        internal void reason. Behind `module_finance` AND `module_students`.
+        another pupil, one that does not exist, and a voided or superseded
+        one (the family's statement does not show them either) are all
+        404 — never 403, so nothing tells whether it exists. Behind
+        `module_finance` AND `module_students`.
         Requires `family:read`.
       operationId: getFamilyPaymentReceipt
       security: [{ familyBearer: [] }]
