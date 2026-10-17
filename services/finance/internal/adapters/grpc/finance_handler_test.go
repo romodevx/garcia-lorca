@@ -106,7 +106,10 @@ type fakeRepo struct {
 	// correction is what CorrectDeposit stores (T9); gotCorrection what it was asked.
 	correction    *ports.CorrectionRecord
 	gotCorrection ports.DepositCorrectionWrite
-	history       []domain.DepositCorrection
+	// correctionOpen is what the correction's plan finds locked: a deposit's
+	// money must land on a charge (CC-202).
+	correctionOpen []ports.ChargeWithPaid
+	history        []domain.DepositCorrection
 }
 
 func newFakeRepo() *fakeRepo {
@@ -166,7 +169,7 @@ func (f *fakeRepo) CorrectDeposit(_ context.Context, w ports.DepositCorrectionWr
 	_ func(record ports.CorrectionRecord) []ports.OutboxEvent,
 ) (ports.CorrectionRecord, bool, error) {
 	f.gotCorrection = w
-	if _, err := plan(nil); err != nil {
+	if _, err := plan(f.correctionOpen); err != nil {
 		return ports.CorrectionRecord{}, false, err
 	}
 	if f.correction == nil {
@@ -1094,6 +1097,11 @@ func TestCorrectDepositMapsTheWire(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	owed, err := domain.NewCharge("ch-1", testTenant, testStudent, testCycle, "concept-1", "Cuota", 100000, 0, fixedNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.repo.correctionOpen = []ports.ChargeWithPaid{{Charge: owed}}
 	f.repo.correction = &ports.CorrectionRecord{
 		Original:   superseded.RehydrateSupersession(fixedNow, correctedID, "P-2026-000002"),
 		Corrected:  ports.DepositRecord{Deposit: corrected, UnallocatedCents: 100000},

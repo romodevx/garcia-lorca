@@ -207,10 +207,12 @@ func TestAVoidedDepositMovesNothing(t *testing.T) {
 	}
 }
 
-// Money over the year is the family's credit: the balance goes below zero.
+// Money over the year is the family's credit: the balance goes below zero. A
+// deposit can no longer leave it (CC-202); one from before still can.
 func TestOverpaymentIsANegativeBalance(t *testing.T) {
 	f := depositFixture(t)
-	deposit(t, f, 3300000, "2026-10-10")
+	deposit(t, f, 3230000, "2026-10-10")
+	legacyCredit(t, f, 70000, "2026-10-10")
 
 	st := statementOf(t, f, testStudent)
 

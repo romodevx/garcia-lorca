@@ -1,6 +1,44 @@
 package domain
 
-import "time"
+import (
+	"time"
+
+	glerrors "github.com/garcia-lorca/pkg/errors"
+)
+
+// RequireFullyApplied is the rule a deposit is taken by (CC-202, QA
+// 2026-10-17): every peso lands on a charge, or the deposit is not taken.
+//
+// The school used to keep what was left as the family's credit, but nothing
+// ever applied it: the cut counted it, the statement read "a favor" and still
+// asked "a pagar hoy". The realistic way in was two cashiers taking the same
+// month at once — the second one, planned under the lock after the first
+// committed, found it paid and kept the money unapplied. Paying AHEAD is not
+// credit: months not yet open are charges, and money lands on them.
+//
+// depositCents is what was handed over, unappliedCents what no charge took;
+// chosen says the cashier restricted the money to some charges. A
+// KindConflict, worded for the cashier: it is the state of the account, not
+// the request, that refuses the money.
+func RequireFullyApplied(depositCents, unappliedCents int64, chosen bool) error {
+	if unappliedCents <= 0 {
+		return nil
+	}
+	applicable := Cents(depositCents - unappliedCents).Pesos()
+	switch {
+	case unappliedCents == depositCents && chosen:
+		return glerrors.New(glerrors.KindConflict,
+			"lo elegido ya está pagado: actualiza la cuenta del alumno antes de cobrar")
+	case unappliedCents == depositCents:
+		return glerrors.New(glerrors.KindConflict, "el alumno no tiene adeudos que cobrar")
+	case chosen:
+		return glerrors.New(glerrors.KindConflict,
+			"el monto excede lo que deben los conceptos elegidos (máximo "+applicable+")")
+	default:
+		return glerrors.New(glerrors.KindConflict,
+			"el monto excede lo que el alumno debe (máximo "+applicable+"), incluido lo que puede pagar por adelantado")
+	}
+}
 
 // Payable is one thing a deposit can be applied to: a charge with something
 // still owed on it, or the surcharge that charge has earned.
@@ -34,9 +72,9 @@ type Allocation struct {
 // it thinly across every open month instead would leave nothing settled, which
 // means nothing stops accruing surcharge and no receipt can say what was paid.
 //
-// Whatever is left when the debts run out is returned rather than refused. A
-// family that overpays keeps a credit; sending a parent away with cash in hand
-// because the arithmetic came out even is not a thing a school does.
+// Whatever is left when the debts run out is returned, not refused: the
+// caller decides. A deposit refuses it (RequireFullyApplied, CC-202) — money no
+// charge claimed was stored as a credit nothing ever applied.
 func Allocate(depositCents int64, items []Payable) ([]Allocation, int64) {
 	remaining := depositCents
 	var out []Allocation

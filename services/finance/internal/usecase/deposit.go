@@ -1115,6 +1115,12 @@ func (p *depositPlanner) plan(open []ports.ChargeWithPaid) (ports.DepositWrite, 
 	}
 
 	allocations, unallocated := domain.Allocate(p.deposit.Amount().Int64(), items)
+	// Planned under the charges' lock, so a second cashier who finds the
+	// month already paid is refused here, inside the transaction: no
+	// deposit, no folio, no credit nobody applies (CC-202).
+	if err := domain.RequireFullyApplied(p.deposit.Amount().Int64(), unallocated, p.chosen != nil); err != nil {
+		return ports.DepositWrite{}, err
+	}
 	fresh = append(fresh, settledWithoutFee(feeOwedBy, allocations)...)
 	scholarships := settledScholarships(becas, allocations)
 

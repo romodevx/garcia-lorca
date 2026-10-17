@@ -4288,9 +4288,12 @@ paths:
       description: >
         A parent hands over an amount and says nothing else. The split lands on
         the oldest debt first, then the surcharge that debt earned, then the next
-        month, and whatever is left over stays as the family's credit. The
-        response carries the whole split so a receipt can be printed without a
-        second call while the parent waits.
+        month — months not yet open included, which is paying ahead. Every peso
+        must land on a charge: an amount past what the charges may take (or past
+        the chosen ones), or chosen charges already paid — a second cashier on
+        the same month — is 409 and NOTHING is stored (CC-202). The response
+        carries the whole split so a receipt can be printed without a second
+        call while the parent waits.
 
 
         Send an idempotencyKey: the retry a lost response provokes must not cost
@@ -4352,8 +4355,8 @@ paths:
                   items: { type: string, format: uuid }
                   description: >
                     The charges the money may pay, chosen at the counter: paid
-                    oldest first, each month with its surcharge; what is left is
-                    the family's credit. Empty or absent means every charge,
+                    oldest first, each month with its surcharge; money past them
+                    is refused (409). Empty or absent means every charge,
                     oldest first. A charge that is not the student's is refused.
             examples:
               creditNoteAndCash:
@@ -4374,6 +4377,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/ModuleDisabled' }
+        '409': { $ref: '#/components/responses/DepositNotApplicable' }
     get:
       tags: [finance-payments]
       summary: A family's deposits, newest first
@@ -4530,8 +4534,8 @@ paths:
                   items: { type: string, format: uuid }
                   description: >
                     The charges the money may pay, chosen at the counter: paid
-                    oldest first, each month with its surcharge; what is left is
-                    the family's credit. Empty or absent means every charge,
+                    oldest first, each month with its surcharge; money past them
+                    is refused (409). Empty or absent means every charge,
                     oldest first. A charge that is not the student's is refused.
       responses:
         '200':
@@ -4543,6 +4547,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/ModuleDisabled' }
+        '409': { $ref: '#/components/responses/DepositNotApplicable' }
 
   /api/v1/finance/deposits/{id}/void:
     post:
@@ -4659,7 +4664,10 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/ModuleDisabled' }
         '409':
-          description: The deposit was cancelled, or already corrected (correct its replacement).
+          description: >
+            The deposit was cancelled, or already corrected (correct its
+            replacement), or the corrected amount does not land in full on the
+            student's charges (CC-202, as on registerDeposit).
 
   /api/v1/finance/deposits/{id}/corrections:
     get:
@@ -7542,6 +7550,21 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
+    DepositNotApplicable:
+      description: >
+        The money does not land in full on the student's charges (CC-202): the
+        amount exceeds what they owe — paying ahead included — or what the
+        chosen charges owe, or the chosen charges are already paid (two
+        cashiers on the same month). Nothing was stored. The body is the
+        sentence for the cashier.
+      content:
+        text/plain:
+          schema: { $ref: '#/components/schemas/PlainTextError' }
+          examples:
+            alreadyPaid:
+              value: 'lo elegido ya está pagado: actualiza la cuenta del alumno antes de cobrar'
+            overpaid:
+              value: 'el monto excede lo que el alumno debe (máximo $35,750.00), incluido lo que puede pagar por adelantado'
     PlainTextError:
       description: Human-readable error text returned as text/plain by students enrollment handlers.
       content:
