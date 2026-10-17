@@ -154,20 +154,50 @@ describe("ExpensesScreen (T10)", () => {
     await waitFor(() => expect(m.uploadReceipt).toHaveBeenCalledWith(expect.any(String), EXP, file));
   });
 
-  // Review T10: the expense is saved before its receipt goes up. A failed
-  // upload closes the drawer and says so, so a retry cannot record it twice.
-  it("a failed receipt upload does not invite a second create", async () => {
+  // CC-206: a file of a type the server refuses is caught on the field,
+  // before anything is saved, and the form stays as it was.
+  it("refuses a .txt on the field before saving, and says which types it takes", async () => {
+    const user = userEvent.setup({ applyAccept: false });
+    renderScreen();
+    await user.click(await screen.findByRole("button", { name: /Registrar egreso/ }));
+    const dialog = await screen.findByRole("dialog");
+    const input = within(dialog).getByLabelText("Comprobante", { selector: "input" });
+    expect(input).toHaveAttribute("accept", "image/jpeg,image/png,application/pdf");
+    await user.selectOptions(within(dialog).getByRole("combobox", { name: /Categoría/ }), CAT);
+    await user.type(within(dialog).getByRole("textbox", { name: /Monto/ }), "450");
+    await user.upload(input, new File(["hola"], "nota.txt", { type: "text/plain" }));
+    expect(within(dialog).getByText("«nota.txt» no se puede adjuntar: el comprobante debe ser JPG, PNG o PDF.")).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole("button", { name: "Registrar egreso" }));
+    expect(m.createExpense).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect((within(dialog).getByRole("textbox", { name: /Monto/ }) as HTMLInputElement).value).toMatch(/^450/);
+  });
+
+  // Review T10 + CC-206: the expense is saved before its receipt goes up. A
+  // refused upload keeps the drawer open with the error on the field; the
+  // retry attaches to the expense already saved instead of recording it twice.
+  it("a refused upload stays on the field, and the retry only attaches the receipt", async () => {
     m.createExpense.mockResolvedValue(toner);
-    m.uploadReceipt.mockRejectedValue(new Error("el comprobante debe ser una imagen JPG o PNG, o un PDF"));
+    m.uploadReceipt.mockRejectedValueOnce(new Error("el comprobante debe ser una imagen JPG o PNG, o un PDF"));
+    m.uploadReceipt.mockResolvedValueOnce({ ...toner, receipt: { contentType: "image/png", sizeBytes: 4 } });
     const user = userEvent.setup();
     renderScreen();
     await user.click(await screen.findByRole("button", { name: /Registrar egreso/ }));
     const dialog = await screen.findByRole("dialog");
     await user.selectOptions(within(dialog).getByRole("combobox", { name: /Categoría/ }), CAT);
     await user.type(within(dialog).getByRole("textbox", { name: /Monto/ }), "10");
-    await user.upload(within(dialog).getByLabelText("Comprobante", { selector: "input" }), new File(["x"], "falso.pdf", { type: "application/pdf" }));
+    const input = within(dialog).getByLabelText("Comprobante", { selector: "input" });
+    await user.upload(input, new File(["x"], "falso.pdf", { type: "application/pdf" }));
     await user.click(within(dialog).getByRole("button", { name: "Registrar egreso" }));
-    expect(await screen.findByRole("status")).toHaveTextContent(/no se subió/);
+
+    expect(await within(dialog).findByText(/El egreso ya quedó registrado, pero el comprobante no se subió: el comprobante debe ser una imagen JPG o PNG, o un PDF/)).toBeInTheDocument();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+    const png = new File(["png"], "ticket.png", { type: "image/png" });
+    await user.upload(input, png);
+    await user.click(within(dialog).getByRole("button", { name: "Registrar egreso" }));
+    await waitFor(() => expect(m.uploadReceipt).toHaveBeenLastCalledWith(expect.any(String), EXP, png));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(m.createExpense).toHaveBeenCalledTimes(1);
   });
