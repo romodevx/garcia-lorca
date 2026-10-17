@@ -455,9 +455,9 @@ func TestRegisterPaymentIsAtomicAndDerivesStatus(t *testing.T) {
 func TestSaveChargePersistsCancellationReason(t *testing.T) {
 	ctx := context.Background()
 	const (
-		conceptID = "c0000000-0000-0000-0000-0000000000c2"
-		chargeID  = "d0000000-0000-0000-0000-0000000000c2"
-		student   = "50000000-0000-0000-0000-0000000000c2"
+		conceptID = "c0000000-0000-0000-0000-00000000c203"
+		chargeID  = "d0000000-0000-0000-0000-00000000c203"
+		student   = "50000000-0000-0000-0000-00000000c203"
 	)
 	charge := seedConceptAndCharge(t, tenantA, conceptID, "cancel-reason", chargeID, student, cycleOne, 10000, 0, today)
 	repo := appRepo(t, tenantA)
