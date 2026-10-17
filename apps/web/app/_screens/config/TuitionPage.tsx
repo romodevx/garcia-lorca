@@ -10,12 +10,13 @@ import type { Cycle, Level } from "../../config/api";
 import { upsertTuitionPlan, type Fee, type EnrollmentConcept, type TuitionPlan } from "../../finance/api";
 import { formatCents } from "../../_lib/money";
 import { API_URL } from "../../api-url";
+import { schoolISODate } from "../../_lib/schoolDay";
 import { ErrorAlert } from "./parts";
 import {
   MAX_DUE_DAY,
   billedMonths,
   centsToPesos,
-  inscriptionTotals,
+  inscriptionTotalOn,
   inscriptionWindowProblem,
   ladderProblem,
   monthlyTotals,
@@ -54,7 +55,15 @@ export interface TuitionPageProps {
   previousCycleName?: string | undefined;
   onClose: () => void;
   onSaved: () => void;
+  /** The school's today (aaaa-mm-dd), for the inscription price in force; defaults to Morelia's now. */
+  today?: string;
 }
+
+/**
+ * The server's refusal of an active table whose months cost nothing (QA CC-110).
+ * The page says it first, on the field; the server stays the authority.
+ */
+const MONTHLY_NOT_PRICED = "La colegiatura mensual debe ser mayor a $0";
 
 export function TuitionPage({
   cycle,
@@ -64,8 +73,16 @@ export function TuitionPage({
   previousCycleName,
   onClose,
   onSaved,
+  today,
 }: TuitionPageProps): ReactElement {
   const [monthly, setMonthly] = useState(plan === undefined ? "" : centsToPesos(plan.monthlyCents));
+  /** The monthly fee's own error, on its field (CC-110). */
+  const [monthlyError, setMonthlyError] = useState<string | undefined>(undefined);
+  const monthlyRef = useRef<HTMLDivElement>(null);
+  const refuseMonthly = (message: string): void => {
+    setMonthlyError(message);
+    monthlyRef.current?.querySelector("input")?.focus();
+  };
   const [months, setMonths] = useState(String(plan?.months ?? 10));
   const [firstMonth, setFirstMonth] = useState(String(plan?.firstBilledMonth ?? 9));
   const [dueDay, setDueDay] = useState(String(plan?.dueDay ?? 10));
@@ -151,6 +168,11 @@ export function TuitionPage({
     const monthlyCents = pesosToCents(monthly);
     if (monthlyCents === null) {
       setError("Escribe la colegiatura mensual, en pesos.");
+      return;
+    }
+    if (monthlyCents <= 0) {
+      // A $0 month issues a settled charge per pupil that reads "pagado".
+      refuseMonthly(`${MONTHLY_NOT_PRICED}.`);
       return;
     }
     const day = wholeInRange(dueDay, 1, MAX_DUE_DAY);
@@ -272,8 +294,9 @@ export function TuitionPage({
         },
       });
       onSaved();
-    } catch {
-      setError("No se pudo guardar el tabulador. Revisa los datos.");
+    } catch (cause) {
+      if (cause instanceof Error && cause.message.startsWith(MONTHLY_NOT_PRICED)) refuseMonthly(cause.message);
+      else setError("No se pudo guardar el tabulador. Revisa los datos.");
     } finally {
       inFlight.current = false;
       setPending(false);
@@ -296,6 +319,7 @@ export function TuitionPage({
           firstMonth={firstMonth}
           fees={fees}
           concepts={typedConcepts ?? concepts}
+          today={today ?? schoolISODate()}
           previousPlan={previousPlan}
           previousCycleName={previousCycleName}
         />
@@ -319,7 +343,19 @@ export function TuitionPage({
 
       <FormSection n={1} title="Colegiatura" note="lo que se cobra cada mes">
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
-          <MoneyField label="Colegiatura mensual" value={monthly} onChange={setMonthly} help="Lo que se cobra cada mes por alumno en este nivel, antes de descuentos y recargos." />
+          <div ref={monthlyRef}>
+            <MoneyField
+              label="Colegiatura mensual"
+              value={monthly}
+              onChange={(v) => {
+                setMonthly(v);
+                // Cleared the moment it is valid; set again only on save.
+                if (monthlyError !== undefined && (pesosToCents(v) ?? 0) > 0) setMonthlyError(undefined);
+              }}
+              error={monthlyError}
+              help="Lo que se cobra cada mes por alumno en este nivel, antes de descuentos y recargos."
+            />
+          </div>
           <NumberField label="Mensualidades" value={months} onChange={setMonths} help="Cuántos meses se cobran a lo largo del ciclo." />
           <NumberField label="Mes de inicio" value={firstMonth} onChange={setFirstMonth} help="El mes en que arranca el cobro, con número: 1 es enero y 12 es diciembre." />
           {/*
@@ -620,6 +656,7 @@ function YearSummary({
   firstMonth,
   fees,
   concepts,
+  today,
   previousPlan,
   previousCycleName,
 }: {
@@ -629,6 +666,8 @@ function YearSummary({
   firstMonth: string;
   fees: readonly Fee[];
   concepts: readonly EnrollmentConcept[];
+  /** The school's today: the inscription is priced at the step in force on it (CC-108). */
+  today: string;
   previousPlan: TuitionPlan | undefined;
   previousCycleName: string | undefined;
 }): ReactElement {
@@ -638,11 +677,11 @@ function YearSummary({
     const start = wholeInRange(firstMonth, 1, 12) ?? 9;
     const tuition = monthlyTotals(billedMonths(cycle.startsOn, start, count), monthlyCents, fees)
       .reduce((sum, m) => sum + m.totalCents, 0);
-    // La inscripción del año es la del PRIMER escalón: lo que paga quien se
-    // inscribe en cuanto abre el periodo.
-    const enrollment = inscriptionTotals(concepts)[0]?.totalCents ?? 0;
+    // La inscripción del año es la del escalón VIGENTE hoy: lo que paga quien se
+    // inscribe ahora. El primero ya pudo haber vencido (CC-108).
+    const enrollment = inscriptionTotalOn(concepts, today) ?? 0;
     return { tuition, enrollment, all: tuition + enrollment };
-  }, [cycle.startsOn, monthly, months, firstMonth, fees, concepts]);
+  }, [cycle.startsOn, monthly, months, firstMonth, fees, concepts, today]);
 
   const before = useMemo(() => {
     if (previousPlan === undefined) return undefined;
@@ -651,9 +690,10 @@ function YearSummary({
       previousPlan.monthlyCents,
       previousPlan.fees,
     ).reduce((sum, m) => sum + m.totalCents, 0);
-    const enrollment = inscriptionTotals(previousPlan.enrollmentConcepts)[0]?.totalCents ?? 0;
+    // The same day a year earlier: the comparable point of the previous ladder.
+    const enrollment = inscriptionTotalOn(previousPlan.enrollmentConcepts, sameDayLastYear(today)) ?? 0;
     return tuition + enrollment;
-  }, [cycle.startsOn, previousPlan]);
+  }, [cycle.startsOn, previousPlan, today]);
 
   const delta = before === undefined ? undefined : total.all - before;
 
@@ -696,6 +736,11 @@ function YearSummary({
       )}
     </div>
   );
+}
+
+/** aaaa-mm-dd one year earlier, as a string: the tiers compare as strings. */
+function sameDayLastYear(isoDate: string): string {
+  return `${Number(isoDate.slice(0, 4)) - 1}${isoDate.slice(4)}`;
 }
 
 function Line({ label, value }: { label: string; value: string }): ReactElement {

@@ -222,6 +222,20 @@ export function inscriptionTotals(concepts: readonly EnrollmentConcept[]): Inscr
   }));
 }
 
+/**
+ * What joining costs on one day (aaaa-mm-dd): every concept at the step in force
+ * that day — the same rule as `inscriptionTotals` and the server. `undefined`
+ * when no concept has a price yet.
+ *
+ * The summary and the Colegiaturas table used to read the FIRST step, so a
+ * ladder of $3,600 until July and $4,000 from August read $3,600 in October,
+ * a price nobody could be charged any more (QA CC-108).
+ */
+export function inscriptionTotalOn(concepts: readonly EnrollmentConcept[], on: string): number | undefined {
+  if (!concepts.some((c) => c.tiers.some((t) => t.effectiveFrom !== ""))) return undefined;
+  return concepts.reduce((sum, c) => sum + amountOn(c, on), 0);
+}
+
 /** What the inscription costs on one date, as one line per tier. */
 export interface InscriptionTotal {
   effectiveFrom: string;

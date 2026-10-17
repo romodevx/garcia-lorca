@@ -7,7 +7,8 @@ import type { Cycle, Level } from "../../config/api";
 import { listTuitionPlans, runBilling, type BillingRun, type TuitionPlan } from "../../finance/api";
 import { formatCents } from "../../_lib/money";
 import { EmptyHint, ErrorAlert, Section } from "./parts";
-import { MONTH_NAMES, inscriptionTotals } from "./tuition-math";
+import { MONTH_NAMES, inscriptionTotalOn } from "./tuition-math";
+import { schoolISODate } from "../../_lib/schoolDay";
 import { TuitionPage } from "./TuitionPage";
 import { useSecondaryInSetup, useSetupPresentation } from "./SetupPresentation";
 import { useLatest } from "./useLatest";
@@ -53,13 +54,18 @@ export interface TuitionPanelProps {
    * instead of reading the plans twice.
    */
   onPlansLoaded?: (cycleId: string, plans: TuitionPlan[] | "failed") => void;
+  /** The school's today (aaaa-mm-dd): the inscription is shown at the price in force; defaults to Morelia's now. */
+  today?: string;
 }
 
 const cell = { padding: "10px 8px" } as const;
 
-/** Lo que cuesta inscribirse, venga de los conceptos o del monto único viejo. */
-function inscriptionShown(plan: TuitionPlan): number {
-  const porConceptos = inscriptionTotals(plan.enrollmentConcepts)[0]?.totalCents;
+/**
+ * Lo que cuesta inscribirse HOY, venga de los conceptos o del monto único viejo.
+ * El escalón vigente, no el primero: ése pudo haber vencido (CC-108).
+ */
+function inscriptionShown(plan: TuitionPlan, today: string): number {
+  const porConceptos = inscriptionTotalOn(plan.enrollmentConcepts, today);
   return porConceptos !== undefined && porConceptos > 0 ? porConceptos : plan.enrollmentCents;
 }
 
@@ -80,7 +86,9 @@ export function TuitionPanel({
   pricingLevelId,
   onPrice,
   onPlansLoaded,
+  today,
 }: TuitionPanelProps): ReactElement {
+  const day = today ?? schoolISODate();
   const [plans, setPlans] = useState<TuitionPlan[]>([]);
   // Los del ciclo anterior existen sólo para ofrecer "copiar de". Se piden una
   // vez y sin bloquear: si fallan, el atajo no aparece y todo lo demás sigue.
@@ -162,6 +170,7 @@ export function TuitionPanel({
         plan={planFor(pricing.id)}
         previousPlan={previousPlans.find((p) => p.levelId === pricing.id)}
         previousCycleName={previousCycle?.name}
+        today={day}
         onClose={() => onPrice?.(undefined)}
         onSaved={() => {
           onPrice?.(undefined);
@@ -220,7 +229,7 @@ export function TuitionPanel({
                           quien se inscribe en cuanto abre el periodo, que es el
                           número que el colegio publica.
                         */}
-                        <td data-label={label("Inscripción")} style={cell}>{formatCents(inscriptionShown(plan))}</td>
+                        <td data-label={label("Inscripción")} style={cell}>{formatCents(inscriptionShown(plan, day))}</td>
                         <td data-label={label("Mensualidad")} style={cell}>{formatCents(plan.monthlyCents)}</td>
                         <td data-label={label("Mensualidades")} style={cell}>
                           {plan.months} desde {MONTH_NAMES[plan.firstBilledMonth - 1]}

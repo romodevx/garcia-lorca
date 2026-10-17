@@ -201,7 +201,9 @@ export function InscriptionSection({ concepts, onChange, onError, draftRef, firs
               {totals.map((t, i) => (
                 <tr key={t.effectiveFrom} style={{ borderTop: "1px solid var(--border)" }}>
                   <td style={{ padding: "7px 4px", color: "var(--text-muted)" }}>
-                    {i === totals.length - 1 ? `Del ${t.effectiveFrom} en adelante` : `Desde el ${t.effectiveFrom}`}
+                    {i === totals.length - 1
+                      ? `Del ${dayWithYearLabel(t.effectiveFrom)} en adelante`
+                      : `Desde el ${dayWithYearLabel(t.effectiveFrom)}`}
                   </td>
                   <td style={{ padding: "7px 4px", textAlign: "right", fontWeight: 700, color: "var(--text)" }}>
                     {formatCents(t.totalCents)}
