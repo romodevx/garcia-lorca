@@ -114,7 +114,8 @@ describe("ActivityEnrollPage (T17)", () => {
     expect(within(enrolled()).queryByText("Cano Ceci")).not.toBeInTheDocument();
   });
 
-  it("the unenrolment toast stays at least 8 seconds", async () => {
+  // CC-210: the house rule — do it, then offer an Undo that does not time out.
+  it("keeps Deshacer on screen after the baja, however long it waits", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
       const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
@@ -123,13 +124,34 @@ describe("ActivityEnrollPage (T17)", () => {
       await user.click(await within(enrolled()).findByRole("checkbox", { name: "Cano Ceci" }));
       await user.click(screen.getByRole("button", { name: /Dar de baja/ }));
       expect(await screen.findByText("1 alumno dado de baja")).toBeInTheDocument();
-      act(() => vi.advanceTimersByTime(7900));
-      expect(screen.getByText("1 alumno dado de baja")).toBeInTheDocument();
-      act(() => vi.advanceTimersByTime(200));
-      expect(screen.queryByText("1 alumno dado de baja")).not.toBeInTheDocument();
+      act(() => vi.advanceTimersByTime(60_000));
+      const status = screen.getByText("1 alumno dado de baja").closest<HTMLElement>("[role=status]");
+      expect(status).not.toBeNull();
+      if (status === null) return;
+      expect(within(status).getByRole("button", { name: "Deshacer" })).toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("Deshacer enrolls them again with the option each one had", async () => {
+    const user = userEvent.setup();
+    m.endEnrollments.mockResolvedValue(1);
+    m.enrollStudents.mockResolvedValue({ enrollments: [
+      { id: "e9", activityId: ACT, studentId: "s3", optionId: FLAT, startsOn: "2026-10-17" },
+    ], chargesCreated: 0 });
+    open();
+    await user.click(await within(enrolled()).findByRole("checkbox", { name: "Cano Ceci" }));
+    await user.click(screen.getByRole("button", { name: /Dar de baja/ }));
+    await user.click(await screen.findByRole("button", { name: "Deshacer" }));
+
+    // No confirmation: undoing is not a new enrolment, and the period's charge is idempotent.
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(m.enrollStudents).toHaveBeenCalledWith(expect.any(String), ACT, [{ studentId: "s3", optionId: FLAT }]);
+    expect(await within(enrolled()).findByText("Cano Ceci")).toBeInTheDocument();
+    expect(within(enrolled()).getByLabelText("Esquema de Cano Ceci")).toHaveValue(FLAT);
+    expect(await screen.findByText("Baja deshecha: 1 alumno inscrito otra vez")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Deshacer" })).not.toBeInTheDocument();
   });
 
   it("shows the gateway's refusal and keeps the lists as they were", async () => {

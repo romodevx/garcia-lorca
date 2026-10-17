@@ -7,6 +7,7 @@ import { SelectField } from "../../_design/form";
 import { Icon } from "../../_design/Icon";
 import { Page } from "../../_design/Page";
 import { Toast } from "../../_design/Toast";
+import { UndoToast } from "../../_design/UndoToast";
 import { DualPanelPicker } from "../../_design/students/DualPanelPicker";
 import { formatStudentName } from "../../_design/students/studentName";
 import { useStudentRoster, type RosterStudent } from "../../_design/students/useStudentRoster";
@@ -14,7 +15,7 @@ import { API_URL } from "../../api-url";
 import { changeActivityOption, endEnrollments, enrollStudents, listEnrollments, type Activity, type Periodicity } from "../../activities/api";
 import { optionLabel, PERIODICITY_LABEL, scheduleSummary, sortOptions } from "../../activities/format";
 import { ErrorAlert } from "../config/parts";
-import { LONG_TOAST_MS, useToast } from "./useToast";
+import { LONG_TOAST_MS, useToast, useUndoOffer } from "./useToast";
 
 // What enrolling charges (owner decision D3): the period in course in full,
 // due today when its own date already passed; a once-a-cycle activity keeps
@@ -41,7 +42,7 @@ export interface ActivityEnrollPageProps {
  * price option, which each pupil moved in starts with, and a per-pupil select
  * on the right to change it. Enrolling issues the period's charge at once and
  * unenrolling never cancels it, so moving pupils in asks first; moving them
- * out does not.
+ * out does not — it is done at once and offers Deshacer (CC-210).
  */
 export function ActivityEnrollPage({ activity, canWrite, onBack }: ActivityEnrollPageProps): ReactElement {
   const roster = useStudentRoster();
@@ -53,6 +54,7 @@ export function ActivityEnrollPage({ activity, canWrite, onBack }: ActivityEnrol
   const [failure, setFailure] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
   const { toast, say } = useToast();
+  const { offer, offerUndo, withdraw } = useUndoOffer();
   const [asking, setAsking] = useState<{ ids: string[]; answer: (yes: boolean) => void } | null>(null);
 
   const confirmAssign = (ids: string[]): Promise<boolean> => new Promise((answer) => setAsking({ ids, answer }));
@@ -76,6 +78,7 @@ export function ActivityEnrollPage({ activity, canWrite, onBack }: ActivityEnrol
     if (busy) return;
     setBusy(true);
     setFailure(undefined);
+    withdraw();
     try {
       await work();
     } catch (err: unknown) {
@@ -91,10 +94,19 @@ export function ActivityEnrollPage({ activity, canWrite, onBack }: ActivityEnrol
     say(`${plural(res.enrollments.length, "alumno inscrito", "alumnos inscritos")} · ${plural(res.chargesCreated, "cargo generado", "cargos generados")}`, LONG_TOAST_MS);
   });
 
+  // Re-enrolling the same day is the way back: the ended row keeps its date and
+  // the period's charge is keyed by its period, so nothing is billed twice.
+  const reenroll = (items: { studentId: string; optionId: string }[]): void => void run(async () => {
+    const res = await enrollStudents(API_URL, activity.id, items);
+    setEnrolled((prev) => new Map([...prev, ...res.enrollments.map((e): [string, string] => [e.studentId, e.optionId])]));
+    say(`Baja deshecha: ${plural(res.enrollments.length, "alumno inscrito", "alumnos inscritos")} otra vez`, LONG_TOAST_MS);
+  });
+
   const unassign = (ids: string[]): void => void run(async () => {
+    const items = ids.map((studentId) => ({ studentId, optionId: enrolled.get(studentId) ?? batch }));
     const ended = await endEnrollments(API_URL, activity.id, ids);
     setEnrolled((prev) => new Map([...prev].filter(([id]) => !ids.includes(id))));
-    say(plural(ended, "alumno dado de baja", "alumnos dados de baja"), LONG_TOAST_MS);
+    offerUndo({ message: plural(ended, "alumno dado de baja", "alumnos dados de baja"), restore: () => reenroll(items) });
   });
 
   const change = (student: RosterStudent, optionId: string): void => void run(async () => {
@@ -154,7 +166,9 @@ export function ActivityEnrollPage({ activity, canWrite, onBack }: ActivityEnrol
           <p style={{ margin: "10px 0 0", color: "var(--text-muted)" }}>{`${chargeRule(activity.periodicity)} El cargo no se borra al darlos de baja.`}</p>
         </ConfirmDialog>
       )}
-      {toast !== undefined && <Toast>{toast}</Toast>}
+      {offer !== undefined
+        ? <UndoToast message={offer.message} onUndo={offer.restore} />
+        : toast !== undefined && <Toast>{toast}</Toast>}
     </Page>
   );
 }
