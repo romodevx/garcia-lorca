@@ -280,16 +280,24 @@ function RunSummary({ run }: { run: BillingRun }): ReactElement {
         Se generaron <strong>{run.tuitionCreated} colegiaturas</strong>,{" "}
         {run.enrollmentCreated} inscripciones, {run.feesCreated} cuotas y{" "}
         {run.lateFeesCreated} recargos. {run.skipped} ya existían.
+        {/* T14-022: in the same sentence, not as a footnote under it. A moved
+            deadline changes what a withdrawal later treats as not yet due. */}
+        {run.enrollmentMoved > 0 && (
+          <>
+            {" "}Se movió la fecha límite de <strong>{run.enrollmentMoved} inscripciones sin pagar</strong> para
+            que coincida con el tabulador.
+          </>
+        )}
+        {(run.enrollmentRepriced ?? 0) > 0 && (
+          <>
+            {" "}Se actualizó el precio de <strong>{run.enrollmentRepriced} inscripciones sin pagar</strong> al
+            tramo vigente.
+          </>
+        )}
       </p>
       {(run.activitiesCreated ?? 0) > 0 && (
         <p style={{ marginTop: 8 }}>
           Además, <strong>{run.activitiesCreated} cargos de actividades</strong>.
-        </p>
-      )}
-      {run.enrollmentMoved > 0 && (
-        <p style={{ marginTop: 8 }}>
-          Se corrigió la fecha límite de <strong>{run.enrollmentMoved} inscripciones</strong> que
-          ya estaban cobradas.
         </p>
       )}
       {run.levelsWithoutPlan.length > 0 && (

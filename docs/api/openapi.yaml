@@ -9135,6 +9135,13 @@ components:
             Inscriptions whose deadline the run corrected to match the tuition
             table. The run never re-issues a charge it has written, so this is
             how a deadline changed after billing reaches pupils already charged.
+        enrollmentRepriced:
+          type: integer
+          example: 0
+          description: >
+            Unpaid inscriptions the run re-priced to the tier now in force.
+            Reported for the same reason as enrollmentMoved, and it matters
+            more: this one moves money, not dates.
         skipped:
           type: integer
           example: 6

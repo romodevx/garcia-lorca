@@ -1239,6 +1239,8 @@ export interface BillingRun {
    * changed after billing reaches pupils who were already charged.
    */
   enrollmentMoved: number;
+  /** Unpaid inscriptions re-priced to the tier in force. Absent from older gateways. */
+  enrollmentRepriced?: number;
   /** Already existed. On a second press this is everything — that IS the proof. */
   skipped: number;
   /** Levels nobody has priced. Reported, never billed at zero. */
