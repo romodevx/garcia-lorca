@@ -32,6 +32,7 @@ vi.mock("./config/api", async (importOriginal) => ({
   listLevels: vi.fn().mockResolvedValue([]),
   listGradeLevels: vi.fn().mockResolvedValue([]),
   listTerms: vi.fn().mockResolvedValue([]),
+  listSubjects: vi.fn().mockResolvedValue([]),
   getSchoolProfile: vi.fn().mockResolvedValue({ profile: { name: "", legalName: "", rfc: "", cct: "", address: "", phone: "", legend: "" }, found: false }),
   listLevelTrash: vi.fn().mockResolvedValue([]),
 }));
