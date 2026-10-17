@@ -173,7 +173,9 @@ func enrollmentToDomain(m enrollmentModel) (domain.Enrollment, error) {
 	if err != nil {
 		return domain.Enrollment{}, err
 	}
-	e = e.WithOrigin(origin)
+	// An import enrollment's created_at is the import's instant: enrolled_at is
+	// the cycle start (T14) and the move to it never touches created_at.
+	e = e.WithOrigin(origin).WithImportedAt(m.CreatedAt)
 	// A non-active enrollment is never written again after its status change
 	// (only an ACTIVE one can be transferred or withdrawn), so updated_at is the
 	// instant it ended. WithEndedAt ignores it for an active one.

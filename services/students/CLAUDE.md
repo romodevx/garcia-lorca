@@ -55,7 +55,10 @@ enrollments carry `origin = 'import'`, which is what finance reads to never bill
 their inscription. The import enrollment is dated the cycle's first day (00:00
 school time; owner decision 2026-10-17, ADR 0033 amendment), so tuition runs
 from September; a re-upload moves earlier imports dated later back to it
-(`MoveImportedToCycleStart`, idempotent, never `withdrawn_on`). One
+(`MoveImportedToCycleStart`, idempotent, withdrawn ones too, never
+`withdrawn_on` nor a non-active row's `updated_at`; logged with batch + ids).
+`Enrollment.imported_at` (from `created_at`, import only) is the day the
+pupil arrived: finance spares the months due before it any surcharge. One
 transaction per pupil; group capacity is not counted
 (the import sizes its groups in config first). Permission (`students:import`)
 and flags are enforced by the gateway.

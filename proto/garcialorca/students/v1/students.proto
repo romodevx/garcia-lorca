@@ -585,6 +585,11 @@ message Enrollment {
   string origin = 10;
   string withdrawn_on = 11;  // YYYY-MM-DD; empty unless withdrawn.
   string withdrawal_reason = 12;  // Optional free-text reason.
+  // imported_at is when the legacy import brought the pupil in, set only for
+  // origin "import". enrolled_at is the cycle's first day for them (T14), so
+  // this is the instant finance reads as "the day they arrived": a month that
+  // fell due before it accrues no surcharge (owner decision 2026-10-17).
+  google.protobuf.Timestamp imported_at = 13;
 }
 
 // EnrollmentTransfer is a dated, reasoned record of a move between groups.

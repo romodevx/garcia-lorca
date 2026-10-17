@@ -65,7 +65,9 @@ func TestMoveImportedToCycleStartMovesOnlyLaterImportsOfTheCycle(t *testing.T) {
 	importedAt(t, tenantA, atStart, startEnr, "IAMB100312MDFRNN02", moveCycle, moveCycleStart)
 	importedAt(t, tenantA, other, otherEnr, "IAMC100312MDFRNN03", moveOtherCycle, moveImportDay)
 	importedAt(t, tenantA, withdrawn, wdEnr, "IAMD100312MDFRNN04", moveCycle, moveImportDay)
-	require.NoError(t, superDB.Exec(`UPDATE enrollments SET status = 'withdrawn', withdrawn_on = ? WHERE id = ?`, moveWithdrawn, wdEnr).Error)
+	wdEndedAt := time.Date(2026, 10, 10, 18, 0, 0, 0, time.UTC)
+	require.NoError(t, superDB.Exec(`UPDATE enrollments SET status = 'withdrawn', withdrawn_on = ?, updated_at = ? WHERE id = ?`,
+		moveWithdrawn, wdEndedAt, wdEnr).Error)
 	seedStudent(t, tenantA, manual, "IAME100312MDFRNN05")
 	repo := appRepo(t, tenantA)
 	manualE, err := domain.NewEnrollment(manualEnr, tenantA, manual, moveCycle, importGroup, "", domain.EnrollmentStatusActive, moveImportDay)
@@ -93,10 +95,44 @@ func TestMoveImportedToCycleStartMovesOnlyLaterImportsOfTheCycle(t *testing.T) {
 	var ended time.Time
 	require.NoError(t, superDB.Raw(`SELECT withdrawn_on FROM enrollments WHERE id = ?`, wdEnr).Scan(&ended).Error)
 	assert.True(t, ended.Equal(moveWithdrawn), "the withdrawn import's end date changed: %v", ended)
+	// A non-active enrollment's END INSTANT is its updated_at for a transfer
+	// (enrollmentToDomain): the move never rewrites updated_at on one.
+	var updated time.Time
+	require.NoError(t, superDB.Raw(`SELECT updated_at FROM enrollments WHERE id = ?`, wdEnr).Scan(&updated).Error)
+	assert.True(t, updated.Equal(wdEndedAt), "the withdrawn import's updated_at moved: %v, want %v", updated, wdEndedAt)
 
 	again, err := repo.MoveImportedToCycleStart(ctx, move)
 	require.NoError(t, err)
 	assert.Empty(t, again, "a second run moved somebody")
+}
+
+// Finance needs the day the import brought a pupil in, now that enrolled_at is
+// the cycle start: an import enrollment reads it from created_at — which the
+// move to the cycle start never changes — and a manual one carries none.
+func TestAnImportEnrollmentCarriesWhenItWasImported(t *testing.T) {
+	ctx := context.Background()
+	const id, enr = "aaaaaaaa-1b00-0000-0000-000000000020", "e1b00000-0000-0000-0000-000000000020"
+	before := time.Now().Add(-time.Minute)
+	importedAt(t, tenantA, id, enr, "IAMG100312MDFRNN07", moveCycle, moveImportDay)
+	repo := appRepo(t, tenantA)
+	_, err := repo.MoveImportedToCycleStart(ctx, ports.CycleStartMove{CycleID: moveCycle, StartsAt: moveCycleStart, StudentIDs: []string{id}})
+	require.NoError(t, err)
+
+	rows, err := repo.ListEnrollments(ctx, id, moveCycle, "")
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.True(t, rows[0].EnrolledAt().Equal(moveCycleStart))
+	assert.True(t, rows[0].ImportedAt().After(before), "imported_at = %v; want the insert's instant", rows[0].ImportedAt())
+
+	const manual, manualEnr = "aaaaaaaa-1b00-0000-0000-000000000021", "e1b00000-0000-0000-0000-000000000021"
+	seedStudent(t, tenantA, manual, "IAMH100312MDFRNN08")
+	e, err := domain.NewEnrollment(manualEnr, tenantA, manual, moveCycle, importGroup, "", domain.EnrollmentStatusActive, moveImportDay)
+	require.NoError(t, err)
+	require.NoError(t, repo.CreateEnrollment(ctx, e, roomFor(e)))
+	got, err := repo.ListEnrollments(ctx, manual, moveCycle, "")
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.True(t, got[0].ImportedAt().IsZero(), "a manual enrollment carries an import instant")
 }
 
 // RLS: one school cannot move another's enrollments.

@@ -158,7 +158,11 @@ func (r *Repository) MoveImportedToCycleStart(ctx context.Context, move ports.Cy
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
 		query := `SELECT student_id FROM enrollments WHERE ` + movableImports
 		if !move.DryRun {
-			query = `UPDATE enrollments SET enrolled_at = ?, updated_at = now() WHERE ` + movableImports + ` RETURNING student_id`
+			// updated_at only moves on an ACTIVE row: a non-active one's
+			// updated_at is the instant it ended (enrollmentToDomain).
+			query = `UPDATE enrollments SET enrolled_at = ?,
+			            updated_at = CASE WHEN status = 'active' THEN now() ELSE updated_at END
+			          WHERE ` + movableImports + ` RETURNING student_id`
 			args = append([]any{move.StartsAt}, args...)
 		}
 		if err := tx.Raw(query, args...).Scan(&moved).Error; err != nil {

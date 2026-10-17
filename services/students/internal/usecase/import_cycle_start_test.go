@@ -1,10 +1,13 @@
 package usecase_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -135,6 +138,34 @@ func TestReimportOnlyAsksAboutPlacedExistingPupils(t *testing.T) {
 
 	if len(f.repo.realigns) != 0 {
 		t.Fatalf("moves asked = %+v; want none", f.repo.realigns)
+	}
+}
+
+// Who was moved, and by which upload, is on record: the batch id and the moved
+// pupils' ids — ids only, never a name or a CURP.
+func TestReimportLogsTheBatchAndTheMovedIDs(t *testing.T) {
+	var buf bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	f := newImportFixture(t)
+	f.repo.existing[importCURP] = ports.ExistingPupil{StudentID: "stu-moved", ActiveGroupIDs: []string{importGroupA}}
+	f.repo.movable["stu-moved"] = true
+
+	f.run(t, true, row(1, importCURP))
+	if buf.Len() != 0 {
+		t.Fatalf("a preview logged a move: %s", buf.String())
+	}
+	f.run(t, false, row(1, importCURP))
+
+	got := buf.String()
+	for _, want := range []string{importBatch, importCycle, "stu-moved"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("log %s lacks %q", got, want)
+		}
+	}
+	if strings.Contains(got, importCURP) || strings.Contains(got, "Hernández") {
+		t.Errorf("the log carries personal data: %s", got)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -166,7 +167,7 @@ func (s *ImportService) ImportStudents(ctx context.Context, rows []ImportRow, va
 	if err != nil {
 		return nil, err
 	}
-	if err := s.moveToCycleStart(ctx, rows, placements, validateOnly, results); err != nil {
+	if err := s.moveToCycleStart(ctx, rows, placements, validateOnly, batchID, results); err != nil {
 		return nil, err
 	}
 
@@ -341,7 +342,10 @@ func (s *ImportService) entryOf(ctx context.Context, cycleID string, entries map
 // that cycle back to its first day. One statement per cycle; validating only
 // reports who would move. The store decides who moves, so a second upload
 // moves nobody.
-func (s *ImportService) moveToCycleStart(ctx context.Context, rows []ImportRow, placements map[string]placement, validateOnly bool, results []ImportResult) error {
+//
+// A real move is logged with the batch and the pupils' ids — ids only, no
+// name or CURP — so who was re-dated, and by which upload, is on record.
+func (s *ImportService) moveToCycleStart(ctx context.Context, rows []ImportRow, placements map[string]placement, validateOnly bool, batchID string, results []ImportResult) error {
 	var cycles []string
 	moves := map[string]*ports.CycleStartMove{}
 	for i, r := range results {
@@ -365,6 +369,10 @@ func (s *ImportService) moveToCycleStart(ctx context.Context, rows []ImportRow, 
 		}
 		for _, id := range ids {
 			moved[id] = true
+		}
+		if !validateOnly && len(ids) > 0 {
+			slog.InfoContext(ctx, "import: enrollments moved to the cycle start",
+				"batch", batchID, "cycle", cycleID, "starts_at", moves[cycleID].StartsAt, "student_ids", ids)
 		}
 	}
 	for i := range results {
