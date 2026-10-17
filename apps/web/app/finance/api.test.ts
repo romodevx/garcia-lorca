@@ -375,17 +375,17 @@ describe("charges write path", () => {
     await expect(getAccount(BASE, "st1")).resolves.toMatchObject({ payments: [{ id: "p1", method: "cash" }] });
   });
 
-  it("cancelCharge POSTs the cancel route with no body", async () => {
+  it("cancelCharge POSTs the cancel route with the reason (CC-203)", async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ ...charge, status: "cancelled" }));
     vi.stubGlobal("fetch", fetchMock);
 
-    const res = await cancelCharge(BASE, "ch1");
+    const res = await cancelCharge(BASE, "ch1", "Cargo duplicado");
 
     expect(res.status).toBe("cancelled");
     const [url, init] = lastCall(fetchMock);
     expect(url).toBe("http://gw/api/v1/finance/charges/ch1/cancel");
     expect(init.method).toBe("POST");
-    expect(init.body).toBeUndefined();
+    expect(JSON.parse(String(init.body))).toEqual({ reason: "Cargo duplicado" });
   });
 });
 

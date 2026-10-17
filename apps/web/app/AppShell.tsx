@@ -671,7 +671,7 @@ export function AppShell(): ReactElement {
       )}
       {view.screen === "finance" &&
         (financeEnabled ? (
-          <FinanceScreen key={intentVisit} onBack={home} notes={notesAccess} canCorrectPayments={canCorrectPayments} cutAccess={cutAccess} />
+          <FinanceScreen key={intentVisit} onBack={home} notes={notesAccess} canCorrectPayments={canCorrectPayments} cutAccess={cutAccess} canManageCharges={principal?.permissions?.includes("finance:write") === true} />
         ) : (
           // Flag OFF: do not render the finance surface; show the friendly stub
           // instead so navigation never dead-ends. (Backend 404 is authoritative.)

@@ -437,15 +437,6 @@ async function sendJSON<T>(baseURL: string, path: string, method: "POST" | "PUT"
   return (await res.json()) as T;
 }
 
-/** POST a bodyless action (the id in the path is the whole request). */
-async function postAction<T>(baseURL: string, path: string): Promise<T> {
-  const res = await authFetch(url(baseURL, `${BASE_PATH}${path}`), { method: "POST", credentials: "include" });
-  if (!res.ok) {
-    throw await failure(res);
-  }
-  return (await res.json()) as T;
-}
-
 /** GET and return the parsed payload. Throws on any non-2xx. */
 async function getJSON<T>(baseURL: string, path: string): Promise<T> {
   const res = await authFetch(url(baseURL, `${BASE_PATH}${path}`), { credentials: "include" });
@@ -596,9 +587,13 @@ export async function applyDiscount(baseURL: string, chargeId: string, discountC
   return toCharge(await sendJSON<Wire<Charge, "status">>(baseURL, `/charges/${chargeId}/discount`, "POST", body));
 }
 
-/** Void a charge. Returns it with `status: "cancelled"` — no longer collectable. */
-export async function cancelCharge(baseURL: string, chargeId: string): Promise<Charge> {
-  return toCharge(await postAction<Wire<Charge, "status">>(baseURL, `/charges/${chargeId}/cancel`));
+/**
+ * Void a charge, with the reason the school gives (CC-203). Returns it with
+ * `status: "cancelled"` — no longer collectable. Terminal: the gateway answers
+ * 409 to a second cancel.
+ */
+export async function cancelCharge(baseURL: string, chargeId: string, reason: string): Promise<Charge> {
+  return toCharge(await sendJSON<Wire<Charge, "status">>(baseURL, `/charges/${chargeId}/cancel`, "POST", { reason }));
 }
 
 /** Every charge past its due date with a remaining balance, across all pages. */
