@@ -89,11 +89,14 @@ function choiceOf(lines: readonly ExpectedLine[], chosen: ReadonlySet<string>): 
 /**
  * The most the counter takes (T8 · T5): every line the quote lists at its
  * figure — the ones not yet open included, which may be paid ahead — or what
- * is asked today, or what was chosen, whichever is largest.
+ * is asked today, whichever is largest. When the cashier CHOSE concepts the
+ * money may pay only those, so the cap is what they add up to: the server
+ * refuses anything past it (CC-202).
  */
-export function maxPayableCents(expected: Pick<Expected, "amountCents" | "lines">, selectedCents: number): number {
+export function maxPayableCents(expected: Pick<Expected, "amountCents" | "lines">, selectedCents: number, chosen: boolean): number {
+  if (chosen) return selectedCents;
   const listed = expected.lines.reduce((sum, l) => sum + l.totalCents, 0);
-  return Math.max(listed, expected.amountCents, selectedCents);
+  return Math.max(listed, expected.amountCents);
 }
 
 /**
@@ -186,11 +189,12 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
   // ONE balance (T5): the quote's, for the day asked about, once it is here —
   // the figure the debt list totals too. Until then, the account's.
   const balance = expected?.annualBalanceCents ?? owed;
-  // The cap is the GROSS debt the quote lists — every line, those not yet open
+  // The cap is the GROSS debt the quote lists (with concepts chosen, what they
+  // add up to: CC-202) — every line, those not yet open
   // included — never the net balance: that one leaves them out and nets the
   // credit (it can be below zero), and would refuse a legitimate payment ahead.
   // Unknown (Infinity) until the quote is here; the server has the last word.
-  const capCents = expected === null ? Number.POSITIVE_INFINITY : maxPayableCents(expected, selectedCents);
+  const capCents = expected === null ? Number.POSITIVE_INFINITY : maxPayableCents(expected, selectedCents, choice !== undefined);
   // How the amount is paid, method by method (T8): it must add up to it.
   const tenders = useTenders(cents);
   const toggle = (chargeId: string): void => {

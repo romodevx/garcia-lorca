@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as financeApi from "../../finance/api";
-import { CollectDrawer } from "./CollectDrawer";
+import { CollectDrawer, maxPayableCents } from "./CollectDrawer";
 
 vi.mock("../../finance/api", () => ({
   getAccount: vi.fn(),
@@ -670,5 +670,24 @@ describe("CollectDrawer · pagar por adelantado lo que aún no abre (T5)", () =>
 
     expect(await screen.findAllByText(/No puede ser mayor que el adeudo \(\$500\.00\)/)).not.toHaveLength(0);
     expect(finance.registerDeposit).not.toHaveBeenCalled();
+  });
+});
+
+// CC-202: the server refuses money that does not land in full on the charges
+// it may pay. With concepts chosen, it may pay only those: the cap is what
+// they add up to, not every line listed.
+describe("maxPayableCents", () => {
+  const line = (chargeId: string, totalCents: number) => ({
+    chargeId, description: chargeId, dueDate: "2026-10-10", owedCents: totalCents, surchargeCents: 0,
+    discountCents: 0, scholarshipCents: 0, totalCents, due: true, inBalance: true,
+  });
+  const expected = { amountCents: 350000, lines: [line("sep", 350000), line("oct", 320000)] };
+
+  it("is every line listed when the counter pays by its own rule", () => {
+    expect(maxPayableCents(expected, 0, false)).toBe(670000);
+  });
+
+  it("is what the chosen concepts add up to when the cashier chose", () => {
+    expect(maxPayableCents(expected, 320000, true)).toBe(320000);
   });
 });
