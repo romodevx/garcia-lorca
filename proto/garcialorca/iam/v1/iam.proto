@@ -86,6 +86,15 @@ service IamService {
   // Use ResendInvitation for the person who never got their mail.
   rpc InviteUser(InviteUserRequest) returns (InviteUserResponse);
 
+  // InviteGuardian invites a family contact into the `guardian` role — the
+  // ONLY road to that role. InviteUser, CreateUser and AssignRole refuse it:
+  // a guardian account means nothing without the guardian↔student link that
+  // students owns, so it is born from "Dar acceso a la app" on the pupil's
+  // record (gateway composes students + iam), never from the staff screen.
+  // An address that already has a deleted account is restored, as InviteUser
+  // does.
+  rpc InviteGuardian(InviteGuardianRequest) returns (InviteGuardianResponse);
+
   // ResendInvitation mails the account's owner a fresh link to set a password.
   //
   // It is BOTH halves of one need: the person whose invitation never arrived,
@@ -114,7 +123,10 @@ service IamService {
   rpc ListUsers(ListUsersRequest) returns (ListUsersResponse);
 
   // SetUserStatus suspends or reactivates an account. A SUSPENDED user cannot log
-  // in; reactivating restores ACTIVE.
+  // in, and its outstanding tokens stop validating; reactivating restores
+  // ACTIVE. The caller is the subject of access_token (never a request field).
+  // Refused: suspending yourself (PermissionDenied) and the last active owner
+  // (AlreadyExists).
   rpc SetUserStatus(SetUserStatusRequest) returns (SetUserStatusResponse);
 
   // DeleteUser soft-deletes an account (T2): it can no longer sign in by any
@@ -362,6 +374,19 @@ message InviteUserResponse {
   Invitation invitation = 2;
 }
 
+// InviteGuardianRequest invites a family contact. There is no role field: the
+// role is always `guardian`, chosen by iam.
+message InviteGuardianRequest {
+  string email = 1;
+  string display_name = 2;
+}
+
+// InviteGuardianResponse mirrors InviteUserResponse.
+message InviteGuardianResponse {
+  User user = 1;
+  Invitation invitation = 2;
+}
+
 // Invitation is what the caller learns after a link is issued.
 //
 // `sent` is the field that did not exist before, and its absence was the bug:
@@ -437,10 +462,13 @@ message ListUsersResponse {
   repeated User users = 1;
 }
 
-// SetUserStatusRequest suspends or reactivates a user account.
+// SetUserStatusRequest suspends or reactivates a user account. access_token
+// identifies the caller: the self-suspension guard reads it, never a
+// caller-supplied id.
 message SetUserStatusRequest {
   string user_id = 1;
   UserStatus status = 2;
+  string access_token = 3;
 }
 
 // SetUserStatusResponse returns the updated user.

@@ -26,6 +26,22 @@ func IsOwnerRoleID(id string) bool {
 	return strings.TrimSpace(id) == OwnerRoleID
 }
 
+// GuardianRoleID is the fixed UUID of the seeded `guardian` role
+// (migrations/iam/0010_guardians.sql): exactly family:read, the family app.
+//
+// It is not an ordinary role to hand out. A guardian account means nothing
+// without the guardian↔student link that students owns, so the role is given
+// ONLY by AdminService.InviteGuardian — the road behind "Dar acceso a la app"
+// on the pupil's record. Every manual road (invite, create, assign) refuses it.
+const GuardianRoleID = "00000000-0000-0000-0000-0000000000a2"
+
+// IsGuardianRoleID reports whether id names the seeded guardian role. Case and
+// surrounding space are ignored because Postgres reads a uuid that way: a guard
+// that compared bytes could be walked around by upper-casing the id.
+func IsGuardianRoleID(id string) bool {
+	return strings.EqualFold(strings.TrimSpace(id), GuardianRoleID)
+}
+
 // Role is a named bundle of permissions. Roles exist only to group permissions;
 // authorization always resolves to permissions, so callers never compare role
 // names. Permissions are stored deduplicated and validated.

@@ -59,7 +59,18 @@ type UserRepository interface {
 	// account is KindNotFound: only SoftDelete and Restore move it. (Restore is
 	// reached by inviting the address again, which puts the account back to
 	// `invited` — it still has to be opened from the new link.)
-	SetStatus(ctx context.Context, userID string, status domain.Status) error
+	//
+	// Leaving `active` (a suspension) refuses with domain.ErrLastOwner when the
+	// account is the only ACTIVE holder of keepActiveHolderOf — checked and
+	// written atomically, as SoftDelete does — and moves password_changed_at,
+	// so every refresh token the account held dies with the suspension instead
+	// of coming back to life on reactivation (ADR 0005).
+	SetStatus(ctx context.Context, userID string, status domain.Status, keepActiveHolderOf string) error
+
+	// StatusOf returns only the account's lifecycle state: the one fact
+	// ValidateToken needs on every request, without loading roles. An unknown
+	// id is KindNotFound.
+	StatusOf(ctx context.Context, userID string) (domain.Status, error)
 
 	// SoftDelete marks the account deleted, stamping who did it and when, and
 	// moves the refresh-token floor (password_changed_at) so every session it

@@ -31,6 +31,10 @@ type fakeUsers struct {
 	statusSet map[string]domain.Status // SetStatus calls
 	statusErr error                    // forced SetStatus error
 	rolesSet  map[string][]string      // SetUserRoles calls
+
+	// actors are further accounts FindByID / StatusOf can see — the caller
+	// of an admin action, who is never the account it acts on.
+	actors map[string]domain.User
 }
 
 type createdUser struct {
@@ -48,7 +52,17 @@ func (f *fakeUsers) FindByID(_ context.Context, id string) (domain.User, error) 
 	if id == f.user.ID() {
 		return f.user, nil
 	}
+	if u, ok := f.actors[id]; ok {
+		return u, nil
+	}
 	return domain.User{}, glerrors.ErrNotFound
+}
+func (f *fakeUsers) StatusOf(ctx context.Context, id string) (domain.Status, error) {
+	u, err := f.FindByID(ctx, id)
+	if err != nil {
+		return domain.StatusUnspecified, err
+	}
+	return u.Status(), nil
 }
 func (f *fakeUsers) FindAuthByID(_ context.Context, id string) (domain.User, string, error) {
 	if id == f.user.ID() {
@@ -76,7 +90,7 @@ func (f *fakeUsers) CreateUser(_ context.Context, user domain.User, passwordHash
 	return nil
 }
 func (f *fakeUsers) ListUsers(context.Context) ([]domain.User, error) { return f.listOut, nil }
-func (f *fakeUsers) SetStatus(_ context.Context, userID string, status domain.Status) error {
+func (f *fakeUsers) SetStatus(_ context.Context, userID string, status domain.Status, _ string) error {
 	if f.statusErr != nil {
 		return f.statusErr
 	}
@@ -387,27 +401,10 @@ func TestListUsersProjectsRoleIds(t *testing.T) {
 	}
 }
 
-func TestSetUserStatusSuspends(t *testing.T) {
-	// The seeded handler's fake user has id "u1"; GetUser after the update reads it.
-	h, users := newHandlerWithUsers(t, false)
-	res, err := h.SetUserStatus(context.Background(), connect.NewRequest(&iamv1.SetUserStatusRequest{
-		UserId: "u1", Status: iamv1.UserStatus_USER_STATUS_SUSPENDED,
-	}))
-	if err != nil {
-		t.Fatalf("SetUserStatus: %v", err)
-	}
-	if got := users.statusSet["u1"]; got != domain.StatusSuspended {
-		t.Errorf("status for u1 = %v, want StatusSuspended", got)
-	}
-	if res.Msg.GetUser().GetId() != "u1" {
-		t.Errorf("response user = %+v, want id u1", res.Msg.GetUser())
-	}
-}
-
 func TestSetUserStatusUnspecifiedIsInvalidArgument(t *testing.T) {
-	h, _ := newHandlerWithUsers(t, false)
+	h, users := newHandlerWithUsers(t, false)
 	_, err := h.SetUserStatus(context.Background(), connect.NewRequest(&iamv1.SetUserStatusRequest{
-		UserId: "u1", Status: iamv1.UserStatus_USER_STATUS_UNSPECIFIED,
+		AccessToken: actorToken(t, users, adminActorID), UserId: selfID, Status: iamv1.UserStatus_USER_STATUS_UNSPECIFIED,
 	}))
 	assertCode(t, err, connect.CodeInvalidArgument)
 }
@@ -416,7 +413,7 @@ func TestSetUserStatusUnknownUserIsNotFound(t *testing.T) {
 	users := &fakeUsers{statusErr: glerrors.ErrNotFound}
 	h := handlerOver(t, users, &fakeRoles{})
 	_, err := h.SetUserStatus(context.Background(), connect.NewRequest(&iamv1.SetUserStatusRequest{
-		UserId: "ghost", Status: iamv1.UserStatus_USER_STATUS_ACTIVE,
+		AccessToken: actorToken(t, users, adminActorID), UserId: "0b8a1c0e-0000-4000-8000-0000000000ff", Status: iamv1.UserStatus_USER_STATUS_ACTIVE,
 	}))
 	assertCode(t, err, connect.CodeNotFound)
 }

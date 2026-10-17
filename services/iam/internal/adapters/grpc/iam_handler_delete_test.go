@@ -24,6 +24,14 @@ const selfID = "0b8a1c0e-0000-4000-8000-000000000001"
 // deleterHandler seeds the caller with the given permissions and logs it in.
 func deleterHandler(t *testing.T, perms ...string) (*grpcadapter.IAMHandler, string) {
 	t.Helper()
+	h, _, access := deleterHandlerWithUsers(t, perms...)
+	return h, access
+}
+
+// deleterHandlerWithUsers is deleterHandler that also returns the fake
+// repository, for the tests that seed more accounts or assert on writes.
+func deleterHandlerWithUsers(t *testing.T, perms ...string) (*grpcadapter.IAMHandler, *fakeUsers, string) {
+	t.Helper()
 	hasher := bcrypt.NewHasher(4)
 	hash, _ := hasher.Hash("test-owner-pw")
 	email, _ := domain.NewEmail("ana@garcialorca.mx")
@@ -35,7 +43,7 @@ func deleterHandler(t *testing.T, perms ...string) (*grpcadapter.IAMHandler, str
 	auth := usecase.NewAuthService(users, roles, hasher, tokens, tokens, nil, nil, "t1", 15*time.Minute, time.Now)
 	admin := usecase.NewAdminService(users, roles, hasher, nil, nil, nil, "", "t1", func() string { return "id" }, nil)
 	h := grpcadapter.NewIAMHandler(auth, admin, usecase.NewHealthService("iam"))
-	return h, loginAccessToken(t, h)
+	return h, users, loginAccessToken(t, h)
 }
 
 func TestDeleteUserCodes(t *testing.T) {
@@ -69,7 +77,8 @@ func TestDeleteUserCodes(t *testing.T) {
 func TestDeletedStatusOnTheWire(t *testing.T) {
 	email, _ := domain.NewEmail("gone@garcialorca.mx")
 	gone, _ := domain.NewUser("u9", "t1", email, "Ex", domain.StatusDeleted, false, nil)
-	h := handlerOver(t, &fakeUsers{user: gone}, &fakeRoles{})
+	users := &fakeUsers{user: gone}
+	h := handlerOver(t, users, &fakeRoles{})
 
 	res, err := h.GetUser(context.Background(), connect.NewRequest(&iamv1.GetUserRequest{Id: "u9"}))
 	if err != nil {
@@ -81,7 +90,7 @@ func TestDeletedStatusOnTheWire(t *testing.T) {
 
 	// SetUserStatus is not a road to `deleted`: DeleteUser is, with its guards.
 	_, err = h.SetUserStatus(context.Background(), connect.NewRequest(&iamv1.SetUserStatusRequest{
-		UserId: "u9", Status: iamv1.UserStatus_USER_STATUS_DELETED,
+		AccessToken: actorToken(t, users, adminActorID), UserId: "u9", Status: iamv1.UserStatus_USER_STATUS_DELETED,
 	}))
 	assertCode(t, err, connect.CodeInvalidArgument)
 }

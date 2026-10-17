@@ -429,7 +429,7 @@ func TestSetStatusSuspend(t *testing.T) {
 	seedUser(t, uid, tenantA, "suspendme@garcialorca.mx", "x", "active")
 
 	repo := pgadapter.NewUserRepo(appDB(t), tenantA)
-	if err := repo.SetStatus(ctx, uid, domain.StatusSuspended); err != nil {
+	if err := repo.SetStatus(ctx, uid, domain.StatusSuspended, domain.OwnerRoleID); err != nil {
 		t.Fatalf("SetStatus: %v", err)
 	}
 	got, err := repo.FindByID(ctx, uid)
@@ -440,7 +440,7 @@ func TestSetStatusSuspend(t *testing.T) {
 		t.Error("suspended user should not be able to authenticate")
 	}
 
-	if err := repo.SetStatus(ctx, "adadadad-0000-0000-0000-0000000000ff", domain.StatusSuspended); glerrors.KindOf(err) != glerrors.KindNotFound {
+	if err := repo.SetStatus(ctx, "adadadad-0000-0000-0000-0000000000ff", domain.StatusSuspended, domain.OwnerRoleID); glerrors.KindOf(err) != glerrors.KindNotFound {
 		t.Errorf("SetStatus on an unknown id should be KindNotFound, got %v", glerrors.KindOf(err))
 	}
 }
@@ -544,7 +544,7 @@ func TestRLSIsolatesAdminWrites(t *testing.T) {
 		t.Errorf("tenant B saw tenant A's role (RLS breach): err=%v", err)
 	}
 	userRepoB := pgadapter.NewUserRepo(appDB(t), tenantB)
-	if err := userRepoB.SetStatus(ctx, uid, domain.StatusSuspended); glerrors.KindOf(err) != glerrors.KindNotFound {
+	if err := userRepoB.SetStatus(ctx, uid, domain.StatusSuspended, domain.OwnerRoleID); glerrors.KindOf(err) != glerrors.KindNotFound {
 		t.Errorf("tenant B suspended tenant A's user (RLS breach): err=%v", glerrors.KindOf(err))
 	}
 }

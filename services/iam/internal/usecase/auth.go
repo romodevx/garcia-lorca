@@ -246,7 +246,7 @@ func (s *AuthService) AuthenticateWithIDToken(ctx context.Context, idToken strin
 	// hash it checks could not have been set by anyone who was not already
 	// through the door, so it proves nothing new.
 	if user.Status() == domain.StatusInvited {
-		if err := s.users.SetStatus(ctx, user.ID(), domain.StatusActive); err != nil {
+		if err := s.users.SetStatus(ctx, user.ID(), domain.StatusActive, domain.OwnerRoleID); err != nil {
 			return AuthResult{}, err
 		}
 		// Whatever links they were still holding die now. One handed out hours
@@ -377,29 +377,66 @@ func (s *AuthService) ChangePassword(ctx context.Context, accessToken, currentPa
 
 // ValidateToken verifies an access token and returns its claims (principal +
 // effective permissions). An invalid/expired token is a generic Unauthorized.
+//
+// The signature is not enough (ISSUE-CC-116). A token is minted for fifteen
+// minutes, and suspending or deleting its account used to leave it working for
+// whatever was left of them: refresh and login refused, the request in hand did
+// not. The gateway asks THIS method on every authenticated request, so the
+// account's current state is read here — one primary-key lookup — and a
+// suspended, deleted or vanished account stops at its very next request.
+//
+// A lookup that FAILED is not a revoked session: it propagates as the server
+// fault it is (KindInternal), so a database blip is a retry, not a sign-out.
 func (s *AuthService) ValidateToken(ctx context.Context, accessToken string) (domain.Claims, error) {
 	claims, err := s.validator.ValidateAccessToken(ctx, accessToken)
 	if err != nil {
 		return domain.Claims{}, glerrors.New(glerrors.KindUnauthorized, "invalid access token")
 	}
+	if err := s.requireActive(ctx, claims.Subject); err != nil {
+		return domain.Claims{}, err
+	}
 	return claims, nil
+}
+
+// requireActive refuses a principal whose account is not active right now.
+func (s *AuthService) requireActive(ctx context.Context, userID string) error {
+	status, err := s.users.StatusOf(ctx, userID)
+	if glerrors.KindOf(err) == glerrors.KindNotFound {
+		return glerrors.New(glerrors.KindUnauthorized, "invalid access token")
+	}
+	if err != nil {
+		return err
+	}
+	if status != domain.StatusActive {
+		return glerrors.New(glerrors.KindUnauthorized, "invalid access token")
+	}
+	return nil
 }
 
 // CheckPermission validates an access token and reports whether its principal
 // holds the given "resource:action" permission.
 func (s *AuthService) CheckPermission(ctx context.Context, accessToken, permission string) (bool, error) {
-	claims, err := s.validator.ValidateAccessToken(ctx, accessToken)
+	claims, err := s.ValidateToken(ctx, accessToken)
 	if err != nil {
-		return false, glerrors.New(glerrors.KindUnauthorized, "invalid access token")
+		return false, err
 	}
 	return claims.Allows(permission), nil
 }
 
 // AssignRole grants a role to a user. The role must exist (KindNotFound
-// otherwise). Who may call this is enforced at the gateway/RPC boundary.
+// otherwise). Who may call this is enforced at the gateway/RPC boundary. The
+// guardian role is refused: it is given only by AdminService.InviteGuardian
+// (ISSUE-CC-115), checked on the id as sent and as resolved.
 func (s *AuthService) AssignRole(ctx context.Context, userID, roleID string) error {
-	if _, err := s.roles.FindByID(ctx, roleID); err != nil {
+	if domain.IsGuardianRoleID(roleID) {
+		return domain.ErrGuardianRoleIsNotManual
+	}
+	role, err := s.roles.FindByID(ctx, roleID)
+	if err != nil {
 		return err // KindNotFound propagates.
+	}
+	if domain.IsGuardianRoleID(role.ID()) {
+		return domain.ErrGuardianRoleIsNotManual
 	}
 	return s.users.AddRole(ctx, userID, roleID)
 }

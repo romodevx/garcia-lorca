@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -144,10 +145,35 @@ func (s *AdminService) InviteUser(ctx context.Context, rawEmail, displayName str
 	if err != nil {
 		return Invitation{}, err // KindInvalid, before either side is touched.
 	}
-	assigned, err := s.resolveRoles(ctx, roleIDs)
+	assigned, err := s.resolveManualRoles(ctx, roleIDs)
 	if err != nil {
 		return Invitation{}, err
 	}
+	return s.invite(ctx, email, displayName, roleIDs, assigned)
+}
+
+// InviteGuardian invites a family contact into the guardian role — the ONLY
+// road to it (ISSUE-CC-115). The role is chosen here, never by the caller: the
+// gateway reaches this from "Dar acceso a la app", which links the account to
+// the pupil right after, and that link is what gives the role any meaning.
+//
+// A deployment without the seeded role (migrations/iam/0010) is OUR fault, not
+// the caller's: inviting into no role would create a login that sees nothing.
+func (s *AdminService) InviteGuardian(ctx context.Context, rawEmail, displayName string) (Invitation, error) {
+	email, err := domain.NewEmail(rawEmail)
+	if err != nil {
+		return Invitation{}, err
+	}
+	guardian, err := s.roles.FindByID(ctx, domain.GuardianRoleID)
+	if err != nil {
+		return Invitation{}, glerrors.Wrap(glerrors.KindInternal, "the guardian role is missing from this deployment", err)
+	}
+	return s.invite(ctx, email, displayName, []string{guardian.ID()}, []domain.Role{guardian})
+}
+
+// invite is InviteUser after the roles are settled: restore a deleted address,
+// refuse a live one, otherwise create the account at the provider and here.
+func (s *AdminService) invite(ctx context.Context, email domain.Email, displayName string, roleIDs []string, assigned []domain.Role) (Invitation, error) {
 
 	// An address already on file is either a deleted account — which comes
 	// back, history and all (owner answer 3) — or a live one, which is the
@@ -490,7 +516,7 @@ func (s *AdminService) AcceptInvitation(ctx context.Context, token, password str
 	if !inv.ActivatesAccount() {
 		return nil
 	}
-	return s.users.SetStatus(ctx, user.ID(), domain.StatusActive)
+	return s.users.SetStatus(ctx, user.ID(), domain.StatusActive, domain.OwnerRoleID)
 }
 
 // setCredential writes the password wherever this environment keeps
@@ -716,7 +742,7 @@ func (s *AdminService) CreateUser(ctx context.Context, rawEmail, displayName, te
 		return domain.User{}, err // KindInvalid
 	}
 
-	assigned, err := s.resolveRoles(ctx, roleIDs)
+	assigned, err := s.resolveManualRoles(ctx, roleIDs)
 	if err != nil {
 		return domain.User{}, err
 	}
@@ -766,6 +792,24 @@ func (s *AdminService) resolveRoles(ctx context.Context, roleIDs []string) ([]do
 	return resolved, nil
 }
 
+// resolveManualRoles is resolveRoles for the roads an administrator drives by
+// hand, which may not hand out the guardian role (ISSUE-CC-115). The ids are
+// checked as typed AND as resolved: Postgres reads a uuid in several spellings,
+// and the resolved role carries the one canonical id.
+func (s *AdminService) resolveManualRoles(ctx context.Context, roleIDs []string) ([]domain.Role, error) {
+	if slices.ContainsFunc(roleIDs, domain.IsGuardianRoleID) {
+		return nil, domain.ErrGuardianRoleIsNotManual
+	}
+	resolved, err := s.resolveRoles(ctx, roleIDs)
+	if err != nil {
+		return nil, err
+	}
+	if slices.ContainsFunc(resolved, func(r domain.Role) bool { return domain.IsGuardianRoleID(r.ID()) }) {
+		return nil, domain.ErrGuardianRoleIsNotManual
+	}
+	return resolved, nil
+}
+
 // GetUser returns a single principal (with roles resolved), or KindNotFound.
 func (s *AdminService) GetUser(ctx context.Context, userID string) (domain.User, error) {
 	return s.users.FindByID(ctx, userID)
@@ -777,9 +821,31 @@ func (s *AdminService) ListUsers(ctx context.Context) ([]domain.User, error) {
 }
 
 // SetUserStatus activates or suspends an account. A suspended account cannot
-// authenticate (domain.User.CanAuthenticate enforces this at login).
-func (s *AdminService) SetUserStatus(ctx context.Context, userID string, status domain.Status) error {
-	if err := s.users.SetStatus(ctx, userID, status); err != nil {
+// authenticate (domain.User.CanAuthenticate at login and refresh, and
+// AuthService.ValidateToken on every request).
+//
+// actorID is the verified caller (from the access token, never the request).
+// Suspending follows the two rules deleting already did (ISSUE-CC-117):
+//
+//   - nobody suspends themself — compared on the LOADED row, so another
+//     spelling of the caller's own uuid is still the caller;
+//   - the last active owner cannot be suspended (enforced atomically by the
+//     repository, under the same row locks as SoftDelete).
+//
+// Reactivating needs neither: it adds an active holder, it cannot remove one.
+func (s *AdminService) SetUserStatus(ctx context.Context, actorID, targetID string, status domain.Status) error {
+	if actorID == "" {
+		return glerrors.New(glerrors.KindUnauthorized, "invalid access token")
+	}
+	if status == domain.StatusSuspended {
+		if err := s.refuseSelfSuspension(ctx, actorID, targetID); err != nil {
+			return err
+		}
+	}
+	if err := s.users.SetStatus(ctx, targetID, status, domain.OwnerRoleID); err != nil {
+		if errors.Is(err, domain.ErrLastOwner) {
+			return domain.ErrLastOwnerSuspension
+		}
 		return err
 	}
 	// Locking somebody out has to reach the links they are still holding.
@@ -787,7 +853,19 @@ func (s *AdminService) SetUserStatus(ctx context.Context, userID string, status 
 	// and the guard in AcceptInvitation is the only thing standing between it
 	// and a way back in. Two locks on the same door, deliberately.
 	if status == domain.StatusSuspended && s.invitations != nil {
-		_ = s.invitations.Revoke(ctx, userID)
+		_ = s.invitations.Revoke(ctx, targetID)
+	}
+	return nil
+}
+
+// refuseSelfSuspension loads the target and refuses when it is the caller.
+func (s *AdminService) refuseSelfSuspension(ctx context.Context, actorID, targetID string) error {
+	target, err := s.users.FindByID(ctx, targetID)
+	if err != nil {
+		return err
+	}
+	if target.ID() == actorID {
+		return domain.ErrSelfSuspension
 	}
 	return nil
 }

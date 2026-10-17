@@ -250,15 +250,30 @@ func (r *UserRepo) ListUsers(ctx context.Context) ([]domain.User, error) {
 	return out, nil
 }
 
-// SetStatus updates a user's lifecycle status. An id that matches no row is
-// KindNotFound.
-func (r *UserRepo) SetStatus(ctx context.Context, userID string, status domain.Status) error {
+// SetStatus updates a user's lifecycle status. An id that matches no row (or a
+// deleted one) is KindNotFound.
+//
+// A suspension takes the same last-holder rule and row locks as SoftDelete, in
+// the same transaction as the write: two directors suspending each other at
+// the same instant serialize, and the second is refused instead of leaving the
+// school with nobody active to administer it. It also moves
+// password_changed_at, so RefreshToken refuses every token the account held
+// (ADR 0005) — a reactivated account signs in again rather than resuming
+// sessions minted before somebody decided to lock it out.
+func (r *UserRepo) SetStatus(ctx context.Context, userID string, status domain.Status, keepActiveHolderOf string) error {
 	text, err := statusColumn(status)
 	if err != nil {
 		return err
 	}
+	changes := map[string]any{"status": text}
 	return r.withTenant(ctx, func(tx *gorm.DB) error {
-		res := tx.Model(&userModel{}).Where("id = ? AND status <> ?", userID, statusDeleted).Update("status", text)
+		if status != domain.StatusActive {
+			if err := guardLastActiveHolder(tx, userID, keepActiveHolderOf); err != nil {
+				return err
+			}
+			changes["password_changed_at"] = gorm.Expr("now()")
+		}
+		res := tx.Model(&userModel{}).Where("id = ? AND status <> ?", userID, statusDeleted).Updates(changes)
 		if res.Error != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "updating user status", res.Error)
 		}
@@ -267,6 +282,27 @@ func (r *UserRepo) SetStatus(ctx context.Context, userID string, status domain.S
 		}
 		return nil
 	})
+}
+
+// StatusOf reads just the account's lifecycle state — one primary-key lookup,
+// no roles — for the per-request check in ValidateToken. Unknown is
+// KindNotFound.
+func (r *UserRepo) StatusOf(ctx context.Context, userID string) (domain.Status, error) {
+	var texts []string
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		return tx.Model(&userModel{}).Where("id = ?", userID).Limit(1).Pluck("status", &texts).Error
+	})
+	if err != nil {
+		return domain.StatusUnspecified, glerrors.Wrap(glerrors.KindInternal, "reading user status", err)
+	}
+	if len(texts) == 0 {
+		return domain.StatusUnspecified, glerrors.ErrNotFound
+	}
+	status, ok := statusToDomain[texts[0]]
+	if !ok {
+		return domain.StatusUnspecified, glerrors.New(glerrors.KindInternal, "unknown user status in the database")
+	}
+	return status, nil
 }
 
 // statusDeleted is the status column's value for a soft-deleted account.

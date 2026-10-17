@@ -42,6 +42,7 @@ type fakeUsers struct {
 	created      []createdUser            // CreateUser calls
 	listOut      []domain.User            // ListUsers return
 	statusSet    map[string]domain.Status // SetStatus calls
+	statusKeep   map[string]string        // SetStatus calls: user -> keepActiveHolderOf
 	passwordsSet map[string]string        // UpdatePassword calls
 	rotated      map[string]bool          // TouchPasswordChangedAt calls
 	rolesSet     map[string][]string      // SetUserRoles calls
@@ -144,17 +145,39 @@ func (f *fakeUsers) ListUsers(_ context.Context) ([]domain.User, error) {
 	return f.listOut, nil
 }
 
-func (f *fakeUsers) SetStatus(_ context.Context, userID string, status domain.Status) error {
+func (f *fakeUsers) SetStatus(_ context.Context, userID string, status domain.Status, keepActiveHolderOf string) error {
 	// A deleted row is out of reach of a plain status change, as in the
 	// repository: only Restore brings it back.
-	if u, ok := f.byID[userID]; ok && u.IsDeleted() {
+	target, ok := f.byID[userID]
+	if !ok {
+		target, ok = f.byID[strings.ToLower(userID)]
+	}
+	if ok && target.IsDeleted() {
 		return glerrors.ErrNotFound
+	}
+	// The repository's last-holder rule, as SoftDelete emulates it: leaving
+	// `active` is refused for the only active holder of keepActiveHolderOf.
+	if ok && status != domain.StatusActive && target.Status() == domain.StatusActive &&
+		slices.Contains(target.RoleIDs(), keepActiveHolderOf) && !f.otherActiveHolder(target.ID(), keepActiveHolderOf) {
+		return domain.ErrLastOwner
 	}
 	if f.statusSet == nil {
 		f.statusSet = map[string]domain.Status{}
+		f.statusKeep = map[string]string{}
 	}
 	f.statusSet[userID] = status
+	f.statusKeep[userID] = keepActiveHolderOf
 	return nil
+}
+
+// StatusOf reads the account's lifecycle state the way FindByID finds it,
+// failing with findByIDErr when that stands in for an unavailable database.
+func (f *fakeUsers) StatusOf(ctx context.Context, userID string) (domain.Status, error) {
+	u, err := f.FindByID(ctx, userID)
+	if err != nil {
+		return domain.StatusUnspecified, err
+	}
+	return u.Status(), nil
 }
 
 // SoftDelete emulates the repository's atomic rule: the only ACTIVE holder of

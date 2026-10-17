@@ -44,9 +44,12 @@ func (f *cpUsers) RemoveRole(context.Context, string, string) error { return nil
 
 // Admin-surface methods are unused by the change-password flow; present only so
 // cpUsers keeps satisfying the extended ports.UserRepository.
-func (f *cpUsers) CreateUser(context.Context, domain.User, string) error    { return nil }
-func (f *cpUsers) ListUsers(context.Context) ([]domain.User, error)         { return nil, nil }
-func (f *cpUsers) SetStatus(context.Context, string, domain.Status) error   { return nil }
+func (f *cpUsers) CreateUser(context.Context, domain.User, string) error          { return nil }
+func (f *cpUsers) ListUsers(context.Context) ([]domain.User, error)               { return nil, nil }
+func (f *cpUsers) SetStatus(context.Context, string, domain.Status, string) error { return nil }
+func (f *cpUsers) StatusOf(context.Context, string) (domain.Status, error) {
+	return f.user.Status(), f.findErr
+}
 func (f *cpUsers) SetUserRoles(context.Context, string, []string) error     { return nil }
 func (f *cpUsers) SoftDelete(context.Context, string, string, string) error { return nil }
 func (f *cpUsers) Restore(context.Context, string, string, []string) error  { return nil }

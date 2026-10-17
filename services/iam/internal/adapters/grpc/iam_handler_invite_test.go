@@ -250,7 +250,7 @@ func handlerWithMailer(t *testing.T, users *fakeUsers, roles *fakeRoles, prov po
 	n := 0
 	admin := usecase.NewAdminService(users, roles, hasher, prov, &stubInvitations{}, mail,
 		"https://escuela.example/activar", "t1",
-		func() string { n++; return fmt.Sprintf("generated-id-%d", n) }, nil)
+		func() string { n++; return fmt.Sprintf("0b8a1c0e-0000-4000-8000-%012d", n) }, nil)
 	return grpcadapter.NewIAMHandler(auth, admin, usecase.NewHealthService("iam"))
 }
 
@@ -300,7 +300,7 @@ func TestResendInvitationRefusesAnActiveAccount(t *testing.T) {
 	}
 	id := created.Msg.GetUser().GetId()
 	if _, err := h.SetUserStatus(context.Background(), connect.NewRequest(&iamv1.SetUserStatusRequest{
-		UserId: id, Status: iamv1.UserStatus_USER_STATUS_ACTIVE,
+		AccessToken: actorToken(t, users, adminActorID), UserId: id, Status: iamv1.UserStatus_USER_STATUS_ACTIVE,
 	})); err != nil {
 		t.Fatalf("activate: %v", err)
 	}

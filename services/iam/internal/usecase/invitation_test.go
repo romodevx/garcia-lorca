@@ -561,7 +561,7 @@ func TestSuspendingAnAccountRevokesItsLiveInvitations(t *testing.T) {
 	inv := &fakeInvitations{}
 	svc := newInviteService(t, users, &fakeProvisioner{}, inv, &fakeMailer{})
 
-	if err := svc.SetUserStatus(context.Background(), "u1", domain.StatusSuspended); err != nil {
+	if err := svc.SetUserStatus(context.Background(), directorID, "u1", domain.StatusSuspended); err != nil {
 		t.Fatalf("SetUserStatus: %v", err)
 	}
 	if len(inv.revoked) != 1 || inv.revoked[0] != "u1" {
@@ -578,7 +578,7 @@ func TestReactivatingAnAccountRevokesNothing(t *testing.T) {
 	inv := &fakeInvitations{}
 	svc := newInviteService(t, users, &fakeProvisioner{}, inv, &fakeMailer{})
 
-	if err := svc.SetUserStatus(context.Background(), "u1", domain.StatusActive); err != nil {
+	if err := svc.SetUserStatus(context.Background(), directorID, "u1", domain.StatusActive); err != nil {
 		t.Fatalf("SetUserStatus: %v", err)
 	}
 	if len(inv.revoked) != 0 {

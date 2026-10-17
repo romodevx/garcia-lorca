@@ -60,7 +60,7 @@ func TestSoftDeleteHidesTheUserAndKeepsTheRow(t *testing.T) {
 	if err := repo.SoftDelete(ctx, uid, actor, "d1d1d1d1-0000-0000-0000-0000000000c1"); glerrors.KindOf(err) != glerrors.KindNotFound {
 		t.Errorf("deleting twice = %v, want KindNotFound", err)
 	}
-	if err := repo.SetStatus(ctx, uid, domain.StatusActive); glerrors.KindOf(err) != glerrors.KindNotFound {
+	if err := repo.SetStatus(ctx, uid, domain.StatusActive, domain.OwnerRoleID); glerrors.KindOf(err) != glerrors.KindNotFound {
 		t.Errorf("SetStatus on a deleted user = %v, want KindNotFound — only Restore brings it back", err)
 	}
 }
