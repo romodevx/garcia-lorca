@@ -20,6 +20,7 @@ import {
   type ExpectedLine,
 } from "../../finance/api";
 import { API_URL } from "../../api-url";
+import { HttpError } from "../../auth/httpError";
 import { localISODate, shortDayLabel } from "../../_lib/localDate";
 import { DebtList } from "./DebtList";
 import { DepositPreviewCard, DepositReceipt } from "./DepositReceipt";
@@ -65,6 +66,9 @@ export interface CollectDrawerProps {
    */
   notes?: NotesAccess;
 }
+
+/** The server's answer when the account changed under the cashier (CC-202). */
+const HTTP_CONFLICT = 409;
 
 const FUTURE_PAYMENT = "La fecha de pago no puede ser futura.";
 const MISSING_PAYMENT_DATE = "Falta la fecha de pago.";
@@ -167,6 +171,9 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
   // A ref and not the state: two presses inside one render both read `saving` as false.
   const inFlight = useRef(false);
   const [error, setError] = useState<string | undefined>(undefined);
+  // Bumped to read the account and the quote again: after a 409 (CC-202) the
+  // money was taken by another cashier, and the screen must show what is left.
+  const [reloads, setReloads] = useState(0);
   const [attemptKey] = useState(newAttemptKey);
   const describe = useRef<Map<string, string>>(new Map());
 
@@ -224,7 +231,7 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
       })
       .catch(() => { if (live) { setOwed(0); } });
     return () => { live = false; };
-  }, [student.id]);
+  }, [student.id, reloads]);
 
   // What is due on the day the family paid, which is not the same question as
   // what is left for the year. The cashier reads this figure aloud.
@@ -252,7 +259,7 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
       })
       .catch(() => {});
     return () => { live = false; };
-  }, [student.id, sentDate, dateOk]);
+  }, [student.id, sentDate, dateOk, reloads]);
 
 
   // Escape closes. Nothing is at risk: the money has not been taken, and the
@@ -294,6 +301,11 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
       onCollected();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "No se pudo registrar el cobro.");
+      // The account moved under the cashier (CC-202): read it again, by itself.
+      if (cause instanceof HttpError && cause.status === HTTP_CONFLICT) {
+        amountEdited.current = false;
+        setReloads((n) => n + 1);
+      }
     } finally {
       inFlight.current = false;
       setSaving(false);

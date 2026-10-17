@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { HttpError } from "../../auth/httpError";
 import * as financeApi from "../../finance/api";
 import { CollectDrawer, maxPayableCents } from "./CollectDrawer";
 
@@ -689,5 +690,38 @@ describe("maxPayableCents", () => {
 
   it("is what the chosen concepts add up to when the cashier chose", () => {
     expect(maxPayableCents(expected, 320000, true)).toBe(320000);
+  });
+});
+
+// Review of PR #144 (N7): another cashier took the money first and the server
+// answered 409 (CC-202). The counter says why and reads the account again by
+// itself, so the cashier sees what is left without closing the drawer.
+describe("CollectDrawer · cobrado por otra caja (CC-202)", () => {
+  it("reloads the account and the quote after a 409, and says why", async () => {
+    const user = userEvent.setup();
+    const paid = "lo elegido ya está pagado: actualiza la cuenta del alumno antes de cobrar";
+    finance.registerDeposit.mockRejectedValue(new HttpError(409, paid, { serverText: paid }));
+    render(<CollectDrawer student={student} onClose={() => {}} onCollected={() => {}} today="2026-10-12" />);
+    await screen.findByTestId("amount-expected");
+    expect(finance.getExpected).toHaveBeenCalledTimes(1);
+    expect(finance.getAccount).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByRole("button", { name: "Cobrar" }));
+
+    expect(await screen.findByText(paid)).toBeInTheDocument();
+    await waitFor(() => expect(finance.getExpected).toHaveBeenCalledTimes(2));
+    expect(finance.getAccount).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not reload on any other failure", async () => {
+    const user = userEvent.setup();
+    finance.registerDeposit.mockRejectedValue(new HttpError(500, "HTTP 500"));
+    render(<CollectDrawer student={student} onClose={() => {}} onCollected={() => {}} today="2026-10-12" />);
+    await screen.findByTestId("amount-expected");
+
+    await user.click(screen.getByRole("button", { name: "Cobrar" }));
+
+    expect(await screen.findByText("HTTP 500")).toBeInTheDocument();
+    expect(finance.getExpected).toHaveBeenCalledTimes(1);
   });
 });

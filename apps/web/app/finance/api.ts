@@ -24,6 +24,7 @@
 
 /** How often a concept is charged. */
 import { authFetch } from "../auth/authFetch";
+import { HttpError } from "../auth/httpError";
 import {
   fromWireExpense,
   fromWireTotals,
@@ -417,7 +418,9 @@ function url(baseURL: string, path: string): string {
 async function failure(res: Response): Promise<Error> {
   const body = await res.text().catch(() => "");
   const detail = body.trim();
-  return new Error(detail !== "" ? detail : `HTTP ${res.status}`);
+  // The status travels with the sentence: a 409 (CC-202, another cashier got
+  // there first) is a state to reload, not just a message to show.
+  return new HttpError(res.status, detail !== "" ? detail : `HTTP ${res.status}`, detail !== "" ? { serverText: detail } : {});
 }
 
 /** Send a JSON body (POST/PUT) and return the parsed entity. Throws on non-2xx. */
