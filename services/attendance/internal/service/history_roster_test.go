@@ -44,8 +44,12 @@ func historyService(t *testing.T, repo *fakeRepo) *service.AttendanceService {
 				{ID: enrLalo, StudentID: "stu-lalo", GroupID: histGroupA, Status: "active", EnrolledAt: time.Date(2026, 10, 17, 0, 0, 0, 0, mx)},
 				// Moved out since: the enrollment now carries group B.
 				{ID: enrMia, StudentID: "stu-mia", GroupID: histGroupB, Status: "active", EnrolledAt: time.Date(2026, 8, 24, 0, 0, 0, 0, mx)},
-				// Withdrew at 20:00 Morelia on the 15th (02:00 UTC on the 16th).
-				{ID: enrRita, StudentID: "stu-rita", GroupID: histGroupA, Status: "withdrawn", EnrolledAt: time.Date(2026, 8, 24, 0, 0, 0, 0, mx), EndedAt: time.Date(2026, 10, 15, 20, 0, 0, 0, mx)},
+				// Withdrawn on the 15th, in the shape students really sends:
+				// withdrawn_on "2026-10-15" and ended_at its midnight UTC
+				// (2026-10-15T00:00Z), which on Morelia's clock is still the
+				// 14th. The withdrawal day counts as her last day of class.
+				{ID: enrRita, StudentID: "stu-rita", GroupID: histGroupA, Status: "withdrawn", EnrolledAt: time.Date(2026, 8, 24, 0, 0, 0, 0, mx),
+					EndedAt: time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC), EndedOn: time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)},
 			},
 			histGroupB: {
 				{ID: enrMia, StudentID: "stu-mia", GroupID: histGroupB, Status: "active", EnrolledAt: time.Date(2026, 8, 24, 0, 0, 0, 0, mx)},

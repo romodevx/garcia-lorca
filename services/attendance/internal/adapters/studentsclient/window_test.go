@@ -23,7 +23,17 @@ func TestToRefCarriesTheEnrollmentWindow(t *testing.T) {
 	if !got.EnrolledAt.Equal(enrolled) || !got.EndedAt.Equal(ended) {
 		t.Errorf("toRef window = %v..%v, want %v..%v", got.EnrolledAt, got.EndedAt, enrolled, ended)
 	}
-	if open := toRef(&studentsv1.Enrollment{Id: "enr-2"}); !open.EndedAt.IsZero() || !open.EnrolledAt.IsZero() {
+	// CC-301 review B1: a withdrawal's day is withdrawn_on as written (its
+	// ended_at is that day's midnight UTC, the previous day in Morelia).
+	withdrawn := toRef(&studentsv1.Enrollment{Id: "enr-3", Status: studentsv1.EnrollmentStatus_ENROLLMENT_STATUS_WITHDRAWN,
+		EndedAt: timestamppb.New(time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)), WithdrawnOn: "2026-10-15"})
+	if want := time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC); !withdrawn.EndedOn.Equal(want) {
+		t.Errorf("EndedOn = %v, want %v", withdrawn.EndedOn, want)
+	}
+	if malformed := toRef(&studentsv1.Enrollment{Id: "enr-4", WithdrawnOn: "15/10/2026"}); !malformed.EndedOn.IsZero() {
+		t.Errorf("a malformed withdrawn_on must stay zero, got %v", malformed.EndedOn)
+	}
+	if open := toRef(&studentsv1.Enrollment{Id: "enr-2"}); !open.EndedAt.IsZero() || !open.EnrolledAt.IsZero() || !open.EndedOn.IsZero() {
 		t.Errorf("unset timestamps must stay zero, got %+v", open)
 	}
 }

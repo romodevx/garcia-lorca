@@ -30,6 +30,10 @@ const (
 // enrollmentStatusActive is the only enrollment status that appears on a roster.
 const enrollmentStatusActive = "active"
 
+// enrollmentStatusWithdrawn is a dated withdrawal: its withdrawn_on is the
+// pupil's last day of class.
+const enrollmentStatusWithdrawn = "withdrawn"
+
 // maxNoteLength bounds, in CHARACTERS (runes, like the column CHECK length()
 // and the web counter), the free-text justification a client may attach to a
 // mark. The column carries the same CHECK, so the cap holds even for a writer
@@ -73,6 +77,11 @@ type EnrollmentRef struct {
 	// CC-301). GroupID is the group it carries TODAY.
 	EnrolledAt time.Time
 	EndedAt    time.Time
+	// EndedOn is a withdrawal's day as students wrote it (withdrawn_on, a
+	// calendar date at midnight UTC), the pupil's LAST day of class. It is read
+	// as is, never through the school zone: ended_at is that same midnight UTC,
+	// which in Morelia still falls on the day before (CC-301 review B1).
+	EndedOn time.Time
 }
 
 // Move is a move of an enrollment between two groups. A transfer rewrites the
@@ -762,11 +771,16 @@ func appendStay(stays []window, w window) []window {
 	return append(stays, w)
 }
 
-// endOf is the last day of an enrollment's final stay: open while active, the
-// day it ended otherwise; known is false for an ended one without that day.
+// endOf is the last day of an enrollment's final stay: open while active; for
+// a withdrawal, its withdrawn_on day as written (the last day of class, never
+// shifted by the zone); otherwise the school day it ended. known is false for
+// an ended one without that day.
 func (s *AttendanceService) endOf(enr EnrollmentRef) (end time.Time, known bool) {
 	if enr.Status == enrollmentStatusActive {
 		return openEnd, true
+	}
+	if enr.Status == enrollmentStatusWithdrawn && !enr.EndedOn.IsZero() {
+		return enr.EndedOn, true
 	}
 	if enr.EndedAt.IsZero() {
 		return time.Time{}, false

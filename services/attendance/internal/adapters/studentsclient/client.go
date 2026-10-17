@@ -71,7 +71,19 @@ func toRef(e *studentsv1.Enrollment) service.EnrollmentRef {
 		Status:     statusString(e.GetStatus()),
 		EnrolledAt: timeOf(e.GetEnrolledAt()),
 		EndedAt:    timeOf(e.GetEndedAt()),
+		EndedOn:    dayOf(e.GetWithdrawnOn()),
 	}
+}
+
+// dayOf is a YYYY-MM-DD calendar date at midnight UTC, with no zone
+// conversion; empty or malformed is the zero time (the service then falls
+// back to ended_at's school day).
+func dayOf(raw string) time.Time {
+	day, err := time.Parse(time.DateOnly, raw)
+	if err != nil {
+		return time.Time{}
+	}
+	return day
 }
 
 // timeOf is a timestamp as a UTC time; an unset one is the zero time.
