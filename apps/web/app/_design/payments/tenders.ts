@@ -12,13 +12,18 @@ export const MAX_TENDERS = 4;
 
 export const AMOUNT_ERROR = "Escribe un monto mayor a cero.";
 export const SUM_ERROR = "La suma de las formas de pago debe ser igual al monto a pagar.";
+export const CARD_TYPE_ERROR = "Elige si la tarjeta es de débito o de crédito.";
 
 /** One row of the editor, as typed. The amount stays text until it is sent. */
 export interface TenderRow {
   key: string;
   method: PaymentMethod;
-  /** Kept while another method is chosen, so going back to card remembers it. */
-  cardType: CardType;
+  /**
+   * Kept while another method is chosen, so going back to card remembers it.
+   * Empty only for a card recorded before the type was asked (N6): nothing is
+   * chosen for the cashier, and the submit asks for it.
+   */
+  cardType: CardType | "";
   amount: string;
   reference: string;
 }
@@ -73,6 +78,11 @@ export function amountError(row: TenderRow): string | undefined {
   return Number.isFinite(cents) && cents > 0 ? undefined : AMOUNT_ERROR;
 }
 
+/** A card says debit or credit: the bank's cut separates them (CC-205). */
+function cardTypeError(row: TenderRow): string | undefined {
+  return row.method === "card" && row.cardType === "" ? CARD_TYPE_ERROR : undefined;
+}
+
 /**
  * What blocks the submit, by row key. Each amount must be above zero; once
  * they all are, they must add up to the amount to pay — the mismatch is put on
@@ -81,7 +91,7 @@ export function amountError(row: TenderRow): string | undefined {
 export function tenderErrors(rows: readonly TenderRow[], totalCents: number): Record<string, string> {
   const errors: Record<string, string> = {};
   for (const row of rows) {
-    const wrong = amountError(row);
+    const wrong = amountError(row) ?? cardTypeError(row);
     if (wrong !== undefined) errors[row.key] = wrong;
   }
   const last = rows[rows.length - 1];
@@ -101,7 +111,7 @@ export function toTenders(rows: readonly TenderRow[]): Tender[] {
       method: row.method,
       amountCents: rowCents(row),
       ...(reference !== "" ? { reference } : {}),
-      ...(row.method === "card" ? { cardType: row.cardType } : {}),
+      ...(row.method === "card" && row.cardType !== "" ? { cardType: row.cardType } : {}),
     };
   });
 }
