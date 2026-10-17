@@ -5,6 +5,7 @@ import (
 	"time"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
+	"github.com/garcia-lorca/pkg/schoolcal"
 )
 
 // EnrollmentStatus is the lifecycle state of an enrollment (a student's place in
@@ -175,21 +176,26 @@ func (e Enrollment) CanWithdraw() bool { return e.status == EnrollmentStatusActi
 // MaxEnrollmentWithdrawalReason is the largest allowed reason, in Unicode characters.
 const MaxEnrollmentWithdrawalReason = 500
 
-// Withdraw ends an active enrollment on a UTC calendar day. A zero date means
-// the caller's current day, supplied explicitly for deterministic behavior.
-func (e Enrollment) Withdraw(on time.Time, reason string, now time.Time) (Enrollment, error) {
+// Withdraw ends an active enrollment on a calendar day. A zero date means the
+// school's current day, from the now supplied explicitly for deterministic
+// behavior.
+//
+// "Today" and the enrollment's own day are read on the school's calendar
+// (zone, ADR 0035): at 20:00 in Morelia UTC is already on tomorrow. on is a
+// calendar date (midnight UTC, a parsed YYYY-MM-DD).
+func (e Enrollment) Withdraw(on time.Time, reason string, now time.Time, zone *time.Location) (Enrollment, error) {
 	if !e.CanWithdraw() {
 		return Enrollment{}, glerrors.New(glerrors.KindConflict, "enrollment is not active")
 	}
-	today := now.UTC()
+	today := schoolcal.Date(now, zone)
 	if on.IsZero() {
 		on = today
 	}
 	day := utcCalendarDay(on)
-	if day.After(utcCalendarDay(today)) {
+	if day.After(today) {
 		return Enrollment{}, glerrors.New(glerrors.KindInvalid, "withdrawal date cannot be in the future")
 	}
-	if day.Before(utcCalendarDay(e.enrolledAt)) {
+	if day.Before(schoolcal.Date(e.enrolledAt, zone)) {
 		return Enrollment{}, glerrors.New(glerrors.KindInvalid, "withdrawal date cannot precede enrollment")
 	}
 	trimmed := strings.TrimSpace(reason)

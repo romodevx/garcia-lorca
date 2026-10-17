@@ -348,10 +348,7 @@ func (s *EnrollmentService) Withdraw(ctx context.Context, enrollmentID string, o
 	if err != nil {
 		return domain.Enrollment{}, err
 	}
-	if on.IsZero() {
-		on = s.now().UTC()
-	}
-	updated, err := enr.Withdraw(on, reason, s.now())
+	updated, err := enr.Withdraw(on, reason, s.now(), s.zone)
 	if err != nil {
 		return domain.Enrollment{}, err
 	}

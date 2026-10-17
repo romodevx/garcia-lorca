@@ -601,6 +601,34 @@ func TestWithdrawActiveThenAlreadyWithdrawn(t *testing.T) {
 	}
 }
 
+// The withdrawal's "today" is the school's (Morelia, ADR 0035), not UTC's: at
+// 20:00 on 1 Aug in Morelia it is already 2 Aug in UTC. A pupil enrolled at
+// that instant can be withdrawn the same school day, a missing date means the
+// school's 1 Aug, and 2 Aug is still in the future.
+func TestWithdrawReadsTodayOnTheSchoolCalendar(t *testing.T) {
+	mexico, err := time.LoadLocation("America/Mexico_City")
+	if err != nil {
+		t.Fatal(err)
+	}
+	evening := time.Date(2026, 8, 2, 2, 0, 0, 0, time.UTC) // 20:00 on 1 Aug in Morelia
+	students, enrolls, catalog := newRepo(), newEnrollRepo(), newCatalog()
+	svc := usecase.NewEnrollmentService(students, enrolls, catalog, &fakePub{}, tenant,
+		func() string { return "gen-1" }, func() time.Time { return evening }).WithSchoolZone(mexico)
+	e := enrolledStudent(t, svc, students, catalog)
+
+	_, err = svc.Withdraw(context.Background(), e.ID(), time.Date(2026, 8, 2, 0, 0, 0, 0, time.UTC), "x")
+	if glerrors.KindOf(err) != glerrors.KindInvalid {
+		t.Fatalf("2 Aug is tomorrow at school: want KindInvalid, got %v", err)
+	}
+	updated, err := svc.Withdraw(context.Background(), e.ID(), time.Time{}, "x")
+	if err != nil {
+		t.Fatalf("Withdraw on the school's today: %v", err)
+	}
+	if want := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC); !updated.WithdrawnOn().Equal(want) {
+		t.Errorf("withdrawn_on = %v, want the school's %v", updated.WithdrawnOn(), want)
+	}
+}
+
 // --- Get / List ------------------------------------------------------------
 
 func TestEnrollmentGetAndList(t *testing.T) {
