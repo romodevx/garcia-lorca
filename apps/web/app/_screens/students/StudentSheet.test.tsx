@@ -31,7 +31,9 @@ vi.mock("../../config/api", () => ({
   listLevels: vi.fn(),
   listGradeLevels: vi.fn(),
 }));
-vi.mock("./ContactsPanel", () => ({ ContactsPanel: () => null }));
+vi.mock("./ContactsPanel", () => ({
+  ContactsPanel: ({ readOnly = false }: { readOnly?: boolean }) => <div data-testid="contacts" data-readonly={String(readOnly)} />,
+}));
 
 const students = vi.mocked(studentsApi);
 const config = vi.mocked(configApi);
@@ -61,7 +63,7 @@ beforeEach(() => {
 });
 afterEach(() => vi.clearAllMocks());
 
-async function openSheet(user: ReturnType<typeof userEvent.setup>, props: { canRevokeCard?: boolean; canWithdraw?: boolean } = {}): Promise<HTMLElement> {
+async function openSheet(user: ReturnType<typeof userEvent.setup>, props: { canRevokeCard?: boolean; canWithdraw?: boolean; onEdit?: (id: string) => void } = {}): Promise<HTMLElement> {
   render(<StudentsScreen onBack={() => {}} {...props} />);
   await user.click(await screen.findByRole("button", { name: "Ver ficha de Cruz Ana" }));
   return screen.getByRole("dialog", { name: "Ficha del alumno" });
@@ -155,10 +157,32 @@ describe("la ficha de un alumno que ya tiene grupo", () => {
     expect(submit).not.toBeNull();
     await user.click(submit!);
     await waitFor(() => expect(students.withdraw).toHaveBeenCalledWith(expect.any(String), "enr-1", { withdrawnOn: expect.any(String), reason: "Cambio de escuela" }));
-    const baja = await within(sheet).findByText(/Baja el 15 oct 2026 · Cambio de escuela/);
+    const baja = await within(sheet).findByText(/Alumno dado de baja el 15 oct 2026 · Cambio de escuela/);
     expect(baja).toBeInTheDocument();
     await waitFor(() => expect(baja).toHaveFocus());
     expect(within(sheet).queryByRole("button", { name: "Cambiar de grupo" })).not.toBeInTheDocument();
+  });
+
+  // ISSUE-T14-009: after the withdrawal the sheet kept "Editar ficha" and
+  // the contacts form, and its header still said "Trámite".
+  it("tras la baja, la ficha dice Baja y ya no ofrece editar", async () => {
+    const user = userEvent.setup();
+    students.listStudents
+      .mockResolvedValueOnce([pupil("lv-pri")])
+      .mockResolvedValue([{ ...pupil("lv-pri"), admissionStatus: "withdrawn" }]);
+    students.previewWithdrawal.mockResolvedValue({ toCancel: [], toCancelCents: 0, remainingDebtCents: 0 });
+    students.withdraw.mockResolvedValue({ id: "enr-1", studentId: "stu-1", cycleId: "c1", groupId: "g-pri-b", termId: "", status: "withdrawn", enrolledAt: "2026-08-31", withdrawnOn: "2026-10-15", withdrawalReason: "Cambio de escuela" });
+    const sheet = await openSheet(user, { canWithdraw: true, onEdit: () => {} });
+    expect(within(sheet).getByRole("button", { name: "Editar ficha" })).toBeInTheDocument();
+    await user.click(within(sheet).getByRole("button", { name: "Dar de baja" }));
+    await user.type(within(sheet).getByLabelText("Motivo"), "Cambio de escuela");
+    await user.click(sheet.querySelector<HTMLButtonElement>('form[aria-labelledby="withdraw-title"] button[type="submit"]')!);
+
+    expect(await within(sheet).findByText(/Alumno dado de baja el 15 oct 2026/)).toBeInTheDocument();
+    expect(within(sheet).queryByText("Trámite")).not.toBeInTheDocument();
+    expect(within(sheet).getAllByText("Baja").length).toBeGreaterThan(0);
+    expect(within(sheet).queryByRole("button", { name: "Editar ficha" })).not.toBeInTheDocument();
+    expect(within(sheet).getByTestId("contacts")).toHaveAttribute("data-readonly", "true");
   });
 
   it("returns focus to Dar de baja after closing the panel with unsaved text", async () => {
@@ -228,7 +252,18 @@ describe("lo que la ficha lee", () => {
     const user = userEvent.setup();
     const sheet = await openSheet(user);
 
-    expect(await within(sheet).findByText("Baja el 15 oct 2026 · motivo")).toBeInTheDocument();
+    expect(await within(sheet).findByText("Alumno dado de baja el 15 oct 2026 · motivo")).toBeInTheDocument();
+  });
+
+  it("la ficha de un alumno ya dado de baja es de sólo lectura", async () => {
+    students.listStudents.mockResolvedValue([{ ...pupil("lv-pri"), admissionStatus: "withdrawn" }]);
+    students.listEnrollments.mockResolvedValue([]);
+    const user = userEvent.setup();
+    const sheet = await openSheet(user, { onEdit: () => {} });
+
+    expect(await within(sheet).findByText("Alumno dado de baja")).toBeInTheDocument();
+    expect(within(sheet).queryByRole("button", { name: "Editar ficha" })).not.toBeInTheDocument();
+    expect(within(sheet).getByTestId("contacts")).toHaveAttribute("data-readonly", "true");
   });
 
   // Not reading the enrolment is not "no group": offering "Inscribir" then

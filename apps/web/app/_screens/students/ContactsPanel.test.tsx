@@ -322,3 +322,21 @@ describe("ContactsPanel · editing (T5)", () => {
     expect(students.updateContact.mock.calls[0]?.[3]).toMatchObject({ fullName: "", isEmergency: true });
   });
 });
+
+// ISSUE-T14-009: a withdrawn pupil's file is read-only; the office still
+// needs to read who to call.
+describe("ContactsPanel · sólo lectura", () => {
+  it("lista los contactos sin ofrecer agregar, editar, quitar ni dar acceso", async () => {
+    students.listContacts.mockResolvedValue([
+      { id: "gl-2", studentId: "st-1", guardianUserId: "", relationship: "other", fullName: "Rosa Méndez", phone: "5551234567", email: "rosa@example.com", hasAccount: false },
+    ]);
+    render(<ContactsPanel studentId="st-1" readOnly />);
+
+    expect(await screen.findByText("Rosa Méndez")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Agregar/ })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Nombre del contacto")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Editar a/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Quitar a/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Dar acceso/ })).not.toBeInTheDocument();
+  });
+});

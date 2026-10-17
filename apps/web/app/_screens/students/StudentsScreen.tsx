@@ -216,15 +216,19 @@ function StudentSheet({
   canRevokeCard?: boolean;
   canWithdraw?: boolean;
 }): ReactElement {
+  // undefined = still reading, null = no group this cycle, "failed" = unknown.
+  const [current, setCurrent] = useState<Enrollment | null | undefined | "failed">(undefined);
+  // A withdrawn file is read-only (plan T2): the withdrawal just made here
+  // counts before the roll is re-read (ISSUE-T14-009).
+  const withdrawn = st.admissionStatus === "withdrawn" || (current !== null && current !== undefined && current !== "failed" && current.status === "withdrawn");
+  const admission: AdmissionStatus = withdrawn ? "withdrawn" : st.admissionStatus;
   const rows: [string, string][] = [
     ["Matrícula", st.enrollmentNumber ?? ""],
     ["CURP", st.curp],
     ["Nivel", `${levelOf(st)} · ${groupOf(st)}`],
     ["Tutor", st.guardianName],
-    ["Admisión", statusOf(st.admissionStatus).label],
+    ["Admisión", statusOf(admission).label],
   ];
-  // undefined = still reading, null = no group this cycle, "failed" = unknown.
-  const [current, setCurrent] = useState<Enrollment | null | undefined | "failed">(undefined);
   const [gid, setGid] = useState("");
   const [reason, setReason] = useState("");
   const [reasonError, setReasonError] = useState<string | undefined>(undefined);
@@ -313,7 +317,7 @@ function StudentSheet({
           <Avatar name={formatStudentName(st)} color="forest" size={62} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <h2 style={{ fontSize: 20, fontWeight: 700, color: "var(--text)" }}>{formatStudentName(st)}</h2>
-            <div style={{ marginTop: 6 }}><StatusPill status={st.admissionStatus} /></div>
+            <div style={{ marginTop: 6 }}><StatusPill status={admission} /></div>
           </div>
           <button type="button" onClick={onClose} aria-label="Cerrar" style={{ width: 40, height: 40, borderRadius: "50%", display: "grid", placeItems: "center", background: "var(--surface-3)", border: "1px solid var(--border)", color: "var(--text-muted)", cursor: "pointer" }}><Icon name="close" size={19} /></button>
         </div>
@@ -321,9 +325,9 @@ function StudentSheet({
       footer={
         !withdrawOpen && <>
           <Btn kind="ghost" icon="documents" style={{ flex: 1 }}>Documentos</Btn>
-          {onEdit !== undefined && <Btn kind="ghost" onClick={onEdit} style={{ flex: 1 }}>Editar ficha</Btn>}
-          {canWithdraw && current !== null && current !== undefined && current !== "failed" && current.status === "active" && st.admissionStatus !== "withdrawn" && <Btn ref={withdrawTrigger} kind="ghost" onClick={() => setWithdrawOpen(true)} style={{ flex: 1, color: "var(--bad-fg)" }}>Dar de baja</Btn>}
-          {ready && current?.status !== "withdrawn" && st.admissionStatus !== "withdrawn" && (
+          {onEdit !== undefined && !withdrawn && <Btn kind="ghost" onClick={onEdit} style={{ flex: 1 }}>Editar ficha</Btn>}
+          {canWithdraw && current !== null && current !== undefined && current !== "failed" && current.status === "active" && !withdrawn && <Btn ref={withdrawTrigger} kind="ghost" onClick={() => setWithdrawOpen(true)} style={{ flex: 1, color: "var(--bad-fg)" }}>Dar de baja</Btn>}
+          {ready && !withdrawn && (
             <Btn icon="check" onClick={() => void save()} style={{ flex: 1, opacity: saving ? 0.6 : 1 }}>
               {transferring ? "Cambiar de grupo" : "Inscribir"}
             </Btn>
@@ -338,7 +342,7 @@ function StudentSheet({
               <span style={{ fontSize: 14.5, fontWeight: 600, color: "var(--text)", textAlign: "right" }}>{v}</span>
             </div>
           ))}
-          <ContactsPanel studentId={st.id} />
+          <ContactsPanel studentId={st.id} readOnly={withdrawn} />
           {canRevokeCard && <RevokeCard studentId={st.id} />}
           {current === "failed" && (
             <p role="alert" style={{ color: "var(--bad-fg)", fontSize: 13.5, padding: "18px 0 0" }}>
@@ -350,7 +354,7 @@ function StudentSheet({
               No pudimos leer los grados de la escuela, así que no sabemos qué grupos son de su nivel. Recarga la página.
             </p>
           )}
-          {ready && current?.status !== "withdrawn" && st.admissionStatus !== "withdrawn" && (
+          {ready && !withdrawn && (
             <div style={{ padding: "18px 0", display: "grid", gap: 10 }}>
               {transferring && (
                 <p style={{ fontSize: 14, color: "var(--text)" }}>
@@ -389,10 +393,18 @@ function StudentSheet({
               )}
             </div>
           )}
-          {(st.admissionStatus === "withdrawn" || (current !== null && current !== undefined && current !== "failed" && current.status === "withdrawn")) && <p ref={withdrawnLine} tabIndex={-1} style={{ paddingTop: 18, color: "var(--text-muted)" }}>Baja el {placed?.withdrawnOn ? dayWithYearLabel(placed.withdrawnOn) : "—"}{placed?.withdrawalReason ? ` · ${placed.withdrawalReason}` : ""}</p>}
+          {withdrawn && <p ref={withdrawnLine} tabIndex={-1} style={{ paddingTop: 18, color: "var(--text-muted)" }}>{withdrawnNote(current)}</p>}
       </>}
     </DrawerShell>
   );
+}
+
+/** "Alumno dado de baja el 15 oct 2026 · motivo": why the sheet is read-only. */
+function withdrawnNote(current: Enrollment | null | undefined | "failed"): string {
+  const enrollment = current !== null && current !== undefined && current !== "failed" ? current : undefined;
+  const on = enrollment?.withdrawnOn ? ` el ${dayWithYearLabel(enrollment.withdrawnOn)}` : "";
+  const why = enrollment?.withdrawalReason ? ` · ${enrollment.withdrawalReason}` : "";
+  return `Alumno dado de baja${on}${why}`;
 }
 
 export interface StudentsScreenProps {
@@ -800,7 +812,7 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
 
       {onCreate !== undefined && <button onClick={onCreate} title="Nuevo alumno" style={{ position: "fixed", right: 32, bottom: FAB_BOTTOM, zIndex: 50, height: FAB_HEIGHT, padding: "0 26px", borderRadius: 99, display: "inline-flex", alignItems: "center", gap: 10, background: "var(--primary)", color: "var(--primary-ink)", fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 16.5, cursor: "pointer", boxShadow: "var(--shadow-fab)" }}><Icon name="plus" size={22} stroke={2.6} />Nuevo alumno</button>}
 
-      {sheet !== null && <StudentSheet st={sheet} groups={groups} cycleId={groupsCycleId} gradeLevels={gradeLevels} gradeLevelsFailed={gradeLevelsFailed} onClose={() => setSheet(null)} onPlaced={onPlaced} onEdit={onEdit === undefined ? undefined : () => onEdit(sheet.id)} canRevokeCard={canRevokeCard} canWithdraw={canWithdraw} />}
+      {sheet !== null && <StudentSheet st={students.find((s) => s.id === sheet.id) ?? sheet} groups={groups} cycleId={groupsCycleId} gradeLevels={gradeLevels} gradeLevelsFailed={gradeLevelsFailed} onClose={() => setSheet(null)} onPlaced={onPlaced} onEdit={onEdit === undefined ? undefined : () => onEdit(sheet.id)} canRevokeCard={canRevokeCard} canWithdraw={canWithdraw} />}
       {notesOf !== null && (
         <StudentNotesDialog
           studentId={notesOf.id}

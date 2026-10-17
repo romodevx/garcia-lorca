@@ -34,6 +34,8 @@ const RELATIONSHIP_LABEL: Record<string, string> = {
 
 export interface ContactsPanelProps {
   studentId: string;
+  /** A withdrawn pupil's file: the contacts are listed, never changed (T14-009). */
+  readOnly?: boolean;
 }
 
 /**
@@ -51,7 +53,7 @@ const NOTHING_REQUIRED = [] as const;
 /** Fuera del componente: useFormatError lo toma como dependencia. */
 const PHONE_RULES = { phone: phoneError } as const;
 
-export function ContactsPanel({ studentId }: ContactsPanelProps): ReactElement {
+export function ContactsPanel({ studentId, readOnly = false }: ContactsPanelProps): ReactElement {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -185,7 +187,7 @@ export function ContactsPanel({ studentId }: ContactsPanelProps): ReactElement {
               <Icon name="check" size={13} stroke={2.6} />App
             </span>
           )}
-          {!c.hasAccount && c.email !== "" && (
+          {!readOnly && !c.hasAccount && c.email !== "" && (
             <Btn
               kind="ghost"
               icon="mail"
@@ -196,15 +198,15 @@ export function ContactsPanel({ studentId }: ContactsPanelProps): ReactElement {
               {granting === c.id ? "Enviando…" : "Dar acceso a la app"}
             </Btn>
           )}
-          {!c.hasAccount && c.email === "" && (
+          {!readOnly && !c.hasAccount && c.email === "" && (
             // An action that cannot succeed should not be pressable. Saying WHY
             // is what turns a missing button into something the office can fix.
             <span style={{ fontSize: 12.5, color: "var(--text-faint)" }}>
               Falta el correo para invitarle
             </span>
           )}
-          <Btn kind="ghost" onClick={() => setEditing(c.id)} aria-label={`Editar a ${displayName(c)}`} style={ROW_ACTION}>Editar</Btn>
-          {!c.hasAccount && (
+          {!readOnly && <Btn kind="ghost" onClick={() => setEditing(c.id)} aria-label={`Editar a ${displayName(c)}`} style={ROW_ACTION}>Editar</Btn>}
+          {!readOnly && !c.hasAccount && (
             // A contact who can open the app is refused by the server (409):
             // its access is revoked first. So the button is not offered.
             <Btn kind="ghost" onClick={() => remove(c)} aria-label={`Quitar a ${displayName(c)}`} style={ROW_ACTION}>Quitar</Btn>
@@ -226,7 +228,7 @@ export function ContactsPanel({ studentId }: ContactsPanelProps): ReactElement {
         );
       })}
 
-      <form onSubmit={(e) => void add(e)} style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 14 }}>
+      {!readOnly && <form onSubmit={(e) => void add(e)} style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 14 }}>
         <div style={{ flex: "2 1 150px", minWidth: 0 }}>
           <TextField
             label="Nombre del contacto"
@@ -274,7 +276,7 @@ export function ContactsPanel({ studentId }: ContactsPanelProps): ReactElement {
         </div>
         <EmergencyCheck label="Contacto de emergencia" checked={emergency} onChange={setEmergency} />
         <Btn type="submit" icon="plus" style={{ opacity: saving ? 0.5 : 1 }}>Agregar</Btn>
-      </form>
+      </form>}
       {error !== undefined && <p role="alert" style={{ color: "var(--bad-fg)", fontSize: 13.5, margin: "10px 0 0" }}>{error}</p>}
       {removal.latest !== undefined && (
         <UndoToast
