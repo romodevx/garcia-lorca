@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"strings"
+
+	connect "connectrpc.com/connect"
 )
 
 // Principal is the authenticated caller as the edge sees it, derived from a
@@ -50,6 +52,12 @@ func RequireAuth(auth Authenticator) func(http.Handler) http.Handler {
 				return
 			}
 			principal, err := auth.ValidateToken(r.Context(), token)
+			if isAuthOutage(err) {
+				// iam could not answer — it did not refuse. A 401 would tell
+				// the client the session is over; 503 tells it to retry.
+				http.Error(w, "authentication temporarily unavailable", http.StatusServiceUnavailable)
+				return
+			}
 			if err != nil {
 				unauthorized(w)
 				return
@@ -138,6 +146,19 @@ func bearerToken(r *http.Request) string {
 		return ""
 	}
 	return strings.TrimSpace(header[len(prefix):])
+}
+
+// isAuthOutage reports whether ValidateToken failed because iam could not
+// answer (it reads the account's status on every call, ISSUE-CC-116) rather
+// than because it refused the token. Every other failure stays a 401:
+// fail-closed, no principal, no access.
+func isAuthOutage(err error) bool {
+	switch connect.CodeOf(err) {
+	case connect.CodeInternal, connect.CodeUnavailable, connect.CodeDeadlineExceeded:
+		return err != nil
+	default:
+		return false
+	}
 }
 
 func unauthorized(w http.ResponseWriter) {
