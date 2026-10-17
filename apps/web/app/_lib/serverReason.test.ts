@@ -38,6 +38,16 @@ describe("spanishServerReason", () => {
     expect(spanishServerReason("no se pudo guardar: duplicate key value violates unique constraint")).toBe("no se pudo guardar");
   });
 
+  // Gate B3 on #142: our own Spanish messages use the colon to say what to do;
+  // cutting there threw away the useful half.
+  it.each([
+    "no quedan lugares en ese grado: abre otro grupo en Configuración",
+    "este contacto puede abrir la app: quítale el acceso antes de borrarlo",
+    "ese grupo es de otro nivel: el alumno está en Secundaria",
+  ])("deja entero un mensaje en español con dos puntos: %s", (message) => {
+    expect(spanishServerReason(message)).toBe(message);
+  });
+
   it("no deja pasar un texto larguísimo", () => {
     const long = `la venta no cuadra ${"de nuevo ".repeat(40)}`;
     const shown = spanishServerReason(long) ?? "";

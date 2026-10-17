@@ -61,14 +61,24 @@ function normalise(raw: string): string {
 const MAX_SHOWN = 200;
 const ELLIPSIS = "…";
 
+const isSpanish = (text: string): boolean => SPANISH.test(text) && !ENGLISH.test(text);
+
+const capped = (text: string): string =>
+  text.length <= MAX_SHOWN ? text : `${text.slice(0, MAX_SHOWN - ELLIPSIS.length).trimEnd()}${ELLIPSIS}`;
+
 /**
- * The service's own sentence, without what it wrapped: a Spanish lead-in can
+ * The service's own sentence, without what it wrapped. A Spanish lead-in can
  * carry a driver's English after a colon ("no se pudo guardar: duplicate key
- * value…"), and a very long text is a dump, not a reason (gate nit on #142).
+ * value…"), so that tail goes. But our own messages use the colon to say what
+ * to do ("no quedan lugares en ese grado: abre otro grupo…"), and a Spanish
+ * tail stays (gate B3 on #142). A very long text is a dump: it is capped.
  */
 function ownSentence(raw: string): string {
-  const head = raw.split(":")[0]?.trim() ?? "";
-  return head.length <= MAX_SHOWN ? head : `${head.slice(0, MAX_SHOWN - ELLIPSIS.length).trimEnd()}${ELLIPSIS}`;
+  const text = raw.trim();
+  const colon = text.indexOf(":");
+  if (colon < 0) return capped(text);
+  const tail = text.slice(colon + 1).trim();
+  return capped(isSpanish(tail) ? text : text.slice(0, colon).trim());
 }
 
 /**
@@ -80,5 +90,5 @@ export function spanishServerReason(raw: string | undefined): string | undefined
   if (known !== undefined) return known;
   const sentence = ownSentence(raw);
   if (sentence === "") return undefined;
-  return KNOWN[normalise(sentence)] ?? (SPANISH.test(sentence) && !ENGLISH.test(sentence) ? sentence : undefined);
+  return KNOWN[normalise(sentence)] ?? (isSpanish(sentence) ? sentence : undefined);
 }
