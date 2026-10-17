@@ -37,12 +37,19 @@ import {
 
 export type Recurrence = "once" | "monthly";
 
+/**
+ * `custom` is the school's own concept; every other kind is one billing finds
+ * by kind (CC-404) — it can be renamed or repriced, never deactivated.
+ */
+export type ConceptKind = "custom" | "tuition" | "enrollment" | "late_fee" | "fee" | "activity";
+
 export interface ChargeConcept {
   id: string;
   name: string;
   defaultAmountCents: number;
   recurrence: Recurrence;
   active: boolean;
+  kind: ConceptKind;
 }
 
 /** Lifecycle of a charge, recomputed server-side after every payment/discount. */
@@ -371,6 +378,7 @@ export interface ChargeFilters {
 type Wire<T, K extends keyof T> = Omit<T, K> & { [P in K]: string };
 
 const RECURRENCES: readonly Recurrence[] = ["once", "monthly"];
+const CONCEPT_KINDS: readonly ConceptKind[] = ["custom", "tuition", "enrollment", "late_fee", "fee", "activity"];
 const CHARGE_STATUSES: readonly ChargeStatus[] = ["pending", "partial", "paid", "cancelled"];
 const PAYMENT_METHODS: readonly PaymentMethod[] = ["cash", "card", "transfer", "credit_note"];
 const DEPOSIT_METHODS: readonly DepositMethod[] = [...PAYMENT_METHODS, "mixed"];
@@ -381,9 +389,11 @@ function oneOf<T extends string>(allowed: readonly T[], value: string, fallback:
   return (allowed as readonly string[]).includes(value) ? (value as T) : fallback;
 }
 
-const toConcept = (raw: Wire<ChargeConcept, "recurrence">): ChargeConcept => ({
+const toConcept = (raw: Wire<ChargeConcept, "recurrence" | "kind">): ChargeConcept => ({
   ...raw,
   recurrence: oneOf(RECURRENCES, raw.recurrence, "monthly"),
+  // An older gateway sends no kind: the safe reading is "the school's own".
+  kind: oneOf(CONCEPT_KINDS, raw.kind ?? "", "custom"),
 });
 
 /**
@@ -523,7 +533,7 @@ export async function createConcept(baseURL: string, input: CreateConceptInput):
     defaultAmountCents: input.defaultAmountCents,
     recurrence: input.recurrence,
   };
-  return toConcept(await sendJSON<Wire<ChargeConcept, "recurrence">>(baseURL, "/concepts", "POST", body));
+  return toConcept(await sendJSON<Wire<ChargeConcept, "recurrence" | "kind">>(baseURL, "/concepts", "POST", body));
 }
 
 /** Full replace of a concept's mutable fields, `active` included. */
@@ -534,13 +544,13 @@ export async function updateConcept(baseURL: string, id: string, input: UpdateCo
     recurrence: input.recurrence,
     active: input.active,
   };
-  return toConcept(await sendJSON<Wire<ChargeConcept, "recurrence">>(baseURL, `/concepts/${id}`, "PUT", body));
+  return toConcept(await sendJSON<Wire<ChargeConcept, "recurrence" | "kind">>(baseURL, `/concepts/${id}`, "PUT", body));
 }
 
 /** Active concepts by default; `includeInactive` adds the archived ones. */
 export async function listConcepts(baseURL: string, includeInactive = false): Promise<ChargeConcept[]> {
   const qs = query({ includeInactive: includeInactive ? "true" : undefined });
-  const rows = await getList<Wire<ChargeConcept, "recurrence">>(baseURL, `/concepts${qs}`, "concepts");
+  const rows = await getList<Wire<ChargeConcept, "recurrence" | "kind">>(baseURL, `/concepts${qs}`, "concepts");
   return rows.map(toConcept);
 }
 

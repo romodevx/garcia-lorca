@@ -14,7 +14,7 @@ vi.mock("../../finance/api", () => ({
 const finance = vi.mocked(financeApi);
 
 const concept = (over: Partial<financeApi.ChargeConcept>): financeApi.ChargeConcept => ({
-  id: "k1", name: "COLEGIATURA", defaultAmountCents: 350000, recurrence: "monthly", active: true, ...over,
+  id: "k1", name: "COLEGIATURA", defaultAmountCents: 350000, recurrence: "monthly", active: true, kind: "custom", ...over,
 });
 
 beforeEach(() => {
@@ -103,6 +103,25 @@ describe("ConceptsPanel (CC-111)", () => {
     await waitFor(() => expect(finance.updateConcept).toHaveBeenCalledWith(expect.any(String), "k1", expect.objectContaining({ active: false })));
     expect(await screen.findByRole("button", { name: "Reactivar COLEGIATURA" })).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent(/COLEGIATURA ya no se ofrece/);
+  });
+
+  it("marks a system concept and never offers to deactivate it (CC-404)", async () => {
+    finance.listConcepts.mockResolvedValue([concept({ id: "k5", name: "RECARGO", kind: "late_fee" })]);
+    render(<ConceptsPanel canWrite />);
+
+    expect(await screen.findByText("Del sistema")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Editar RECARGO" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Desactivar RECARGO" })).not.toBeInTheDocument();
+  });
+
+  it("shows the server's reason when it refuses a change", async () => {
+    const user = userEvent.setup();
+    finance.updateConcept.mockRejectedValue(Object.assign(new Error("este concepto es del sistema: la facturación lo usa y no se puede desactivar"), { status: 400 }));
+    render(<ConceptsPanel canWrite />);
+
+    await user.click(await screen.findByRole("button", { name: "Desactivar COLEGIATURA" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/no se pudo guardar COLEGIATURA/i);
   });
 
   it("says so when the list cannot be read, and retries", async () => {

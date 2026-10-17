@@ -38,7 +38,7 @@ beforeEach(() => {
   finance.listCharges.mockResolvedValue([CHARGE]);
   finance.getOverdue.mockResolvedValue([]);
   finance.getIncome.mockResolvedValue({ lines: [], totalCents: 0, creditNoteCents: 0 });
-  finance.listConcepts.mockResolvedValue([{ id: "k9", name: "CREDENCIAL", defaultAmountCents: 8000, recurrence: "once", active: true }]);
+  finance.listConcepts.mockResolvedValue([{ id: "k9", name: "CREDENCIAL", defaultAmountCents: 8000, recurrence: "once", active: true, kind: "custom" }]);
 });
 afterEach(() => vi.clearAllMocks());
 

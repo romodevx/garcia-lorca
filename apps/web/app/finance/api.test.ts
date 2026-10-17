@@ -43,6 +43,7 @@ const concept = {
   defaultAmountCents: 185000,
   recurrence: "monthly",
   active: true,
+  kind: "custom",
 };
 
 const charge = {
@@ -321,6 +322,17 @@ describe("concepts write path", () => {
 });
 
 describe("charges write path", () => {
+  it("listConcepts reads the kind, and an unknown or absent one is the school's own (CC-404)", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ concepts: [
+      { id: "k1", name: "Colegiatura", defaultAmountCents: 1, recurrence: "monthly", active: true, kind: "tuition" },
+      { id: "k2", name: "Credencial", defaultAmountCents: 1, recurrence: "once", active: true },
+    ] })));
+
+    const got = await listConcepts(BASE);
+
+    expect(got.map((c) => c.kind)).toEqual(["tuition", "custom"]);
+  });
+
   it("createCharge POSTs the single-charge shape", async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(charge, 201));
     vi.stubGlobal("fetch", fetchMock);

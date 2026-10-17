@@ -13,7 +13,7 @@ const PUPILS: PupilOption[] = [
   { id: "s1", label: "CRUZ VALENTINA · 3° PRIMARIA · A" },
   { id: "s2", label: "SÁNCHEZ MATEO · 1° SECUNDARIA · B" },
 ];
-const CREDENCIAL: financeApi.ChargeConcept = { id: "k9", name: "CREDENCIAL", defaultAmountCents: 8000, recurrence: "once", active: true };
+const CREDENCIAL: financeApi.ChargeConcept = { id: "k9", name: "CREDENCIAL", defaultAmountCents: 8000, recurrence: "once", active: true, kind: "custom" };
 const CREATED: financeApi.Charge = {
   id: "ch9", studentId: "s1", cycleId: "c1", conceptId: "k9", description: "CREDENCIAL", amountCents: 8000,
   discountCents: 0, dueDate: "2026-10-17", status: "pending", paidCents: 0, remainingCents: 8000,

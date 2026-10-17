@@ -25,6 +25,7 @@ export function ConceptRow({ concept, canWrite, onSave }: ConceptRowProps): Reac
   const [recurrence, setRecurrence] = useState<string>(concept.recurrence);
   const [error, setError] = useState<string | undefined>(undefined);
   const [saving, setSaving] = useState(false);
+  const system = concept.kind !== "custom";
 
   const save = async (input: UpdateConceptInput): Promise<void> => {
     if (saving) return;
@@ -74,11 +75,15 @@ export function ConceptRow({ concept, canWrite, onSave }: ConceptRowProps): Reac
       <td style={{ ...td, fontWeight: 600 }}>{concept.name}</td>
       <td style={td}>{formatCents(concept.defaultAmountCents)}</td>
       <td style={td}>{RECURRENCE_LABEL[concept.recurrence]}</td>
-      <td style={td}>{concept.active ? "Activo" : "Inactivo"}</td>
+      <td style={td}>
+        {concept.active ? "Activo" : "Inactivo"}
+        {system && <span title="La facturación lo usa: se puede editar, no desactivar." style={{ marginLeft: 8, padding: "2px 9px", borderRadius: 99, fontSize: 12, fontWeight: 600, background: "var(--surface-3)", color: "var(--text-muted)" }}>Del sistema</span>}
+      </td>
       {canWrite && (
         <td style={{ ...td, whiteSpace: "nowrap" }}>
           <button type="button" aria-label={`Editar ${concept.name}`} onClick={() => { setName(concept.name); setAmount(formatPesosInput(concept.defaultAmountCents)); setRecurrence(concept.recurrence); setError(undefined); setEditing(true); }} style={link}>Editar</button>
-          <button type="button" aria-label={`${concept.active ? "Desactivar" : "Reactivar"} ${concept.name}`} aria-busy={saving || undefined} onClick={toggle} style={{ ...link, color: concept.active ? "var(--text-muted)" : "var(--forest)" }}>{concept.active ? "Desactivar" : "Reactivar"}</button>
+          {/* CC-404: billing finds a system concept by kind and ignores `active` — no switch that lies. */}
+          {(!system || !concept.active) && <button type="button" aria-label={`${concept.active ? "Desactivar" : "Reactivar"} ${concept.name}`} aria-busy={saving || undefined} onClick={toggle} style={{ ...link, color: concept.active ? "var(--text-muted)" : "var(--forest)" }}>{concept.active ? "Desactivar" : "Reactivar"}</button>}
         </td>
       )}
     </tr>
