@@ -171,6 +171,53 @@ func TestADepositSettlesTheImportedPupilsSeptemberAtTheNormalPrice(t *testing.T)
 	requireOneBalance(t, f, 0)
 }
 
+// A month due before the import earns no early-payment reward either: the
+// school's pronto pago exists, and September paid on 17 October is not early.
+func TestTheImportedPupilsSeptemberEarnsNoEarlyPaymentReward(t *testing.T) {
+	f := dailyFixture(t)
+	onlySeptember(t, f, usecase.TuitionPlanInput{
+		EnrollmentCents: 50000, MonthlyCents: 320000,
+		Policy: domain.CollectionPolicy{DailyMode: true, LateFeeDailyCents: 1000, SurchargeCountsAllDays: true,
+			EarlyPaymentCents: 15000, EarlyPaymentDays: 5},
+	})
+	importPupil(f, aug(2026, time.August, 1), importDay)
+	runOn(t, f, "2026-10-17")
+	f.clock = noon(2026, time.October, 17)
+
+	got := deposit(t, f, 320000, "2026-10-17")
+
+	september := f.repo.charges[septemberTuition(t, f)]
+	assert.Zero(t, september.Discount().Int64(), "September got a %q discount", september.DiscountReason())
+	assert.Empty(t, got.Surcharges)
+	assert.Zero(t, got.UnallocatedCents)
+	requireOneBalance(t, f, 0)
+}
+
+// A pupil imported, withdrawn and enrolled again by hand in the same cycle is
+// priced by the ACTIVE enrolment: the manual one has no import grace, so
+// September is late as usual — whatever order students lists them in.
+func TestTheRunPricesAPupilByTheirActiveEnrollment(t *testing.T) {
+	f := billingFixture(t)
+	f.enrollments.byCycle[testCycle] = []ports.EnrollmentRef{
+		{ID: "enr-manual", StudentID: testStudent, GroupID: testGroup, CycleID: testCycle,
+			Status: "active", EnrolledAt: aug(2026, time.August, 1)},
+		{ID: "enr-imp", StudentID: testStudent, GroupID: testGroup, CycleID: testCycle,
+			Status: "withdrawn", EnrolledAt: aug(2026, time.August, 1), Origin: ports.EnrollmentOriginImport, ImportedOn: importDay},
+	}
+
+	runOn(t, f, "2026-10-17")
+
+	september := 0
+	for _, fee := range lateFeeDescriptions(t, f) {
+		if strings.Contains(fee, "septiembre") {
+			september++
+		}
+	}
+	if september != 1 {
+		t.Fatalf("late fees = %v; want September's one, under the active manual enrolment", lateFeeDescriptions(t, f))
+	}
+}
+
 func issuedInMonth(issued map[string]int64, month string) bool {
 	for name := range issued {
 		if strings.Contains(name, month) {

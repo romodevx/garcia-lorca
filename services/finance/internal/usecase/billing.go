@@ -621,11 +621,19 @@ func (s *FinanceService) accrueLateFees(
 	if err != nil {
 		return nil, err
 	}
+	// A pupil with two enrolments in the cycle (imported, withdrawn, enrolled
+	// again by hand) is priced by the ACTIVE one, as planFor does: the import
+	// grace belongs to the enrolment that carried it, whatever the list order.
 	planOfStudent := make(map[string]domain.TuitionPlan, len(enrollments))
+	activePlan := make(map[string]bool, len(enrollments))
 	for _, enr := range enrollments {
-		if plan, ok := planByLevel[levelOfGroup[enr.GroupID]]; ok {
-			planOfStudent[enr.StudentID] = pricedFor(plan, enr)
+		plan, ok := planByLevel[levelOfGroup[enr.GroupID]]
+		active := enr.Status == enrolmentStatusActive
+		if !ok || (activePlan[enr.StudentID] && !active) {
+			continue
 		}
+		planOfStudent[enr.StudentID] = pricedFor(plan, enr)
+		activePlan[enr.StudentID] = active
 	}
 
 	var out []domain.Charge
