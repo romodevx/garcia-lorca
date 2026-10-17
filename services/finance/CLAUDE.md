@@ -89,8 +89,16 @@ ledger operations run in a single transaction (Unit of Work).
   second cashier on the same month), is `KindConflict` → 409 in Spanish, and
   no deposit, folio or credit is stored. Paying ahead is not credit: months
   not yet open are charges. The preview applies the same rule; a replay under
-  the same key still returns the original. `UnallocatedCents` stays only for
-  deposits stored before the rule.
+  the same key still returns the original — also for a double click that sends
+  the key twice at once: `RegisterDeposit` looks it up again under the
+  charges' lock. **A correction is split by the same planner**, so it obeys the
+  same rule: when the corrected date or amount leaves money no charge takes
+  (e.g. a date before the due day drops the surcharge the original paid), the
+  409 names the maximum; the office corrects to that maximum and hands the
+  excess back to the family. `UnallocatedCents` stays only for **deposits
+  stored before the rule** — they exist only in local QA data (there is no
+  production yet), so nothing is migrated: cancel them, or correct them to the
+  maximum, with the UI.
 - **A card part says debit or credit (CC-205):** `Deposit.RequireCardType` on
   every deposit or correction being TAKEN (`newDeposit`); reads of older rows
   without a type keep working. The gateway refuses it at the edge too.
