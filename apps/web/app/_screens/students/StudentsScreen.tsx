@@ -402,6 +402,19 @@ function StudentSheet({
   );
 }
 
+/**
+ * "Maternal a Bachillerato": the school's first and last level, in its own
+ * order (ISSUE-T14-017 — the card used to say "Kínder a Preparatoria" for
+ * every school). One level names itself; none, nothing.
+ */
+function levelSpan(levels: readonly Pick<Level, "name" | "sortOrder">[]): string {
+  const ordered = [...levels].sort((a, b) => (a.sortOrder ?? Number.MAX_SAFE_INTEGER) - (b.sortOrder ?? Number.MAX_SAFE_INTEGER));
+  const first = ordered[0];
+  const last = ordered[ordered.length - 1];
+  if (first === undefined || last === undefined) return "";
+  return first === last ? first.name : `${first.name} a ${last.name}`;
+}
+
 /** "Alumno dado de baja el 15 oct 2026 · motivo": why the sheet is read-only. */
 function withdrawnNote(current: Enrollment | null | undefined | "failed"): string {
   const enrollment = current !== null && current !== undefined && current !== "failed" ? current : undefined;
@@ -669,7 +682,7 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
     { icon: "check" as IconName, c: "lime", label: "Inscritos", val: String(counts.active), sub: "Admisión activa" },
     { icon: "clock" as IconName, c: "yellow", label: "En trámite", val: String(counts.pending), sub: "Faltan documentos" },
     { icon: "students" as IconName, c: "forest", label: "Total", val: String(counts.all), sub: "Alumnos registrados" },
-    { icon: "graduation" as IconName, c: "purple", label: "Niveles", val: String(levelsPresent.filter((l) => l !== NO_LEVEL).length), sub: "Kínder a Preparatoria" },
+    { icon: "graduation" as IconName, c: "purple", label: "Niveles", val: String(levelsPresent.filter((l) => l !== NO_LEVEL).length), sub: levelSpan(levels) },
   ];
 
   return (
@@ -700,7 +713,7 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
             <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: 13, color: "var(--text-muted)", fontWeight: 600, whiteSpace: "nowrap" }}>{k.label}</div>
               <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 22, color: "var(--text)", lineHeight: 1.2 }}>{k.val}</div>
-              <div style={{ fontSize: 12, color: "var(--text-faint)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{k.sub}</div>
+              {k.sub !== "" && <div style={{ fontSize: 12, color: "var(--text-faint)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{k.sub}</div>}
             </div>
           </div>
         ))}
