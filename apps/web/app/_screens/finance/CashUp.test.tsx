@@ -228,4 +228,31 @@ describe("CashUpPanel · nota de crédito y pago combinado (tarea 8)", () => {
     await user.click(buttons[0] as HTMLElement);
     expect(onCorrect).toHaveBeenCalledWith(expect.objectContaining({ id: "d1" }));
   });
+
+  // ISSUE-T14-206: deposits came first and loose payments after, so 09:53 sat
+  // above 08:35. The cut reads in the order the money came in; same instant, by folio.
+  it("lists deposits and loose payments together, in the order they came in", async () => {
+    const loose = (id: string, paidAt: string, description: string): financeApi.CashUpPayment => ({
+      id, chargeId: "c1", amountCents: 10000, method: "cash", reference: "", paidAt, description,
+    });
+    finance.getCashUp.mockResolvedValue({
+      deposits: [
+        { ...deposit("d5", 200000, "cash"), paidAt: "2026-10-10T15:53:00Z", folio: "P-2026-000005" },
+        { ...deposit("d4", 200000, "cash"), paidAt: "2026-10-10T15:53:00Z", folio: "P-2026-000004" },
+      ],
+      cancelled: [], superseded: [],
+      payments: [loose("p2", "2026-10-10T14:45:00Z", "Uniformes · U-2026-000001"), loose("p1", "2026-10-10T14:35:00Z", "INSCRIPCIÓN")],
+      cashCents: 420000, cardCents: 0, transferCents: 0, totalCents: 420000, creditNoteCents: 0,
+    });
+
+    render(<CashUpPanel day="2026-10-10" />);
+    await screen.findByTestId("cash-up-total");
+
+    const rows = screen.getAllByTestId("cash-up-row").map((r) => r.textContent ?? "");
+    expect(rows).toHaveLength(4);
+    expect(rows[0]).toMatch(/INSCRIPCIÓN/);
+    expect(rows[1]).toMatch(/U-2026-000001/);
+    expect(rows[2]).toMatch(/P-2026-000004/);
+    expect(rows[3]).toMatch(/P-2026-000005/);
+  });
 });
