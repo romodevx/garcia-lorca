@@ -20,6 +20,8 @@
 
 BEGIN;
 
+SET LOCAL lock_timeout = '5s';
+
 ALTER TABLE users
     ADD COLUMN IF NOT EXISTS credential_version bigint NOT NULL DEFAULT 0
         CHECK (credential_version >= 0);
