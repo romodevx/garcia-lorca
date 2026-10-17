@@ -28,6 +28,7 @@ import {
   resendInvitation,
   type Role,
 } from "../../admin/api";
+import { assignableByHand } from "../../admin/permissions";
 import { PERMISSION_CATALOG } from "./catalog";
 import { OwnerOnlyList } from "./parts";
 
@@ -151,6 +152,11 @@ export function AdminScreen({ onBack, canDeleteUsers = false, currentUserId }: A
   }, []);
   useEffect(() => reload(), [reload]);
 
+  // The guardian role is never offered by hand (ISSUE-CC-115): a family login
+  // is born from "Dar acceso a la app" on the pupil's record, which links it to
+  // the child. A user who already holds it keeps it through an edit — the
+  // chip is hidden, not deselected.
+  const handRoles = useMemo(() => assignableByHand(roles), [roles]);
   const roleName = useCallback((id: string): string => roles.find((r) => r.id === id)?.name ?? id, [roles]);
   const stats = useMemo(() => ({ users: users.length, roles: roles.length, active: users.filter((u) => u.status === "active").length, suspended: users.filter((u) => u.status === "suspended").length, invited: users.filter((u) => u.status === "invited").length }), [users, roles]);
 
@@ -293,8 +299,11 @@ export function AdminScreen({ onBack, canDeleteUsers = false, currentUserId }: A
                       password that its own invitation link then refused
                       (activation only happens from `invited`), and that resend
                       refused too. One click made a person unreachable. */}
-                  {(u.status === "active" || u.status === "suspended") && (
-                    <button onClick={() => void onSuspend(u)} style={{ height: 38, padding: "0 14px", borderRadius: 99, fontSize: 13.5, fontWeight: 600, color: u.status === "active" ? "var(--bad-fg)" : "var(--forest)", background: "var(--surface-3)", border: "1px solid var(--border)", cursor: "pointer" }}>{u.status === "active" ? "Suspender" : "Reactivar"}</button>
+                  {/* Never on your own row (ISSUE-CC-117): iam refuses
+                      suspending yourself — this is the courtesy, that is the
+                      rule. The label names the person, like Eliminar. */}
+                  {(u.status === "active" || u.status === "suspended") && u.id !== currentUserId && (
+                    <button onClick={() => void onSuspend(u)} aria-label={`${u.status === "active" ? "Suspender" : "Reactivar"} a ${u.displayName}`} style={{ height: 38, padding: "0 14px", borderRadius: 99, fontSize: 13.5, fontWeight: 600, color: u.status === "active" ? "var(--bad-fg)" : "var(--forest)", background: "var(--surface-3)", border: "1px solid var(--border)", cursor: "pointer" }}>{u.status === "active" ? "Suspender" : "Reactivar"}</button>
                   )}
                   {/* Owner-only, and never on your own row: iam refuses both
                       anyway — this is the courtesy, that is the rule. */}
@@ -319,10 +328,10 @@ export function AdminScreen({ onBack, canDeleteUsers = false, currentUserId }: A
       </div>
 
       {addUser && (invites
-        ? <InviteUserDrawer roles={roles} onClose={() => setAddUser(false)} onSave={onInviteUser} />
-        : <CreateUserDrawer roles={roles} onClose={() => setAddUser(false)} onSave={onCreateUser} />)}
+        ? <InviteUserDrawer roles={handRoles} onClose={() => setAddUser(false)} onSave={onInviteUser} />
+        : <CreateUserDrawer roles={handRoles} onClose={() => setAddUser(false)} onSave={onCreateUser} />)}
       {addRole && <CreateRoleDrawer onClose={() => setAddRole(false)} onSave={onCreateRole} />}
-      {editRoles !== null && <EditRolesDrawer user={editRoles} roles={roles} onClose={() => setEditRoles(null)} onSave={(ids) => onSaveUserRoles(editRoles, ids)} />}
+      {editRoles !== null && <EditRolesDrawer user={editRoles} roles={handRoles} onClose={() => setEditRoles(null)} onSave={(ids) => onSaveUserRoles(editRoles, ids)} />}
       {editPerms !== null && <EditPermsDrawer role={editPerms} onClose={() => setEditPerms(null)} onSave={(ps) => onSavePerms(editPerms, ps)} />}
       {deleting !== null && <DeleteUserDialog user={deleting} onClose={() => setDeleting(null)} onConfirm={() => onDeleteUser(deleting)} onGiveUp={() => closeDeleted(deleting)} />}
       {handover !== null && (
