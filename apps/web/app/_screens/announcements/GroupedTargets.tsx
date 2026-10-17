@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactElement } from "react";
+import { useId, useState, type ReactElement } from "react";
 import { Icon } from "../../_design/Icon";
 import type { Target, TargetSection } from "./audience";
 import { TargetRow } from "./TargetRow";
@@ -53,15 +53,23 @@ function LevelSection({ section, picked, onToggle, openByDefault }: LevelSection
   // Decided once, when the level appears: after that the office opens and
   // closes it, and a re-render never snaps it back.
   const [open, setOpen] = useState(openByDefault || chosen > 0);
+  const bodyId = useId();
+  const countId = useId();
+  const count = chosen > 0 ? `${chosen} de ${total}` : String(total);
+  // A real button with aria-expanded (WAI-ARIA disclosure), not a styled
+  // <summary> that assistive tech and the QA could not reach as one (ISSUE-T14-021).
+  // Named by the level alone; the count is its description.
   return (
-    <details className="announce-level" open={open} onToggle={(e) => setOpen(e.currentTarget.open)}>
-      <summary className="announce-level__summary">
+    <div className="announce-level">
+      <button type="button" className="announce-level__summary" aria-label={section.title} aria-describedby={countId} aria-expanded={open} aria-controls={bodyId} onClick={() => setOpen((o) => !o)}>
         <Icon name="chevron" size={CHEVRON_SIZE} className="announce-level__chevron" />
         <span className="announce-level__title">{section.title}</span>
-        <span className="announce-level__count">{chosen > 0 ? `${chosen} de ${total}` : total}</span>
-      </summary>
-      <TargetRows targets={section.targets} picked={picked} onToggle={onToggle} />
-    </details>
+        <span id={countId} className="announce-level__count">{count}</span>
+      </button>
+      <div id={bodyId} hidden={!open}>
+        {open && <TargetRows targets={section.targets} picked={picked} onToggle={onToggle} />}
+      </div>
+    </div>
   );
 }
 

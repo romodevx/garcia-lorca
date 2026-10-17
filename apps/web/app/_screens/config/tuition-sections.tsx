@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 
 import { Btn } from "../../_design/Controls";
 import { DateField, MoneyField, TextField } from "../../_design/form";
@@ -17,7 +17,10 @@ import {
   pesosToCents,
   readTierDraft,
   sameLineName,
+  withDraftTiers,
   withTier,
+  withoutHalfTyped,
+  type TierDraftField,
   type TierDraftRead,
 } from "./tuition-math";
 
@@ -54,12 +57,13 @@ export type DraftCheck = () => string | undefined;
  */
 export type InscriptionFlush = (
   concepts: EnrollmentConcept[],
-) => { problem: string } | { concepts: EnrollmentConcept[] };
+) => { problem: string; focus?: () => void } | { concepts: EnrollmentConcept[] };
 
-/** Lo que una tarjeta de concepto entrega al guardar, y cómo vaciarse después. */
+/** Lo que una tarjeta de concepto entrega al guardar, cómo vaciarse y dónde señalar. */
 interface CardDraft {
   read: () => TierDraftRead;
   clear: () => void;
+  focus: (field: TierDraftField) => void;
 }
 
 /**
@@ -72,9 +76,25 @@ interface CardDraft {
  * date, flat ones included. Making them add it up by hand is how a school
  * publishes a flyer that its own system contradicts.
  */
-export function InscriptionSection({ concepts, onChange, onError, draftRef }: InscriptionSectionProps): ReactElement {
+export function InscriptionSection({ concepts, onChange, onError, draftRef, firstTierFrom, onPreviewChange }: InscriptionSectionProps): ReactElement {
   const [name, setName] = useState("");
   const cardDrafts = useRef(new Map<string, CardDraft>());
+  /*
+   * Lo que cada tarjeta tiene tecleado, en estado (ISSUE-T14-007): el total de
+   * la sección y el resumen del año leen lo que se ve escrito, no sólo lo que
+   * ya se agregó con el botón.
+   */
+  const [typed, setTyped] = useState<Record<string, TierDraftRead>>({});
+  const reportTyped = useCallback((concept: string, read: TierDraftRead | undefined): void => {
+    setTyped((prev) => {
+      const next = { ...prev };
+      if (read === undefined) delete next[concept];
+      else next[concept] = read;
+      return next;
+    });
+  }, []);
+  const preview = useMemo(() => withDraftTiers(concepts, typed), [concepts, typed]);
+  useEffect(() => onPreviewChange?.(preview), [preview, onPreviewChange]);
 
   /*
    * Al desmontarse deja de reclamar.
@@ -123,8 +143,9 @@ export function InscriptionSection({ concepts, onChange, onError, draftRef }: In
   const patch = (index: number, tiers: PriceTier[]): void =>
     onChange(concepts.map((c, i) => (i === index ? { ...c, tiers } : c)));
 
-  const totals = inscriptionTotals(concepts);
-  const problem = ladderProblem(concepts);
+  const totals = inscriptionTotals(preview);
+  // A concept being typed is not "missing its price": its own draft says what it lacks on save.
+  const problem = ladderProblem(withoutHalfTyped(preview, typed));
 
   return (
     <div style={{ marginBottom: 12 }}>
@@ -151,6 +172,8 @@ export function InscriptionSection({ concepts, onChange, onError, draftRef }: In
           onRemove={() => onChange(concepts.filter((_, i) => i !== index))}
           onError={onError}
           registerDraft={registerDraft}
+          reportTyped={reportTyped}
+          firstTierFrom={firstTierFrom}
         />
       ))}
 
@@ -203,23 +226,41 @@ export function InscriptionSection({ concepts, onChange, onError, draftRef }: In
  * which is what the first version did — invited two rows for one concept and a
  * validation error instead of the merge the director meant.
  */
-function ConceptCard({ concept, onChangeTiers, onRemove, onError, registerDraft }: ConceptCardProps): ReactElement {
-  const [from, setFrom] = useState("");
+function ConceptCard({ concept, onChangeTiers, onRemove, onError, registerDraft, reportTyped, firstTierFrom }: ConceptCardProps): ReactElement {
+  /*
+   * El PRIMER monto de un concepto arranca vigente desde el inicio del ciclo
+   * (ISSUE-T14-007): es la fecha que ya usa `seedConcepts` para un plan viejo,
+   * y la que pone la mayoría: el precio vale para el ciclo que se tarifica.
+   * "Hoy" no: en un ciclo ya empezado dejaría sin precio a quien se inscribió
+   * antes de hoy. Los escalones siguientes no la heredan: tendrían que ir después.
+   */
+  const prefilledFrom = concept.tiers.length === 0 ? firstTierFrom : "";
+  const [from, setFrom] = useState(prefilledFrom);
   const [to, setTo] = useState("");
   const [amount, setAmount] = useState("");
+  const amountBox = useRef<HTMLDivElement>(null);
+  const fromBox = useRef<HTMLDivElement>(null);
 
   const clear = (): void => {
     setAmount("");
     setFrom("");
     setTo("");
   };
+  const focus = (field: TierDraftField): void =>
+    (field === "amount" ? amountBox : fromBox).current?.querySelector("input")?.focus();
+  const readTyped = (): TierDraftRead => readTierDraft(concept.name, { amount, from, to }, prefilledFrom);
 
   // Se registra en cada render: la lectura tiene que ver los valores de AHORA,
   // y un registro que sólo corriera al montar leería los del principio.
   useEffect(() => {
-    registerDraft(concept.name, { read: () => readTierDraft(concept.name, { amount, from, to }), clear });
+    registerDraft(concept.name, { read: readTyped, clear, focus });
     return () => registerDraft(concept.name, undefined);
   });
+
+  useEffect(() => {
+    reportTyped(concept.name, readTierDraft(concept.name, { amount, from, to }, prefilledFrom));
+  }, [reportTyped, concept.name, amount, from, to, prefilledFrom]);
+  useEffect(() => () => reportTyped(concept.name, undefined), [reportTyped, concept.name]);
 
   const addAmount = (): void => {
     const read = readTierDraft(concept.name, { amount, from, to });
@@ -281,8 +322,12 @@ function ConceptCard({ concept, onChangeTiers, onRemove, onError, registerDraft 
       )}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10, marginBottom: 10 }}>
-        <MoneyField label="Monto" value={amount} onChange={setAmount} help="Lo que se cobra por este concepto, por alumno." />
-        <DateField label="Vigente desde" value={from} onChange={setFrom} />
+        <div ref={amountBox}>
+          <MoneyField label="Monto" value={amount} onChange={setAmount} help="Lo que se cobra por este concepto, por alumno." />
+        </div>
+        <div ref={fromBox}>
+          <DateField label="Vigente desde" value={from} onChange={setFrom} />
+        </div>
         <DateField label="Vigente hasta (opcional)" value={to} onChange={setTo} />
       </div>
       <Btn kind="ghost" icon="plus" onClick={addAmount}>Agregar monto con su vigencia</Btn>
@@ -301,14 +346,14 @@ function flushDrafts(
   pendingName: string,
   cards: ReadonlyMap<string, CardDraft>,
   onChange: (concepts: EnrollmentConcept[]) => void,
-): { problem: string } | { concepts: EnrollmentConcept[] } {
+): ReturnType<InscriptionFlush> {
   if (pendingName.trim() !== "") {
     return { problem: `Tienes el concepto "${pendingName.trim()}" escrito sin agregar. Aprieta "Agregar concepto" o borra lo escrito.` };
   }
   const ready = new Map<string, { tier: PriceTier; clear: () => void }>();
   for (const [name, card] of cards) {
     const read = card.read();
-    if (read.kind === "problem") return { problem: read.message };
+    if (read.kind === "problem") return { problem: read.message, focus: () => card.focus(read.field) };
     if (read.kind === "tier") ready.set(name, { tier: read.tier, clear: card.clear });
   }
   if (ready.size === 0) return { concepts };
@@ -331,6 +376,10 @@ function flushDrafts(
 interface ConceptCardProps {
   /** Cómo entregar lo escrito y sin agregar; `undefined` la da de baja. */
   registerDraft: (name: string, draft: CardDraft | undefined) => void;
+  /** Lo tecleado, para los totales en vivo; `undefined` al desmontarse. */
+  reportTyped: (name: string, read: TierDraftRead | undefined) => void;
+  /** Desde cuándo vale el primer monto si no se dice otra cosa: el inicio del ciclo. */
+  firstTierFrom: string;
   concept: EnrollmentConcept;
   onChangeTiers: (tiers: PriceTier[]) => void;
   onRemove: () => void;
@@ -343,6 +392,10 @@ export interface InscriptionSectionProps {
   concepts: EnrollmentConcept[];
   onChange: (concepts: EnrollmentConcept[]) => void;
   onError: (message: string | undefined) => void;
+  /** Desde cuándo vale el primer monto de un concepto: el inicio del ciclo. */
+  firstTierFrom: string;
+  /** Los conceptos con lo tecleado incluido, para el resumen del año. */
+  onPreviewChange?: (concepts: EnrollmentConcept[]) => void;
 }
 
 /**

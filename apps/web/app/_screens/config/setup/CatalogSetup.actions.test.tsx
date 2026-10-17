@@ -99,6 +99,7 @@ describe("Paso 2 · Ciclo escolar (A7–A11)", () => {
 
     await user.click(within(step).getByRole("button", { name: "Nuevo ciclo" }));
     const drawer = screen.getByRole("dialog", { name: "Nuevo ciclo escolar" });
+    await user.clear(within(drawer).getByLabelText("Nombre del ciclo"));
     await user.type(within(drawer).getByLabelText("Nombre del ciclo"), "2028-2029");
     fireEvent.change(within(drawer).getByLabelText("Inicia"), { target: { value: "2028-08-01" } });
     fireEvent.change(within(drawer).getByLabelText("Termina"), { target: { value: "2029-06-30" } });
@@ -113,6 +114,7 @@ describe("Paso 2 · Ciclo escolar (A7–A11)", () => {
     const step = await openStep(user, "Ciclo escolar");
     await user.click(within(step).getByRole("button", { name: "Nuevo ciclo" }));
     const drawer = screen.getByRole("dialog", { name: "Nuevo ciclo escolar" });
+    await user.clear(within(drawer).getByLabelText("Nombre del ciclo"));
     await user.type(within(drawer).getByLabelText("Nombre del ciclo"), "2028-2029");
     fireEvent.change(within(drawer).getByLabelText("Inicia"), { target: { value: "2028-08-01" } });
     fireEvent.change(within(drawer).getByLabelText("Termina"), { target: { value: "2029-06-30" } });

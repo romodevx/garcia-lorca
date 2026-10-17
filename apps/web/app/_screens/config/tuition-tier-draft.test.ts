@@ -13,6 +13,15 @@ describe("readTierDraft", () => {
     expect(readTierDraft(concept, { amount: " ", from: "", to: "" })).toEqual({ kind: "empty" });
   });
 
+  it("only the date the card opened with is still nothing pending (ISSUE-T14-007)", () => {
+    expect(readTierDraft(concept, { amount: "", from: "2026-08-01", to: "" }, "2026-08-01")).toEqual({ kind: "empty" });
+  });
+
+  it("names the field a half-filled draft lacks, so the save can focus it", () => {
+    expect(readTierDraft(concept, { amount: "4000", from: "", to: "" })).toMatchObject({ kind: "problem", field: "from" });
+    expect(readTierDraft(concept, { amount: "", from: "2026-09-01", to: "" })).toMatchObject({ kind: "problem", field: "amount" });
+  });
+
   it("a filled amount and start date is a tier, in cents", () => {
     expect(readTierDraft(concept, { amount: "4,500.00", from: "2026-08-01", to: "" })).toEqual({
       kind: "tier",

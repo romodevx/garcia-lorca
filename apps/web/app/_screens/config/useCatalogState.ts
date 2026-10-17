@@ -165,6 +165,12 @@ export function useCatalogState(notice: string | undefined, canWriteConfig = fal
     };
   }, [adoptLevels]);
 
+  // A school with ONE level has nothing to choose: every step starts on it (ISSUE-T14-023).
+  const onlyLevelId = levels.length === 1 ? levels[0]?.id : undefined;
+  useEffect(() => {
+    if (onlyLevelId !== undefined) setSelectedLevelId((prev) => prev ?? onlyLevelId);
+  }, [onlyLevelId]);
+
   // Selecting a level loads its grades and clears any grade selection.
   useEffect(() => {
     if (selectedLevelId === undefined) return;

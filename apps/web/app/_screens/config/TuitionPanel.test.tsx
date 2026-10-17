@@ -47,6 +47,7 @@ async function captureInscription(
   await user.type(within(form).getByLabelText("Nuevo concepto"), "Inscripción");
   await user.click(within(form).getByRole("button", { name: /Agregar concepto/ }));
   await user.type(within(form).getByLabelText("Monto"), amount);
+  await user.clear(within(form).getByLabelText("Vigente desde"));
   await user.type(within(form).getByLabelText("Vigente desde"), "2026-08-01");
   await user.click(within(form).getByRole("button", { name: /Agregar monto/ }));
 }

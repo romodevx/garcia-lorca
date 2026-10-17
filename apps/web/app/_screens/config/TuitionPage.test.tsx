@@ -226,6 +226,7 @@ describe("los montos de cobranza no se tragan en silencio", () => {
     await user.type(screen.getByLabelText("Nuevo concepto"), "INSCRIPCIÓN");
     await user.click(screen.getByRole("button", { name: /Agregar concepto/ }));
     await user.type(screen.getByLabelText("Monto"), "4500");
+    await user.clear(screen.getByLabelText("Vigente desde"));
     await user.type(screen.getByLabelText("Vigente desde"), "2026-08-01");
     await user.click(screen.getByRole("button", { name: /Agregar monto/ }));
 
@@ -248,6 +249,7 @@ describe("los montos de cobranza no se tragan en silencio", () => {
     await user.type(screen.getByLabelText("Nuevo concepto"), "INSCRIPCIÓN");
     await user.click(screen.getByRole("button", { name: /Agregar concepto/ }));
     await user.type(screen.getByLabelText("Monto"), "4500");
+    await user.clear(screen.getByLabelText("Vigente desde"));
     await user.type(screen.getByLabelText("Vigente desde"), "2026-08-01");
     await user.click(screen.getByRole("button", { name: /Agregar monto/ }));
 
@@ -317,6 +319,7 @@ describe("un monto escrito y no agregado", () => {
     const user = userEvent.setup();
     await conConcepto(user);
     await user.type(screen.getByLabelText("Monto"), "4500");
+    await user.clear(screen.getByLabelText("Vigente desde"));
     await user.type(screen.getByLabelText("Vigente desde"), "2026-08-01");
     await user.click(screen.getByRole("button", { name: "Guardar tabulador" }));
 
@@ -343,6 +346,7 @@ describe("un monto escrito y no agregado", () => {
       </StrictMode>,
     );
     await user.type(screen.getByLabelText("Monto"), "4600");
+    await user.clear(screen.getByLabelText("Vigente desde"));
     await user.type(screen.getByLabelText("Vigente desde"), "2026-11-01");
     await user.click(screen.getByRole("button", { name: "Guardar tabulador" }));
 
@@ -364,9 +368,11 @@ describe("un monto escrito y no agregado", () => {
     const user = userEvent.setup();
     await conConcepto(user);
     await user.type(screen.getByLabelText("Monto"), "5200");
+    await user.clear(screen.getByLabelText("Vigente desde"));
     await user.type(screen.getByLabelText("Vigente desde"), "2026-10-01");
     await user.click(screen.getByRole("button", { name: /Agregar monto/ }));
     await user.type(screen.getByLabelText("Monto"), "4500");
+    await user.clear(screen.getByLabelText("Vigente desde"));
     await user.type(screen.getByLabelText("Vigente desde"), "2026-08-01");
     await user.type(screen.getByLabelText("Vigente hasta (opcional)"), "2026-09-30");
     await user.click(screen.getByRole("button", { name: "Guardar tabulador" }));
@@ -392,6 +398,7 @@ describe("un monto escrito y no agregado", () => {
     await user.type(screen.getByLabelText("Fecha de inicio de inscripción"), "2026-07-01");
     await user.type(screen.getByLabelText("Fecha límite de inscripción"), "2026-06-01");
     await user.type(screen.getByLabelText("Monto"), "4500");
+    await user.clear(screen.getByLabelText("Vigente desde"));
     await user.type(screen.getByLabelText("Vigente desde"), "2026-08-01");
     await user.click(screen.getByRole("button", { name: "Guardar tabulador" }));
     await user.click(screen.getByRole("button", { name: "Guardar tabulador" }));
@@ -405,6 +412,7 @@ describe("un monto escrito y no agregado", () => {
     const user = userEvent.setup();
     await conConcepto(user);
     await user.type(screen.getByLabelText("Monto"), "4500");
+    await user.clear(screen.getByLabelText("Vigente desde"));
     await user.click(screen.getByRole("button", { name: "Guardar tabulador" }));
 
     expect(alertSaying(/INSCRIPCIÓN.*Vigente desde/)).toBeDefined();
@@ -414,7 +422,8 @@ describe("un monto escrito y no agregado", () => {
   it("un tramo a medias no se guarda: dice que falta el monto", async () => {
     const user = userEvent.setup();
     await conConcepto(user);
-    await user.type(screen.getByLabelText("Vigente desde"), "2026-08-01");
+    await user.clear(screen.getByLabelText("Vigente desde"));
+    await user.type(screen.getByLabelText("Vigente desde"), "2026-09-01");
     await user.click(screen.getByRole("button", { name: "Guardar tabulador" }));
 
     expect(alertSaying(/INSCRIPCIÓN.*falta el monto/)).toBeDefined();
@@ -425,6 +434,7 @@ describe("un monto escrito y no agregado", () => {
     const user = userEvent.setup();
     await conConcepto(user);
     await user.type(screen.getByLabelText("Monto"), "45oo");
+    await user.clear(screen.getByLabelText("Vigente desde"));
     await user.type(screen.getByLabelText("Vigente desde"), "2026-08-01");
     await user.click(screen.getByRole("button", { name: "Guardar tabulador" }));
 
@@ -439,6 +449,7 @@ describe("un monto escrito y no agregado", () => {
     await user.type(screen.getByLabelText("Nuevo concepto"), "INSCRIPCIÓN");
     await user.click(screen.getByRole("button", { name: /Agregar concepto/ }));
     await user.type(screen.getByLabelText("Monto"), "4500");
+    await user.clear(screen.getByLabelText("Vigente desde"));
     await user.type(screen.getByLabelText("Vigente desde"), "2026-08-01");
     await user.click(screen.getByRole("button", { name: /Agregar monto/ }));
 
@@ -469,6 +480,7 @@ describe("plegar una sección después de escribir en ella", () => {
     await user.type(screen.getByLabelText("Nuevo concepto"), "INSCRIPCIÓN");
     await user.click(screen.getByRole("button", { name: /Agregar concepto/ }));
     await user.type(screen.getByLabelText("Monto"), "4500");
+    await user.clear(screen.getByLabelText("Vigente desde"));
     await user.type(screen.getByLabelText("Vigente desde"), "2026-08-01");
     await user.click(screen.getByRole("button", { name: /Agregar monto/ }));
 
@@ -552,6 +564,7 @@ describe("el rango de fechas de la inscripción", () => {
     await user.type(screen.getByLabelText("Nuevo concepto"), "INSCRIPCIÓN");
     await user.click(screen.getByRole("button", { name: /Agregar concepto/ }));
     await user.type(screen.getByLabelText("Monto"), "4500");
+    await user.clear(screen.getByLabelText("Vigente desde"));
     await user.type(screen.getByLabelText("Vigente desde"), "2026-08-01");
     await user.click(screen.getByRole("button", { name: /Agregar monto/ }));
   }
@@ -669,5 +682,64 @@ describe("Guardar tabulador y los montos al abrir (T12)", () => {
     expect(busy).toBeEnabled();
     expect(busy).toHaveAttribute("aria-busy", "true");
     expect(finance.upsertTuitionPlan).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("la inscripción mientras se captura (ISSUE-T14-007)", () => {
+  async function conConcepto(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+    open();
+    await user.type(screen.getByLabelText("Colegiatura mensual"), "2800");
+    await user.type(screen.getByLabelText("Nuevo concepto"), "INSCRIPCIÓN");
+    await user.click(screen.getByRole("button", { name: /Agregar concepto/ }));
+  }
+  const summary = (): string => screen.getByTestId("create-page-aside").textContent ?? "";
+
+  it("'Vigente desde' de un concepto nuevo arranca en el inicio del ciclo", async () => {
+    const user = userEvent.setup();
+    await conConcepto(user);
+
+    expect(screen.getByLabelText("Vigente desde")).toHaveValue(CYCLE.startsOn);
+  });
+
+  it("el siguiente escalón no hereda esa fecha: ya no sería la primera", async () => {
+    const user = userEvent.setup();
+    await conConcepto(user);
+    await user.type(screen.getByLabelText("Monto"), "4000");
+    await user.click(screen.getByRole("button", { name: /Agregar monto/ }));
+
+    expect(screen.getByLabelText("Vigente desde")).toHaveValue("");
+  });
+
+  it("el resumen del año suma el monto tecleado sin esperar a guardar", async () => {
+    const user = userEvent.setup();
+    await conConcepto(user);
+    await user.type(screen.getByLabelText("Monto"), "4000");
+
+    expect(summary()).toContain("Inscripción$4,000.00");
+  });
+
+  it("sin la fecha, no dice que falta cuánto cuesta y lleva el foco a 'Vigente desde'", async () => {
+    const user = userEvent.setup();
+    await conConcepto(user);
+    await user.type(screen.getByLabelText("Monto"), "4000");
+    await user.clear(screen.getByLabelText("Vigente desde"));
+    await user.click(screen.getByRole("button", { name: "Guardar tabulador" }));
+
+    expect(finance.upsertTuitionPlan).not.toHaveBeenCalled();
+    const alerts = screen.getAllByRole("alert").map((a) => a.textContent ?? "");
+    expect(alerts.some((t) => /Vigente desde/.test(t))).toBe(true);
+    expect(alerts.some((t) => /cuánto cuesta/.test(t))).toBe(false);
+    expect(screen.getByLabelText("Vigente desde")).toHaveFocus();
+  });
+
+  it("con la fecha y sin monto, el foco va a Monto", async () => {
+    const user = userEvent.setup();
+    await conConcepto(user);
+    await user.clear(screen.getByLabelText("Vigente desde"));
+    await user.type(screen.getByLabelText("Vigente desde"), "2026-09-01");
+    await user.click(screen.getByRole("button", { name: "Guardar tabulador" }));
+
+    expect(finance.upsertTuitionPlan).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Monto")).toHaveFocus();
   });
 });

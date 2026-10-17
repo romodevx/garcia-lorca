@@ -32,14 +32,19 @@ describe("GradingControl", () => {
     expect(screen.getByLabelText("Calificación mínima", CAMPO)).toHaveValue(5);
     expect(screen.getByLabelText("Calificación máxima", CAMPO)).toHaveValue(10);
     expect(screen.getByLabelText("Mínimo aprobatorio", CAMPO)).toHaveValue(6);
-    expect(screen.getByRole("radio", { name: "1 decimal" })).toBeChecked();
   });
 
-  it("a level that does not say grades 5 to 10 in whole numbers (no decimals by default)", () => {
+  it("never offers decimals: grades are whole numbers only (owner decision), even if a level stored some", () => {
+    renderControl(primaria);
+    expect(screen.queryByRole("group", { name: "Decimales" })).toBeNull();
+    expect(screen.queryByRole("radio", { name: "1 decimal" })).toBeNull();
+    expect(screen.queryByRole("radio", { name: "2 decimales" })).toBeNull();
+  });
+
+  it("a level that does not say grades 5 to 10", () => {
     renderControl(kinder);
     expect(screen.getByRole("checkbox", { name: "Lleva calificación numérica" })).toBeChecked();
     expect(screen.getByLabelText("Calificación máxima", CAMPO)).toHaveValue(10);
-    expect(screen.getByRole("radio", { name: "Sin decimales" })).toBeChecked();
   });
 
   it("turning numeric grading off saves at once and hides the scale", async () => {
@@ -58,9 +63,9 @@ describe("GradingControl", () => {
 
     await user.clear(screen.getByLabelText("Mínimo aprobatorio", CAMPO));
     await user.type(screen.getByLabelText("Mínimo aprobatorio", CAMPO), "7");
-    await user.click(screen.getByRole("radio", { name: "Sin decimales" }));
     await user.click(screen.getByRole("button", { name: "Guardar calificación" }));
 
+    // The stored "1 decimal" is ignored: saving the scale saves whole numbers.
     expect(save).toHaveBeenCalledWith("l1", { enabled: true, min: 5, max: 10, decimals: 0, passing: 7 });
     expect(await screen.findByRole("status")).toHaveTextContent("PRIMARIA: calificación guardada");
   });
@@ -175,7 +180,7 @@ describe("GradingControl", () => {
 
       await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
       expect(save).toHaveBeenNthCalledWith(1, "l1", { enabled: true, min: 5, max: 10, decimals: 1, passing: 6 });
-      expect(save).toHaveBeenNthCalledWith(2, "l1", { enabled: true, min: 5, max: 10, decimals: 1, passing: 7 });
+      expect(save).toHaveBeenNthCalledWith(2, "l1", { enabled: true, min: 5, max: 10, decimals: 0, passing: 7 });
     });
 
     it("a toggle made while the scale is saving waits, then sends the scale just saved", async () => {
@@ -192,7 +197,7 @@ describe("GradingControl", () => {
       await act(async () => release());
 
       await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
-      expect(save).toHaveBeenLastCalledWith("l1", { enabled: false, min: 5, max: 10, decimals: 1, passing: 8 });
+      expect(save).toHaveBeenLastCalledWith("l1", { enabled: false, min: 5, max: 10, decimals: 0, passing: 8 });
     });
 
     it("a failed toggle drops the scale queued behind it and the switch goes back", async () => {
@@ -243,14 +248,12 @@ describe("GradingControl", () => {
       renderControl(primaria, vi.fn().mockRejectedValue(tightening()));
 
       await user.clear(screen.getByLabelText("Calificación mínima", CAMPO));
-      await user.type(screen.getByLabelText("Calificación mínima", CAMPO), "5.5");
-      await user.click(screen.getByRole("radio", { name: "Sin decimales" }));
+      await user.type(screen.getByLabelText("Calificación mínima", CAMPO), "4");
       await user.click(screen.getByRole("button", { name: "Guardar calificación" }));
 
       expect(await screen.findByRole("alert")).toHaveTextContent(TEXT);
       expect(screen.getByRole("alert")).not.toHaveTextContent("No se pudo guardar");
       expect(screen.getByLabelText("Calificación mínima", CAMPO)).toHaveValue(5);
-      expect(screen.getByRole("radio", { name: "1 decimal" })).toBeChecked();
     });
 
     it("turning grading off goes back on and says why", async () => {

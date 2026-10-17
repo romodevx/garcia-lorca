@@ -215,6 +215,8 @@ export function ExpensesScreen({ onBack, permissions, today: injectedToday }: Ex
 
 const th = { textAlign: "left", fontSize: 12, fontWeight: 700, color: "var(--text-faint)", textTransform: "uppercase", letterSpacing: ".04em", padding: "12px 14px" } as const;
 const td = { padding: "14px", fontSize: 14.5, color: "var(--text)", borderTop: "1px solid var(--border)" } as const;
+/** A row's open button reads as the date it shows; the row around it stays the mouse target. */
+const rowButton = { background: "none", border: 0, padding: 0, font: "inherit", color: "inherit", cursor: "pointer", minHeight: 24 } as const;
 
 function ExpensesTable({
   rows, loading, status, activeCount, cancelledCount, onStatus, onOpen, page, pages, total, onPage,
@@ -264,10 +266,19 @@ function ExpensesTable({
               <tr><td style={{ ...td, color: "var(--text-muted)" }} colSpan={6}>{status === "active" ? "No hay egresos registrados este mes." : "No hay egresos cancelados este mes."}</td></tr>
             )}
             {rows.map((e) => (
-              <tr key={e.id} data-testid="expense-row" onClick={() => onOpen(e)} tabIndex={0}
-                onKeyDown={(k) => { if (k.key === "Enter") onOpen(e); }}
+              /*
+                The whole row opens the expense for the mouse; the keyboard and
+                assistive tech get a real button in its first cell (ISSUE-T14-021).
+                The button has no handler of its own: its click (Enter or Space
+                included) bubbles to the row, so it opens once.
+              */
+              <tr key={e.id} data-testid="expense-row" onClick={() => onOpen(e)}
                 style={{ cursor: "pointer", boxShadow: `inset 3px 0 0 ${e.status === "cancelled" ? "var(--red)" : "var(--forest)"}` }}>
-                <td style={td}>{e.spentOn}</td>
+                <td style={td}>
+                  <button type="button" aria-label={`Abrir egreso: ${e.categoryName}, ${formatCents(e.amountCents)}, ${e.spentOn}`} style={rowButton}>
+                    {e.spentOn}
+                  </button>
+                </td>
                 <td style={td}>{e.categoryName}</td>
                 <td style={{ ...td, color: "var(--text-muted)" }}>
                   {e.description !== "" ? e.description : "—"}

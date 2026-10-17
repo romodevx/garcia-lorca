@@ -30,13 +30,34 @@ const (
 	maxGradeDecimals = 2     // the mark column stores hundredths
 )
 
-// NewGradingScale builds a validated scale from hundredths.
+// NewGradingScale builds a validated scale from hundredths. A whole-number
+// scale (decimals 0) also takes whole-number bounds: a passing mark of 6.5 is
+// one no captured grade can ever equal (ISSUE-T14-005).
 func NewGradingScale(enabled bool, minHundredths, maxHundredths, passingHundredths, decimals int) (GradingScale, error) {
+	s, err := RestoreGradingScale(enabled, minHundredths, maxHundredths, passingHundredths, decimals)
+	if err != nil {
+		return GradingScale{}, err
+	}
+	if s.decimals == 0 && !s.wholeBounds() {
+		return GradingScale{}, glerrors.New(glerrors.KindInvalid, "Sin decimales, la mínima, la máxima y la aprobatoria son números enteros")
+	}
+	return s, nil
+}
+
+// RestoreGradingScale rebuilds a stored scale. It skips the whole-number rule,
+// which is newer than some rows: refusing one on read would hide its level.
+func RestoreGradingScale(enabled bool, minHundredths, maxHundredths, passingHundredths, decimals int) (GradingScale, error) {
 	s := GradingScale{enabled: enabled, min: minHundredths, max: maxHundredths, passing: passingHundredths, decimals: decimals}
 	if err := s.validate(); err != nil {
 		return GradingScale{}, err
 	}
 	return s, nil
+}
+
+const hundredthsPerMark = 100
+
+func (s GradingScale) wholeBounds() bool {
+	return s.min%hundredthsPerMark == 0 && s.max%hundredthsPerMark == 0 && s.passing%hundredthsPerMark == 0
 }
 
 func (s GradingScale) validate() error {

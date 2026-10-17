@@ -204,7 +204,8 @@ describe("Ausencias — en la semana y en «ahora» (T19)", () => {
   it("paints the absent teacher's classes «Sin cubrir» on the week, and moves week by week", async () => {
     m.listUncovered.mockResolvedValue([{ date: "2026-10-05", class: uncoveredMate() }]);
     const user = renderManager();
-    await user.click(await screen.findByRole("button", { name: "3.º" }));
+    await user.click(await screen.findByRole("button", { name: "Primaria" }));
+    await user.click(screen.getByRole("button", { name: "3.º" }));
     await user.click(screen.getByRole("button", { name: "A" }));
     expect(screen.getByText("Semana del 5 al 9 de octubre")).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole("button", { name: /^Matemáticas, 3.º A, Ana Ruiz, lunes 08:00 a 08:50, sin cubrir/ })).toBeInTheDocument());

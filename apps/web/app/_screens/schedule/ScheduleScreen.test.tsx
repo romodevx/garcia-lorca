@@ -56,12 +56,34 @@ async function typeTime(user: ReturnType<typeof userEvent.setup>, input: HTMLEle
 
 const blocks = (): HTMLElement[] => screen.queryAllByTestId("schedule-block");
 
+async function choosePrimaria(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+  await user.click(await screen.findByRole("button", { name: "Primaria" }));
+}
+
 async function chooseGroup3A(user: ReturnType<typeof userEvent.setup>): Promise<void> {
-  await user.click(await screen.findByRole("button", { name: "3.º" }));
+  await choosePrimaria(user);
+  await user.click(screen.getByRole("button", { name: "3.º" }));
   await user.click(screen.getByRole("button", { name: "A" }));
 }
 
 describe("Horarios — la semana (T16)", () => {
+  // ISSUE-T14-016: it opened on the first level's grades ("1°" of Maternal) though nobody chose a level.
+  it("with several levels, starts with none chosen and no Grado row", async () => {
+    renderManager();
+    await screen.findByRole("button", { name: "Primaria" });
+    expect(screen.getByRole("button", { name: "Primaria" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: "Secundaria" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.queryByRole("group", { name: "Grado" })).toBeNull();
+  });
+
+  it("with a single level, starts on it and shows its grades", async () => {
+    const board = sampleBoard();
+    m.getBoard.mockResolvedValue(sampleBoard({ levels: [board.levels[0]!] }));
+    renderManager();
+    expect(await screen.findByRole("button", { name: "Primaria" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "3.º" })).toBeInTheDocument();
+  });
+
   it("shows the chosen group's week, Monday to Friday", async () => {
     const user = renderManager();
     await chooseGroup3A(user);
@@ -73,7 +95,7 @@ describe("Horarios — la semana (T16)", () => {
 
   it("shows a teacher's week across groups", async () => {
     const user = renderManager();
-    await screen.findByRole("button", { name: "3.º" });
+    await screen.findByRole("button", { name: "Primaria" });
     await user.selectOptions(screen.getByLabelText("Docente"), ANA);
     expect(blocks()).toHaveLength(2);
     expect(blocks().every((b) => /Ana Ruiz/.test(b.getAttribute("aria-label") ?? ""))).toBe(true);
@@ -170,16 +192,31 @@ describe("Horarios — la semana (T16)", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 
-  it("asks for a reason once the cycle has started", async () => {
+  // ISSUE-T14-015: a school that starts mid-cycle builds its timetable after
+  // the start; adding a class changes nothing anyone relied on.
+  it("once the cycle has started, adding a class asks for no reason", async () => {
     m.getBoard.mockResolvedValue(sampleBoard({ started: true }));
+    m.createBlock.mockResolvedValue(sampleBoard().blocks[0]!);
     const user = renderManager();
     await chooseGroup3A(user);
     await user.click(screen.getByRole("button", { name: "Agregar clase el martes a las 09:00" }));
     const dialog = screen.getByRole("dialog");
+    expect(within(dialog).queryByLabelText("Motivo del cambio")).toBeNull();
     await user.selectOptions(within(dialog).getByLabelText("Asignatura — Docente"), "Matemáticas — Ana Ruiz");
     await user.click(within(dialog).getByRole("button", { name: "Guardar clase" }));
+    await waitFor(() => expect(m.createBlock).toHaveBeenCalledTimes(1));
+    expect(m.createBlock.mock.calls[0]![1]).not.toHaveProperty("reason");
+  });
+
+  it("once the cycle has started, changing a class asks for a reason", async () => {
+    m.getBoard.mockResolvedValue(sampleBoard({ started: true }));
+    const user = renderManager();
+    await chooseGroup3A(user);
+    await user.click(screen.getByRole("button", { name: /^Matemáticas, 3.º A/ }));
+    const dialog = screen.getByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "Guardar clase" }));
     expect(within(dialog).getByLabelText("Motivo del cambio")).toHaveAttribute("aria-invalid", "true");
-    expect(m.createBlock).not.toHaveBeenCalled();
+    expect(m.updateBlock).not.toHaveBeenCalled();
   });
 
   // The drawer's form is noValidate (T13): the date's min/max no longer stop a
@@ -327,7 +364,7 @@ describe("Horarios — historial y horas del nivel (T16)", () => {
 
   it("refuses a level day shorter than an hour without asking the server", async () => {
     const user = renderManager();
-    await screen.findByRole("button", { name: "3.º" });
+    await choosePrimaria(user);
     await typeTime(user, screen.getByLabelText("Termina"), "07:30");
     expect(screen.getByLabelText("Termina")).toHaveAttribute("aria-invalid", "true");
     await user.click(screen.getByRole("button", { name: "Guardar horas" }));
@@ -337,7 +374,7 @@ describe("Horarios — historial y horas del nivel (T16)", () => {
   it("saves the level's hours", async () => {
     m.putSettings.mockResolvedValue({ levelId: "x", gridStart: "07:00", gridEnd: "15:00" });
     const user = renderManager();
-    await screen.findByRole("button", { name: "3.º" });
+    await choosePrimaria(user);
     await typeTime(user, screen.getByLabelText("Termina"), "15:00");
     await user.click(screen.getByRole("button", { name: "Guardar horas" }));
     await waitFor(() => expect(m.putSettings).toHaveBeenCalledWith(expect.any(String), sampleBoard().levels[0]!.id, { gridStart: "07:00", gridEnd: "15:00" }));

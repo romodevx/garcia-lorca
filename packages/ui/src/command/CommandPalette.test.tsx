@@ -77,4 +77,14 @@ describe("CommandPalette", () => {
     fireEvent.keyDown(input, { key: "Escape" });
     expect(screen.queryByPlaceholderText("Buscar o ejecutar…")).toBeNull();
   });
+
+  // ISSUE-T14-021: Radix warned "Missing `Description`" on every page the palette opened on.
+  it("describes the dialog with the hint, so Radix has its Description", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    render(<CommandPalette open onOpenChange={() => {}} commands={COMMANDS} labels={{ ...LABELS, hint: "Prueba con el nombre de un alumno." }} onSelect={() => {}} />);
+
+    expect(screen.getByRole("dialog")).toHaveAccessibleDescription("Prueba con el nombre de un alumno.");
+    expect(warn.mock.calls.flat().join(" ")).not.toMatch(/Description/);
+    warn.mockRestore();
+  });
 });

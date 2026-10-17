@@ -98,8 +98,11 @@ describe("CycleBar — characterization", () => {
 
     await user.click(screen.getByRole("button", { name: "Nuevo ciclo" }));
     const drawer = await screen.findByRole("dialog", { name: "Nuevo ciclo escolar" });
+    await user.clear(screen.getByLabelText(/^Nombre del ciclo/));
     await user.type(screen.getByLabelText(/^Nombre del ciclo/), "2028-2029");
+    await user.clear(screen.getByLabelText(/^Inicia/));
     await user.type(screen.getByLabelText(/^Inicia/), "2028-08-01");
+    await user.clear(screen.getByLabelText(/^Termina/));
     await user.type(screen.getByLabelText(/^Termina/), "2029-06-30");
     await user.click(screen.getByRole("button", { name: "Crear ciclo" }));
 

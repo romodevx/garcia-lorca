@@ -86,11 +86,20 @@ function initial(target: DrawerTarget, board: ScheduleBoard, gridEnd: number): V
   };
 }
 
+/**
+ * Once the cycle has started, changing a class needs its reason for the
+ * history; adding one does not (ISSUE-T14-015): a school that starts mid-cycle
+ * builds its whole timetable then, and the addition is still recorded.
+ */
+export function asksReason(board: ScheduleBoard, target: DrawerTarget): boolean {
+  return board.started && target.kind === "edit";
+}
+
 export function useBlockForm(target: DrawerTarget, board: ScheduleBoard, index: ScheduleIndex, grid: GridSpan): BlockForm {
   const [saved] = useState<Values>(() => initial(target, board, grid.end));
   const [values, setValues] = useState<Values>(saved);
   const [timeErrors, setTimeErrors] = useState<TimeErrors>({});
-  const required = useRequired(board.started ? ["weekday", "startsAt", "endsAt", "groupId", "assignmentId", "reason"] : ["weekday", "startsAt", "endsAt", "groupId", "assignmentId"]);
+  const required = useRequired(asksReason(board, target) ? ["weekday", "startsAt", "endsAt", "groupId", "assignmentId", "reason"] : ["weekday", "startsAt", "endsAt", "groupId", "assignmentId"]);
 
   // A time already saved is kept as it is, even where the picker would not reach (ISSUE-028).
   const spanOf = (v: Values): GridSpan => levelSpan(board, index, v.groupId, grid);
@@ -121,10 +130,10 @@ export function useBlockForm(target: DrawerTarget, board: ScheduleBoard, index: 
 }
 
 /** Saves the form; null when it did not validate (nothing was sent). */
-export async function saveBlock(form: BlockForm, target: DrawerTarget, started: boolean): Promise<string | null> {
+export async function saveBlock(form: BlockForm, target: DrawerTarget, withReason: boolean): Promise<string | null> {
   const v = form.valid();
   if (v === null) return null;
-  const input = { assignmentId: v.assignmentId, weekday: Number(v.weekday), startsAt: v.startsAt, endsAt: v.endsAt, ...(started ? { reason: v.reason.trim() } : {}) };
+  const input = { assignmentId: v.assignmentId, weekday: Number(v.weekday), startsAt: v.startsAt, endsAt: v.endsAt, ...(withReason ? { reason: v.reason.trim() } : {}) };
   if (target.kind === "edit") {
     await updateBlock(API_URL, target.block.id, input);
     return "Clase actualizada";
@@ -133,8 +142,8 @@ export async function saveBlock(form: BlockForm, target: DrawerTarget, started: 
   return "Clase agregada";
 }
 
-/** Day, start, end, group, "Asignatura — Docente" and, once the cycle started, the reason. */
-export function BlockFields({ form, board, index }: { form: BlockForm; board: ScheduleBoard; index: ScheduleIndex }): ReactElement {
+/** Day, start, end, group, "Asignatura — Docente" and, to change a class once the cycle started, the reason. */
+export function BlockFields({ form, board, index, withReason }: { form: BlockForm; board: ScheduleBoard; index: ScheduleIndex; withReason: boolean }): ReactElement {
   const { values, set, required, timeErrors, judgeTimes } = form;
   const bounds = timeBounds(form.span);
   const groups = board.groups
@@ -159,7 +168,7 @@ export function BlockFields({ form, board, index }: { form: BlockForm; board: Sc
       <SelectField label="Asignatura — Docente" required value={values.assignmentId} error={err("assignmentId")} onClearError={() => required.clear("assignmentId")}
         help="Sólo las materias que tiene asignadas este grupo en Docentes (carga académica)."
         onChange={(assignmentId) => set({ assignmentId })} options={assignmentsOfGroup(board, index, values.groupId)} />
-      {board.started && (
+      {withReason && (
         <TextField label="Motivo del cambio" required value={values.reason} error={err("reason")} onClearError={() => required.clear("reason")}
           help="El ciclo ya empezó: cada cambio al horario queda en el historial con su motivo."
           onChange={(reason) => set({ reason })} />

@@ -77,6 +77,19 @@ describe("ExpensesScreen (T10)", () => {
     expect(screen.getAllByTestId("expense-row")[0]).toHaveTextContent("duplicado");
   });
 
+  // ISSUE-T14-021: the row was a focusable <tr> with no role; Space did nothing.
+  it("opens an expense from a real button in its row, by keyboard", async () => {
+    const user = userEvent.setup();
+    renderScreen();
+    const row = (await screen.findAllByTestId("expense-row"))[0] as HTMLElement;
+    expect(row).not.toHaveAttribute("tabindex");
+    const open = within(row).getByRole("button", { name: "Abrir egreso: Papelería, $1,250.50, 2026-10-01" });
+
+    open.focus();
+    await user.keyboard(" ");
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+  });
+
   it("records an expense from the quick-add drawer, defaulting to today and cash", async () => {
     m.createExpense.mockResolvedValue(toner);
     const user = userEvent.setup();

@@ -207,7 +207,11 @@ func (r *placementRun) level(req PlacementRequest) (*levelRef, error) {
 	if req.LevelID != "" {
 		return r.levelByID(req.LevelID)
 	}
-	name := domain.CleanName(req.NewLevelName)
+	// Capitals, as the office's own form writes a level (ISSUE-T14-008): an
+	// imported "Maternal" beside a typed "PRIMARIA" read as two conventions.
+	// Matching stays folded (case, accents, spacing), so a re-import never
+	// duplicates a level whatever its capitals.
+	name := strings.ToUpper(domain.CleanName(req.NewLevelName))
 	if name == "" {
 		return &levelRef{code: PlacementInvalid}, nil
 	}

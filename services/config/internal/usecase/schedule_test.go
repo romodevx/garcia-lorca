@@ -306,15 +306,32 @@ func TestCreateBlockStaysInsideTheLevelGrid(t *testing.T) {
 	assert.Equal(t, domain.CodeScheduleWeekdayInvalid, codeOf(err))
 }
 
+// ISSUE-T14-015: a school that starts mid-cycle builds its whole timetable
+// after the start. Adding a class changes nothing anyone relied on, so it needs
+// no reason — but it is still recorded. Moving or removing one does need it.
+func TestAddingAClassAfterTheCycleStartedNeedsNoReasonButIsRecorded(t *testing.T) {
+	f := newFakeSchedule(t)
+	s := newScheduleService(f, duringCycle())
+
+	first, err := s.CreateBlock(context.Background(), usecase.BlockInput{AssignmentID: aMat3A, Weekday: 1, Start: at(8, 0), End: at(8, 50)}, director)
+	require.NoError(t, err)
+	_, err = s.CreateBlock(context.Background(), usecase.BlockInput{AssignmentID: aMus3A, Weekday: 1, Start: at(9, 0), End: at(9, 50)}, director)
+	require.NoError(t, err)
+	require.Len(t, f.events, 2)
+	assert.Equal(t, domain.ActionBlockCreated, f.events[0].Action)
+	assert.Equal(t, "", f.events[0].Reason)
+
+	_, err = s.UpdateBlock(context.Background(), first.ID(), usecase.BlockInput{AssignmentID: aMat3A, Weekday: 2, Start: at(8, 0), End: at(8, 50)}, director)
+	assert.Equal(t, domain.CodeScheduleReasonRequired, codeOf(err))
+	assert.Equal(t, domain.CodeScheduleReasonRequired, codeOf(s.DeleteBlock(context.Background(), first.ID(), "", director)))
+}
+
 func TestBaseEditsAfterTheCycleStartedNeedAReasonAndAreRecorded(t *testing.T) {
 	f := newFakeSchedule(t)
 	b := addBlock(t, newScheduleService(f, beforeCycle()), aMat3A, 1, at(8, 0), at(8, 50))
 	s := newScheduleService(f, duringCycle())
 
-	_, err := s.CreateBlock(context.Background(), usecase.BlockInput{AssignmentID: aMus3A, Weekday: 1, Start: at(9, 0), End: at(9, 50)}, director)
-	assert.Equal(t, domain.CodeScheduleReasonRequired, codeOf(err))
-
-	_, err = s.CreateBlock(context.Background(), usecase.BlockInput{AssignmentID: aMus3A, Weekday: 1, Start: at(9, 0), End: at(9, 50), Reason: "Nueva materia"}, director)
+	_, err := s.CreateBlock(context.Background(), usecase.BlockInput{AssignmentID: aMus3A, Weekday: 1, Start: at(9, 0), End: at(9, 50), Reason: "Nueva materia"}, director)
 	require.NoError(t, err)
 	require.Len(t, f.events, 1)
 	e := f.events[0]
