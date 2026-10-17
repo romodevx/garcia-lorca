@@ -3,6 +3,7 @@ package domain
 import (
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
 )
@@ -45,6 +46,11 @@ type PeriodClosure struct {
 	closedBy     string
 	closedByName string
 	reopenedAt   time.Time
+	// reopenedBy / reopenedByName / reopenReason are who last reopened the
+	// period and why (CC-308): the audit of the latest reopen.
+	reopenedBy     string
+	reopenedByName string
+	reopenReason   string
 	// months are the term's months when it was last closed: while closed, the
 	// term locks them even if config later moves a month out of the term.
 	months []Month
@@ -61,7 +67,11 @@ type PeriodClosureFields struct {
 	ClosedBy     string
 	ClosedByName string
 	ReopenedAt   time.Time
-	Months       []Month
+	// ReopenedBy, ReopenedByName and ReopenReason: the latest reopen's audit.
+	ReopenedBy     string
+	ReopenedByName string
+	ReopenReason   string
+	Months         []Month
 }
 
 // NewOpenPeriod is a period that was never closed: open, version 0.
@@ -84,6 +94,7 @@ func RestorePeriodClosure(f PeriodClosureFields) (PeriodClosure, error) {
 	return PeriodClosure{
 		termID: f.TermID, cycleID: f.CycleID, levelID: f.LevelID, status: f.Status, version: f.Version,
 		closedAt: f.ClosedAt, closedBy: f.ClosedBy, closedByName: f.ClosedByName, reopenedAt: f.ReopenedAt,
+		reopenedBy: f.ReopenedBy, reopenedByName: f.ReopenedByName, reopenReason: f.ReopenReason,
 		months: append([]Month(nil), f.Months...),
 	}, nil
 }
@@ -102,14 +113,37 @@ func (p PeriodClosure) Close(actor Actor, at time.Time, months []Month) (PeriodC
 	return p, nil
 }
 
-// Reopen opens a closed period at `at`, keeping its version. An open period is
-// refused with ALREADY_OPEN.
-func (p PeriodClosure) Reopen(at time.Time) (PeriodClosure, error) {
+// MaxReopenReasonLength bounds, in characters, why a period was reopened (the
+// column carries the same CHECK).
+const MaxReopenReasonLength = 500
+
+// msgReopenReason is the refusal of a reopen without a usable reason.
+const msgReopenReason = "Escribe el motivo para reabrir el periodo (máximo 500 caracteres)"
+
+// ParseReopenReason is why a period is reopened, trimmed: 1..
+// MaxReopenReasonLength characters, KindInvalid otherwise (CC-308).
+func ParseReopenReason(reason string) (string, error) {
+	reason = strings.TrimSpace(reason)
+	if reason == "" || utf8.RuneCountInString(reason) > MaxReopenReasonLength {
+		return "", glerrors.New(glerrors.KindInvalid, msgReopenReason)
+	}
+	return reason, nil
+}
+
+// Reopen opens a closed period at `at` on behalf of actor, keeping its version,
+// and records who reopened it and why (CC-308; see ParseReopenReason). An
+// open period is refused with ALREADY_OPEN.
+func (p PeriodClosure) Reopen(actor Actor, reason string, at time.Time) (PeriodClosure, error) {
+	reason, err := ParseReopenReason(reason)
+	if err != nil {
+		return PeriodClosure{}, err
+	}
 	if p.status == PeriodOpen {
 		return PeriodClosure{}, Conflict(CodeAlreadyOpen, msgAlreadyOpen)
 	}
 	p.status = PeriodOpen
 	p.reopenedAt = at
+	p.reopenedBy, p.reopenedByName, p.reopenReason = actor.ID, actor.Name, reason
 	return p, nil
 }
 
@@ -126,6 +160,15 @@ func (p PeriodClosure) ClosedByName() string { return p.closedByName }
 func (p PeriodClosure) ReopenedAt() time.Time {
 	return p.reopenedAt
 }
+
+// ReopenedBy is the iam user who last reopened the period ("" if never).
+func (p PeriodClosure) ReopenedBy() string { return p.reopenedBy }
+
+// ReopenedByName is that user's name as it read when they reopened it.
+func (p PeriodClosure) ReopenedByName() string { return p.reopenedByName }
+
+// ReopenReason is why the period was last reopened.
+func (p PeriodClosure) ReopenReason() string { return p.reopenReason }
 
 // Months is the snapshot of the term's months taken by the last close (a copy).
 func (p PeriodClosure) Months() []Month { return append([]Month(nil), p.months...) }

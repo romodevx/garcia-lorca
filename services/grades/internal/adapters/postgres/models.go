@@ -63,6 +63,11 @@ type periodClosureModel struct {
 	ClosedBy     *string    `gorm:"column:closed_by"`
 	ClosedByName *string    `gorm:"column:closed_by_name"`
 	ReopenedAt   *time.Time `gorm:"column:reopened_at"`
+	// ReopenedBy / ReopenedByName / ReopenReason audit the latest reopen
+	// (CC-308, grades/0010).
+	ReopenedBy     *string `gorm:"column:reopened_by"`
+	ReopenedByName *string `gorm:"column:reopened_by_name"`
+	ReopenReason   *string `gorm:"column:reopen_reason"`
 	// Months is the text[] snapshot of "YYYY-MM" the last close covered.
 	Months pq.StringArray `gorm:"column:months;type:text[]"`
 }

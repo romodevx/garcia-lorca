@@ -506,9 +506,13 @@ func (s *PeriodsService) Close(ctx context.Context, termID string, force bool, a
 
 // Reopen opens a closed term so its grades can be corrected. Its report cards
 // stay published until the next close supersedes them. A term never closed is
-// refused with ALREADY_OPEN. Who reopened it is logged (the closure keeps who
-// closed it last).
-func (s *PeriodsService) Reopen(ctx context.Context, termID, actorID string) (domain.PeriodStatus, error) {
+// refused with ALREADY_OPEN. The reason is required (KindInvalid when blank,
+// checked before any RPC); who reopened it and why are stored on the closure
+// (CC-308) and logged without the reason (free text).
+func (s *PeriodsService) Reopen(ctx context.Context, termID string, actor domain.Actor, reason string) (domain.PeriodStatus, error) {
+	if _, err := domain.ParseReopenReason(reason); err != nil {
+		return "", err
+	}
 	term, err := s.terms.TermByID(ctx, termID)
 	if err != nil {
 		return "", err
@@ -525,7 +529,7 @@ func (s *PeriodsService) Reopen(ctx context.Context, termID, actorID string) (do
 		if !found {
 			current = domain.NewOpenPeriod(term.ID, term.CycleID, term.LevelID)
 		}
-		if reopened, err = current.Reopen(s.now()); err != nil {
+		if reopened, err = current.Reopen(actor, reason, s.now()); err != nil {
 			return err
 		}
 		return tx.SaveClosure(ctx, reopened)
@@ -535,7 +539,7 @@ func (s *PeriodsService) Reopen(ctx context.Context, termID, actorID string) (do
 	}
 	s.log.Info("grades period reopened",
 		slog.String("term_id", termID),
-		slog.String("actor_id", actorID),
+		slog.String("actor_id", actor.ID),
 		slog.Int("version", reopened.Version()))
 	return reopened.Status(), nil
 }

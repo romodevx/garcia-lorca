@@ -7322,13 +7322,30 @@ paths:
       description: >
         Unlocks the period's months so its grades can be corrected. Its report
         cards stay published until the next close supersedes them. An open
-        period (or one never closed) is 409 `ALREADY_OPEN`. Behind
-        `module_grades`. Requires `grades:close` (owner only).
+        period (or one never closed) is 409 `ALREADY_OPEN`. The reason is
+        required (CC-308): missing, blank or over 500 characters is 400 with
+        `details.field: reason`; grades stores it, trimmed, with who reopened
+        the period and when. Behind `module_grades`. Requires `grades:close`
+        (owner only).
       operationId: reopenGradePeriod
       security: [{ sessionCookie: [] }]
       parameters:
         - $ref: '#/components/parameters/CsrfToken'
         - $ref: '#/components/parameters/TermIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  minLength: 1
+                  maxLength: 500
+                  description: Why the period is reopened, in the director's words.
+            example: { reason: Corrección de la calificación de Matemáticas de 3º B }
       responses:
         '200':
           description: The period is open.
@@ -7340,6 +7357,16 @@ paths:
                 properties:
                   status: { type: string, enum: [open] }
               example: { status: open }
+        '400':
+          description: The reason is missing, blank or longer than 500 characters.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example:
+                error:
+                  code: invalid
+                  message: Escribe el motivo para reabrir el periodo (máximo 500 caracteres)
+                  details: { field: reason }
         '401': { $ref: '#/components/responses/PlainUnauthorized' }
         '403': { $ref: '#/components/responses/PlainForbidden' }
         '404': { $ref: '#/components/responses/PlainNotFound' }

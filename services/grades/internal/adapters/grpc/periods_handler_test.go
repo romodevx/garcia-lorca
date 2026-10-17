@@ -27,12 +27,13 @@ type stubPeriods struct {
 	card     domain.ReportCard
 	err      error
 
-	closeForce  bool
-	closeActor  domain.Actor
-	reopenActor string
-	filter      ports.ReportCardFilter
-	closed      []string
-	closedAsked []string
+	closeForce   bool
+	closeActor   domain.Actor
+	reopenActor  domain.Actor
+	reopenReason string
+	filter       ports.ReportCardFilter
+	closed       []string
+	closedAsked  []string
 }
 
 func (s *stubPeriods) ListPeriods(context.Context, string) ([]usecase.Period, error) {
@@ -48,8 +49,8 @@ func (s *stubPeriods) Close(_ context.Context, _ string, force bool, actor domai
 	return s.closeRes, s.err
 }
 
-func (s *stubPeriods) Reopen(_ context.Context, _ string, actorID string) (domain.PeriodStatus, error) {
-	s.reopenActor = actorID
+func (s *stubPeriods) Reopen(_ context.Context, _ string, actor domain.Actor, reason string) (domain.PeriodStatus, error) {
+	s.reopenActor, s.reopenReason = actor, reason
 	return domain.PeriodOpen, s.err
 }
 
@@ -177,10 +178,11 @@ func TestClosePeriodRPC(t *testing.T) {
 
 func TestReopenPeriodRPC(t *testing.T) {
 	p := &stubPeriods{}
-	res, err := periodsHandler(p).ReopenPeriod(context.Background(), connect.NewRequest(&gradesv1.ReopenPeriodRequest{TermId: termID, ActorId: "dir"}))
+	res, err := periodsHandler(p).ReopenPeriod(context.Background(), connect.NewRequest(&gradesv1.ReopenPeriodRequest{TermId: termID, ActorId: "dir", ActorName: "Directora", Reason: "Corrección"}))
 	require.NoError(t, err)
 	assert.Equal(t, "open", res.Msg.GetStatus())
-	assert.Equal(t, "dir", p.reopenActor)
+	assert.Equal(t, domain.Actor{ID: "dir", Name: "Directora"}, p.reopenActor, "CC-308: the actor reaches the use case")
+	assert.Equal(t, "Corrección", p.reopenReason)
 
 	p.err = domain.Conflict(domain.CodeAlreadyOpen, "El periodo ya está abierto")
 	_, err = periodsHandler(p).ReopenPeriod(context.Background(), connect.NewRequest(&gradesv1.ReopenPeriodRequest{TermId: termID}))

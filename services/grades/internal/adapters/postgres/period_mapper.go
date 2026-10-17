@@ -32,6 +32,10 @@ func fromDomainClosure(tenantID string, c domain.PeriodClosure) periodClosureMod
 		ClosedByName: stringPtr(c.ClosedByName()),
 		ReopenedAt:   timePtr(c.ReopenedAt()),
 		Months:       monthTexts(c.Months()),
+
+		ReopenedBy:     stringPtr(c.ReopenedBy()),
+		ReopenedByName: stringPtr(c.ReopenedByName()),
+		ReopenReason:   stringPtr(c.ReopenReason()),
 	}
 }
 
@@ -45,7 +49,8 @@ func toDomainClosure(m periodClosureModel) (domain.PeriodClosure, error) {
 		TermID: m.TermID, CycleID: m.CycleID, LevelID: m.LevelID,
 		Status: domain.PeriodStatus(m.Status), Version: m.Version,
 		ClosedAt: deref(m.ClosedAt), ClosedBy: derefString(m.ClosedBy), ClosedByName: derefString(m.ClosedByName),
-		ReopenedAt: deref(m.ReopenedAt),
+		ReopenedAt: deref(m.ReopenedAt), ReopenedBy: derefString(m.ReopenedBy),
+		ReopenedByName: derefString(m.ReopenedByName), ReopenReason: derefString(m.ReopenReason),
 	})
 	if err != nil {
 		return domain.PeriodClosure{}, glerrors.Wrap(glerrors.KindInternal, "invalid period closure row", err)

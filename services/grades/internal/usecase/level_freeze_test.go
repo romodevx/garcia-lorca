@@ -58,7 +58,7 @@ func TestPeriodWritesRefuseALevelBeingDeleted(t *testing.T) {
 		_, err := f.svc.Close(context.Background(), firstTermID, false, dirActor)
 		require.NoError(t, err)
 		freeze(f)
-		_, err = f.svc.Reopen(context.Background(), firstTermID, director)
+		_, err = f.svc.Reopen(context.Background(), firstTermID, dirActor, reopenReason)
 		assert.Equal(t, levelarchive.CodeLevelBeingDeleted, levelarchive.CodeOf(err), "err = %v", err)
 		assert.True(t, f.grades.closures[firstTermID].IsClosed(), "the period stays closed")
 	})

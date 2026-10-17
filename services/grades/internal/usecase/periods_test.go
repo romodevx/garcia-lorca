@@ -309,6 +309,9 @@ func (f periodsFixture) captureAll(t *testing.T) {
 
 var dirActor = domain.Actor{ID: director, Name: "Directora Ruiz"}
 
+// reopenReason is why the fixture director reopens a period (CC-308).
+const reopenReason = "Corrección de calificaciones"
+
 // --- progress ----------------------------------------------------------------
 
 func TestPeriodProgressCountsAndGroupsWhatIsMissing(t *testing.T) {
@@ -574,10 +577,15 @@ func TestReopenAndCloseAgainIssuesVersion2(t *testing.T) {
 	_, err := f.svc.Close(context.Background(), firstTermID, false, dirActor)
 	require.NoError(t, err)
 
-	status, err := f.svc.Reopen(context.Background(), firstTermID, director)
+	status, err := f.svc.Reopen(context.Background(), firstTermID, dirActor, reopenReason)
 	require.NoError(t, err)
 	assert.Equal(t, domain.PeriodOpen, status)
 	assert.False(t, f.grades.closures[firstTermID].IsClosed())
+	assert.Equal(t, dirActor.ID, f.grades.closures[firstTermID].ReopenedBy(), "CC-308: who reopened it is stored")
+	assert.Equal(t, reopenReason, f.grades.closures[firstTermID].ReopenReason())
+
+	_, err = f.svc.Reopen(context.Background(), firstTermID, dirActor, " ")
+	assert.Equal(t, glerrors.KindInvalid, glerrors.KindOf(err), "a blank reason is refused")
 	latest, err := f.svc.ReportCards(context.Background(), ports.ReportCardFilter{TermID: firstTermID})
 	require.NoError(t, err)
 	assert.Len(t, latest, 3, "reopening keeps the report cards published")
@@ -617,7 +625,7 @@ func TestReCloseWithoutChangesNotifiesNobody(t *testing.T) {
 	_, err := f.svc.Close(context.Background(), firstTermID, false, dirActor)
 	require.NoError(t, err)
 	require.Len(t, f.publisher.published, 3, "v1 always notifies")
-	_, err = f.svc.Reopen(context.Background(), firstTermID, director)
+	_, err = f.svc.Reopen(context.Background(), firstTermID, dirActor, reopenReason)
 	require.NoError(t, err)
 
 	res, err := f.svc.Close(context.Background(), firstTermID, false, dirActor)
@@ -639,7 +647,7 @@ func TestReCloseNotifiesAPupilWithoutAPreviousCard(t *testing.T) {
 	f.captureAll(t)
 	_, err := f.svc.Close(context.Background(), firstTermID, false, dirActor)
 	require.NoError(t, err)
-	_, err = f.svc.Reopen(context.Background(), firstTermID, director)
+	_, err = f.svc.Reopen(context.Background(), firstTermID, dirActor, reopenReason)
 	require.NoError(t, err)
 	kept := f.periods.cards[:0]
 	for _, rc := range f.periods.cards {
@@ -667,7 +675,7 @@ func TestReCloseCountsTheCardsItWithdraws(t *testing.T) {
 	f.captureAll(t)
 	_, err := f.svc.Close(context.Background(), firstTermID, false, dirActor)
 	require.NoError(t, err)
-	_, err = f.svc.Reopen(context.Background(), firstTermID, director)
+	_, err = f.svc.Reopen(context.Background(), firstTermID, dirActor, reopenReason)
 	require.NoError(t, err)
 	delete(f.grades.rows, gradeKey("enr-3", subjectID, "gl-2-"+period1))
 
@@ -701,9 +709,9 @@ func TestFirstCloseWithdrawsNothing(t *testing.T) {
 
 func TestReopenRefusals(t *testing.T) {
 	f := newPeriodsFixture(t)
-	_, err := f.svc.Reopen(context.Background(), firstTermID, director)
+	_, err := f.svc.Reopen(context.Background(), firstTermID, dirActor, reopenReason)
 	assert.Equal(t, domain.CodeAlreadyOpen, domain.RefusalCodeOf(err), "a period never closed is open")
-	_, err = f.svc.Reopen(context.Background(), "ghost", director)
+	_, err = f.svc.Reopen(context.Background(), "ghost", dirActor, reopenReason)
 	assert.Equal(t, glerrors.KindNotFound, glerrors.KindOf(err))
 }
 
@@ -827,7 +835,7 @@ func TestStudentReportCardsNewestTermFirst(t *testing.T) {
 	f.capture(t, "enr-1", subjectID, period2, 8)
 	_, err = f.svc.Close(context.Background(), secondTermID, true, dirActor)
 	require.NoError(t, err)
-	_, err = f.svc.Reopen(context.Background(), firstTermID, director)
+	_, err = f.svc.Reopen(context.Background(), firstTermID, dirActor, reopenReason)
 	require.NoError(t, err)
 	_, err = f.svc.Close(context.Background(), firstTermID, false, dirActor) // v2 of T1, issued last
 	require.NoError(t, err)
@@ -858,7 +866,7 @@ func TestClosedTerms(t *testing.T) {
 	require.NoError(t, err)
 	_, err = f.svc.Close(context.Background(), secondTermID, true, dirActor)
 	require.NoError(t, err)
-	_, err = f.svc.Reopen(context.Background(), secondTermID, director)
+	_, err = f.svc.Reopen(context.Background(), secondTermID, dirActor, reopenReason)
 	require.NoError(t, err)
 
 	got, err := f.svc.ClosedTerms(context.Background(), []string{secondTermID, firstTermID, "ghost"})
