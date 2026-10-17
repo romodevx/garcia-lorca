@@ -85,6 +85,9 @@ const EXPORT_COLUMNS: readonly CsvColumn<Row>[] = [
   // T18: Saldo is net of it, so without this column the file would not add up.
   { label: "Beca", value: (r) => centsToPesosInput(r.charge.scholarshipCents ?? 0) },
   { label: "Pagado", value: (r) => centsToPesosInput(r.charge.paidCents) },
+  // CC-207: the part of Pagado credit notes settled — not money — so that
+  // Pagado − Nota de crédito adds up to Cobrado.
+  { label: "Nota de crédito", value: (r) => centsToPesosInput(r.charge.creditNoteCents ?? 0) },
   { label: "Saldo", value: (r) => centsToPesosInput(owedCents(r.charge)) },
   { label: "Estado", value: (r) => STATUS[r.visual].label },
 ];
