@@ -44,6 +44,7 @@ export function WeekView({ board, mode, canWrite, now, onChanged, version = 0 }:
   const [target, setTarget] = useState<DrawerTarget | null>(null);
   const [toast, setToast] = useState<string | undefined>(undefined);
   const removal = useUndoableRemoval<ScheduleBlock>();
+  const [gone, setGone] = useState<ReadonlySet<string>>(new Set());
   const today = nowInSchoolZone(now).date;
   const week = useWeekChanges(board, mode, today, version);
 
@@ -53,15 +54,18 @@ export function WeekView({ board, mode, canWrite, now, onChanged, version = 0 }:
     return () => clearTimeout(t);
   }, [toast]);
 
-  const shown = filterBlocks(board, filter).filter((b) => !removal.pending.some((p) => p.id === b.id));
+  const shown = filterBlocks(board, filter).filter((b) => !gone.has(b.id) && !removal.pending.some((p) => p.id === b.id));
   const gridLevel = filter.levelId !== "" ? filter.levelId : index.levelOfGroup(shown[0]?.groupId ?? "");
   const grid = gridBounds(board.settings.find((s) => s.levelId === gridLevel), shown);
   const newClass = (weekday: number, start: number): void => setTarget({ kind: "new", weekday, start, groupId: filter.groupId, teacherId: filter.teacherId });
 
   const remove = (block: ScheduleBlock, reason: string): void => {
     setTarget(null);
-    removal.remove(block, () => {
-      deleteBlock(API_URL, block.id, reason === "" ? undefined : reason)
+    removal.remove(block, ({ keepalive }) => {
+      // Hidden for good once sent: until the board is read again it still lists
+      // it, and a class back on screen invites a second DELETE (gate #142).
+      setGone((prev) => new Set(prev).add(block.id));
+      deleteBlock(API_URL, block.id, reason === "" ? undefined : reason, { keepalive })
         .catch((err: unknown) => setToast(err instanceof Error ? err.message : "No se pudo quitar la clase."))
         .finally(onChanged);
     });

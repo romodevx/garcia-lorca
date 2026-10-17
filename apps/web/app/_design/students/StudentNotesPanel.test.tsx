@@ -113,8 +113,8 @@ describe("StudentNotesPanel", () => {
     expect(screen.getAllByRole("button", { name: "Anular nota" })).toHaveLength(2);
   });
 
-  // Reversible: gone at once, told to the server only when the 8 s run out
-  // (or the page is left).
+  // Reversible: gone at once, told to the server when the offer is closed,
+  // another note is voided, the page is left — or the window is about to end.
   it("voids with an undo", async () => {
     const user = userEvent.setup();
     const { unmount } = renderPanel();
@@ -127,7 +127,40 @@ describe("StudentNotesPanel", () => {
 
     await user.click(screen.getByRole("button", { name: "Anular nota" }));
     unmount();
-    expect(api.voidNote).toHaveBeenCalledWith(expect.any(String), "st1", "n-2");
+    expect(api.voidNote).toHaveBeenCalledWith(expect.any(String), "st1", "n-2", { keepalive: false });
+  });
+
+  // Gate B1 on #142: closing the tab must not cancel the void.
+  it("closing the tab sends the void with keepalive", async () => {
+    const user = userEvent.setup();
+    renderPanel();
+    await screen.findByText("Llegó con fiebre");
+    await user.click(screen.getByRole("button", { name: "Anular nota" }));
+
+    window.dispatchEvent(new Event("pagehide"));
+
+    expect(api.voidNote).toHaveBeenCalledWith(expect.any(String), "st1", "n-2", { keepalive: true });
+  });
+
+  // Gate B2 on #142: Deshacer has no clock any more, but the author's 15
+  // minutes do. Left open, the offer would outlive the window and the server
+  // would refuse the void. It is sent while the window is still open.
+  it("sends an author's void before the 15 minutes run out, even with Deshacer still open", async () => {
+    useFakeClock();
+    try {
+      renderPanel();
+      await screen.findByText("Llegó con fiebre");
+      fireEvent.click(screen.getByRole("button", { name: "Anular nota" }));
+
+      act(() => vi.advanceTimersByTime(9 * 60_000));
+      expect(api.voidNote).not.toHaveBeenCalled();
+
+      act(() => vi.advanceTimersByTime(60_000));
+      expect(api.voidNote).toHaveBeenCalledWith(expect.any(String), "st1", "n-2", { keepalive: false });
+      expect(screen.queryByRole("button", { name: /Deshacer/ })).not.toBeInTheDocument();
+    } finally {
+      useRealClock();
+    }
   });
 
   // The void reaches the server only after the 8 s undo: with less than that

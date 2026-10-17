@@ -462,7 +462,7 @@ describe("Paso 8 · Calendario (A27–A32)", () => {
       const step = await openStep(user, "Calendario");
       await user.click(await within(step).findByRole("button", { name: "Quitar PATRIA" }));
       await user.click(screen.getByRole("button", { name: "Cerrar aviso" }));
-      await waitFor(() => expect(config.deleteNonWorkingPeriod).toHaveBeenCalledWith(API, "d1"));
+      await waitFor(() => expect(config.deleteNonWorkingPeriod).toHaveBeenCalledWith(API, "d1", { keepalive: false }));
     });
   });
 });

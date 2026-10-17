@@ -114,7 +114,7 @@ describe("CalendarPanel", () => {
     expect(config.deleteNonWorkingPeriod).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: "Cerrar aviso" }));
 
-    expect(config.deleteNonWorkingPeriod).toHaveBeenCalledWith(expect.anything(), "per-1");
+    expect(config.deleteNonWorkingPeriod).toHaveBeenCalledWith(expect.anything(), "per-1", { keepalive: false });
     useRealClock();
   });
 
@@ -223,11 +223,11 @@ describe("quitar varios días dentro del mismo plazo", () => {
     await user.click(screen.getByRole("button", { name: /Quitar INDEPENDENCIA/ }));
     await user.click(screen.getByRole("button", { name: /Quitar REVOLUCIÓN/ }));
     // Quitar el segundo es otra acción: el primero ya no se ofrece y se borra.
-    expect(config.deleteNonWorkingPeriod).toHaveBeenCalledWith(expect.anything(), "per-1");
+    expect(config.deleteNonWorkingPeriod).toHaveBeenCalledWith(expect.anything(), "per-1", { keepalive: false });
     await user.click(screen.getByRole("button", { name: "Cerrar aviso" }));
 
-    expect(config.deleteNonWorkingPeriod).toHaveBeenCalledWith(expect.anything(), "per-1");
-    expect(config.deleteNonWorkingPeriod).toHaveBeenCalledWith(expect.anything(), "per-2");
+    expect(config.deleteNonWorkingPeriod).toHaveBeenCalledWith(expect.anything(), "per-1", { keepalive: false });
+    expect(config.deleteNonWorkingPeriod).toHaveBeenCalledWith(expect.anything(), "per-2", { keepalive: false });
     useRealClock();
   });
 
@@ -242,7 +242,20 @@ describe("quitar varios días dentro del mismo plazo", () => {
     await user.click(screen.getByRole("button", { name: /Quitar Independencia/ }));
     unmount();
 
-    expect(config.deleteNonWorkingPeriod).toHaveBeenCalledWith(expect.anything(), "per-1");
+    expect(config.deleteNonWorkingPeriod).toHaveBeenCalledWith(expect.anything(), "per-1", { keepalive: false });
+  });
+
+  // Gate B1 on #142: closing the tab must not cancel the delete.
+  it("si se cierra la pestaña, el borrado sale con keepalive", async () => {
+    const user = userEvent.setup();
+    config.deleteNonWorkingPeriod.mockResolvedValue(undefined);
+    render(<CalendarPanel cycle={cycle} />);
+    await screen.findByText("Independencia");
+
+    await user.click(screen.getByRole("button", { name: /Quitar Independencia/ }));
+    window.dispatchEvent(new Event("pagehide"));
+
+    expect(config.deleteNonWorkingPeriod).toHaveBeenCalledWith(expect.anything(), "per-1", { keepalive: true });
   });
 });
 

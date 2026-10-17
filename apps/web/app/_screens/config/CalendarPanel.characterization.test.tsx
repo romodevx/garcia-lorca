@@ -170,7 +170,7 @@ describe("CalendarPanel — characterization", () => {
     await user.click(await screen.findByRole("button", { name: "Quitar FESTIVAL" }));
     await user.click(screen.getByRole("button", { name: "Cerrar aviso" }));
 
-    expect(config.deleteSchoolEvent).toHaveBeenCalledWith(expect.any(String), "ev1");
+    expect(config.deleteSchoolEvent).toHaveBeenCalledWith(expect.any(String), "ev1", { keepalive: false });
   });
 
   // ISSUE-CC-105: removing an activity is another action, so the closed day
@@ -185,7 +185,7 @@ describe("CalendarPanel — characterization", () => {
     await user.click(await screen.findByRole("button", { name: "Quitar INVIERNO" }));
     await user.click(await screen.findByRole("button", { name: "Quitar FESTIVAL" }));
 
-    expect(config.deleteNonWorkingPeriod).toHaveBeenCalledWith(expect.any(String), "d2");
+    expect(config.deleteNonWorkingPeriod).toHaveBeenCalledWith(expect.any(String), "d2", { keepalive: false });
     expect(config.deleteSchoolEvent).not.toHaveBeenCalled();
     expect(screen.getAllByRole("button", { name: "Deshacer" })).toHaveLength(1);
   });

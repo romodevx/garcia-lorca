@@ -92,7 +92,12 @@ describe("useUndoableRemoval", () => {
     expect(commit).toHaveBeenCalledTimes(1);
   });
 
-  it("cerrar la pestaña también compromete lo pendiente", () => {
+  /**
+   * Gate B1: la descarga de la página cancela un fetch normal, así que el
+   * borrado que sale por `pagehide` debe pedir `keepalive`. Y la página puede
+   * volver del bfcache: el aviso ya no debe estar.
+   */
+  it("cerrar la pestaña compromete lo pendiente con keepalive y quita el aviso", () => {
     const commit = vi.fn();
     const { result } = renderHook(() => useUndoableRemoval<string>());
     act(() => result.current.remove("a", commit));
@@ -100,6 +105,18 @@ describe("useUndoableRemoval", () => {
     act(() => { window.dispatchEvent(new Event("pagehide")); });
 
     expect(commit).toHaveBeenCalledTimes(1);
+    expect(commit).toHaveBeenCalledWith({ keepalive: true });
+    expect(result.current.latest).toBeUndefined();
+  });
+
+  it("los compromisos dentro de la página no piden keepalive", () => {
+    const commit = vi.fn();
+    const { result } = renderHook(() => useUndoableRemoval<string>());
+    act(() => result.current.remove("a", commit));
+
+    act(() => result.current.dismiss());
+
+    expect(commit).toHaveBeenCalledWith({ keepalive: false });
   });
 
   it("nada se borra dos veces", () => {

@@ -18,6 +18,7 @@
 
 // --- entity types (match the gateway JSON contract) -----------------------
 
+import type { DeferredInit } from "../_lib/deferredInit";
 import { GENERIC_SERVER_FAILURE, spanishServerReason } from "../_lib/serverReason";
 import { authFetch } from "../auth/authFetch";
 
@@ -191,8 +192,9 @@ async function studentsFailure(res: Response): Promise<StudentsError> {
   return new StudentsError(res.status, body.trim(), res.headers.get("X-Error-Code") ?? undefined);
 }
 
-async function postJSON<T>(baseURL: string, path: string, body: unknown): Promise<T> {
+async function postJSON<T>(baseURL: string, path: string, body: unknown, init: DeferredInit = {}): Promise<T> {
   const res = await authFetch(url(baseURL, `${BASE_PATH}${path}`), {
+    ...init,
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
@@ -506,8 +508,8 @@ async function sendJSON<T>(target: string, method: "PUT" | "PATCH", body: unknow
   return (await res.json()) as T;
 }
 
-async function sendEmpty(target: string, method: "DELETE"): Promise<void> {
-  const res = await authFetch(target, { method, credentials: "include" });
+async function sendEmpty(target: string, method: "DELETE", init: DeferredInit = {}): Promise<void> {
+  const res = await authFetch(target, { ...init, method, credentials: "include" });
   if (!res.ok) {
     throw await studentsFailure(res);
   }
@@ -585,8 +587,8 @@ export function updateContact(
 }
 
 /** Refused with 409 while the contact can open the family app. */
-export function removeContact(baseURL: string, studentId: string, contactId: string): Promise<void> {
-  return sendEmpty(studentPath(baseURL, studentId, `/contacts/${encodeURIComponent(contactId)}`), "DELETE");
+export function removeContact(baseURL: string, studentId: string, contactId: string, init?: DeferredInit): Promise<void> {
+  return sendEmpty(studentPath(baseURL, studentId, `/contacts/${encodeURIComponent(contactId)}`), "DELETE", init);
 }
 
 // --- notes (T6) -------------------------------------------------------------
@@ -632,11 +634,12 @@ export function editNote(baseURL: string, studentId: string, noteId: string, bod
 }
 
 /** 403 after the author's 15 minutes (unless the caller may void any); 409 if already voided. */
-export function voidNote(baseURL: string, studentId: string, noteId: string): Promise<StudentNote> {
+export function voidNote(baseURL: string, studentId: string, noteId: string, init?: DeferredInit): Promise<StudentNote> {
   return postJSON<StudentNote>(
     baseURL,
     `/students/${encodeURIComponent(studentId)}/notes/${encodeURIComponent(noteId)}/void`,
     {},
+    init,
   );
 }
 

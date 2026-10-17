@@ -17,11 +17,25 @@ import { useCallback, useEffect, useRef, useState } from "react";
  *
  * Nada se pierde ni se borra dos veces: cada pendiente sale de la cola antes de
  * comprometerse.
+ *
+ * Al cerrar la pestaña la descarga cancela un fetch normal, así que ese
+ * compromiso pide `keepalive` (compuerta B1 de #142): quien borra se lo pasa a
+ * su llamada al API. No `sendBeacon`, que no lleva método DELETE ni headers.
  */
+export interface CommitHow {
+  /** The page is going away: the request must outlive it. */
+  keepalive: boolean;
+}
+
+export type Commit = (how: CommitHow) => void;
+
 interface Pending<T> {
   item: T;
-  commit: () => void;
+  commit: Commit;
 }
+
+const IN_PAGE: CommitHow = { keepalive: false };
+const LEAVING: CommitHow = { keepalive: true };
 
 export interface UndoableRemoval<T> {
   /** Lo último quitado y todavía deshacible, para anunciarlo. */
@@ -35,7 +49,7 @@ export interface UndoableRemoval<T> {
    */
   readonly pending: readonly T[];
   /** Quita: la lista ya no lo muestra, el servidor todavía no se entera. */
-  remove: (item: T, commit: () => void) => void;
+  remove: (item: T, commit: Commit) => void;
   /** Devuelve lo último quitado y cancela su borrado. */
   undo: () => T[] | undefined;
   /** La persona cerró el aviso: se borra de verdad. */
@@ -53,21 +67,21 @@ export function useUndoableRemoval<T>(): UndoableRemoval<T> {
   }, []);
 
   /** Takes everything out of the queue first, so a re-entrant call never commits twice. */
-  const commitAll = useCallback((): void => {
+  const commitAll = useCallback((how: CommitHow): void => {
     const due = pending.current;
     pending.current = [];
-    for (const entry of due) entry.commit();
+    for (const entry of due) entry.commit(how);
   }, []);
 
   const flush = useCallback((): void => {
     if (pending.current.length === 0) return;
-    commitAll();
+    commitAll(IN_PAGE);
     publish();
   }, [commitAll, publish]);
 
   const remove = useCallback(
-    (item: T, commit: () => void): void => {
-      commitAll();
+    (item: T, commit: Commit): void => {
+      commitAll(IN_PAGE);
       pending.current = [{ item, commit }];
       publish();
     },
@@ -83,12 +97,17 @@ export function useUndoableRemoval<T>(): UndoableRemoval<T> {
   }, [publish]);
 
   useEffect(() => {
-    window.addEventListener("pagehide", commitAll);
-    return () => {
-      window.removeEventListener("pagehide", commitAll);
-      commitAll();
+    // A page restored from the bfcache must not show an offer already spent.
+    const leaving = (): void => {
+      commitAll(LEAVING);
+      publish();
     };
-  }, [commitAll]);
+    window.addEventListener("pagehide", leaving);
+    return () => {
+      window.removeEventListener("pagehide", leaving);
+      commitAll(IN_PAGE);
+    };
+  }, [commitAll, publish]);
 
   return { latest: items[items.length - 1], pending: items, remove, undo, dismiss: flush, flush };
 }

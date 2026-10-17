@@ -126,8 +126,8 @@ export function ContactsPanel({ studentId }: ContactsPanelProps): ReactElement {
 
   const remove = (contact: Contact): void => {
     setContacts((prev) => prev.filter((c) => c.id !== contact.id));
-    removal.remove(contact, () => {
-      removeContact(API_URL, studentId, contact.id).catch(() => {
+    removal.remove(contact, ({ keepalive }) => {
+      removeContact(API_URL, studentId, contact.id, { keepalive }).catch(() => {
         setError(`No se pudo quitar a ${contact.fullName}. Vuelve a cargar la página.`);
         reload();
       });

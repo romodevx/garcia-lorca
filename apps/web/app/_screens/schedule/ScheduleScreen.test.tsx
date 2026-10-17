@@ -354,6 +354,35 @@ describe("Horarios — cambios reversibles (T16)", () => {
     expect(m.deleteBlock).not.toHaveBeenCalled();
   });
 
+  // Gate B1 on #142: closing the tab must not cancel the delete.
+  it("closing the tab sends the class's delete with keepalive", async () => {
+    m.deleteBlock.mockResolvedValue(undefined);
+    const user = renderManager();
+    await chooseGroup3A(user);
+    await user.click(screen.getByRole("button", { name: /^Matemáticas, 3.º A/ }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Quitar clase" }));
+
+    window.dispatchEvent(new Event("pagehide"));
+
+    expect(m.deleteBlock).toHaveBeenCalledWith(expect.any(String), BLOCK_MATE, undefined, { keepalive: true });
+  });
+
+  // Gate nit on #142: once the delete is confirmed the class stays hidden
+  // until the board says so, instead of reappearing (and inviting a 2nd DELETE).
+  it("keeps a removed class hidden once its delete is sent", async () => {
+    m.deleteBlock.mockResolvedValue(undefined);
+    const user = renderManager();
+    await chooseGroup3A(user);
+    await user.click(screen.getByRole("button", { name: /^Matemáticas, 3.º A/ }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Quitar clase" }));
+
+    await user.click(screen.getByRole("button", { name: "Cerrar aviso" }));
+
+    await waitFor(() => expect(m.deleteBlock).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(m.getBoard.mock.calls.length).toBeGreaterThan(1));
+    expect(screen.queryByRole("button", { name: /^Matemáticas, 3.º A/ })).not.toBeInTheDocument();
+  });
+
   it("undoes a date's change from the day list", async () => {
     m.deleteOverride.mockResolvedValue(undefined);
     m.getDay.mockResolvedValue({

@@ -309,7 +309,20 @@ describe("ContactsPanel · editing (T5)", () => {
 
     await user.click(screen.getByRole("button", { name: "Quitar a Rosa Méndez" }));
     unmount();
-    expect(students.removeContact).toHaveBeenCalledWith(expect.any(String), "st-1", "gl-2");
+    expect(students.removeContact).toHaveBeenCalledWith(expect.any(String), "st-1", "gl-2", { keepalive: false });
+  });
+
+  // Gate B1 on #142: closing the tab must not cancel the delete.
+  it("closing the tab sends the delete with keepalive", async () => {
+    const user = userEvent.setup();
+    students.removeContact.mockResolvedValue(undefined);
+    render(<ContactsPanel studentId="st-1" />);
+    await screen.findByText("Rosa Méndez");
+
+    await user.click(screen.getByRole("button", { name: "Quitar a Rosa Méndez" }));
+    window.dispatchEvent(new Event("pagehide"));
+
+    expect(students.removeContact).toHaveBeenCalledWith(expect.any(String), "st-1", "gl-2", { keepalive: true });
   });
 
   // The server refuses it (409): revoke the access first. A button that

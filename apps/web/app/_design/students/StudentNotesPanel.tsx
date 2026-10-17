@@ -13,11 +13,13 @@ import type { NoteWriteResult, StudentNotes } from "./useStudentNotes";
 /** How long the author may take a note back (the server enforces it). */
 const AUTHOR_VOID_WINDOW_MS = 15 * 60_000;
 /**
- * The void reaches the server only when the 8-second undo runs out, so the
- * button leaves early enough for it to still land inside the window, with a
- * margin for the request itself.
+ * Deshacer has no clock (ISSUE-CC-105), so an author's pending void is sent on
+ * its own when the window is about to close (gate B2 on #142). The button
+ * leaves this much earlier, so a click always has time to be undone or sent.
  */
 const VOID_LEAD_MS = 10_000;
+/** How long before the window closes a pending void is sent: room for the request. */
+const REQUEST_MARGIN_MS = 5_000;
 /** How long after writing it the author is offered "Anular". */
 const OWN_VOID_SPAN_MS = AUTHOR_VOID_WINDOW_MS - VOID_LEAD_MS;
 const MAX_NOTE_CHARS = 2000;
@@ -76,8 +78,9 @@ export interface StudentNotesPanelProps {
  *
  * A note can be edited by its author (or the owner); the server keeps the text
  * each edit replaced, and the note shows who edited it last. A wrong note is
- * voided: gone from this list at once, with eight seconds to undo, and kept on
- * the server marked "anulada" — which only whoever may void any note sees.
+ * voided: gone from this list at once, with Deshacer until the person moves on
+ * (or the author's window is about to close), and kept on the server marked
+ * "anulada" — which only whoever may void any note sees.
  */
 export function StudentNotesPanel({
   notes: state,
@@ -112,6 +115,15 @@ export function StudentNotesPanel({
     return () => clearTimeout(timer);
   }, [nextCutoff, now, tick]);
   const removal = useUndoableRemoval<StudentNote>();
+  // An author's void cannot wait past the server's window for Deshacer.
+  const pendingVoid = removal.latest;
+  const { flush } = removal;
+  useEffect(() => {
+    if (pendingVoid === undefined || canVoidAny) return;
+    const deadline = Date.parse(pendingVoid.createdAt) + AUTHOR_VOID_WINDOW_MS - REQUEST_MARGIN_MS;
+    const timer = setTimeout(flush, Math.max(0, deadline - now()));
+    return () => clearTimeout(timer);
+  }, [pendingVoid, canVoidAny, flush, now]);
   const focusFirstInvalid = useFocusFirstInvalid();
 
   const dirty = draft.trim() !== "" || editing !== undefined;
@@ -170,8 +182,8 @@ export function StudentNotesPanel({
       return;
     }
     state.hide(note);
-    removal.remove(note, () => {
-      voidNote(API_URL, studentId, note.id)
+    removal.remove(note, ({ keepalive }) => {
+      voidNote(API_URL, studentId, note.id, { keepalive })
         .then(() => {
           state.unhide([note], false);
           if (canVoidAny) state.reload();

@@ -193,8 +193,8 @@ export function CalendarPanel({ cycle, onLoaded }: CalendarPanelProps): ReactEle
               onClick={() => {
                 setPeriods((prev) => prev.filter((x) => x.id !== p.id));
                 eventRemoval.flush();
-                dayRemoval.remove(p, () => {
-                  void deleteNonWorkingPeriod(API_URL, p.id)
+                dayRemoval.remove(p, ({ keepalive }) => {
+                  void deleteNonWorkingPeriod(API_URL, p.id, { keepalive })
                     .then(reload)
                     .catch(() => setError("No se pudo quitar ese día."));
                 });
@@ -240,8 +240,8 @@ export function CalendarPanel({ cycle, onLoaded }: CalendarPanelProps): ReactEle
                 onClick={() => {
                   setEvents((prev) => prev.filter((x) => x.id !== ev.id));
                   dayRemoval.flush();
-                  eventRemoval.remove(ev, () => {
-                    void deleteSchoolEvent(API_URL, ev.id)
+                  eventRemoval.remove(ev, ({ keepalive }) => {
+                    void deleteSchoolEvent(API_URL, ev.id, { keepalive })
                       .then(reload)
                       .catch(() => setError("No se pudo quitar esa actividad."));
                   });
