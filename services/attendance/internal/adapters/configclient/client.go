@@ -13,8 +13,10 @@ package configclient
 import (
 	"context"
 	"net/http"
+	"time"
 
 	connect "connectrpc.com/connect"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	configv1 "github.com/garcia-lorca/gen/go/garcialorca/config/v1"
 	"github.com/garcia-lorca/gen/go/garcialorca/config/v1/configv1connect"
@@ -25,6 +27,9 @@ import (
 
 // Compile-time proof the adapter satisfies the consumer-defined seam.
 var _ service.GroupReader = (*Client)(nil)
+
+// Compile-time proof the adapter satisfies the school-calendar seam (T14).
+var _ service.SchoolCalendar = (*Client)(nil)
 
 // Client checks group references against config by RPC. It depends only on the
 // generated Connect client.
@@ -72,6 +77,27 @@ func (c *Client) WritableByID(ctx context.Context, id string) error {
 		return levelarchive.LevelBeingDeleted()
 	}
 	return nil
+}
+
+// SchoolDayOf asks config's school calendar whether the group has classes on
+// date (T14): the group's cycle, then that cycle's rule. A config that predates
+// GetSchoolDay (Unimplemented, mid-rollout) leaves the day open, as attendance
+// behaved before.
+func (c *Client) SchoolDayOf(ctx context.Context, groupID string, date time.Time) (service.SchoolDay, error) {
+	group, err := c.rpc.GetGroup(ctx, connect.NewRequest(&configv1.GetGroupRequest{Id: groupID}))
+	if err != nil {
+		return service.SchoolDay{}, mapConfigErr(err, "group")
+	}
+	day, err := c.rpc.GetSchoolDay(ctx, connect.NewRequest(&configv1.GetSchoolDayRequest{
+		CycleId: group.Msg.GetGroup().GetCycleId(), Date: timestamppb.New(date),
+	}))
+	if connect.CodeOf(err) == connect.CodeUnimplemented {
+		return service.SchoolDay{Open: true}, nil
+	}
+	if err != nil {
+		return service.SchoolDay{}, mapConfigErr(err, "school day")
+	}
+	return service.SchoolDay{Open: day.Msg.GetOpen(), Closed: day.Msg.GetClosedLabel()}, nil
 }
 
 // mapConfigErr translates a Connect transport error to the seam's error

@@ -20,6 +20,7 @@ type fakeTeachingAttendance struct {
 	gotRosterSubjectID string
 	roster             []client.AttendanceRosterRow
 	session            *client.AttendanceSession
+	noClasses          bool
 	rosterErr          error
 	rosterCalls        int
 
@@ -37,7 +38,7 @@ func (f *fakeTeachingAttendance) GetDailyRoster(_ context.Context, groupID, date
 	if f.rosterErr != nil {
 		return client.AttendanceRoster{}, f.rosterErr
 	}
-	return client.AttendanceRoster{Rows: f.roster, Session: f.session}, nil
+	return client.AttendanceRoster{Rows: f.roster, Session: f.session, NoClasses: f.noClasses}, nil
 }
 
 func (f *fakeTeachingAttendance) SaveDailyAttendance(_ context.Context, in client.SaveAttendanceInput) (client.SaveAttendanceResult, error) {

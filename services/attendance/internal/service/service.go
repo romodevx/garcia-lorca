@@ -321,6 +321,9 @@ type RosterRow struct {
 type Roster struct {
 	Rows    []RosterRow
 	Session *Session
+	// NoClasses is true when the date has no classes for the group (T14): the
+	// list may be read, but a save is refused with NO_CLASSES.
+	NoClasses bool
 }
 
 // SaveRequest is one save of a list: the group·day, the subject for a per-class
@@ -367,6 +370,8 @@ type AttendanceService struct {
 	// school is the school's time zone: an enrollment's instants are read as
 	// days on its calendar, the one the lists are taken on (default UTC).
 	school *time.Location
+	// calendar refuses saves on days without classes (T14); nil = none refused.
+	calendar SchoolCalendar
 }
 
 // Option configures an AttendanceService (functional options).
@@ -442,8 +447,12 @@ func (s *AttendanceService) GetDailyRoster(ctx context.Context, groupID, dateStr
 	if err != nil {
 		return Roster{}, err
 	}
+	schoolDay, err := s.schoolDayOf(ctx, key)
+	if err != nil {
+		return Roster{}, err
+	}
 
-	out := Roster{Rows: make([]RosterRow, 0, len(enrollmentIDs))}
+	out := Roster{Rows: make([]RosterRow, 0, len(enrollmentIDs)), NoClasses: !schoolDay.Open}
 	if found {
 		out.Session = &session
 	}
@@ -492,6 +501,9 @@ func (s *AttendanceService) SaveDailyAttendance(ctx context.Context, req SaveReq
 		return SaveResult{}, err
 	}
 	if err := s.requireWritableGroup(ctx, req.GroupID); err != nil {
+		return SaveResult{}, err
+	}
+	if err := s.requireSchoolDay(ctx, key); err != nil {
 		return SaveResult{}, err
 	}
 	enrollmentIDs, studentByEnrollment, err := s.activeRoster(ctx, req.GroupID)

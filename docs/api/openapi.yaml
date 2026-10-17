@@ -3409,8 +3409,11 @@ paths:
         so every enrollment missing from it (or marked `present`) ends present.
         Stored rows are corrected in place and events go out only for what
         changed, so re-saving never re-notifies the family. The caller is
-        stamped as the list's taker. Same mode rules as the roster; any date.
-        Requires `attendance:write`.
+        stamped as the list's taker. Same mode rules as the roster; any date
+        with classes: a weekend, a date outside the group's cycle or a day the
+        school calendar closes is 400 `X-Error-Code: NO_CLASSES` ("Ese día no
+        hay clases.", with the closed period's name in parentheses when there
+        is one). Requires `attendance:write`.
       operationId: saveAttendance
       security: [{ sessionCookie: [] }]
       parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
@@ -3427,7 +3430,7 @@ paths:
                 - { enrollmentId: 3f2504e0-4f89-41d3-9a0c-0305e82c3301, status: absent, note: "" }
       responses:
         '200': { $ref: '#/components/responses/AttendanceSaved' }
-        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '400': { $ref: '#/components/responses/AttendanceSaveRefused' }
         '401': { $ref: '#/components/responses/PlainUnauthorized' }
         '403': { $ref: '#/components/responses/PlainForbidden' }
         '404': { $ref: '#/components/responses/PlainNotFound' }
@@ -3648,7 +3651,9 @@ paths:
         to 7 days back: 400 "No puedes registrar una fecha futura" for a date
         after today, "Solo puedes corregir hasta 7 días atrás" for one before
         the window. An enrollment of another group is refused by the attendance
-        service (400). The caller is stamped as the list's taker. Requires
+        service (400). A day without classes is 400 `X-Error-Code:
+        NO_CLASSES` ("Ese día no hay clases."), as on the director route. The
+        caller is stamped as the list's taker. Requires
         `attendance_own:write`.
       operationId: saveTeachingAttendance
       security: [{ sessionCookie: [] }]
@@ -3665,7 +3670,7 @@ paths:
                 - { enrollmentId: 3f2504e0-4f89-41d3-9a0c-0305e82c3301, status: late, note: "8:15" }
       responses:
         '200': { $ref: '#/components/responses/AttendanceSaved' }
-        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '400': { $ref: '#/components/responses/AttendanceSaveRefused' }
         '401': { $ref: '#/components/responses/PlainUnauthorized' }
         '403': { $ref: '#/components/responses/PlainForbidden' }
         '404': { $ref: '#/components/responses/PlainNotFound' }
@@ -6835,6 +6840,7 @@ components:
       description: >
         The refusal's machine code, so a screen can react (mark the cell, lock
         the row) without parsing the sentence. Exposed to the web via CORS.
+        Attendance saves (T14): NO_CLASSES (400, a day without classes).
         Period grades (T15): GRADE_NOT_INTEGER, GRADE_OUT_OF_RANGE,
         GRADE_NOT_NUMBER, PERIOD_NOT_IN_GRADE, PERIOD_NOT_STARTED,
         PERIOD_PREVIOUS_GROUP, LEVEL_NOT_GRADED, ENROLLMENT_NOT_IN_GROUP,
@@ -7260,6 +7266,19 @@ components:
         text/plain:
           schema: { type: string }
           example: invalid page token
+    AttendanceSaveRefused:
+      description: >
+        The list cannot be saved; the body says why, written for the person.
+        With `X-Error-Code: NO_CLASSES` the date has no classes for the group
+        (weekend, outside its cycle, or a closed day of the school calendar).
+        Without a code: a contract violation (bad date, mark of another group,
+        window or mode rule).
+      headers:
+        X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
+      content:
+        text/plain:
+          schema: { type: string }
+          example: Ese día no hay clases.
     PlainBadRequest:
       description: The request did not satisfy the contract; the body says which field.
       content:
@@ -9509,14 +9528,17 @@ components:
         editable: { type: boolean, description: Whether the caller may still save this list. }
         readOnlyReason:
           type: string
-          enum: [future, window]
+          enum: [future, window, no_classes]
           description: >
             Present only when `editable` is false, and says why: `future` — the
             date is after `today` (web text "No puedes registrar una fecha
             futura"); `window` — more than `windowDays` before `today` (web
-            text "Solo puedes corregir hasta 7 días atrás"). A code, not a
-            sentence: the web maps it to its own text. Never sent to the
-            director, who has no window.
+            text "Solo puedes corregir hasta 7 días atrás"); `no_classes` —
+            the school calendar has no classes that day: a weekend, a date
+            outside the group's cycle, or a closed day (web text "Ese día no
+            hay clases."), sent to the director too. `future` and `window`
+            win over `no_classes`. A code, not a sentence: the web maps it to
+            its own text. A list already taken on such a day stays readable.
         today:
           type: string
           format: date

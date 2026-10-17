@@ -53,6 +53,9 @@ var msgOutsideWindow = fmt.Sprintf("Solo puedes corregir hasta %d días atrás",
 const (
 	readOnlyFuture = "future"
 	readOnlyWindow = "window"
+	// readOnlyNoClasses: the school calendar has no classes that day (T14);
+	// the attendance service refuses its save with NO_CLASSES.
+	readOnlyNoClasses = "no_classes"
 )
 
 const (
@@ -405,8 +408,8 @@ func clampRunes(s string, n int) string {
 // --- roster JSON ---------------------------------------------------------------
 
 // attendanceListResponse is the roster both surfaces answer with.
-// ReadOnlyReason says why a non-editable list is read-only (readOnlyFuture |
-// readOnlyWindow) and is omitted when the list is editable. Today is the
+// ReadOnlyReason says why a non-editable list is read-only (readOnlyFuture,
+// readOnlyWindow, readOnlyNoClasses) and is omitted when editable. Today is the
 // server's school day (UTC, see schoolToday), so the web's date picker starts
 // from the same day the window is measured against.
 type attendanceListResponse struct {
@@ -445,6 +448,9 @@ type attendanceListRow struct {
 }
 
 func toAttendanceListResponse(view listView, roster client.AttendanceRoster, students studentDirectory) attendanceListResponse {
+	if view.ReadOnlyReason == "" && roster.NoClasses {
+		view.ReadOnlyReason = readOnlyNoClasses
+	}
 	out := attendanceListResponse{
 		Mode:           view.Mode,
 		Date:           view.Date,

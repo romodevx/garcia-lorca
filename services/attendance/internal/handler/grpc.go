@@ -65,8 +65,9 @@ func (h *AttendanceHandler) GetDailyRoster(ctx context.Context, req *connect.Req
 		})
 	}
 	return connect.NewResponse(&attendancev1.GetDailyRosterResponse{
-		Rows:    out,
-		Session: toProtoSession(roster.Session),
+		Rows:      out,
+		Session:   toProtoSession(roster.Session),
+		NoClasses: roster.NoClasses,
 	}), nil
 }
 
@@ -192,10 +193,19 @@ const ErrorCodeMeta = "X-Error-Code"
 // attaches its machine code (e.g. LEVEL_BEING_DELETED) as X-Error-Code.
 func connectErr(err error) *connect.Error {
 	ce := connectErrForKind(err)
-	if code := levelarchive.CodeOf(err); code != "" {
+	if code := refusalCode(err); code != "" {
 		ce.Meta().Set(ErrorCodeMeta, code)
 	}
 	return ce
+}
+
+// refusalCode is the machine code err names: a level deletion (ADR 0021) or a
+// day without classes (T14).
+func refusalCode(err error) string {
+	if code := levelarchive.CodeOf(err); code != "" {
+		return code
+	}
+	return service.CodeOf(err)
 }
 
 func connectErrForKind(err error) *connect.Error {
