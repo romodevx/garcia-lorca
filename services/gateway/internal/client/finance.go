@@ -204,17 +204,32 @@ func (c *FinanceClient) GenerateCharges(ctx context.Context, conceptID, cycleID,
 	return res.Msg.GetCreatedCount(), res.Msg.GetSkippedCount(), nil
 }
 
-// ListCharges lists charges filtered by any of studentID, cycleID ("" = no
-// filter on that dimension).
-func (c *FinanceClient) ListCharges(ctx context.Context, studentID, cycleID string) ([]Charge, error) {
+// PageRequest is one page of a paged finance read: the opaque token of the
+// previous page ("" = the first) and how many rows (0 = the service default).
+type PageRequest struct {
+	Token string
+	Size  int32
+}
+
+// ChargePage is one page of charges and the token of the next ("" = last page).
+type ChargePage struct {
+	Charges       []Charge
+	NextPageToken string
+}
+
+// ListCharges lists one page of charges filtered by any of studentID, cycleID
+// ("" = no filter on that dimension).
+func (c *FinanceClient) ListCharges(ctx context.Context, studentID, cycleID string, page PageRequest) (ChargePage, error) {
 	res, err := c.rpc.ListCharges(ctx, connect.NewRequest(&financev1.ListChargesRequest{
 		StudentId: studentID,
 		CycleId:   cycleID,
+		PageToken: page.Token,
+		PageSize:  page.Size,
 	}))
 	if err != nil {
-		return nil, err
+		return ChargePage{}, err
 	}
-	return toCharges(res.Msg.GetCharges()), nil
+	return ChargePage{Charges: toCharges(res.Msg.GetCharges()), NextPageToken: res.Msg.GetNextPageToken()}, nil
 }
 
 // PreviewWithdrawal asks finance which future charges would be cancelled and
@@ -399,16 +414,19 @@ func (c *FinanceClient) account(ctx context.Context, req *financev1.GetAccountRe
 	}, nil
 }
 
-// ListOverdue lists charges past their due date with a remaining balance,
-// optionally filtered by cycle ("" = any).
-func (c *FinanceClient) ListOverdue(ctx context.Context, cycleID string) ([]Charge, error) {
+// ListOverdue lists one page of the charges past their due date with a
+// remaining balance, optionally filtered by cycle ("" = any). A page may be
+// short, even empty, while NextPageToken says more remain.
+func (c *FinanceClient) ListOverdue(ctx context.Context, cycleID string, page PageRequest) (ChargePage, error) {
 	res, err := c.rpc.ListOverdue(ctx, connect.NewRequest(&financev1.ListOverdueRequest{
-		CycleId: cycleID,
+		CycleId:   cycleID,
+		PageToken: page.Token,
+		PageSize:  page.Size,
 	}))
 	if err != nil {
-		return nil, err
+		return ChargePage{}, err
 	}
-	return toCharges(res.Msg.GetCharges()), nil
+	return ChargePage{Charges: toCharges(res.Msg.GetCharges()), NextPageToken: res.Msg.GetNextPageToken()}, nil
 }
 
 // --- deposits (M16) --------------------------------------------------------

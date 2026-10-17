@@ -58,7 +58,10 @@ type fakeFinance struct {
 
 	listStudent string
 	listCycle   string
-	charges     []client.Charge
+	listPage    client.PageRequest
+	// nextPageToken is what both paged reads answer as the next page's token.
+	nextPageToken string
+	charges       []client.Charge
 
 	discountChargeID string
 	discountCents    int64
@@ -80,6 +83,7 @@ type fakeFinance struct {
 	account        client.AccountStatement
 
 	overdueCycle string
+	overduePage  client.PageRequest
 	overdue      []client.Charge
 
 	depositStudent  string
@@ -203,9 +207,9 @@ func (f *fakeFinance) GenerateCharges(_ context.Context, conceptID, cycleID, gro
 	return f.created, f.skipped, nil
 }
 
-func (f *fakeFinance) ListCharges(_ context.Context, studentID, cycleID string) ([]client.Charge, error) {
-	f.listStudent, f.listCycle = studentID, cycleID
-	return f.charges, f.err
+func (f *fakeFinance) ListCharges(_ context.Context, studentID, cycleID string, page client.PageRequest) (client.ChargePage, error) {
+	f.listStudent, f.listCycle, f.listPage = studentID, cycleID, page
+	return client.ChargePage{Charges: f.charges, NextPageToken: f.nextPageToken}, f.err
 }
 
 func (f *fakeFinance) ApplyDiscount(_ context.Context, chargeID string, discountCents int64, reason string) (client.Charge, error) {
@@ -246,9 +250,9 @@ func (f *fakeFinance) GetAccount(_ context.Context, studentID string) (client.Ac
 	return f.account, f.err
 }
 
-func (f *fakeFinance) ListOverdue(_ context.Context, cycleID string) ([]client.Charge, error) {
-	f.overdueCycle = cycleID
-	return f.overdue, f.err
+func (f *fakeFinance) ListOverdue(_ context.Context, cycleID string, page client.PageRequest) (client.ChargePage, error) {
+	f.overdueCycle, f.overduePage = cycleID, page
+	return client.ChargePage{Charges: f.overdue, NextPageToken: f.nextPageToken}, f.err
 }
 
 // sampleCharge is the canned charge the fake returns from every charge-mutating
