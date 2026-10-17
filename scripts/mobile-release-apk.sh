@@ -69,9 +69,14 @@ say "EXPO_PUBLIC_API_URL=$EXPO_PUBLIC_API_URL"
 cd "$REPO_ROOT"
 pnpm install --frozen-lockfile --filter @garcia-lorca/mobile...
 
+mkdir -p "$OUT_DIR"
 cd "$MOBILE_DIR"
 say "expo prebuild (android, clean)"
+# prebuild rewrites package.json's android/ios scripts to `expo run:*`; that is
+# a choice for the repo, not a side effect of a local build. Put it back.
+cp package.json "$OUT_DIR/package.json.before-prebuild"
 CI=1 pnpm exec expo prebuild --platform android --clean --no-install
+cp "$OUT_DIR/package.json.before-prebuild" package.json
 
 manifest=android/app/src/main/AndroidManifest.xml
 [ -f "$manifest" ] || die "prebuild produced no $manifest"
