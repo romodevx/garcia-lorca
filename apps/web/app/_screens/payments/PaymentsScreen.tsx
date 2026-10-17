@@ -13,6 +13,7 @@ import type { CutAccess } from "../finance/CashCutClosing";
 import { CashUpDrawer } from "../finance/CashUpDrawer";
 import { CollectDrawer, type CollectStudent } from "../finance/CollectDrawer";
 import type { NotesAccess } from "../../_design/students/StudentNotesBeside";
+import { useRoomLabels } from "../../_design/students/roomLabels";
 import { matchesSearch } from "../../_design/textSearch";
 import { formatStudentName, sortStudents, studentNameSearchKeys } from "../../_design/students/studentName";
 import { ModuleHeaderIcon } from "../../_design/ModuleHeaderIcon";
@@ -62,6 +63,9 @@ export function PaymentsScreen({ onBack, canGrantDiscounts = false, notes, canCo
   const [cashUp, setCashUp] = useState(false);
   const [owed, setOwed] = useState<Map<string, number>>(new Map());
   const [toast, setToast] = useState<string | null>(null);
+  // "3° PRIMARIA · A", as the receipt says it (T14-018); the file's own words until read.
+  const rooms = useRoomLabels();
+  const roomOf = (s: Student): string => rooms.get(s.id) ?? `${s.level} · ${s.gradeGroup}`;
 
   const loadRoll = useCallback(() => {
     setRoll("loading");
@@ -163,12 +167,12 @@ export function PaymentsScreen({ onBack, canGrantDiscounts = false, notes, canCo
           return (
             <button
               key={s.id}
-              onClick={() => setCollecting({ id: s.id, firstName: s.firstName, lastName: s.lastName, maternalLastName: s.maternalLastName, gradeGroup: s.gradeGroup })}
+              onClick={() => setCollecting({ id: s.id, firstName: s.firstName, lastName: s.lastName, maternalLastName: s.maternalLastName, gradeGroup: roomOf(s) })}
               style={{ display: "flex", width: "100%", alignItems: "center", gap: 14, padding: "14px 20px", background: "transparent", border: "none", borderTop: "1px solid var(--border)", cursor: "pointer", textAlign: "left" }}>
               <Avatar name={formatStudentName(s)} color="forest" size={42} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 15.5, fontWeight: 600, color: "var(--text)" }}>{formatStudentName(s)}</div>
-                <div style={{ fontSize: 13.5, color: "var(--text-muted)" }}>{s.level} · {s.gradeGroup}</div>
+                <div style={{ fontSize: 13.5, color: "var(--text-muted)" }}>{roomOf(s)}</div>
               </div>
               <div style={{ textAlign: "right" }}>
                 <div style={{ fontSize: 12.5, color: "var(--text-faint)" }}>Debe hoy</div>
