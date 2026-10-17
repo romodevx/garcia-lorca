@@ -75,6 +75,13 @@ describe("changePassword refusals", () => {
       serverText: "La nueva contraseña debe tener al menos 8 caracteres.",
     });
   });
+
+  it("keeps the gateway's machine code (X-Error-Code)", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response("La contraseña actual no es correcta.", { status: 401, headers: { "X-Error-Code": "REAUTH_FAILED" } }),
+    ));
+    await expect(changePassword("http://gw", "wrong", "newlongpass")).rejects.toMatchObject({ status: 401, errorCode: "REAUTH_FAILED" });
+  });
 });
 
 describe("logout", () => {

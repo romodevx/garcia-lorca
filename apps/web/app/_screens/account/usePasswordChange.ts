@@ -9,14 +9,18 @@ import {
   type PasswordDraft,
   type PasswordErrors,
   type PasswordField,
+  type SessionEndReason,
 } from "./changePasswordRules";
 
 export interface PasswordChangeOptions {
   onSubmit: (currentPassword: string, newPassword: string) => Promise<{ sessionRenewed: boolean }>;
   /** The password changed and the gateway handed back a fresh session (200). */
   onRenewed: () => void;
-  /** The password changed but the session could not be renewed (204). */
-  onSessionEnded: () => void;
+  /**
+   * No live session remains: the password changed but could not be renewed
+   * (204, passwordChanged), or the session was already gone (plain 401).
+   */
+  onSessionEnded: (reason: SessionEndReason) => void;
 }
 
 export interface PasswordChange {
@@ -24,6 +28,8 @@ export interface PasswordChange {
   errors: PasswordErrors;
   failure?: string;
   saving: boolean;
+  /** Something was typed: closing would discard it. */
+  dirty: boolean;
   setField: (field: PasswordField, value: string) => void;
   bindInput: (field: PasswordField) => (node: HTMLInputElement | null) => void;
   submit: () => Promise<void>;
@@ -62,11 +68,12 @@ export function usePasswordChange({ onSubmit, onRenewed, onSessionEnded }: Passw
     try {
       const { sessionRenewed } = await onSubmit(draft.current, draft.next);
       if (sessionRenewed) onRenewed();
-      else onSessionEnded();
+      else onSessionEnded("passwordChanged");
     } catch (err) {
-      const { field, message } = describeChangeFailure(err);
-      if (field === undefined) setFailure(message);
-      else report({ [field]: message });
+      const failed = describeChangeFailure(err);
+      if (failed.kind === "sessionExpired") onSessionEnded("sessionExpired");
+      else if (failed.kind === "form") setFailure(failed.message);
+      else report({ [failed.field]: failed.message });
     } finally {
       inFlight.current = false;
       setSaving(false);
@@ -78,6 +85,7 @@ export function usePasswordChange({ onSubmit, onRenewed, onSessionEnded }: Passw
     errors,
     failure,
     saving,
+    dirty: FIELD_ORDER.some((field) => draft[field] !== ""),
     setField: (field, value) => setDraft((d) => ({ ...d, [field]: value })),
     bindInput: (field) => (node) => { inputs.current[field] = node; },
     submit,

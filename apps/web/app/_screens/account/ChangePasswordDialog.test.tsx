@@ -72,8 +72,8 @@ describe("ChangePasswordDialog", () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it("maps a 401 to the current-password field", async () => {
-    const onSubmit = vi.fn<Submit>().mockRejectedValue(new HttpError(401, "changePassword: HTTP 401"));
+  it("maps a 401 REAUTH_FAILED to the current-password field", async () => {
+    const onSubmit = vi.fn<Submit>().mockRejectedValue(new HttpError(401, "changePassword: HTTP 401", { errorCode: "REAUTH_FAILED" }));
     const user = userEvent.setup();
     renderDialog(onSubmit);
     await screen.findByRole("dialog");
@@ -87,11 +87,12 @@ describe("ChangePasswordDialog", () => {
   it.each([
     [new HttpError(400, "changePassword: HTTP 400"), "La nueva contraseña no cumple los requisitos: usa al menos 8 caracteres."],
     // The gateway's own Spanish sentence wins over the fallback...
-    [new HttpError(400, "changePassword: HTTP 400", "La nueva contraseña debe tener al menos 8 caracteres."), "La nueva contraseña debe tener al menos 8 caracteres."],
+    [new HttpError(400, "changePassword: HTTP 400", { serverText: "La nueva contraseña debe tener al menos 8 caracteres." }), "La nueva contraseña debe tener al menos 8 caracteres."],
     // ...but an unknown (English, generic) body is never shown verbatim.
-    [new HttpError(400, "changePassword: HTTP 400", "Bad Request"), "La nueva contraseña no cumple los requisitos: usa al menos 8 caracteres."],
+    [new HttpError(400, "changePassword: HTTP 400", { serverText: "Bad Request" }), "La nueva contraseña no cumple los requisitos: usa al menos 8 caracteres."],
     [new TypeError("Failed to fetch"), "No pudimos contactar al servidor. Revisa tu conexión e intenta de nuevo."],
     [new HttpError(500, "changePassword: HTTP 500"), "No se pudo cambiar la contraseña. Intenta de nuevo en un momento."],
+    [new HttpError(429, "changePassword: HTTP 429"), "Demasiados intentos. Espera unos minutos e intenta de nuevo."],
   ])("explains a failed change in words (%s)", async (err, message) => {
     const user = userEvent.setup();
     renderDialog(vi.fn<Submit>().mockRejectedValue(err));
@@ -124,7 +125,7 @@ describe("ChangePasswordDialog", () => {
     await screen.findByRole("dialog");
     await fill(user, "actual-123", "nueva-larga-1", "nueva-larga-1");
     await user.keyboard("{Enter}");
-    expect(await screen.findByRole("status")).toHaveTextContent("Tu contraseña cambió");
+    expect(await screen.findByRole("status")).toHaveTextContent("Tu contraseña cambió. Las demás sesiones dejarán de funcionar en unos minutos.");
     await user.click(screen.getByRole("button", { name: "Listo" }));
     expect(onClose).toHaveBeenCalled();
     expect(onSessionEnded).not.toHaveBeenCalled();
@@ -136,6 +137,46 @@ describe("ChangePasswordDialog", () => {
     await screen.findByRole("dialog");
     await fill(user, "actual-123", "nueva-larga-1", "nueva-larga-1");
     await user.click(save());
-    await vi.waitFor(() => expect(onSessionEnded).toHaveBeenCalled());
+    await vi.waitFor(() => expect(onSessionEnded).toHaveBeenCalledWith("passwordChanged"));
+  });
+
+  // A 401 WITHOUT the code is not the password: the session itself is gone.
+  it("treats a plain 401 as an expired session, not as a wrong password", async () => {
+    const user = userEvent.setup();
+    const { onSessionEnded } = renderDialog(vi.fn<Submit>().mockRejectedValue(new HttpError(401, "changePassword: HTTP 401")));
+    await screen.findByRole("dialog");
+    await fill(user, "actual-123", "nueva-larga-1", "nueva-larga-1");
+    await user.click(save());
+    await vi.waitFor(() => expect(onSessionEnded).toHaveBeenCalledWith("sessionExpired"));
+    expect(screen.queryByText("La contraseña actual no es correcta.")).toBeNull();
+  });
+
+  // ui-forms-and-modals: Esc closes; ask first only when there are unsaved changes.
+  it("closes on Esc right away when nothing was typed", async () => {
+    const user = userEvent.setup();
+    const { onClose } = renderDialog(vi.fn());
+    await screen.findByRole("dialog");
+    await user.keyboard("{Escape}");
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("asks before Esc discards typed passwords, without opening a second dialog", async () => {
+    const user = userEvent.setup();
+    const { onClose } = renderDialog(vi.fn());
+    await screen.findByRole("dialog");
+    await user.type(screen.getByLabelText("Contraseña actual"), "algo");
+    await user.keyboard("{Escape}");
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    expect(screen.getByText("¿Descartar lo que escribiste?")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Seguir editando" })).toHaveFocus();
+
+    await user.click(screen.getByRole("button", { name: "Seguir editando" }));
+    expect(screen.queryByText("¿Descartar lo que escribiste?")).toBeNull();
+    expect(screen.getByLabelText("Contraseña actual")).toHaveValue("algo");
+
+    await user.click(screen.getByRole("button", { name: "Cerrar" }));
+    await user.click(screen.getByRole("button", { name: "Descartar" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });

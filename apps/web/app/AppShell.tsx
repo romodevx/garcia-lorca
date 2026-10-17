@@ -41,6 +41,7 @@ import { GradesScreen } from "./_screens/grades/GradesScreen";
 import { Login } from "./_screens/Login";
 import { ChangePassword } from "./_screens/ChangePassword";
 import { ChangePasswordDialog } from "./_screens/account/ChangePasswordDialog";
+import type { SessionEndReason } from "./_screens/account/changePasswordRules";
 import { ModulePlaceholder } from "./_screens/ModulePlaceholder";
 import { AnnouncementsScreen } from "./_screens/announcements/AnnouncementsScreen";
 import { AnnouncementsCompose } from "./_screens/announcements/AnnouncementsCompose";
@@ -456,12 +457,13 @@ export function AppShell(): ReactElement {
     goReplacing({ screen: "login" });
   };
 
-  // The password changed but the gateway could not sign the caller back in
-  // (its 204): every earlier session, this one included, is revoked.
-  const endSessionAfterPasswordChange = (): void => {
+  // No live session is left after a change-password call: either the password
+  // changed and the gateway could not sign the caller back in (its 204), or
+  // the session was already gone (a 401 without REAUTH_FAILED).
+  const endSessionAfterPasswordChange = (reason: SessionEndReason): void => {
     setChangingPassword(false);
     logout();
-    setAuthError("Tu contraseña cambió. Entra con la nueva.");
+    setAuthError(reason === "passwordChanged" ? "Tu contraseña cambió. Entra con la nueva." : "Tu sesión terminó. Vuelve a entrar.");
   };
 
   // When the session is REFUSED, this is what the person reads.

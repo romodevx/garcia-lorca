@@ -66,13 +66,13 @@ describe("ChangePassword (forced)", () => {
     const { onDone, onSessionEnded } = renderScreen(vi.fn<Submit>().mockResolvedValue({ sessionRenewed: false }));
     await fillValid(user);
     await user.click(primary());
-    await vi.waitFor(() => expect(onSessionEnded).toHaveBeenCalled());
+    await vi.waitFor(() => expect(onSessionEnded).toHaveBeenCalledWith("passwordChanged"));
     expect(onDone).not.toHaveBeenCalled();
   });
 
   it("maps a 401 to the temporary-password field", async () => {
     const user = userEvent.setup();
-    renderScreen(vi.fn<Submit>().mockRejectedValue(new HttpError(401, "changePassword: HTTP 401")));
+    renderScreen(vi.fn<Submit>().mockRejectedValue(new HttpError(401, "changePassword: HTTP 401", { errorCode: "REAUTH_FAILED" })));
     await fillValid(user);
     await user.click(primary());
     expect(await screen.findByText("La contraseña actual no es correcta.")).toBeInTheDocument();

@@ -205,6 +205,8 @@ describe("AppShell navigation flow", () => {
     await user.click(screen.getByRole("button", { name: "Guardar y entrar" }));
     expect(await screen.findByText("Tu contraseña cambió. Entra con la nueva.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Entrar al sistema" })).toBeInTheDocument();
+    // The browser's cookies are cleared too, not just the screen.
+    expect(mockLogout).toHaveBeenCalledWith(expect.any(String));
   });
 
   it("routes to the forced change-password screen and then to the dashboard", async () => {
@@ -1174,5 +1176,21 @@ describe("cambiar la contraseña por voluntad propia (ISSUE-T14-103)", () => {
     await openDialog(user);
     expect(await screen.findByRole("button", { name: "Entrar al sistema" })).toBeInTheDocument();
     expect(screen.getByText("Tu contraseña cambió. Entra con la nueva.")).toBeInTheDocument();
+    expect(mockLogout).toHaveBeenCalledWith(expect.any(String));
+  });
+
+  it("a plain 401 (session gone, not the password) sends to sign-in saying the session ended", async () => {
+    mockMe.mockResolvedValue(OWNER_ME);
+    mockChangePassword.mockRejectedValue(new HttpError(401, "changePassword: HTTP 401"));
+    mockLogout.mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    render(
+      <Providers flags={{}}>
+        <AppShell />
+      </Providers>
+    );
+    await openDialog(user);
+    expect(await screen.findByRole("button", { name: "Entrar al sistema" })).toBeInTheDocument();
+    expect(screen.getByText("Tu sesión terminó. Vuelve a entrar.")).toBeInTheDocument();
   });
 });

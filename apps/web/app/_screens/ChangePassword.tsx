@@ -4,6 +4,7 @@ import type { ReactElement } from "react";
 
 import { Btn, ThemeToggle } from "../_design/Controls";
 import type { Theme } from "../theme/theme-script";
+import type { SessionEndReason } from "./account/changePasswordRules";
 import { PasswordFields } from "./account/PasswordFields";
 import { usePasswordChange } from "./account/usePasswordChange";
 
@@ -13,8 +14,8 @@ export interface ChangePasswordProps {
   onSubmit: (currentPassword: string, newPassword: string) => Promise<{ sessionRenewed: boolean }>;
   /** The password changed and the session was renewed: go on into the system. */
   onDone: () => void;
-  /** The password changed but the session could not be renewed (204). */
-  onSessionEnded: () => void;
+  /** No live session remains (see usePasswordChange). */
+  onSessionEnded: (reason: SessionEndReason) => void;
 }
 
 /**
