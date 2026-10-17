@@ -1,6 +1,7 @@
 package domain_test
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -78,6 +79,24 @@ func TestCycleRename(t *testing.T) {
 	_, err = c.Rename("   ")
 	assert.Equal(t, glerrors.KindInvalid, glerrors.KindOf(err))
 	assert.Equal(t, domain.CodeCycleNameRequired, domain.RefusalCodeOf(err))
+}
+
+// Review of PR #141: the name is what every selector shows, so it is bounded.
+func TestCycleNameIsAtMostEightyCharacters(t *testing.T) {
+	from, to := day(2026, time.August, 24), day(2027, time.July, 9)
+	eighty := strings.Repeat("ñ", 80)
+
+	require.NoError(t, domain.CheckCycleName(eighty), "80 runes, not bytes, are allowed")
+	err := domain.CheckCycleName(eighty + "x")
+	assert.Equal(t, glerrors.KindInvalid, glerrors.KindOf(err))
+	assert.Equal(t, domain.CodeCycleNameTooLong, domain.RefusalCodeOf(err))
+	assert.Equal(t, "El nombre del ciclo admite hasta 80 caracteres", glerrors.SafeMessage(err))
+
+	c := mustCycle(t, "c1", "2026-2027", from, to)
+	_, err = c.Rename(eighty + "x")
+	assert.Equal(t, domain.CodeCycleNameTooLong, domain.RefusalCodeOf(err))
+	_, err = c.Rename(eighty)
+	assert.NoError(t, err)
 }
 
 func mustClosure(t *testing.T, id, label string, from, to time.Time) domain.NonWorkingPeriod {

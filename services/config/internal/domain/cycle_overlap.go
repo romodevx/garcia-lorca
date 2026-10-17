@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
 )
@@ -15,7 +16,25 @@ const (
 	CodeCycleOverlap      RefusalCode = "CYCLE_OVERLAP"
 	CodeCycleNameRequired RefusalCode = "CYCLE_NAME_REQUIRED"
 	CodeNonWorkingOverlap RefusalCode = "NON_WORKING_OVERLAP"
+	CodeCycleNameTooLong  RefusalCode = "CYCLE_NAME_TOO_LONG"
 )
+
+// maxCycleNameRunes bounds a cycle's name: it is what every selector shows.
+const maxCycleNameRunes = 80
+
+// CheckCycleName is CYCLE_NAME_TOO_LONG (KindInvalid) for a name of more than
+// 80 characters (runes, so "Ñ" counts once).
+//
+// Called on the write paths (create, rename) and deliberately NOT by NewCycle:
+// NewCycle also rebuilds every stored row, and a rule added after the fact
+// must not make a saved year unreadable.
+func CheckCycleName(name string) error {
+	if utf8.RuneCountInString(strings.TrimSpace(name)) > maxCycleNameRunes {
+		return refusal(glerrors.KindInvalid, CodeCycleNameTooLong,
+			fmt.Sprintf("El nombre del ciclo admite hasta %d caracteres", maxCycleNameRunes))
+	}
+	return nil
+}
 
 // rangesShare reports whether two inclusive day ranges share at least one day.
 func rangesShare(aFrom, aTo, bFrom, bTo time.Time) bool {
@@ -62,6 +81,9 @@ func (c Cycle) Rename(name string) (Cycle, error) {
 	trimmed := strings.TrimSpace(name)
 	if trimmed == "" {
 		return Cycle{}, refusal(glerrors.KindInvalid, CodeCycleNameRequired, "Escribe el nombre del ciclo")
+	}
+	if err := CheckCycleName(trimmed); err != nil {
+		return Cycle{}, err
 	}
 	c.name = trimmed
 	return c, nil

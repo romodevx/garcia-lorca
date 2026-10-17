@@ -77,7 +77,7 @@ func (r *Repository) withTenant(ctx context.Context, fn func(tx *gorm.DB) error)
 const cycleNameTaken = "Ya existe un ciclo con ese nombre"
 
 // cyclesLockKey and nonWorkingLockKey prefix the advisory locks (hashed with
-// the tenant / cycle id) that serialize the overlap checks below.
+// the tenant, and the tenant + cycle id) that serialize the overlap checks below.
 const (
 	cyclesLockKey     = "config.cycles:"
 	nonWorkingLockKey = "config.non_working_periods:"
@@ -147,8 +147,22 @@ func (r *Repository) RenameCycle(ctx context.Context, c domain.Cycle) error {
 //
 // The demotion is scoped to rows that are actually active and are not this one,
 // so re-activating the live year writes nothing anybody has to reason about.
+//
+// A year whose dates share a day with another is refused (CYCLE_OVERLAP) under
+// the same tenant lock CreateCycle takes, before anything is stood down: drafts
+// stored before the overlap rule existed must not become the live year.
 func (r *Repository) ActivateCycle(ctx context.Context, c domain.Cycle) error {
 	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		if err := advisoryLock(tx, cyclesLockKey+r.tenantID, "the school years"); err != nil {
+			return err
+		}
+		others, err := listCycles(tx)
+		if err != nil {
+			return err
+		}
+		if err := domain.RefuseCycleOverlap(c, others); err != nil {
+			return err
+		}
 		if err := tx.Model(&cycleModel{}).
 			Where("status = ? AND id <> ?", domain.CycleStatusActive.String(), c.ID()).
 			Update("status", domain.CycleStatusDraft.String()).Error; err != nil {
@@ -995,7 +1009,7 @@ func translateFindErr(err error) error {
 func (r *Repository) CreateNonWorkingPeriod(ctx context.Context, p domain.NonWorkingPeriod) error {
 	model := fromDomainNonWorkingPeriod(p)
 	return r.withTenant(ctx, func(tx *gorm.DB) error {
-		if err := advisoryLock(tx, nonWorkingLockKey+p.CycleID(), "the school calendar"); err != nil {
+		if err := advisoryLock(tx, nonWorkingLockKey+r.tenantID+":"+p.CycleID(), "the school calendar"); err != nil {
 			return err
 		}
 		others, err := listNonWorkingPeriods(tx, p.CycleID())

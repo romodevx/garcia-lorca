@@ -119,6 +119,42 @@ func TestCreateCycleOverlapHoldsUnderConcurrency(t *testing.T) {
 	assert.Equal(t, 1, stored)
 }
 
+// PR #141 review: a draft stored before the rule (the QA's) shares days with the
+// live year. Activating it would hand the school two answers to "which year is
+// this date in", so it is refused the same way, and nothing changes.
+func TestActivateCycleRefusesAYearThatOverlapsAnother(t *testing.T) {
+	ctx := context.Background()
+	const tenant = "c1c1c1c1-0000-4000-8000-000000000007"
+	repo := pgadapter.NewRepository(appDB(t), tenant)
+	live, err := domain.NewCycle("c1c1c1c1-0006-4000-8000-000000000001", tenant, "2026-2027", domain.CycleStatusActive,
+		ymd(2026, time.August, 24), ymd(2027, time.July, 9))
+	require.NoError(t, err)
+	require.NoError(t, insertCycleFixture(t, live))
+	clashing := newCycle(t, tenant, "c1c1c1c1-0006-4000-8000-000000000002", "2027", ymd(2027, time.January, 10), ymd(2027, time.December, 20))
+	require.NoError(t, insertCycleFixture(t, clashing), "stored before the rule existed")
+	next := newCycle(t, tenant, "c1c1c1c1-0006-4000-8000-000000000003", "2028-2029", ymd(2028, time.August, 21), ymd(2029, time.July, 6))
+	require.NoError(t, repo.CreateCycle(ctx, next))
+
+	activated, err := clashing.Activate()
+	require.NoError(t, err)
+	err = repo.ActivateCycle(ctx, activated)
+
+	assert.Equal(t, glerrors.KindConflict, glerrors.KindOf(err))
+	assert.Equal(t, domain.CodeCycleOverlap, domain.RefusalCodeOf(err))
+	assert.Contains(t, glerrors.SafeMessage(err), `"2026-2027"`)
+	stillLive, gerr := repo.GetCycle(ctx, live.ID())
+	require.NoError(t, gerr)
+	assert.Equal(t, domain.CycleStatusActive, stillLive.Status(), "the live year must not be stood down by a refused activation")
+	stillDraft, gerr := repo.GetCycle(ctx, clashing.ID())
+	require.NoError(t, gerr)
+	assert.Equal(t, domain.CycleStatusDraft, stillDraft.Status())
+
+	// A year that shares no day with any other still activates.
+	nextActive, err := next.Activate()
+	require.NoError(t, err)
+	require.NoError(t, repo.ActivateCycle(ctx, nextActive))
+}
+
 // CC-103: a draft year could not be renamed.
 func TestRenameCycle(t *testing.T) {
 	ctx := context.Background()

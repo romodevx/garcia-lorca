@@ -2,6 +2,7 @@ package usecase_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -64,6 +65,16 @@ func TestRenameCycle(t *testing.T) {
 			assert.Equal(t, "Ciclo 2026-2027", repo.cycles[c.ID()].Name())
 		})
 	}
+}
+
+// PR #141 review: a name over 80 characters is refused before reaching the repo.
+func TestCreateCycleRefusesANameOverEightyCharacters(t *testing.T) {
+	svc, repo := newService(t)
+
+	_, err := svc.CreateCycle(ctx(), strings.Repeat("A", 81), domain.CycleStatusDraft, someDate, laterDate)
+
+	assert.Equal(t, domain.CodeCycleNameTooLong, domain.RefusalCodeOf(err))
+	assert.Empty(t, repo.cycles)
 }
 
 // CC-101 through the use case: the repository's refusal reaches the caller.

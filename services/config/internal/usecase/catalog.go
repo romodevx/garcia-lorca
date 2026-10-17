@@ -54,6 +54,9 @@ func (s *CatalogService) CreateCycle(ctx context.Context, name string, status do
 	if status == domain.CycleStatusUnspecified {
 		status = domain.CycleStatusDraft
 	}
+	if err := domain.CheckCycleName(name); err != nil {
+		return domain.Cycle{}, err
+	}
 	c, err := domain.NewCycle(s.newID(), s.tenant, name, status, startsOn, endsOn)
 	if err != nil {
 		return domain.Cycle{}, err

@@ -2082,7 +2082,11 @@ paths:
               type: object
               required: [name, startsOn, endsOn]
               properties:
-                name: { type: string, minLength: 1 }
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 80
+                  description: Longer is 400 CYCLE_NAME_TOO_LONG.
                 status: { type: string, enum: [draft, active, closed] }
                 startsOn: { type: string, format: date }
                 endsOn: { type: string, format: date }
@@ -2104,6 +2108,42 @@ paths:
           description: >
             Another cycle has this name, or its dates share a day with this
             one (X-Error-Code CYCLE_OVERLAP; the body names that cycle).
+          headers:
+            X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
+          content:
+            text/plain:
+              schema: { type: string }
+              example: 'Las fechas se traslapan con el ciclo "2026-2027" (del 24 de agosto de 2026 al 9 de julio de 2027)'
+
+  /api/v1/config/cycles/{id}/activate:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      tags: [config]
+      summary: Put a school year into service
+      description: >
+        Stands down whichever other year was active, in one transaction. A
+        year whose dates share a day with another (one stored before that rule
+        existed) is refused. Requires `config:write`.
+      operationId: activateCycle
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      responses:
+        '200':
+          description: The cycle, now active.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Cycle' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409':
+          description: >
+            A closed year cannot be reopened, or its dates share a day with
+            another cycle (X-Error-Code CYCLE_OVERLAP; the body names it).
           headers:
             X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
           content:
@@ -2134,7 +2174,11 @@ paths:
               type: object
               required: [name]
               properties:
-                name: { type: string, minLength: 1 }
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 80
+                  description: Longer is 400 CYCLE_NAME_TOO_LONG.
             example:
               name: 2027-2028
       responses:
