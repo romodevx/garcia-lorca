@@ -18,7 +18,7 @@ export interface StepLevelsProps {
   /** Every group of the cycle (the status read): the picked grade's groups. */
   cycleGroups: StatusRead<Group[]>;
   actions: SetupActions;
-  /** config:write: reorder levels (T8). Grade corrections come in `actions`. */
+  /** config:write: create (CC-311) and reorder levels (T8). Grade corrections come in `actions`. */
   canWrite?: boolean;
   /** Given only to the owner (levels:delete), exactly as the old view does (A37). */
   onDeleteLevel?: (levelId: string) => void;
@@ -38,7 +38,7 @@ export function StepLevels({ slot, levels, grades, cycleGroups, actions, canWrit
           levels={levels.list}
           selectedLevelId={levels.selectedId}
           onSelect={levels.select}
-          onCreate={actions.createLevel}
+          onCreate={canWrite ? actions.createLevel : undefined}
           onSetAttendanceMode={levels.setAttendanceMode}
           onSetGrading={levels.setGrading}
           onDelete={onDeleteLevel}

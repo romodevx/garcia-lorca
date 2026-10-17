@@ -42,7 +42,7 @@ vi.mock("./finance/api", () => ({
 
 beforeEach(() => {
   resetFakeRouter("/configuracion");
-  vi.mocked(apiMe).mockResolvedValue({ userId: "u1", email: "owner@example.com", permissions: ["config:read"] });
+  vi.mocked(apiMe).mockResolvedValue({ userId: "u1", email: "owner@example.com", permissions: ["config:read", "config:write"] });
 });
 afterEach(() => vi.clearAllMocks());
 

@@ -19,7 +19,7 @@ import { useSetupStatus, type SetupStatus } from "./useSetupStatus";
 /** Read by assistive tech, not seen. */
 const visuallyHidden: CSSProperties = { position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" };
 
-function setupInput(state: CatalogState, status: SetupStatus): SetupInput {
+function setupInput(state: CatalogState, status: SetupStatus, access: { canWrite: boolean; tuitionReadable: boolean }): SetupInput {
   return {
     profile: status.profile,
     cycles: state.cycles.list,
@@ -31,6 +31,7 @@ function setupInput(state: CatalogState, status: SetupStatus): SetupInput {
     groups: status.groups,
     plans: status.plans,
     closedDays: status.closedDays,
+    ...access,
   };
 }
 
@@ -40,12 +41,12 @@ function setupInput(state: CatalogState, status: SetupStatus): SetupInput {
  * the right. The same state, panels, calls and arguments as `Catalog` — only
  * order, grouping and hierarchy change. The gateway is the security boundary.
  */
-export function CatalogSetup({ onBack, canDeleteLevels = false, onDeleteLevel, notice, onOpenLevelPeriods, onOpenStudentImport, canWriteConfig = false }: CatalogProps): ReactElement {
+export function CatalogSetup({ onBack, canDeleteLevels = false, onDeleteLevel, notice, onOpenLevelPeriods, onOpenStudentImport, canWriteConfig = false, canReadTuition = false }: CatalogProps): ReactElement {
   const state = useCatalogState(notice, canWriteConfig);
   const status = useSetupStatus(state.cycles.selectedId);
   const actions = useSetupActions(state, status.refresh);
   const [stored] = useState(readStoredStep);
-  const view = deriveSteps(setupInput(state, status), stored ?? null);
+  const view = deriveSteps(setupInput(state, status, { canWrite: canWriteConfig, tuitionReadable: canReadTuition }), stored ?? null);
   const loaded = !state.load.loading && state.load.error === undefined;
   const nav = useOpenStep(view.initialStepId, loaded && view.settled, stored);
   const narrow = useMaxWidth(NARROW_MAX_PX);
@@ -80,6 +81,7 @@ export function CatalogSetup({ onBack, canDeleteLevels = false, onDeleteLevel, n
                 actions={actions}
                 canDeleteLevels={canDeleteLevels}
                 canWriteConfig={canWriteConfig}
+                canReadTuition={canReadTuition}
                 onDeleteLevel={onDeleteLevel}
                 onOpenLevelPeriods={onOpenLevelPeriods}
               />

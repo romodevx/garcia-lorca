@@ -28,6 +28,8 @@ export interface SetupPanesProps {
   canDeleteLevels: boolean;
   /** config:write: rename/delete grades and groups, reorder levels (T8). */
   canWriteConfig?: boolean;
+  /** finance:read: the tabuladores are read and shown (CC-311). */
+  canReadTuition?: boolean;
   onDeleteLevel?: (levelId: string) => void;
   onOpenLevelPeriods?: (levelId: string) => void;
 }
@@ -38,7 +40,7 @@ export interface SetupPanesProps {
  * prices take the screen the other steps unmount, as they do today, and each
  * child keeps a fixed slot (`{cond && …}`), so TuitionPanel never moves (§3.3).
  */
-export function SetupPanes({ steps, openId, onOpen, state, status, actions, canDeleteLevels, canWriteConfig = false, onDeleteLevel, onOpenLevelPeriods }: SetupPanesProps): ReactElement {
+export function SetupPanes({ steps, openId, onOpen, state, status, actions, canDeleteLevels, canWriteConfig = false, canReadTuition = false, onDeleteLevel, onOpenLevelPeriods }: SetupPanesProps): ReactElement {
   const pricing = state.pricing.active;
   const cycle = state.cycles.selected;
   const slot = (id: StepId): StepSlot => ({ step: stepOf(steps, id), hidden: openId !== id, onGo: onOpen });
@@ -50,7 +52,7 @@ export function SetupPanes({ steps, openId, onOpen, state, status, actions, canD
       {!pricing && <StepTerms slot={slot("terms")} cycle={cycle} levels={state.levels} terms={state.terms} actions={actions} onOpenLevelPeriods={onOpenLevelPeriods} />}
       {!pricing && <StepSubjects slot={slot("subjects")} cycle={cycle} levels={state.levels} grades={state.grades} />}
       {!pricing && <StepGroups slot={slot("groups")} cycle={cycle} levels={state.levels} grades={state.grades} groups={state.groups} cycleGroups={status.groups} actions={actions} />}
-      <StepTuition slot={slot("tuition")} cycles={state.cycles} levels={state.levels.list} pricing={state.pricing} onPlansLoaded={status.onPlansLoaded} />
+      <StepTuition slot={slot("tuition")} cycles={state.cycles} levels={state.levels.list} pricing={state.pricing} canRead={canReadTuition} onPlansLoaded={status.onPlansLoaded} />
       {!pricing && <StepCalendar slot={slot("calendar")} cycle={cycle} onLoaded={status.onCalendarLoaded} />}
       {!pricing && canDeleteLevels && (
         <StepFrame tool hidden={openId !== "trash"} onGo={onOpen}>

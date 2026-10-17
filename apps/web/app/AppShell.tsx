@@ -30,7 +30,7 @@ import { LevelPeriodsScreen } from "./_screens/config/periods/LevelPeriodsScreen
 import { StudentImportScreen } from "./_screens/studentImport/StudentImportScreen";
 import { canImportStudents } from "./studentImport/file";
 import { clearLevelNotice, leaveLevelNotice, peekLevelNotice } from "./_screens/config/levelDeletion/pendingNotice";
-import { canDeleteLevels, canWriteConfig } from "./config/permissions";
+import { canDeleteLevels, canReadTuition, canWriteConfig } from "./config/permissions";
 import { canDeleteUsers } from "./admin/permissions";
 import { AdminScreen } from "./_screens/admin/AdminScreen";
 import { StudentEditScreen } from "./_screens/students/StudentEditScreen";
@@ -536,6 +536,7 @@ export function AppShell(): ReactElement {
   // answers reads with config:read and edits with config:write.
   const openLevelPeriods = (levelId: string): void => go({ screen: "levelPeriods", levelId });
   const mayWriteConfig = canWriteConfig(principal?.permissions);
+  const mayReadTuition = canReadTuition(principal?.permissions);
   // Owner-only (students:import). UX only: the gateway refuses without it.
   const mayImportStudents = studentImportEnabled && canImportStudents(principal?.permissions);
   const openStudentImport = mayImportStudents ? (): void => go({ screen: "studentImport" }) : undefined;
@@ -706,9 +707,9 @@ export function AppShell(): ReactElement {
         (view.screen === "studentImport" && !mayImportStudents)) &&
         (configEnabled ? (
           configSetupView ? (
-            <CatalogSetup onBack={home} canDeleteLevels={mayDeleteLevels} onDeleteLevel={openLevelDelete} onOpenLevelPeriods={openLevelPeriods} onOpenStudentImport={openStudentImport} notice={configNotice} canWriteConfig={mayWriteConfig} />
+            <CatalogSetup onBack={home} canDeleteLevels={mayDeleteLevels} onDeleteLevel={openLevelDelete} onOpenLevelPeriods={openLevelPeriods} onOpenStudentImport={openStudentImport} notice={configNotice} canWriteConfig={mayWriteConfig} canReadTuition={mayReadTuition} />
           ) : (
-            <Catalog onBack={home} canDeleteLevels={mayDeleteLevels} onDeleteLevel={openLevelDelete} onOpenLevelPeriods={openLevelPeriods} onOpenStudentImport={openStudentImport} notice={configNotice} canWriteConfig={mayWriteConfig} />
+            <Catalog onBack={home} canDeleteLevels={mayDeleteLevels} onDeleteLevel={openLevelDelete} onOpenLevelPeriods={openLevelPeriods} onOpenStudentImport={openStudentImport} notice={configNotice} canWriteConfig={mayWriteConfig} canReadTuition={mayReadTuition} />
           )
         ) : (
           // Flag OFF: never render the catalog; show the friendly stub so

@@ -9,6 +9,7 @@ import { CycleBar } from "./CycleBar";
 import { GradeLevelsPanel } from "./GradeLevelsPanel";
 import { GroupsPanel } from "./GroupsPanel";
 import { LevelsPanel } from "./LevelsPanel";
+import { TuitionNotReadable } from "./TuitionNotReadable";
 import { TuitionPanel } from "./TuitionPanel";
 import { LevelTrashPanel } from "./levelDeletion/LevelTrashPanel";
 import { CalendarPanel } from "./CalendarPanel";
@@ -41,6 +42,11 @@ export interface CatalogProps {
    * order (T8). UX only — the gateway's 403 is the boundary.
    */
   canWriteConfig?: boolean;
+  /**
+   * finance:read: the tabuladores are read and shown. Without it Colegiaturas
+   * says who sees them and nothing is asked of the gateway (CC-311).
+   */
+  canReadTuition?: boolean;
 }
 
 /**
@@ -51,7 +57,7 @@ export interface CatalogProps {
  * gateway (behind the flag + config:read/write) is the security boundary; this
  * screen is UX only.
  */
-export function Catalog({ onBack, canDeleteLevels = false, onDeleteLevel, notice, onOpenLevelPeriods, onOpenStudentImport, canWriteConfig = false }: CatalogProps): ReactElement {
+export function Catalog({ onBack, canDeleteLevels = false, onDeleteLevel, notice, onOpenLevelPeriods, onOpenStudentImport, canWriteConfig = false, canReadTuition = false }: CatalogProps): ReactElement {
   const { load, cycles, levels, grades, groups, terms: levelTerms, pricing: pricingState, notice: noticeState } = useCatalogState(notice, canWriteConfig);
   const selectedCycle = cycles.selected;
   const selectedLevel = levels.selected;
@@ -127,7 +133,8 @@ export function Catalog({ onBack, canDeleteLevels = false, onDeleteLevel, notice
             through finance — the ledger owns prices — but it belongs in front of
             a director's eyes here, next to the levels it prices.
           */}
-          {selectedCycle !== undefined && (
+          {!pricing && !canReadTuition && <TuitionNotReadable />}
+          {canReadTuition && selectedCycle !== undefined && (
             <TuitionPanel
               cycle={selectedCycle}
               levels={levels.list}
@@ -144,7 +151,7 @@ export function Catalog({ onBack, canDeleteLevels = false, onDeleteLevel, notice
               levels={levels.list}
               selectedLevelId={levels.selectedId}
               onSelect={levels.select}
-              onCreate={levels.create}
+              onCreate={canWriteConfig ? levels.create : undefined}
               onSetAttendanceMode={levels.setAttendanceMode}
               onSetGrading={levels.setGrading}
               onDelete={canDeleteLevels ? onDeleteLevel : undefined}

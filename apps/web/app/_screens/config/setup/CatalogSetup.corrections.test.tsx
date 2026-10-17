@@ -55,7 +55,7 @@ async function groupsStep(user: User): Promise<HTMLElement> {
 
 describe("without config:write", () => {
   it("offers no reorder, rename or delete", async () => {
-    const { user } = renderSetup();
+    const { user } = renderSetup({ canWriteConfig: false });
     await settled();
     const levels = await levelsStep(user);
     await within(levels).findByRole("button", { name: "1° PRIMARIA" });

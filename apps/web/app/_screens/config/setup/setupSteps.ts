@@ -74,6 +74,10 @@ export interface SetupInput {
   plans: StatusRead<Pick<TuitionPlan, "levelId">[]>;
   /** Closed days of the selected cycle. */
   closedDays: StatusRead<number>;
+  /** finance:read — without it the tabuladores are never read (CC-311). Absent means readable. */
+  tuitionReadable?: boolean;
+  /** config:write — without it this is a reading view, not a setup to finish (CC-311). Absent means writable. */
+  canWrite?: boolean;
 }
 
 export interface StepView extends StepDef {
@@ -204,7 +208,11 @@ function groupsMark(input: SetupInput): Mark {
   });
 }
 
+/** A role without finance:read: the step says who sees it instead of "Revisando…" forever. */
+const TUITION_NOT_READABLE: Mark = { status: "unknown", line: "Lo ve quien administra Finanzas" };
+
 function tuitionMark(input: SetupInput): Mark {
+  if (input.tuitionReadable === false) return TUITION_NOT_READABLE;
   return prerequisite(input) ?? fromRead(input.plans, (plans) => {
     const missing = input.levels.filter((l) => !plans.some((p) => p.levelId === l.id)).map((l) => l.name);
     if (missing.length === input.levels.length) return pending("Ningún nivel tiene precio");
@@ -311,7 +319,7 @@ export function deriveSteps(input: SetupInput, storedStepId: string | null): Set
   return {
     steps,
     subtitle: subtitle(input, steps, ready),
-    cardTitle: ready ? "Configuración" : "Puesta en marcha",
+    cardTitle: ready || input.canWrite === false ? "Configuración" : "Puesta en marcha",
     ready,
     settled: steps.every((s) => s.status !== "loading"),
     initialStepId: initialStep(steps, storedStepId),
