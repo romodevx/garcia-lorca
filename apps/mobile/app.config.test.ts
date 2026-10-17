@@ -1,4 +1,4 @@
-import { easProjectConfig } from "./app.config";
+import { androidPackageConfig, easProjectConfig } from "./app.config";
 import type { ExpoConfig } from "expo/config";
 
 describe("easProjectConfig", () => {
@@ -16,5 +16,17 @@ describe("easProjectConfig", () => {
   it("leaves current updates behavior untouched when the project id is absent", () => {
     const config = { updates: { enabled: true }, extra: { other: "value" } } as Partial<ExpoConfig>;
     expect(easProjectConfig(undefined, config)).toEqual({ extra: { ...config.extra, eas: {} } });
+  });
+});
+
+describe("androidPackageConfig", () => {
+  it("sets the Android application id from the build environment, keeping the rest of android", () => {
+    const result = androidPackageConfig(" mx.example.family ", { android: { jsEngine: "hermes" } } as Partial<ExpoConfig>);
+    expect(result).toEqual({ android: { jsEngine: "hermes", package: "mx.example.family" } });
+  });
+
+  it("adds nothing when no application id is given, so EAS keeps owning it", () => {
+    expect(androidPackageConfig(undefined, { android: { jsEngine: "hermes" } } as Partial<ExpoConfig>)).toEqual({});
+    expect(androidPackageConfig("  ", {} as Partial<ExpoConfig>)).toEqual({});
   });
 });
