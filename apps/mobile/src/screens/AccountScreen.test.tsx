@@ -46,7 +46,7 @@ describe("AccountScreen (the backend's ledger, T7)", () => {
     jest.clearAllMocks();
   });
 
-  it("renders the ledger as finance sent it, newest first, with each running balance", async () => {
+  it("renders the ledger as finance sent it, newest first", async () => {
     const fetchMock = mockFetch({
       movements: [
         line("charge", "2026-09-10", "Colegiatura septiembre", 320000, 320000),
@@ -71,7 +71,60 @@ describe("AccountScreen (the backend's ledger, T7)", () => {
     ]);
     expect(screen.getByText("Acumulado a hoy")).toBeTruthy();
     expect(screen.getByText(/P-2026-000042/)).toBeTruthy();
-    expect(screen.getByText("Saldo $2,200.00")).toBeTruthy();
+  });
+
+  // ISSUE-T14-106: a payment made before its charge's due day (the inscription
+  // moved to the 19th, paid on the 17th) gave running balances below zero that
+  // read as credit. A per-line balance cannot mean anything once a payment can
+  // precede its charge, so the rows carry their amount only.
+  it("shows no per-line running balance, so a prepayment never reads as credit", async () => {
+    mockFetch({
+      movements: [
+        line("payment", "2026-10-17", "Pago", 300000, -300000, { method: "cash", folio: "P-2026-000002" }),
+        line("charge", "2026-10-19", "Inscripción", 300000, 0),
+      ],
+      totals: { ...ZERO, chargedCents: 300000, paidCents: 300000, balanceCents: 0 },
+      dueTodayCents: 0,
+      asOf: "2026-10-17",
+    });
+
+    await renderWithProviders(<AccountScreen />);
+
+    await waitFor(() => expect(screen.getByText("Inscripción")).toBeTruthy());
+    expect(screen.queryByText("Saldo a favor $3,000.00")).toBeNull();
+    expect(screen.queryByText(/^Saldo (-|−)?\$/)).toBeNull();
+  });
+
+  // ISSUE-T14-106: the cycle's months are all on the ledger, so newest-first put
+  // June of next year on top and today's payments at the bottom. What has
+  // happened reads newest first; what is still to come sits below, soonest first.
+  it("lists what has happened newest first and the months still to come below, soonest first", async () => {
+    mockFetch({
+      movements: [
+        line("charge", "2026-08-24", "Colegiatura agosto", 280000, 280000),
+        line("charge", "2026-09-10", "Colegiatura septiembre", 280000, 560000),
+        line("payment", "2026-10-17", "Pago", 400000, 160000, { method: "card" }),
+        line("charge", "2026-10-19", "Colegiatura octubre", 280000, 440000),
+        line("charge", "2026-11-10", "Colegiatura noviembre", 280000, 720000),
+        line("charge", "2027-06-10", "Colegiatura junio", 280000, 1000000),
+      ],
+      totals: { ...ZERO, chargedCents: 1400000, paidCents: 400000, balanceCents: 1000000 },
+      dueTodayCents: 160000,
+      asOf: "2026-10-17",
+    });
+
+    await renderWithProviders(<AccountScreen />);
+
+    await waitFor(() => expect(screen.getByText("Colegiatura junio")).toBeTruthy());
+    expect(screen.getAllByLabelText(/^Movimiento /).map((r) => r.props.accessibilityLabel)).toEqual([
+      "Movimiento Pago",
+      "Movimiento Colegiatura septiembre",
+      "Movimiento Colegiatura agosto",
+      "Movimiento Colegiatura octubre",
+      "Movimiento Colegiatura noviembre",
+      "Movimiento Colegiatura junio",
+    ]);
+    expect(screen.getByText("Próximos cargos")).toBeTruthy();
   });
 
   // T18: the family's beca is a line of its own under the month, read as a
@@ -117,7 +170,7 @@ describe("AccountScreen (the backend's ledger, T7)", () => {
     await renderWithProviders(<AccountScreen />);
 
     await waitFor(() => expect(screen.getByLabelText("Saldo").props.children).toBe("$7,750.00"));
-    expect(screen.getByText("Saldo pendiente $32,000.00")).toBeTruthy();
+    expect(screen.getByText("Saldo total $32,000.00")).toBeTruthy();
     const note = screen.getByLabelText("Detalle del saldo");
     expect(String(note.props.children)).toContain("150.00");
     expect(String(note.props.children)).toContain("100.00");
@@ -149,7 +202,7 @@ describe("AccountScreen (the backend's ledger, T7)", () => {
     expect(screen.queryByText("Pendiente")).toBeNull();
   });
 
-  it("names a running balance below zero as credit", async () => {
+  it("names a balance below zero as credit, once (in the header)", async () => {
     mockFetch({
       movements: [line("payment", "2026-09-12", "Pago", 50000, -50000, { method: "cash" })],
       totals: { ...ZERO, paidCents: 50000, balanceCents: -50000 },
@@ -159,7 +212,7 @@ describe("AccountScreen (the backend's ledger, T7)", () => {
 
     await renderWithProviders(<AccountScreen />);
 
-    await waitFor(() => expect(screen.getAllByText("Saldo a favor $500.00").length).toBe(2));
+    await waitFor(() => expect(screen.getByText("Saldo a favor $500.00")).toBeTruthy());
     expect(screen.queryByText(/Saldo -/)).toBeNull();
   });
 
