@@ -38,6 +38,7 @@ export function ReportCardScreen({ id, studentId }: ReportCardScreenProps): Reac
         ? null
         : {
             path: reportCardPdfPath(childId, data.id),
+            kind: "boleta",
             studentId: childId,
             fallbackName: fallbackPdfName(data),
             title: `Boleta ${data.termName}`,

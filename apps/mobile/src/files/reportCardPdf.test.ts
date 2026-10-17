@@ -92,9 +92,10 @@ function refreshSucceeds(): void {
   })) as unknown as typeof fetch;
 }
 
-const ROOT = "file:///cache/boletas";
+const DOCUMENTS = "file:///cache/documentos";
+const ROOT = `${DOCUMENTS}/boleta`;
 const SERVER_NAME = "boleta-A0123-1er-trimestre-v2.pdf";
-const REQUEST = { path: "/api/v1/x/pdf", studentId: "s1", fallbackName: "boleta-1er-trimestre-v2.pdf" };
+const REQUEST = { path: "/api/v1/x/pdf", kind: "boleta", studentId: "s1", fallbackName: "boleta-1er-trimestre-v2.pdf" };
 
 describe("downloadPdf", () => {
   beforeEach(async () => {
@@ -256,15 +257,40 @@ describe("downloadPdf", () => {
   });
 });
 
+// ISSUE-T14-107 gate: a receipt downloading while the statement is being
+// shared must not empty the statement's folder (nor the other way round).
+describe("downloadPdf · one folder per kind of document", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockDeleted.length = 0;
+    Object.assign(mockCache, { exists: true, entries: {}, failDelete: false, failRename: false });
+  });
+
+  it("downloads each kind into its own folder and leaves the others alone", async () => {
+    writes("comprobante-P-1.pdf");
+    mockCache.entries = {
+      [DOCUMENTS]: ["estado-de-cuenta", "comprobante"],
+      [`${DOCUMENTS}/estado-de-cuenta`]: ["s1"],
+      [`${DOCUMENTS}/estado-de-cuenta/s1`]: ["estado-de-cuenta.pdf"],
+    };
+
+    const uri = await downloadPdf({ ...REQUEST, kind: "comprobante", fallbackName: "comprobante.pdf" });
+
+    expect(uri).toBe(`${DOCUMENTS}/comprobante/s1/comprobante-P-1.pdf`);
+    expect(mockDeleted.filter((d) => d.includes("estado-de-cuenta"))).toEqual([]);
+  });
+});
+
 describe("clearPdfCache", () => {
   beforeEach(() => {
     mockDeleted.length = 0;
     Object.assign(mockCache, { exists: true, entries: {}, failDelete: false });
   });
 
-  it("deletes the whole boletas folder", () => {
+  // The documents folder, and the "boletas" one apps before T14 left behind.
+  it("deletes every downloaded document, the older boletas folder included", () => {
     clearPdfCache();
-    expect(mockDeleted).toEqual([ROOT]);
+    expect(mockDeleted).toEqual([DOCUMENTS, "file:///cache/boletas"]);
   });
 
   it("does nothing when nothing was ever downloaded", () => {

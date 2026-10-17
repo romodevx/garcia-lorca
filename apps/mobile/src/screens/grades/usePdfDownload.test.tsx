@@ -7,7 +7,7 @@ jest.mock("../../files/reportCardPdf", () => {
   return { ...actual, downloadPdf: jest.fn(), sharePdf: jest.fn(async () => undefined) };
 });
 
-const target = { path: "/p", studentId: "s1", fallbackName: "boleta-t1-v1.pdf", title: "Boleta T1" };
+const target = { path: "/p", kind: "boleta", studentId: "s1", fallbackName: "boleta-t1-v1.pdf", title: "Boleta T1" };
 
 describe("usePdfDownload", () => {
   beforeEach(() => jest.clearAllMocks());
@@ -32,5 +32,16 @@ describe("usePdfDownload", () => {
 
     expect(sharePdf).toHaveBeenCalledWith("file:///b.pdf", "Boleta T1");
     expect(hook.result.current.state).toEqual({ status: "idle" });
+  });
+
+  // ISSUE-T14-107: one hook serves a list whose rows each name their own PDF.
+  it("downloads the document the caller names when it starts", async () => {
+    (downloadPdf as jest.Mock).mockResolvedValue("file:///r.pdf");
+    const hook = await renderHook(() => usePdfDownload(null));
+
+    await act(async () => hook.result.current.open({ ...target, path: "/receipt", title: "Comprobante" }));
+
+    expect(downloadPdf).toHaveBeenCalledWith(expect.objectContaining({ path: "/receipt" }));
+    expect(sharePdf).toHaveBeenCalledWith("file:///r.pdf", "Comprobante");
   });
 });

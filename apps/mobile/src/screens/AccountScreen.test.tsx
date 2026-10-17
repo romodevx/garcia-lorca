@@ -1,8 +1,8 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react-native";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react-native";
 import { router } from "expo-router";
 import { demoFlags } from "../flags/bootstrap";
 import { clearTokens, saveTokens } from "../api";
-import { downloadPdf, sharePdf } from "../files/reportCardPdf";
+import { downloadPdf, PdfError, sharePdf } from "../files/reportCardPdf";
 import { AccountScreen } from "./AccountScreen";
 import { renderWithProviders } from "../test/renderWithProviders";
 
@@ -221,11 +221,113 @@ describe("AccountScreen (the backend's ledger, T7)", () => {
 
     await renderWithProviders(<AccountScreen />);
 
-    fireEvent.press(await screen.findByLabelText("Descargar estado de cuenta"));
+    await fireEvent.press(await screen.findByLabelText("Descargar estado de cuenta"));
     await waitFor(() =>
-      expect(downloadPdf).toHaveBeenCalledWith(expect.objectContaining({ path: "/api/v1/family/students/s1/statement/pdf", studentId: "s1" })),
+      expect(downloadPdf).toHaveBeenCalledWith(expect.objectContaining({ path: "/api/v1/family/students/s1/statement/pdf", kind: "estado-de-cuenta", studentId: "s1" })),
     );
     await waitFor(() => expect(sharePdf).toHaveBeenCalledWith("file:///cache/estado.pdf", "Estado de cuenta"));
+    await waitFor(() => expect(screen.queryByText("Descargando…")).toBeNull());
+  });
+
+  // ISSUE-T14-107: a payment opens its receipt, as the PDF the family shares.
+  it("opens a payment's receipt from its row", async () => {
+    mockFetch({
+      movements: [line("payment", "2026-10-17", "Pago · Inscripción", 300000, 0, { method: "cash", folio: "P-2026-000002", depositId: "dep-1" })],
+      totals: ZERO,
+      dueTodayCents: 0,
+      asOf: "2026-10-17",
+    });
+
+    await renderWithProviders(<AccountScreen />);
+
+    await fireEvent.press(await screen.findByRole("button", { name: "Movimiento Pago · Inscripción" }));
+    await waitFor(() =>
+      expect(downloadPdf).toHaveBeenCalledWith(
+        expect.objectContaining({ path: "/api/v1/family/students/s1/receipts/dep-1/pdf", kind: "comprobante", studentId: "s1", fallbackName: "comprobante-P-2026-000002.pdf" }),
+      ),
+    );
+    await waitFor(() => expect(sharePdf).toHaveBeenCalledWith("file:///cache/estado.pdf", "Comprobante de pago"));
+    await waitFor(() => expect(screen.queryByText("Descargando…")).toBeNull());
+  });
+
+  // The gate's nit: the parent tapped one row; that row says what happened.
+  it("says on the tapped payment's row why its receipt could not be opened", async () => {
+    (downloadPdf as jest.Mock).mockRejectedValueOnce(new PdfError("network"));
+    mockFetch({
+      movements: [
+        line("payment", "2026-10-10", "Pago · Colegiatura octubre", 280000, 0, { method: "cash", depositId: "dep-1" }),
+        line("payment", "2026-10-17", "Pago · Inscripción", 300000, 0, { method: "cash", depositId: "dep-2" }),
+      ],
+      totals: ZERO,
+      dueTodayCents: 0,
+      asOf: "2026-10-17",
+    });
+
+    await renderWithProviders(<AccountScreen />);
+
+    await fireEvent.press(await screen.findByRole("button", { name: "Movimiento Pago · Colegiatura octubre" }));
+    const status = await screen.findByTestId("receipt-status-dep-1");
+    expect(within(status).getByRole("alert").props.children).toBe(
+      "No pudimos descargar el comprobante. Revisa tu conexión e inténtalo de nuevo.",
+    );
+    expect(screen.queryByTestId("receipt-status-dep-2")).toBeNull();
+  });
+
+  it("says in words why a receipt could not be opened", async () => {
+    (downloadPdf as jest.Mock).mockRejectedValueOnce(new PdfError("not_found"));
+    mockFetch({
+      movements: [line("payment", "2026-10-17", "Pago · Inscripción", 300000, 0, { method: "cash", depositId: "dep-1" })],
+      totals: ZERO,
+      dueTodayCents: 0,
+      asOf: "2026-10-17",
+    });
+
+    await renderWithProviders(<AccountScreen />);
+
+    await fireEvent.press(await screen.findByRole("button", { name: "Movimiento Pago · Inscripción" }));
+    expect(await screen.findByText("Este comprobante ya no está disponible.")).toBeTruthy();
+    expect(sharePdf).not.toHaveBeenCalled();
+  });
+
+  it("lists every charge a payment paid, with its part", async () => {
+    mockFetch({
+      movements: [
+        line("payment", "2026-10-17", "Pago · Inscripción 2026-2027 y 1 más", 350000, 0, {
+          method: "cash",
+          depositId: "dep-1",
+          appliedTo: [
+            { chargeId: "c1", description: "Inscripción 2026-2027", amountCents: 300000 },
+            { chargeId: "c2", description: "Colegiatura octubre", amountCents: 50000 },
+          ],
+        }),
+      ],
+      totals: ZERO,
+      dueTodayCents: 0,
+      asOf: "2026-10-17",
+    });
+
+    await renderWithProviders(<AccountScreen />);
+
+    expect(await screen.findByText("Pagó: Inscripción 2026-2027 $3,000.00 · Colegiatura octubre $500.00")).toBeTruthy();
+  });
+
+  it("does not offer a receipt for a line without a deposit", async () => {
+    mockFetch({ movements: [line("charge", "2026-09-10", "Colegiatura septiembre", 320000, 320000)], totals: ZERO, dueTodayCents: 0, asOf: "2026-10-01" });
+
+    await renderWithProviders(<AccountScreen />);
+
+    await waitFor(() => expect(screen.getByText("Colegiatura septiembre")).toBeTruthy());
+    expect(screen.queryByRole("button", { name: "Movimiento Colegiatura septiembre" })).toBeNull();
+  });
+
+  // The figure is what makes the month current, early-payment reward included (ISSUE-T14-106).
+  it("names today's figure as what keeps the family current", async () => {
+    mockFetch({ movements: [], totals: { ...ZERO, balanceCents: 300000 }, dueTodayCents: 300000, asOf: "2026-10-17" });
+
+    await renderWithProviders(<AccountScreen />);
+
+    expect(await screen.findByText("Para estar al corriente")).toBeTruthy();
+    expect(screen.queryByText("A pagar hoy")).toBeNull();
   });
 
   // Task 13: with the card's flag on, Cuenta leads to the child's card; off,
@@ -234,7 +336,7 @@ describe("AccountScreen (the backend's ledger, T7)", () => {
     mockFetch({ movements: [], totals: ZERO, dueTodayCents: 0, asOf: "2026-10-01" });
     await renderWithProviders(<AccountScreen />, { flags: { ...demoFlags, module_student_card: true } });
 
-    fireEvent.press(await screen.findByLabelText("Credencial"));
+    await fireEvent.press(await screen.findByLabelText("Credencial"));
     expect(router.push).toHaveBeenCalledWith("/credencial");
   });
 

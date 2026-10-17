@@ -24,7 +24,13 @@ export interface FamilyStudent {
   level: string;
   /** The config level id. */
   levelId: string;
+  /** The group's bare letter as stored on the pupil. Show groupLabel. */
   gradeGroup: string;
+  /**
+   * The group as every screen names it ("3° PRIMARIA · B", ISSUE-T14-108); the
+   * bare letter when the school cannot resolve it. Absent from older gateways.
+   */
+  groupLabel?: string;
 }
 
 /** A child's placement in a cycle. Grades and attendance are keyed by enrollment. */
@@ -49,6 +55,13 @@ export interface FamilyProfile extends FamilyStudent {
  */
 export type MovementKind = "charge" | "surcharge" | "discount" | "scholarship" | "payment" | "credit_note";
 
+/** One charge a deposit's money paid, with its part (ISSUE-T14-106). */
+export interface FamilyAppliedPart {
+  chargeId: string;
+  description: string;
+  amountCents: number;
+}
+
 /**
  * One line of the child's ledger (T7), as finance worked it out. Amounts are
  * integer cents; `amountCents` is always positive and `kind` says which way it
@@ -67,6 +80,10 @@ export interface FamilyMovement {
   cardType?: string;
   reference?: string;
   folio?: string;
+  /** On money lines: the deposit, whose receipt the family can open. */
+  depositId?: string;
+  /** On a deposit's lines: the charges its money paid, in due-date order. */
+  appliedTo?: FamilyAppliedPart[];
   /** A surcharge earned up to today and not yet written down. */
   accrued: boolean;
   notYetDue: boolean;
@@ -91,9 +108,9 @@ export interface FamilyStatement {
   movements: FamilyMovement[];
   totals: FamilyStatementTotals;
   /**
-   * What the school is asking for TODAY: the months that have come due, already
-   * carrying the surcharge that has accrued and net of the early-payment reward
-   * — the counter's figure.
+   * What to pay to be current this month: what has come due plus this month's
+   * charges not yet due (so the early-payment reward can still be earned),
+   * carrying the accrued surcharge, net of that reward — the counter's figure.
    */
   dueTodayCents: number;
   /** Its parts, so the screen can explain its own figure. */
@@ -164,6 +181,11 @@ export async function getStatement(studentId: string): Promise<FamilyStatement> 
 /** The authenticated path of the statement's PDF. */
 export function statementPdfPath(studentId: string): string {
   return `/api/v1/family/students/${studentId}/statement/pdf`;
+}
+
+/** The authenticated path of one payment's receipt PDF (ISSUE-T14-107). */
+export function receiptPdfPath(studentId: string, depositId: string): string {
+  return `/api/v1/family/students/${encodeURIComponent(studentId)}/receipts/${encodeURIComponent(depositId)}/pdf`;
 }
 
 /** Reads one child's grade entries, optionally narrowed to a single term. */

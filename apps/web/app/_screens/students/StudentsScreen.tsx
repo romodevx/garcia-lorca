@@ -641,6 +641,10 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
       };
     });
   }, [students, enrollments, groups, gradeLevels, catalogLevels, placementReady]);
+  // Each pupil's classroom with its grade ("3° PRIMARIA · B"), from the reads
+  // already made; the file's bare letter until they land (ISSUE-T14-303).
+  const rooms = useMemo(() => roomLabelsOf(enrollments, groups), [enrollments, groups]);
+  const roomOf = (s: Student): string => rooms.get(s.id) ?? s.gradeGroup;
   const rows = useMemo(
     () => placedRows.filter((r) => tab === "all" || statusOf(r.student.admissionStatus).tab === tab),
     [placedRows, tab],
@@ -894,7 +898,7 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
         <StudentNotesDialog
           studentId={notesOf.id}
           name={formatStudentName(notesOf)}
-          subtitle={notesOf.gradeGroup}
+          subtitle={roomOf(notesOf)}
           userId={userId}
           canWrite={canWriteNotes}
           canVoidAny={canVoidAnyNote}
@@ -905,7 +909,7 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
         <StudentStatementDrawer
           studentId={statementOf.id}
           name={formatStudentName(statementOf)}
-          subtitle={statementOf.gradeGroup}
+          subtitle={roomOf(statementOf)}
           canCorrect={canCorrectPayments}
           onClose={() => setStatementOf(null)}
         />

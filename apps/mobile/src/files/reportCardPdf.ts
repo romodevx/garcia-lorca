@@ -6,19 +6,21 @@ import { ApiError } from "../api/errors";
 import { getAccessToken } from "../api/tokenStore";
 
 /**
- * Downloads an authenticated PDF (a boleta) into the app's cache and hands it
- * to the phone's native share / preview sheet.
+ * Downloads an authenticated PDF (a boleta, the account statement, a payment's
+ * receipt) into the app's cache and hands it to the phone's native share /
+ * preview sheet.
  *
  * The download is native (expo-file-system `File.downloadFileAsync`) so the
- * bytes never cross the JS bridge. Each child has a folder
- * (`cache/boletas/<studentId>/`), so siblings never collide; the file keeps
- * the server's Content-Disposition name (`boleta-<matrícula>-<periodo>-v<N>.pdf`)
- * or, when that did not reach the native layer, is renamed to
- * {@link fallbackPdfName} — never an id, since the parent sees the name when
- * sharing. Everything else under `boletas/` is deleted first, so the cache holds
- * only the boleta being opened and a re-download overwrites it
- * (and {@link clearPdfCache} empties it on sign-out). Native downloads bypass {@link apiFetch}, so an expired access
- * token is handled here the same way: refresh once, retry once.
+ * bytes never cross the JS bridge. Each kind of document and each child has a
+ * folder (`cache/documentos/<kind>/<studentId>/`), so siblings never collide
+ * and one kind's download never deletes another's file while it is being
+ * shared. The file keeps the server's Content-Disposition name or, when that
+ * did not reach the native layer, the caller's fallback name — never an id,
+ * since the parent sees the name when sharing. Everything else under the
+ * kind's folder is deleted first, so the cache holds only the document of that
+ * kind being opened and a re-download overwrites it ({@link clearPdfCache}
+ * empties it all on sign-out). Native downloads bypass {@link apiFetch}, so an
+ * expired access token is handled here the same way: refresh once, retry once.
  */
 
 export type PdfErrorKind = "network" | "server" | "not_found" | "session" | "storage" | "unavailable";
@@ -34,7 +36,9 @@ export class PdfError extends Error {
 export interface PdfDownloadRequest {
   /** Authenticated API path of the PDF. */
   path: string;
-  /** The child the boleta belongs to: names its cache folder, never the file. */
+  /** The kind of document ("boleta", "comprobante"…): its own cache folder. */
+  kind: string;
+  /** The child the document belongs to: names its cache folder, never the file. */
   studentId: string;
   /** Used when the server's filename did not reach the native layer, from {@link fallbackPdfName}. */
   fallbackName: string;
@@ -42,7 +46,9 @@ export interface PdfDownloadRequest {
   onProgress?: (fraction: number | null) => void;
 }
 
-const CACHE_FOLDER = "boletas";
+const CACHE_FOLDER = "documentos";
+/** Where apps before T14 kept boletas; still emptied on sign-out. */
+const LEGACY_CACHE_FOLDER = "boletas";
 const PDF_EXTENSION = ".pdf";
 const PDF_MIME = "application/pdf";
 const PDF_UTI = "com.adobe.pdf";
@@ -81,8 +87,8 @@ function classify(failure: unknown): PdfError {
   return new PdfError("network", message);
 }
 
-function cacheFolder(): Directory {
-  return new Directory(Paths.cache, CACHE_FOLDER);
+function cacheFolder(name: string = CACHE_FOLDER): Directory {
+  return new Directory(Paths.cache, name);
 }
 
 function storageError(failure: unknown): PdfError {
@@ -90,12 +96,13 @@ function storageError(failure: unknown): PdfError {
 }
 
 /**
- * Empties `boletas/` except this child's (now empty) folder and answers that
- * folder. A path-like student id is slugged so it stays inside `boletas/`.
+ * Empties the kind's folder except this child's (now empty) folder and answers
+ * that folder. Other kinds are left alone. A path-like kind or student id is
+ * slugged so it stays inside `documentos/`.
  */
-function prepareStudentFolder(studentId: string): Directory {
+function prepareStudentFolder(kind: string, studentId: string): Directory {
   try {
-    const root = cacheFolder();
+    const root = new Directory(cacheFolder(), slug(kind) || "documento");
     const folderName = slug(studentId) || "alumno";
     root.create({ idempotent: true, intermediates: true });
     for (const entry of root.list()) {
@@ -157,18 +164,21 @@ async function downloadWithSessionRetry(request: PdfDownloadRequest, folder: Dir
 
 /** Downloads the PDF into the child's cache folder and answers its local file URI. */
 export async function downloadPdf(request: PdfDownloadRequest): Promise<string> {
-  const folder = prepareStudentFolder(request.studentId);
+  const folder = prepareStudentFolder(request.kind, request.studentId);
   const file = await downloadWithSessionRetry(request, folder);
   return ensurePdfName(file, request.fallbackName).uri;
 }
 
 /**
- * Deletes every downloaded boleta — called on sign-out, so a shared or lost
- * phone keeps no child's grades behind. Throws when the phone refuses.
+ * Deletes every downloaded document, and the older `boletas/` folder — called
+ * on sign-out, so a shared or lost phone keeps no child's grades or money
+ * behind. Throws when the phone refuses.
  */
 export function clearPdfCache(): void {
-  const folder = cacheFolder();
-  if (folder.exists) folder.delete();
+  for (const name of [CACHE_FOLDER, LEGACY_CACHE_FOLDER]) {
+    const folder = cacheFolder(name);
+    if (folder.exists) folder.delete();
+  }
 }
 
 /** Opens the native share / preview sheet for a local PDF. */

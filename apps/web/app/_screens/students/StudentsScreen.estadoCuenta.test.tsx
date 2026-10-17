@@ -77,6 +77,23 @@ describe("StudentsScreen · estado de cuenta", () => {
     await waitFor(() => expect(trigger).toHaveFocus());
   });
 
+  // ISSUE-T14-303: the header names the classroom with its grade, not the bare letter.
+  it("names the pupil's classroom with its grade in the header", async () => {
+    students.listStudents.mockResolvedValue([{ ...valentina, gradeGroup: "B" }]);
+    students.listEnrollments.mockResolvedValue([
+      { id: "e-1", studentId: "st-1", cycleId: "c1", groupId: "g-3b", termId: "", status: "active", enrolledAt: "2026-08-20" },
+    ]);
+    config.listCycles.mockResolvedValue([{ id: "c1", name: "2026-2027", status: "active", startsOn: "2026-08-01", endsOn: "2027-06-30" }]);
+    config.listLabelledGroups.mockResolvedValue([{ id: "g-3b", cycleId: "c1", gradeLevelId: "gl-3", name: "B", capacity: 25, label: "3º PRIMARIA · B" }]);
+    const user = userEvent.setup();
+    render(<StudentsScreen onBack={() => {}} canReadStatement />);
+    await waitFor(() => expect(config.listLabelledGroups).toHaveBeenCalled());
+    await user.click(await screen.findByRole("button", { name: "Estado de cuenta de Cruz Valentina" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Estado de cuenta · Cruz Valentina" });
+    expect(await within(dialog).findByText("3º PRIMARIA · B")).toBeInTheDocument();
+  });
+
   it("is not offered to whoever cannot see the money", async () => {
     render(<StudentsScreen onBack={() => {}} />);
     await screen.findByRole("button", { name: "Notas de Cruz Valentina" });

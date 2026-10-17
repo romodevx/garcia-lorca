@@ -8,6 +8,8 @@ export type PdfDownloadState =
 
 export interface PdfDownloadTarget {
   path: string;
+  /** The kind of document: each kind keeps its own cache folder. */
+  kind: string;
   studentId: string;
   /** Used when the server's filename is unavailable, from fallbackPdfName. */
   fallbackName: string;
@@ -31,7 +33,9 @@ const MESSAGES: Record<PdfErrorKind, string> = {
  * screen closes mid-download the result is dropped: no share sheet pops up
  * over whatever the parent went to, and no state is set on an unmounted screen.
  */
-export function usePdfDownload(target: PdfDownloadTarget | null): { state: PdfDownloadState; start: () => void } {
+export function usePdfDownload(
+  defaultTarget: PdfDownloadTarget | null,
+): { state: PdfDownloadState; start: () => void; open: (target: PdfDownloadTarget) => void } {
   const [state, setState] = useState<PdfDownloadState>({ status: "idle" });
   const busy = useRef(false);
   const mounted = useRef(true);
@@ -43,8 +47,11 @@ export function usePdfDownload(target: PdfDownloadTarget | null): { state: PdfDo
     };
   }, []);
 
-  const start = useCallback(() => {
-    if (target === null || busy.current) {
+  // `open` takes the document at the tap: a list whose rows each name their own
+  // (a statement's receipts). `start` takes no argument, so it can be handed to
+  // onPress as is without the press event posing as a target.
+  const open = useCallback((target: PdfDownloadTarget) => {
+    if (busy.current) {
       return;
     }
     busy.current = true;
@@ -56,6 +63,7 @@ export function usePdfDownload(target: PdfDownloadTarget | null): { state: PdfDo
       try {
         const uri = await downloadPdf({
           path: target.path,
+          kind: target.kind,
           studentId: target.studentId,
           fallbackName: target.fallbackName,
           onProgress: (progress) => update({ status: "downloading", progress }),
@@ -70,7 +78,11 @@ export function usePdfDownload(target: PdfDownloadTarget | null): { state: PdfDo
         busy.current = false;
       }
     })();
-  }, [target]);
+  }, []);
 
-  return { state, start };
+  const start = useCallback(() => {
+    if (defaultTarget !== null) open(defaultTarget);
+  }, [defaultTarget, open]);
+
+  return { state, start, open };
 }
