@@ -28,12 +28,33 @@ function subOf(m: FamilyMovement): string {
   return parts.filter(Boolean).join(" · ");
 }
 
+/**
+ * What a deposit paid, each charge with its part (ISSUE-T14-106); empty when
+ * the line names a single charge already ("Pago · Inscripción").
+ */
+function appliedLineOf(m: FamilyMovement): string {
+  const parts = m.appliedTo ?? [];
+  if (parts.length < 2) return "";
+  return `Pagó: ${parts.map((p) => `${p.description} ${pesos(p.amountCents)}`).join(" · ")}`;
+}
+
+interface MovementListProps {
+  movements: readonly FamilyMovement[];
+  /** Opens a payment's receipt; rows without a deposit are not offered one. */
+  onOpenReceipt?: (movement: FamilyMovement) => void;
+}
+
 /** A card of ledger lines, in the order given. */
-export function MovementList({ movements }: { movements: readonly FamilyMovement[] }): ReactElement {
+export function MovementList({ movements, onOpenReceipt }: MovementListProps): ReactElement {
   return (
     <Card>
       {movements.map((m, i) => (
-        <MovementRow key={`${m.kind}-${m.date}-${i}`} movement={m} divider={i > 0} />
+        <MovementRow
+          key={`${m.kind}-${m.date}-${i}`}
+          movement={m}
+          divider={i > 0}
+          onOpenReceipt={onOpenReceipt !== undefined && m.depositId ? () => onOpenReceipt(m) : undefined}
+        />
       ))}
     </Card>
   );
@@ -44,25 +65,44 @@ export function MovementList({ movements }: { movements: readonly FamilyMovement
  * payment can precede its charge's due day, and the balance after it then
  * reads as credit the family does not have. The header carries the total.
  */
-function MovementRow({ movement, divider }: { movement: FamilyMovement; divider: boolean }): ReactElement {
+function MovementRow({ movement, divider, onOpenReceipt }: { movement: FamilyMovement; divider: boolean; onOpenReceipt?: () => void }): ReactElement {
   const theme = useTheme();
   const look = KIND_LOOK[movement.kind] ?? KIND_LOOK.charge;
   const amount = look.credit ? -movement.amountCents : movement.amountCents;
-  return (
-    <View accessible accessibilityLabel={`Movimiento ${movement.description}`}>
-      <ListRow divider={divider}>
-        <TintIcon name={look.icon} tint={look.tint} />
-        <View style={{ flex: 1 }}>
-          <Text style={[styles.rowTitle, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]}>{movement.description}</Text>
-          <Text style={[styles.rowSub, { color: theme.colors.text3, fontFamily: theme.fonts.uiSemi }]}>{subOf(movement)}</Text>
-        </View>
-        <View style={styles.trail}>
-          <Text style={[styles.amountVal, { color: look.credit ? theme.colors.ok : theme.colors.text, fontFamily: theme.fonts.display }]}>
-            {pesos(amount)}
-          </Text>
-          {movement.accrued ? <Chip kind="warn">Acumulado a hoy</Chip> : null}
-        </View>
+  const applied = appliedLineOf(movement);
+  const label = `Movimiento ${movement.description}`;
+  const content = (
+    <>
+      <TintIcon name={look.icon} tint={look.tint} />
+      <View style={{ flex: 1 }}>
+        <Text style={[styles.rowTitle, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]}>{movement.description}</Text>
+        <Text style={[styles.rowSub, { color: theme.colors.text3, fontFamily: theme.fonts.uiSemi }]}>{subOf(movement)}</Text>
+        {applied !== "" ? (
+          <Text style={[styles.rowSub, { color: theme.colors.text2, fontFamily: theme.fonts.uiSemi }]}>{applied}</Text>
+        ) : null}
+      </View>
+      <View style={styles.trail}>
+        <Text style={[styles.amountVal, { color: look.credit ? theme.colors.ok : theme.colors.text, fontFamily: theme.fonts.display }]}>
+          {pesos(amount)}
+        </Text>
+        {movement.accrued ? <Chip kind="warn">Acumulado a hoy</Chip> : null}
+        {onOpenReceipt !== undefined ? (
+          <Text style={[styles.receiptCue, { color: theme.colors.text2, fontFamily: theme.fonts.uiExtra }]}>Comprobante</Text>
+        ) : null}
+      </View>
+    </>
+  );
+  // A payment opens its receipt (ISSUE-T14-107): the whole row is the target.
+  if (onOpenReceipt !== undefined) {
+    return (
+      <ListRow divider={divider} onPress={onOpenReceipt} accessibilityLabel={label} accessibilityHint="Abre el comprobante de pago">
+        {content}
       </ListRow>
+    );
+  }
+  return (
+    <View accessible accessibilityLabel={label}>
+      <ListRow divider={divider}>{content}</ListRow>
     </View>
   );
 }
@@ -72,4 +112,5 @@ const styles = StyleSheet.create({
   rowSub: { fontSize: 12.5, fontWeight: "600", marginTop: 3 },
   trail: { alignItems: "flex-end", gap: 4 },
   amountVal: { fontSize: 16, fontWeight: "700", letterSpacing: -0.2 },
+  receiptCue: { fontSize: 13, fontWeight: "800", textDecorationLine: "underline" },
 });

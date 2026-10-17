@@ -65,6 +65,17 @@ export function formatSubtitle(gradeGroup: string, level: string): string {
   return [levelText, group && group !== grade ? group : ""].filter(Boolean).join(" · ");
 }
 
+/**
+ * The school's own name for the group ("3° PRIMARIA · B", ISSUE-T14-108). A
+ * label that is only the letter is the gateway's fallback: the letter and the
+ * level then say more.
+ */
+function subtitleOf(student: FamilyStudent): string {
+  const label = (student.groupLabel ?? "").trim();
+  if (label !== "" && label !== student.gradeGroup.trim()) return label;
+  return formatSubtitle(student.gradeGroup, student.level);
+}
+
 /** Projects a family student (or null) into the null-safe display view-model. */
 export function toChildView(student: FamilyStudent | null): ChildView {
   if (student === null) {
@@ -75,7 +86,7 @@ export function toChildView(student: FamilyStudent | null): ChildView {
     fullName: formatStudentName(student),
     short: formatDisplayName("", student.lastName),
     headerName: formatDisplayName(student.firstName, student.lastName),
-    subtitle: formatSubtitle(student.gradeGroup, student.level),
+    subtitle: subtitleOf(student),
     initials: studentInitials(student),
     group: student.gradeGroup,
     levelLabel: student.level,

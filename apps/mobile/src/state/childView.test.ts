@@ -46,6 +46,18 @@ describe("toChildView", () => {
     expect(view.subtitle).toBe("Primaria · B");
   });
 
+  // ISSUE-T14-108: the gateway names the group with its grade; the app shows it as sent.
+  it("uses the group label the school sends, grade included", () => {
+    const view = toChildView({ ...student, level: "PRIMARIA", gradeGroup: "B", groupLabel: "3º PRIMARIA · B" });
+    expect(view.subtitle).toBe("3º PRIMARIA · B");
+  });
+
+  it("falls back to letter and level when the label is absent or only the letter", () => {
+    expect(toChildView({ ...student, gradeGroup: "B", groupLabel: "B" }).subtitle).toBe("Primaria · B");
+    expect(toChildView({ ...student, gradeGroup: "B", groupLabel: " " }).subtitle).toBe("Primaria · B");
+    expect(toChildView({ ...student, gradeGroup: "B" }).subtitle).toBe("Primaria · B");
+  });
+
   it("marks a kínder child as qualitative", () => {
     const view = toChildView({ ...student, level: "Kínder" });
     expect(view.levelLabel).toBe("Kínder");

@@ -33,4 +33,15 @@ describe("usePdfDownload", () => {
     expect(sharePdf).toHaveBeenCalledWith("file:///b.pdf", "Boleta T1");
     expect(hook.result.current.state).toEqual({ status: "idle" });
   });
+
+  // ISSUE-T14-107: one hook serves a list whose rows each name their own PDF.
+  it("downloads the document the caller names when it starts", async () => {
+    (downloadPdf as jest.Mock).mockResolvedValue("file:///r.pdf");
+    const hook = await renderHook(() => usePdfDownload(null));
+
+    await act(async () => hook.result.current.open({ ...target, path: "/receipt", title: "Comprobante" }));
+
+    expect(downloadPdf).toHaveBeenCalledWith(expect.objectContaining({ path: "/receipt" }));
+    expect(sharePdf).toHaveBeenCalledWith("file:///r.pdf", "Comprobante");
+  });
 });
