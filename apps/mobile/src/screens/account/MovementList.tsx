@@ -1,10 +1,11 @@
-import { type ReactElement } from "react";
+import { useMemo, type ReactElement } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import type { FamilyMovement, MovementKind } from "../../api";
 import type { IconName } from "../../icons";
 import { useTheme, type TintName } from "../../theme";
 import { Card, Chip, ListRow, TintIcon } from "../../ui";
 import { formatDate, pesos } from "../format";
+import { groupDeposits, type LedgerRow } from "./ledgerView";
 import { PdfStatus } from "./PdfStatus";
 import type { ReceiptStatus } from "./useReceiptDownload";
 
@@ -20,15 +21,23 @@ const KIND_LOOK: Record<MovementKind, { icon: IconName; tint: TintName; label: s
 
 const METHOD_LABEL: Record<string, string> = { cash: "Efectivo", card: "Tarjeta", transfer: "Transferencia", credit_note: "Nota de crédito" };
 
+const methodLabel = (method: string | undefined): string => (method ? (METHOD_LABEL[method] ?? method) : "");
+
+/** How the money came: one method, or each tender with its part (ISSUE-CC-315). */
+function howPaid({ movement, tenders }: LedgerRow, kind: string): string[] {
+  if (tenders.length > 0) return tenders.map((t) => `${methodLabel(t.method)} ${pesos(t.amountCents)}`);
+  const method = methodLabel(movement.method);
+  // A credit note's method is its kind (T8): said once, not twice.
+  return method !== kind ? [method] : [];
+}
+
 /** The row's second line: what the line is, its day, and how money came. */
-function subOf(m: FamilyMovement): string {
+function subOf(row: LedgerRow): string {
+  const m = row.movement;
   const kind = KIND_LOOK[m.kind]?.label ?? m.kind;
   // "Pago · Inscripción" already says what it is (ISSUE-T14-402): not twice.
   const named = m.description.startsWith(`${kind} · `);
-  const parts = [named ? "" : kind, formatDate(m.date)];
-  const method = m.method ? (METHOD_LABEL[m.method] ?? m.method) : "";
-  // A credit note's method is its kind (T8): said once, not twice.
-  if (method !== kind) parts.push(method);
+  const parts = [named ? "" : kind, formatDate(m.date), ...howPaid(row, kind)];
   if (m.folio) parts.push(m.folio);
   return parts.filter(Boolean).join(" · ");
 }
@@ -51,20 +60,19 @@ interface MovementListProps {
   receiptStatus?: ReceiptStatus | null;
 }
 
-/** A card of ledger lines, in the order given. */
+/** A card of ledger lines, in the order given; a deposit is one row (ISSUE-CC-315). */
 export function MovementList({ movements, onOpenReceipt, receiptStatus }: MovementListProps): ReactElement {
-  // A deposit paid in two tenders has two lines: its status sits under the first.
-  const statusAt = receiptStatus ? movements.findIndex((m) => m.depositId === receiptStatus.depositId) : -1;
+  const rows = useMemo(() => groupDeposits(movements), [movements]);
   return (
     <Card>
-      {movements.map((m, i) => (
-        <View key={`${m.kind}-${m.date}-${i}`}>
+      {rows.map((row, i) => (
+        <View key={`${row.movement.kind}-${row.movement.date}-${i}`}>
           <MovementRow
-            movement={m}
+            row={row}
             divider={i > 0}
-            onOpenReceipt={onOpenReceipt !== undefined && m.depositId ? () => onOpenReceipt(m) : undefined}
+            onOpenReceipt={onOpenReceipt !== undefined && row.movement.depositId ? () => onOpenReceipt(row.movement) : undefined}
           />
-          {i === statusAt && receiptStatus && receiptStatus.state.status !== "idle" ? (
+          {receiptStatus && row.movement.depositId === receiptStatus.depositId && receiptStatus.state.status !== "idle" ? (
             <View testID={`receipt-status-${receiptStatus.depositId}`} style={styles.rowStatus}>
               <PdfStatus state={receiptStatus.state} />
             </View>
@@ -80,8 +88,9 @@ export function MovementList({ movements, onOpenReceipt, receiptStatus }: Moveme
  * payment can precede its charge's due day, and the balance after it then
  * reads as credit the family does not have. The header carries the total.
  */
-function MovementRow({ movement, divider, onOpenReceipt }: { movement: FamilyMovement; divider: boolean; onOpenReceipt?: () => void }): ReactElement {
+function MovementRow({ row, divider, onOpenReceipt }: { row: LedgerRow; divider: boolean; onOpenReceipt?: () => void }): ReactElement {
   const theme = useTheme();
+  const { movement } = row;
   const look = KIND_LOOK[movement.kind] ?? KIND_LOOK.charge;
   const amount = look.credit ? -movement.amountCents : movement.amountCents;
   const applied = appliedLineOf(movement);
@@ -91,7 +100,7 @@ function MovementRow({ movement, divider, onOpenReceipt }: { movement: FamilyMov
       <TintIcon name={look.icon} tint={look.tint} />
       <View style={{ flex: 1 }}>
         <Text style={[styles.rowTitle, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]}>{movement.description}</Text>
-        <Text style={[styles.rowSub, { color: theme.colors.text3, fontFamily: theme.fonts.uiSemi }]}>{subOf(movement)}</Text>
+        <Text style={[styles.rowSub, { color: theme.colors.text3, fontFamily: theme.fonts.uiSemi }]}>{subOf(row)}</Text>
         {applied !== "" ? (
           <Text style={[styles.rowSub, { color: theme.colors.text2, fontFamily: theme.fonts.uiSemi }]}>{applied}</Text>
         ) : null}

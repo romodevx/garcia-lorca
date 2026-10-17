@@ -1,5 +1,5 @@
 import type { FamilyMovement } from "../../api";
-import { splitLedger } from "./ledgerView";
+import { groupDeposits, splitLedger } from "./ledgerView";
 
 const line = (date: string, description: string): FamilyMovement => ({
   kind: "charge",
@@ -34,5 +34,33 @@ describe("splitLedger", () => {
 
     expect(names(view.happened)).toEqual(["jun", "sep"]);
     expect(view.upcoming).toEqual([]);
+  });
+});
+
+describe("groupDeposits (ISSUE-CC-315)", () => {
+  const money = (kind: FamilyMovement["kind"], method: string, amountCents: number, depositId: string): FamilyMovement => ({
+    ...line("2026-10-12", `${kind}-${method}`),
+    kind,
+    method,
+    amountCents,
+    depositId,
+  });
+
+  it("folds a deposit's tenders into one row where its first line was, keeping the rest", () => {
+    const rows = groupDeposits([
+      line("2026-10-01", "cargo"),
+      money("credit_note", "credit_note", 50000, "d1"),
+      money("payment", "cash", 20000, "d1"),
+      money("payment", "card", 10000, "d2"),
+    ]);
+
+    expect(rows.map((r) => r.movement.description)).toEqual(["cargo", "payment-cash", "payment-card"]);
+    // A credit note completed with cash still reads as the payment, for the total.
+    expect(rows[1]?.movement.amountCents).toBe(70000);
+    expect(rows[1]?.tenders).toEqual([
+      { method: "credit_note", amountCents: 50000 },
+      { method: "cash", amountCents: 20000 },
+    ]);
+    expect(rows[2]?.tenders).toEqual([]);
   });
 });

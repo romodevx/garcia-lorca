@@ -35,3 +35,54 @@ const ISO_DAY_LENGTH = "YYYY-MM-DD".length;
 function calendarDay(iso: string): string {
   return iso.slice(0, ISO_DAY_LENGTH);
 }
+
+/** One method of a deposit and the part it brought (T8). */
+export interface Tender {
+  method: string;
+  amountCents: number;
+}
+
+/**
+ * One row of the account as the family reads it: a ledger line, or a whole
+ * deposit that finance lists one line per tender (ISSUE-CC-315).
+ */
+export interface LedgerRow {
+  /** The row's line; for a deposit, its tenders summed into `amountCents`. */
+  movement: FamilyMovement;
+  /** The deposit's tenders when it came in more than one, in ledger order; else empty. */
+  tenders: Tender[];
+}
+
+/**
+ * Folds each deposit's lines into one row, placed where its first line was.
+ * Finance writes a line per tender and every one carries the WHOLE deposit's
+ * `appliedTo`, so two rows read as two payments of everything. Lines without
+ * a deposit pass through untouched. O(n), order kept.
+ */
+export function groupDeposits(movements: readonly FamilyMovement[]): LedgerRow[] {
+  const groups: FamilyMovement[][] = [];
+  const byDeposit = new Map<string, FamilyMovement[]>();
+  for (const m of movements) {
+    const group = m.depositId ? byDeposit.get(m.depositId) : undefined;
+    if (group !== undefined) {
+      group.push(m);
+      continue;
+    }
+    const fresh = [m];
+    groups.push(fresh);
+    if (m.depositId) byDeposit.set(m.depositId, fresh);
+  }
+  return groups.map(toRow);
+}
+
+function toRow(lines: FamilyMovement[]): LedgerRow {
+  const [first] = lines as [FamilyMovement, ...FamilyMovement[]];
+  if (lines.length === 1) return { movement: first, tenders: [] };
+  // A credit note completed with cash is still a payment: the row looks like one.
+  const lead = lines.find((line) => line.kind === "payment") ?? first;
+  const amountCents = lines.reduce((sum, line) => sum + line.amountCents, 0);
+  return {
+    movement: { ...lead, amountCents },
+    tenders: lines.map((line) => ({ method: line.method ?? "", amountCents: line.amountCents })),
+  };
+}
