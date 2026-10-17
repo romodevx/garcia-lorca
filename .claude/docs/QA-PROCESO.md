@@ -38,17 +38,23 @@ lleva su test de regresión primero), `git-workflow.md` (nunca en `dev`/`master`
 
 ### 0.1 Levantar el stack en modo producción
 
-> **PENDIENTE — lo llena otro agente.** Debe dejar: cómo construir y arrancar web
-> (`next build && next start`, sin source maps), gateway y servicios con binarios de
-> release (no `air`), `IAM_JWT_SECRET` fijo (si no, cada reinicio de iam cierra todas
-> las sesiones — [T14 E1]), Pub/Sub (emulador), fake-gcs, `ENABLED_MODULES` igual al de
-> `deploy/terraform/services.tf`, zona `SCHOOL_TIMEZONE=America/Mexico_City`, puertos, y
-> cómo saber que cada servicio está vivo (sondear el puerto: `docker ps` dice "Up" aunque
-> el binario haya muerto).
->
-> _(sección reservada)_
+La guía completa está en [`deploy/PROD-LOCAL.md`](../../deploy/PROD-LOCAL.md). En corto:
 
-Mientras tanto, el stack de desarrollo es `docker compose up -d` (web :3012 según `.env`,
+| Paso | Comando | Notas |
+|---|---|---|
+| Construir imágenes | `make prod-build` | las 10 imágenes de producción **una por una** (en paralelo se cae el daemon de Docker) |
+| Arrancar | `make prod-up` | detiene los contenedores de la app de desarrollo (Postgres sigue) y levanta el proyecto `prod-local` |
+| Salud | `make prod-status` | sondea el **puerto** de cada servicio, no `docker ps` |
+| Bitácoras | `make prod-logs` | |
+| Apagar | `make prod-down` | vuelve a arrancar el stack de desarrollo |
+| APK de release | `scripts/mobile-release-apk.sh` | JDK 17 (`brew install openjdk@17`); app id local de marcador |
+
+- Puertos: web **:13000**, gateway **:18080** (el emulador usa `10.0.2.2:18080`), servicios internos 18091–18101 sólo en 127.0.0.1.
+- Firma de sesiones fija (`.env.prod-local`, ignorado por git): reiniciar iam ya no cierra las sesiones.
+- `ENABLED_MODULES` = lista de `deploy/terraform/services.tf` + `ui_refresh,announcements_view` (encendidos en dev a mano; ver §0.2).
+- Diferencias con producción real (sin escala a cero, login por contraseña en vez de Identity Platform, Pub/Sub emulado, push sólo en bitácora, sin SMTP, archivos subidos en memoria, Postgres sin TLS, sin Cloud Scheduler, APK con llave de depuración): tabla en `deploy/PROD-LOCAL.md`.
+
+El stack de desarrollo sigue siendo `docker compose up -d` (web :3012 según `.env`,
 gateway :8080, Postgres :5433 en el host, servicios internos :8091–:8101). Antes de
 empezar, anotar en el reporte qué stack se usó.
 
