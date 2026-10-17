@@ -101,6 +101,8 @@ export function TuitionPage({
   };
   const [fees, setFees] = useState<Fee[]>(plan?.fees ?? []);
   const [concepts, setConcepts] = useState<EnrollmentConcept[]>(() => seedConcepts(plan, cycle));
+  /** The concepts with each card's typed amount merged in: what the year summary reads. */
+  const [typedConcepts, setTypedConcepts] = useState<EnrollmentConcept[] | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
   const [pending, setPending] = useState(false);
   const inFlight = useRef(false);
@@ -207,6 +209,8 @@ export function TuitionPage({
     const inscription = inscriptionDraft.current(concepts);
     if ("problem" in inscription) {
       complain(inscription.problem);
+      // El foco va al campo que falta, no al primero de la tarjeta (ISSUE-T14-007).
+      inscription.focus?.();
       return;
     }
     const savedConcepts = inscription.concepts;
@@ -291,7 +295,7 @@ export function TuitionPage({
           months={months}
           firstMonth={firstMonth}
           fees={fees}
-          concepts={concepts}
+          concepts={typedConcepts ?? concepts}
           previousPlan={previousPlan}
           previousCycleName={previousCycleName}
         />
@@ -333,6 +337,8 @@ export function TuitionPage({
           onChange={setConcepts}
           onError={setError}
           draftRef={inscriptionDraft}
+          firstTierFrom={cycle.startsOn}
+          onPreviewChange={setTypedConcepts}
         />
         {/* Inicio y límite lado a lado: son UN rango, la única pareja que las
             reglas de formularios permiten en la misma fila. */}

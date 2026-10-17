@@ -46,37 +46,67 @@ export interface TierDraft {
   to: string;
 }
 
+/** Which field of a concept card a draft problem is about, so the save can focus it. */
+export type TierDraftField = "amount" | "from";
+
 /** Nothing typed, a tier ready to add, or what is missing to make one. */
 export type TierDraftRead =
   | { kind: "empty" }
   | { kind: "tier"; tier: PriceTier }
-  | { kind: "problem"; message: string };
+  | { kind: "problem"; message: string; field: TierDraftField };
 
 /**
  * Reads a card's unsaved tier (ISSUE-013), the same way for its "Agregar
  * monto" button and for "Guardar tabulador": a complete draft is a tier, a
  * half-filled one says exactly what it lacks. Saving used to refuse even a
  * complete draft until the button was pressed, and the year summary read $0.00.
+ *
+ * `prefilledFrom` is the date the card opened with (ISSUE-T14-007): left
+ * untouched with nothing else typed, the card is still empty — the director did
+ * not write it, so it must not block the save with "falta el monto".
  */
-export function readTierDraft(concept: string, draft: TierDraft): TierDraftRead {
+export function readTierDraft(concept: string, draft: TierDraft, prefilledFrom = ""): TierDraftRead {
   const amount = draft.amount.trim();
   const from = draft.from.trim();
   const to = draft.to.trim();
-  if (amount === "" && from === "" && to === "") return { kind: "empty" };
+  const fromUntouched = from === "" || from === prefilledFrom;
+  if (amount === "" && fromUntouched && to === "") return { kind: "empty" };
   if (amount === "") {
-    return { kind: "problem", message: `A "${concept}" le falta el monto. Escríbelo, o borra las fechas que pusiste.` };
+    return { kind: "problem", field: "amount", message: `A "${concept}" le falta el monto. Escríbelo, o borra las fechas que pusiste.` };
   }
   const cents = pesosToCents(amount);
   if (cents === null) {
-    return { kind: "problem", message: `El monto de "${concept}" no se entiende. Escríbelo en pesos, por ejemplo 4500.00` };
+    return { kind: "problem", field: "amount", message: `El monto de "${concept}" no se entiende. Escríbelo en pesos, por ejemplo 4500.00` };
   }
   if (cents <= 0) {
-    return { kind: "problem", message: `El monto de "${concept}" debe ser mayor a cero.` };
+    return { kind: "problem", field: "amount", message: `El monto de "${concept}" debe ser mayor a cero.` };
   }
   if (from === "") {
-    return { kind: "problem", message: `A "${concept}" le falta la fecha "Vigente desde" del monto. Escríbela, o borra el monto.` };
+    return { kind: "problem", field: "from", message: `A "${concept}" le falta la fecha "Vigente desde" del monto. Escríbela, o borra el monto.` };
   }
   return { kind: "tier", tier: { effectiveFrom: from, effectiveTo: to, amountCents: cents } };
+}
+
+/**
+ * The concepts as they would be saved right now: each card's complete draft
+ * tier merged in, so the totals read what is typed and not only what was added.
+ */
+export function withDraftTiers(
+  concepts: readonly EnrollmentConcept[],
+  drafts: Readonly<Record<string, TierDraftRead>>,
+): EnrollmentConcept[] {
+  return concepts.map((c) => {
+    const draft = drafts[c.name];
+    return draft?.kind === "tier" ? { ...c, tiers: withTier(c.tiers, draft.tier) } : c;
+  });
+}
+
+/** Concepts whose card has a half-typed tier: the live ladder check leaves them alone. */
+export function withoutHalfTyped(
+  concepts: readonly EnrollmentConcept[],
+  drafts: Readonly<Record<string, TierDraftRead>>,
+): EnrollmentConcept[] {
+  return concepts.filter((c) => drafts[c.name]?.kind !== "problem");
 }
 
 /** Adds a tier in date order, which is how it is charged and how a price list reads. */
