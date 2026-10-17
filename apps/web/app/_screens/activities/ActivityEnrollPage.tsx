@@ -18,11 +18,12 @@ import { LONG_TOAST_MS, useToast } from "./useToast";
 
 // What enrolling charges (owner decision D3): the period in course in full,
 // due today when its own date already passed; a once-a-cycle activity keeps
-// the same window everyone had, counted from today.
+// the same window everyone had, counted from today. The server moves a due
+// date that lands on a weekend or holiday to the next school day (CC-212).
 function chargeRule(periodicity: Periodicity): string {
   return periodicity === "per_cycle"
     ? "Pagan la actividad completa, con el mismo plazo que los demás contado desde hoy."
-    : "Pagan completo el periodo en curso; si su fecha límite ya pasó, vence hoy.";
+    : "Pagan completo el periodo en curso; si su fecha límite ya pasó, vence hoy o, si hoy no hay clases, el siguiente día hábil.";
 }
 
 const LABELS = { available: "Alumnos", assigned: "Inscritos", assign: "Inscribir", unassign: "Dar de baja", emptyAssigned: "Nadie inscrito todavía." };
