@@ -7,6 +7,7 @@ import { Btn } from "../../_design/Controls";
 import { Icon } from "../../_design/Icon";
 import { DateField, Field, inputStyle, MoneyField, SelectField, useRequired } from "../../_design/form";
 import { createCharge, listConcepts, type Charge, type ChargeConcept } from "../../finance/api";
+import { failureMessage } from "../../finance/failureMessage";
 import { formatPesosInput, pesosToCents } from "../../_lib/money";
 import { BAD_AMOUNT } from "./conceptCopy";
 
@@ -26,6 +27,12 @@ export interface ManualChargePanelProps {
 }
 
 const FIELDS = ["pupil", "conceptId", "amount", "dueDate"] as const;
+// The gateway answers 409 to a second charge of one concept in one cycle (UNIQUE per cycle).
+const CREATE_FAILURE = {
+  conflict: "Este alumno ya tiene un cargo de ese concepto en el ciclo.",
+  forbiddenAction: "crear cargos",
+  other: "No se pudo crear el cargo. Revisa los datos e intenta de nuevo.",
+};
 
 /**
  * A loose charge to one pupil (CC-203): pupil, concept, amount, due date. Four
@@ -73,7 +80,7 @@ export function ManualChargePanel({ cycleId, pupils, today, onCreated, onClose }
     setProblem(undefined);
     createCharge(API_URL, { studentId: pupil.id, cycleId, conceptId: concept.id, amountCentsOverride: pesosToCents(values.amount), descriptionOverride: "", dueDate: values.dueDate })
       .then((charge) => onCreated(charge, `Cargo de ${concept.name} creado para ${pupil.label}.`))
-      .catch(() => setProblem("No se pudo crear el cargo. Revisa los datos e intenta de nuevo."))
+      .catch((cause: unknown) => setProblem(failureMessage(cause, CREATE_FAILURE)))
       .finally(() => setSaving(false));
   };
 

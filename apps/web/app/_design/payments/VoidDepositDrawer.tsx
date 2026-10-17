@@ -4,6 +4,7 @@ import { useState, type ReactElement } from "react";
 
 import { API_URL } from "../../api-url";
 import { voidDeposit } from "../../finance/api";
+import { failureMessage } from "../../finance/failureMessage";
 import { Btn } from "../Controls";
 import { DrawerShell } from "../DrawerShell";
 import { Icon } from "../Icon";
@@ -19,6 +20,11 @@ export interface VoidDepositDrawerProps {
 }
 
 const REQUIRED = ["reason"] as const;
+const VOID_FAILURE = {
+  conflict: "Este pago ya estaba anulado o corregido. Vuelve a abrir el estado de cuenta.",
+  forbiddenAction: "anular pagos",
+  other: "No se pudo anular el pago. Intenta de nuevo.",
+};
 
 /**
  * Cancelling a registered payment (CC-203). It does not undo — the receipt
@@ -39,7 +45,7 @@ export function VoidDepositDrawer({ depositId, folio, onVoided, onCancel }: Void
     setProblem(undefined);
     voidDeposit(API_URL, depositId, reason.trim())
       .then(() => onVoided(`${folio === "" ? "Pago" : `Pago ${folio}`} anulado. Lo que pagó vuelve a deberse.`))
-      .catch(() => setProblem("No se pudo anular el pago. Puede que ya estuviera anulado o corregido; vuelve a abrir el estado de cuenta."))
+      .catch((cause: unknown) => setProblem(failureMessage(cause, VOID_FAILURE)))
       .finally(() => setSaving(false));
   };
 

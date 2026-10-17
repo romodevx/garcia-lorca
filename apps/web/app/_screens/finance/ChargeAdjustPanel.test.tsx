@@ -104,6 +104,22 @@ describe("ChargeAdjustPanel · cancelar (CC-203)", () => {
     expect(finance.cancelCharge).not.toHaveBeenCalled();
   });
 
+  it.each([
+    [Object.assign(new Error("charge already cancelled"), { status: 409 }), /ya estaba cancelado/],
+    [Object.assign(new Error("forbidden"), { status: 403 }), /no tiene permiso/],
+    [new TypeError("Failed to fetch"), /No hubo conexión/],
+  ])("tells a conflict, a refusal and a lost connection apart (%#)", async (cause, message) => {
+    const user = userEvent.setup();
+    finance.cancelCharge.mockRejectedValue(cause);
+    setup();
+
+    await user.click(screen.getByRole("radio", { name: "Cancelar cargo" }));
+    await user.type(screen.getByLabelText(/^Motivo/), "Cargo duplicado");
+    await user.click(screen.getByRole("button", { name: "Cancelar este cargo" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(message);
+  });
+
   it("closing leaves the charge untouched", async () => {
     const user = userEvent.setup();
     const { onClose } = setup();

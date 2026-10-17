@@ -375,6 +375,12 @@ describe("charges write path", () => {
     await expect(getAccount(BASE, "st1")).resolves.toMatchObject({ payments: [{ id: "p1", method: "cash" }] });
   });
 
+  it("a refused write carries its HTTP status, so the screen can tell 409 from 403", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("charge already cancelled", { status: 409 })));
+
+    await expect(cancelCharge(BASE, "ch1", "Duplicado")).rejects.toMatchObject({ status: 409, message: "charge already cancelled" });
+  });
+
   it("cancelCharge POSTs the cancel route with the reason (CC-203)", async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ ...charge, status: "cancelled" }));
     vi.stubGlobal("fetch", fetchMock);

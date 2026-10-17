@@ -7,6 +7,7 @@ import { Btn } from "../../_design/Controls";
 import { Icon } from "../../_design/Icon";
 import { MoneyField, TextField, useRequired } from "../../_design/form";
 import { applyDiscount, cancelCharge, type Charge } from "../../finance/api";
+import { failureMessage } from "../../finance/failureMessage";
 import { formatCents, formatPesosInput, pesosToCents } from "../../_lib/money";
 import { BAD_AMOUNT } from "./conceptCopy";
 
@@ -20,6 +21,10 @@ export interface ChargeAdjustPanelProps {
 }
 
 type Mode = "discount" | "cancel";
+const FAILURE = {
+  discount: { conflict: "Este cargo cambió mientras tanto. Vuelve a cargar la lista.", forbiddenAction: "aplicar descuentos", other: "No se pudo aplicar el descuento. Intenta de nuevo." },
+  cancel: { conflict: "Este cargo ya estaba cancelado. Vuelve a cargar la lista.", forbiddenAction: "cancelar cargos", other: "No se pudo cancelar el cargo. Intenta de nuevo." },
+} as const;
 const MODES: readonly { value: Mode; label: string }[] = [
   { value: "discount", label: "Descuento" },
   { value: "cancel", label: "Cancelar cargo" },
@@ -56,8 +61,8 @@ export function ChargeAdjustPanel({ charge, name, onDone, onClose }: ChargeAdjus
       } else {
         onDone(await cancelCharge(API_URL, charge.id, reason.trim()), `Cargo de ${name} cancelado.`);
       }
-    } catch {
-      setProblem(mode === "discount" ? "No se pudo aplicar el descuento. Intenta de nuevo." : "No se pudo cancelar el cargo. Puede que ya estuviera cancelado; vuelve a cargar la lista.");
+    } catch (cause) {
+      setProblem(failureMessage(cause, FAILURE[mode]));
     } finally {
       setSaving(false);
     }

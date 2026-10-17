@@ -101,6 +101,33 @@ describe("ManualChargePanel (CC-203 + CC-111)", () => {
     expect(await screen.findByText(/da de alta un concepto en Conceptos de cobro/)).toBeInTheDocument();
   });
 
+  it.each([
+    [409, "Este alumno ya tiene un cargo de ese concepto en el ciclo."],
+    [403, "Tu cuenta no tiene permiso para crear cargos."],
+  ])("says what a %i means", async (status, message) => {
+    const user = userEvent.setup();
+    finance.createCharge.mockRejectedValue(Object.assign(new Error("refused"), { status }));
+    setup();
+
+    await user.type(screen.getByLabelText(/^Alumno/), "CRUZ VALENTINA · 3° PRIMARIA · A");
+    await user.selectOptions(await screen.findByLabelText(/^Concepto/), "k9");
+    await user.click(screen.getByRole("button", { name: "Crear cargo" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(message);
+  });
+
+  it("says when the server could not be reached", async () => {
+    const user = userEvent.setup();
+    finance.createCharge.mockRejectedValue(new TypeError("Failed to fetch"));
+    setup();
+
+    await user.type(screen.getByLabelText(/^Alumno/), "CRUZ VALENTINA · 3° PRIMARIA · A");
+    await user.selectOptions(await screen.findByLabelText(/^Concepto/), "k9");
+    await user.click(screen.getByRole("button", { name: "Crear cargo" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/No hubo conexión/);
+  });
+
   it("keeps the form when the server refuses", async () => {
     const user = userEvent.setup();
     finance.createCharge.mockRejectedValue(new Error("HTTP 500"));

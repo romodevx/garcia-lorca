@@ -415,12 +415,20 @@ function url(baseURL: string, path: string): string {
  * show WHY the payment bounced instead of a generic message. Falls back to the
  * status when the body is empty.
  */
+/** A non-2xx answer from the finance gateway, with its HTTP status (409 vs 403…). */
+export class FinanceError extends HttpError {
+  constructor(status: number, message: string, detail: { serverText?: string } = {}) {
+    super(status, message, detail);
+    this.name = "FinanceError";
+  }
+}
+
 async function failure(res: Response): Promise<Error> {
   const body = await res.text().catch(() => "");
   const detail = body.trim();
   // The status travels with the sentence: a 409 (CC-202, another cashier got
   // there first) is a state to reload, not just a message to show.
-  return new HttpError(res.status, detail !== "" ? detail : `HTTP ${res.status}`, detail !== "" ? { serverText: detail } : {});
+  return new FinanceError(res.status, detail !== "" ? detail : `HTTP ${res.status}`, detail !== "" ? { serverText: detail } : {});
 }
 
 /** Send a JSON body (POST/PUT) and return the parsed entity. Throws on non-2xx. */

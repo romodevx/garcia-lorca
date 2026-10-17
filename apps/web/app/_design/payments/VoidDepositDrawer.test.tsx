@@ -58,6 +58,21 @@ describe("VoidDepositDrawer (CC-203)", () => {
     expect(onVoided).not.toHaveBeenCalled();
   });
 
+  it.each([
+    [Object.assign(new Error("this deposit is already cancelled"), { status: 409 }), /ya estaba anulado o corregido/],
+    [Object.assign(new Error("forbidden"), { status: 403 }), /no tiene permiso para anular pagos/],
+    [new TypeError("Failed to fetch"), /No hubo conexión/],
+  ])("tells a conflict, a refusal and a lost connection apart (%#)", async (cause, message) => {
+    const user = userEvent.setup();
+    finance.voidDeposit.mockRejectedValue(cause);
+    setup();
+
+    await user.type(await screen.findByLabelText(/^Motivo/), "Duplicado");
+    await user.click(screen.getByRole("button", { name: "Anular pago" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(message);
+  });
+
   it("backing out leaves the payment alone", async () => {
     const user = userEvent.setup();
     const { onCancel } = setup();
