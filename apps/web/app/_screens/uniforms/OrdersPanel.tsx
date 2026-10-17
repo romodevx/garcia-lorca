@@ -274,7 +274,9 @@ export function toRows(orders: UniformOrder[]): Row[] {
     const rows: Row[] = order.fulfillments.map((f) => ({
       key: f.id,
       folioStem: order.folio,
-      folioSuffix: f.folio.startsWith(order.folio) ? f.folio.slice(order.folio.length) : "",
+      // A counter sale is one act, filed under the folio its receipt prints
+      // (T14-019); the letter names one delivery of an order handed over in parts.
+      folioSuffix: f.status !== "sold_at_counter" && f.folio.startsWith(order.folio) ? f.folio.slice(order.folio.length) : "",
       who,
       levelLabel,
       itemsLabel: itemsLabel(order, f),
