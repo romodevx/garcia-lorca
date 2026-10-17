@@ -186,7 +186,7 @@ function ClassicDashboard({ user, onOpen, permissions, permissionsFailed = false
       ) : !resolved ? (
         <ModulesSkeleton />
       ) : visibleModules.length === 0 ? (
-        <NoModules />
+        <NoModules permissions={permissions} />
       ) : (
         <div style={GRID_STYLE}>
           {visibleModules.map((m, i) => (

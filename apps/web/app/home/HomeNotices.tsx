@@ -63,8 +63,19 @@ export function PermissionsUnavailable({ onRetry }: { onRetry?: () => void }): R
   );
 }
 
+const FAMILY_PERMISSION_PREFIX = "family:";
+
+/**
+ * A guardian's permissions are all `family:*`: everything they can do lives in
+ * the family app, and no administrator will grant them a web module.
+ */
+function isFamilyOnly(permissions: readonly string[]): boolean {
+  return permissions.length > 0 && permissions.every((p) => p.startsWith(FAMILY_PERMISSION_PREFIX));
+}
+
 // Shown to a signed-in user whose permissions match no module at all.
-export function NoModules(): ReactElement {
+export function NoModules({ permissions }: { permissions: readonly string[] }): ReactElement {
+  const family = isFamilyOnly(permissions);
   return (
     <div
       style={{
@@ -82,9 +93,13 @@ export function NoModules(): ReactElement {
     >
       <Icon name="shield" size={30} stroke={2} />
       <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 18, color: "var(--text)" }}>
-        No tienes módulos asignados
+        {family ? "Aquí no hay módulos para familias" : "No tienes módulos asignados"}
       </div>
-      <div style={{ fontSize: 13.5 }}>Solicita acceso a tu administrador para ver tus módulos aquí.</div>
+      <div style={{ fontSize: 13.5 }}>
+        {family
+          ? "Tu acceso es desde la app de García Lorca para familias."
+          : "Solicita acceso a tu administrador para ver tus módulos aquí."}
+      </div>
     </div>
   );
 }
