@@ -4330,7 +4330,10 @@ paths:
                 cardType:
                   type: string
                   enum: [debit, credit]
-                  description: Only on a card. A card type on cash is refused.
+                  description: >
+                    Only on a card, and REQUIRED on a card (CC-205): the bank's
+                    cut separates debit from credit. A card type on cash, or a
+                    card without one, is 400 and nothing is registered.
                 reference: { type: string }
                 paidAt:
                   type: string
@@ -8789,7 +8792,9 @@ components:
         cardType:
           type: string
           enum: [debit, credit]
-          description: Only on a card.
+          description: >
+            Only on a card. Required on a card tender of a deposit or a
+            correction (CC-205): without it the request is 400.
 
     Deposit:
       type: object

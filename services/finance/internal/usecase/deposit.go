@@ -221,8 +221,21 @@ func (s *FinanceService) prepareDeposit(ctx context.Context, in DepositInput, wh
 }
 
 // newDeposit builds the deposit the counter described: by its tenders when it
-// sent them (T8), by its single method otherwise.
+// sent them (T8), by its single method otherwise. Every card part must say
+// debit or credit (CC-205): this is money being taken, not read back.
 func (s *FinanceService) newDeposit(in DepositInput, when paymentDay, calendarVersion string) (domain.Deposit, error) {
+	deposit, err := s.describedDeposit(in, when, calendarVersion)
+	if err != nil {
+		return domain.Deposit{}, err
+	}
+	if err := deposit.RequireCardType(); err != nil {
+		return domain.Deposit{}, err
+	}
+	return deposit, nil
+}
+
+// describedDeposit is the deposit exactly as the counter described it.
+func (s *FinanceService) describedDeposit(in DepositInput, when paymentDay, calendarVersion string) (domain.Deposit, error) {
 	if len(in.Tenders) == 0 {
 		deposit, err := domain.NewDeposit(s.newID(), s.tenantID, in.StudentID, in.AmountCents,
 			in.Method, in.Reference, when.at, in.IdempotencyKey, calendarVersion)

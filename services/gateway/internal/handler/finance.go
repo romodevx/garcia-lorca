@@ -551,6 +551,24 @@ func invalidTenders(ts []client.Tender) string {
 	return ""
 }
 
+// msgCardWithoutType refuses a deposit's card part with no debit/credit.
+const msgCardWithoutType = "a card payment needs cardType: debit or credit"
+
+// untypedCard reports a deposit being taken on a card that does not say debit
+// or credit (CC-205): the bank's cut separates them. By its tenders when it
+// sent them, by its single method otherwise. Finance applies the same rule.
+func untypedCard(method, cardType string, tenders []client.Tender) bool {
+	if len(tenders) == 0 {
+		return method == "card" && cardType == ""
+	}
+	for _, t := range tenders {
+		if t.Method == "card" && t.CardType == "" {
+			return true
+		}
+	}
+	return false
+}
+
 // grantsDiscounts is the permission that may lower what a family owes.
 const grantsDiscounts = "finance:write"
 
@@ -579,6 +597,10 @@ func (h *FinanceHandler) RegisterDeposit(w http.ResponseWriter, r *http.Request)
 	}
 	if msg := invalidTenders(req.Tenders); msg != "" {
 		http.Error(w, msg, http.StatusBadRequest)
+		return
+	}
+	if untypedCard(req.Method, req.CardType, req.Tenders) {
+		http.Error(w, msgCardWithoutType, http.StatusBadRequest)
 		return
 	}
 	// The late reward is a discount the school grants, and discounts are

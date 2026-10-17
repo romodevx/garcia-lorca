@@ -81,3 +81,30 @@ func TestFinanceRefusesTendersOutsideTheContract(t *testing.T) {
 		})
 	}
 }
+
+// CC-205: a deposit taken on a card says debit or credit — by its tenders or
+// by its single method — or it is refused at the edge, before finance.
+func TestADepositOnACardWithoutItsTypeIsRefusedAtTheEdge(t *testing.T) {
+	cases := map[string]string{
+		"a card tender":        `{"studentId":"stu-1","amountCents":25000,"tenders":[{"method":"card","amountCents":25000}]}`,
+		"cash and a card":      `{"studentId":"stu-1","amountCents":25000,"tenders":[{"method":"cash","amountCents":5000},{"method":"card","amountCents":20000}]}`,
+		"a single card method": `{"studentId":"stu-1","amountCents":25000,"method":"card"}`,
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			svc := &fakeFinance{}
+			rec := doReq(t, handler.NewFinanceHandler(svc).RegisterDeposit, http.MethodPost, "/api/v1/finance/deposits", body)
+			if rec.Code != http.StatusBadRequest {
+				t.Errorf("status %d, want 400", rec.Code)
+			}
+			if svc.depositStudent != "" {
+				t.Error("a card with no type reached finance")
+			}
+		})
+	}
+	svc := &fakeFinance{depositResult: client.DepositResult{Deposit: client.Deposit{ID: "dep-1"}}}
+	if rec := doReq(t, handler.NewFinanceHandler(svc).RegisterDeposit, http.MethodPost, "/api/v1/finance/deposits",
+		`{"studentId":"stu-1","amountCents":25000,"method":"card","cardType":"credit"}`); rec.Code != http.StatusCreated {
+		t.Errorf("a typed card: status %d, want 201", rec.Code)
+	}
+}
