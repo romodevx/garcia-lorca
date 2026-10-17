@@ -9,7 +9,7 @@ const RESULT: StudentImportResult = {
   levels: [],
   placements: [],
   rows: [],
-  summary: { total: 0, new: 0, warnings: 0, already: 0, skipped: 0, pending: 0 },
+  summary: { total: 0, new: 0, warnings: 0, already: 0, skipped: 0, pending: 0, movedToCycleStart: 0 },
   unresolved: [],
   planHash: "h1",
 };

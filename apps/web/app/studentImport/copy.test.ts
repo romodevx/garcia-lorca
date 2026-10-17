@@ -4,11 +4,15 @@ import { StudentImportError } from "./api";
 import {
   CUT_UNKNOWN,
   GENERIC_REASON,
+  busyText,
   REASON_TEXT,
   confirmationText,
   cutWithCount,
   failureText,
   importButtonLabel,
+  moveButtonLabel,
+  movedText,
+  toMoveText,
   reasonText,
   rowReasons,
 } from "./copy";
@@ -83,7 +87,7 @@ describe("failureText", () => {
 describe("the confirmation and the button", () => {
   it("states the O5 terms with the cycle's name", () => {
     expect(confirmationText("2026–2027")).toBe(
-      "Se inscribirán en el ciclo 2026–2027 sin cargo de inscripción. Las colegiaturas mensuales sí se les cobrarán como a todos. Una importación no se deshace de golpe: cada alumno se da de baja uno por uno.",
+      "Se inscribirán en el ciclo 2026–2027 desde su primer día, sin cargo de inscripción. Las colegiaturas mensuales sí se les cobrarán como a todos, desde el primer mes del ciclo. Una importación no se deshace de golpe: cada alumno se da de baja uno por uno.",
     );
   });
 
@@ -103,5 +107,31 @@ describe("a cut commit", () => {
 
   it("still says re-uploading is safe when nothing arrived", () => {
     expect(CUT_UNKNOWN).toMatch(/Sube el mismo archivo otra vez/);
+  });
+});
+
+describe("earlier imports moved to the cycle start (T14)", () => {
+  it("says in the preview how many enrollments would move, and why it matters", () => {
+    expect(toMoveText(12)).toBe(
+      "12 inscripciones de una importación anterior se moverán al inicio del ciclo: esos alumnos se cobrarán desde el primer mes, como a todos.",
+    );
+    expect(toMoveText(1)).toBe(
+      "1 inscripción de una importación anterior se moverá al inicio del ciclo: ese alumno se cobrará desde el primer mes, como a todos.",
+    );
+  });
+
+  it("names the move on the button when nobody new comes in", () => {
+    expect(moveButtonLabel(12)).toBe("Mover 12 inscripciones al inicio del ciclo");
+    expect(moveButtonLabel(1)).toBe("Mover 1 inscripción al inicio del ciclo");
+  });
+
+  it("says what is happening while only moves are written", () => {
+    expect(busyText(0, 2)).toBe("Moviendo 2 inscripciones al inicio del ciclo… no cierres esta ventana");
+    expect(busyText(3, 2)).toBe("Importando 3 alumnos… no cierres esta ventana");
+  });
+
+  it("says how many moved once it is done", () => {
+    expect(movedText(12)).toBe("12 inscripciones movidas al inicio del ciclo.");
+    expect(movedText(1)).toBe("1 inscripción movida al inicio del ciclo.");
   });
 });

@@ -100,7 +100,27 @@ export function failureText(err: unknown): string {
 
 /** The O5 box above the primary button. */
 export function confirmationText(cycleName: string): string {
-  return `Se inscribirán en el ciclo ${cycleName} sin cargo de inscripción. Las colegiaturas mensuales sí se les cobrarán como a todos. Una importación no se deshace de golpe: cada alumno se da de baja uno por uno.`;
+  return `Se inscribirán en el ciclo ${cycleName} desde su primer día, sin cargo de inscripción. Las colegiaturas mensuales sí se les cobrarán como a todos, desde el primer mes del ciclo. Una importación no se deshace de golpe: cada alumno se da de baja uno por uno.`;
+}
+
+function enrollments(n: number): string {
+  return `${n} ${n === 1 ? "inscripción" : "inscripciones"}`;
+}
+
+/** T14, in the preview: earlier imports dated after the cycle's first day. */
+export function toMoveText(count: number): string {
+  const one = count === 1;
+  return `${enrollments(count)} de una importación anterior ${one ? "se moverá" : "se moverán"} al inicio del ciclo: ${one ? "ese alumno se cobrará" : "esos alumnos se cobrarán"} desde el primer mes, como a todos.`;
+}
+
+/** The primary button when the file only repairs earlier imports. */
+export function moveButtonLabel(count: number): string {
+  return `Mover ${enrollments(count)} al inicio del ciclo`;
+}
+
+/** T14, once done. */
+export function movedText(count: number): string {
+  return `${enrollments(count)} ${count === 1 ? "movida" : "movidas"} al inicio del ciclo.`;
 }
 
 /** "Primaria", "Preescolar y Primaria", "A, B y C". */
@@ -118,7 +138,8 @@ export function importButtonLabel(count: number, levelNames: readonly string[]):
   return `Importar ${pupils(count)} a ${joinNames(levelNames)}`;
 }
 
-export function busyText(count: number): string {
+export function busyText(count: number, moves = 0): string {
+  if (count === 0 && moves > 0) return `Moviendo ${enrollments(moves)} al inicio del ciclo… no cierres esta ventana`;
   return `Importando ${pupils(count)}… no cierres esta ventana`;
 }
 

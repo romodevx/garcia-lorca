@@ -5,7 +5,7 @@ import { useState, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
 import type { Level } from "../../config/api";
 import type { LevelChoice, StudentImportResult } from "../../studentImport/api";
-import { PREVIEW_BANNER, allAlreadyText, confirmationText, importButtonLabel } from "../../studentImport/copy";
+import { PREVIEW_BANNER, allAlreadyText, confirmationText, importButtonLabel, moveButtonLabel, toMoveText } from "../../studentImport/copy";
 import { defaultTab, destinationNames, type ImportTab } from "../../studentImport/view";
 import { CatalogTree } from "./CatalogTree";
 import { ImportSummary } from "./ImportSummary";
@@ -32,7 +32,10 @@ export function PreviewStep(props: PreviewStepProps): ReactElement {
   const [tab, setTab] = useState<ImportTab>(() => defaultTab(result.rows));
   const [asked, setAsked] = useState(0);
   const { summary } = result;
-  const nothingToImport = summary.new === 0 && summary.pending === 0;
+  const newPupils = summary.new + summary.pending;
+  const toMove = summary.movedToCycleStart;
+  const nothingToImport = newPupils === 0 && toMove === 0;
+  const buttonLabel = newPupils > 0 ? importButtonLabel(newPupils, destinationNames(result)) : moveButtonLabel(toMove);
 
   const tryImport = (): void => {
     if (result.unresolved.length > 0) {
@@ -55,10 +58,11 @@ export function PreviewStep(props: PreviewStepProps): ReactElement {
           {summary.already > 0 ? allAlreadyText(summary.already) : "Ninguna fila de este archivo se puede importar. Revisa los motivos en la tabla."}
         </p>
       ) : (
-        <p style={noteStyle}>{confirmationText(result.cycle.name)}</p>
+        newPupils > 0 && <p style={noteStyle}>{confirmationText(result.cycle.name)}</p>
       )}
+      {toMove > 0 && <p style={noteStyle}>{toMoveText(toMove)}</p>}
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12 }}>
-        {!nothingToImport && <Btn icon="upload" onClick={tryImport}>{importButtonLabel(summary.new + summary.pending, destinationNames(result))}</Btn>}
+        {!nothingToImport && <Btn icon="upload" onClick={tryImport}>{buttonLabel}</Btn>}
         <Btn kind="ghost" onClick={onBack}>Atrás</Btn>
         <button type="button" onClick={onCancel} style={{ minHeight: 44, padding: "0 12px", color: "var(--text-muted)", fontWeight: 600 }}>Cancelar</button>
       </div>

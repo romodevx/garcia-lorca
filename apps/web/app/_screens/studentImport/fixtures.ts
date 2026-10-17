@@ -24,7 +24,7 @@ export const MATCHED: StudentImportResult = {
     importRow({ row: 4, status: "already", name: "SOTO, CIRO", reason: "already_exists" }),
     importRow({ row: 5, status: "skipped", name: "LUNA, DANI", reason: "status_withdrawn" }),
   ],
-  summary: { total: 4, new: 2, warnings: 1, already: 1, skipped: 1, pending: 0 },
+  summary: { total: 4, new: 2, warnings: 1, already: 1, skipped: 1, pending: 0, movedToCycleStart: 0 },
   unresolved: [],
   planHash: "h1",
 };
@@ -35,7 +35,7 @@ export const UNRESOLVED: StudentImportResult = {
   levels: [{ fileName: "Preparatoria", status: "unresolved", students: 2, noTuition: false }],
   placements: [],
   rows: [importRow({ row: 2, status: "pending", reason: "level_unresolved", destination: "Preparatoria · 1° · A" }), importRow({ row: 3, status: "pending", reason: "level_unresolved" })],
-  summary: { total: 2, new: 0, warnings: 0, already: 0, skipped: 0, pending: 2 },
+  summary: { total: 2, new: 0, warnings: 0, already: 0, skipped: 0, pending: 2, movedToCycleStart: 0 },
   unresolved: ["Preparatoria"],
   planHash: "h2",
 };
@@ -43,5 +43,12 @@ export const UNRESOLVED: StudentImportResult = {
 export const ALL_ALREADY: StudentImportResult = {
   ...MATCHED,
   rows: [importRow({ row: 2, status: "already", reason: "already_exists" }), importRow({ row: 3, status: "already", reason: "already_exists" })],
-  summary: { total: 2, new: 0, warnings: 0, already: 2, skipped: 0, pending: 0 },
+  summary: { total: 2, new: 0, warnings: 0, already: 2, skipped: 0, pending: 0, movedToCycleStart: 0 },
+};
+
+/** T14: the same file uploaded again, two of its pupils imported before the
+ * owner's decision and dated after the cycle's first day. */
+export const ALREADY_TO_MOVE: StudentImportResult = {
+  ...ALL_ALREADY,
+  summary: { ...ALL_ALREADY.summary, movedToCycleStart: 2 },
 };

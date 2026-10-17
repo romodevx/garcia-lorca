@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { StudentImportResult } from "../../studentImport/api";
 import { PreviewStep } from "./PreviewStep";
-import { ALL_ALREADY, LEVELS, MATCHED, UNRESOLVED, importRow } from "./fixtures";
+import { ALL_ALREADY, ALREADY_TO_MOVE, LEVELS, MATCHED, UNRESOLVED, importRow } from "./fixtures";
 
 function renderPreview(result: StudentImportResult, over: Partial<Parameters<typeof PreviewStep>[0]> = {}) {
   const props = {
@@ -41,7 +41,7 @@ describe("the preview's frame", () => {
 
   it("states the O5 terms above a button that names how many and where", () => {
     renderPreview(MATCHED);
-    expect(screen.getByText(/Se inscribirán en el ciclo 2026–2027 sin cargo de inscripción/)).toBeInTheDocument();
+    expect(screen.getByText(/Se inscribirán en el ciclo 2026–2027 desde su primer día, sin cargo de inscripción/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Importar 2 alumnos a Primaria" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Atrás" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Cancelar" })).toBeInTheDocument();
@@ -57,6 +57,21 @@ describe("the preview's frame", () => {
     renderPreview(ALL_ALREADY);
     expect(screen.getByText("Estos 2 alumnos ya estaban registrados (misma CURP). No se duplicó nada.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Importar/ })).not.toBeInTheDocument();
+  });
+
+  it("offers to move earlier imports to the cycle start even when nobody is new (T14)", async () => {
+    const { user, onImport } = renderPreview(ALREADY_TO_MOVE);
+    expect(
+      screen.getByText("2 inscripciones de una importación anterior se moverán al inicio del ciclo: esos alumnos se cobrarán desde el primer mes, como a todos."),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Importar/ })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Mover 2 inscripciones al inicio del ciclo" }));
+    expect(onImport).toHaveBeenCalledOnce();
+  });
+
+  it("says nothing about moves when there are none", () => {
+    renderPreview(MATCHED);
+    expect(screen.queryByText(/se moverá/)).not.toBeInTheDocument();
   });
 });
 

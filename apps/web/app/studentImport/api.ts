@@ -74,6 +74,8 @@ export interface ImportSummary {
   already: number;
   skipped: number;
   pending: number;
+  /** A subset of `already`: earlier imports moved (preview: to move) to the cycle's first day. */
+  movedToCycleStart: number;
 }
 
 export interface StudentImportResult {

@@ -250,7 +250,7 @@ describe("step 3 — the commit", () => {
     api.commitStudentImport.mockResolvedValue({
       ...MATCHED,
       rows: [importRow({ row: 2, status: "new" }), importRow({ row: 3, status: "skipped", reason: "not_answered" })],
-      summary: { total: 2, new: 1, warnings: 0, already: 0, skipped: 1, pending: 0 },
+      summary: { total: 2, new: 1, warnings: 0, already: 0, skipped: 1, pending: 0, movedToCycleStart: 0 },
     });
     const { user } = renderScreen();
     await upload(user);
