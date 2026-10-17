@@ -717,6 +717,8 @@ export function AppShell(): ReactElement {
           permissions={principal?.permissions}
           // Back to the list as it was left: level, grade, group and search (T4).
           onBack={backToStudents}
+          // A withdrawn pupil's file is read-only: their ficha, not a form.
+          onWithdrawn={() => router.replace(viewToPath({ screen: "studentSheet", studentId: view.studentId }))}
         />
       )}
       {view.screen === "studentNew" && studentsEnabled && canCreateStudents && (

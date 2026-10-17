@@ -5,7 +5,9 @@ import {
   listEnrollments,
   listStudents,
   transfer,
+  updateStudent,
   withdraw,
+  type StudentProfile,
 } from "./api";
 
 const BASE = "http://gw";
@@ -194,5 +196,30 @@ describe("withdraw", () => {
     expect(init.method).toBe("POST");
     expect(init.credentials).toBe("include");
     expect(JSON.parse(init.body as string)).toEqual({ enrollmentId: "en1" });
+  });
+});
+
+// T14 gate: a withdrawn pupil's refusal is a 409 like a duplicate CURP; the
+// gateway's X-Error-Code tells them apart.
+const PROFILE: StudentProfile = {
+  birthDate: "", sex: "", email: "", phones: [],
+  address: { street: "", extNumber: "", intNumber: "", neighborhood: "", postalCode: "", municipality: "", state: "" },
+};
+
+describe("StudentsError · baja", () => {
+  it("reads STUDENT_WITHDRAWN from X-Error-Code", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("ese alumno está dado de baja: su ficha ya no se corrige", {
+      status: 409, headers: { "X-Error-Code": "STUDENT_WITHDRAWN" },
+    })));
+
+    const err = await updateStudent(BASE, "st1", { firstName: "A", lastName: "B", curp: "AAAA000000AAAAAA01", profile: PROFILE }).catch((e: unknown) => e);
+    expect(err).toMatchObject({ status: 409, isWithdrawn: true });
+  });
+
+  it("a plain 409 is not a baja", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("curp taken", { status: 409 })));
+
+    const err = await updateStudent(BASE, "st1", { firstName: "A", lastName: "B", curp: "AAAA000000AAAAAA01", profile: PROFILE }).catch((e: unknown) => e);
+    expect(err).toMatchObject({ status: 409, isWithdrawn: false });
   });
 });

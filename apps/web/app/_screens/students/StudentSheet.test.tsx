@@ -32,7 +32,7 @@ vi.mock("../../config/api", () => ({
   listGradeLevels: vi.fn(),
 }));
 vi.mock("./ContactsPanel", () => ({
-  ContactsPanel: ({ readOnly = false }: { readOnly?: boolean }) => <div data-testid="contacts" data-readonly={String(readOnly)} />,
+  ContactsPanel: () => <div data-testid="contacts" />,
 }));
 
 const students = vi.mocked(studentsApi);
@@ -215,7 +215,9 @@ describe("la ficha de un alumno que ya tiene grupo", () => {
     expect(within(sheet).queryByText("Trámite")).not.toBeInTheDocument();
     expect(within(sheet).getAllByText("Baja").length).toBeGreaterThan(0);
     expect(within(sheet).queryByRole("button", { name: "Editar ficha" })).not.toBeInTheDocument();
-    expect(within(sheet).getByTestId("contacts")).toHaveAttribute("data-readonly", "true");
+    // Owner's rule: the remaining debt is still collected, so contacts stay editable.
+    expect(within(sheet).getByTestId("contacts")).toBeInTheDocument();
+    expect(within(sheet).getByText(/Los contactos siguen editables/)).toBeInTheDocument();
   });
 
   it("returns focus to Dar de baja after closing the panel with unsaved text", async () => {
@@ -297,7 +299,7 @@ describe("lo que la ficha lee", () => {
 
     expect(await within(sheet).findByText("Alumno dado de baja")).toBeInTheDocument();
     expect(within(sheet).queryByRole("button", { name: "Editar ficha" })).not.toBeInTheDocument();
-    expect(within(sheet).getByTestId("contacts")).toHaveAttribute("data-readonly", "true");
+    expect(within(sheet).getByTestId("contacts")).toBeInTheDocument();
   });
 
   // Not reading the enrolment is not "no group": offering "Inscribir" then
@@ -401,5 +403,20 @@ describe("verificar credencial (tarea 13)", () => {
     render(<StudentsScreen onBack={() => {}} canVerifyCard />);
     await user.click(await screen.findByRole("button", { name: "Verificar credencial" }));
     expect(screen.getByRole("dialog", { name: "Verificar credencial" })).toBeInTheDocument();
+  });
+});
+
+// T14 gate nit: following /alumnos/a → /alumnos/b with a's ficha open opens b.
+describe("la liga directa a una ficha", () => {
+  it("abre la ficha de la nueva liga aunque ya haya una abierta", async () => {
+    students.listStudents.mockResolvedValue([pupil("lv-pri"), { ...pupil("lv-pri"), id: "stu-2", firstName: "Berta", lastName: "Díaz" }]);
+    students.listEnrollments.mockResolvedValue([]);
+    const { rerender } = render(<StudentsScreen onBack={() => {}} linkedStudentId="stu-1" />);
+    const sheet = await screen.findByRole("dialog", { name: "Ficha del alumno" });
+    expect(within(sheet).getByRole("heading", { name: "Cruz Ana" })).toBeInTheDocument();
+
+    rerender(<StudentsScreen onBack={() => {}} linkedStudentId="stu-2" />);
+
+    expect(await within(screen.getByRole("dialog", { name: "Ficha del alumno" })).findByRole("heading", { name: "Díaz Berta" })).toBeInTheDocument();
   });
 });

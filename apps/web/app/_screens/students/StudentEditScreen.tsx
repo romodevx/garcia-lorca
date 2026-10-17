@@ -64,6 +64,11 @@ export interface StudentEditScreenProps {
   userId: string;
   permissions?: readonly string[];
   onBack: () => void;
+  /**
+   * The pupil turned out to be withdrawn: their file no longer changes, so the
+   * caller sends the office to the read-only ficha instead (T14 gate).
+   */
+  onWithdrawn?: () => void;
   /** The school's date (aaaa-mm-dd); injected by tests. Defaults to the local day. */
   today?: string;
 }
@@ -116,8 +121,22 @@ function localToday(): string {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 }
 
+/** What a withdrawn pupil's edit address shows while it hands over to the ficha. */
+function WithdrawnNotice({ onWithdrawn, onBack }: { onWithdrawn?: () => void; onBack: () => void }): ReactElement {
+  useEffect(() => { onWithdrawn?.(); }, [onWithdrawn]);
+  return (
+    <div style={{ padding: 26 }}>
+      <p role="status" style={{ color: "var(--text)", fontSize: 15, marginBottom: 14 }}>
+        Este alumno está dado de baja; su ficha ya no se corrige.
+      </p>
+      <Btn kind="ghost" onClick={onBack}>Volver a alumnos</Btn>
+    </div>
+  );
+}
+
 function failureMessage(cause: unknown): string {
   if (cause instanceof StudentsError) {
+    if (cause.isWithdrawn) return "Este alumno está dado de baja; su ficha ya no se corrige.";
     if (cause.isConflict) return "Ya hay otro alumno con ese CURP.";
     if (cause.isInvalid) return "El servidor no aceptó algún dato de la ficha. Revísala.";
     if (cause.status === 403) return "No tienes permiso para editar esta ficha.";
@@ -126,7 +145,7 @@ function failureMessage(cause: unknown): string {
   return "No se pudo guardar la ficha. Intenta de nuevo.";
 }
 
-export function StudentEditScreen({ studentId, userId, permissions, onBack, today }: StudentEditScreenProps): ReactElement {
+export function StudentEditScreen({ studentId, userId, permissions, onBack, onWithdrawn, today }: StudentEditScreenProps): ReactElement {
   const day = today ?? localToday();
   const canReadMedical = permissions?.includes("medical:read") === true;
   const canWriteMedical = canReadMedical && permissions?.includes("medical:write") === true;
@@ -183,6 +202,7 @@ export function StudentEditScreen({ studentId, userId, permissions, onBack, toda
         if (!live) return;
         const p = st.profile;
         setStudent(st);
+        if (st.admissionStatus === "withdrawn") return;
         setFirstName(st.firstName);
         setLastName(st.lastName);
         setMaternalLastName(st.maternalLastName ?? "");
@@ -308,6 +328,9 @@ export function StudentEditScreen({ studentId, userId, permissions, onBack, toda
   }
   if (student === undefined) {
     return <p style={{ padding: 26, color: "var(--text-muted)" }}>Cargando la ficha…</p>;
+  }
+  if (student.admissionStatus === "withdrawn") {
+    return <WithdrawnNotice onWithdrawn={onWithdrawn} onBack={onBack} />;
   }
 
   const fullName = formatStudentName({ firstName, lastName, maternalLastName });

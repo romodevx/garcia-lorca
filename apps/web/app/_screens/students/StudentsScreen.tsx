@@ -356,7 +356,7 @@ function StudentSheet({
               <span style={{ fontSize: 14.5, fontWeight: 600, color: "var(--text)", textAlign: "right" }}>{v}</span>
             </div>
           ))}
-          <ContactsPanel studentId={st.id} readOnly={withdrawn} />
+          <ContactsPanel studentId={st.id} />
           {canRevokeCard && <RevokeCard studentId={st.id} />}
           {current === "failed" && (
             <p role="alert" style={{ color: "var(--bad-fg)", fontSize: 13.5, padding: "18px 0 0" }}>
@@ -410,7 +410,10 @@ function StudentSheet({
               )}
             </div>
           )}
-          {withdrawn && <p ref={withdrawnLine} tabIndex={-1} style={{ paddingTop: 18, color: "var(--text-muted)" }}>{withdrawnNote(current)}</p>}
+          {withdrawn && <div style={{ paddingTop: 18, color: "var(--text-muted)", display: "grid", gap: 4 }}>
+            <p ref={withdrawnLine} tabIndex={-1}>{withdrawnNote(current)}</p>
+            <p style={{ fontSize: 13.5 }}>Sus datos, su foto y su expediente médico ya no se corrigen. Los contactos siguen editables para cobrar lo que quede pendiente.</p>
+          </div>}
       </>}
     </DrawerShell>
   );
@@ -683,8 +686,10 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
   const cycleName = activeCycle?.name ?? "—";
   const clear = (): void => { setTab("all"); filter.clear(); };
 
-  // A direct link opens its pupil's ficha once, as soon as the roll is read.
+  // A direct link opens its pupil's ficha once, as soon as the roll is read;
+  // following another link while one is open opens that one.
   const [linked, setLinked] = useState(linkedStudentId);
+  useEffect(() => { if (linkedStudentId !== undefined) setLinked(linkedStudentId); }, [linkedStudentId]);
   useEffect(() => {
     if (linked === undefined || loading) return;
     const found = students.find((s) => s.id === linked);
@@ -872,7 +877,7 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
 
       {onCreate !== undefined && <button onClick={onCreate} title="Nuevo alumno" style={{ position: "fixed", right: 32, bottom: FAB_BOTTOM, zIndex: 50, height: FAB_HEIGHT, padding: "0 26px", borderRadius: 99, display: "inline-flex", alignItems: "center", gap: 10, background: "var(--primary)", color: "var(--primary-ink)", fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 16.5, cursor: "pointer", boxShadow: "var(--shadow-fab)" }}><Icon name="plus" size={22} stroke={2.6} />Nuevo alumno</button>}
 
-      {sheet !== null && <StudentSheet st={students.find((s) => s.id === sheet.id) ?? sheet} groups={groups} cycleId={groupsCycleId} gradeLevels={gradeLevels} gradeLevelsFailed={gradeLevelsFailed} onClose={closeSheet} onPlaced={onPlaced} onEdit={onEdit === undefined ? undefined : () => onEdit(sheet.id)} canRevokeCard={canRevokeCard} canWithdraw={canWithdraw} />}
+      {sheet !== null && <StudentSheet key={sheet.id} st={students.find((s) => s.id === sheet.id) ?? sheet} groups={groups} cycleId={groupsCycleId} gradeLevels={gradeLevels} gradeLevelsFailed={gradeLevelsFailed} onClose={closeSheet} onPlaced={onPlaced} onEdit={onEdit === undefined ? undefined : () => onEdit(sheet.id)} canRevokeCard={canRevokeCard} canWithdraw={canWithdraw} />}
       {notesOf !== null && (
         <StudentNotesDialog
           studentId={notesOf.id}

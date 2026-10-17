@@ -195,6 +195,27 @@ describe("StudentEditScreen", () => {
     expect(screen.getByLabelText("Nombre(s)")).toHaveAttribute("aria-invalid", "true");
   });
 
+  // T14 gate: the withdrawn refusal is a 409 too, and is not a CURP clash.
+  it("says the pupil is withdrawn when that is why the server refused", async () => {
+    const user = userEvent.setup();
+    api.updateStudent.mockRejectedValue(new studentsApi.StudentsError(409, "ese alumno está dado de baja", "STUDENT_WITHDRAWN"));
+    renderScreen();
+    await user.click(await screen.findByRole("button", { name: "Guardar ficha" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Este alumno está dado de baja; su ficha ya no se corrige.");
+    expect(screen.queryByText("Ya hay otro alumno con ese CURP.")).not.toBeInTheDocument();
+  });
+
+  it("a withdrawn pupil's edit page sends to the ficha instead of a form", async () => {
+    api.getStudent.mockResolvedValue({ ...student, admissionStatus: "withdrawn" });
+    const onWithdrawn = vi.fn();
+    render(<StudentEditScreen studentId="st1" userId="u-me" permissions={["students:read", "students:update"]} onBack={() => {}} onWithdrawn={onWithdrawn} today={TODAY} />);
+
+    await waitFor(() => expect(onWithdrawn).toHaveBeenCalledTimes(1));
+    expect(screen.queryByLabelText("Nombre(s)")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Guardar ficha" })).not.toBeInTheDocument();
+  });
+
   it("says what the server refused", async () => {
     const user = userEvent.setup();
     api.updateStudent.mockRejectedValue(new studentsApi.StudentsError(409, "curp taken"));
