@@ -8,16 +8,16 @@ import (
 	"github.com/garcia-lorca/services/gateway/internal/client"
 )
 
-// ContactAccountIssuer is the iam surface this action needs: which accounts
-// already exist, and how to invite a guardian. Consumer-defined, so the handler
-// is testable without iam.
+// ContactAccountIssuer is the iam surface this action needs. Consumer-defined,
+// so the handler is testable without iam.
 //
 // InviteGuardian takes no role: iam picks the guardian role itself, and it is
 // the ONLY road into that role — InviteUser refuses it (ISSUE-CC-115), so the
-// staff screen cannot mint a family login that no pupil is linked to.
+// staff screen cannot mint a family login that no pupil is linked to. It is
+// keyed on the address and ENSURES the role: an account that already exists
+// (a teacher who is also a parent) gains it and the invitation comes back nil.
 type ContactAccountIssuer interface {
-	ListUsers(ctx context.Context) ([]client.User, error)
-	InviteGuardian(ctx context.Context, email, displayName string) (client.User, client.Invitation, error)
+	InviteGuardian(ctx context.Context, email, displayName string) (client.User, *client.Invitation, error)
 }
 
 // ContactGranter is the students surface: the pupil's contact list, and
@@ -136,21 +136,21 @@ func (h *ContactAccessHandler) findContact(ctx context.Context, studentID, conta
 	return nil, nil
 }
 
-// accountFor returns the iam account for this address, inviting one if there is
-// none. An existing account is REUSED rather than duplicated: a parent with two
-// children at the school has one login, and a second account for the same
-// address would be one they never open and the school cannot tell apart.
+// accountFor returns the iam account for this address holding the guardian
+// role. iam does the matching, so an existing account is REUSED rather than
+// duplicated — a parent with two children, or a teacher who is also a parent,
+// has one login — and it is iam that adds the role to it. Reusing the account
+// here, at the edge, used to skip that: the account was linked to the pupil
+// without the role, and with the manual roads closed it could never open the
+// app.
 //
-// The returned invitation is nil in that case — nothing was sent.
+// The returned invitation is nil when the address already had an account:
+// nothing was sent.
 func (h *ContactAccessHandler) accountFor(ctx context.Context, email, displayName string) (client.User, *invitationResponse, error) {
-	if existing, found, err := userByEmail(ctx, h.iam, email); err != nil || found {
-		return existing, nil, err
-	}
-
 	user, invitation, err := h.iam.InviteGuardian(ctx, email, displayName)
-	if err != nil {
-		return client.User{}, nil, err
+	if err != nil || invitation == nil {
+		return user, nil, err
 	}
-	res := toInvitationResponse(invitation)
+	res := toInvitationResponse(*invitation)
 	return user, &res, nil
 }

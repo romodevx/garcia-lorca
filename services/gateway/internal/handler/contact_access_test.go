@@ -16,28 +16,35 @@ import (
 
 // --- doubles ---------------------------------------------------------------
 
-// fakeIssuer is the iam half: the users that already exist, and what a
-// guardian invitation produces. There is no role to pass: InviteGuardian is
-// the one iam road into the guardian role, and iam picks the role itself
-// (ISSUE-CC-115) — InviteUser refuses it.
+// fakeIssuer is the iam half. It behaves like iam's InviteGuardian, which
+// ENSURES the guardian role keyed on the address: an address that already has an
+// account gets the role on THAT account and nothing is sent; otherwise a new
+// account is invited. There is no role to pass: iam picks it (ISSUE-CC-115).
 type fakeIssuer struct {
-	users []client.User
+	users []client.User // accounts that already exist
 
 	invitedEmail string
 	invitedName  string
 	invitedUser  client.User
 	invitation   client.Invitation
 	inviteErr    error
+	// ensuredOn is the existing account the role was added to, if any.
+	ensuredOn string
 }
 
-func (f *fakeIssuer) ListUsers(context.Context) ([]client.User, error) { return f.users, nil }
-
-func (f *fakeIssuer) InviteGuardian(_ context.Context, email, displayName string) (client.User, client.Invitation, error) {
+func (f *fakeIssuer) InviteGuardian(_ context.Context, email, displayName string) (client.User, *client.Invitation, error) {
 	f.invitedEmail, f.invitedName = email, displayName
 	if f.inviteErr != nil {
-		return client.User{}, client.Invitation{}, f.inviteErr
+		return client.User{}, nil, f.inviteErr
 	}
-	return f.invitedUser, f.invitation, nil
+	for _, u := range f.users {
+		if strings.EqualFold(u.Email, email) {
+			f.ensuredOn = u.ID
+			return u, nil, nil
+		}
+	}
+	inv := f.invitation
+	return f.invitedUser, &inv, nil
 }
 
 // fakeGranter is the students half: the pupil's contact list and the grant.
@@ -165,8 +172,11 @@ func TestInviteContactReusesAnExistingAccount(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200 (body=%s)", rec.Code, rec.Body.String())
 	}
-	if iam.invitedEmail != "" {
-		t.Errorf("a second account was minted for %q — the address already had one", iam.invitedEmail)
+	// iam is ALWAYS asked: it is what adds the guardian role to the account
+	// that already exists. Reusing it at the edge without the role left a
+	// teacher who is also a parent unable to open the app (tech-lead BLOCK).
+	if iam.ensuredOn != "usr-old" {
+		t.Errorf("guardian role ensured on %q, want the existing account usr-old", iam.ensuredOn)
 	}
 	if students.grantUserID != "usr-old" {
 		t.Errorf("attached %q, want the account that already existed", students.grantUserID)

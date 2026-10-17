@@ -177,6 +177,12 @@ func TestAuthClientSetUserStatusSuspend(t *testing.T) {
 }
 
 func (stubIAM) InviteGuardian(_ context.Context, req *connect.Request[iamv1.InviteGuardianRequest]) (*connect.Response[iamv1.InviteGuardianResponse], error) {
+	if req.Msg.GetEmail() == "existe@example.com" {
+		// A live account: iam adds the role and sends nothing.
+		return connect.NewResponse(&iamv1.InviteGuardianResponse{
+			User: &iamv1.User{Id: "usr-old", Email: req.Msg.GetEmail(), Status: iamv1.UserStatus_USER_STATUS_ACTIVE},
+		}), nil
+	}
 	return connect.NewResponse(&iamv1.InviteGuardianResponse{
 		User:       &iamv1.User{Id: "usr-g", Email: req.Msg.GetEmail(), DisplayName: req.Msg.GetDisplayName(), Status: iamv1.UserStatus_USER_STATUS_INVITED},
 		Invitation: &iamv1.Invitation{Url: "https://x/activar?t=abc", Sent: false},
@@ -194,8 +200,18 @@ func TestAuthClientInviteGuardian(t *testing.T) {
 	if u.ID != "usr-g" || u.Email != "mama@example.com" || u.Status != "invited" {
 		t.Errorf("user = %+v", u)
 	}
-	if inv.URL != "https://x/activar?t=abc" || inv.Sent {
+	if inv == nil || inv.URL != "https://x/activar?t=abc" || inv.Sent {
 		t.Errorf("invitation = %+v", inv)
+	}
+
+	// An existing account comes back with no invitation at all — not an empty
+	// one that would read as "a link was issued and not sent".
+	old, none, err := c.InviteGuardian(context.Background(), "existe@example.com", "Papá")
+	if err != nil {
+		t.Fatalf("InviteGuardian (existing): %v", err)
+	}
+	if old.ID != "usr-old" || none != nil {
+		t.Errorf("got (%q, %+v), want usr-old and no invitation", old.ID, none)
 	}
 }
 

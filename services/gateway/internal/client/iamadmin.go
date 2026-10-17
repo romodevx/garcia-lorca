@@ -48,18 +48,26 @@ func (c *AuthClient) InviteUser(ctx context.Context, email, displayName string, 
 	return toUser(res.Msg.GetUser()), toInvitation(res.Msg.GetInvitation()), nil
 }
 
-// InviteGuardian invites a family contact into the guardian role. It takes no
+// InviteGuardian ensures a family contact holds the guardian role. It takes no
 // role: iam chooses it, and this is the only road into it (InviteUser refuses
-// the guardian role, ISSUE-CC-115).
-func (c *AuthClient) InviteGuardian(ctx context.Context, email, displayName string) (User, Invitation, error) {
+// the guardian role, ISSUE-CC-115). iam keys it on the address: an existing
+// live account gains the role and comes back with a NIL invitation — nothing
+// was sent; otherwise the account is invited (or restored) and the link
+// returned.
+func (c *AuthClient) InviteGuardian(ctx context.Context, email, displayName string) (User, *Invitation, error) {
 	res, err := c.rpc.InviteGuardian(ctx, connect.NewRequest(&iamv1.InviteGuardianRequest{
 		Email:       email,
 		DisplayName: displayName,
 	}))
 	if err != nil {
-		return User{}, Invitation{}, err
+		return User{}, nil, err
 	}
-	return toUser(res.Msg.GetUser()), toInvitation(res.Msg.GetInvitation()), nil
+	user := toUser(res.Msg.GetUser())
+	if res.Msg.GetInvitation() == nil {
+		return user, nil, nil
+	}
+	inv := toInvitation(res.Msg.GetInvitation())
+	return user, &inv, nil
 }
 
 // Invitation is what came of issuing the link: whether it was delivered, why
