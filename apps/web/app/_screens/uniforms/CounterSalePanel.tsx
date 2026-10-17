@@ -12,7 +12,14 @@ import { counterSale, UniformsError, type SaleLine, type UniformItem, type Unifo
 import type { Student } from "../../students/api";
 import { ReceiptActions } from "../receipts/ReceiptActions";
 import { StudentPicker } from "./StudentPicker";
-import { EmptyState, ErrorNote, field, FieldLabel, label, money } from "./parts";
+import { EmptyState, ErrorNote, FieldError, fieldWithError, FieldLabel, label, money } from "./parts";
+
+const EMPTY_CART = "Agrega al menos una prenda al carrito.";
+const NO_STUDENT = "Elige al alumno, o marca «Venta sin alumno».";
+const NO_BUYER = "Escribe quién compró: sin eso la venta no se puede reclamar después.";
+
+/** What stops the sale, in the order the screen asks for it; undefined when nothing does. */
+type SaleGap = "cart" | "student" | "buyer";
 
 import { API_URL } from "../../api-url";
 
@@ -49,6 +56,11 @@ export function CounterSalePanel({
   const [note, setNote] = useState("");
   const [received, setReceived] = useState("");
   const [pending, setPending] = useState(false);
+  // A ref and not the state: a double click lands before `pending` repaints.
+  // The sale key already stops a second charge; this stops a second request.
+  const inFlight = useRef(false);
+  const [gap, setGap] = useState<SaleGap | undefined>(undefined);
+  const saleRootRef = useRef<HTMLDivElement>(null);
   const [failure, setFailure] = useState<UniformsError | null>(null);
   const [sold, setSold] = useState<UniformOrder | null>(null);
   // "Agregar al carrito" unmounts the picker with the button that had focus;
@@ -121,12 +133,21 @@ export function CounterSalePanel({
   }, []);
 
   const sell = useCallback(async (): Promise<void> => {
+    if (inFlight.current) return;
+    // Never a greyed-out button: pressing it says what the sale still needs.
+    const missing = saleGap(cart.length, anonymous, student !== null, note);
+    setGap(missing);
+    if (missing !== undefined) {
+      focusGap(saleRootRef.current, missing);
+      return;
+    }
     if (!tenders.validate()) {
       focusFirstInvalid();
       return;
     }
     const split = tenders.toTenders();
     const [first] = split;
+    inFlight.current = true;
     setPending(true);
     setFailure(null);
     try {
@@ -156,6 +177,7 @@ export function CounterSalePanel({
     } catch (err) {
       setFailure(err instanceof UniformsError ? err : new UniformsError("internal", "Algo salió mal"));
     } finally {
+      inFlight.current = false;
       setPending(false);
     }
   }, [anonymous, cart, focusFirstInvalid, note, onSold, saleKey, student, tenders]);
@@ -197,13 +219,12 @@ export function CounterSalePanel({
     );
   }
 
-  const canConfirm =
-    cart.length > 0 &&
-    !pending &&
-    (anonymous ? note.trim() !== "" : student !== null);
+  // A gap the cashier already filled stops being shown, without a second press.
+  const shownGap = gap !== undefined && saleGap(cart.length, anonymous, student !== null, note) === gap ? gap : undefined;
+  const buyerError = shownGap === "buyer" ? NO_BUYER : undefined;
 
   return (
-    <div style={{ display: "grid", gap: 18 }}>
+    <div ref={saleRootRef} style={{ display: "grid", gap: 18 }}>
       {failure !== null && (
         <ErrorNote
           message={failure.message}
@@ -335,11 +356,13 @@ export function CounterSalePanel({
           </FieldLabel>
           <input
             id="counter-note"
-            style={field}
-            aria-describedby="counter-note-help"
+            style={fieldWithError(buyerError !== undefined)}
+            aria-describedby={buyerError !== undefined ? "counter-note-help counter-note-error" : "counter-note-help"}
+            aria-invalid={buyerError !== undefined ? true : undefined}
             value={note}
             onChange={(e) => setNote(e.target.value)}
           />
+          <FieldError htmlFor="counter-note" message={buyerError} />
         </div>
       </section>
 
@@ -360,11 +383,35 @@ export function CounterSalePanel({
         )}
       </section>
 
-      <Btn icon="check" onClick={() => void sell()} disabled={!canConfirm}>
+      {(shownGap === "cart" || shownGap === "student") && (
+        <p role="alert" style={{ fontSize: 14, fontWeight: 600, color: "var(--bad-fg)" }}>
+          {shownGap === "cart" ? EMPTY_CART : NO_STUDENT}
+        </p>
+      )}
+      <Btn icon="check" onClick={() => void sell()} busy={pending}>
         {pending ? "Cobrando…" : `Cobrar y entregar · ${money(total)}`}
       </Btn>
     </div>
   );
+}
+
+/** The first thing the sale lacks, in the order the screen asks for it. */
+function saleGap(cartLines: number, anonymous: boolean, hasStudent: boolean, note: string): SaleGap | undefined {
+  if (cartLines === 0) return "cart";
+  if (anonymous) return note.trim() === "" ? "buyer" : undefined;
+  return hasStudent ? undefined : "student";
+}
+
+/** Takes the cashier to what is missing: the garments, the pupil or the buyer. */
+function focusGap(root: HTMLElement | null, gap: SaleGap): void {
+  if (root === null) return;
+  const target =
+    gap === "buyer"
+      ? root.querySelector<HTMLElement>("#counter-note")
+      : gap === "student"
+        ? root.querySelector<HTMLElement>('input[aria-label="Alumno"]')
+        : root.querySelector<HTMLElement>("button[aria-pressed]");
+  target?.focus();
 }
 
 interface CartLine {

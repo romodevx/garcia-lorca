@@ -6,7 +6,7 @@ import { Btn } from "../../_design/Controls";
 import { MoneyField, TextField, useFocusFirstInvalid, useRequired } from "../../_design/form";
 import { createItem, updateItem, UniformsError, upsertSizes, type ItemCategory, type Level, type SizeSpec, type UniformItem } from "../../uniforms/api";
 import { Drawer } from "./InventoryPanel";
-import { EmptyState, ErrorNote, field, FieldLabel, label, LevelChips, money, type SchoolLevel } from "./parts";
+import { EmptyState, ErrorNote, field, FieldError, fieldWithError, FieldLabel, label, LevelChips, money, type SchoolLevel } from "./parts";
 
 import { API_URL } from "../../api-url";
 
@@ -169,6 +169,7 @@ export function CatalogPanel({
 
 /** Fuera del componente: useRequired lo toma como dependencia. */
 const CREATE_REQUIRED = ["name", "price"] as const;
+const NO_SIZES = "Escribe las tallas: un rango como 4-16 o una lista como CH, M, G.";
 
 function CreateDrawer({
   levels,
@@ -283,7 +284,7 @@ function CreateDrawer({
         <Btn kind="ghost" onClick={onClose}>
           Cancelar
         </Btn>
-        <Btn icon="check" onClick={() => void save()} style={{ opacity: pending ? 0.6 : 1 }}>
+        <Btn icon="check" onClick={() => void save()} busy={pending} style={{ opacity: pending ? 0.6 : 1 }}>
           {pending ? "Guardando…" : "Crear y poner tallas"}
         </Btn>
       </div>
@@ -313,11 +314,23 @@ function SizesDrawer({
   const [raw, setRaw] = useState(item.sizes.map((s) => s.sizeLabel).join(", "));
   const [minStock, setMinStock] = useState("");
   const [pending, setPending] = useState(false);
+  // A ref and not the state: a double click lands before `pending` repaints.
+  const inFlight = useRef(false);
+  const [sizesError, setSizesError] = useState<string | undefined>(undefined);
+  const sizesInput = useRef<HTMLInputElement>(null);
 
   const labels = parseSizes(raw);
   const min = Number(minStock);
 
   const save = useCallback(async (): Promise<void> => {
+    if (inFlight.current) return;
+    // Never a greyed-out button: saving with nothing typed says what is missing.
+    if (labels.length === 0) {
+      setSizesError(NO_SIZES);
+      sizesInput.current?.focus();
+      return;
+    }
+    inFlight.current = true;
     setPending(true);
     try {
       const specs: SizeSpec[] = labels.map((sizeLabel, index) => ({
@@ -331,6 +344,7 @@ function SizesDrawer({
       onError(err instanceof UniformsError ? err : new UniformsError("internal", "Algo salió mal"));
       onClose();
     } finally {
+      inFlight.current = false;
       setPending(false);
     }
   }, [item.id, labels, min, onClose, onDone, onError]);
@@ -345,11 +359,17 @@ function SizesDrawer({
       </FieldLabel>
       <input
         id="sizes-raw"
-        style={field}
-        aria-describedby="sizes-raw-help"
+        ref={sizesInput}
+        style={fieldWithError(sizesError !== undefined)}
+        aria-describedby={sizesError !== undefined ? "sizes-raw-help sizes-raw-error" : "sizes-raw-help"}
+        aria-invalid={sizesError !== undefined ? true : undefined}
         value={raw}
-        onChange={(e) => setRaw(e.target.value)}
+        onChange={(e) => {
+          setRaw(e.target.value);
+          if (parseSizes(e.target.value).length > 0) setSizesError(undefined);
+        }}
       />
+      <FieldError htmlFor="sizes-raw" message={sizesError} />
 
       {labels.length > 0 && (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 12 }}>
@@ -390,7 +410,7 @@ function SizesDrawer({
         <Btn kind="ghost" onClick={onClose}>
           Cancelar
         </Btn>
-        <Btn icon="check" onClick={() => void save()} disabled={labels.length === 0 || pending}>
+        <Btn icon="check" onClick={() => void save()} busy={pending}>
           {pending ? "Guardando…" : `Guardar ${labels.length} tallas`}
         </Btn>
       </div>

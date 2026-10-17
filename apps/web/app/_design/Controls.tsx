@@ -47,6 +47,11 @@ export interface BtnProps {
   full?: boolean;
   danger?: boolean;
   disabled?: boolean;
+  /**
+   * A save in flight (`aria-busy`). The forms rule: a primary button is never
+   * disabled while saving — it says so, and the caller ignores repeat clicks.
+   */
+  busy?: boolean;
   type?: "button" | "submit";
   style?: CSSProperties;
   /** Only when the visible text alone is ambiguous ("Editar" on every row). */
@@ -62,6 +67,7 @@ export function Btn({
   full,
   danger,
   disabled,
+  busy,
   type = "button",
   style = {},
   "aria-label": ariaLabel,
@@ -102,6 +108,7 @@ export function Btn({
       ref={ref}
       onClick={onClick}
       disabled={disabled}
+      aria-busy={busy === true ? true : undefined}
       aria-label={ariaLabel}
       style={{ ...base, ...k }}
       onMouseEnter={(e) => {

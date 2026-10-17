@@ -66,4 +66,39 @@ describe("SetPassword", () => {
     await user.click(screen.getByRole("button", { name: "Mostrar contraseña" }));
     expect(input).toHaveAttribute("type", "text");
   });
+
+  // QA 2026-10-15, ISSUE-015: "Crear mi contraseña" sat greyed out until the
+  // eighth character, with no word about why. It is never disabled: pressing
+  // it with a short password says what is missing, on the field.
+  it("never disables the button: a short password is refused with the reason", async () => {
+    const user = userEvent.setup();
+    const { onSubmit } = setup();
+    const button = screen.getByRole("button", { name: /Crear mi contraseña/ });
+    expect(button).toBeEnabled();
+
+    await user.click(button);
+
+    const input = screen.getByLabelText("Tu contraseña");
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByText("Escribe una contraseña de al menos 8 caracteres.")).toBeInTheDocument();
+    expect(input).toHaveFocus();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("while saving, the button is busy, not disabled, and a second press sends nothing", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    const { rerender } = render(
+      <SetPassword heading="Crea tu contraseña" intro="Elige." cta="Crear mi contraseña" pending={false} onSubmit={onSubmit} />,
+    );
+    await user.type(screen.getByLabelText("Tu contraseña"), testPassword);
+    await user.click(screen.getByRole("button", { name: /Crear mi contraseña/ }));
+    rerender(<SetPassword heading="Crea tu contraseña" intro="Elige." cta="Crear mi contraseña" pending onSubmit={onSubmit} />);
+
+    const busy = screen.getByRole("button", { name: /Guardando/ });
+    expect(busy).toBeEnabled();
+    expect(busy).toHaveAttribute("aria-busy", "true");
+    await user.click(busy);
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+  });
 });
