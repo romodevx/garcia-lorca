@@ -288,7 +288,15 @@ function RunSummary({ run }: { run: BillingRun }): ReactElement {
       <p>
         Se generaron <strong>{run.tuitionCreated} colegiaturas</strong>,{" "}
         {run.enrollmentCreated} inscripciones, {run.feesCreated} cuotas y{" "}
-        {run.lateFeesCreated} recargos. {run.skipped} ya existían.
+        {run.lateFeesCreated} recargos.
+        {/* CC-213: a first run can skip inscriptions or activities issued
+            earlier; a bare "6 ya existían" read as tuitions charged twice. */}
+        {run.skipped > 0 && (
+          <span>
+            {" "}{run.skipped} {run.skipped === 1 ? "cargo ya existía" : "cargos ya existían"} (colegiaturas,
+            inscripciones, cuotas o actividades emitidos antes) y no se volvieron a cobrar.
+          </span>
+        )}
         {/* T14-022: in the same sentence, not as a footnote under it. A moved
             deadline changes what a withdrawal later treats as not yet due. */}
         {run.enrollmentMoved > 0 && (
