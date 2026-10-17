@@ -24,7 +24,8 @@ type ListFilter struct {
 	// Birthday narrows the list to pupils born on a calendar day (nil = any).
 	Birthday *BirthdayFilter
 	// ActiveEnrollment narrows the list to pupils with an active enrollment,
-	// whatever their admission status (owner decision D4).
+	// whatever their admission status except withdrawn or rejected (owner
+	// decision D4).
 	ActiveEnrollment bool
 }
 

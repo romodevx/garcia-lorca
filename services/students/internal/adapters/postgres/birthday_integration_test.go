@@ -185,23 +185,40 @@ func TestListByActiveEnrollment(t *testing.T) {
 		attendingPending = "b1d00000-0000-0000-0000-000000000011"
 		withdrawn        = "b1d00000-0000-0000-0000-000000000012"
 		neverPlaced      = "b1d00000-0000-0000-0000-000000000013"
+		withdrawnFile    = "b1d00000-0000-0000-0000-000000000014"
 		cycle            = "c0000000-0000-0000-0000-000000000001"
 		group            = "6b000000-0000-4000-8000-000000000011"
+		enrAttending     = "e1d00000-0000-0000-0000-000000000011"
+		enrWithdrawn     = "e1d00000-0000-0000-0000-000000000012"
+		enrStaleFile     = "e1d00000-0000-0000-0000-000000000014"
 	)
 	bornOn(t, repo, attendingPending, "BIRA151105MDFRNN11", "2015-11-05", false)
 	bornOn(t, repo, withdrawn, "BIRA151105MDFRNN12", "2015-11-05", false)
 	bornOn(t, repo, neverPlaced, "BIRA151105MDFRNN13", "2015-11-05", false)
+	bornOn(t, repo, withdrawnFile, "BIRA151105MDFRNN14", "2015-11-05", false)
 	at := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
-	for i, id := range []string{attendingPending, withdrawn} {
-		e, err := domain.NewEnrollment("e1d00000-0000-0000-0000-00000000001"+string(rune('1'+i)), tenantBirthdays, id, cycle, group, "", domain.EnrollmentStatusActive, at)
+	for enr, pupil := range map[string]string{enrAttending: attendingPending, enrWithdrawn: withdrawn, enrStaleFile: withdrawnFile} {
+		e, err := domain.NewEnrollment(enr, tenantBirthdays, pupil, cycle, group, "", domain.EnrollmentStatusActive, at)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if err := createRoomy(ctx, repo, e); err != nil {
-			t.Fatalf("enrol %s: %v", id, err)
+			t.Fatalf("enrol %s: %v", pupil, err)
 		}
 	}
-	if err := repo.SetEnrollmentStatus(ctx, "e1d00000-0000-0000-0000-000000000012", domain.EnrollmentStatusWithdrawn); err != nil {
+	if err := repo.SetEnrollmentStatus(ctx, enrWithdrawn, domain.EnrollmentStatusWithdrawn); err != nil {
+		t.Fatal(err)
+	}
+	// Review of T11: a file withdrawn through the admission path keeps its
+	// enrollment open; a withdrawn (or rejected) file is never greeted.
+	stale, err := repo.FindByID(ctx, withdrawnFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stale.Withdraw("se mudó"); err != nil {
+		t.Fatalf("Withdraw: %v", err)
+	}
+	if err := repo.Update(ctx, stale); err != nil {
 		t.Fatal(err)
 	}
 

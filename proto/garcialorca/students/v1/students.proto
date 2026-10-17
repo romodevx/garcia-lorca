@@ -466,8 +466,9 @@ message ListStudentsRequest {
   // birthday greeting asks "who turns a year older today". Unset = any day.
   BirthdayFilter birthday = 8;
   // active_enrollment narrows the list to pupils with an active enrollment,
-  // whatever their admission status (owner decision D4: the birthday greeting
-  // reaches every pupil attending, "en trámite" included). false = any.
+  // whatever their admission status but withdrawn or rejected (owner decision
+  // D4: the birthday greeting reaches every pupil attending, "en trámite"
+  // included). false = any.
   bool active_enrollment = 9;
 }
 
