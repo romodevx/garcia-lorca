@@ -265,7 +265,8 @@ func (r *Repository) RescheduleUnpaid(ctx context.Context, items []ports.ChargeR
 // chargeInsertBatchSize bounds one INSERT of charges. Postgres caps a statement
 // at 65535 parameters and a charge binds 18 columns, so a single INSERT broke
 // near 3640 rows: the first full-school billing run answered 500 and billed
-// nothing. 1000 rows stays well under the cap if the table gains columns.
+// nothing. 1000 rows binds 18000 parameters, and stays under the cap while the
+// table has at most 65 columns.
 const chargeInsertBatchSize = 1000
 
 // CreateChargesBulk issues many charges in one transaction, skipping the rows

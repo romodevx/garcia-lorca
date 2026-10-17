@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"testing"
 
+	"gorm.io/gorm"
+
 	"github.com/garcia-lorca/services/finance/internal/domain"
 )
 
@@ -50,6 +52,9 @@ func TestCreateChargesBulkSplitsPastTheParameterCap(t *testing.T) {
 	if created != 2*bulkRunSize {
 		t.Fatalf("created = %d, want %d", created, 2*bulkRunSize)
 	}
+	if n := countConceptCharges(t, tenantA, conceptID); n != 2*bulkRunSize {
+		t.Fatalf("stored under tenant A = %d, want %d", n, 2*bulkRunSize)
+	}
 
 	again, err := repo.CreateChargesBulk(ctx, build("dc00000"))
 	if err != nil {
@@ -58,4 +63,25 @@ func TestCreateChargesBulkSplitsPastTheParameterCap(t *testing.T) {
 	if again != 0 {
 		t.Errorf("re-run created = %d, want 0", again)
 	}
+}
+
+// countConceptCharges counts, under the tenant's own RLS context, the charges of
+// one concept — what was stored, independently of the driver's RowsAffected.
+func countConceptCharges(t *testing.T, tenant, conceptID string) int64 {
+	t.Helper()
+	db, err := open(appDSN)
+	if err != nil {
+		t.Fatalf("open app db: %v", err)
+	}
+	var n int64
+	err = db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("SELECT set_config('app.current_tenant', ?, true)", tenant).Error; err != nil {
+			return err
+		}
+		return tx.Table("charges").Where("concept_id = ?", conceptID).Count(&n).Error
+	})
+	if err != nil {
+		t.Fatalf("count charges: %v", err)
+	}
+	return n
 }
