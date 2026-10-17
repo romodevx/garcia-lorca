@@ -5,6 +5,7 @@ import type { ReactElement } from "react";
 import { DateField, TextField } from "../../_design/form";
 import { Icon } from "../../_design/Icon";
 import { todayISO } from "../attendance/sheetModel";
+import { CurpNotices } from "./CurpNotices";
 import type { AltaForm } from "./useAltaForm";
 
 /**
@@ -27,6 +28,7 @@ export function AltaIdentityFields({ form }: { form: AltaForm }): ReactElement {
         error={errors.curp}
         onClearError={() => clearError("curp")}
       />
+      <CurpNotices curp={draft.curp} birthDate={draft.birthDate} />
       {/* Surnames first, as the school reads its lists (T3). The two surnames
           are one logical entity, so they may sit side by side. */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 14 }}>

@@ -46,6 +46,7 @@ import {
 import { resizeToJpeg } from "../../students/photoResize";
 import { bankReferenceError, birthDateError, MEXICAN_STATES, phoneDigits, phoneError, postalCodeError } from "../../students/profileRules";
 import { ContactsPanel } from "./ContactsPanel";
+import { CurpNotices } from "./CurpNotices";
 import { StudentNotesPanel } from "../../_design/students/StudentNotesPanel";
 import { useStudentNotes } from "../../_design/students/useStudentNotes";
 import { formatStudentName } from "../../_design/students/studentName";
@@ -379,6 +380,7 @@ export function StudentEditScreen({ studentId, userId, permissions, onBack, onWi
           <TextField label="Apellido materno" value={maternalLastName} onChange={setMaternalLastName} uppercase help="El segundo apellido, el de la madre. Déjalo vacío si el acta no lo trae." />
           <TextField label="Nombre(s)" value={firstName} onChange={setFirstName} uppercase required error={required.errors.firstName} onClearError={() => required.clear("firstName")} />
           <TextField label="CURP" value={curp} onChange={setCurp} uppercase required error={required.errors.curp} onClearError={() => required.clear("curp")} help="Los 18 caracteres de la CURP del alumno." />
+          <CurpNotices curp={curp} birthDate={birthDate} sex={sex} />
           <DateField
             label="Fecha de nacimiento"
             value={birthDate}
