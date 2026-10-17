@@ -142,8 +142,8 @@ export type ParsedGrade =
   | { kind: "invalid" }
   | { kind: "value"; value: number; decimals: number };
 
-/** Digits, optionally a point and more digits — no signs, exponents, hex or inner spaces. */
-const NUMBER_SHAPE = /^(\d+)(?:\.(\d+))?$/;
+/** An optional minus, digits, optionally a point and more digits — no plus, exponents, hex or inner spaces. A minus is read so the range check names the scale (CC-307). */
+const NUMBER_SHAPE = /^-?(\d+)(?:\.(\d+))?$/;
 
 /**
  * "9,5" and "9.5" read alike (so the decimals can be refused, never rounded);
