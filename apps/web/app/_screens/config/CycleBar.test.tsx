@@ -87,9 +87,23 @@ describe("la captura del ciclo", () => {
     await user.click(screen.getByRole("button", { name: /Nuevo ciclo/ }));
 
     const nombre = screen.getByLabelText("Nombre del ciclo");
+    await user.clear(nombre);
     await user.type(nombre, "2026-2027 anual");
     expect(nombre).toHaveValue("2026-2027 ANUAL");
     expect(nombre).toHaveAttribute("aria-required", "true");
+  });
+
+  it("abre con el ciclo escolar propuesto: nombre y fechas de agosto a julio (ISSUE-T14-023)", async () => {
+    const onCreate = vi.fn().mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    render(<CycleBar cycles={[]} selectedCycleId={undefined} onSelect={vi.fn()} onCreate={onCreate} onActivate={vi.fn()} today="2026-10-17" />);
+    await user.click(screen.getByRole("button", { name: /Nuevo ciclo/ }));
+
+    expect(screen.getByLabelText("Nombre del ciclo")).toHaveValue("2026-2027");
+    expect(screen.getByLabelText("Inicia")).toHaveValue("2026-08-01");
+    expect(screen.getByLabelText("Termina")).toHaveValue("2027-07-31");
+    await user.click(screen.getByRole("button", { name: /Crear ciclo/ }));
+    expect(onCreate).toHaveBeenCalledWith({ name: "2026-2027", startsOn: "2026-08-01", endsOn: "2027-07-31" });
   });
 
   it("guardar en blanco marca los tres campos en rojo y no llama al API", async () => {
@@ -97,6 +111,9 @@ describe("la captura del ciclo", () => {
     const user = userEvent.setup();
     render(<CycleBar cycles={[]} selectedCycleId={undefined} onSelect={vi.fn()} onCreate={onCreate} onActivate={vi.fn()} />);
     await user.click(screen.getByRole("button", { name: /Nuevo ciclo/ }));
+    await user.clear(screen.getByLabelText("Nombre del ciclo"));
+    await user.clear(screen.getByLabelText("Inicia"));
+    await user.clear(screen.getByLabelText("Termina"));
     await user.click(screen.getByRole("button", { name: /Crear ciclo/ }));
 
     expect(screen.getByLabelText("Nombre del ciclo")).toHaveAttribute("aria-invalid", "true");

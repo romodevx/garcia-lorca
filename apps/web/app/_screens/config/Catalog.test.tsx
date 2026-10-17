@@ -96,6 +96,7 @@ describe("Catalog — cycles", () => {
     // shows a choice OR a form, never both at once.
     await user.click(await screen.findByRole("button", { name: "Nuevo ciclo" }));
     const drawer = await screen.findByRole("dialog", { name: "Nuevo ciclo escolar" });
+    await user.clear(within(drawer).getByLabelText(/^Nombre del (ciclo|nivel)$/));
     await user.type(within(drawer).getByLabelText(/^Nombre del (ciclo|nivel)$/), "2026-2027");
     fireEvent.change(within(drawer).getByLabelText("Inicia"), { target: { value: "2026-08-01" } });
     fireEvent.change(within(drawer).getByLabelText("Termina"), { target: { value: "2027-06-30" } });
@@ -318,6 +319,10 @@ describe("Catalog — todo se crea en modal", () => {
     render(<Catalog onBack={() => {}} />);
     await user.click(await screen.findByRole("button", { name: "Nuevo ciclo" }));
     const drawer = await screen.findByRole("dialog", { name: "Nuevo ciclo escolar" });
+    // It opens with a proposed year (ISSUE-T14-023): empty it to see what is missing.
+    await user.clear(within(drawer).getByLabelText(/^Nombre del (ciclo|nivel)$/));
+    await user.clear(within(drawer).getByLabelText("Inicia"));
+    await user.clear(within(drawer).getByLabelText("Termina"));
 
     await user.click(within(drawer).getByRole("button", { name: "Crear ciclo" }));
 
@@ -349,6 +354,7 @@ describe("crear varios niveles de corrido", () => {
     render(<Catalog onBack={() => {}} />);
     await user.click(await screen.findByRole("button", { name: "Nuevo nivel" }));
     const drawer = await screen.findByRole("dialog", { name: "Nuevo nivel educativo" });
+    await user.clear(within(drawer).getByLabelText(/^Nombre del (ciclo|nivel)$/));
     await user.type(within(drawer).getByLabelText(/^Nombre del (ciclo|nivel)$/), "Maternal");
     await user.type(within(drawer).getByLabelText("Clave SEP"), "MAT");
 

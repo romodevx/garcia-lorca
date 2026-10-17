@@ -5,6 +5,8 @@ import { Btn } from "../../_design/Controls";
 import { SlideOver } from "../../_design/SlideOver";
 import { ConfigError, type Cycle, type CreateCycleInput } from "../../config/api";
 import { DateField, TextField, useRequired } from "../../_design/form";
+import { schoolISODate } from "../../_lib/schoolDay";
+import { proposeCycle } from "./cycleProposal";
 import { EmptyHint, ErrorAlert, Section, SelectChip } from "./parts";
 import { useSetupPresentation } from "./SetupPresentation";
 
@@ -13,6 +15,8 @@ export interface CycleBarProps {
   selectedCycleId: string | undefined;
   onSelect: (id: string) => void;
   onCreate: (input: CreateCycleInput) => Promise<void>;
+  /** The school's today (aaaa-mm-dd), for the proposed new cycle; defaults to now. */
+  today?: string;
   /** Puts the selected draft year into service, standing down the previous one. */
   onActivate: (id: string) => Promise<void>;
 }
@@ -52,7 +56,7 @@ const STATUS_LABEL: Record<string, string> = {
 /** Fuera del componente: useRequired los toma como dependencia. */
 const CYCLE_REQUIRED = ["name", "startsOn", "endsOn"] as const;
 
-export function CycleBar({ cycles, selectedCycleId, onSelect, onCreate, onActivate }: CycleBarProps): ReactElement {
+export function CycleBar({ cycles, selectedCycleId, onSelect, onCreate, onActivate, today }: CycleBarProps): ReactElement {
   const [creating, setCreating] = useState(false);
   const form = useRequired(CYCLE_REQUIRED);
   const [name, setName] = useState("");
@@ -81,6 +85,16 @@ export function CycleBar({ cycles, selectedCycleId, onSelect, onCreate, onActiva
     } finally {
       setActivating(false);
     }
+  };
+
+  // Opens on the proposed school year, so the happy path is one click (ISSUE-T14-023).
+  const startCreating = (): void => {
+    const proposal = proposeCycle(cycles, today ?? schoolISODate());
+    setName(proposal.name);
+    setStartsOn(proposal.startsOn);
+    setEndsOn(proposal.endsOn);
+    setError(undefined);
+    setCreating(true);
   };
 
   const submit = async (): Promise<void> => {
@@ -117,7 +131,7 @@ export function CycleBar({ cycles, selectedCycleId, onSelect, onCreate, onActiva
       )}
 
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-        <Btn icon="plus" kind={newCycleKind} onClick={() => { setError(undefined); setCreating(true); }}>Nuevo ciclo</Btn>
+        <Btn icon="plus" kind={newCycleKind} onClick={startCreating}>Nuevo ciclo</Btn>
         {selected !== undefined && selected.status !== "active" && (
           <Btn kind="ghost" icon="check" onClick={() => void activate()} disabled={activating}>
             {activating ? "Activando…" : `Activar ciclo ${selected.name}`}
