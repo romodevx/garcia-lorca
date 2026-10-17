@@ -28,9 +28,9 @@ const (
 	// maxListLimit caps every unpaginated ledger read, so no single request can
 	// pull an unbounded number of rows into memory (defense in depth behind the
 	// use case's scoping filters). It is a DOCUMENTED bound, not a hidden one:
-	// each capped method says so. It is also the largest keyset page
-	// (ListChargesPage, ListOverduePage), which is how a cycle-wide read gets
-	// past it.
+	// each capped method says so. A cycle-wide read gets past it through the
+	// keyset pages (ListChargesPage, ListOverduePage), whose size is
+	// ports.MaxChargePageSize.
 	maxListLimit = 500
 )
 
@@ -914,10 +914,10 @@ func validateCursor(after ports.ChargeCursor) error {
 	return nil
 }
 
-// clampPageLimit keeps a page inside (0, maxListLimit].
+// clampPageLimit keeps a page inside (0, ports.MaxChargePageSize].
 func clampPageLimit(limit int) int {
-	if limit <= 0 || limit > maxListLimit {
-		return maxListLimit
+	if limit <= 0 || limit > ports.MaxChargePageSize {
+		return ports.MaxChargePageSize
 	}
 	return limit
 }

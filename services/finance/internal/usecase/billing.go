@@ -597,7 +597,7 @@ func (s *FinanceService) levelsWithoutPlan(ctx context.Context, planByLevel map[
 // included: a month its scholarship settled in time is not late (T18).
 func (s *FinanceService) allOverdue(ctx context.Context, cycleID string, asOf time.Time) ([]ports.ChargeWithPaid, error) {
 	return walkPages(func(after ports.ChargeCursor) (ports.ChargePage, error) {
-		return s.overduePage(ctx, cycleID, asOf, after, MaxPageSize)
+		return s.overduePage(ctx, cycleID, asOf, after, ports.MaxChargePageSize)
 	})
 }
 

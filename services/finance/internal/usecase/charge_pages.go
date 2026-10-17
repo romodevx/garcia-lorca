@@ -8,11 +8,6 @@ import (
 	"github.com/garcia-lorca/services/finance/internal/ports"
 )
 
-// MaxPageSize is both the default and the largest page of a charge walk. It
-// bounds what one round trip holds in memory, NOT what a caller can read: the
-// walk goes on until Next comes back zero.
-const MaxPageSize = 500
-
 // maxWalkPages stops a whole-set walk that never ends — a repository handing
 // back the same cursor forever — with an error instead of a hang. 1,000 pages
 // of 500 is half a million charges, far past any school.
@@ -21,8 +16,8 @@ const maxWalkPages = 1000
 // pageSize is the size actually asked of the repository: the default for zero
 // or less, clamped to the maximum above it.
 func pageSize(requested int) int {
-	if requested <= 0 || requested > MaxPageSize {
-		return MaxPageSize
+	if requested <= 0 || requested > ports.MaxChargePageSize {
+		return ports.MaxChargePageSize
 	}
 	return requested
 }

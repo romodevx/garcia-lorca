@@ -583,6 +583,13 @@ type FinanceRepository interface {
 	ListTuitionPlans(ctx context.Context, cycleID string) ([]domain.TuitionPlan, error)
 }
 
+// MaxChargePageSize is both the default and the largest page of a charge walk
+// (ListChargesPage, ListOverduePage), in the use case and in the repository
+// alike. It bounds what one round trip holds in memory, NOT what a caller can
+// read: a walk goes on until Next comes back zero. The gateway's
+// maxFinancePageSize and the contract's pageSize maximum mirror it.
+const MaxChargePageSize = 500
+
 // ChargeCursor is the keyset position of a page walk over charges: the last
 // (due_date, id) already examined. Passed in, zero means "from the beginning";
 // handed back, zero means "no more pages". Keyset and not OFFSET because the

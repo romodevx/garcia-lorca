@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -379,7 +380,10 @@ func (h *FinanceHandler) ListCharges(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, pagedChargesBody("charges", res))
 }
 
-// maxFinancePageSize is the largest page the finance reads serve.
+// maxFinancePageSize is the largest page the finance reads serve. It mirrors
+// finance's ports.MaxChargePageSize (and the contract's pageSize maximum); the
+// gateway cannot import another module's internal package, so a change there
+// must be made here too.
 const maxFinancePageSize = 500
 
 // readPageRequest reads pageToken and pageSize. pageSize, when present, must be
@@ -393,7 +397,7 @@ func readPageRequest(w http.ResponseWriter, q url.Values) (client.PageRequest, b
 	size, err := strconv.Atoi(q.Get("pageSize"))
 	if err != nil || size < 1 || size > maxFinancePageSize {
 		middleware.WriteError(w, http.StatusBadRequest, "invalid",
-			"pageSize debe ser un entero entre 1 y 500", map[string]string{"field": "pageSize"})
+			fmt.Sprintf("pageSize debe ser un entero entre 1 y %d", maxFinancePageSize), map[string]string{"field": "pageSize"})
 		return client.PageRequest{}, false
 	}
 	page.Size = int32(size)

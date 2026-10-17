@@ -1022,7 +1022,7 @@ func TestRunBillingSkipsEveryChargeForWithdrawnEnrollment(t *testing.T) {
 func TestRunBillingAccruesPastAPageOfSettledCharges(t *testing.T) {
 	f := billingFixture(t)
 	concept := f.seedConcept(t, "Colegiatura anterior", 100000)
-	const settled = usecase.MaxPageSize + 1 // a whole page of them, and then some
+	const settled = ports.MaxChargePageSize + 1 // a whole page of them, and then some
 	for i := 0; i < settled; i++ {
 		// Due before the run's inscription (2026-08-10), so in (due_date, id)
 		// order every one of them is examined first.

@@ -15,7 +15,7 @@ const maxTestPages = 100
 // ListChargesPage followed until Next is zero.
 func allCharges(ctx context.Context, svc *usecase.FinanceService, studentID, cycleID string) ([]ports.ChargeWithPaid, error) {
 	return walkTestPages(func(after ports.ChargeCursor) (ports.ChargePage, error) {
-		return svc.ListChargesPage(ctx, studentID, cycleID, after, usecase.MaxPageSize)
+		return svc.ListChargesPage(ctx, studentID, cycleID, after, ports.MaxChargePageSize)
 	})
 }
 
@@ -23,7 +23,7 @@ func allCharges(ctx context.Context, svc *usecase.FinanceService, studentID, cyc
 // end.
 func allOverdue(ctx context.Context, svc *usecase.FinanceService, cycleID string) ([]ports.ChargeWithPaid, error) {
 	return walkTestPages(func(after ports.ChargeCursor) (ports.ChargePage, error) {
-		return svc.ListOverduePage(ctx, cycleID, after, usecase.MaxPageSize)
+		return svc.ListOverduePage(ctx, cycleID, after, ports.MaxChargePageSize)
 	})
 }
 
