@@ -4653,9 +4653,9 @@ paths:
         08:50"); the database enforces both rules too (EXCLUDE), so two
         editors racing cannot double-book. A class that would collide with a
         date-specific change already recorded (a substitute on a future date)
-        is 409 `SCHEDULE_OVERRIDE_CONFLICT`. Once the cycle has started a
-        `reason` is required (400 `SCHEDULE_REASON_REQUIRED`) and the edit goes
-        to the history. Requires `schedule:write`.
+        is 409 `SCHEDULE_OVERRIDE_CONFLICT`. Once the cycle has started the
+        new class goes to the history; `reason` is optional (adding a class
+        changes nothing already relied on). Requires `schedule:write`.
       operationId: createScheduleBlock
       security: [{ sessionCookie: [] }]
       parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
@@ -4688,7 +4688,8 @@ paths:
       tags: [schedule]
       summary: Move or change a class of the base timetable (T16)
       description: >
-        Same rules as creating one. Moving a class to another weekday while it
+        Same rules as creating one, except that once the cycle has started a
+        `reason` is required (400 `SCHEDULE_REASON_REQUIRED`). Moving a class to another weekday while it
         has date-specific changes on future dates is 409
         `SCHEDULE_BLOCK_HAS_OVERRIDES` (remove those changes first). Requires
         `schedule:write`.
@@ -7501,7 +7502,7 @@ components:
         weekday: { type: integer, minimum: 1, maximum: 5 }
         startsAt: { type: string, pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$', example: '08:00' }
         endsAt: { type: string, pattern: '^([01][0-9]|2[0-4]):[0-5][0-9]$', example: '08:50' }
-        reason: { type: string, maxLength: 200, description: Required once the cycle has started. }
+        reason: { type: string, maxLength: 200, description: 'Required to change a class (PUT) once the cycle has started; optional when adding one.' }
     ScheduleDay:
       type: object
       required: [date, weekday, nonWorking, classes]

@@ -45,7 +45,8 @@ func NewScheduleService(repo ports.ScheduleRepository, tenant string, newID func
 }
 
 // BlockInput places a teaching assignment on a weekday and time (minutes since
-// midnight). Reason is required once the cycle has started.
+// midnight). Once the cycle has started, Reason is required to move or change
+// a class; adding one needs none (ISSUE-T14-015), though it is still recorded.
 type BlockInput struct {
 	AssignmentID string
 	Weekday      int
@@ -176,7 +177,7 @@ func (s *ScheduleService) Day(ctx context.Context, cycleID string, date time.Tim
 
 // CreateBlock adds a class to the base timetable.
 func (s *ScheduleService) CreateBlock(ctx context.Context, in BlockInput, by domain.Actor) (domain.ScheduleBlock, error) {
-	p, err := s.placement(ctx, s.newID(), in)
+	p, err := s.placement(ctx, s.newID(), in, addition)
 	if err != nil {
 		return domain.ScheduleBlock{}, err
 	}
@@ -203,7 +204,7 @@ func (s *ScheduleService) CreateBlock(ctx context.Context, in BlockInput, by dom
 // UpdateBlock moves or changes a class of the base timetable. A class with
 // changes on dates still ahead keeps its weekday and assignment.
 func (s *ScheduleService) UpdateBlock(ctx context.Context, id string, in BlockInput, by domain.Actor) (domain.ScheduleBlock, error) {
-	p, err := s.placement(ctx, id, in)
+	p, err := s.placement(ctx, id, in, change)
 	if err != nil {
 		return domain.ScheduleBlock{}, err
 	}
@@ -554,9 +555,19 @@ type placed struct {
 	by      domain.Actor
 }
 
+// baseEdit says whether a base-timetable write adds a class or changes one.
+type baseEdit bool
+
+const (
+	addition baseEdit = false
+	change   baseEdit = true
+)
+
 // placement validates in against its assignment, the level's grid and the
-// cycle's start, and builds the class with id.
-func (s *ScheduleService) placement(ctx context.Context, id string, in BlockInput) (placed, error) {
+// cycle's start, and builds the class with id. Only a change of an existing
+// class needs a reason once the cycle started: an addition alters nothing the
+// families or teachers already relied on.
+func (s *ScheduleService) placement(ctx context.Context, id string, in BlockInput, edit baseEdit) (placed, error) {
 	a, err := s.repo.GetTeachingAssignment(ctx, strings.TrimSpace(in.AssignmentID))
 	if err != nil {
 		if glerrors.KindOf(err) == glerrors.KindNotFound {
@@ -580,7 +591,7 @@ func (s *ScheduleService) placement(ctx context.Context, id string, in BlockInpu
 		return placed{}, domain.OutsideGrid(grid)
 	}
 	started := s.started(cat.Cycle)
-	reason, err := domain.ScheduleReason(in.Reason, started)
+	reason, err := domain.ScheduleReason(in.Reason, started && edit == change)
 	if err != nil {
 		return placed{}, err
 	}

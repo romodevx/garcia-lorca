@@ -6,7 +6,7 @@ import { Btn } from "../../_design/Controls";
 import { SlideOver } from "../../_design/SlideOver";
 import type { ScheduleBlock, ScheduleBoard } from "../../schedule/api";
 import { blockLabel, type ScheduleIndex } from "../../schedule/catalog";
-import { BlockFields, saveBlock, useBlockForm, type DrawerTarget } from "./blockForm";
+import { asksReason, BlockFields, saveBlock, useBlockForm, type DrawerTarget } from "./blockForm";
 import { OverrideFields, saveOverride, useOverrideForm } from "./overrideForm";
 import { Tabs } from "./parts";
 
@@ -46,6 +46,7 @@ export function BlockDrawer({ target, board, index, grid, today, onClose, onSave
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
   const blockForm = useBlockForm(target, board, index, grid);
+  const withReason = asksReason(board, target);
   const overrideForm = useOverrideForm(anchor, board, today, section === "override");
 
   const submit = async (): Promise<void> => {
@@ -53,7 +54,7 @@ export function BlockDrawer({ target, board, index, grid, today, onClose, onSave
     setError(undefined);
     setPending(true);
     try {
-      const message = section === "class" ? await saveBlock(blockForm, target, board.started) : await saveOverride(overrideForm, anchor);
+      const message = section === "class" ? await saveBlock(blockForm, target, withReason) : await saveOverride(overrideForm, anchor);
       if (message !== null) onSaved(message);
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo guardar.");
@@ -65,7 +66,7 @@ export function BlockDrawer({ target, board, index, grid, today, onClose, onSave
   const remove = (): void => {
     if (editing === undefined) return;
     // Once the cycle started, the removal needs its reason (the field is right there).
-    if (board.started && blockForm.valid() === null) return;
+    if (withReason && blockForm.valid() === null) return;
     onRemove(editing, blockForm.values.reason.trim());
   };
 
@@ -95,7 +96,7 @@ export function BlockDrawer({ target, board, index, grid, today, onClose, onSave
         )}
         {section === "class" ? (
           <>
-            <BlockFields form={blockForm} board={board} index={index} />
+            <BlockFields form={blockForm} board={board} index={index} withReason={withReason} />
             {editing !== undefined && (
               <div>
                 <Btn kind="outline" icon="trash" onClick={remove} style={{ color: "var(--bad-fg)", borderColor: "var(--bad-fg)" }}>Quitar clase</Btn>

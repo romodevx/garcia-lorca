@@ -170,16 +170,31 @@ describe("Horarios — la semana (T16)", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 
-  it("asks for a reason once the cycle has started", async () => {
+  // ISSUE-T14-015: a school that starts mid-cycle builds its timetable after
+  // the start; adding a class changes nothing anyone relied on.
+  it("once the cycle has started, adding a class asks for no reason", async () => {
     m.getBoard.mockResolvedValue(sampleBoard({ started: true }));
+    m.createBlock.mockResolvedValue(sampleBoard().blocks[0]!);
     const user = renderManager();
     await chooseGroup3A(user);
     await user.click(screen.getByRole("button", { name: "Agregar clase el martes a las 09:00" }));
     const dialog = screen.getByRole("dialog");
+    expect(within(dialog).queryByLabelText("Motivo del cambio")).toBeNull();
     await user.selectOptions(within(dialog).getByLabelText("Asignatura — Docente"), "Matemáticas — Ana Ruiz");
     await user.click(within(dialog).getByRole("button", { name: "Guardar clase" }));
+    await waitFor(() => expect(m.createBlock).toHaveBeenCalledTimes(1));
+    expect(m.createBlock.mock.calls[0]![1]).not.toHaveProperty("reason");
+  });
+
+  it("once the cycle has started, changing a class asks for a reason", async () => {
+    m.getBoard.mockResolvedValue(sampleBoard({ started: true }));
+    const user = renderManager();
+    await chooseGroup3A(user);
+    await user.click(screen.getByRole("button", { name: /^Matemáticas, 3.º A/ }));
+    const dialog = screen.getByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "Guardar clase" }));
     expect(within(dialog).getByLabelText("Motivo del cambio")).toHaveAttribute("aria-invalid", "true");
-    expect(m.createBlock).not.toHaveBeenCalled();
+    expect(m.updateBlock).not.toHaveBeenCalled();
   });
 
   // The drawer's form is noValidate (T13): the date's min/max no longer stop a
