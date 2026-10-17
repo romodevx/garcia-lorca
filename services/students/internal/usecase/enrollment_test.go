@@ -67,6 +67,14 @@ func (r *fakeEnrollRepo) ListTransfers(_ context.Context, studentID string) ([]d
 	return r.history[studentID], nil
 }
 
+func (r *fakeEnrollRepo) ListTransfersTouchingGroup(context.Context, string) ([]domain.EnrollmentTransfer, error) {
+	return nil, nil
+}
+
+func (r *fakeEnrollRepo) ListEnrollmentsEverInGroup(context.Context, string) ([]domain.Enrollment, error) {
+	return nil, nil
+}
+
 func (r *fakeEnrollRepo) ListTransfersIntoGroup(_ context.Context, groupID string) ([]domain.EnrollmentTransfer, error) {
 	return r.history[groupID], nil
 }

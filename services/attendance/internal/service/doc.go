@@ -15,6 +15,17 @@
 // never re-notifies the parents. Each save records the list's session, which is
 // what tells an all-present day from a day nobody took.
 //
+// CC-301: a list of day D is who sat in the group ON D, never who sits in it
+// today. Students rewrites an enrollment's group in place, so the service
+// rebuilds each pupil's stays in the group from every enrollment ever in it and
+// every move into or out of it (EnrollmentReader): enrolled on or before D, not
+// withdrawn before D (the withdrawal day still counts), and in the group on D
+// by the moves. On a move day the pupil is on both groups' lists and whichever
+// list marks them first holds the mark (attendance/0004). The roster, the save
+// (a mark for anyone else is refused) and the report all read the same stays.
+// Limit: an enrollment whose entry day was edited later is read with its
+// CURRENT entry day; students keeps no history of that edit.
+//
 // This package declares the seams it depends on (Repo, EnrollmentReader,
 // GroupReader, Publisher) and imports NO framework: the GORM repository, the
 // Connect reader clients and the Pub/Sub publisher all implement these

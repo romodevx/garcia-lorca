@@ -275,7 +275,7 @@ func (h *StudentsHandler) GetEnrollment(ctx context.Context, req *connect.Reques
 
 func (h *StudentsHandler) ListEnrollments(ctx context.Context, req *connect.Request[studentsv1.ListEnrollmentsRequest]) (*connect.Response[studentsv1.ListEnrollmentsResponse], error) {
 	m := req.Msg
-	enrollments, err := h.enroll.ListEnrollments(ctx, m.GetStudentId(), m.GetCycleId(), m.GetGroupId())
+	enrollments, err := h.listEnrollments(ctx, m)
 	if err != nil {
 		return nil, connectErr(err)
 	}
@@ -284,6 +284,19 @@ func (h *StudentsHandler) ListEnrollments(ctx context.Context, req *connect.Requ
 		out = append(out, toProtoEnrollment(e))
 	}
 	return connect.NewResponse(&studentsv1.ListEnrollmentsResponse{Enrollments: out}), nil
+}
+
+// listEnrollments picks the read: ever_in_group_id stands alone (it is a
+// group's whole past, not a narrowing of the other filters).
+func (h *StudentsHandler) listEnrollments(ctx context.Context, m *studentsv1.ListEnrollmentsRequest) ([]domain.Enrollment, error) {
+	ever := m.GetEverInGroupId()
+	if ever == "" {
+		return h.enroll.ListEnrollments(ctx, m.GetStudentId(), m.GetCycleId(), m.GetGroupId())
+	}
+	if m.GetStudentId() != "" || m.GetCycleId() != "" || m.GetGroupId() != "" {
+		return nil, glerrors.New(glerrors.KindInvalid, "ever_in_group_id stands alone")
+	}
+	return h.enroll.ListEnrollmentsEverInGroup(ctx, ever)
 }
 
 // TransferStudent moves an active enrollment to another group in the SAME cycle.
@@ -298,18 +311,20 @@ func (h *StudentsHandler) TransferStudent(ctx context.Context, req *connect.Requ
 	return connect.NewResponse(&studentsv1.TransferStudentResponse{Enrollment: toProtoEnrollment(enrollment)}), nil
 }
 
-// ListTransfers returns a pupil's group moves (student_id) or every move into
-// a group (to_group_id), oldest first. Exactly one filter must be named; a
-// malformed id is InvalidArgument.
+// ListTransfers returns a pupil's group moves (student_id), every move into a
+// group (to_group_id) or every move into or out of it (group_id), oldest
+// first. Exactly one filter must be named; a malformed id is InvalidArgument.
 func (h *StudentsHandler) ListTransfers(ctx context.Context, req *connect.Request[studentsv1.ListTransfersRequest]) (*connect.Response[studentsv1.ListTransfersResponse], error) {
 	var (
 		transfers []domain.EnrollmentTransfer
 		err       error
 	)
-	studentID, groupID := req.Msg.GetStudentId(), req.Msg.GetToGroupId()
+	studentID, groupID, touching := req.Msg.GetStudentId(), req.Msg.GetToGroupId(), req.Msg.GetGroupId()
 	switch {
-	case groupID != "" && studentID != "":
-		err = glerrors.New(glerrors.KindInvalid, "name student_id or to_group_id, not both")
+	case countNamed(studentID, groupID, touching) > 1:
+		err = glerrors.New(glerrors.KindInvalid, "name one of student_id, to_group_id or group_id")
+	case touching != "":
+		transfers, err = h.enroll.ListTransfersTouchingGroup(ctx, touching)
 	case groupID != "":
 		transfers, err = h.enroll.ListTransfersIntoGroup(ctx, groupID)
 	default:
@@ -330,6 +345,17 @@ func (h *StudentsHandler) ListTransfers(ctx context.Context, req *connect.Reques
 		})
 	}
 	return connect.NewResponse(&studentsv1.ListTransfersResponse{Transfers: out}), nil
+}
+
+// countNamed is how many of the filters were given.
+func countNamed(filters ...string) int {
+	n := 0
+	for _, f := range filters {
+		if f != "" {
+			n++
+		}
+	}
+	return n
 }
 
 func (h *StudentsHandler) WithdrawEnrollment(ctx context.Context, req *connect.Request[studentsv1.WithdrawEnrollmentRequest]) (*connect.Response[studentsv1.WithdrawEnrollmentResponse], error) {

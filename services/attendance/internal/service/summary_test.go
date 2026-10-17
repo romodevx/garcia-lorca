@@ -38,9 +38,9 @@ func reportService(t *testing.T, repo *fakeRepo) *service.AttendanceService {
 			{ID: enrDora, StudentID: "stu-4", Status: "withdrawn", EnrolledAt: at(t, "2026-08-01"), EndedAt: at(t, "2026-09-05")},
 			{ID: enrEva, StudentID: "stu-5", Status: "withdrawn", EnrolledAt: at(t, "2026-08-01"), EndedAt: at(t, "2026-08-20")},
 		}},
-		transfers: map[string][]service.TransferIn{reportGroup: {
-			{EnrollmentID: enrBeto, MovedAt: at(t, "2026-09-01")},
-			{EnrollmentID: enrBeto, MovedAt: at(t, "2026-09-20")}, // the latest move in counts
+		moves: map[string][]service.Move{reportGroup: {
+			{EnrollmentID: enrBeto, FromGroupID: "grp-old", ToGroupID: reportGroup, MovedAt: at(t, "2026-09-01")},
+			{EnrollmentID: enrBeto, ToGroupID: reportGroup, MovedAt: at(t, "2026-09-20")}, // the latest move in counts
 		}},
 	}
 	groups := &fakeGroups{existing: map[string]bool{reportGroup: true}}

@@ -176,6 +176,45 @@ func (r *Repository) ListTransfersIntoGroup(ctx context.Context, groupID string)
 	})
 }
 
+// ListTransfersTouchingGroup returns every move into OR out of one group,
+// oldest moved_at first (id breaks ties), in one tenant-bound query: with the
+// enrollments ever in the group, it is who sat in the group on any past day.
+// Both sides are indexed (0015 to_group, 0021 from_group).
+func (r *Repository) ListTransfersTouchingGroup(ctx context.Context, groupID string) ([]domain.EnrollmentTransfer, error) {
+	return r.listTransfers(ctx, func(q *gorm.DB) *gorm.DB {
+		return q.Where("enrollment_transfers.to_group_id = ? OR enrollment_transfers.from_group_id = ?", groupID, groupID)
+	})
+}
+
+// ListEnrollmentsEverInGroup returns, ordered by id, every enrollment that was
+// ever in one group: the ones that carry it now, and the ones moved out of it
+// since (a transfer rewrites group_id in place, so those carry another group).
+func (r *Repository) ListEnrollmentsEverInGroup(ctx context.Context, groupID string) ([]domain.Enrollment, error) {
+	var out []domain.Enrollment
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		var rows []enrollmentModel
+		movedOut := tx.Model(&enrollmentTransferModel{}).Select("enrollment_id").Where("from_group_id = ?", groupID)
+		if err := tx.Model(&enrollmentModel{}).
+			Where("group_id = ? OR id IN (?)", groupID, movedOut).
+			Order("id ASC").Find(&rows).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "listing the group's enrollments", err)
+		}
+		out = make([]domain.Enrollment, 0, len(rows))
+		for _, m := range rows {
+			e, err := enrollmentToDomain(m)
+			if err != nil {
+				return err
+			}
+			out = append(out, e)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (r *Repository) listTransfers(ctx context.Context, filter func(*gorm.DB) *gorm.DB) ([]domain.EnrollmentTransfer, error) {
 	var out []domain.EnrollmentTransfer
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
