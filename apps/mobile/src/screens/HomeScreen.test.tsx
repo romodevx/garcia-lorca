@@ -10,6 +10,56 @@ jest.mock("./attendanceView", () => {
 });
 import { renderWithProviders } from "../test/renderWithProviders";
 
+// ISSUE-T14-108: the "Hoy" card drew the green "presente" check for every
+// status, a justified absence included. It now uses the status's own icon,
+// the same one the Asistencia tab shows.
+describe("HomeScreen today's attendance icon", () => {
+  const kid = { id: "s1", firstName: "Alumna", lastName: "Prueba", level: "Primaria", levelId: "l1", gradeGroup: "B" };
+
+  function gatewayWithToday(status: string): void {
+    globalThis.fetch = jest.fn(async (url: string) => {
+      const u = String(url);
+      if (u.includes("/family/students/s1/attendance")) {
+        const day = { date: "2026-10-16", status, mode: "daily", classes: [], note: "Cita médica" };
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ month: "2026-10", today: "2026-10-16", days: [day], summary: {} }),
+        };
+      }
+      if (u.endsWith("/family/students")) return { ok: true, status: 200, json: async () => ({ students: [kid] }) };
+      return { ok: true, status: 200, json: async () => ({ notifications: [] }) };
+    }) as unknown as typeof fetch;
+  }
+
+  beforeEach(async () => {
+    mockDeviceMonth.mockReturnValue("2026-10");
+    await saveTokens({ accessToken: "a1", refreshToken: "r1" });
+  });
+  afterEach(async () => {
+    await clearTokens();
+  });
+
+  it("shows a justified absence with its own icon, not the present check", async () => {
+    gatewayWithToday("excused");
+
+    await renderWithProviders(<HomeScreen />);
+
+    await waitFor(() => expect(screen.getByText("Falta justificada")).toBeTruthy());
+    expect(screen.getByTestId("today-status-document")).toBeTruthy();
+    expect(screen.queryByTestId("today-status-check-circle")).toBeNull();
+  });
+
+  it("keeps the check for a day the child attended", async () => {
+    gatewayWithToday("present");
+
+    await renderWithProviders(<HomeScreen />);
+
+    await waitFor(() => expect(screen.getByText("Asistió")).toBeTruthy());
+    expect(screen.getByTestId("today-status-check-circle")).toBeTruthy();
+  });
+});
+
 describe("HomeScreen summary cards", () => {
   beforeEach(() => {
     jest.clearAllMocks();

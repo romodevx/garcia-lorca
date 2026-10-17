@@ -10,6 +10,7 @@ import { useTheme } from "../theme";
 import { Card, Chip, SectionLabel, TintIcon } from "../ui";
 import { AsyncErrorState } from "./AsyncStates";
 import { todayHeadline } from "./attendanceView";
+import { chipTint } from "./attendance/tint";
 import { useSchoolMonth } from "./attendance/useSchoolMonth";
 import { pesos } from "./format";
 
@@ -49,6 +50,9 @@ export function HomeScreen(): ReactElement {
   const inCredit = balanceCents !== null && balanceCents < 0;
   const balanceLabel = inCredit ? "Saldo a favor" : settled ? "Estado de cuenta" : "Saldo por pagar";
 
+  const today = todayHeadline(todayRecord);
+  const todayTint = chipTint(theme.colors, today.kind);
+
   const dateLabel = new Date().toLocaleDateString("es-MX", { weekday: "long", day: "numeric", month: "long" });
 
   return (
@@ -67,13 +71,15 @@ export function HomeScreen(): ReactElement {
       {/* Today's attendance → Asistencia */}
       <Card onPress={() => router.push("/(tabs)/asistencia")} accessibilityLabel="Asistencia de hoy" style={styles.hero}>
         <View style={styles.heroTop}>
-          <View style={[styles.statusCircle, { backgroundColor: theme.colors.primarySoft }]}>
-            <Icon name="check" size={28} stroke={3} color={theme.colors.tintLimeInk} />
+          {/* The status's own icon and tint, as on the Asistencia tab — never the
+              "presente" check for an absence (ISSUE-T14-108). */}
+          <View testID={`today-status-${today.icon}`} style={[styles.statusCircle, { backgroundColor: todayTint.bg }]}>
+            <Icon name={today.icon} size={28} stroke={2.6} color={todayTint.fg} />
           </View>
           <View style={styles.heroMain}>
             <Text style={[styles.heroLabel, { color: theme.colors.text2, fontFamily: theme.fonts.ui }]}>Asistencia de hoy</Text>
             <Text style={[styles.heroValue, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]}>
-              {todayHeadline(todayRecord).text}
+              {today.text}
             </Text>
             {todayRecord?.note ? (
               <Text style={[styles.heroSub, { color: theme.colors.text3, fontFamily: theme.fonts.uiSemi }]}>{todayRecord.note}</Text>
