@@ -163,6 +163,48 @@ describe("ExpensesScreen (T10)", () => {
     expect(m.cancelExpense).toHaveBeenCalledWith(expect.any(String), EXP, "duplicado");
   });
 
+  // T12 (from T7's review): an expense opened as "1250.50" until the blur.
+  it("opens an expense's amount with its thousands separator, and saves it unchanged", async () => {
+    m.updateExpense.mockResolvedValue(toner);
+    const user = userEvent.setup();
+    renderScreen();
+    await user.click((await screen.findAllByTestId("expense-row"))[0] as HTMLElement);
+    const dialog = await screen.findByRole("dialog");
+
+    expect(within(dialog).getByRole("textbox", { name: /Monto/ })).toHaveValue("1,250.50");
+    await user.click(within(dialog).getByRole("button", { name: "Guardar cambios" }));
+    expect(m.updateExpense).toHaveBeenCalledWith(expect.any(String), EXP, expect.objectContaining({ amountCents: 125050 }));
+  });
+
+  // QA 2026-10-15, ISSUE-025: with no categories the form opened with an empty
+  // "Categoría" that nothing could fill. It invites to create the first one.
+  it("with no categories, invites to create the first instead of an empty form", async () => {
+    m.listCategories.mockResolvedValue([]);
+    const user = userEvent.setup();
+    renderScreen();
+    await screen.findAllByTestId("expense-row");
+    await user.click(screen.getByRole("button", { name: /Registrar egreso/ }));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).queryByRole("combobox", { name: /Categoría/ })).toBeNull();
+    expect(within(dialog).getByText(/Primero, una categoría/)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Crear la primera categoría" }));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("tab", { name: /Categorías/ })).toHaveAttribute("aria-selected", "true");
+    await waitFor(() => expect(screen.getByRole("button", { name: /Nueva categoría/ })).toHaveFocus());
+  });
+
+  it("only retired categories count as none", async () => {
+    m.listCategories.mockResolvedValue([{ id: CAT, name: "Papelería", active: false }]);
+    const user = userEvent.setup();
+    renderScreen();
+    await screen.findAllByTestId("expense-row");
+    await user.click(screen.getByRole("button", { name: /Registrar egreso/ }));
+
+    expect(within(await screen.findByRole("dialog")).getByRole("button", { name: "Crear la primera categoría" })).toBeInTheDocument();
+  });
+
   it("a reader sees everything and changes nothing", async () => {
     renderScreen(["expenses:read"]);
     expect(await screen.findAllByTestId("expense-row")).toHaveLength(1);
