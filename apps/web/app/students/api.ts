@@ -18,6 +18,7 @@
 
 // --- entity types (match the gateway JSON contract) -----------------------
 
+import { GENERIC_SERVER_FAILURE, spanishServerReason } from "../_lib/serverReason";
 import { authFetch } from "../auth/authFetch";
 
 export type AdmissionStatus = "pending" | "accepted" | "enrolled" | "rejected" | "withdrawn";
@@ -144,6 +145,14 @@ const STUDENT_WITHDRAWN = "STUDENT_WITHDRAWN";
  * for both ("verifica el CURP"), which it also showed when the server fell over,
  * so a person could re-type a perfectly good CURP forever.
  */
+/** What to say when the server's reason cannot be shown, by status. */
+function fallbackFor(status: number): string {
+  if (status === 403) return "Tu cuenta no tiene permiso para esta acción.";
+  if (status === 404) return "No encontramos ese registro. Actualiza la página e intenta de nuevo.";
+  if (status === 409) return "Los datos cambiaron mientras tanto. Actualiza la página e intenta de nuevo.";
+  return GENERIC_SERVER_FAILURE;
+}
+
 export class StudentsError extends Error {
   readonly status: number;
   /** The server's own words, when it sent any. */
@@ -152,7 +161,9 @@ export class StudentsError extends Error {
   readonly code: string | undefined;
 
   constructor(status: number, detail: string, code?: string) {
-    super(detail !== "" ? detail : `HTTP ${status}`);
+    // ISSUE-CC-113: `message` is what a screen shows, so it is never the
+    // service's English. `detail` keeps the raw words for code that branches.
+    super(spanishServerReason(detail) ?? fallbackFor(status));
     this.name = "StudentsError";
     this.status = status;
     this.detail = detail;

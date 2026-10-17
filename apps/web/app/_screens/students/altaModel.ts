@@ -1,4 +1,5 @@
 import { formatStudentName } from "../../_design/students/studentName";
+import { spanishServerReason } from "../../_lib/serverReason";
 import { API_URL } from "../../api-url";
 import type { LabelledGroup } from "../../config/api";
 import { addNote, createStudent, enroll, enrollIntoGrade, StudentsError, type CreateStudentInput } from "../../students/api";
@@ -127,8 +128,10 @@ export function placementFailureMessage(err: unknown): string {
   const retryTail = " El alumno sí se creó: corrige y presiona «Crear alumno» otra vez.";
   if (err instanceof StudentsError) {
     if (err.isConflict) return "Ese grado ya no tiene lugares. Abre otro grupo en Configuración." + tail;
-    if (err.isInvalid) return (err.detail !== "" ? err.detail : "No se pudo inscribir en ese grado.") + retryTail;
-    if (err.status === HTTP_FORBIDDEN && err.detail !== "") return err.detail + retryTail;
+    // The server's reason in Spanish, or nothing when it cannot be said (ISSUE-CC-113).
+    const said = spanishServerReason(err.detail);
+    if (err.isInvalid) return (said ?? "No se pudo inscribir en ese grado.") + retryTail;
+    if (err.status === HTTP_FORBIDDEN && said !== undefined) return said + retryTail;
   }
   return "No se pudo inscribir al alumno en ese grado." + tail;
 }

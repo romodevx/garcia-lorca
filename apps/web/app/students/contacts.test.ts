@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { addContact, listContacts } from "./api";
+import { addContact, inviteContactToApp, listContacts, StudentsError } from "./api";
 
 const BASE = "http://gw";
 
@@ -44,11 +44,31 @@ describe("contacts", () => {
     expect(got[0]?.fullName).toBe("Rosa Méndez");
   });
 
-  it("surfaces the gateway's words when the contact is refused", async () => {
+  // ISSUE-CC-113: the gateway's words are English; the office reads Spanish.
+  it("surfaces the gateway's reason, in Spanish, when the contact is refused", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("a contact without an account needs a name", { status: 400 })));
 
     await expect(
       addContact(BASE, { studentId: "st-1", relationship: "other", fullName: "" }),
-    ).rejects.toThrow("a contact without an account needs a name");
+    ).rejects.toThrow("Escribe el nombre del contacto.");
+  });
+
+  it("says in Spanish that a teacher's email cannot get the family app", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("user is not a guardian", { status: 400 })));
+
+    const err = (await inviteContactToApp(BASE, "st-1", "gl-1").catch((e: unknown) => e)) as StudentsError;
+
+    expect(err).toBeInstanceOf(StudentsError);
+    expect(err.message).toBe("Ese correo no es de un tutor. Para dar acceso a la app, usa el correo de un padre, madre o tutor.");
+    expect(err.status).toBe(400);
+  });
+
+  it("never shows English it does not know, nor a bare HTTP status", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("contact belongs to another student", { status: 409 })));
+
+    const err = (await inviteContactToApp(BASE, "st-1", "gl-1").catch((e: unknown) => e)) as StudentsError;
+
+    expect(err.message).not.toMatch(/contact|HTTP/);
+    expect(err.message).toMatch(/intenta de nuevo/i);
   });
 });

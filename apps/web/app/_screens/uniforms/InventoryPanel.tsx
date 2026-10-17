@@ -5,10 +5,26 @@ import { Btn } from "../../_design/Controls";
 import { DrawerShell } from "../../_design/DrawerShell";
 import { Icon } from "../../_design/Icon";
 import { adjustStock, receiveStock, UniformsError, type UniformItem } from "../../uniforms/api";
+import { API_URL } from "../../api-url";
 import { EmptyState, ErrorNote, field, FieldError, fieldWithError, FieldLabel, label, StockPill } from "./parts";
 
+const asUniformsError = (err: unknown): UniformsError =>
+  err instanceof UniformsError ? err : new UniformsError("internal", "Algo salió mal. Intenta de nuevo.");
 
-import { API_URL } from "../../api-url";
+const pieces = (n: number): string => `${n} ${n === 1 ? "pieza" : "piezas"}`;
+
+/**
+ * ISSUE-CC-112: stock lives per size, so an article with no size was simply
+ * absent from this screen — no row, no receipt — and nobody said why.
+ */
+function WithoutSizesNote({ items }: { items: readonly UniformItem[] }): ReactElement {
+  const names = items.map((item) => item.name).join(", ");
+  return (
+    <p role="status" style={{ padding: "12px 16px", borderRadius: "var(--r-lg)", background: "var(--warn-bg)", color: "var(--warn-fg)", fontWeight: 600, fontSize: 14 }}>
+      {`${names} no aparece${items.length === 1 ? "" : "n"} aquí porque no tiene${items.length === 1 ? "" : "n"} tallas. En Catálogo, abre «Tallas» y elige «Usar talla única» si se vende en una sola.`}
+    </p>
+  );
+}
 
 const NO_PIECES = "Escribe cuántas piezas llegaron de al menos una talla.";
 const NO_DELTA = "Escribe cuánto cambia la existencia, por ejemplo -2 o 3.";
@@ -41,8 +57,6 @@ export function InventoryPanel({
   const [onlyLow, setOnlyLow] = useState(false);
   const [receiving, setReceiving] = useState<UniformItem | null>(null);
   const [adjusting, setAdjusting] = useState<{ item: UniformItem; sizeId: string; sizeLabel: string } | null>(null);
-  const [failure, setFailure] = useState<UniformsError | null>(null);
-
   const lowCount = useMemo(
     () => items.reduce((n, item) => n + item.sizes.filter((s) => s.belowMinimum).length, 0),
     [items],
@@ -60,6 +74,7 @@ export function InventoryPanel({
   );
 
   const withSizes = items.filter((item) => item.sizes.length > 0);
+  const withoutSizes = items.filter((item) => item.active && item.sizes.length === 0);
 
   if (withSizes.length === 0) {
     return (
@@ -73,8 +88,6 @@ export function InventoryPanel({
 
   return (
     <div style={{ display: "grid", gap: 16 }}>
-      {failure !== null && <ErrorNote message={failure.message} detail={failure.detail} />}
-
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
         <div role="tablist" aria-label="Existencias" style={{ display: "flex", gap: 6, padding: 5, background: "var(--surface-3)", borderRadius: "var(--r-pill)", border: "1px solid var(--border)" }}>
           <FilterTab label="Todas" count={rows.length} active={!onlyLow} onSelect={() => setOnlyLow(false)} />
@@ -85,6 +98,8 @@ export function InventoryPanel({
           Entrada de almacén
         </Btn>
       </div>
+
+      {withoutSizes.length > 0 && <WithoutSizesNote items={withoutSizes} />}
 
       {rows.length === 0 ? (
         <EmptyState
@@ -186,7 +201,6 @@ export function InventoryPanel({
             setReceiving(null);
             onChanged();
           }}
-          onError={setFailure}
         />
       )}
 
@@ -198,7 +212,6 @@ export function InventoryPanel({
             setAdjusting(null);
             onChanged();
           }}
-          onError={setFailure}
         />
       )}
     </div>
@@ -252,18 +265,17 @@ function ReceiveDrawer({
   initial,
   onClose,
   onDone,
-  onError,
 }: {
   items: UniformItem[];
   initial: UniformItem;
   onClose: () => void;
   onDone: () => void;
-  onError: (err: UniformsError) => void;
 }): ReactElement {
   const [item, setItem] = useState(initial);
   const [quantities, setQuantities] = useState<Record<string, string>>({});
   const [note, setNote] = useState("");
   const [pending, setPending] = useState(false);
+  const [failure, setFailure] = useState<UniformsError | null>(null);
   // A ref and not the state: a double click lands before `pending` repaints,
   // and booking a box in twice doubles the shelf.
   const inFlight = useRef(false);
@@ -287,21 +299,23 @@ function ReceiveDrawer({
       return;
     }
     inFlight.current = true;
+    setFailure(null);
     setPending(true);
     try {
       await receiveStock(API_URL, lines, note);
       onDone();
     } catch (err) {
-      onError(err instanceof UniformsError ? err : new UniformsError("internal", "Algo salió mal"));
-      onClose();
+      // ISSUE-CC-113: the drawer stays open with what was typed; the reason shows inside it.
+      setFailure(asUniformsError(err));
     } finally {
       inFlight.current = false;
       setPending(false);
     }
-  }, [lines, note, onClose, onDone, onError]);
+  }, [lines, note, onDone]);
 
   return (
     <Drawer title="Entrada de almacén" icon="plus" onClose={onClose}>
+      {failure !== null && <ErrorNote message={failure.message} detail={failure.detail} />}
       <label style={label} htmlFor="receive-item">
         Prenda
       </label>
@@ -369,7 +383,7 @@ function ReceiveDrawer({
           Cancelar
         </Btn>
         <Btn icon="check" onClick={() => void save()} busy={pending}>
-          {pending ? "Guardando…" : `Guardar ${lines.reduce((n, l) => n + l.qty, 0)} piezas`}
+          {pending ? "Guardando…" : `Guardar ${pieces(lines.reduce((n, l) => n + l.qty, 0))}`}
         </Btn>
       </div>
     </Drawer>
@@ -386,16 +400,15 @@ function AdjustDrawer({
   target,
   onClose,
   onDone,
-  onError,
 }: {
   target: { item: UniformItem; sizeId: string; sizeLabel: string };
   onClose: () => void;
   onDone: () => void;
-  onError: (err: UniformsError) => void;
 }): ReactElement {
   const [delta, setDelta] = useState("");
   const [note, setNote] = useState("");
   const [pending, setPending] = useState(false);
+  const [failure, setFailure] = useState<UniformsError | null>(null);
   const inFlight = useRef(false);
   const [deltaError, setDeltaError] = useState<string | undefined>(undefined);
   const [noteError, setNoteError] = useState<string | undefined>(undefined);
@@ -416,21 +429,23 @@ function AdjustDrawer({
       return;
     }
     inFlight.current = true;
+    setFailure(null);
     setPending(true);
     try {
       await adjustStock(API_URL, target.sizeId, parsed, note.trim());
       onDone();
     } catch (err) {
-      onError(err instanceof UniformsError ? err : new UniformsError("internal", "Algo salió mal"));
-      onClose();
+      // ISSUE-CC-113: the drawer stays open with what was typed; the reason shows inside it.
+      setFailure(asUniformsError(err));
     } finally {
       inFlight.current = false;
       setPending(false);
     }
-  }, [deltaOk, note, noteOk, onClose, onDone, onError, parsed, target.sizeId]);
+  }, [deltaOk, note, noteOk, onDone, parsed, target.sizeId]);
 
   return (
     <Drawer title={`Ajustar ${target.item.name} · ${target.sizeLabel}`} icon="settings" onClose={onClose}>
+      {failure !== null && <ErrorNote message={failure.message} detail={failure.detail} />}
       <FieldLabel
         htmlFor="adjust-delta"
         help="Cuánto cambia la existencia, con signo: un número negativo resta piezas y uno positivo las suma."

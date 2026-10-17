@@ -20,6 +20,22 @@ const CATEGORIES: { id: ItemCategory; label: string }[] = [
   { id: "other", label: "Otro" },
 ];
 
+/**
+ * What a book or a notebook is sold in (ISSUE-CC-112). Stock lives per size, so
+ * an article with NO size has no stock row: it never showed in Existencias nor
+ * in Entrada de almacén, and could be neither stocked nor sold.
+ */
+export const ONE_SIZE = "ÚNICA";
+const ONE_SIZE_SPEC: SizeSpec = { sizeLabel: ONE_SIZE, sizeOrder: 1, minStock: 0 };
+
+/** Only a garment comes in a size run; everything else is sold as one size. */
+const hasSizeRun = (category: ItemCategory): boolean => category === "uniform";
+
+const asUniformsError = (err: unknown): UniformsError =>
+  err instanceof UniformsError ? err : new UniformsError("internal", "Algo salió mal. Intenta de nuevo.");
+
+const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
+
 const CATEGORY_LABEL: Record<string, string> = {
   uniform: "Uniforme", book: "Libro", supply: "Papelería", other: "Otro",
 };
@@ -145,9 +161,10 @@ export function CatalogPanel({
             onChanged();
             // Straight into sizes: a garment with no sizes cannot be sold, so
             // stopping here would leave the job half done and looking finished.
-            setSizing(created);
+            // Anything else already got its one size.
+            if (hasSizeRun(created.category)) setSizing(created);
+            else setNote(`Se creó ${created.name} con talla única. Ya puedes darle entrada en Existencias.`);
           }}
-          onError={setFailure}
         />
       )}
 
@@ -160,7 +177,6 @@ export function CatalogPanel({
             setNote(message);
             onChanged();
           }}
-          onError={setFailure}
         />
       )}
     </div>
@@ -175,18 +191,18 @@ function CreateDrawer({
   levels,
   onClose,
   onDone,
-  onError,
 }: {
   levels: readonly SchoolLevel[];
   onClose: () => void;
   onDone: (created: UniformItem) => void;
-  onError: (err: UniformsError) => void;
 }): ReactElement {
   const [name, setName] = useState("");
   const [level, setLevel] = useState<Level>("");
   const [category, setCategory] = useState<ItemCategory>("uniform");
   const [pesos, setPesos] = useState("");
   const [pending, setPending] = useState(false);
+  const [failure, setFailure] = useState<UniformsError | null>(null);
+  const createdRef = useRef<UniformItem | undefined>(undefined);
   // Un ref y no el estado: dos clics llegan antes de que `pending` repinte, y
   // sin clave única nada en el servidor frena un segundo artículo igual.
   const inFlight = useRef(false);
@@ -212,21 +228,26 @@ function CreateDrawer({
       return;
     }
     inFlight.current = true;
+    setFailure(null);
     setPending(true);
     try {
-      const created = await createItem(API_URL, { name: name.trim(), levelId: level, priceCents, category });
+      // A retry after the one size failed must not create the article twice.
+      const created = createdRef.current ?? (await createItem(API_URL, { name: name.trim(), levelId: level, priceCents, category }));
+      createdRef.current = created;
+      if (!hasSizeRun(created.category)) await upsertSizes(API_URL, created.id, [ONE_SIZE_SPEC]);
       onDone(created);
     } catch (err) {
-      onError(err instanceof UniformsError ? err : new UniformsError("internal", "Algo salió mal"));
-      onClose();
+      // ISSUE-CC-113: the drawer stays open with what was typed.
+      setFailure(asUniformsError(err));
     } finally {
       inFlight.current = false;
       setPending(false);
     }
-  }, [category, focusFirstInvalid, form, level, name, onClose, onDone, onError, pesos, priceCents]);
+  }, [category, focusFirstInvalid, form, level, name, onDone, pesos, priceCents]);
 
   return (
     <Drawer title="Nuevo artículo" icon="plus" onClose={onClose}>
+      {failure !== null && <ErrorNote message={failure.message} detail={failure.detail} />}
       <p style={label}>Tipo</p>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
         {CATEGORIES.map((option) => (
@@ -285,7 +306,7 @@ function CreateDrawer({
           Cancelar
         </Btn>
         <Btn icon="check" onClick={() => void save()} busy={pending}>
-          {pending ? "Guardando…" : "Crear y poner tallas"}
+          {pending ? "Guardando…" : hasSizeRun(category) ? "Crear y poner tallas" : "Crear"}
         </Btn>
       </div>
     </Drawer>
@@ -304,16 +325,15 @@ function SizesDrawer({
   item,
   onClose,
   onDone,
-  onError,
 }: {
   item: UniformItem;
   onClose: () => void;
   onDone: (message: string) => void;
-  onError: (err: UniformsError) => void;
 }): ReactElement {
   const [raw, setRaw] = useState(item.sizes.map((s) => s.sizeLabel).join(", "));
   const [minStock, setMinStock] = useState("");
   const [pending, setPending] = useState(false);
+  const [failure, setFailure] = useState<UniformsError | null>(null);
   // A ref and not the state: a double click lands before `pending` repaints.
   const inFlight = useRef(false);
   const [sizesError, setSizesError] = useState<string | undefined>(undefined);
@@ -331,6 +351,7 @@ function SizesDrawer({
       return;
     }
     inFlight.current = true;
+    setFailure(null);
     setPending(true);
     try {
       const specs: SizeSpec[] = labels.map((sizeLabel, index) => ({
@@ -341,16 +362,16 @@ function SizesDrawer({
       const res = await upsertSizes(API_URL, item.id, specs);
       onDone(sizesMessage(res.createdCount, res.updatedCount));
     } catch (err) {
-      onError(err instanceof UniformsError ? err : new UniformsError("internal", "Algo salió mal"));
-      onClose();
+      setFailure(asUniformsError(err));
     } finally {
       inFlight.current = false;
       setPending(false);
     }
-  }, [item.id, labels, min, onClose, onDone, onError]);
+  }, [item.id, labels, min, onDone]);
 
   return (
     <Drawer title={`Tallas de ${item.name}`} icon="plus" onClose={onClose}>
+      {failure !== null && <ErrorNote message={failure.message} detail={failure.detail} />}
       <FieldLabel
         htmlFor="sizes-raw"
         help="Escribe un rango como 4-16, una lista separada por comas, o letras: CH, M, G. El orden es el que escribas."
@@ -370,6 +391,18 @@ function SizesDrawer({
         }}
       />
       <FieldError htmlFor="sizes-raw" message={sizesError} />
+      {item.sizes.length === 0 && (
+        <Btn
+          kind="ghost"
+          style={{ marginTop: 10 }}
+          onClick={() => {
+            setRaw(ONE_SIZE);
+            setSizesError(undefined);
+          }}
+        >
+          Usar talla única
+        </Btn>
+      )}
 
       {labels.length > 0 && (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 12 }}>
@@ -411,7 +444,7 @@ function SizesDrawer({
           Cancelar
         </Btn>
         <Btn icon="check" onClick={() => void save()} busy={pending}>
-          {pending ? "Guardando…" : `Guardar ${labels.length} tallas`}
+          {pending ? "Guardando…" : `Guardar ${plural(labels.length, "talla", "tallas")}`}
         </Btn>
       </div>
     </Drawer>

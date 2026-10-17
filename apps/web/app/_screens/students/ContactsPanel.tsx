@@ -7,6 +7,7 @@ import { Icon } from "../../_design/Icon";
 import { InviteLink } from "../../_design/InviteLink";
 import { UndoToast } from "../../_design/UndoToast";
 import { useUndoableRemoval } from "../../_design/useUndoableRemoval";
+import { spanishServerReason } from "../../_lib/serverReason";
 import {
   addContact,
   inviteContactToApp,
@@ -111,7 +112,7 @@ export function ContactsPanel({ studentId }: ContactsPanelProps): ReactElement {
       setEmergency(false);
       reload();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "No se pudo agregar el contacto.");
+      setError((cause instanceof Error ? spanishServerReason(cause.message) : undefined) ?? "No se pudo agregar el contacto.");
     } finally {
       setSaving(false);
     }
@@ -143,7 +144,7 @@ export function ContactsPanel({ studentId }: ContactsPanelProps): ReactElement {
     } catch (cause) {
       setGrantError((prev) => ({
         ...prev,
-        [contact.id]: cause instanceof Error ? cause.message : "No se pudo dar el acceso.",
+        [contact.id]: (cause instanceof Error ? spanishServerReason(cause.message) : undefined) ?? "No se pudo dar el acceso.",
       }));
     } finally {
       setGranting(undefined);
@@ -347,7 +348,7 @@ function ContactEditRow({
         isEmergency: emergency,
       });
     } catch (cause) {
-      setFailure(cause instanceof Error ? cause.message : "No se pudo guardar el contacto.");
+      setFailure((cause instanceof Error ? spanishServerReason(cause.message) : undefined) ?? "No se pudo guardar el contacto.");
       setSaving(false);
     }
   };

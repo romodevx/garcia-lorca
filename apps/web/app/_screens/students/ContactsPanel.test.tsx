@@ -114,6 +114,23 @@ describe("ContactsPanel — dar acceso a la app", () => {
     expect(students.inviteContactToApp.mock.calls[0]?.[2]).toBe("gl-2");
   });
 
+  // ISSUE-CC-113: a failure that is not the server's (the network fell) used to
+  // print the browser's English ("Failed to fetch").
+  it("says in Spanish when access could not be given", async () => {
+    const user = userEvent.setup();
+    students.listContacts.mockResolvedValue([
+      { id: "gl-2", studentId: "st-1", guardianUserId: "", relationship: "father", fullName: "Mateo Contreras", phone: "", email: "mateo@example.com", hasAccount: false },
+    ]);
+    students.inviteContactToApp.mockRejectedValue(new TypeError("Failed to fetch"));
+    render(<ContactsPanel studentId="st-1" />);
+    await screen.findByText("Mateo Contreras");
+
+    await user.click(screen.getByRole("button", { name: /Dar acceso a la app/ }));
+
+    expect(await screen.findByText("No se pudo dar el acceso.")).toBeInTheDocument();
+    expect(screen.queryByText(/Failed to fetch/)).toBeNull();
+  });
+
   // A contact with no address has nowhere to receive the invitation, so the
   // button is not offered: an action that cannot succeed should not be pressable.
   it("does not offer the button to a contact with no email", async () => {
