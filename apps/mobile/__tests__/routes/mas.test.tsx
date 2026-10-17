@@ -1,3 +1,4 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { router } from "expo-router";
 import { getAccessToken, saveTokens } from "@/src/api";
@@ -48,5 +49,19 @@ describe("MasRoute logout", () => {
     expect(del?.url).toContain("/api/v1/family/devices/ExponentPushToken%5Bxyz%5D");
     expect(del?.bearer).toBe("Bearer a1");
     expect(await readRegisteredToken()).toBeNull();
+  });
+
+  // CC-303 gate: the remembered child belongs to the guardian who signed out.
+  it("forgets the remembered child on Cerrar sesión", async () => {
+    await saveTokens({ accessToken: "a1", refreshToken: "r1" });
+    await AsyncStorage.setItem("gl.selectedChildId", "s2");
+
+    await renderWithProviders(<MasRoute />);
+    await act(async () => {
+      fireEvent.press(screen.getByLabelText("Cerrar sesión"));
+    });
+
+    await waitFor(() => expect(router.replace).toHaveBeenCalledWith("/"));
+    expect(await AsyncStorage.getItem("gl.selectedChildId")).toBeNull();
   });
 });

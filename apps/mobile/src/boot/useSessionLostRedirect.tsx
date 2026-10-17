@@ -4,6 +4,7 @@ import { onSessionLost } from "@/src/api";
 import { SESSION_ENDED_ROUTE } from "@/src/navigation/routes";
 import { unregisterPush } from "@/src/push/unregister";
 import { useAppState } from "@/src/state/AppState";
+import { forgetSelectedChild } from "@/src/state/selectedChildStore";
 
 /**
  * Subscribes once to the "session lost" signal (a refresh token the gateway
@@ -28,6 +29,7 @@ export function useSessionLostRedirect(): void {
       // be left guessing (ISSUE-T14-102).
       router.replace(SESSION_ENDED_ROUTE);
       void unregisterPush();
+      void forgetSelectedChild();
       // Tokens are already cleared by refresh(), so both short-circuit to an empty
       // slice without firing a request.
       void refreshChildren();

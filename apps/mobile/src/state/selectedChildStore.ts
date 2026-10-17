@@ -16,6 +16,18 @@ export async function readSelectedChild(): Promise<string | null> {
   }
 }
 
+/**
+ * Drops the remembered child: on logout and on a lost session, so the next
+ * guardian on a shared phone starts from nothing of the previous one's.
+ */
+export async function forgetSelectedChild(): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // Non-fatal: an id that is not among the next guardian's children is ignored.
+  }
+}
+
 export function rememberSelectedChild(id: string): void {
   AsyncStorage.setItem(STORAGE_KEY, id).catch(() => {
     // Non-fatal: the in-memory choice still applies for this session.

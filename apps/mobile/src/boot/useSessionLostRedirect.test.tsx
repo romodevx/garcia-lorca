@@ -1,3 +1,4 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { act, cleanup, waitFor } from "@testing-library/react-native";
 import { router } from "expo-router";
 import { type ReactElement } from "react";
@@ -77,6 +78,18 @@ describe("useSessionLostRedirect", () => {
     expect(await readPendingUnregisters()).toEqual(["ExponentPushToken[xyz]"]);
     const deletes = fetchMock.mock.calls.filter((c) => String((c as unknown[])[0]).includes("/family/devices"));
     expect(deletes).toHaveLength(0);
+  });
+
+  // CC-303 gate: a dead session must not leave its child remembered for the next guardian.
+  it("forgets the remembered child when the session is lost", async () => {
+    await AsyncStorage.setItem("gl.selectedChildId", "s2");
+    await renderWithProviders(<Harness />);
+
+    await act(async () => {
+      emitSessionLost();
+    });
+
+    await waitFor(async () => expect(await AsyncStorage.getItem("gl.selectedChildId")).toBeNull());
   });
 
   it("stops reacting once unmounted (subscription is cleaned up)", async () => {

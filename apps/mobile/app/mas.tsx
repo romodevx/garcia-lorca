@@ -8,6 +8,7 @@ import { unregisterPush } from "@/src/push/unregister";
 import { LOGIN_ROUTE } from "@/src/navigation/routes";
 import { MoreScreen } from "@/src/screens/MoreScreen";
 import { useAppState } from "@/src/state/AppState";
+import { forgetSelectedChild } from "@/src/state/selectedChildStore";
 import { useTheme } from "@/src/theme";
 
 /** "Más" module grid — pushed from the bottom bar's last entry. */
@@ -25,6 +26,7 @@ export default function MasRoute(): ReactNode {
   const onLogout = async (): Promise<void> => {
     await unregisterPush();
     await signOut();
+    await forgetSelectedChild();
     await refreshChildren();
     await refreshNotifications();
     router.replace(LOGIN_ROUTE);
