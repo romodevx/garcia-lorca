@@ -59,6 +59,9 @@ type fakeConfig struct {
 	renamedSubject string
 	renamedTo      string
 	deletedSubject string
+	// CC-103 cycle rename.
+	renamedCycle   string
+	renamedCycleTo string
 	// T8 catalog corrections.
 	reorderedLevels []string
 	renamedGrade    string

@@ -41,6 +41,8 @@ type fakeCatalog struct {
 	unique       map[string]bool // scope-qualified unique keys across all entities
 	// renames counts the subject renames that reached the repository.
 	renames int
+	// cycleRenames counts the cycle renames that reached the repository.
+	cycleRenames int
 	// reassignWrites counts the reassignments that actually moved a row.
 	reassignWrites int
 	// applyCalls counts ApplyTermMonths transactions; applyErr fails them.
@@ -110,6 +112,15 @@ func (f *fakeCatalog) DeleteSchoolEvent(_ context.Context, id string) error {
 }
 
 func (f *fakeCatalog) CreateNonWorkingPeriod(_ context.Context, p domain.NonWorkingPeriod) error {
+	others := make([]domain.NonWorkingPeriod, 0, len(f.periods))
+	for _, o := range f.periods {
+		if o.CycleID() == p.CycleID() {
+			others = append(others, o)
+		}
+	}
+	if err := domain.RefuseNonWorkingOverlap(p, others); err != nil {
+		return err
+	}
 	if err := f.claim("period|" + p.CycleID() + "|" + p.Label()); err != nil {
 		return err
 	}
@@ -137,6 +148,13 @@ func (f *fakeCatalog) DeleteNonWorkingPeriod(_ context.Context, id string) error
 }
 
 func (f *fakeCatalog) CreateCycle(_ context.Context, c domain.Cycle) error {
+	others := make([]domain.Cycle, 0, len(f.cycles))
+	for _, o := range f.cycles {
+		others = append(others, o)
+	}
+	if err := domain.RefuseCycleOverlap(c, others); err != nil {
+		return err
+	}
 	if err := f.claim("cycle|" + c.Name()); err != nil {
 		return err
 	}
@@ -933,9 +951,17 @@ func (f *fakeCatalog) ActivateCycle(_ context.Context, c domain.Cycle) error {
 
 // --- activating a school year -----------------------------------------------
 
+// seedNamedCycle creates a draft year after every year already seeded, since
+// two years may not share a day.
 func seedNamedCycle(t *testing.T, svc *usecase.CatalogService, name string) domain.Cycle {
 	t.Helper()
-	c, err := svc.CreateCycle(ctx(), name, domain.CycleStatusUnspecified, someDate, laterDate)
+	existing, err := svc.ListCycles(ctx())
+	if err != nil {
+		t.Fatalf("list cycles: %v", err)
+	}
+	shift := 2 * len(existing)
+	c, err := svc.CreateCycle(ctx(), name, domain.CycleStatusUnspecified,
+		someDate.AddDate(shift, 0, 0), laterDate.AddDate(shift, 0, -1))
 	if err != nil {
 		t.Fatalf("seed cycle %q: %v", name, err)
 	}

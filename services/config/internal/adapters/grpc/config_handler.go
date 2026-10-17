@@ -666,6 +666,15 @@ func (h *ConfigHandler) ActivateCycle(ctx context.Context, req *connect.Request[
 	return connect.NewResponse(&configv1.ActivateCycleResponse{Cycle: toProtoCycle(cycle)}), nil
 }
 
+// RenameCycle gives a cycle a new name, keeping its dates and status.
+func (h *ConfigHandler) RenameCycle(ctx context.Context, req *connect.Request[configv1.RenameCycleRequest]) (*connect.Response[configv1.RenameCycleResponse], error) {
+	cycle, err := h.catalog.RenameCycle(ctx, req.Msg.GetId(), req.Msg.GetName())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&configv1.RenameCycleResponse{Cycle: toProtoCycle(cycle)}), nil
+}
+
 // --- school calendar (M16) -------------------------------------------------
 
 // dateLayout is how a calendar day travels on the wire. A plain YYYY-MM-DD, not

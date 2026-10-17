@@ -53,7 +53,7 @@ func seedTermMonthsRig(t *testing.T, tenant, prefix string) termMonthsRig {
 
 	cycle, err := domain.NewCycle(r.cycleID, tenant, "Cycle-"+prefix, domain.CycleStatusActive, startsOn, endsOn)
 	require.NoError(t, err)
-	require.NoError(t, repo.CreateCycle(ctx, cycle))
+	require.NoError(t, insertCycleFixture(t, cycle))
 	for lid, name := range map[string]string{r.levelID: "Level-" + prefix, r.otherLevelID: "Other-" + prefix} {
 		level, err := domain.NewLevel(lid, tenant, name, "", domain.GranularityCycle)
 		require.NoError(t, err)

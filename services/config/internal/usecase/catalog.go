@@ -54,6 +54,9 @@ func (s *CatalogService) CreateCycle(ctx context.Context, name string, status do
 	if status == domain.CycleStatusUnspecified {
 		status = domain.CycleStatusDraft
 	}
+	if err := domain.CheckCycleName(name); err != nil {
+		return domain.Cycle{}, err
+	}
 	c, err := domain.NewCycle(s.newID(), s.tenant, name, status, startsOn, endsOn)
 	if err != nil {
 		return domain.Cycle{}, err
@@ -84,6 +87,25 @@ func (s *CatalogService) ActivateCycle(ctx context.Context, id string) (domain.C
 		return domain.Cycle{}, err
 	}
 	return activated, nil
+}
+
+// RenameCycle gives a cycle a new name, keeping its dates and status.
+//
+// A draft year born with a placeholder name ("Nuevo ciclo") had no way to get
+// a real one and sat in every selector under it (CC-103).
+func (s *CatalogService) RenameCycle(ctx context.Context, id, name string) (domain.Cycle, error) {
+	current, err := s.repo.GetCycle(ctx, id)
+	if err != nil {
+		return domain.Cycle{}, err
+	}
+	renamed, err := current.Rename(name)
+	if err != nil {
+		return domain.Cycle{}, err
+	}
+	if err := s.repo.RenameCycle(ctx, renamed); err != nil {
+		return domain.Cycle{}, err
+	}
+	return renamed, nil
 }
 
 // GetCycle returns a cycle by id (KindNotFound if absent).

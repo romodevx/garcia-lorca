@@ -33,8 +33,14 @@ import (
 type CatalogRepository interface {
 	// --- cycles (per-cycle umbrella, tenant-scoped) ---
 
-	// CreateCycle persists a new cycle. A duplicate name (per tenant) is KindConflict.
+	// CreateCycle persists a new cycle. A duplicate name (per tenant) is
+	// KindConflict; dates that share a day with another cycle of the tenant are
+	// refused with domain.RefuseCycleOverlap's CYCLE_OVERLAP, checked atomically
+	// with the insert.
 	CreateCycle(ctx context.Context, c domain.Cycle) error
+	// RenameCycle writes c's name over the stored cycle's. KindNotFound when the
+	// cycle does not exist; KindConflict when another cycle has the name.
+	RenameCycle(ctx context.Context, c domain.Cycle) error
 	// GetCycle returns a cycle by id, or KindNotFound.
 	GetCycle(ctx context.Context, id string) (domain.Cycle, error)
 	// ListCycles returns every cycle in the tenant.

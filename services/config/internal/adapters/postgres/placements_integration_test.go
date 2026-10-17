@@ -35,7 +35,7 @@ func newPlacementSchool(t *testing.T, tenantID string) placementSchool {
 	if err != nil {
 		t.Fatalf("NewCycle: %v", err)
 	}
-	if err := repo.CreateCycle(context.Background(), cycle); err != nil {
+	if err := insertCycleFixture(t, cycle); err != nil {
 		t.Fatalf("CreateCycle: %v", err)
 	}
 	return placementSchool{repo: repo, svc: usecase.NewPlacementService(repo, tenantID, uuid.NewString), cycleID: cycleID}

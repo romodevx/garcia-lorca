@@ -2052,7 +2052,151 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/ModuleDisabled' }
         '409':
-          description: This cycle already has a closure with that name.
+          description: >
+            This cycle already has a closure with that name, or one of the days
+            is already closed by another period of the cycle (X-Error-Code
+            NON_WORKING_OVERLAP; the body names that period).
+          headers:
+            X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
+          content:
+            text/plain:
+              schema: { type: string }
+              example: 'Ese día ya está marcado sin clases: "Revolución" (16 de noviembre de 2026)'
+
+  /api/v1/config/cycles:
+    post:
+      tags: [config]
+      summary: Create a school year
+      description: >
+        A new cycle starts as a draft. Its dates may not share a day with any
+        other cycle of the school: "which year is this date in" must have one
+        answer. Requires `config:write`.
+      operationId: createCycle
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, startsOn, endsOn]
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 80
+                  description: Longer is 400 CYCLE_NAME_TOO_LONG.
+                status: { type: string, enum: [draft, active, closed] }
+                startsOn: { type: string, format: date }
+                endsOn: { type: string, format: date }
+            example:
+              name: 2027-2028
+              startsOn: '2027-08-23'
+              endsOn: '2028-07-07'
+      responses:
+        '201':
+          description: The stored cycle.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Cycle' }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+        '409':
+          description: >
+            Another cycle has this name, or its dates share a day with this
+            one (X-Error-Code CYCLE_OVERLAP; the body names that cycle).
+          headers:
+            X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
+          content:
+            text/plain:
+              schema: { type: string }
+              example: 'Las fechas se traslapan con el ciclo "2026-2027" (del 24 de agosto de 2026 al 9 de julio de 2027)'
+
+  /api/v1/config/cycles/{id}/activate:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      tags: [config]
+      summary: Put a school year into service
+      description: >
+        Stands down whichever other year was active, in one transaction. A
+        year whose dates share a day with another (one stored before that rule
+        existed) is refused. Requires `config:write`.
+      operationId: activateCycle
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      responses:
+        '200':
+          description: The cycle, now active.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Cycle' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409':
+          description: >
+            A closed year cannot be reopened, or its dates share a day with
+            another cycle (X-Error-Code CYCLE_OVERLAP; the body names it).
+          headers:
+            X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
+          content:
+            text/plain:
+              schema: { type: string }
+              example: 'Las fechas se traslapan con el ciclo "2026-2027" (del 24 de agosto de 2026 al 9 de julio de 2027)'
+
+  /api/v1/config/cycles/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    patch:
+      tags: [config]
+      summary: Rename a school year
+      description: >
+        Same id, dates and status; everything that points at the cycle follows
+        the new name. Requires `config:write`.
+      operationId: renameCycle
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 80
+                  description: Longer is 400 CYCLE_NAME_TOO_LONG.
+            example:
+              name: 2027-2028
+      responses:
+        '200':
+          description: The cycle under its new name.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Cycle' }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409':
+          description: Another cycle already has this name.
+          content:
+            text/plain:
+              schema: { type: string }
+              example: Ya existe un ciclo con ese nombre
 
   /api/v1/config/calendar/{id}:
     delete:
@@ -8474,6 +8618,18 @@ components:
         levelId: { type: string, format: uuid }
         groupId: { type: string, format: uuid }
 
+    Cycle:
+      type: object
+      description: >
+        A school year. Both ends inclusive; no two cycles of a school share a
+        day. Exactly one is active at a time.
+      required: [id, name, status, startsOn, endsOn]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, example: 2026-2027 }
+        status: { type: string, enum: [draft, active, closed] }
+        startsOn: { type: string, format: date }
+        endsOn: { type: string, format: date }
     NonWorkingPeriod:
       type: object
       description: >

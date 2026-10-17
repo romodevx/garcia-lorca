@@ -55,6 +55,8 @@ service ConfigService {
   // roster header, the group dropdowns, the tuition table, the billing run — so
   // that question must have exactly one answer.
   rpc ActivateCycle(ActivateCycleRequest) returns (ActivateCycleResponse);
+  // RenameCycle gives a cycle a new name, keeping its dates and status.
+  rpc RenameCycle(RenameCycleRequest) returns (RenameCycleResponse);
 
   // --- grade_levels (catalog) ---
   // CreateGradeLevel adds a grade within a level.
@@ -584,6 +586,17 @@ message ActivateCycleRequest {
 }
 
 message ActivateCycleResponse {
+  Cycle cycle = 1;
+}
+
+// RenameCycleRequest names the cycle and its new name.
+message RenameCycleRequest {
+  string id = 1;
+  string name = 2;
+}
+
+// RenameCycleResponse returns the renamed cycle.
+message RenameCycleResponse {
   Cycle cycle = 1;
 }
 

@@ -118,7 +118,7 @@ export function Catalog({ onBack, canDeleteLevels = false, onDeleteLevel, notice
         <div className="fade-up" style={{ display: "grid", gap: 18 }}>
           {!pricing && <SchoolProfilePanel />}
           {!pricing && (
-            <CycleBar cycles={cycles.list} selectedCycleId={cycles.selectedId} onSelect={cycles.select} onCreate={cycles.create} onActivate={cycles.activate} />
+            <CycleBar cycles={cycles.list} selectedCycleId={cycles.selectedId} onSelect={cycles.select} onCreate={cycles.create} onActivate={cycles.activate} onRename={cycles.rename} />
           )}
           {!pricing && onOpenStudentImport !== undefined && <StudentImportEntry onOpen={onOpenStudentImport} />}
 

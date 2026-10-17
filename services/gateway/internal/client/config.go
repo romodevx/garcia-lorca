@@ -242,6 +242,15 @@ func (c *ConfigClient) ActivateCycle(ctx context.Context, id string) (CycleResul
 	return toCycleResult(res.Msg.GetCycle()), nil
 }
 
+// RenameCycle gives a cycle a new name, keeping its dates and status.
+func (c *ConfigClient) RenameCycle(ctx context.Context, id, name string) (CycleResult, error) {
+	res, err := c.rpc.RenameCycle(ctx, connect.NewRequest(&configv1.RenameCycleRequest{Id: id, Name: name}))
+	if err != nil {
+		return CycleResult{}, err
+	}
+	return toCycleResult(res.Msg.GetCycle()), nil
+}
+
 // --- levels ---------------------------------------------------------------
 
 // CreateLevel adds a catalog level via the config service.

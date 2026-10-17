@@ -21,6 +21,28 @@ if (typeof globalThis.ResizeObserver === "undefined") {
     disconnect(): void {}
   };
 }
+// jsdom has <dialog> but none of its behaviour. The smallest faithful part:
+// showModal opens it, close(returnValue) closes it and fires "close" — which is
+// what our native dialogs listen to. (Top layer and inert background are the
+// browser's; e2e covers those.)
+if (typeof HTMLDialogElement !== "undefined" && typeof HTMLDialogElement.prototype.showModal !== "function") {
+  const proto = HTMLDialogElement.prototype as HTMLDialogElement & { returnValue: string };
+  Object.defineProperty(proto, "open", {
+    configurable: true,
+    get(this: HTMLDialogElement) { return this.hasAttribute("open"); },
+    set(this: HTMLDialogElement, value: boolean) { this.toggleAttribute("open", value); },
+  });
+  proto.returnValue = "";
+  proto.showModal = function showModal(this: HTMLDialogElement): void {
+    this.open = true;
+  };
+  proto.close = function close(this: HTMLDialogElement & { returnValue: string }, returnValue?: string): void {
+    if (!this.open) return;
+    if (returnValue !== undefined) this.returnValue = returnValue;
+    this.open = false;
+    this.dispatchEvent(new Event("close"));
+  };
+}
 if (typeof Element !== "undefined" && typeof Element.prototype.scrollIntoView !== "function") {
   Element.prototype.scrollIntoView = function scrollIntoView(): void {};
 }

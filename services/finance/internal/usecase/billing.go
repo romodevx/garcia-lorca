@@ -132,6 +132,9 @@ func (s *FinanceService) UpsertTuitionPlan(ctx context.Context, in TuitionPlanIn
 	if err != nil {
 		return domain.TuitionPlan{}, err
 	}
+	if err := plan.UnpricedMonths(); err != nil {
+		return domain.TuitionPlan{}, err
+	}
 	if err := plan.SharedLineName(); err != nil {
 		return domain.TuitionPlan{}, err
 	}

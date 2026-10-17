@@ -73,11 +73,66 @@ func (r *Repository) withTenant(ctx context.Context, fn func(tx *gorm.DB) error)
 
 // --- cycles ---------------------------------------------------------------
 
-// CreateCycle persists a new cycle. A duplicate name (per tenant) is KindConflict.
+// cycleNameTaken is the sentence for the (tenant_id, name) UNIQUE.
+const cycleNameTaken = "Ya existe un ciclo con ese nombre"
+
+// cyclesLockKey and nonWorkingLockKey prefix the advisory locks (hashed with
+// the tenant, and the tenant + cycle id) that serialize the overlap checks below.
+const (
+	cyclesLockKey     = "config.cycles:"
+	nonWorkingLockKey = "config.non_working_periods:"
+)
+
+// advisoryLock takes a transaction-scoped advisory lock on key.
+func advisoryLock(tx *gorm.DB, key, what string) error {
+	if err := tx.Exec("SELECT pg_advisory_xact_lock(hashtextextended(?, 0))", key).Error; err != nil {
+		return glerrors.Wrap(glerrors.KindInternal, "locking "+what, err)
+	}
+	return nil
+}
+
+// CreateCycle persists a new cycle. A duplicate name (per tenant) is
+// KindConflict; dates shared with another cycle are CYCLE_OVERLAP.
+//
+// The overlap is checked under a tenant-wide advisory lock rather than an
+// EXCLUDE constraint: schools already hold overlapping years (the QA made one),
+// and an EXCLUDE cannot be added NOT VALID, so the migration would fail on
+// exactly the databases that need the rule. The lock makes two concurrent
+// creates take turns, so the second one sees the first.
 func (r *Repository) CreateCycle(ctx context.Context, c domain.Cycle) error {
 	model := fromDomainCycle(c)
 	return r.withTenant(ctx, func(tx *gorm.DB) error {
-		return translateCreateErr(tx.Create(&model).Error, "creating cycle", "a cycle with this name already exists")
+		if err := advisoryLock(tx, cyclesLockKey+r.tenantID, "the school years"); err != nil {
+			return err
+		}
+		others, err := listCycles(tx)
+		if err != nil {
+			return err
+		}
+		if err := domain.RefuseCycleOverlap(c, others); err != nil {
+			return err
+		}
+		return translateCreateErr(tx.Create(&model).Error, "creating cycle", cycleNameTaken)
+	})
+}
+
+// RenameCycle writes c's name. A malformed or unknown id is KindNotFound; a
+// name another cycle has is KindConflict.
+func (r *Repository) RenameCycle(ctx context.Context, c domain.Cycle) error {
+	if !isUUID(c.ID()) {
+		return glerrors.ErrNotFound
+	}
+	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		res := tx.Model(&cycleModel{}).
+			Where("id = ?", c.ID()).
+			Updates(map[string]any{"name": c.Name(), "updated_at": gorm.Expr("now()")})
+		if res.Error != nil {
+			return translateCreateErr(res.Error, "renaming cycle", cycleNameTaken)
+		}
+		if res.RowsAffected == 0 {
+			return glerrors.ErrNotFound
+		}
+		return nil
 	})
 }
 
@@ -92,8 +147,22 @@ func (r *Repository) CreateCycle(ctx context.Context, c domain.Cycle) error {
 //
 // The demotion is scoped to rows that are actually active and are not this one,
 // so re-activating the live year writes nothing anybody has to reason about.
+//
+// A year whose dates share a day with another is refused (CYCLE_OVERLAP) under
+// the same tenant lock CreateCycle takes, before anything is stood down: drafts
+// stored before the overlap rule existed must not become the live year.
 func (r *Repository) ActivateCycle(ctx context.Context, c domain.Cycle) error {
 	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		if err := advisoryLock(tx, cyclesLockKey+r.tenantID, "the school years"); err != nil {
+			return err
+		}
+		others, err := listCycles(tx)
+		if err != nil {
+			return err
+		}
+		if err := domain.RefuseCycleOverlap(c, others); err != nil {
+			return err
+		}
 		if err := tx.Model(&cycleModel{}).
 			Where("status = ? AND id <> ?", domain.CycleStatusActive.String(), c.ID()).
 			Update("status", domain.CycleStatusDraft.String()).Error; err != nil {
@@ -134,22 +203,29 @@ func (r *Repository) GetCycle(ctx context.Context, id string) (domain.Cycle, err
 func (r *Repository) ListCycles(ctx context.Context) ([]domain.Cycle, error) {
 	var out []domain.Cycle
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
-		var rows []cycleModel
-		if err := tx.Order("name").Find(&rows).Error; err != nil {
-			return glerrors.Wrap(glerrors.KindInternal, "listing cycles", err)
-		}
-		out = make([]domain.Cycle, 0, len(rows))
-		for _, m := range rows {
-			c, derr := toDomainCycle(m)
-			if derr != nil {
-				return derr
-			}
-			out = append(out, c)
-		}
-		return nil
+		var lerr error
+		out, lerr = listCycles(tx)
+		return lerr
 	})
 	if err != nil {
 		return nil, err
+	}
+	return out, nil
+}
+
+// listCycles reads every cycle the transaction's tenant can see, by name.
+func listCycles(tx *gorm.DB) ([]domain.Cycle, error) {
+	var rows []cycleModel
+	if err := tx.Order("name").Find(&rows).Error; err != nil {
+		return nil, glerrors.Wrap(glerrors.KindInternal, "listing cycles", err)
+	}
+	out := make([]domain.Cycle, 0, len(rows))
+	for _, m := range rows {
+		c, err := toDomainCycle(m)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, c)
 	}
 	return out, nil
 }
@@ -927,12 +1003,24 @@ func translateFindErr(err error) error {
 // --- school calendar (M16) -------------------------------------------------
 
 // CreateNonWorkingPeriod persists a closed period. The same label twice in one
-// cycle is a duplicate entry, not two closures, so it comes back KindConflict.
+// cycle is a duplicate entry, not two closures, so it comes back KindConflict;
+// so is a day another period of the cycle already closes (NON_WORKING_OVERLAP),
+// checked under a per-cycle advisory lock for the reason CreateCycle gives.
 func (r *Repository) CreateNonWorkingPeriod(ctx context.Context, p domain.NonWorkingPeriod) error {
 	model := fromDomainNonWorkingPeriod(p)
 	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		if err := advisoryLock(tx, nonWorkingLockKey+r.tenantID+":"+p.CycleID(), "the school calendar"); err != nil {
+			return err
+		}
+		others, err := listNonWorkingPeriods(tx, p.CycleID())
+		if err != nil {
+			return err
+		}
+		if err := domain.RefuseNonWorkingOverlap(p, others); err != nil {
+			return err
+		}
 		return translateCreateErr(tx.Create(&model).Error, "creating non-working period",
-			"this cycle already has a period with that name")
+			"Ya hay un día sin clases con ese nombre en el ciclo")
 	})
 }
 
@@ -941,22 +1029,29 @@ func (r *Repository) CreateNonWorkingPeriod(ctx context.Context, p domain.NonWor
 func (r *Repository) ListNonWorkingPeriods(ctx context.Context, cycleID string) ([]domain.NonWorkingPeriod, error) {
 	var out []domain.NonWorkingPeriod
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
-		var rows []nonWorkingPeriodModel
-		if err := tx.Where("cycle_id = ?", cycleID).Order("starts_on, id").Find(&rows).Error; err != nil {
-			return glerrors.Wrap(glerrors.KindInternal, "listing non-working periods", err)
-		}
-		out = make([]domain.NonWorkingPeriod, 0, len(rows))
-		for _, m := range rows {
-			p, derr := toDomainNonWorkingPeriod(m)
-			if derr != nil {
-				return derr
-			}
-			out = append(out, p)
-		}
-		return nil
+		var lerr error
+		out, lerr = listNonWorkingPeriods(tx, cycleID)
+		return lerr
 	})
 	if err != nil {
 		return nil, err
+	}
+	return out, nil
+}
+
+// listNonWorkingPeriods reads a cycle's closed periods, earliest first.
+func listNonWorkingPeriods(tx *gorm.DB, cycleID string) ([]domain.NonWorkingPeriod, error) {
+	var rows []nonWorkingPeriodModel
+	if err := tx.Where("cycle_id = ?", cycleID).Order("starts_on, id").Find(&rows).Error; err != nil {
+		return nil, glerrors.Wrap(glerrors.KindInternal, "listing non-working periods", err)
+	}
+	out := make([]domain.NonWorkingPeriod, 0, len(rows))
+	for _, m := range rows {
+		p, err := toDomainNonWorkingPeriod(m)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, p)
 	}
 	return out, nil
 }

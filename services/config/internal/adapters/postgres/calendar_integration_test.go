@@ -23,7 +23,7 @@ func seedCalendarCycle(t *testing.T, repo *pgadapter.Repository, tenant, id, nam
 	if err != nil {
 		t.Fatalf("NewCycle: %v", err)
 	}
-	if err := repo.CreateCycle(context.Background(), cycle); err != nil {
+	if err := insertCycleFixture(t, cycle); err != nil {
 		t.Fatalf("CreateCycle: %v", err)
 	}
 }

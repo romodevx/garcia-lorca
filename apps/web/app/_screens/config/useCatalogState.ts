@@ -6,6 +6,7 @@ import { API_URL } from "../../api-url";
 import type { AttendanceMode } from "../../attendance/sheet";
 import {
   activateCycle,
+  renameCycle,
   copyTermMonths,
   createCycle,
   createGradeLevel,
@@ -49,6 +50,8 @@ export interface CyclesSlice {
   select: (id: string) => void;
   create: (input: CreateCycleInput) => Promise<void>;
   activate: (id: string) => Promise<void>;
+  /** Renames a year (QA CC-103). Undefined without config:write. */
+  rename: ((id: string, name: string) => Promise<void>) | undefined;
 }
 
 export interface LevelsSlice {
@@ -206,6 +209,11 @@ export function useCatalogState(notice: string | undefined, canWriteConfig = fal
     setCycles((prev) => prev.map((c) => (c.id === activated.id ? activated : c.status === "active" ? { ...c, status: "draft" } : c)));
   }, []);
 
+  const handleRenameCycle = useCallback(async (id: string, name: string): Promise<void> => {
+    const renamed = await renameCycle(API_URL, id, name);
+    setCycles((prev) => prev.map((c) => (c.id === renamed.id ? renamed : c)));
+  }, []);
+
   const handleCreateCycle = useCallback(async (input: CreateCycleInput): Promise<void> => {
     const created = await createCycle(API_URL, input);
     setCycles((prev) => [...prev, created]);
@@ -332,6 +340,7 @@ export function useCatalogState(notice: string | undefined, canWriteConfig = fal
       select: setSelectedCycleId,
       create: handleCreateCycle,
       activate: handleActivateCycle,
+      rename: canWriteConfig ? handleRenameCycle : undefined,
     },
     levels: {
       list: levels,

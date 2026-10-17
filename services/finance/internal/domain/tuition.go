@@ -226,6 +226,21 @@ func NewTuitionPlan(spec TuitionPlanSpec) (TuitionPlan, error) {
 	}, nil
 }
 
+// UnpricedMonths refuses an active table whose months cost nothing (CC-110):
+// with no named schedule the monthly fee is every month's price, and $0 issues
+// ten settled charges per pupil that read as "paid" on every statement. An
+// inactive table bills nothing, and a schedule prices each month itself (each
+// installment is already refused at zero by NewTuitionPlan).
+//
+// Write path only, like SharedLineName: a table stored at $0 before this rule
+// must stay readable, or the billing run would stop for the whole level.
+func (p TuitionPlan) UnpricedMonths() error {
+	if !p.active || len(p.schedule) > 0 || p.monthlyCents > 0 {
+		return nil
+	}
+	return glerrors.New(glerrors.KindInvalid, "La colegiatura mensual debe ser mayor a $0")
+}
+
 // ID identifies the plan.
 func (p TuitionPlan) ID() string { return p.id }
 

@@ -11,7 +11,7 @@ import { StepFrame, type StepSlot } from "../StepFrame";
 export function StepCycle({ slot, cycles, actions }: { slot: StepSlot; cycles: CyclesSlice; actions: SetupActions }): ReactElement {
   return (
     <StepFrame {...slot}>
-      <CycleBar cycles={cycles.list} selectedCycleId={cycles.selectedId} onSelect={cycles.select} onCreate={actions.createCycle} onActivate={actions.activateCycle} />
+      <CycleBar cycles={cycles.list} selectedCycleId={cycles.selectedId} onSelect={cycles.select} onCreate={actions.createCycle} onActivate={actions.activateCycle} onRename={cycles.rename} />
     </StepFrame>
   );
 }
