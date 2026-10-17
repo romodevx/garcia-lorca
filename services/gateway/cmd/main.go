@@ -420,9 +420,11 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	// office already typed). It decides WHO MAY SEE A CHILD, so it sits on
 	// guardians:write beside the links above — not on users:write, even though it
 	// creates an account, because the account is a means and the child is the
-	// subject. Before this existed there was no way at all: the anti-escalation
-	// guard refuses to assign `guardian` to anybody, which is why the owner now
-	// holds family:read (ADR 0012).
+	// subject. It is the ONLY road to the `guardian` role: iam refuses it on
+	// every manual road (invite, create, assign; ISSUE-CC-115) and its
+	// InviteGuardian picks the role itself, adding it to an account that already
+	// exists at that address. The owner holds family:read so the anti-escalation
+	// guard lets it delegate the role at all (ADR 0012).
 	contactAccessH := handler.NewContactAccessHandler(authClient, studentsClient)
 	mux.Handle("POST /api/v1/students/{studentId}/guardians/{contactId}/invite",
 		guardiansWrite(contactAccessH.Invite))

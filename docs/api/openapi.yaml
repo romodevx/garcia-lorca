@@ -1068,11 +1068,11 @@ paths:
         contacts and the office still reads one name.
 
 
-        Until this existed there was no way at all. Creating the account by hand
-        and assigning the `guardian` role is refused for everybody — the
-        anti-escalation guard lets a caller assign only roles whose permissions
-        it already holds, and `family:read` was held by nobody. So no family
-        could be given the app without writing SQL.
+        This is the ONLY road to the `guardian` role. Every manual road refuses
+        it with a 400 (`POST /api/v1/users`, `POST /api/v1/users/invite`,
+        `POST /api/v1/users/{id}/roles`): a guardian account means nothing
+        without the link to a pupil that this operation makes. iam picks the
+        role itself; the request never names it.
 
 
         The contact needs an email: it is where the invitation goes. The school
@@ -1081,9 +1081,11 @@ paths:
 
 
         IDEMPOTENT by email. Inviting a contact whose address already has an
-        account attaches that account rather than creating a duplicate, so a
-        retry after a failed send is safe and a mother of two children signs in
-        once for both.
+        account attaches that account rather than creating a duplicate, and
+        gives it the `guardian` role if it lacked it (a teacher who is also a
+        parent keeps one login and can now open the app). A deleted account at
+        that address is restored as an invited guardian. So a retry after a
+        failed send is safe and a mother of two children signs in once for both.
       operationId: inviteContactToApp
       security: [{ sessionCookie: [] }]
       parameters:
@@ -1139,6 +1141,14 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+        '500':
+          description: >
+            The deployment has no `guardian` role (migrations/iam/0010 missing).
+            Nothing was created: it is the server's fault, not the request's.
+          content:
+            text/plain:
+              schema: { type: string }
+              example: internal error
 
   /api/v1/students:
     post:
@@ -2139,6 +2149,178 @@ paths:
               schema: { type: string }
               example: internal error
 
+  /api/v1/users:
+    post:
+      tags: [iam-users]
+      summary: Create a login account with a temporary password
+      description: >
+        The older road: the director types a temporary password and the account
+        must rotate it at first sign-in. Refused where an identity provider owns
+        credentials (invite instead). The caller may only assign roles whose
+        permissions it holds. Requires `users:write`; `module_iam`.
+      operationId: createUser
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, displayName, tempPassword]
+              properties:
+                email: { type: string, format: email }
+                displayName: { type: string }
+                tempPassword: { type: string }
+                roleIds:
+                  type: array
+                  items: { type: string, format: uuid }
+            example: { email: maestra@garcialorca.edu.mx, displayName: GABRIELA ROJAS, tempPassword: "<contraseña-temporal>", roleIds: [00000000-0000-0000-0000-0000000000a4] }
+      responses:
+        '201':
+          description: The account created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminUser' }
+        '400':
+          description: >
+            The body is malformed, an email or role is invalid, or one of the
+            roles is `guardian`, which is never assigned by hand (it is given
+            only by `POST /api/v1/students/{studentId}/guardians/{contactId}/invite`).
+          content:
+            text/plain:
+              schema: { type: string }
+              example: "el rol de tutor (guardian) no se asigna a mano: se da desde la ficha del alumno, con «Dar acceso a la app»"
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403':
+          description: The caller lacks `users:write` or a permission one of the roles carries.
+          content:
+            text/plain:
+              schema: { type: string }
+              example: "forbidden: cannot assign a role granting a permission you do not hold: finance:read"
+        '409':
+          description: The address already has an account.
+          content:
+            text/plain:
+              schema: { type: string }
+              example: a user with this email already exists
+
+  /api/v1/users/invite:
+    post:
+      tags: [iam-users]
+      summary: Invite a login account (no password)
+      description: >
+        Creates the account with no password and sends its owner the link that
+        sets the first one. An address with a deleted account is restored as
+        `invited` with only the roles of this invitation. The caller may only
+        assign roles whose permissions it holds; `guardian` is never accepted
+        here. Requires `users:write`; `module_iam`.
+      operationId: inviteUser
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, displayName]
+              properties:
+                email: { type: string, format: email }
+                displayName: { type: string }
+                roleIds:
+                  type: array
+                  items: { type: string, format: uuid }
+            example: { email: maestra@garcialorca.edu.mx, displayName: GABRIELA ROJAS, roleIds: [00000000-0000-0000-0000-0000000000a4] }
+      responses:
+        '201':
+          description: The invited account and what happened to its link.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/AdminUser'
+                  - type: object
+                    required: [invitation]
+                    properties:
+                      invitation: { $ref: '#/components/schemas/Invitation' }
+        '400':
+          description: >
+            The body is malformed, an email or role is invalid, or one of the
+            roles is `guardian`, which is never assigned by hand (it is given
+            only by `POST /api/v1/students/{studentId}/guardians/{contactId}/invite`).
+          content:
+            text/plain:
+              schema: { type: string }
+              example: "el rol de tutor (guardian) no se asigna a mano: se da desde la ficha del alumno, con «Dar acceso a la app»"
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403':
+          description: The caller lacks `users:write` or a permission one of the roles carries.
+          content:
+            text/plain:
+              schema: { type: string }
+              example: "forbidden: cannot assign a role granting a permission you do not hold: finance:read"
+        '409':
+          description: The address already has a live account.
+          content:
+            text/plain:
+              schema: { type: string }
+              example: a user with this email already exists
+
+  /api/v1/users/{id}/roles:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      tags: [iam-users]
+      summary: Replace a login account's roles
+      description: >
+        Sends the desired final set; the gateway applies the difference. Only
+        ADDED roles are checked against the caller's own permissions (removing
+        is always allowed). Adding `guardian` is refused; an account that
+        already holds it keeps it when the set includes it. Requires
+        `users:write`; `module_iam`.
+      operationId: setUserRoles
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [roleIds]
+              properties:
+                roleIds:
+                  type: array
+                  items: { type: string, format: uuid }
+            example: { roleIds: [00000000-0000-0000-0000-0000000000a4] }
+      responses:
+        '200':
+          description: The account with its roles as they are now.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminUser' }
+        '400':
+          description: >
+            The body is malformed, an email or role is invalid, or one of the
+            roles is `guardian`, which is never assigned by hand (it is given
+            only by `POST /api/v1/students/{studentId}/guardians/{contactId}/invite`).
+          content:
+            text/plain:
+              schema: { type: string }
+              example: "el rol de tutor (guardian) no se asigna a mano: se da desde la ficha del alumno, con «Dar acceso a la app»"
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403':
+          description: The caller lacks `users:write` or a permission one of the added roles carries.
+          content:
+            text/plain:
+              schema: { type: string }
+              example: "forbidden: cannot assign a role granting a permission you do not hold: finance:read"
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
   /api/v1/users/{id}/status:
     parameters:
       - name: id
@@ -2154,7 +2336,8 @@ paths:
         pending invitation and reset links are revoked and its refresh tokens
         die for good (reactivating means signing in again). Refused: suspending
         your own account (403) and the last active account holding the owner
-        role (409), the same rules as deleting. The caller is read from its own
+        role (409), the same rules as deleting; only an owner may suspend an
+        owner (403). The caller is read from its own
         session, never from the request. Only `active` and `suspended` may be
         set; anything else is 400. An id that is not a uuid or names no
         undeleted account is 404. Requires `users:write`; `module_iam`.
@@ -2177,18 +2360,7 @@ paths:
           description: The account as it is now.
           content:
             application/json:
-              schema:
-                type: object
-                required: [id, email, displayName, status, mustChangePassword, roleIds]
-                properties:
-                  id: { type: string, format: uuid }
-                  email: { type: string, format: email }
-                  displayName: { type: string }
-                  status: { type: string, enum: [active, suspended, invited, deleted] }
-                  mustChangePassword: { type: boolean }
-                  roleIds:
-                    type: array
-                    items: { type: string, format: uuid }
+              schema: { $ref: '#/components/schemas/AdminUser' }
               example:
                 id: 0b8a1c0e-0000-4000-8000-000000000002
                 email: maestra@garcialorca.edu.mx
@@ -2204,7 +2376,10 @@ paths:
               example: user status is required
         '401': { $ref: '#/components/responses/PlainUnauthorized' }
         '403':
-          description: The caller lacks `users:write` or is suspending their own account.
+          description: >
+            The caller lacks `users:write`, is suspending their own account, or
+            is suspending an owner without being an owner (`users:write` can be
+            delegated; locking the director out cannot).
           content:
             text/plain:
               schema: { type: string }
@@ -2216,6 +2391,14 @@ paths:
             text/plain:
               schema: { type: string }
               example: no se puede suspender al último director activo
+        '500':
+          description: >
+            The account IS suspended, but its pending links could not be
+            revoked. Repeat the request to finish; it is safe.
+          content:
+            text/plain:
+              schema: { type: string }
+              example: la cuenta quedó suspendida, pero no se anularon sus enlaces pendientes; vuelve a intentarlo
 
   /api/v1/teachers/{id}/access:
     post:
@@ -8502,6 +8685,20 @@ components:
         voidedAt: { type: string, format: date-time, description: "Present only on a voided note." }
         updatedAt: { type: string, format: date-time, description: "Present only on an edited note: when it was last edited." }
         updatedByName: { type: string, example: "Gabriela Rojas", description: "Present only on an edited note: who last edited it, as their name read then." }
+
+    AdminUser:
+      type: object
+      description: A login account as the administration screens see it.
+      required: [id, email, displayName, status, mustChangePassword, roleIds]
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        displayName: { type: string }
+        status: { type: string, enum: [active, suspended, invited, deleted] }
+        mustChangePassword: { type: boolean }
+        roleIds:
+          type: array
+          items: { type: string, format: uuid }
 
     Invitation:
       type: object
