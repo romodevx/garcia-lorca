@@ -158,11 +158,10 @@ describe("PaymentsScreen · corte de caja", () => {
 
 // ISSUE-T14-018: the search and the counter's header said "PRIMARIA · A";
 // the receipt said "3° PRIMARIA · A". Two A's are told apart by the grade.
-describe("PaymentsScreen · el grupo con su grado (T14-018)", () => {
-  it("names the classroom with its grade in the results and the counter's header", async () => {
-    students.listStudents.mockResolvedValue([{ ...student("s1", "Valentina", "Cruz"), gradeGroup: "A" }]);
-    config.listLabelledGroups.mockResolvedValue([{ id: "gA", cycleId: "c1", gradeLevelId: "g3", name: "A", capacity: 30, label: "3° PRIMARIA · A" }]);
-    students.listEnrollments.mockResolvedValue([{ id: "e1", studentId: "s1", cycleId: "c1", groupId: "gA", termId: "", status: "active", enrolledAt: "2026-08-20" }]);
+// CC-211: Cobranza has no config:read, so the label comes with the list itself.
+describe("PaymentsScreen · el grupo con su grado (T14-018, CC-211)", () => {
+  it("names the classroom with its grade in the results and the counter's header, from the list alone", async () => {
+    students.listStudents.mockResolvedValue([{ ...student("s1", "Valentina", "Cruz"), gradeGroup: "A", groupLabel: "3° PRIMARIA · A" }]);
     const user = userEvent.setup();
     render(<PaymentsScreen onBack={() => {}} />);
     await screen.findByLabelText("Buscar alumno");
@@ -173,5 +172,25 @@ describe("PaymentsScreen · el grupo con su grado (T14-018)", () => {
     await user.click(screen.getByRole("button", { name: /Cruz Valentina/ }));
     const dialog = await screen.findByRole("dialog", { name: /^Cobrar/ });
     expect(dialog).toHaveTextContent("3° PRIMARIA · A");
+  });
+
+  it("never asks config for the catalog the cashier cannot read", async () => {
+    render(<PaymentsScreen onBack={() => {}} />);
+    await screen.findByLabelText("Buscar alumno");
+    await waitFor(() => expect(students.listStudents).toHaveBeenCalled());
+
+    expect(config.listCycles).not.toHaveBeenCalled();
+    expect(config.listLabelledGroups).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the level and the stored group when the list carries no label", async () => {
+    students.listStudents.mockResolvedValue([{ ...student("s1", "Valentina", "Cruz"), gradeGroup: "A" }]);
+    const user = userEvent.setup();
+    render(<PaymentsScreen onBack={() => {}} />);
+    await screen.findByLabelText("Buscar alumno");
+
+    await user.type(screen.getByLabelText("Buscar alumno"), "Valen");
+
+    expect(await screen.findByText("primaria · A")).toBeInTheDocument();
   });
 });

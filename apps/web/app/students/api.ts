@@ -35,6 +35,12 @@ export interface Student {
   /** The config level id ("" only for a legacy pupil no level matched). */
   levelId: string;
   gradeGroup: string;
+  /**
+   * Only in the list: the classroom in the current cycle with its grade,
+   * "3° PRIMARIA · B" (CC-211). Absent when the gateway could not place the
+   * pupil — show level and gradeGroup then (studentRoomLabel).
+   */
+  groupLabel?: string;
   guardianName: string;
   admissionStatus: AdmissionStatus;
   /** The editable half of the file. Absent from gateways older than T5. */

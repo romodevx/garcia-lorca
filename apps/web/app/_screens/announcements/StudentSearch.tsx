@@ -3,6 +3,7 @@
 import { useId, useMemo, useState, type KeyboardEvent, type ReactElement } from "react";
 import { matchesSearch } from "../../_design/textSearch";
 import { formatStudentName, sortStudents, studentNameSearchKeys } from "../../_design/students/studentName";
+import { studentRoomLabel } from "../../_design/students/studentRoom";
 import type { Student } from "../../students/api";
 import { TargetRow } from "./TargetRow";
 
@@ -24,13 +25,8 @@ interface PupilEntry {
   keys: readonly string[];
 }
 
-/** "Primaria · 1° A": `gradeGroup` alone may be just the letter. */
-function groupLine(s: Student): string {
-  return [s.level, s.gradeGroup].filter((part) => part !== "").join(" · ");
-}
-
 function toEntries(students: readonly Student[]): PupilEntry[] {
-  return sortStudents(students).map((s) => ({ id: s.id, name: formatStudentName(s), detail: groupLine(s), keys: studentNameSearchKeys(s) }));
+  return sortStudents(students).map((s) => ({ id: s.id, name: formatStudentName(s), detail: studentRoomLabel(s), keys: studentNameSearchKeys(s) }));
 }
 
 /** D1: Enter here would send the announcement to whoever is already picked. */
