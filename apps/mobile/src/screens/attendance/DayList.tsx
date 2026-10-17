@@ -4,7 +4,7 @@ import type { AttendanceDay } from "../../api/attendance";
 import { Icon } from "../../icons";
 import { useTheme } from "../../theme";
 import { Card, Chip } from "../../ui";
-import { dayLabel, statusPill } from "../attendanceView";
+import { dayLabel, dayPill } from "../attendanceView";
 import { ClassList } from "./TodayCard";
 
 /** The month's school days, newest first. A per-class day opens to its classes. */
@@ -31,7 +31,7 @@ export function DayList({ days }: { days: AttendanceDay[] }): ReactElement {
 function DayRow({ day, divider }: { day: AttendanceDay; divider: boolean }): ReactElement {
   const theme = useTheme();
   const [open, setOpen] = useState(false);
-  const pill = statusPill(day.status);
+  const pill = dayPill(day);
   const label = dayLabel(day.date);
   const expandable = day.classes.length > 0;
   const toggleHint = open ? "Ocultar clases" : "Ver clases";
