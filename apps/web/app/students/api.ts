@@ -126,6 +126,9 @@ function url(baseURL: string, path: string): string {
 }
 
 /** POST a JSON body and return the parsed entity. Throws on any non-2xx. */
+/** The students service's refusal code for a write to a withdrawn pupil's file. */
+const STUDENT_WITHDRAWN = "STUDENT_WITHDRAWN";
+
 /**
  * A students failure the UI can act on.
  *
@@ -135,9 +138,6 @@ function url(baseURL: string, path: string): string {
  * for both ("verifica el CURP"), which it also showed when the server fell over,
  * so a person could re-type a perfectly good CURP forever.
  */
-/** The students service's refusal code for a write to a withdrawn pupil's file. */
-const STUDENT_WITHDRAWN = "STUDENT_WITHDRAWN";
-
 export class StudentsError extends Error {
   readonly status: number;
   /** The server's own words, when it sent any. */

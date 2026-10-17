@@ -213,6 +213,20 @@ describe("StudentEditScreen", () => {
 
     await waitFor(() => expect(onWithdrawn).toHaveBeenCalledTimes(1));
     expect(screen.queryByLabelText("Nombre(s)")).not.toBeInTheDocument();
+  });
+
+  // The shell hands a fresh callback on every render: the redirect fires once.
+  it("redirects a withdrawn pupil once, whatever the caller re-renders", async () => {
+    api.getStudent.mockResolvedValue({ ...student, admissionStatus: "withdrawn" });
+    const redirects = vi.fn();
+    const props = { studentId: "st1", userId: "u-me", permissions: ["students:read", "students:update"], onBack: () => {}, today: TODAY };
+    const { rerender } = render(<StudentEditScreen {...props} onWithdrawn={() => redirects()} />);
+    await waitFor(() => expect(redirects).toHaveBeenCalledTimes(1));
+
+    rerender(<StudentEditScreen {...props} onWithdrawn={() => redirects()} />);
+    rerender(<StudentEditScreen {...props} onWithdrawn={() => redirects()} />);
+
+    expect(redirects).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("button", { name: "Guardar ficha" })).not.toBeInTheDocument();
   });
 

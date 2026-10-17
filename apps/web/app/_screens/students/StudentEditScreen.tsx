@@ -123,7 +123,13 @@ function localToday(): string {
 
 /** What a withdrawn pupil's edit address shows while it hands over to the ficha. */
 function WithdrawnNotice({ onWithdrawn, onBack }: { onWithdrawn?: () => void; onBack: () => void }): ReactElement {
-  useEffect(() => { onWithdrawn?.(); }, [onWithdrawn]);
+  // Once: the caller may hand a fresh callback on every render.
+  const redirected = useRef(false);
+  useEffect(() => {
+    if (redirected.current || onWithdrawn === undefined) return;
+    redirected.current = true;
+    onWithdrawn();
+  }, [onWithdrawn]);
   return (
     <div style={{ padding: 26 }}>
       <p role="status" style={{ color: "var(--text)", fontSize: 15, marginBottom: 14 }}>
