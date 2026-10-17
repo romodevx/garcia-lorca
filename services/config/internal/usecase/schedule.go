@@ -182,14 +182,19 @@ type SchoolDayStatus struct {
 	Closed string
 }
 
-// SchoolDay applies the school-calendar rule to one date of a cycle — the
-// same rule the timetable uses (dayTimetable.schoolDay), offered to the other
-// services that must not act on a day without classes (attendance, T14).
-func (s *ScheduleService) SchoolDay(ctx context.Context, cycleID string, date time.Time) (SchoolDayStatus, error) {
-	if strings.TrimSpace(cycleID) == "" {
-		return SchoolDayStatus{}, glerrors.New(glerrors.KindInvalid, "cycle id is required")
+// SchoolDay applies the school-calendar rule to one date of a group's cycle —
+// the same rule the timetable uses (dayTimetable.schoolDay), offered to the
+// services that must not act on a day without classes (attendance, T14). It
+// takes the group so the caller needs one round trip, not two.
+func (s *ScheduleService) SchoolDay(ctx context.Context, groupID string, date time.Time) (SchoolDayStatus, error) {
+	if strings.TrimSpace(groupID) == "" {
+		return SchoolDayStatus{}, glerrors.New(glerrors.KindInvalid, "group id is required")
 	}
-	cycle, err := s.repo.GetCycle(ctx, cycleID)
+	group, err := s.repo.GetGroup(ctx, groupID)
+	if err != nil {
+		return SchoolDayStatus{}, err
+	}
+	cycle, err := s.repo.GetCycle(ctx, group.CycleID())
 	if err != nil {
 		return SchoolDayStatus{}, err
 	}

@@ -112,6 +112,15 @@ func (f *fakeSchedule) GetCycle(_ context.Context, id string) (domain.Cycle, err
 func (f *fakeSchedule) ListCycles(context.Context) ([]domain.Cycle, error) {
 	return []domain.Cycle{f.cat.Cycle}, nil
 }
+func (f *fakeSchedule) GetGroup(_ context.Context, id string) (domain.Group, error) {
+	for _, g := range f.cat.Groups {
+		if g.ID() == id {
+			return g, nil
+		}
+	}
+	return domain.Group{}, notFound("group")
+}
+
 func (f *fakeSchedule) GetLevel(_ context.Context, id string) (domain.Level, error) {
 	for _, l := range f.cat.Levels {
 		if l.ID() == id {

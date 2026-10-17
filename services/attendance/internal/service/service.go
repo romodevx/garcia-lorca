@@ -434,6 +434,10 @@ func (s *AttendanceService) GetDailyRoster(ctx context.Context, groupID, dateStr
 	if err := s.requireGroup(ctx, groupID); err != nil {
 		return Roster{}, err
 	}
+	schoolDay, err := s.schoolDayOf(ctx, key)
+	if err != nil {
+		return Roster{}, err
+	}
 	enrollmentIDs, studentByEnrollment, err := s.activeRoster(ctx, groupID)
 	if err != nil {
 		return Roster{}, err
@@ -444,10 +448,6 @@ func (s *AttendanceService) GetDailyRoster(ctx context.Context, groupID, dateStr
 		return Roster{}, err
 	}
 	session, found, err := s.repo.SessionFor(ctx, key)
-	if err != nil {
-		return Roster{}, err
-	}
-	schoolDay, err := s.schoolDayOf(ctx, key)
 	if err != nil {
 		return Roster{}, err
 	}

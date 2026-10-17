@@ -117,6 +117,22 @@ func TestSavePropagatesACalendarFailure(t *testing.T) {
 	}
 }
 
+// The roster asks the calendar right after the group check: a calendar
+// failure costs no repository read.
+func TestRosterAsksTheCalendarBeforeTheRepository(t *testing.T) {
+	cal := newCalendar()
+	cal.err = glerrors.Wrap(glerrors.KindInternal, "config school day lookup failed", errors.New("boom"))
+	repo := newFakeRepo()
+	svc := calendarService(t, repo, nil, cal)
+	_, err := svc.GetDailyRoster(context.Background(), groupID, schoolDay, "")
+	if glerrors.KindOf(err) != glerrors.KindInternal {
+		t.Fatalf("KindOf(%v) = %v, want KindInternal", err, glerrors.KindOf(err))
+	}
+	if repo.marksForDateCalls != 0 {
+		t.Errorf("MarksForList called %d times before the calendar answered", repo.marksForDateCalls)
+	}
+}
+
 // Reading stays open (old weekend lists must remain visible), but the roster
 // says the day has no classes so the screen can lock it.
 func TestRosterOfADayWithoutClassesIsReadableAndSaysSo(t *testing.T) {

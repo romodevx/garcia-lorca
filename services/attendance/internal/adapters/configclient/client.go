@@ -80,22 +80,22 @@ func (c *Client) WritableByID(ctx context.Context, id string) error {
 }
 
 // SchoolDayOf asks config's school calendar whether the group has classes on
-// date (T14): the group's cycle, then that cycle's rule. A config that predates
-// GetSchoolDay (Unimplemented, mid-rollout) leaves the day open, as attendance
-// behaved before.
+// date (T14), in one round trip: config resolves the group's cycle itself.
+//
+// A config that predates GetSchoolDay (Unimplemented, mid-rollout) leaves the
+// day open, as attendance behaved before. Every other failure — NotFound
+// included: the caller validated the group just before, so a missing one here
+// is config's inconsistency, never a 404 for the save or read — is
+// KindInternal, and never an open day.
 func (c *Client) SchoolDayOf(ctx context.Context, groupID string, date time.Time) (service.SchoolDay, error) {
-	group, err := c.rpc.GetGroup(ctx, connect.NewRequest(&configv1.GetGroupRequest{Id: groupID}))
-	if err != nil {
-		return service.SchoolDay{}, mapConfigErr(err, "group")
-	}
 	day, err := c.rpc.GetSchoolDay(ctx, connect.NewRequest(&configv1.GetSchoolDayRequest{
-		CycleId: group.Msg.GetGroup().GetCycleId(), Date: timestamppb.New(date),
+		GroupId: groupID, Date: timestamppb.New(date),
 	}))
-	if connect.CodeOf(err) == connect.CodeUnimplemented {
+	switch {
+	case connect.CodeOf(err) == connect.CodeUnimplemented:
 		return service.SchoolDay{Open: true}, nil
-	}
-	if err != nil {
-		return service.SchoolDay{}, mapConfigErr(err, "school day")
+	case err != nil:
+		return service.SchoolDay{}, glerrors.Wrap(glerrors.KindInternal, "config school day lookup failed", err)
 	}
 	return service.SchoolDay{Open: day.Msg.GetOpen(), Closed: day.Msg.GetClosedLabel()}, nil
 }

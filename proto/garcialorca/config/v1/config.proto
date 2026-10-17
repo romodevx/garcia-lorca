@@ -221,9 +221,10 @@ service ConfigService {
   // GetScheduleDay is the effective timetable of a date (base + changes);
   // teacher_id narrows it to the classes that teacher gives or was replaced in.
   rpc GetScheduleDay(GetScheduleDayRequest) returns (GetScheduleDayResponse);
-  // GetSchoolDay says whether a date has classes in a cycle: a weekday inside
-  // the cycle's dates that no non-working period closes. Attendance asks it
-  // before taking a list (T14), so the rule lives here once.
+  // GetSchoolDay says whether a group has classes on a date: a weekday inside
+  // its cycle's dates that no non-working period closes (unknown group:
+  // NotFound). Attendance asks it before taking a list (T14), so the rule
+  // lives here once.
   rpc GetSchoolDay(GetSchoolDayRequest) returns (GetSchoolDayResponse);
   // CreateScheduleBlock places a teaching assignment on a weekday and time.
   // A double-booked teacher or group is AlreadyExists (X-Error-Code
@@ -1479,7 +1480,8 @@ message GetScheduleDayResponse {
 }
 
 message GetSchoolDayRequest {
-  string cycle_id = 1;
+  // group_id: the group whose cycle's calendar answers (one lookup for the caller).
+  string group_id = 1;
   google.protobuf.Timestamp date = 2;
 }
 
