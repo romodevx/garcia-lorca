@@ -170,6 +170,12 @@ describe("Dashboard picks its home from module_ui_refresh", () => {
     expect(screen.queryByRole("region", { name: "Académico" })).not.toBeInTheDocument();
   });
 
+  it("OFF: no \"Módulos\" heading over nothing — a role with no module sees only the notice (CC-315)", () => {
+    renderHome(<Dashboard user={USERS.admin} onOpen={() => {}} permissions={[]} now={NOW} />, false);
+    expect(screen.queryByRole("heading", { name: "Módulos" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Todo el sistema, a la vista")).not.toBeInTheDocument();
+  });
+
   it("ON: the areas, and no \"Módulos\" heading", () => {
     renderHome(<Dashboard user={USERS.admin} onOpen={() => {}} permissions={OWNER_PERMS} now={NOW} />, true);
     expect(screen.getByRole("region", { name: "Académico" })).toBeInTheDocument();
