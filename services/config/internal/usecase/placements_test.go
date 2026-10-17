@@ -199,7 +199,7 @@ func invalid(code string) usecase.Placement { return usecase.Placement{Error: co
 func TestEnsurePlacements(t *testing.T) {
 	maternal := usecase.PlacementRequest{NewLevelName: "Maternal", GradeOrdinal: 1, GroupName: "A", Capacity: 20}
 	newMaternal := usecase.Placement{
-		LevelID: "id-1", LevelName: "Maternal", LevelCreated: true,
+		LevelID: "id-1", LevelName: "MATERNAL", LevelCreated: true,
 		GradeLevelID: "id-2", GradeName: "1°", GradeCreated: true,
 		GroupID: "id-3", GroupName: "A", GroupCreated: true, Capacity: 20,
 	}
@@ -265,7 +265,7 @@ func TestEnsurePlacements(t *testing.T) {
 			name: "an unknown level is created with its grade and group",
 			reqs: []usecase.PlacementRequest{{NewLevelName: "  Secundaria   Técnica ", GradeOrdinal: 2, GroupName: "a", Capacity: 35}},
 			want: []usecase.Placement{{
-				LevelID: "id-1", LevelName: "Secundaria Técnica", LevelCreated: true,
+				LevelID: "id-1", LevelName: "SECUNDARIA TÉCNICA", LevelCreated: true,
 				GradeLevelID: "id-2", GradeName: "2°", GradeCreated: true,
 				GroupID: "id-3", GroupName: "A", GroupCreated: true, Capacity: 35,
 			}},
@@ -303,7 +303,7 @@ func TestEnsurePlacements(t *testing.T) {
 			name: "placements sharing a new level create it once and all say so",
 			reqs: []usecase.PlacementRequest{maternal, {NewLevelName: "MATERNAL", GradeOrdinal: 2, GroupName: "A", Capacity: 20}},
 			want: []usecase.Placement{newMaternal, {
-				LevelID: "id-1", LevelName: "Maternal", LevelCreated: true,
+				LevelID: "id-1", LevelName: "MATERNAL", LevelCreated: true,
 				GradeLevelID: "id-4", GradeName: "2°", GradeCreated: true,
 				GroupID: "id-5", GroupName: "A", GroupCreated: true, Capacity: 20,
 			}},
@@ -325,8 +325,8 @@ func TestEnsurePlacements(t *testing.T) {
 			reqs:   []usecase.PlacementRequest{maternal, maternal, {NewLevelName: "Preparatoria", GradeOrdinal: 1, GroupName: "A", Capacity: 30}},
 			dryRun: true,
 			want: []usecase.Placement{
-				{LevelName: "Maternal", LevelCreated: true, GradeName: "1°", GradeCreated: true, GroupName: "A", GroupCreated: true, Capacity: 20},
-				{LevelName: "Maternal", LevelCreated: true, GradeName: "1°", GradeCreated: true, GroupName: "A", GroupCreated: true, Capacity: 20},
+				{LevelName: "MATERNAL", LevelCreated: true, GradeName: "1°", GradeCreated: true, GroupName: "A", GroupCreated: true, Capacity: 20},
+				{LevelName: "MATERNAL", LevelCreated: true, GradeName: "1°", GradeCreated: true, GroupName: "A", GroupCreated: true, Capacity: 20},
 				{LevelID: "lvl-prepa", LevelName: "Preparatoria", GradeName: "1°", GradeCreated: true, GroupName: "A", GroupCreated: true, Capacity: 30},
 			},
 		},
@@ -377,7 +377,8 @@ func TestEnsurePlacementsCreatesALevelWithCreateLevelDefaults(t *testing.T) {
 	if !ok {
 		t.Fatal("the level was not stored")
 	}
-	want := mustLevel(t, created.ID(), "Secundaria", false)
+	// ISSUE-T14-008: named like a level the office creates by hand, in capitals.
+	want := mustLevel(t, created.ID(), "SECUNDARIA", false)
 	if !reflect.DeepEqual(created, want) {
 		t.Errorf("created level\n got: %+v\nwant: %+v", created, want)
 	}

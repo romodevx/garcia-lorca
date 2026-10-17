@@ -216,8 +216,8 @@ func TestPreviewCreatesALevelTheSchoolDoesNotHave(t *testing.T) {
 
 	got := decodePreview(t, post(t, f.h.Preview, importRequest{FileBase64: file}))
 
-	if got.Levels[0].Status != levelCreate || got.Levels[0].LevelName != "Preparatoria" || len(got.Unresolved) != 0 {
-		t.Fatalf("levels = %+v unresolved %v, want Preparatoria created", got.Levels, got.Unresolved)
+	if got.Levels[0].Status != levelCreate || got.Levels[0].LevelName != "PREPARATORIA" || len(got.Unresolved) != 0 {
+		t.Fatalf("levels = %+v unresolved %v, want PREPARATORIA created, in capitals like a typed level (ISSUE-T14-008)", got.Levels, got.Unresolved)
 	}
 	if got.Rows[0].Status != rowNew {
 		t.Errorf("row = %+v, want new", got.Rows[0])
