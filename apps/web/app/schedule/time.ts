@@ -66,6 +66,33 @@ export function defaultEnd(start: number, gridEnd: number): number {
   return Math.min(start + DEFAULT_CLASS_MINUTES, gridEnd);
 }
 
+/** The earliest a school day's clock reads: what a typed time is held to. */
+export const SCHOOL_DAY_EARLIEST = 7 * MINUTES_PER_HOUR;
+/** The latest a school day's clock reads. */
+export const SCHOOL_DAY_LATEST = 20 * MINUTES_PER_HOUR;
+
+export interface TimeBounds {
+  min: number;
+  max: number;
+  /** A time already saved: it stays valid even outside the bounds (ISSUE-028). */
+  kept?: string;
+}
+
+/**
+ * What is wrong with a typed time, or undefined. An empty value is the
+ * required check's to judge, not this one's; a saved value is never refused.
+ */
+export function timeError(value: string, { min, max, kept }: TimeBounds): string | undefined {
+  if (value === "" || value === kept) return undefined;
+  const minutes = toMinutes(value);
+  if (Number.isNaN(minutes) || minutes < min || minutes > max) return `Escribe una hora entre ${toHHMM(min)} y ${toHHMM(max)}.`;
+  if (minutes % SLOT_MINUTES !== 0) {
+    const below = snapToSlot(minutes);
+    return `La hora va en pasos de ${SLOT_MINUTES} minutos: ${toHHMM(below)} o ${toHHMM(below + SLOT_MINUTES)}.`;
+  }
+  return undefined;
+}
+
 /** Every 5-minute step from `from` to `to`, both included, as "HH:MM". */
 export function timeOptions(from: number, to: number): string[] {
   const out: string[] = [];

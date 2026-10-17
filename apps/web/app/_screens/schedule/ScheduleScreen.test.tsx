@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -45,6 +45,13 @@ function renderManager(canWrite = true): ReturnType<typeof userEvent.setup> {
   const user = userEvent.setup();
   render(<ScheduleScreen onBack={() => undefined} mode="manage" canWrite={canWrite} now={MONDAY_0810} />);
   return user;
+}
+
+/** jsdom has no hour/minute segments: a typed time arrives as one change, then the blur. */
+async function typeTime(user: ReturnType<typeof userEvent.setup>, input: HTMLElement, value: string): Promise<void> {
+  await user.click(input);
+  fireEvent.change(input, { target: { value } });
+  await user.tab();
 }
 
 const blocks = (): HTMLElement[] => screen.queryAllByTestId("schedule-block");
@@ -103,6 +110,37 @@ describe("Horarios — la semana (T16)", () => {
         assignmentId: "60000000-0000-4000-8000-000000000001", weekday: 2, startsAt: "09:00", endsAt: "09:50",
       }),
     );
+  });
+
+  it("ISSUE-028 · a class's start and end are typed, within the level's hours", async () => {
+    const user = renderManager();
+    await chooseGroup3A(user);
+    await user.click(screen.getByRole("button", { name: "Agregar clase el martes a las 09:00" }));
+    const dialog = screen.getByRole("dialog");
+    const start = within(dialog).getByLabelText("Inicio");
+    expect(start).toHaveAttribute("type", "time");
+    expect(start).toHaveAttribute("min", "07:00");
+    expect(start).toHaveAttribute("max", "13:55");
+    expect(within(dialog).getByLabelText("Fin")).toHaveAttribute("max", "14:00");
+    await typeTime(user, start, "06:00");
+    expect(start).toHaveAccessibleDescription("Escribe una hora entre 07:00 y 13:55.");
+    await user.selectOptions(within(dialog).getByLabelText("Asignatura — Docente"), "Matemáticas — Ana Ruiz");
+    await user.click(within(dialog).getByRole("button", { name: "Guardar clase" }));
+    expect(m.createBlock).not.toHaveBeenCalled();
+  });
+
+  it("ISSUE-028 · a class saved at an hour the picker would not offer keeps it", async () => {
+    const board = sampleBoard();
+    const early = { ...board.blocks[0]!, startsAt: "06:32", endsAt: "07:20" };
+    m.getBoard.mockResolvedValue(sampleBoard({ blocks: [early, ...board.blocks.slice(1)] }));
+    m.updateBlock.mockResolvedValue(early);
+    const user = renderManager();
+    await chooseGroup3A(user);
+    await user.click(screen.getByRole("button", { name: /^Matemáticas, 3.º A/ }));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByLabelText("Inicio")).toHaveValue("06:32");
+    await user.click(within(dialog).getByRole("button", { name: "Guardar clase" }));
+    await waitFor(() => expect(m.updateBlock).toHaveBeenCalledWith(expect.any(String), early.id, expect.objectContaining({ startsAt: "06:32", endsAt: "07:20" })));
   });
 
   it("keeps the drawer open and shows the server's sentence on a conflict", async () => {
@@ -256,7 +294,7 @@ describe("Horarios — historial y horas del nivel (T16)", () => {
   it("refuses a level day shorter than an hour without asking the server", async () => {
     const user = renderManager();
     await screen.findByRole("button", { name: "3.º" });
-    await user.selectOptions(screen.getByLabelText("Termina"), "07:30");
+    await typeTime(user, screen.getByLabelText("Termina"), "07:30");
     expect(screen.getByLabelText("Termina")).toHaveAttribute("aria-invalid", "true");
     await user.click(screen.getByRole("button", { name: "Guardar horas" }));
     expect(m.putSettings).not.toHaveBeenCalled();
@@ -266,7 +304,7 @@ describe("Horarios — historial y horas del nivel (T16)", () => {
     m.putSettings.mockResolvedValue({ levelId: "x", gridStart: "07:00", gridEnd: "15:00" });
     const user = renderManager();
     await screen.findByRole("button", { name: "3.º" });
-    await user.selectOptions(screen.getByLabelText("Termina"), "15:00");
+    await typeTime(user, screen.getByLabelText("Termina"), "15:00");
     await user.click(screen.getByRole("button", { name: "Guardar horas" }));
     await waitFor(() => expect(m.putSettings).toHaveBeenCalledWith(expect.any(String), sampleBoard().levels[0]!.id, { gridStart: "07:00", gridEnd: "15:00" }));
   });

@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  SCHOOL_DAY_EARLIEST,
+  SCHOOL_DAY_LATEST,
+  timeError,
   addDays,
   defaultEnd,
   gridBounds,
@@ -202,5 +205,30 @@ describe("schoolWeekOf (review T19)", () => {
     expect(schoolWeekOf("2026-10-07")).toBe("2026-10-05");
     expect(schoolWeekOf("2026-10-10")).toBe("2026-10-12");
     expect(schoolWeekOf("2026-10-11")).toBe("2026-10-12");
+  });
+});
+
+describe("ISSUE-028 · a typed time, judged against the school day", () => {
+  it("the school day spans 07:00 to 20:00", () => {
+    expect(toHHMM(SCHOOL_DAY_EARLIEST)).toBe("07:00");
+    expect(toHHMM(SCHOOL_DAY_LATEST)).toBe("20:00");
+  });
+
+  const range = { min: SCHOOL_DAY_EARLIEST, max: SCHOOL_DAY_LATEST };
+  it.each([
+    ["07:00", undefined],
+    ["20:00", undefined],
+    ["08:35", undefined],
+    ["06:55", "Escribe una hora entre 07:00 y 20:00."],
+    ["20:05", "Escribe una hora entre 07:00 y 20:00."],
+    ["08:07", "La hora va en pasos de 5 minutos: 08:05 o 08:10."],
+    ["", undefined],
+  ])("%s → %s", (value, want) => {
+    expect(timeError(value, range)).toBe(want);
+  });
+
+  it("a time already saved outside the day is kept as it is, never refused", () => {
+    expect(timeError("06:30", { ...range, kept: "06:30" })).toBeUndefined();
+    expect(timeError("06:35", { ...range, kept: "06:30" })).toBe("Escribe una hora entre 07:00 y 20:00.");
   });
 });

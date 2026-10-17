@@ -45,7 +45,7 @@ export function BlockDrawer({ target, board, index, grid, today, onClose, onSave
   const [section, setSection] = useState<Section>("class");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
-  const blockForm = useBlockForm(target, board, grid.end);
+  const blockForm = useBlockForm(target, board, grid);
   const overrideForm = useOverrideForm(anchor, board, today, section === "override");
 
   const submit = async (): Promise<void> => {
