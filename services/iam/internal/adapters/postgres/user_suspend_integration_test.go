@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"gorm.io/gorm"
+
 	glerrors "github.com/garcia-lorca/pkg/errors"
 	pgadapter "github.com/garcia-lorca/services/iam/internal/adapters/postgres"
 	"github.com/garcia-lorca/services/iam/internal/domain"
@@ -94,4 +96,81 @@ func TestStatusOfReadsTheLifecycleStateUnderRLS(t *testing.T) {
 	if _, err := pgadapter.NewUserRepo(appDB(t), tenantA).StatusOf(ctx, "e3e3e3e3-0000-0000-0000-0000000000ff"); glerrors.KindOf(err) != glerrors.KindNotFound {
 		t.Errorf("StatusOf of an unknown id = %v, want KindNotFound", err)
 	}
+}
+
+// Two directors suspending each other at the same instant: exactly one wins and
+// the other is refused, never both (which would leave the school with no active
+// director). The race is FORCED, not hoped for: a blocker transaction holds
+// both rows, the two suspensions are released only once Postgres shows both
+// waiting on a lock, so each must re-read the other's row after it commits.
+// Without FOR UPDATE in guardLastActiveHolder both count two holders before
+// blocking and both succeed — this test fails.
+func TestConcurrentMutualSuspensionLeavesOneActiveDirector(t *testing.T) {
+	ctx := context.Background()
+	role := "e4e4e4e4-0000-0000-0000-0000000000c1"
+	first := "e4e4e4e4-0000-0000-0000-000000000001"
+	second := "e4e4e4e4-0000-0000-0000-000000000002"
+	seedRole(t, role, tenantA, "RaceOwner", []string{"users:delete"})
+	seedUser(t, first, tenantA, "race-first@garcialorca.mx", "x", "active")
+	seedUser(t, second, tenantA, "race-second@garcialorca.mx", "x", "active")
+	assign(t, first, role, tenantA)
+	assign(t, second, role, tenantA)
+	db := appDB(t)
+	t.Cleanup(func() {
+		if sqlDB, err := db.DB(); err == nil {
+			_ = sqlDB.Close()
+		}
+	})
+	repo := pgadapter.NewUserRepo(db, tenantA)
+
+	blocker := superDB.Begin()
+	if err := blocker.Exec("SELECT 1 FROM users WHERE id IN (?, ?) FOR UPDATE", first, second).Error; err != nil {
+		t.Fatalf("blocker: %v", err)
+	}
+	results := make(chan error, 2)
+	go func() { results <- repo.SetStatus(ctx, second, domain.StatusSuspended, role) }() // first suspends second
+	go func() { results <- repo.SetStatus(ctx, first, domain.StatusSuspended, role) }()  // second suspends first
+	waitForLockWaiters(t, superDB, 2)
+	if err := blocker.Commit().Error; err != nil {
+		t.Fatalf("release blocker: %v", err)
+	}
+
+	var ok, refused int
+	for range 2 {
+		switch err := <-results; {
+		case err == nil:
+			ok++
+		case glerrors.KindOf(err) == glerrors.KindConflict:
+			refused++
+		default:
+			t.Fatalf("unexpected error: %v", err)
+		}
+	}
+	if ok != 1 || refused != 1 {
+		t.Fatalf("successes=%d refusals=%d, want exactly one of each", ok, refused)
+	}
+	var active int64
+	if err := superDB.Raw("SELECT count(*) FROM users WHERE id IN (?, ?) AND status = 'active'", first, second).Scan(&active).Error; err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if active != 1 {
+		t.Errorf("active directors = %d, want 1", active)
+	}
+}
+
+// waitForLockWaiters polls until n backends of this database wait on a lock.
+func waitForLockWaiters(t *testing.T, db *gorm.DB, n int64) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		var waiting int64
+		if err := db.Raw("SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'").Scan(&waiting).Error; err != nil {
+			t.Fatalf("pg_stat_activity: %v", err)
+		}
+		if waiting >= n {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %d lock waiters", n)
 }
