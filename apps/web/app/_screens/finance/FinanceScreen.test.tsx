@@ -476,7 +476,7 @@ describe("PayDrawer · nota de crédito + pago combinado (tarea 8)", () => {
     await user.type(amount, "1500");
     await submit(user, dialog);
 
-    expect(await within(dialog).findByText(/No puede ser mayor que el saldo del cargo/)).toBeInTheDocument();
+    expect(await within(dialog).findByText(/No puede ser mayor que lo que se paga hoy/)).toBeInTheDocument();
     await waitFor(() => expect(document.activeElement).toBe(amount));
     expect(finance.registerDeposit).not.toHaveBeenCalled();
   });
@@ -632,7 +632,30 @@ describe("PayDrawer · lo que se debe hoy (revisión B1)", () => {
     await user.type(amount, "1000");
     await user.click(within(dialog).getByRole("button", { name: /^Registrar pago$/ }));
 
-    expect(await within(dialog).findByText(/No puede ser mayor que el saldo del cargo \(\$950\.00\)/)).toBeInTheDocument();
+    expect(await within(dialog).findByText(/No puede ser mayor que lo que se paga hoy \(\$950\.00\)/)).toBeInTheDocument();
     expect(finance.registerDeposit).not.toHaveBeenCalled();
+  });
+
+  // Round 2: a quote that cannot be read falls back to the bare balance — and says so.
+  it("falls back to the charge's balance when the quote fails, and tells the cashier", async () => {
+    finance.getExpected.mockRejectedValue(new Error("finance is down"));
+    const { dialog } = await open();
+
+    expect(await within(dialog).findByText(/No se pudo cotizar el cargo para ese día/)).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("Monto a pagar", { selector: "input" })).toHaveValue("1,000.00");
+    expect(within(dialog).getByTestId("pay-quote")).toHaveTextContent(/A pagar hoy\s*\$1,000\.00/);
+  });
+
+  // Round 2: another day is another quote; until it arrives, the previous
+  // day's figure must not cap nor show.
+  it("forgets the previous day's quote while the new day's is read", async () => {
+    finance.getExpected.mockResolvedValueOnce(quoteFor("ch1", 100000, { discountCents: 5000, totalCents: 95000 }));
+    const { dialog } = await open();
+    await waitFor(() => expect(within(dialog).getByTestId("pay-quote")).toHaveTextContent(/A pagar hoy\s*\$950\.00/));
+
+    finance.getExpected.mockReturnValue(new Promise<financeApi.Expected>(() => {}));
+    fireEvent.change(within(dialog).getByLabelText("Fecha de pago"), { target: { value: "2026-01-05" } });
+
+    await waitFor(() => expect(within(dialog).getByTestId("pay-quote")).toHaveTextContent(/A pagar hoy\s*\$1,000\.00/));
   });
 });

@@ -21,10 +21,10 @@ import { paymentDateError } from "./CollectDrawer";
 import { ChargeQuote, useChargeQuote } from "./ChargeQuote";
 import { DepositPreviewCard, DepositReceipt } from "./DepositReceipt";
 
-/** What is wrong with the amount paid against one charge, if anything: never more than it still owes. */
-export function chargeAmountError(cents: number, remainingCents: number): string | undefined {
+/** What is wrong with the amount paid against one charge, if anything: never more than it asks for today. */
+export function chargeAmountError(cents: number, payableCents: number): string | undefined {
   if (!Number.isFinite(cents) || cents <= 0) return AMOUNT_ERROR;
-  return cents > remainingCents ? `No puede ser mayor que el saldo del cargo (${formatCents(remainingCents)}).` : undefined;
+  return cents > payableCents ? `No puede ser mayor que lo que se paga hoy (${formatCents(payableCents)}).` : undefined;
 }
 
 export interface PayDrawerProps {
@@ -72,11 +72,12 @@ export function PayDrawer({ charge, name, today, notes, onClose, onPaid }: PayDr
   // fee and applies pronto pago, so its bare balance is neither the amount to
   // prefill nor the most it may take.
   const quote = useChargeQuote(charge.studentId, charge.id, sentDate, dateOk);
-  const capCents = quote?.totalCents ?? charge.remainingCents;
+  const capCents = quote.line?.totalCents ?? charge.remainingCents;
   const amountEdited = useRef(false);
   useEffect(() => {
-    if (quote !== undefined && !amountEdited.current) setAmount(formatPesosInput(quote.totalCents));
-  }, [quote]);
+    if (amountEdited.current) return;
+    setAmount(formatPesosInput(quote.line?.totalCents ?? charge.remainingCents));
+  }, [quote.line, charge.remainingCents]);
   // What the amount covers, from the planner that takes the money.
   const preview = useDepositPreview({ studentId: charge.studentId, amountCents: cents, paidOn: sentDate, chargeIds: [charge.id], enabled: receipt === null && dateOk });
   // How it is paid, method by method (T8): the rows must add up to the amount.
@@ -144,7 +145,7 @@ export function PayDrawer({ charge, name, today, notes, onClose, onPaid }: PayDr
       }
     >
       <StudentNotesBeside beside={beside} studentId={charge.studentId}>
-        <ChargeQuote line={quote} balanceCents={charge.remainingCents} />
+        <ChargeQuote quote={quote} balanceCents={charge.remainingCents} />
         <MoneyField
           label="Monto a pagar"
           value={amount}
