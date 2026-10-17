@@ -107,6 +107,8 @@ describe("CashUpPanel · egresos y cierre (T10)", () => {
     render(<CashUpPanel day="2026-10-10" access={access} />);
 
     expect(await screen.findByText(/Modificado después del cierre/)).toBeInTheDocument();
+    // CC-215: a new payment after the close is the commonest change; the notice names it.
+    expect(screen.getByText(/un cobro nuevo, una corrección, una cancelación o un egreso/)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Reabrir corte" }));
     await user.click(screen.getByRole("button", { name: "Confirmar reapertura" }));
     expect(expenses.reopenCashCut).not.toHaveBeenCalled();
