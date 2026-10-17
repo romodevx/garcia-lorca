@@ -22,7 +22,8 @@ const NONE: ReadonlySet<string> = new Set();
  * a confirmation (a removed class is not irreversible).
  */
 export function CurrentLoadPanel({ load, onRemove, removing = NONE }: CurrentLoadPanelProps): ReactElement {
-  const groupCount = load.reduce((n, s) => n + s.slots.length, 0);
+  // Distinct groups: two subjects in the same group are one group (ISSUE-T14-014).
+  const groupCount = new Set(load.flatMap((s) => s.slots.map((slot) => slot.groupId))).size;
   const subtitle =
     load.length === 0 ? "Asignaturas y grupos que imparte." : `${load.length} ${plural(load.length, "asignatura", "asignaturas")} · ${groupCount} ${plural(groupCount, "grupo", "grupos")}`;
 
