@@ -94,17 +94,26 @@ describe("PeriodsPanel — cards", () => {
     expect(within(closed).getByText("Cerrado v2")).toBeInTheDocument();
     expect(within(closed).getByText(/1 dic.* 2026 · por Luis Beltrán/)).toBeInTheDocument();
     expect(within(closed).getByRole("button", { name: "Reabrir" })).toBeInTheDocument();
-    expect(within(closed).getByRole("button", { name: "Ver boletas" })).toBeInTheDocument();
-    expect(within(closed).queryByRole("button", { name: "Revisar y cerrar" })).toBeNull();
+    expect(within(closed).getByRole("button", { name: /^Ver boletas/ })).toBeInTheDocument();
+    expect(within(closed).queryByRole("button", { name: /^Revisar y cerrar/ })).toBeNull();
+  });
+
+  it("names each card's actions with its level and period, so nine buttons never sound alike (CC-312)", async () => {
+    render(<PeriodsPanel canClose />);
+
+    const open = await card("PRIMARIA · 1.er trimestre");
+    expect(within(open).getByRole("button", { name: "Revisar y cerrar PRIMARIA · 1.er trimestre" })).toHaveTextContent("Revisar y cerrar");
+    const closed = await card("PRIMARIA · 2.º trimestre");
+    expect(within(closed).getByRole("button", { name: "Ver boletas PRIMARIA · 2.º trimestre" })).toHaveTextContent("Ver boletas");
   });
 
   it("without grades:close there is nothing to close or reopen", async () => {
     render(<PeriodsPanel canClose={false} />);
 
     const open = await card("PRIMARIA · 1.er trimestre");
-    expect(within(open).queryByRole("button", { name: "Revisar y cerrar" })).toBeNull();
+    expect(within(open).queryByRole("button", { name: /^Revisar y cerrar/ })).toBeNull();
     expect(within(await card("PRIMARIA · 2.º trimestre")).queryByRole("button", { name: "Reabrir" })).toBeNull();
-    expect(within(await card("PRIMARIA · 2.º trimestre")).getByRole("button", { name: "Ver boletas" })).toBeInTheDocument();
+    expect(within(await card("PRIMARIA · 2.º trimestre")).getByRole("button", { name: /^Ver boletas/ })).toBeInTheDocument();
   });
 
   it("shows only the levels the server lists: an ungraded Kínder it omits gets no section (T10)", async () => {
@@ -131,7 +140,7 @@ describe("PeriodsPanel — Revisar y cerrar", () => {
   it("lists what is missing by group and only offers closing anyway, which publishes the boletas", async () => {
     const user = userEvent.setup();
     render(<PeriodsPanel canClose />);
-    await user.click(within(await card("PRIMARIA · 1.er trimestre")).getByRole("button", { name: "Revisar y cerrar" }));
+    await user.click(within(await card("PRIMARIA · 1.er trimestre")).getByRole("button", { name: /^Revisar y cerrar/ }));
 
     const dialog = await screen.findByRole("dialog", { name: "Cerrar PRIMARIA · 1.er trimestre" });
     expect(client.progress).toHaveBeenCalledWith("t1");
@@ -157,7 +166,7 @@ describe("PeriodsPanel — Revisar y cerrar", () => {
     const user = userEvent.setup();
     client.progress.mockResolvedValue(COMPLETE);
     render(<PeriodsPanel canClose />);
-    await user.click(within(await card("PRIMARIA · 1.er trimestre")).getByRole("button", { name: "Revisar y cerrar" }));
+    await user.click(within(await card("PRIMARIA · 1.er trimestre")).getByRole("button", { name: /^Revisar y cerrar/ }));
 
     const dialog = await screen.findByRole("dialog");
     await user.click(await within(dialog).findByRole("button", { name: "Cerrar periodo" }));
@@ -172,7 +181,7 @@ describe("PeriodsPanel — Revisar y cerrar", () => {
     client.progress.mockResolvedValue({ ...COMPLETE, reportCards: 2, skippedWithoutGrades: 0, withdrawnReportCards: 1 });
     client.close.mockResolvedValueOnce({ status: "closed", version: 2, reportCards: 2, skippedWithoutGrades: 0, withdrawnReportCards: 1 });
     render(<PeriodsPanel canClose />);
-    await user.click(within(await card("PRIMARIA · 1.er trimestre")).getByRole("button", { name: "Revisar y cerrar" }));
+    await user.click(within(await card("PRIMARIA · 1.er trimestre")).getByRole("button", { name: /^Revisar y cerrar/ }));
 
     const dialog = await screen.findByRole("dialog");
     expect(
@@ -190,7 +199,7 @@ describe("PeriodsPanel — Revisar y cerrar", () => {
     client.progress.mockResolvedValueOnce(COMPLETE).mockResolvedValueOnce(MISSING);
     client.close.mockRejectedValueOnce(new GradeRequestError(409, "Faltan 38 calificaciones por capturar", "MISSING_GRADES"));
     render(<PeriodsPanel canClose />);
-    await user.click(within(await card("PRIMARIA · 1.er trimestre")).getByRole("button", { name: "Revisar y cerrar" }));
+    await user.click(within(await card("PRIMARIA · 1.er trimestre")).getByRole("button", { name: /^Revisar y cerrar/ }));
 
     const dialog = await screen.findByRole("dialog");
     await user.click(await within(dialog).findByRole("button", { name: "Cerrar periodo" }));
@@ -204,7 +213,7 @@ describe("PeriodsPanel — Revisar y cerrar", () => {
   it("Cancelar closes the dialog and gives the focus back to its button", async () => {
     const user = userEvent.setup();
     render(<PeriodsPanel canClose />);
-    const trigger = within(await card("PRIMARIA · 1.er trimestre")).getByRole("button", { name: "Revisar y cerrar" });
+    const trigger = within(await card("PRIMARIA · 1.er trimestre")).getByRole("button", { name: /^Revisar y cerrar/ });
     await user.click(trigger);
 
     await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Cancelar" }));
@@ -235,7 +244,7 @@ describe("PeriodsPanel — Ver boletas", () => {
   const BOLETA = { id: "rc1", studentId: "s1", studentName: "José Núñez", groupLabel: "1° PRIMARIA · A", version: 2, issuedAt: "2026-12-01T18:00:00Z", generalAverage: 8.7, hasGrades: true };
 
   const openGroup = async (user: ReturnType<typeof userEvent.setup>): Promise<HTMLElement> => {
-    await user.click(within(await card("PRIMARIA · 2.º trimestre")).getByRole("button", { name: "Ver boletas" }));
+    await user.click(within(await card("PRIMARIA · 2.º trimestre")).getByRole("button", { name: /^Ver boletas/ }));
     const dialog = await screen.findByRole("dialog", { name: "Boletas · PRIMARIA · 2.º trimestre" });
     const groupSelect = await within(dialog).findByRole("combobox", { name: "Grupo" });
     expect(within(groupSelect).queryByRole("option", { name: "1° SECUNDARIA · A" })).toBeNull();
@@ -296,7 +305,7 @@ describe("PeriodsPanel — Ver boletas", () => {
   it("says when a group has no boletas yet", async () => {
     const user = userEvent.setup();
     render(<PeriodsPanel canClose />);
-    await user.click(within(await card("PRIMARIA · 2.º trimestre")).getByRole("button", { name: "Ver boletas" }));
+    await user.click(within(await card("PRIMARIA · 2.º trimestre")).getByRole("button", { name: /^Ver boletas/ }));
 
     const dialog = await screen.findByRole("dialog");
     await user.selectOptions(await within(dialog).findByRole("combobox", { name: "Grupo" }), "g1");
@@ -306,7 +315,7 @@ describe("PeriodsPanel — Ver boletas", () => {
 });
 
 const openClose = async (user: ReturnType<typeof userEvent.setup>, name = "PRIMARIA · 1.er trimestre"): Promise<HTMLElement> => {
-  await user.click(within(await card(name)).getByRole("button", { name: "Revisar y cerrar" }));
+  await user.click(within(await card(name)).getByRole("button", { name: /^Revisar y cerrar/ }));
   return screen.findByRole("dialog");
 };
 
@@ -490,7 +499,7 @@ describe("PeriodsPanel — a period no grade has configured", () => {
     render(<PeriodsPanel canClose />);
 
     const open = await card("PRIMARIA · 1.er trimestre");
-    expect(within(open).queryByRole("button", { name: "Revisar y cerrar" })).toBeNull();
+    expect(within(open).queryByRole("button", { name: /^Revisar y cerrar/ })).toBeNull();
     expect(within(open).getByText("Sin fechas: ningún grado tiene este periodo")).toBeInTheDocument();
     expect(within(open).getByText("Dale fechas en Configuración › Periodos por grado")).toBeInTheDocument();
   });
