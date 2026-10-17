@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, type ReactElement } from "react";
 
 import { Page } from "../../_design/Page";
+import { schoolISODate } from "../../_lib/schoolDay";
 import {
   getTeachingAttendanceSheet,
   listAttendanceClasses,
@@ -16,12 +17,11 @@ import { groupLabel, subjectLabel } from "../teaching/selection";
 import { AttendanceHeader } from "./AttendanceHeader";
 import { toAttendanceOptions, type AttendanceOption } from "./attendanceOptions";
 import { PassSheet } from "./PassSheet";
-import { todayISO } from "./sheetModel";
 import { useLeaveGuard } from "./useLeaveGuard";
 
 export interface TeacherAttendanceProps {
   onBack: () => void;
-  /** Pins the day (tests, deep links); defaults to the local today. */
+  /** Pins the day (tests, deep links); defaults to the school's day (Morelia, ADR 0035). */
   today?: string;
   /** module_student_card is on: the list offers "Escanear QR". */
   canScanCards?: boolean;
@@ -45,7 +45,7 @@ export function TeacherAttendance({ onBack, today, canScanCards = false }: Teach
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | undefined>(undefined);
   const guard = useLeaveGuard();
-  const day = today ?? todayISO();
+  const day = today ?? schoolISODate();
 
   useEffect(() => {
     let active = true;

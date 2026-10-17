@@ -44,7 +44,7 @@ export interface AttendanceSheet {
   rows: AttendanceSheetRow[];
   /** Set by newer gateways when `editable` is false. */
   readOnlyReason?: ReadOnlyReason;
-  /** The server's school day (`YYYY-MM-DD`, UTC); absent from older gateways. */
+  /** The school's day (`YYYY-MM-DD`, America/Mexico_City); absent from older gateways. */
   today?: string;
 }
 
