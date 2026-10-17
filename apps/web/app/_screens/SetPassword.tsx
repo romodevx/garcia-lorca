@@ -1,6 +1,6 @@
 "use client";
 
-import { type CSSProperties, type ReactElement, useState } from "react";
+import { type CSSProperties, type ReactElement, useRef, useState } from "react";
 
 import { Icon } from "../_design/Icon";
 import { Btn } from "../_design/Controls";
@@ -27,6 +27,7 @@ import { Btn } from "../_design/Controls";
  */
 
 const MIN_LEN = 8;
+const TOO_SHORT = `Escribe una contraseña de al menos ${MIN_LEN} caracteres.`;
 
 const field: CSSProperties = {
   width: "100%",
@@ -54,8 +55,24 @@ export interface SetPasswordProps {
 export function SetPassword({ email, heading, intro, cta, pending, error, onSubmit }: SetPasswordProps): ReactElement {
   const [password, setPassword] = useState("");
   const [show, setShow] = useState(false);
-  const tooShort = password.length > 0 && password.length < MIN_LEN;
-  const ready = password.length >= MIN_LEN && !pending;
+  // Said on submit, not while typing; cleared the moment the password is long enough.
+  const [refused, setRefused] = useState(false);
+  const input = useRef<HTMLInputElement>(null);
+  const long = password.length >= MIN_LEN;
+  const tooShort = password.length > 0 && !long;
+  const fieldError = refused && !long ? TOO_SHORT : undefined;
+
+  // The button is never disabled (forms rule): pressing it with a short
+  // password says why, and pressing it while saving does nothing.
+  const submit = (): void => {
+    if (pending) return;
+    if (!long) {
+      setRefused(true);
+      input.current?.focus();
+      return;
+    }
+    onSubmit(password);
+  };
 
   return (
     <div className="app-root" style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: "24px 20px" }}>
@@ -83,7 +100,7 @@ export function SetPassword({ email, heading, intro, cta, pending, error, onSubm
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            if (ready) onSubmit(password);
+            submit();
           }}
         >
           <label style={{ display: "block", fontSize: 14, fontWeight: 600, color: "var(--text-muted)", marginBottom: 7 }} htmlFor="pwd">
@@ -96,13 +113,15 @@ export function SetPassword({ email, heading, intro, cta, pending, error, onSubm
           <div style={{ position: "relative" }}>
             <input
               id="pwd"
-              aria-describedby="pwd-hint"
+              ref={input}
+              aria-describedby={fieldError !== undefined ? "pwd-hint pwd-error" : "pwd-hint"}
+              aria-invalid={fieldError !== undefined ? true : undefined}
               type={show ? "text" : "password"}
               autoComplete="new-password"
               autoFocus
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              style={field}
+              style={fieldError !== undefined ? { ...field, borderColor: "var(--red)" } : field}
             />
             <button
               type="button"
@@ -114,7 +133,11 @@ export function SetPassword({ email, heading, intro, cta, pending, error, onSubm
               <Icon name="eye" size={20} />
             </button>
           </div>
-          {tooShort ? (
+          {fieldError !== undefined ? (
+            <p id="pwd-error" role="alert" style={{ fontSize: 13.5, color: "var(--bad-fg)", marginTop: 8 }}>
+              {fieldError}
+            </p>
+          ) : tooShort ? (
             <p style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 8 }}>Te faltan {MIN_LEN - password.length} caracteres.</p>
           ) : null}
 
@@ -122,7 +145,7 @@ export function SetPassword({ email, heading, intro, cta, pending, error, onSubm
             {/* type="submit", explicitly. Btn defaults to type="button", so
                 without this the button sits inside the form and does nothing —
                 the field fills, the click lands, and the page never moves. */}
-            <Btn full type="submit" icon="check" disabled={!ready} style={{ height: 54, fontSize: 17 }}>
+            <Btn full type="submit" icon="check" busy={pending} style={{ height: 54, fontSize: 17 }}>
               {pending ? "Guardando…" : cta}
             </Btn>
           </div>

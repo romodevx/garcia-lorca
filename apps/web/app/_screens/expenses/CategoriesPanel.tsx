@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactElement } from "react";
+import { useEffect, useRef, useState, type ReactElement } from "react";
 
 import { InlineCreateRow } from "../../_design/InlineCreateRow";
 import { API_URL } from "../../api-url";
@@ -15,12 +15,24 @@ export function CategoriesPanel({
   categories,
   canWrite,
   onChanged,
+  focusNew = false,
+  onFocused,
 }: {
   categories: readonly ExpenseCategory[];
   canWrite: boolean;
   onChanged: () => void;
+  /** Arrived from "Crear la primera categoría": the cursor waits on "Nueva categoría". */
+  focusNew?: boolean;
+  /** The focus request was spent: the screen clears it, so a later visit keeps its own focus. */
+  onFocused?: () => void;
 }): ReactElement {
   const [error, setError] = useState<string | undefined>(undefined);
+  const addButton = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!focusNew) return;
+    addButton.current?.focus();
+    onFocused?.();
+  }, [focusNew, onFocused]);
 
   const add = async (values: Record<string, string>): Promise<void> => {
     setError(undefined);
@@ -68,6 +80,7 @@ export function CategoriesPanel({
       {canWrite && (
         <InlineCreateRow
           addLabel="Nueva categoría"
+          addButtonRef={addButton}
           columns={[{ key: "name", label: "Nombre", kind: "text", uppercase: true, required: true, help: "Cómo se llama el tipo de gasto: PAPELERÍA, MANTENIMIENTO, NÓMINA." }]}
           onCreate={add}
         />

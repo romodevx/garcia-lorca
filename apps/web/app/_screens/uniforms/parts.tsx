@@ -75,6 +75,24 @@ export function FieldLabel({
   );
 }
 
+/** A field of this screen that refused the save: red border, same shape. */
+export function fieldWithError(invalid: boolean): CSSProperties {
+  return invalid ? { ...field, border: "1.5px solid var(--red)" } : field;
+}
+
+/**
+ * What a field is missing, said under it. Its id is the field's plus
+ * `-error`, so the input lists it in `aria-describedby` next to its help.
+ */
+export function FieldError({ htmlFor, message }: { htmlFor: string; message: string | undefined }): ReactElement | null {
+  if (message === undefined) return null;
+  return (
+    <p id={`${htmlFor}-error`} role="alert" style={{ fontSize: 13.5, color: "var(--bad-fg)", marginTop: 6 }}>
+      {message}
+    </p>
+  );
+}
+
 /**
  * A card that says what happened and what to do about it.
  *

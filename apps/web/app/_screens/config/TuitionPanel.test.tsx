@@ -74,7 +74,7 @@ describe("pesos and cents", () => {
     expect(pesosToCents("3200")).toBe(320000);
     expect(pesosToCents("3,200.50")).toBe(320050);
     expect(pesosToCents("0.05")).toBe(5);
-    expect(centsToPesos(320000)).toBe("3200.00");
+    expect(centsToPesos(320000)).toBe("3,200.00");
     expect(centsToPesos(5)).toBe("0.05");
   });
 

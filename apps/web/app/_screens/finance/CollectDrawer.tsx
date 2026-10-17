@@ -7,6 +7,8 @@ import { DateField, MoneyField, useFocusFirstInvalid } from "../../_design/form"
 import { TenderEditor } from "../../_design/payments/TenderEditor";
 import { AMOUNT_ERROR, tenderLabel } from "../../_design/payments/tenders";
 import { useTenders } from "../../_design/payments/useTenders";
+import { ClosedCutNotice } from "../../_design/payments/ClosedCutNotice";
+import { useClosedCut } from "../../_design/payments/useClosedCut";
 import {
   getAccount,
   getExpected,
@@ -24,7 +26,7 @@ import { API_URL } from "../../api-url";
 import { localISODate, shortDayLabel } from "../../_lib/localDate";
 import { DebtList } from "./DebtList";
 import { ReceiptActions } from "../receipts/ReceiptActions";
-import { centsToPesosInput, formatCents, pesosToCents } from "../../_lib/money";
+import { formatPesosInput, formatCents, pesosToCents } from "../../_lib/money";
 import { formatStudentName } from "../../_design/students/studentName";
 import { StudentNotesBeside, useNotesBeside, type NotesAccess } from "../../_design/students/StudentNotesBeside";
 
@@ -148,6 +150,8 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
   // in Mexico City — so only a payment dated earlier travels with its date.
   const sentDate = paidOn === day ? "" : paidOn;
   const focusFirstInvalid = useFocusFirstInvalid();
+  // Said before the cashier confirms, not discovered later on the cut (ISSUE-026).
+  const cutClosed = useClosedCut(sentDate, dateOk);
   // Once the cashier types another amount, a new quote (a new date) does not
   // overwrite it. Reformatting the prefilled amount on blur is not that.
   const amountEdited = useRef(false);
@@ -171,6 +175,8 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
   const [preview, setPreview] = useState<{ allocations: Payment[]; surcharges: Charge[]; unallocatedCents: number } | null>(null);
   const [receipt, setReceipt] = useState<DepositResult | null>(null);
   const [saving, setSaving] = useState(false);
+  // A ref and not the state: two presses inside one render both read `saving` as false.
+  const inFlight = useRef(false);
   const [error, setError] = useState<string | undefined>(undefined);
   const [attemptKey] = useState(newAttemptKey);
   const describe = useRef<Map<string, string>>(new Map());
@@ -205,7 +211,7 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
     if (!amountEdited.current) {
       const cents = selectedTotal(lines, next);
       prefilledCents.current = cents;
-      setAmount(centsToPesosInput(cents));
+      setAmount(formatPesosInput(cents));
     }
   };
 
@@ -246,7 +252,7 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
         // paying exactly that, and retyping it is a chance to mistype it.
         if (e.amountCents > 0 && !amountEdited.current) {
           prefilledCents.current = e.amountCents;
-          setAmount(centsToPesosInput(e.amountCents));
+          setAmount(formatPesosInput(e.amountCents));
         }
       })
       .catch(() => {});
@@ -284,7 +290,7 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
   }, [onClose]);
 
   const submit = useCallback(async (): Promise<void> => {
-    if (saving) {
+    if (inFlight.current) {
       return;
     }
     // Every problem is marked at once, then the view goes to the first of them.
@@ -299,6 +305,7 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
     }
     const split = tenders.toTenders();
     const [first] = split;
+    inFlight.current = true;
     setSaving(true);
     setError(undefined);
     try {
@@ -321,9 +328,10 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "No se pudo registrar el cobro.");
     } finally {
+      inFlight.current = false;
       setSaving(false);
     }
-  }, [saving, student.id, cents, capCents, tenders, attemptKey, grantEarly, sentDate, paidOn, day, choice, focusFirstInvalid, onCollected]);
+  }, [student.id, cents, capCents, tenders, attemptKey, grantEarly, sentDate, paidOn, day, choice, focusFirstInvalid, onCollected]);
 
   return (
     <DrawerShell
@@ -438,13 +446,15 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
                     help="El día en que la familia pagó. Si capturas tarde, pon ese día: los recargos, el pronto pago y el precio de la inscripción se calculan con él."
                   />
 
+                  <ClosedCutNotice closed={cutClosed} day={sentDate} />
+
                   {error !== undefined && <p role="alert" style={{ color: "var(--bad-fg)", fontSize: 14, margin: 0 }}>{error}</p>}
                 </div>
 
                 <div style={{ display: "flex", gap: 12, alignItems: "center", padding: "18px 26px", borderTop: "1px solid var(--border)", background: "var(--surface-2)" }}>
                   <Btn kind="ghost" type="button" onClick={onClose}>Cancelar</Btn>
                   <div style={{ flex: 1 }} />
-                  <Btn icon="check" type="submit" style={{ height: 52, fontSize: 16 }}>Cobrar</Btn>
+                  <Btn icon="check" type="submit" busy={saving} style={{ height: 52, fontSize: 16 }}>{saving ? "Cobrando…" : "Cobrar"}</Btn>
                 </div>
               </form>
             </StudentNotesBeside>

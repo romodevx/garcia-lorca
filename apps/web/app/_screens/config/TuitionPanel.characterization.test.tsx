@@ -142,7 +142,8 @@ describe("TuitionPage (via TuitionPanel) — characterization", () => {
     expect(finance.upsertTuitionPlan).not.toHaveBeenCalled();
   });
 
-  it("says 'Guardando…' and is disabled while saving, then goes back to the table", async () => {
+  // The forms rule (T12): busy, never disabled, while saving.
+  it("says 'Guardando…' and is busy, not disabled, while saving, then goes back to the table", async () => {
     let finish: () => void = () => {};
     finance.upsertTuitionPlan.mockReturnValue(new Promise((resolve) => { finish = () => resolve(plan("lv2")); }));
     const user = userEvent.setup();
@@ -150,7 +151,9 @@ describe("TuitionPage (via TuitionPanel) — characterization", () => {
 
     await user.click(screen.getByRole("button", { name: "Guardar tabulador" }));
 
-    expect(await screen.findByRole("button", { name: "Guardando…" })).toBeDisabled();
+    const busy = await screen.findByRole("button", { name: "Guardando…" });
+    expect(busy).toBeEnabled();
+    expect(busy).toHaveAttribute("aria-busy", "true");
     finish();
     expect(await screen.findByRole("heading", { name: "Colegiaturas" })).toBeInTheDocument();
   });

@@ -15,7 +15,7 @@ import {
   type DepositSnapshot,
 } from "../../finance/api";
 import { depositDay } from "../../finance/depositDay";
-import { centsToPesosInput, formatCents, pesosToCents } from "../../_lib/money";
+import { formatPesosInput, formatCents, pesosToCents } from "../../_lib/money";
 import { localISODate } from "../../_lib/localDate";
 import { ticketPath } from "../../receipts/api";
 import { Btn } from "../Controls";
@@ -115,7 +115,7 @@ interface FormErrors {
 function CorrectionForm({ data, today, onClose }: { data: Loaded; today: string; onClose: () => void }): ReactElement {
   const { deposit } = data;
   const title = `Corregir pago ${deposit.folio ?? ""}`.trim();
-  const [amount, setAmount] = useState(centsToPesosInput(deposit.amountCents));
+  const [amount, setAmount] = useState(formatPesosInput(deposit.amountCents));
   // The recorded day: the deposit's school-local day (ADR 0035). Untouched, it
   // is not sent: the server keeps the original's day and instant.
   const recordedDay = depositDay(deposit);

@@ -210,24 +210,27 @@ describe("the till", () => {
     expect(screen.queryByText("× 2")).toBeNull();
   });
 
-  it("keeps the confirm button shut until it has everything it needs", async () => {
-    stubCatalogue([jumper]);
+  // ISSUE-015: the confirm button used to sit greyed out until the sale was
+  // complete. It is never disabled now: pressing it says what is missing.
+  it("never shuts the confirm button: it says what the sale still needs", async () => {
+    const fetchMock = stubCatalogue([jumper]);
     const user = userEvent.setup();
     render(<UniformsScreen onBack={() => {}} permissions={ALL} />);
 
     await waitFor(() => expect(screen.getByText("Suéter verde")).toBeInTheDocument());
     const confirm = (): HTMLElement => screen.getByRole("button", { name: /Cobrar y entregar/ });
-    expect(confirm()).toBeDisabled();
+    expect(confirm()).toBeEnabled();
 
     await user.click(screen.getByText("Suéter verde"));
     await user.click(screen.getByRole("button", { name: /Talla M, 6 libres/ }));
     await user.click(screen.getByRole("button", { name: "Agregar al carrito" }));
-    // A cart is not enough: an anonymous sale needs a note, and a named one
-    // needs the pupil.
-    expect(confirm()).toBeDisabled();
+    // A cart is not enough: a named sale needs the pupil.
+    await user.click(confirm());
+    expect(screen.getByText(/Elige al alumno/)).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).includes("/counter-sale"))).toBe(false);
 
     await chooseZoe(user);
-    expect(confirm()).toBeEnabled();
+    expect(screen.queryByText(/Elige al alumno/)).toBeNull();
   });
 
   it("warns, in the card itself, that an anonymous sale lands on nobody's statement", async () => {

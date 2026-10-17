@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactElement } from "react";
+import { useEffect, useMemo, useState, type ReactElement, type Ref } from "react";
 import { listStudents, type Student } from "../../students/api";
 import { field } from "./parts";
 
@@ -24,10 +24,13 @@ import { formatStudentName, sortStudents, studentNameSearchKeys } from "../../_d
 export function StudentPicker({
   value,
   onChange,
+  inputRef,
 }: {
   /** The chosen pupil, or null while nobody is chosen. */
   value: Student | null;
   onChange: (student: Student | null) => void;
+  /** The search field, for a screen that sends the cursor to it. */
+  inputRef?: Ref<HTMLInputElement>;
 }): ReactElement {
   const [students, setStudents] = useState<Student[] | null>(null);
   const [term, setTerm] = useState("");
@@ -80,6 +83,7 @@ export function StudentPicker({
   return (
     <div>
       <input
+        ref={inputRef}
         style={field}
         placeholder="Escribe el nombre del alumno"
         aria-label="Alumno"

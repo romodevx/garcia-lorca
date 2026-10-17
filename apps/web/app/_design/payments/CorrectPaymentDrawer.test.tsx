@@ -175,4 +175,13 @@ describe("CorrectPaymentDrawer (T9)", () => {
     const dialog = await open();
     expect(within(dialog).getByLabelText(/Fecha de pago/)).toHaveValue("2026-10-01");
   });
+
+  // T12 (from T7's review): the amount opened as "1850.00" and only took its
+  // thousands separator once the cursor left it.
+  it("opens the amount with its thousands separator", async () => {
+    api.listDeposits.mockResolvedValue([{ ...deposit, amountCents: 185000, tenders: [{ method: "cash", amountCents: 185000 }] }]);
+    const dialog = await open();
+
+    expect(within(dialog).getByLabelText(/Monto recibido/)).toHaveValue("1,850.00");
+  });
 });

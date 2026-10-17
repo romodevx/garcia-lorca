@@ -159,7 +159,7 @@ describe("copiar del ciclo anterior", () => {
 
     await user.click(screen.getByRole("button", { name: "Copiar" }));
 
-    expect(screen.getByLabelText("Colegiatura mensual")).toHaveValue("2800.00");
+    expect(screen.getByLabelText("Colegiatura mensual")).toHaveValue("2,800.00");
     expect(screen.getByLabelText("Mensualidades")).toHaveValue(10);
     // La fecha límite de inscripción cae FUERA del ciclo por diseño — se cobra
     // en junio para un año que abre en agosto — y aun así se conserva.
@@ -629,5 +629,45 @@ describe("el rango de fechas de la inscripción", () => {
     await user.type(screen.getByLabelText("Fecha de inicio de inscripción"), "2026-06-01");
 
     expect(screen.queryByText(/no puede ser posterior/i)).toBeNull();
+  });
+});
+
+// T12 · ISSUE-015 + T7: "Guardar tabulador" is never disabled, and a money
+// field opens in the format it takes when the cursor leaves it.
+describe("Guardar tabulador y los montos al abrir (T12)", () => {
+  const SAVED = { ...PREVIOUS, cycleId: CYCLE.id, monthlyCents: 400000, policy: { ...PREVIOUS.policy, earlyPaymentCents: 125050 } };
+
+  it("abre la colegiatura con separador de miles, sin esperar a salir del campo", () => {
+    open({ plan: SAVED });
+
+    expect(screen.getByLabelText("Colegiatura mensual")).toHaveValue("4,000.00");
+  });
+
+  it("guarda lo que abrió con separador: el lector acepta las comas", async () => {
+    const user = userEvent.setup();
+    open({ plan: SAVED });
+
+    await user.click(screen.getByRole("button", { name: "Guardar tabulador" }));
+
+    expect(finance.upsertTuitionPlan).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        monthlyCents: 400000,
+        policy: expect.objectContaining({ earlyPaymentCents: 125050 }) as unknown,
+      }),
+    );
+  });
+
+  it("mientras guarda, el botón dice que está ocupado sin apagarse y no guarda dos veces", async () => {
+    const user = userEvent.setup();
+    finance.upsertTuitionPlan.mockReturnValue(new Promise<TuitionPlan>(() => {}));
+    open({ plan: SAVED });
+
+    await user.dblClick(screen.getByRole("button", { name: "Guardar tabulador" }));
+
+    const busy = screen.getByRole("button", { name: /Guardando/ });
+    expect(busy).toBeEnabled();
+    expect(busy).toHaveAttribute("aria-busy", "true");
+    expect(finance.upsertTuitionPlan).toHaveBeenCalledTimes(1);
   });
 });

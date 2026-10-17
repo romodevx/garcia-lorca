@@ -47,7 +47,9 @@ export function ExpensesScreen({ onBack, permissions, today: injectedToday }: Ex
   const [month, setMonth] = useState(today);
   const [status, setStatus] = useState<StatusFilter>("active");
   const [page, setPage] = useState(0);
-  const [categories, setCategories] = useState<ExpenseCategory[]>([]);
+  // null until read: "no categories" is only said once it is known.
+  const [categories, setCategories] = useState<ExpenseCategory[] | null>(null);
+  const [focusNewCategory, setFocusNewCategory] = useState(false);
   const [expenses, setExpenses] = useState<Expense[] | null>(null);
   const [summary, setSummary] = useState<FinanceSummary | null>(null);
   const [failure, setFailure] = useState<string | undefined>(undefined);
@@ -101,6 +103,14 @@ export function ExpensesScreen({ onBack, permissions, today: injectedToday }: Ex
     { icon: "card" as const, color: "purple" as const, label: "Balance", value: formatCents(summary?.balance.totalCents ?? 0), sub: "ingresos − egresos", testId: "stat-balance" },
     { icon: "documents" as const, color: "orange" as const, label: "Notas de crédito", value: formatCents(summary?.creditNoteCents ?? 0), sub: "no es ingreso", testId: "stat-credit-notes" },
   ];
+
+  const noActiveCategory = categories !== null && !categories.some((c) => c.active);
+  const clearFocusNewCategory = useCallback(() => setFocusNewCategory(false), []);
+  const createFirstCategory = (): void => {
+    setDrawer(null);
+    setTab("categories");
+    setFocusNewCategory(true);
+  };
 
   const onSaved = (message: string, keepOpen?: boolean): void => {
     setToast(message);
@@ -173,7 +183,7 @@ export function ExpensesScreen({ onBack, permissions, today: injectedToday }: Ex
           />
         )}
         {tab === "reports" && <ReportsPanel today={today} />}
-        {tab === "categories" && <CategoriesPanel categories={categories} canWrite={canWrite} onChanged={loadCategories} />}
+        {tab === "categories" && <CategoriesPanel categories={categories ?? []} canWrite={canWrite} onChanged={loadCategories} focusNew={focusNewCategory} onFocused={clearFocusNewCategory} />}
       </div>
 
       {canWrite && (
@@ -190,11 +200,12 @@ export function ExpensesScreen({ onBack, permissions, today: injectedToday }: Ex
         <ExpenseDrawer
           key={drawer.expense?.id ?? "new"}
           expense={drawer.expense}
-          categories={categories}
+          categories={categories ?? []}
           today={today}
           canWrite={canWrite}
           onClose={() => setDrawer(null)}
           onSaved={onSaved}
+          onCreateCategory={noActiveCategory ? createFirstCategory : undefined}
         />
       )}
       {toast !== undefined && <Toast>{toast}</Toast>}

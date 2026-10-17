@@ -1,6 +1,6 @@
 import type { Cycle } from "../../config/api";
 import type { EnrollmentConcept, Fee, PriceTier, TuitionPlan } from "../../finance/api";
-import { centsToPesosInput, pesosToCents as strictPesosToCents } from "../../_lib/money";
+import { formatPesosInput, pesosToCents as strictPesosToCents } from "../../_lib/money";
 
 /**
  * La aritmética del tabulador, sin pantalla.
@@ -86,7 +86,7 @@ export function withTier(tiers: readonly PriceTier[], tier: PriceTier): PriceTie
 
 /** Cents back into the pesos a person reads, always with both decimals. */
 export function centsToPesos(cents: number): string {
-  return centsToPesosInput(cents);
+  return formatPesosInput(cents);
 }
 
 /**

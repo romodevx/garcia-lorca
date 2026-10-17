@@ -5,7 +5,7 @@
  * Every value is the TEXT on screen: money stays in pesos until `readDraft`,
  * so nothing typed is ever silently turned into a zero.
  */
-import { centsToPesosInput, pesosToCents } from "../../_lib/money";
+import { formatPesosInput, pesosToCents } from "../../_lib/money";
 import type { Activity, ActivityInput, ActivityPriceOption, ActivitySlot, Periodicity } from "../../activities/api";
 
 /** "flat" is the fee whatever the days; otherwise days per week, "1".."7". */
@@ -80,13 +80,13 @@ export function draftFromActivity(a: Activity): ActivityDraft {
     periodicity: a.periodicity,
     billingStartsOn: a.billingStartsOn,
     firstDueOn: a.firstDueOn,
-    lateFee: a.lateFeeCents === 0 ? "" : centsToPesosInput(a.lateFeeCents),
+    lateFee: a.lateFeeCents === 0 ? "" : formatPesosInput(a.lateFeeCents),
     active: a.active,
     options: a.options.map((o) => ({
       key: rowKey(),
       id: o.id,
       kind: o.daysPerWeek === null ? FLAT : (String(o.daysPerWeek) as OptionKind),
-      amount: centsToPesosInput(o.amountCents),
+      amount: formatPesosInput(o.amountCents),
     })),
   };
 }

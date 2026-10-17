@@ -103,6 +103,7 @@ export function TuitionPage({
   const [concepts, setConcepts] = useState<EnrollmentConcept[]>(() => seedConcepts(plan, cycle));
   const [error, setError] = useState<string | undefined>(undefined);
   const [pending, setPending] = useState(false);
+  const inFlight = useRef(false);
   // Cobranza y Cuotas nacen plegadas; un error de guardado las abre.
   const [openCollection, setOpenCollection] = useState(false);
   const [openFees, setOpenFees] = useState(false);
@@ -143,6 +144,8 @@ export function TuitionPage({
   };
 
   const submit = async (): Promise<void> => {
+    // A ref and not the state: a double click lands before `pending` repaints.
+    if (inFlight.current) return;
     const monthlyCents = pesosToCents(monthly);
     if (monthlyCents === null) {
       setError("Escribe la colegiatura mensual, en pesos.");
@@ -232,6 +235,7 @@ export function TuitionPage({
       return;
     }
 
+    inFlight.current = true;
     setPending(true);
     setError(undefined);
     try {
@@ -267,6 +271,7 @@ export function TuitionPage({
     } catch {
       setError("No se pudo guardar el tabulador. Revisa los datos.");
     } finally {
+      inFlight.current = false;
       setPending(false);
     }
   };
@@ -295,9 +300,10 @@ export function TuitionPage({
         <>
           <Btn kind="ghost" onClick={onClose}>Cancelar</Btn>
           <div style={{ flex: 1 }} />
-          {/* Nunca se apaga por una forma incompleta: al enviar se explica qué
-              falta. Un botón muerto que no dice nada se lee como una app rota. */}
-          <Btn icon="check" onClick={() => void submit()} disabled={pending}>
+          {/* Nunca se apaga, ni por una forma incompleta ni mientras guarda: al
+              enviar se explica qué falta, y guardando dice que está ocupado e
+              ignora el segundo clic. Un botón muerto se lee como una app rota. */}
+          <Btn icon="check" onClick={() => void submit()} busy={pending}>
             {pending ? "Guardando…" : "Guardar tabulador"}
           </Btn>
         </>

@@ -8,6 +8,7 @@ import {
   type CSSProperties,
   type KeyboardEvent,
   type ReactElement,
+  type Ref,
 } from "react";
 
 import { Icon } from "./Icon";
@@ -67,6 +68,8 @@ export interface InlineCreateRowProps {
    * grado o abrir un salón más chico, y no hay otra pantalla donde corregirlo.
    */
   defaults?: Readonly<Record<string, string>>;
+  /** The closed row's button, for a screen that sends the cursor to it. */
+  addButtonRef?: Ref<HTMLButtonElement>;
 }
 
 const etiquetaFilaStyle: CSSProperties = {
@@ -119,6 +122,7 @@ export function InlineCreateRow({
   addLabel,
   rules = NO_RULES,
   defaults = NO_DEFAULTS,
+  addButtonRef,
 }: InlineCreateRowProps): ReactElement {
   // Un prefijo por renglón: dos tablas en la misma pantalla no se roban el id
   // de su celda "Nombre", ni la etiqueta apunta a la celda del vecino.
@@ -228,6 +232,7 @@ export function InlineCreateRow({
   if (!open) {
     return (
       <button
+        ref={addButtonRef}
         type="button"
         onClick={() => setOpen(true)}
         style={{

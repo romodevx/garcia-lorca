@@ -21,7 +21,8 @@ import {
   type ExpenseEvent,
   type ExpenseMethod,
 } from "../../expenses/api";
-import { centsToPesosInput, formatCents, pesosToCents } from "../../_lib/money";
+import { formatPesosInput, formatCents, pesosToCents } from "../../_lib/money";
+import { FirstCategoryInvite } from "./FirstCategoryInvite";
 
 export const METHOD_LABEL: Record<ExpenseMethod, string> = { cash: "Efectivo", card: "Tarjeta", transfer: "Transferencia" };
 const METHODS: readonly ExpenseMethod[] = ["cash", "card", "transfer"];
@@ -46,6 +47,11 @@ export interface ExpenseDrawerProps {
   onClose: () => void;
   /** Saved: what to tell the person, and whether to keep the drawer open (save & new). */
   onSaved: (message: string, keepOpen?: boolean) => void;
+  /**
+   * Given once the categories are read: with no active one, a new expense
+   * invites to create the first category instead of an unfillable form.
+   */
+  onCreateCategory?: () => void;
 }
 
 /**
@@ -54,11 +60,11 @@ export interface ExpenseDrawerProps {
  * is the table's column order. Defaults make the common case one click: today,
  * cash, the last category used.
  */
-export function ExpenseDrawer({ expense, categories, today, canWrite, onClose, onSaved }: ExpenseDrawerProps): ReactElement {
+export function ExpenseDrawer({ expense, categories, today, canWrite, onClose, onSaved, onCreateCategory }: ExpenseDrawerProps): ReactElement {
   const editing = expense !== undefined;
   const [spentOn, setSpentOn] = useState(expense?.spentOn ?? today);
   const [categoryId, setCategoryId] = useState(expense?.categoryId ?? "");
-  const [amount, setAmount] = useState(expense !== undefined ? centsToPesosInput(expense.amountCents) : "");
+  const [amount, setAmount] = useState(expense !== undefined ? formatPesosInput(expense.amountCents) : "");
   const [method, setMethod] = useState<ExpenseMethod>(expense?.method ?? "cash");
   const [description, setDescription] = useState(expense?.description ?? "");
   const [reason, setReason] = useState("");
@@ -174,6 +180,10 @@ export function ExpenseDrawer({ expense, categories, today, canWrite, onClose, o
   };
 
   const title = editing ? (cancelled ? "Egreso cancelado" : canWrite ? "Editar egreso" : "Egreso") : "Registrar egreso";
+
+  if (!editing && options.length === 0 && onCreateCategory !== undefined) {
+    return <FirstCategoryInvite onCreateCategory={onCreateCategory} onClose={onClose} />;
+  }
 
   return (
     <SlideOver

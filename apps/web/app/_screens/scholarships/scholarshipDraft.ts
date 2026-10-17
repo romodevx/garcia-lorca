@@ -5,7 +5,7 @@
  * The value stays TEXT until `readDraft`: a percent becomes basis points and
  * an amount becomes cents only there, so nothing typed is silently a zero.
  */
-import { centsToPesosInput, pesosToCents } from "../../_lib/money";
+import { formatPesosInput, pesosToCents } from "../../_lib/money";
 import type { Scholarship, ScholarshipInput, ScholarshipKind } from "../../scholarships/api";
 import { basisPointsToPercentInput, percentToBasisPoints } from "../../scholarships/format";
 
@@ -39,7 +39,7 @@ export function emptyDraft(): ScholarshipDraft {
 }
 
 export function draftFromScholarship(s: Scholarship): ScholarshipDraft {
-  const value = s.kind === "percent" ? basisPointsToPercentInput(s.value) : centsToPesosInput(s.value);
+  const value = s.kind === "percent" ? basisPointsToPercentInput(s.value) : formatPesosInput(s.value);
   return { name: s.name, kind: s.kind, value, targets: [...s.targets], active: s.active };
 }
 

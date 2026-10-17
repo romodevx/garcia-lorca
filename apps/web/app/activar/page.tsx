@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactElement, useState } from "react";
+import { type ReactElement, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { SetPassword } from "../_screens/SetPassword";
@@ -30,6 +30,8 @@ export default function ActivatePage(): ReactElement {
   const token = params.get("token") ?? "";
 
   const [pending, setPending] = useState(false);
+  // A ref and not the state: two presses inside one render both read `pending` as false.
+  const inFlight = useRef(false);
   const [error, setError] = useState<string | undefined>(undefined);
   const [done, setDone] = useState(false);
 
@@ -59,6 +61,8 @@ export default function ActivatePage(): ReactElement {
   }
 
   const onSubmit = (password: string): void => {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setPending(true);
     setError(undefined);
     void acceptInvitation(API_URL, token, password)
@@ -70,7 +74,10 @@ export default function ActivatePage(): ReactElement {
           "Esta invitación ya no es válida. Pide una nueva en la dirección del colegio o escribe a soporte@garcialorca.edu.mx.",
         );
       })
-      .finally(() => setPending(false));
+      .finally(() => {
+        inFlight.current = false;
+        setPending(false);
+      });
   };
 
   return (

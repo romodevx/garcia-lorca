@@ -1,35 +1,44 @@
 /**
- * The order a Mexican school reads its groups in: level (as the catalogue
- * lists them), then grade ordinal, then group letter (es-MX collation).
- * Pure — shared by every picker that lists groups.
+ * The order a Mexican school reads its groups in: level (the school's own
+ * `sortOrder`, else the catalogue's list order), then grade ordinal, then
+ * group name (es-MX collation). Pure — `labelGroups` applies it, so every
+ * screen that lists groups gets them in this order (ISSUE-018).
  */
 
-import type { GradeLevel, LabelledGroup, Level } from "./api";
+import type { GradeLevel, Group, Level } from "./api";
 
 const LOCALE = "es-MX";
 const UNKNOWN_RANK = Number.MAX_SAFE_INTEGER;
 
 export interface SchoolCatalogue {
-  levels: readonly Level[];
-  grades: readonly GradeLevel[];
+  levels: readonly Pick<Level, "id" | "sortOrder">[];
+  grades: readonly Pick<GradeLevel, "id" | "levelId" | "ordinal">[];
 }
 
-/** Comparator: level → grade → letter; a group whose grade/level is unknown sorts last. */
-export function schoolOrder(cat: SchoolCatalogue): (a: LabelledGroup, b: LabelledGroup) => number {
-  const levelIndex = new Map(cat.levels.map((l, i) => [l.id, i]));
+/** Comparator: level → grade → name; a group whose grade/level is unknown sorts last. */
+export function schoolOrder(cat: SchoolCatalogue): (a: Group, b: Group) => number {
+  const levelRank = new Map(cat.levels.map((l, i) => [l.id, l.sortOrder ?? i + 1]));
   const gradeById = new Map(cat.grades.map((g) => [g.id, g]));
-  const rank = (g: LabelledGroup): [number, number] => {
+  const rank = (g: Group): { orphan: number; level: number; levelId: string; ordinal: number } => {
     const grade = gradeById.get(g.gradeLevelId);
-    return [levelIndex.get(grade?.levelId ?? "") ?? UNKNOWN_RANK, grade?.ordinal ?? 0];
+    const levelId = grade?.levelId ?? "";
+    return { orphan: grade === undefined ? 1 : 0, level: levelRank.get(levelId) ?? UNKNOWN_RANK, levelId, ordinal: grade?.ordinal ?? 0 };
   };
   return (a, b) => {
-    const [la, ga] = rank(a);
-    const [lb, gb] = rank(b);
-    return la - lb || ga - gb || a.name.localeCompare(b.name, LOCALE, { numeric: true });
+    const ra = rank(a);
+    const rb = rank(b);
+    return (
+      ra.orphan - rb.orphan ||
+      ra.level - rb.level ||
+      // Levels that could not be read still stay together, not interleaved by grade.
+      ra.levelId.localeCompare(rb.levelId) ||
+      ra.ordinal - rb.ordinal ||
+      a.name.localeCompare(b.name, LOCALE, { numeric: true })
+    );
   };
 }
 
 /** A sorted copy; the input is left untouched. */
-export function sortBySchoolOrder<G extends LabelledGroup>(groups: readonly G[], cat: SchoolCatalogue): G[] {
+export function sortBySchoolOrder<G extends Group>(groups: readonly G[], cat: SchoolCatalogue): G[] {
   return [...groups].sort(schoolOrder(cat));
 }

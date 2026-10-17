@@ -1,20 +1,29 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type RefObject } from "react";
 import { pesosToCents } from "../../_lib/money";
 import { Btn } from "../../_design/Controls";
 import { MoneyField, useFocusFirstInvalid } from "../../_design/form";
 import { TenderEditor } from "../../_design/payments/TenderEditor";
 import { useTenders } from "../../_design/payments/useTenders";
+import { ClosedCutNotice } from "../../_design/payments/ClosedCutNotice";
+import { useClosedCut } from "../../_design/payments/useClosedCut";
 import { Icon } from "../../_design/Icon";
 import { SizeQuantityPicker, type SizePick } from "../../_design/SizeQuantityPicker";
 import { counterSale, UniformsError, type SaleLine, type UniformItem, type UniformOrder } from "../../uniforms/api";
 import type { Student } from "../../students/api";
 import { ReceiptActions } from "../receipts/ReceiptActions";
 import { StudentPicker } from "./StudentPicker";
-import { EmptyState, ErrorNote, field, FieldLabel, label, money } from "./parts";
+import { EmptyState, ErrorNote, FieldError, fieldWithError, FieldLabel, label, money } from "./parts";
 
 import { API_URL } from "../../api-url";
+
+const EMPTY_CART = "Agrega al menos una prenda al carrito.";
+const NO_STUDENT = "Elige al alumno, o marca «Venta sin alumno».";
+const NO_BUYER = "Escribe quién compró: sin eso la venta no se puede reclamar después.";
+
+/** What stops the sale, in the order the screen asks for it; undefined when nothing does. */
+type SaleGap = "cart" | "student" | "buyer";
 
 
 /**
@@ -49,6 +58,16 @@ export function CounterSalePanel({
   const [note, setNote] = useState("");
   const [received, setReceived] = useState("");
   const [pending, setPending] = useState(false);
+  // A ref and not the state: a double click lands before `pending` repaints.
+  // The sale key already stops a second charge; this stops a second request.
+  const inFlight = useRef(false);
+  const [gap, setGap] = useState<SaleGap | undefined>(undefined);
+  // Where each gap sends the cursor: the first garment, the pupil, the buyer.
+  const firstItemRef = useRef<HTMLButtonElement>(null);
+  const studentInputRef = useRef<HTMLInputElement>(null);
+  const noteInputRef = useRef<HTMLInputElement>(null);
+  // A counter sale enters today's cut: said at the till when it is closed (ISSUE-026).
+  const cutClosed = useClosedCut("", canSell);
   const [failure, setFailure] = useState<UniformsError | null>(null);
   const [sold, setSold] = useState<UniformOrder | null>(null);
   // "Agregar al carrito" unmounts the picker with the button that had focus;
@@ -121,12 +140,21 @@ export function CounterSalePanel({
   }, []);
 
   const sell = useCallback(async (): Promise<void> => {
+    if (inFlight.current) return;
+    // Never a greyed-out button: pressing it says what the sale still needs.
+    const missing = saleGap(cart.length, anonymous, student !== null, note);
+    setGap(missing);
+    if (missing !== undefined) {
+      focusGap({ cart: firstItemRef, student: studentInputRef, buyer: noteInputRef }, missing);
+      return;
+    }
     if (!tenders.validate()) {
       focusFirstInvalid();
       return;
     }
     const split = tenders.toTenders();
     const [first] = split;
+    inFlight.current = true;
     setPending(true);
     setFailure(null);
     try {
@@ -156,6 +184,7 @@ export function CounterSalePanel({
     } catch (err) {
       setFailure(err instanceof UniformsError ? err : new UniformsError("internal", "Algo salió mal"));
     } finally {
+      inFlight.current = false;
       setPending(false);
     }
   }, [anonymous, cart, focusFirstInvalid, note, onSold, saleKey, student, tenders]);
@@ -197,10 +226,9 @@ export function CounterSalePanel({
     );
   }
 
-  const canConfirm =
-    cart.length > 0 &&
-    !pending &&
-    (anonymous ? note.trim() !== "" : student !== null);
+  // A gap the cashier already filled stops being shown, without a second press.
+  const shownGap = gap !== undefined && saleGap(cart.length, anonymous, student !== null, note) === gap ? gap : undefined;
+  const buyerError = shownGap === "buyer" ? NO_BUYER : undefined;
 
   return (
     <div style={{ display: "grid", gap: 18 }}>
@@ -217,9 +245,10 @@ export function CounterSalePanel({
       <section>
         <p style={label}>1. Prenda</p>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-          {activeItems.map((item) => (
+          {activeItems.map((item, index) => (
             <button
               key={item.id}
+              ref={index === 0 ? firstItemRef : undefined}
               onClick={() => setSelectedItem(item)}
               aria-pressed={selectedItem?.id === item.id}
               style={{
@@ -296,7 +325,7 @@ export function CounterSalePanel({
       <section style={{ display: "grid", gap: 12 }}>
         <p style={label}>3. Para quién</p>
         {!anonymous ? (
-          <StudentPicker value={student} onChange={setStudent} />
+          <StudentPicker value={student} onChange={setStudent} inputRef={studentInputRef} />
         ) : (
           <div
             style={{
@@ -335,11 +364,14 @@ export function CounterSalePanel({
           </FieldLabel>
           <input
             id="counter-note"
-            style={field}
-            aria-describedby="counter-note-help"
+            ref={noteInputRef}
+            style={fieldWithError(buyerError !== undefined)}
+            aria-describedby={buyerError !== undefined ? "counter-note-help counter-note-error" : "counter-note-help"}
+            aria-invalid={buyerError !== undefined ? true : undefined}
             value={note}
             onChange={(e) => setNote(e.target.value)}
           />
+          <FieldError htmlFor="counter-note" message={buyerError} />
         </div>
       </section>
 
@@ -360,11 +392,29 @@ export function CounterSalePanel({
         )}
       </section>
 
-      <Btn icon="check" onClick={() => void sell()} disabled={!canConfirm}>
+      <ClosedCutNotice closed={cutClosed} day="" />
+      {(shownGap === "cart" || shownGap === "student") && (
+        <p role="alert" style={{ fontSize: 14, fontWeight: 600, color: "var(--bad-fg)" }}>
+          {shownGap === "cart" ? EMPTY_CART : NO_STUDENT}
+        </p>
+      )}
+      <Btn icon="check" onClick={() => void sell()} busy={pending}>
         {pending ? "Cobrando…" : `Cobrar y entregar · ${money(total)}`}
       </Btn>
     </div>
   );
+}
+
+/** The first thing the sale lacks, in the order the screen asks for it. */
+function saleGap(cartLines: number, anonymous: boolean, hasStudent: boolean, note: string): SaleGap | undefined {
+  if (cartLines === 0) return "cart";
+  if (anonymous) return note.trim() === "" ? "buyer" : undefined;
+  return hasStudent ? undefined : "student";
+}
+
+/** Takes the cashier to what is missing: the garments, the pupil or the buyer. */
+function focusGap(targets: Record<SaleGap, RefObject<HTMLElement | null>>, gap: SaleGap): void {
+  targets[gap].current?.focus();
 }
 
 interface CartLine {

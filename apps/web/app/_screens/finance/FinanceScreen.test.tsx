@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -81,6 +81,64 @@ describe("FinanceScreen", () => {
     await waitFor(() =>
       expect(finance.registerPayment).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ chargeId: "ch1", amountCents: 50000, method: "cash" })),
     );
+  });
+});
+
+// T12 (from T7's review): the balance opened as "1000.00" until the blur.
+describe("FinanceScreen · el monto al abrir", () => {
+  it("pre-fills the charge's balance with its thousands separator", async () => {
+    const user = userEvent.setup();
+    render(<FinanceScreen onBack={() => {}} />);
+    await screen.findByText("Cruz Valentina");
+
+    await user.click(screen.getAllByRole("button", { name: /Registrar pago/ })[0] as HTMLElement);
+    const dialog = await screen.findByRole("dialog", { name: "Registrar pago" });
+
+    expect(within(dialog).getByLabelText("Monto a pagar", { selector: "input" })).toHaveValue("1,000.00");
+  });
+});
+
+// ISSUE-026 (found again in /qa): Finanzas' own "Registrar pago" enters the
+// day's cut too, and said nothing when that cut was closed.
+describe("FinanceScreen · Registrar pago con el corte cerrado", () => {
+  it("warns before registering, without blocking it", async () => {
+    finance.getCashUp.mockResolvedValue({
+      deposits: [], cancelled: [], superseded: [], payments: [], cashCents: 0, cardCents: 0, transferCents: 0, totalCents: 0, creditNoteCents: 0,
+      closure: { id: "cut", day: "2026-10-16" } as financeApi.CashUp["closure"],
+    });
+    finance.registerPayment.mockResolvedValue({} as financeApi.PaymentResult);
+    const user = userEvent.setup();
+    render(<FinanceScreen onBack={() => {}} />);
+    await screen.findByText("Cruz Valentina");
+    await user.click(screen.getAllByRole("button", { name: /Registrar pago/ })[0] as HTMLElement);
+    const dialog = await screen.findByRole("dialog", { name: "Registrar pago" });
+
+    expect(await within(dialog).findByText(/El corte de hoy ya se cerró/)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: /^Registrar pago$/ }));
+    await waitFor(() => expect(finance.registerPayment).toHaveBeenCalledTimes(1));
+  });
+});
+
+describe("FinanceScreen · Registrar pago while saving", () => {
+  it("is busy, not disabled, and two presses in one render send one payment", async () => {
+    finance.registerPayment.mockReturnValue(new Promise<financeApi.PaymentResult>(() => {}));
+    const user = userEvent.setup();
+    render(<FinanceScreen onBack={() => {}} />);
+    await screen.findByText("Cruz Valentina");
+    await user.click(screen.getAllByRole("button", { name: /Registrar pago/ })[0] as HTMLElement);
+    const dialog = await screen.findByRole("dialog", { name: "Registrar pago" });
+
+    // Two presses inside one render: state cannot see the first, a ref can.
+    const save = within(dialog).getByRole("button", { name: /^Registrar pago$/ });
+    act(() => {
+      save.click();
+      save.click();
+    });
+
+    const busy = await within(dialog).findByRole("button", { name: "Registrando…" });
+    expect(busy).toBeEnabled();
+    expect(busy).toHaveAttribute("aria-busy", "true");
+    expect(finance.registerPayment).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactElement } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactElement } from "react";
 import { Avatar } from "../../_design/Brand";
 import { Btn } from "../../_design/Controls";
 import { DrawerShell } from "../../_design/DrawerShell";
@@ -11,6 +11,8 @@ import { DateField, MoneyField, useFocusFirstInvalid } from "../../_design/form"
 import { TenderEditor } from "../../_design/payments/TenderEditor";
 import { AMOUNT_ERROR } from "../../_design/payments/tenders";
 import { useTenders } from "../../_design/payments/useTenders";
+import { ClosedCutNotice } from "../../_design/payments/ClosedCutNotice";
+import { useClosedCut } from "../../_design/payments/useClosedCut";
 import { paymentDateError } from "./CollectDrawer";
 import { StudentNotesBeside, useNotesBeside, type NotesAccess } from "../../_design/students/StudentNotesBeside";
 import { listCycles, type Cycle } from "../../config/api";
@@ -18,7 +20,7 @@ import { getOverdue, listCharges, registerPayment, type Charge } from "../../fin
 import { pendingCents } from "../../finance/pending";
 import { localISODate } from "../../_lib/localDate";
 import { schoolISODate, schoolMonthStart } from "../../_lib/schoolDay";
-import { centsToPesosInput, formatCents, pesosToCents } from "../../_lib/money";
+import { centsToPesosInput, formatCents, formatPesosInput, pesosToCents } from "../../_lib/money";
 import { listStudents, type Student } from "../../students/api";
 import { useIntent } from "../../routing/pendingIntent";
 
@@ -78,7 +80,7 @@ export function chargeAmountError(cents: number, remainingCents: number): string
 function PayDrawer({ charge, name, today, notes, onClose, onPaid }: { charge: Charge; name: string; today?: string; notes?: NotesAccess; onClose: () => void; onPaid: () => void }): ReactElement {
   // The pupil's notes on the left, as at the counter (T6).
   const beside = useNotesBeside(charge.studentId, notes);
-  const [amount, setAmount] = useState(centsToPesosInput(charge.remainingCents));
+  const [amount, setAmount] = useState(formatPesosInput(charge.remainingCents));
   const [amountError, setAmountError] = useState<string | undefined>(undefined);
   // The day the family paid (task 7): not always the day it is keyed.
   const day = today ?? localISODate();
@@ -87,7 +89,11 @@ function PayDrawer({ charge, name, today, notes, onClose, onPaid }: { charge: Ch
   const sentDate = paidOn === day ? "" : paidOn;
   const focusFirstInvalid = useFocusFirstInvalid();
   const [dateError, setDateError] = useState<string | undefined>(undefined);
+  // The payment enters the cut of the day it is dated: said before it is taken (ISSUE-026).
+  const cutClosed = useClosedCut(sentDate, paymentDateError(paidOn, day) === undefined);
   const [saving, setSaving] = useState(false);
+  // A ref and not the state: two presses inside one render both read `saving` as false.
+  const inFlight = useRef(false);
   const [error, setError] = useState<string | undefined>(undefined);
   // One key per ATTEMPT, minted when the drawer opens and kept across retries.
   // The gateway dedupes on it, so a retry after a network error returns the
@@ -106,7 +112,7 @@ function PayDrawer({ charge, name, today, notes, onClose, onPaid }: { charge: Ch
   const dirty = amount.trim() !== "" || tenders.dirty;
 
   const submit = async (): Promise<void> => {
-    if (saving) return;
+    if (inFlight.current) return;
     const wrongDate = paymentDateError(paidOn, day);
     const wrongAmount = chargeAmountError(cents, charge.remainingCents);
     setDateError(wrongDate);
@@ -118,6 +124,7 @@ function PayDrawer({ charge, name, today, notes, onClose, onPaid }: { charge: Ch
     }
     const split = tenders.toTenders();
     const [first] = split;
+    inFlight.current = true;
     setSaving(true);
     setError(undefined);
     try {
@@ -134,6 +141,7 @@ function PayDrawer({ charge, name, today, notes, onClose, onPaid }: { charge: Ch
       onPaid();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "No se pudo registrar el pago.");
+      inFlight.current = false;
       setSaving(false);
     }
   };
@@ -158,7 +166,7 @@ function PayDrawer({ charge, name, today, notes, onClose, onPaid }: { charge: Ch
         <>
           <Btn kind="ghost" onClick={onClose}>Cancelar</Btn>
           <div style={{ flex: 1 }} />
-          <Btn icon="check" onClick={() => void submit()} style={{ height: 52, fontSize: 16 }}>Registrar pago</Btn>
+          <Btn icon="check" onClick={() => void submit()} busy={saving} style={{ height: 52, fontSize: 16 }}>{saving ? "Registrando…" : "Registrar pago"}</Btn>
         </>
       }
     >
@@ -192,6 +200,7 @@ function PayDrawer({ charge, name, today, notes, onClose, onPaid }: { charge: Ch
               error={dateError}
               help="El día en que la familia pagó. Si capturas tarde, pon ese día: el recargo y el pronto pago se calculan con él."
             />
+            <ClosedCutNotice closed={cutClosed} day={sentDate} />
             {error !== undefined && <p role="alert" style={{ color: "var(--bad-fg)", fontSize: 14, margin: 0 }}>{error}</p>}
       </StudentNotesBeside>
     </DrawerShell>

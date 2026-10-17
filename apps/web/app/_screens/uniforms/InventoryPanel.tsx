@@ -1,13 +1,19 @@
 "use client";
 
-import { useCallback, useMemo, useState, type ReactElement } from "react";
+import { useCallback, useMemo, useRef, useState, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
 import { DrawerShell } from "../../_design/DrawerShell";
 import { Icon } from "../../_design/Icon";
 import { adjustStock, receiveStock, UniformsError, type UniformItem } from "../../uniforms/api";
-import { EmptyState, ErrorNote, field, FieldLabel, label, StockPill } from "./parts";
+import { EmptyState, ErrorNote, field, FieldError, fieldWithError, FieldLabel, label, StockPill } from "./parts";
+
 
 import { API_URL } from "../../api-url";
+
+const NO_PIECES = "Escribe cuántas piezas llegaron de al menos una talla.";
+const NO_DELTA = "Escribe cuánto cambia la existencia, por ejemplo -2 o 3.";
+const MIN_REASON = 3;
+const NO_REASON = `Escribe el motivo del ajuste (al menos ${MIN_REASON} letras).`;
 
 
 /**
@@ -258,6 +264,11 @@ function ReceiveDrawer({
   const [quantities, setQuantities] = useState<Record<string, string>>({});
   const [note, setNote] = useState("");
   const [pending, setPending] = useState(false);
+  // A ref and not the state: a double click lands before `pending` repaints,
+  // and booking a box in twice doubles the shelf.
+  const inFlight = useRef(false);
+  const [piecesError, setPiecesError] = useState<string | undefined>(undefined);
+  const quantitiesRef = useRef<HTMLDivElement>(null);
 
   const lines = useMemo(
     () =>
@@ -268,6 +279,14 @@ function ReceiveDrawer({
   );
 
   const save = useCallback(async (): Promise<void> => {
+    if (inFlight.current) return;
+    // Never a greyed-out button: saving an empty receipt says what is missing.
+    if (lines.length === 0) {
+      setPiecesError(NO_PIECES);
+      quantitiesRef.current?.querySelector("input")?.focus();
+      return;
+    }
+    inFlight.current = true;
     setPending(true);
     try {
       await receiveStock(API_URL, lines, note);
@@ -276,6 +295,7 @@ function ReceiveDrawer({
       onError(err instanceof UniformsError ? err : new UniformsError("internal", "Algo salió mal"));
       onClose();
     } finally {
+      inFlight.current = false;
       setPending(false);
     }
   }, [lines, note, onClose, onDone, onError]);
@@ -304,24 +324,30 @@ function ReceiveDrawer({
         ))}
       </select>
 
-      <p style={{ ...label, marginTop: 16 }}>Piezas por talla</p>
-      <div style={{ display: "grid", gap: 8 }}>
+      <p id="receive-pieces" style={{ ...label, marginTop: 16 }}>Piezas por talla</p>
+      <div ref={quantitiesRef} style={{ display: "grid", gap: 8 }}>
         {[...item.sizes]
           .sort((a, b) => a.sizeOrder - b.sizeOrder)
           .map((size) => (
             <div key={size.id} style={{ display: "flex", alignItems: "center", gap: 12 }}>
               <span style={{ width: 70, fontWeight: 700 }}>{size.sizeLabel}</span>
               <input
-                style={{ ...field, maxWidth: 120 }}
+                style={{ ...fieldWithError(piecesError !== undefined), maxWidth: 120 }}
                 inputMode="numeric"
                 aria-label={`Piezas talla ${size.sizeLabel}`}
+                aria-invalid={piecesError !== undefined ? true : undefined}
+                aria-describedby={piecesError !== undefined ? "receive-pieces-error" : undefined}
                 value={quantities[size.id] ?? ""}
-                onChange={(e) => setQuantities((q) => ({ ...q, [size.id]: e.target.value }))}
+                onChange={(e) => {
+                  setQuantities((q) => ({ ...q, [size.id]: e.target.value }));
+                  if (Number(e.target.value) > 0) setPiecesError(undefined);
+                }}
               />
               <span style={{ fontSize: 13, color: "var(--text-faint)" }}>tiene {size.onHand}</span>
             </div>
           ))}
       </div>
+      <FieldError htmlFor="receive-pieces" message={piecesError} />
 
       <FieldLabel
         htmlFor="receive-note"
@@ -342,7 +368,7 @@ function ReceiveDrawer({
         <Btn kind="ghost" onClick={onClose}>
           Cancelar
         </Btn>
-        <Btn icon="check" onClick={() => void save()} disabled={lines.length === 0 || pending}>
+        <Btn icon="check" onClick={() => void save()} busy={pending}>
           {pending ? "Guardando…" : `Guardar ${lines.reduce((n, l) => n + l.qty, 0)} piezas`}
         </Btn>
       </div>
@@ -370,11 +396,26 @@ function AdjustDrawer({
   const [delta, setDelta] = useState("");
   const [note, setNote] = useState("");
   const [pending, setPending] = useState(false);
+  const inFlight = useRef(false);
+  const [deltaError, setDeltaError] = useState<string | undefined>(undefined);
+  const [noteError, setNoteError] = useState<string | undefined>(undefined);
+  const deltaInput = useRef<HTMLInputElement>(null);
+  const noteInput = useRef<HTMLInputElement>(null);
 
   const parsed = Number(delta);
-  const valid = Number.isFinite(parsed) && parsed !== 0 && note.trim().length >= 3;
+  const deltaOk = delta.trim() !== "" && Number.isFinite(parsed) && parsed !== 0;
+  const noteOk = note.trim().length >= MIN_REASON;
 
   const save = useCallback(async (): Promise<void> => {
+    if (inFlight.current) return;
+    // Never a greyed-out button: every problem is marked, the first takes the focus.
+    setDeltaError(deltaOk ? undefined : NO_DELTA);
+    setNoteError(noteOk ? undefined : NO_REASON);
+    if (!deltaOk || !noteOk) {
+      (deltaOk ? noteInput : deltaInput).current?.focus();
+      return;
+    }
+    inFlight.current = true;
     setPending(true);
     try {
       await adjustStock(API_URL, target.sizeId, parsed, note.trim());
@@ -383,9 +424,10 @@ function AdjustDrawer({
       onError(err instanceof UniformsError ? err : new UniformsError("internal", "Algo salió mal"));
       onClose();
     } finally {
+      inFlight.current = false;
       setPending(false);
     }
-  }, [note, onClose, onDone, onError, parsed, target.sizeId]);
+  }, [deltaOk, note, noteOk, onClose, onDone, onError, parsed, target.sizeId]);
 
   return (
     <Drawer title={`Ajustar ${target.item.name} · ${target.sizeLabel}`} icon="settings" onClose={onClose}>
@@ -397,12 +439,19 @@ function AdjustDrawer({
       </FieldLabel>
       <input
         id="adjust-delta"
-        style={field}
+        ref={deltaInput}
+        style={fieldWithError(deltaError !== undefined)}
         inputMode="numeric"
-        aria-describedby="adjust-delta-help"
+        aria-describedby={deltaError !== undefined ? "adjust-delta-help adjust-delta-error" : "adjust-delta-help"}
+        aria-invalid={deltaError !== undefined ? true : undefined}
         value={delta}
-        onChange={(e) => setDelta(e.target.value)}
+        onChange={(e) => {
+          setDelta(e.target.value);
+          const n = Number(e.target.value);
+          if (e.target.value.trim() !== "" && Number.isFinite(n) && n !== 0) setDeltaError(undefined);
+        }}
       />
+      <FieldError htmlFor="adjust-delta" message={deltaError} />
       <FieldLabel
         htmlFor="adjust-note"
         style={{ marginTop: 16 }}
@@ -412,11 +461,17 @@ function AdjustDrawer({
       </FieldLabel>
       <input
         id="adjust-note"
-        style={field}
-        aria-describedby="adjust-note-help"
+        ref={noteInput}
+        style={fieldWithError(noteError !== undefined)}
+        aria-describedby={noteError !== undefined ? "adjust-note-help adjust-note-error" : "adjust-note-help"}
+        aria-invalid={noteError !== undefined ? true : undefined}
         value={note}
-        onChange={(e) => setNote(e.target.value)}
+        onChange={(e) => {
+          setNote(e.target.value);
+          if (e.target.value.trim().length >= MIN_REASON) setNoteError(undefined);
+        }}
       />
+      <FieldError htmlFor="adjust-note" message={noteError} />
       <p style={{ fontSize: 12.5, color: "var(--text-faint)", marginTop: 8 }}>
         Queda registrado con tu nombre y no se puede borrar.
       </p>
@@ -424,7 +479,7 @@ function AdjustDrawer({
         <Btn kind="ghost" onClick={onClose}>
           Cancelar
         </Btn>
-        <Btn icon="check" onClick={() => void save()} disabled={!valid || pending}>
+        <Btn icon="check" onClick={() => void save()} busy={pending}>
           {pending ? "Guardando…" : "Guardar ajuste"}
         </Btn>
       </div>

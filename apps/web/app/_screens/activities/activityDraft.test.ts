@@ -143,4 +143,15 @@ describe("draftFromActivity", () => {
     const { id: _id, enrolledCount: _n, ...input } = activity;
     expect(readDraft(draftFromActivity(activity)).input).toEqual(input);
   });
+
+  it("opens money with thousands separators, as the field shows it after blur (T12)", () => {
+    const activity: Activity = {
+      id: "a1", enrolledCount: 0, name: "Robótica", periodicity: "monthly",
+      schedule: [], billingStartsOn: "2026-10-01", firstDueOn: "2026-10-03", lateFeeCents: 125000, active: true,
+      options: [{ id: OPT, daysPerWeek: null, amountCents: 120000 }],
+    };
+    const draft = draftFromActivity(activity);
+    expect(draft.lateFee).toBe("1,250.00");
+    expect(draft.options[0]?.amount).toBe("1,200.00");
+  });
 });
