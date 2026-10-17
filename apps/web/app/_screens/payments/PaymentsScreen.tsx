@@ -5,7 +5,7 @@ import { Avatar } from "../../_design/Brand";
 import { Btn } from "../../_design/Controls";
 import { Icon } from "../../_design/Icon";
 import { Page } from "../../_design/Page";
-import { listStudents, type Student } from "../../students/api";
+import { listStudentsWithRooms, type Student } from "../../students/api";
 import { getExpected } from "../../finance/api";
 import { API_URL } from "../../api-url";
 import { formatCents } from "../../_lib/money";
@@ -69,7 +69,7 @@ export function PaymentsScreen({ onBack, canGrantDiscounts = false, notes, canCo
 
   const loadRoll = useCallback(() => {
     setRoll("loading");
-    listStudents(API_URL)
+    listStudentsWithRooms(API_URL)
       .then((rows) => { setStudents(rows); setRoll("ready"); })
       .catch(() => setRoll("failed"));
   }, []);

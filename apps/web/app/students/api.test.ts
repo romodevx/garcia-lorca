@@ -4,6 +4,7 @@ import {
   getStudent,
   listEnrollments,
   listStudents,
+  listStudentsWithRooms,
   transfer,
   updateStudent,
   withdraw,
@@ -76,9 +77,27 @@ describe("listStudents", () => {
     await expect(listStudents(BASE)).resolves.toEqual([]);
   });
 
+  it("never asks for the classroom labels: they cost the gateway five catalog reads", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ students: [student] }));
+    vi.stubGlobal("fetch", fetchMock);
+    await listStudents(BASE);
+    expect(lastCall(fetchMock)[0]).not.toContain("include");
+  });
+
   it("throws on a non-ok response", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("", { status: 403 })));
     await expect(listStudents(BASE)).rejects.toThrow();
+  });
+});
+
+describe("listStudentsWithRooms (CC-211)", () => {
+  it("asks the gateway for each pupil's groupLabel and keeps it", async () => {
+    const labelled = { ...student, groupLabel: "3° PRIMARIA · B" };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ students: [labelled] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(listStudentsWithRooms(BASE)).resolves.toEqual([labelled]);
+    expect(lastCall(fetchMock)[0]).toBe("http://gw/api/v1/students?include=groupLabel");
   });
 });
 

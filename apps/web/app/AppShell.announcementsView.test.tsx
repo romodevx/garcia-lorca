@@ -37,7 +37,7 @@ vi.mock("./config/api", async (importOriginal) => ({
   listLabelledGroups: vi.fn().mockResolvedValue([]),
 }));
 
-vi.mock("./students/api", () => ({ listStudents: vi.fn().mockResolvedValue([]) }));
+vi.mock("./students/api", () => ({ listStudents: vi.fn().mockResolvedValue([]), listStudentsWithRooms: vi.fn().mockResolvedValue([]) }));
 
 const NEW_VIEW_ONLY = "Destinatarios";
 const OLD_VIEW_ONLY = "¿A quién?";

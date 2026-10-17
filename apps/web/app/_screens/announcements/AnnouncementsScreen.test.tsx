@@ -20,7 +20,7 @@ vi.mock("../../comms/api", () => ({
   updateBirthdayTemplate: vi.fn(),
 }));
 vi.mock("../../config/api", () => ({ listCycles: vi.fn(), listLevels: vi.fn(), listGroups: vi.fn(), listLabelledGroups: vi.fn() }));
-vi.mock("../../students/api", () => ({ listStudents: vi.fn() }));
+vi.mock("../../students/api", () => ({ listStudentsWithRooms: vi.fn() }));
 
 const comms = vi.mocked(commsApi);
 const config = vi.mocked(configApi);
@@ -30,7 +30,7 @@ beforeEach(() => {
   config.listCycles.mockResolvedValue([{ id: "c1", name: "2026-2027", status: "active", startsOn: "2026-08-01", endsOn: "2027-06-30" }]);
   config.listLevels.mockResolvedValue([{ id: "lv1", name: "Primaria", sepCode: "PRIM", enrollmentGranularity: "cycle" }]);
   config.listGroups.mockResolvedValue([{ id: "g1", cycleId: "c1", gradeLevelId: "gl1", name: "1° A", capacity: 30 }]);
-  students.listStudents.mockResolvedValue([
+  students.listStudentsWithRooms.mockResolvedValue([
     { id: "s1", curp: "C1", firstName: "Valentina", lastName: "Cruz", level: "primaria", levelId: "", gradeGroup: "1° A", guardianName: "Tutor", admissionStatus: "enrolled" },
   ]);
   comms.announce.mockResolvedValue({ created: 28, audience: 28 });

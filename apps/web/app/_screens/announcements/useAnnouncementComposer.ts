@@ -3,7 +3,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { announce, type AnnouncementScope } from "../../comms/api";
 import { listCycles, listLabelledGroups, listLevels, type Cycle, type LabelledGroup, type Level } from "../../config/api";
-import { listStudents, type Student } from "../../students/api";
+import { listStudentsWithRooms, type Student } from "../../students/api";
 import { API_URL } from "../../api-url";
 
 /** One key per attempt: a retry must not buzz four hundred phones twice. */
@@ -85,7 +85,7 @@ export function useAnnouncementComposer(): AnnouncementComposer {
   useEffect(() => {
     listCycles(API_URL).then(setCycles).catch(() => setError("No pudimos leer los ciclos.")).finally(() => setCyclesSettled(true));
     listLevels(API_URL).then(setLevels).catch(() => {}).finally(() => setLevelsSettled(true));
-    listStudents(API_URL).then(setStudents).catch(() => {}).finally(() => setStudentsSettled(true));
+    listStudentsWithRooms(API_URL).then(setStudents).catch(() => {}).finally(() => setStudentsSettled(true));
   }, []);
 
   useEffect(() => {

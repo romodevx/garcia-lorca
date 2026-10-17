@@ -230,6 +230,15 @@ export function listStudents(baseURL: string, status?: string): Promise<Student[
   return getList<Student>(baseURL, `/students${query({ status })}`, "students");
 }
 
+/**
+ * The list with each pupil's `groupLabel` ("3° PRIMARIA · B", CC-211). It costs
+ * the gateway five catalog reads, so only the screens that show the classroom
+ * to a role without config:read ask for it (Registro de pagos, Avisos).
+ */
+export function listStudentsWithRooms(baseURL: string): Promise<Student[]> {
+  return getList<Student>(baseURL, `/students${query({ include: "groupLabel" })}`, "students");
+}
+
 export function getStudent(baseURL: string, id: string): Promise<Student> {
   return getJSON<Student>(baseURL, `/students/${id}`);
 }
