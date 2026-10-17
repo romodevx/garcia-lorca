@@ -456,6 +456,49 @@ async function getList<T>(baseURL: string, path: string, key: string): Promise<T
   return data[key] ?? [];
 }
 
+/**
+ * The most pages a whole-set read follows. At the gateway's 500 rows a page
+ * this is 50,000 charges, ten times the largest school; a walk that gets here is
+ * a server handing out tokens forever, and it fails rather than truncates.
+ */
+const MAX_PAGES = 100;
+
+/**
+ * GET every page of a paged list endpoint (`{ <key>: [...], nextPageToken? }`)
+ * and return all the rows, in order.
+ *
+ * It keeps going while `nextPageToken` is present and non-empty, NEVER stopping
+ * on a short or empty page: the overdue read drops settled charges after
+ * cutting the page, so an empty page can sit in front of more debt. A missing
+ * page is money missing from a figure, so every way the walk can fail — a
+ * failed page, a repeated token, too many pages — throws instead of handing back
+ * what it had so far.
+ */
+async function getAllPages<T>(
+  baseURL: string,
+  path: string,
+  params: Record<string, string | undefined>,
+  key: string,
+): Promise<T[]> {
+  const rows: T[] = [];
+  const seen = new Set<string>();
+  let pageToken: string | undefined;
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const data = await getJSON<Record<string, unknown>>(baseURL, `${path}${query({ ...params, pageToken })}`);
+    rows.push(...((data[key] as T[] | undefined) ?? []));
+    const next = data.nextPageToken;
+    if (typeof next !== "string" || next === "") {
+      return rows;
+    }
+    if (seen.has(next)) {
+      throw new Error(`La lista de ${key} repitió una página; no se muestra incompleta.`);
+    }
+    seen.add(next);
+    pageToken = next;
+  }
+  throw new Error(`La lista de ${key} pasó de ${MAX_PAGES} páginas; no se muestra incompleta.`);
+}
+
 /** Builds `?a=1&b=2`, skipping empty values, so optional filters simply drop. */
 function query(params: Record<string, string | undefined>): string {
   const search = new URLSearchParams();
@@ -528,10 +571,13 @@ export async function generateCharges(baseURL: string, input: GenerateChargesInp
   return { created: res.created ?? 0, skipped: res.skipped ?? 0 };
 }
 
-/** Pass a student and/or a cycle: the gateway rejects an unscoped read with 400. */
+/**
+ * Every charge of the filter, across all the gateway's pages. Pass a student
+ * and/or a cycle: the gateway rejects an unscoped read with 400.
+ */
 export async function listCharges(baseURL: string, filters: ChargeFilters = {}): Promise<Charge[]> {
-  const qs = query({ studentId: filters.studentId, cycleId: filters.cycleId });
-  const rows = await getList<Wire<Charge, "status">>(baseURL, `/charges${qs}`, "charges");
+  const params = { studentId: filters.studentId, cycleId: filters.cycleId };
+  const rows = await getAllPages<Wire<Charge, "status">>(baseURL, "/charges", params, "charges");
   return rows.map(toCharge);
 }
 
@@ -550,9 +596,9 @@ export async function cancelCharge(baseURL: string, chargeId: string): Promise<C
   return toCharge(await postAction<Wire<Charge, "status">>(baseURL, `/charges/${chargeId}/cancel`));
 }
 
-/** Charges past their due date with a remaining balance. */
+/** Every charge past its due date with a remaining balance, across all pages. */
 export async function getOverdue(baseURL: string, cycleId?: string): Promise<Charge[]> {
-  const rows = await getList<Wire<Charge, "status">>(baseURL, `/overdue${query({ cycleId })}`, "overdue");
+  const rows = await getAllPages<Wire<Charge, "status">>(baseURL, "/overdue", { cycleId }, "overdue");
   return rows.map(toCharge);
 }
 
