@@ -4,6 +4,7 @@ import { useRef, useState, type ReactElement } from "react";
 
 import { Btn } from "../../../_design/Controls";
 import { DrawerShell } from "../../../_design/DrawerShell";
+import { TextArea, useRequired } from "../../../_design/form";
 import type { GradingPeriod, PeriodsClient } from "../../../grades/periods";
 import { ErrorAlert } from "../../config/parts";
 import { periodTitle } from "./format";
@@ -18,19 +19,37 @@ export interface ReopenPeriodDialogProps {
   onStale: (message: string) => void;
 }
 
-/** Reopening lets grades change again; the families keep the current boleta until the next close issues a new version. */
+/** The longest reason the server stores (CC-308). */
+const MAX_REASON = 500;
+
+/** Shown under the reason when it runs past MAX_REASON. */
+const REASON_TOO_LONG = "Máximo 500 caracteres";
+
+/**
+ * Reopening lets grades change again; the families keep the current boleta until the next close issues a new version.
+ * Why it is reopened is required (CC-308): the server stores it with who did it, so a later "¿quién cambió esta boleta?" has an answer.
+ */
 export function ReopenPeriodDialog({ period, client, onClose, onReopened, onStale }: ReopenPeriodDialogProps): ReactElement {
   const [error, setError] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
+  const [reason, setReason] = useState("");
+  const [tooLong, setTooLong] = useState(false);
+  const required = useRequired(["reason"]);
   // A ref, not the state: two clicks inside one render would both read `busy` as false.
   const inFlight = useRef(false);
 
   const reopen = async (): Promise<void> => {
     if (inFlight.current) return;
+    const trimmed = reason.trim();
+    if (!required.check({ reason: trimmed })) return;
+    if ([...trimmed].length > MAX_REASON) {
+      setTooLong(true);
+      return;
+    }
     inFlight.current = true;
     setBusy(true);
     try {
-      await client.reopen(period.termId);
+      await client.reopen(period.termId, trimmed);
       onReopened();
     } catch (err) {
       const refusal = reopenRefusal(err);
@@ -60,6 +79,19 @@ export function ReopenPeriodDialog({ period, client, onClose, onReopened, onStal
         <p style={{ color: "var(--text-muted)" }}>
           Las familias siguen viendo la boleta actual (v{period.version}). Al volver a cerrar se emite la v{period.version + 1} como “Boleta actualizada”.
         </p>
+        <TextArea
+          label="Motivo"
+          required
+          rows={3}
+          value={reason}
+          help="Queda registrado con tu nombre: por qué se vuelven a modificar las calificaciones."
+          error={required.errors.reason ?? (tooLong ? REASON_TOO_LONG : undefined)}
+          onClearError={() => {
+            required.clear("reason");
+            setTooLong(false);
+          }}
+          onChange={setReason}
+        />
         {error !== undefined && <ErrorAlert message={error} />}
       </div>
     </DrawerShell>

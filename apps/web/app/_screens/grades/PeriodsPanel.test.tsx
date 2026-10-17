@@ -74,6 +74,11 @@ afterEach(() => {
 
 const card = async (name: string): Promise<HTMLElement> => screen.findByRole("article", { name });
 
+/** A reopen needs its reason (CC-308): type one into the open dialog. */
+async function giveReason(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+  await user.type(within(await screen.findByRole("dialog")).getByRole("textbox", { name: /Motivo/ }), "Corrección");
+}
+
 describe("PeriodsPanel — cards", () => {
   it("shows the active cycle's periods per level, with status, dates and capture progress", async () => {
     render(<PeriodsPanel canClose />);
@@ -232,11 +237,41 @@ describe("PeriodsPanel — Reabrir", () => {
 
     const dialog = await screen.findByRole("dialog", { name: "Reabrir PRIMARIA · 2.º trimestre" });
     expect(within(dialog).getByText(/siguen viendo la boleta actual/)).toBeInTheDocument();
+    await user.type(within(dialog).getByRole("textbox", { name: /Motivo/ }), "  Corrección de Matemáticas de 3º B  ");
     await user.click(within(dialog).getByRole("button", { name: "Reabrir periodo" }));
 
-    expect(client.reopen).toHaveBeenCalledWith("t2");
+    expect(client.reopen).toHaveBeenCalledWith("t2", "Corrección de Matemáticas de 3º B");
     await waitFor(() => expect(client.list).toHaveBeenCalledTimes(2));
     expect(await screen.findByRole("status")).toHaveTextContent("Periodo reabierto");
+  });
+});
+
+describe("PeriodsPanel — Reabrir pide el motivo (CC-308)", () => {
+  it("without a reason it says what is missing and reopens nothing", async () => {
+    const user = userEvent.setup();
+    render(<PeriodsPanel canClose />);
+    await user.click(within(await card("PRIMARIA · 2.º trimestre")).getByRole("button", { name: "Reabrir" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.type(within(dialog).getByRole("textbox", { name: /Motivo/ }), "   ");
+    await user.click(within(dialog).getByRole("button", { name: "Reabrir periodo" }));
+
+    expect(await within(dialog).findByText("Falta este dato")).toBeInTheDocument();
+    expect(within(dialog).getByRole("textbox", { name: /Motivo/ })).toHaveAttribute("aria-invalid", "true");
+    expect(client.reopen).not.toHaveBeenCalled();
+  });
+
+  it("over 500 characters it says the limit and reopens nothing", async () => {
+    const user = userEvent.setup();
+    render(<PeriodsPanel canClose />);
+    await user.click(within(await card("PRIMARIA · 2.º trimestre")).getByRole("button", { name: "Reabrir" }));
+    const dialog = await screen.findByRole("dialog");
+    const field = within(dialog).getByRole("textbox", { name: /Motivo/ });
+    await user.click(field);
+    await user.paste("a".repeat(501));
+    await user.click(within(dialog).getByRole("button", { name: "Reabrir periodo" }));
+
+    expect(await within(dialog).findByText("Máximo 500 caracteres")).toBeInTheDocument();
+    expect(client.reopen).not.toHaveBeenCalled();
   });
 });
 
@@ -404,6 +439,7 @@ describe("PeriodsPanel — refusals that mean something", () => {
     client.reopen.mockRejectedValueOnce(new GradeRequestError(409, "El periodo ya está abierto", "ALREADY_OPEN"));
     render(<PeriodsPanel canClose />);
     await user.click(within(await card("PRIMARIA · 2.º trimestre")).getByRole("button", { name: "Reabrir" }));
+    await giveReason(user);
     await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Reabrir periodo" }));
 
     expect(await screen.findByRole("status")).toHaveTextContent("El periodo ya estaba abierto");
@@ -455,6 +491,7 @@ describe("PeriodsPanel — focus and double submits", () => {
     client.list.mockResolvedValueOnce([OPEN, CLOSED]).mockResolvedValue([OPEN, { ...CLOSED, status: "open" }]);
     render(<PeriodsPanel canClose />);
     await user.click(within(await card("PRIMARIA · 2.º trimestre")).getByRole("button", { name: "Reabrir" }));
+    await giveReason(user);
     await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Reabrir periodo" }));
 
     await waitFor(() => expect(within(screen.getByRole("article", { name: "PRIMARIA · 2.º trimestre" })).getByText("Abierto")).toBeInTheDocument());
@@ -482,6 +519,7 @@ describe("PeriodsPanel — focus and double submits", () => {
     client.reopen.mockReturnValue(new Promise(() => {}));
     render(<PeriodsPanel canClose />);
     await user.click(within(await card("PRIMARIA · 2.º trimestre")).getByRole("button", { name: "Reabrir" }));
+    await giveReason(user);
     const button = within(await screen.findByRole("dialog")).getByRole("button", { name: "Reabrir periodo" });
 
     act(() => {
