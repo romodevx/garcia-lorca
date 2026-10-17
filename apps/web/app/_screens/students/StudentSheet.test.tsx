@@ -31,7 +31,9 @@ vi.mock("../../config/api", () => ({
   listLevels: vi.fn(),
   listGradeLevels: vi.fn(),
 }));
-vi.mock("./ContactsPanel", () => ({ ContactsPanel: () => null }));
+vi.mock("./ContactsPanel", () => ({
+  ContactsPanel: () => <div data-testid="contacts" />,
+}));
 
 const students = vi.mocked(studentsApi);
 const config = vi.mocked(configApi);
@@ -47,10 +49,12 @@ const GROUPS = [
   { id: "g-pri-a", cycleId: "c1", gradeLevelId: "gl-pri-1", name: "1° A", capacity: 30 },
   { id: "g-pri-b", cycleId: "c1", gradeLevelId: "gl-pri-1", name: "1° B", capacity: 30 },
   { id: "g-kin-a", cycleId: "c1", gradeLevelId: "gl-kin-1", name: "1° A", capacity: 30 },
+  { id: "g-pri-2a", cycleId: "c1", gradeLevelId: "gl-pri-2", name: "2° A", capacity: 30 },
 ];
 const GRADES = [
   { id: "gl-pri-1", levelId: "lv-pri", name: "1° Primaria", ordinal: 1 },
   { id: "gl-kin-1", levelId: "lv-kin", name: "1° Kínder", ordinal: 1 },
+  { id: "gl-pri-2", levelId: "lv-pri", name: "2° Primaria", ordinal: 2 },
 ];
 
 beforeEach(() => {
@@ -61,7 +65,7 @@ beforeEach(() => {
 });
 afterEach(() => vi.clearAllMocks());
 
-async function openSheet(user: ReturnType<typeof userEvent.setup>, props: { canRevokeCard?: boolean; canWithdraw?: boolean } = {}): Promise<HTMLElement> {
+async function openSheet(user: ReturnType<typeof userEvent.setup>, props: { canRevokeCard?: boolean; canWithdraw?: boolean; onEdit?: (id: string) => void } = {}): Promise<HTMLElement> {
   render(<StudentsScreen onBack={() => {}} {...props} />);
   await user.click(await screen.findByRole("button", { name: "Ver ficha de Cruz Ana" }));
   return screen.getByRole("dialog", { name: "Ficha del alumno" });
@@ -90,13 +94,42 @@ describe("la ficha de un alumno que ya tiene grupo", () => {
     expect(within(sheet).getByRole("button", { name: "Cambiar de grupo" })).toBeInTheDocument();
   });
 
-  it("solo ofrece grupos de su nivel, y no el que ya tiene", async () => {
+  // ISSUE-T14-013: a change of group stays in the pupil's grade; 2° A is
+  // another grade of the same level, and moving grade is not a group change.
+  it("solo ofrece grupos de su mismo grado, y no el que ya tiene", async () => {
     const user = userEvent.setup();
     const sheet = await openSheet(user);
     const group = await within(sheet).findByRole("group", { name: "Cambiar a" });
 
     const offered = within(group).getAllByRole("button").map((b) => b.textContent);
-    expect(offered).toEqual(["1° A"]); // primaria's 1° A only — not kínder's, not its own 1° B
+    expect(offered).toEqual(["1° A"]); // primaria's 1° A only — not kínder's, not 2° A, not its own 1° B
+  });
+
+  // An imported pupil may sit in the wrong grade and the ficha is the only
+  // place to fix it: the other grades are one disclosure away, never gone.
+  it("deja cambiar de grado tras «Ver grupos de otros grados»", async () => {
+    const user = userEvent.setup();
+    students.transfer.mockResolvedValue({ id: "enr-1", studentId: "stu-1", cycleId: "c1", groupId: "g-pri-2a", termId: "", status: "active", enrolledAt: "2026-08-31" });
+    const sheet = await openSheet(user);
+    const disclose = await within(sheet).findByRole("button", { name: "Ver grupos de otros grados" });
+    expect(disclose).toHaveAttribute("aria-expanded", "false");
+    expect(within(sheet).queryByRole("button", { name: "2° A" })).not.toBeInTheDocument();
+
+    await user.click(disclose);
+    expect(disclose).toHaveAttribute("aria-expanded", "true");
+    const others = within(sheet).getByRole("group", { name: "Otros grados" });
+    expect(within(others).getAllByRole("button").map((b) => b.textContent)).toEqual(["2° A"]);
+    await user.click(within(others).getByRole("button", { name: "2° A" }));
+    expect(within(sheet).queryByRole("button", { name: "Cambiar de grupo" })).not.toBeInTheDocument();
+    await user.type(within(sheet).getByLabelText(/^Motivo/), "Venía mal del Excel");
+    await user.click(within(sheet).getByRole("button", { name: "Cambiar de grado" }));
+
+    await waitFor(() =>
+      expect(students.transfer).toHaveBeenCalledWith(expect.any(String), {
+        enrollmentId: "enr-1", toGroupId: "g-pri-2a", reason: "Venía mal del Excel",
+      }),
+    );
+    expect(await screen.findByRole("status")).toHaveTextContent("Cambiado a 2° A");
   });
 
   it("cambia de grupo con el motivo capturado", async () => {
@@ -112,6 +145,8 @@ describe("la ficha de un alumno que ya tiene grupo", () => {
         enrollmentId: "enr-1", toGroupId: "g-pri-a", reason: "Cambio de turno",
       }),
     );
+    // ISSUE-T14-013: the panel closed with no word of what happened.
+    expect(await screen.findByRole("status")).toHaveTextContent("Cambiado a 1° A");
   });
 
   it("un doble clic no manda dos cambios de grupo", async () => {
@@ -155,10 +190,34 @@ describe("la ficha de un alumno que ya tiene grupo", () => {
     expect(submit).not.toBeNull();
     await user.click(submit!);
     await waitFor(() => expect(students.withdraw).toHaveBeenCalledWith(expect.any(String), "enr-1", { withdrawnOn: expect.any(String), reason: "Cambio de escuela" }));
-    const baja = await within(sheet).findByText(/Baja el 15 oct 2026 · Cambio de escuela/);
+    const baja = await within(sheet).findByText(/Alumno dado de baja el 15 oct 2026 · Cambio de escuela/);
     expect(baja).toBeInTheDocument();
     await waitFor(() => expect(baja).toHaveFocus());
     expect(within(sheet).queryByRole("button", { name: "Cambiar de grupo" })).not.toBeInTheDocument();
+  });
+
+  // ISSUE-T14-009: after the withdrawal the sheet kept "Editar ficha" and
+  // the contacts form, and its header still said "Trámite".
+  it("tras la baja, la ficha dice Baja y ya no ofrece editar", async () => {
+    const user = userEvent.setup();
+    students.listStudents
+      .mockResolvedValueOnce([pupil("lv-pri")])
+      .mockResolvedValue([{ ...pupil("lv-pri"), admissionStatus: "withdrawn" }]);
+    students.previewWithdrawal.mockResolvedValue({ toCancel: [], toCancelCents: 0, remainingDebtCents: 0 });
+    students.withdraw.mockResolvedValue({ id: "enr-1", studentId: "stu-1", cycleId: "c1", groupId: "g-pri-b", termId: "", status: "withdrawn", enrolledAt: "2026-08-31", withdrawnOn: "2026-10-15", withdrawalReason: "Cambio de escuela" });
+    const sheet = await openSheet(user, { canWithdraw: true, onEdit: () => {} });
+    expect(within(sheet).getByRole("button", { name: "Editar ficha" })).toBeInTheDocument();
+    await user.click(within(sheet).getByRole("button", { name: "Dar de baja" }));
+    await user.type(within(sheet).getByLabelText("Motivo"), "Cambio de escuela");
+    await user.click(sheet.querySelector<HTMLButtonElement>('form[aria-labelledby="withdraw-title"] button[type="submit"]')!);
+
+    expect(await within(sheet).findByText(/Alumno dado de baja el 15 oct 2026/)).toBeInTheDocument();
+    expect(within(sheet).queryByText("Trámite")).not.toBeInTheDocument();
+    expect(within(sheet).getAllByText("Baja").length).toBeGreaterThan(0);
+    expect(within(sheet).queryByRole("button", { name: "Editar ficha" })).not.toBeInTheDocument();
+    // Owner's rule: the remaining debt is still collected, so contacts stay editable.
+    expect(within(sheet).getByTestId("contacts")).toBeInTheDocument();
+    expect(within(sheet).getByText(/Los contactos siguen editables/)).toBeInTheDocument();
   });
 
   it("returns focus to Dar de baja after closing the panel with unsaved text", async () => {
@@ -191,7 +250,8 @@ describe("la ficha de un alumno sin grupo", () => {
     const sheet = await openSheet(user);
     const group = await within(sheet).findByRole("group", { name: "Inscribir en" });
 
-    expect(within(group).getAllByRole("button").map((b) => b.textContent)).toEqual(["1° A", "1° B"]);
+    // An enrolment may pick any grade of the level: it is where the pupil starts.
+    expect(within(group).getAllByRole("button").map((b) => b.textContent)).toEqual(["1° A", "1° B", "2° A"]);
   });
 
   it("dice lo que respondió el servidor, no un «No se pudo» a secas", async () => {
@@ -228,7 +288,18 @@ describe("lo que la ficha lee", () => {
     const user = userEvent.setup();
     const sheet = await openSheet(user);
 
-    expect(await within(sheet).findByText("Baja el 15 oct 2026 · motivo")).toBeInTheDocument();
+    expect(await within(sheet).findByText("Alumno dado de baja el 15 oct 2026 · motivo")).toBeInTheDocument();
+  });
+
+  it("la ficha de un alumno ya dado de baja es de sólo lectura", async () => {
+    students.listStudents.mockResolvedValue([{ ...pupil("lv-pri"), admissionStatus: "withdrawn" }]);
+    students.listEnrollments.mockResolvedValue([]);
+    const user = userEvent.setup();
+    const sheet = await openSheet(user, { onEdit: () => {} });
+
+    expect(await within(sheet).findByText("Alumno dado de baja")).toBeInTheDocument();
+    expect(within(sheet).queryByRole("button", { name: "Editar ficha" })).not.toBeInTheDocument();
+    expect(within(sheet).getByTestId("contacts")).toBeInTheDocument();
   });
 
   // Not reading the enrolment is not "no group": offering "Inscribir" then
@@ -332,5 +403,20 @@ describe("verificar credencial (tarea 13)", () => {
     render(<StudentsScreen onBack={() => {}} canVerifyCard />);
     await user.click(await screen.findByRole("button", { name: "Verificar credencial" }));
     expect(screen.getByRole("dialog", { name: "Verificar credencial" })).toBeInTheDocument();
+  });
+});
+
+// T14 gate nit: following /alumnos/a → /alumnos/b with a's ficha open opens b.
+describe("la liga directa a una ficha", () => {
+  it("abre la ficha de la nueva liga aunque ya haya una abierta", async () => {
+    students.listStudents.mockResolvedValue([pupil("lv-pri"), { ...pupil("lv-pri"), id: "stu-2", firstName: "Berta", lastName: "Díaz" }]);
+    students.listEnrollments.mockResolvedValue([]);
+    const { rerender } = render(<StudentsScreen onBack={() => {}} linkedStudentId="stu-1" />);
+    const sheet = await screen.findByRole("dialog", { name: "Ficha del alumno" });
+    expect(within(sheet).getByRole("heading", { name: "Cruz Ana" })).toBeInTheDocument();
+
+    rerender(<StudentsScreen onBack={() => {}} linkedStudentId="stu-2" />);
+
+    expect(await within(screen.getByRole("dialog", { name: "Ficha del alumno" })).findByRole("heading", { name: "Díaz Berta" })).toBeInTheDocument();
   });
 });

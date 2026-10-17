@@ -8,6 +8,7 @@ import { HttpError } from "./auth/httpError";
 import { Providers, fakePath, fakeRouter, resetFakeRouter, useFakePathname } from "./test-utils";
 import { changePassword as apiChangePassword, login as apiLogin, logout as apiLogout, me as apiMe, refresh as apiRefresh } from "./auth/api";
 import { mayHaveSession } from "./auth/sessionHint";
+import { getStudent, listStudents } from "./students/api";
 
 // La navegación ES la barra de direcciones. El router falso tiene estado real
 // (test-utils.tsx) para que un clic que navega vuelva a pintar, como en el
@@ -83,6 +84,7 @@ vi.mock("./admin/api", async (importOriginal) => ({
 
 vi.mock("./students/api", () => ({
   listStudents: vi.fn().mockResolvedValue([]),
+  listEnrollments: vi.fn().mockResolvedValue([]),
   listContacts: vi.fn().mockResolvedValue([]),
   listNotes: vi.fn().mockResolvedValue([]),
   getPhotoBlob: vi.fn().mockResolvedValue(null),
@@ -635,6 +637,46 @@ describe("la dirección manda sobre la pantalla", () => {
 
     expect(await screen.findByRole("heading", { name: "Editar ficha" })).toBeInTheDocument();
     expect(await screen.findByLabelText("Nombre(s)")).toHaveValue("ADA");
+  });
+
+  // ISSUE-T14-010: /alumnos/<id> painted Inicio with the address unchanged.
+  it("la liga /alumnos/<id> abre la ficha de ese alumno", async () => {
+    vi.mocked(listStudents).mockResolvedValueOnce([
+      { id: "st1", curp: "CURP1", firstName: "ADA", lastName: "LOVELACE", level: "Primaria", levelId: "lv1", gradeGroup: "4° A", guardianName: "", admissionStatus: "enrolled" },
+    ]);
+    resetFakeRouter("/alumnos/st1");
+    mockMe.mockResolvedValue(OWNER_ME);
+    render(
+      <Providers flags={{ module_students: true }}>
+        <AppShell />
+      </Providers>
+    );
+
+    expect(await screen.findByRole("dialog", { name: "Ficha del alumno" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "LOVELACE ADA" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Estudiantes" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Cerrar" }));
+    await waitFor(() => expect(fakePath()).toBe("/alumnos"));
+    expect(screen.queryByRole("dialog", { name: "Ficha del alumno" })).not.toBeInTheDocument();
+  });
+
+  // T14 gate: a withdrawn pupil's file is read-only; its edit address hands over to the ficha.
+  it("la dirección de edición de un alumno dado de baja lleva a su ficha", async () => {
+    vi.mocked(getStudent).mockResolvedValueOnce({
+      id: "st1", curp: "CURP1", firstName: "ADA", lastName: "LOVELACE", level: "Primaria", levelId: "lv1",
+      gradeGroup: "4° A", guardianName: "", admissionStatus: "withdrawn",
+    });
+    resetFakeRouter("/alumnos/st1/editar");
+    mockMe.mockResolvedValue({ ...OWNER_ME, permissions: [...OWNER_ME.permissions, "students:update"] });
+    render(
+      <Providers flags={{ module_students: true }}>
+        <AppShell />
+      </Providers>
+    );
+
+    await waitFor(() => expect(fakePath()).toBe("/alumnos/st1"));
+    expect(screen.queryByLabelText("Nombre(s)")).not.toBeInTheDocument();
   });
 
   it("sin students:update, la dirección de edición no pinta la forma", async () => {

@@ -2,6 +2,7 @@ package usecase_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -632,6 +633,65 @@ func TestHasPhoto(t *testing.T) {
 			got, err := svc.HasPhoto(context.Background(), created.ID())
 			if err != nil || got != tc.want {
 				t.Errorf("HasPhoto = %v, %v; want %v", got, err, tc.want)
+			}
+		})
+	}
+}
+
+// T14-009: after a baja the pupil's identity, medical record and photo are
+// read-only. The web hides the entry points, but the edit page has its own
+// address, so the server refuses each write with one detectable refusal.
+// Contacts stay writable: the remaining debt is still collected.
+func TestAWithdrawnPupilsFileIsReadOnly(t *testing.T) {
+	writes := []struct {
+		name  string
+		write func(svc *usecase.StudentService, id string) error
+	}{
+		{"identity", func(svc *usecase.StudentService, id string) error {
+			_, err := svc.UpdateDetails(context.Background(), usecase.UpdateDetailsInput{
+				ID: id, FirstName: "Ana", LastName: "Hernández", CURP: "HEGA050312MDFRNN09",
+			})
+			return err
+		}},
+		{"medical", func(svc *usecase.StudentService, id string) error {
+			_, err := svc.UpdateMedical(context.Background(), id, "O+", "", "")
+			return err
+		}},
+		{"photo upload", func(svc *usecase.StudentService, id string) error {
+			_, err := svc.UploadPhoto(context.Background(), id, jpegBytes)
+			return err
+		}},
+		{"photo removal", func(svc *usecase.StudentService, id string) error {
+			return svc.DeletePhoto(context.Background(), id)
+		}},
+	}
+	for _, w := range writes {
+		t.Run(w.name, func(t *testing.T) {
+			svc, repo, _ := newService(t)
+			store := memPhotos{}
+			svc = svc.WithClock(func() time.Time { return schoolToday }).WithPhotos(store)
+			created, err := svc.CreateApplicant(context.Background(), validInput())
+			if err != nil {
+				t.Fatalf("CreateApplicant: %v", err)
+			}
+			if _, err := svc.UploadPhoto(context.Background(), created.ID(), jpegBytes); err != nil {
+				t.Fatalf("UploadPhoto before the baja: %v", err)
+			}
+			photo := repo.photos[created.ID()]
+			if _, err := svc.ChangeAdmissionStatus(context.Background(), usecase.ChangeStatusInput{ID: created.ID(), Target: domain.AdmissionWithdrawn, Reason: "cambio de escuela"}); err != nil {
+				t.Fatalf("withdraw: %v", err)
+			}
+
+			err = w.write(svc, created.ID())
+			if !errors.Is(err, domain.ErrWithdrawnReadOnly) {
+				t.Fatalf("err = %v, want ErrWithdrawnReadOnly", err)
+			}
+			if glerrors.KindOf(err) != glerrors.KindConflict {
+				t.Errorf("kind = %v, want KindConflict", glerrors.KindOf(err))
+			}
+			if len(repo.updated) != 1 || len(repo.medical) != 0 || repo.photos[created.ID()] != photo || len(store) != 1 {
+				t.Errorf("a refused write persisted: updates=%d medical=%d photo=%+v objects=%d",
+					len(repo.updated), len(repo.medical), repo.photos[created.ID()], len(store))
 			}
 		})
 	}

@@ -216,15 +216,19 @@ function StudentSheet({
   canRevokeCard?: boolean;
   canWithdraw?: boolean;
 }): ReactElement {
+  // undefined = still reading, null = no group this cycle, "failed" = unknown.
+  const [current, setCurrent] = useState<Enrollment | null | undefined | "failed">(undefined);
+  // A withdrawn file is read-only (plan T2): the withdrawal just made here
+  // counts before the roll is re-read (ISSUE-T14-009).
+  const withdrawn = st.admissionStatus === "withdrawn" || (current !== null && current !== undefined && current !== "failed" && current.status === "withdrawn");
+  const admission: AdmissionStatus = withdrawn ? "withdrawn" : st.admissionStatus;
   const rows: [string, string][] = [
     ["Matrícula", st.enrollmentNumber ?? ""],
     ["CURP", st.curp],
     ["Nivel", `${levelOf(st)} · ${groupOf(st)}`],
     ["Tutor", st.guardianName],
-    ["Admisión", statusOf(st.admissionStatus).label],
+    ["Admisión", statusOf(admission).label],
   ];
-  // undefined = still reading, null = no group this cycle, "failed" = unknown.
-  const [current, setCurrent] = useState<Enrollment | null | undefined | "failed">(undefined);
   const [gid, setGid] = useState("");
   const [reason, setReason] = useState("");
   const [reasonError, setReasonError] = useState<string | undefined>(undefined);
@@ -265,7 +269,21 @@ function StudentSheet({
   const ownLevel = groups.filter((g) => st.levelId === "" || levelOfGrade.get(g.gradeLevelId) === st.levelId);
   const placed = current !== null && current !== undefined && current !== "failed" ? current : undefined;
   const currentGroup = placed === undefined ? undefined : groups.find((g) => g.id === placed.groupId);
-  const choices = placed !== undefined ? ownLevel.filter((g) => g.id !== placed.groupId) : ownLevel;
+  // A change of group offers the pupil's own grade first (ISSUE-T14-013); the
+  // level's other grades sit behind a disclosure, because an imported pupil
+  // may have landed in the wrong grade and this is where the office fixes it.
+  // Unknown current group: the whole level, nothing hidden.
+  const sameGrade = (g: LabelledGroup): boolean => currentGroup === undefined || g.gradeLevelId === currentGroup.gradeLevelId;
+  const choices = placed !== undefined ? ownLevel.filter((g) => g.id !== placed.groupId && sameGrade(g)) : ownLevel;
+  const otherGrades = placed !== undefined ? ownLevel.filter((g) => !sameGrade(g)) : [];
+  const [showOtherGrades, setShowOtherGrades] = useState(false);
+  const changingGrade = otherGrades.some((g) => g.id === gid);
+  const pick = (id: string): void => { setGid(id); setRefusal(undefined); };
+  const toggleOtherGrades = (): void => {
+    // Folding them away drops a choice the office can no longer see.
+    if (showOtherGrades && changingGrade) setGid("");
+    setShowOtherGrades((v) => !v);
+  };
   const transferring = placed !== undefined;
   const ready = current !== undefined && current !== "failed" && !gradeLevelsFailed;
 
@@ -288,7 +306,7 @@ function StudentSheet({
     try {
       if (placed !== undefined) {
         await transfer(API_URL, { enrollmentId: placed.id, toGroupId: gid, reason: reason.trim() });
-        onPlaced("Alumno cambiado de grupo");
+        onPlaced(`Cambiado a ${groups.find((g) => g.id === gid)?.label ?? "otro grupo"}`);
       } else {
         await enroll(API_URL, { studentId: st.id, groupId: gid });
         onPlaced("Alumno inscrito en el grupo");
@@ -313,7 +331,7 @@ function StudentSheet({
           <Avatar name={formatStudentName(st)} color="forest" size={62} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <h2 style={{ fontSize: 20, fontWeight: 700, color: "var(--text)" }}>{formatStudentName(st)}</h2>
-            <div style={{ marginTop: 6 }}><StatusPill status={st.admissionStatus} /></div>
+            <div style={{ marginTop: 6 }}><StatusPill status={admission} /></div>
           </div>
           <button type="button" onClick={onClose} aria-label="Cerrar" style={{ width: 40, height: 40, borderRadius: "50%", display: "grid", placeItems: "center", background: "var(--surface-3)", border: "1px solid var(--border)", color: "var(--text-muted)", cursor: "pointer" }}><Icon name="close" size={19} /></button>
         </div>
@@ -321,11 +339,11 @@ function StudentSheet({
       footer={
         !withdrawOpen && <>
           <Btn kind="ghost" icon="documents" style={{ flex: 1 }}>Documentos</Btn>
-          {onEdit !== undefined && <Btn kind="ghost" onClick={onEdit} style={{ flex: 1 }}>Editar ficha</Btn>}
-          {canWithdraw && current !== null && current !== undefined && current !== "failed" && current.status === "active" && st.admissionStatus !== "withdrawn" && <Btn ref={withdrawTrigger} kind="ghost" onClick={() => setWithdrawOpen(true)} style={{ flex: 1, color: "var(--bad-fg)" }}>Dar de baja</Btn>}
-          {ready && current?.status !== "withdrawn" && st.admissionStatus !== "withdrawn" && (
+          {onEdit !== undefined && !withdrawn && <Btn kind="ghost" onClick={onEdit} style={{ flex: 1 }}>Editar ficha</Btn>}
+          {canWithdraw && current !== null && current !== undefined && current !== "failed" && current.status === "active" && !withdrawn && <Btn ref={withdrawTrigger} kind="ghost" onClick={() => setWithdrawOpen(true)} style={{ flex: 1, color: "var(--bad-fg)" }}>Dar de baja</Btn>}
+          {ready && !withdrawn && (
             <Btn icon="check" onClick={() => void save()} style={{ flex: 1, opacity: saving ? 0.6 : 1 }}>
-              {transferring ? "Cambiar de grupo" : "Inscribir"}
+              {transferring ? (changingGrade ? "Cambiar de grado" : "Cambiar de grupo") : "Inscribir"}
             </Btn>
           )}
         </>
@@ -350,7 +368,7 @@ function StudentSheet({
               No pudimos leer los grados de la escuela, así que no sabemos qué grupos son de su nivel. Recarga la página.
             </p>
           )}
-          {ready && current?.status !== "withdrawn" && st.admissionStatus !== "withdrawn" && (
+          {ready && !withdrawn && (
             <div style={{ padding: "18px 0", display: "grid", gap: 10 }}>
               {transferring && (
                 <p style={{ fontSize: 14, color: "var(--text)" }}>
@@ -363,15 +381,18 @@ function StudentSheet({
               </span>
               {choices.length === 0 ? (
                 <p style={{ fontSize: 13.5, color: "var(--text-faint)" }}>
-                  {transferring ? "No hay otro grupo de su nivel en este ciclo." : "No hay grupos de su nivel en este ciclo: créalos en Configuración."}
+                  {transferring ? "No hay otro grupo de su grado en este ciclo." : "No hay grupos de su nivel en este ciclo: créalos en Configuración."}
                 </p>
               ) : (
-                <div role="group" aria-label={transferring ? "Cambiar a" : "Inscribir en"} style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  {choices.map((g) => {
-                    const on = gid === g.id;
-                    return <button key={g.id} type="button" aria-pressed={on} onClick={() => { setGid(g.id); setRefusal(undefined); }} style={{ height: 44, padding: "0 15px", borderRadius: 99, fontSize: 13.5, fontWeight: 600, fontFamily: "var(--font-display)", cursor: "pointer", border: `1.5px solid ${on ? "var(--lime)" : "var(--border)"}`, background: on ? "color-mix(in oklab, var(--lime) 12%, var(--surface))" : "var(--surface)", color: on ? "var(--forest)" : "var(--text-muted)" }}>{g.label}</button>;
-                  })}
-                </div>
+                <GroupChips label={transferring ? "Cambiar a" : "Inscribir en"} groups={choices} chosen={gid} onPick={pick} />
+              )}
+              {otherGrades.length > 0 && (
+                <>
+                  <button type="button" aria-expanded={showOtherGrades} aria-controls="other-grade-groups" onClick={toggleOtherGrades} style={{ justifySelf: "start", minHeight: 44, padding: 0, fontSize: 13.5, fontWeight: 600, color: "var(--forest)", textDecoration: "underline", cursor: "pointer" }}>
+                    Ver grupos de otros grados
+                  </button>
+                  {showOtherGrades && <div id="other-grade-groups"><GroupChips label="Otros grados" groups={otherGrades} chosen={gid} onPick={pick} /></div>}
+                </>
               )}
               {transferring && (
                 <TextField
@@ -389,10 +410,46 @@ function StudentSheet({
               )}
             </div>
           )}
-          {(st.admissionStatus === "withdrawn" || (current !== null && current !== undefined && current !== "failed" && current.status === "withdrawn")) && <p ref={withdrawnLine} tabIndex={-1} style={{ paddingTop: 18, color: "var(--text-muted)" }}>Baja el {placed?.withdrawnOn ? dayWithYearLabel(placed.withdrawnOn) : "—"}{placed?.withdrawalReason ? ` · ${placed.withdrawalReason}` : ""}</p>}
+          {withdrawn && <div style={{ paddingTop: 18, color: "var(--text-muted)", display: "grid", gap: 4 }}>
+            <p ref={withdrawnLine} tabIndex={-1}>{withdrawnNote(current)}</p>
+            <p style={{ fontSize: 13.5 }}>Sus datos, su foto y su expediente médico ya no se corrigen. Los contactos siguen editables para cobrar lo que quede pendiente.</p>
+          </div>}
       </>}
     </DrawerShell>
   );
+}
+
+/** Pickable groups as pills; `groups` arrive in school order (level, grade, name). */
+function GroupChips({ label, groups, chosen, onPick }: { label: string; groups: readonly LabelledGroup[]; chosen: string; onPick: (id: string) => void }): ReactElement {
+  return (
+    <div role="group" aria-label={label} style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+      {groups.map((g) => {
+        const on = chosen === g.id;
+        return <button key={g.id} type="button" aria-pressed={on} onClick={() => onPick(g.id)} style={{ height: 44, padding: "0 15px", borderRadius: 99, fontSize: 13.5, fontWeight: 600, fontFamily: "var(--font-display)", cursor: "pointer", border: `1.5px solid ${on ? "var(--lime)" : "var(--border)"}`, background: on ? "color-mix(in oklab, var(--lime) 12%, var(--surface))" : "var(--surface)", color: on ? "var(--forest)" : "var(--text-muted)" }}>{g.label}</button>;
+      })}
+    </div>
+  );
+}
+
+/**
+ * "Maternal a Bachillerato": the school's first and last level, in its own
+ * order (ISSUE-T14-017 — the card used to say "Kínder a Preparatoria" for
+ * every school). One level names itself; none, nothing.
+ */
+function levelSpan(levels: readonly Pick<Level, "name" | "sortOrder">[]): string {
+  const ordered = [...levels].sort((a, b) => (a.sortOrder ?? Number.MAX_SAFE_INTEGER) - (b.sortOrder ?? Number.MAX_SAFE_INTEGER));
+  const first = ordered[0];
+  const last = ordered[ordered.length - 1];
+  if (first === undefined || last === undefined) return "";
+  return first === last ? first.name : `${first.name} a ${last.name}`;
+}
+
+/** "Alumno dado de baja el 15 oct 2026 · motivo": why the sheet is read-only. */
+function withdrawnNote(current: Enrollment | null | undefined | "failed"): string {
+  const enrollment = current !== null && current !== undefined && current !== "failed" ? current : undefined;
+  const on = enrollment?.withdrawnOn ? ` el ${dayWithYearLabel(enrollment.withdrawnOn)}` : "";
+  const why = enrollment?.withdrawalReason ? ` · ${enrollment.withdrawalReason}` : "";
+  return `Alumno dado de baja${on}${why}`;
 }
 
 export interface StudentsScreenProps {
@@ -425,6 +482,10 @@ export interface StudentsScreenProps {
    */
   onOpenImport?: () => void;
   canWithdraw?: boolean;
+  /** /alumnos/{id}: the pupil whose ficha opens once the roll is read (T14-010). */
+  linkedStudentId?: string;
+  /** The linked ficha was closed: the address goes back to the list. */
+  onLinkedSheetClosed?: () => void;
 }
 
 /** What the school reads in Excel, in the order the table shows it. */
@@ -439,7 +500,7 @@ const EXPORT_COLUMNS: readonly CsvColumn<Row>[] = [
   { label: "Estado", value: (r) => statusOf(r.student.admissionStatus).label },
 ];
 
-export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false, canVoidAnyNote = false, userId = "", canVerifyCard = false, canRevokeCard = false, canReadStatement = false, canCorrectPayments = false, onOpenImport, canWithdraw = false }: StudentsScreenProps): ReactElement {
+export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false, canVoidAnyNote = false, userId = "", canVerifyCard = false, canRevokeCard = false, canReadStatement = false, canCorrectPayments = false, onOpenImport, canWithdraw = false, linkedStudentId, onLinkedSheetClosed }: StudentsScreenProps): ReactElement {
   const [verifying, setVerifying] = useState(false);
   const [students, setStudents] = useState<Student[]>([]);
   const [cycles, setCycles] = useState<Cycle[]>([]);
@@ -625,8 +686,24 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
   const cycleName = activeCycle?.name ?? "—";
   const clear = (): void => { setTab("all"); filter.clear(); };
 
+  // A direct link opens its pupil's ficha once, as soon as the roll is read;
+  // following another link while one is open opens that one.
+  const [linked, setLinked] = useState(linkedStudentId);
+  useEffect(() => { if (linkedStudentId !== undefined) setLinked(linkedStudentId); }, [linkedStudentId]);
+  useEffect(() => {
+    if (linked === undefined || loading) return;
+    const found = students.find((s) => s.id === linked);
+    if (found !== undefined) setSheet(found);
+    else if (!loadFailed) say("No encontramos a ese alumno en el padrón.");
+    setLinked(undefined);
+  }, [linked, loading, loadFailed, students, say]);
+  const closeSheet = (): void => {
+    setSheet(null);
+    onLinkedSheetClosed?.();
+  };
+
   const onPlaced = (message: string, keepSheet = false): void => {
-    if (!keepSheet) setSheet(null);
+    if (!keepSheet) closeSheet();
     reload();
     say(message);
   };
@@ -636,7 +713,7 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
     { icon: "check" as IconName, c: "lime", label: "Inscritos", val: String(counts.active), sub: "Admisión activa" },
     { icon: "clock" as IconName, c: "yellow", label: "En trámite", val: String(counts.pending), sub: "Faltan documentos" },
     { icon: "students" as IconName, c: "forest", label: "Total", val: String(counts.all), sub: "Alumnos registrados" },
-    { icon: "graduation" as IconName, c: "purple", label: "Niveles", val: String(levelsPresent.filter((l) => l !== NO_LEVEL).length), sub: "Kínder a Preparatoria" },
+    { icon: "graduation" as IconName, c: "purple", label: "Niveles", val: String(levelsPresent.filter((l) => l !== NO_LEVEL).length), sub: levelSpan(levels) },
   ];
 
   return (
@@ -667,7 +744,7 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
             <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: 13, color: "var(--text-muted)", fontWeight: 600, whiteSpace: "nowrap" }}>{k.label}</div>
               <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 22, color: "var(--text)", lineHeight: 1.2 }}>{k.val}</div>
-              <div style={{ fontSize: 12, color: "var(--text-faint)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{k.sub}</div>
+              {k.sub !== "" && <div style={{ fontSize: 12, color: "var(--text-faint)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{k.sub}</div>}
             </div>
           </div>
         ))}
@@ -800,7 +877,7 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
 
       {onCreate !== undefined && <button onClick={onCreate} title="Nuevo alumno" style={{ position: "fixed", right: 32, bottom: FAB_BOTTOM, zIndex: 50, height: FAB_HEIGHT, padding: "0 26px", borderRadius: 99, display: "inline-flex", alignItems: "center", gap: 10, background: "var(--primary)", color: "var(--primary-ink)", fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 16.5, cursor: "pointer", boxShadow: "var(--shadow-fab)" }}><Icon name="plus" size={22} stroke={2.6} />Nuevo alumno</button>}
 
-      {sheet !== null && <StudentSheet st={sheet} groups={groups} cycleId={groupsCycleId} gradeLevels={gradeLevels} gradeLevelsFailed={gradeLevelsFailed} onClose={() => setSheet(null)} onPlaced={onPlaced} onEdit={onEdit === undefined ? undefined : () => onEdit(sheet.id)} canRevokeCard={canRevokeCard} canWithdraw={canWithdraw} />}
+      {sheet !== null && <StudentSheet key={sheet.id} st={students.find((s) => s.id === sheet.id) ?? sheet} groups={groups} cycleId={groupsCycleId} gradeLevels={gradeLevels} gradeLevelsFailed={gradeLevelsFailed} onClose={closeSheet} onPlaced={onPlaced} onEdit={onEdit === undefined ? undefined : () => onEdit(sheet.id)} canRevokeCard={canRevokeCard} canWithdraw={canWithdraw} />}
       {notesOf !== null && (
         <StudentNotesDialog
           studentId={notesOf.id}
@@ -823,7 +900,8 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
       )}
       {verifying && <VerifyCardDrawer onClose={() => setVerifying(false)} />}
       {toast !== null && (
-        <div style={{ position: "fixed", bottom: 28, left: "50%", transform: "translateX(-50%)", zIndex: 80, display: "flex", alignItems: "center", gap: 11, padding: "14px 22px", borderRadius: "var(--r-pill)", background: "var(--forest)", color: "#fff", fontWeight: 600, fontSize: 15, boxShadow: "var(--shadow-pop)", animation: "pop .25s var(--ease) both" }}>
+        // role=status: the confirmation is announced, not only painted (ISSUE-T14-013).
+        <div role="status" style={{ position: "fixed", bottom: 28, left: "50%", transform: "translateX(-50%)", zIndex: 80, display: "flex", alignItems: "center", gap: 11, padding: "14px 22px", borderRadius: "var(--r-pill)", background: "var(--forest)", color: "#fff", fontWeight: 600, fontSize: 15, boxShadow: "var(--shadow-pop)", animation: "pop .25s var(--ease) both" }}>
           <Icon name="check" size={20} stroke={2.6} />{toast}
         </div>
       )}

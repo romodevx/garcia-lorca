@@ -24,6 +24,8 @@ describe("el mapa de rutas", () => {
     ["/configuracion/migrar-alumnos", { screen: "studentImport" }],
     ["/administracion", { screen: "admin" }],
     ["/modulo/reportes", { screen: "module", moduleId: "reportes" }],
+    // ISSUE-T14-010: a link to one pupil opens their ficha, not Inicio.
+    ["/alumnos/stu-1", { screen: "studentSheet", studentId: "stu-1" }],
     ["/alumnos/stu-1/editar", { screen: "studentEdit", studentId: "stu-1" }],
     ["/docentes/tch-1/carga", { screen: "teacherLoad", teacherId: "tch-1" }],
     ["/configuracion/niveles/lv-1/eliminar", { screen: "levelDelete", levelId: "lv-1" }],
@@ -65,6 +67,11 @@ describe("el mapa de rutas", () => {
     expect(viewToPath({ screen: "levelDelete", levelId: "a b" })).toBe("/configuracion/niveles/a%20b/eliminar");
     expect(viewToPath({ screen: "levelPeriods", levelId: "a b" })).toBe("/configuracion/niveles/a%20b/periodos");
     expect(pathToView("/configuracion/niveles//periodos")).toEqual({ screen: "dashboard" });
+  });
+
+  it("/alumnos/nuevo sigue siendo el alta, no la ficha de un alumno «nuevo»", () => {
+    expect(pathToView("/alumnos/nuevo")).toEqual({ screen: "studentNew" });
+    expect(pathToView("/alumnos/%E0%A4%A")).toEqual({ screen: "dashboard" });
   });
 
   it("un id con un escape roto no tumba la app", () => {

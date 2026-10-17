@@ -217,12 +217,33 @@ func (s *Student) ChangeBankReference(ref BankReference) { s.bankReference = ref
 // and its seat count. The first name and the paternal surname stay required, as
 // when the pupil was created; the maternal surname is optional.
 func (s *Student) UpdateDetails(firstName, lastName, maternalLastName string, curp CURP, profile Profile) error {
+	if err := s.RequireEditable(); err != nil {
+		return err
+	}
 	first, last := strings.TrimSpace(firstName), strings.TrimSpace(lastName)
 	if first == "" || last == "" {
 		return glerrors.New(glerrors.KindInvalid, "first and last name are required")
 	}
 	s.firstName, s.lastName, s.curp, s.profile = first, last, curp, profile
 	s.maternalLastName = strings.TrimSpace(maternalLastName)
+	return nil
+}
+
+// CodeStudentWithdrawn is the machine code of ErrWithdrawnReadOnly (the
+// X-Error-Code the gateway forwards): a 409 the screen must not read as a
+// duplicate CURP.
+const CodeStudentWithdrawn = "STUDENT_WITHDRAWN"
+
+// ErrWithdrawnReadOnly refuses a correction of a withdrawn pupil's identity,
+// medical record or photo: the school already closed the file. Contacts are
+// not covered — the remaining debt is still collected by phone.
+var ErrWithdrawnReadOnly = glerrors.New(glerrors.KindConflict, "ese alumno está dado de baja: su ficha ya no se corrige")
+
+// RequireEditable is ErrWithdrawnReadOnly for a withdrawn pupil, else nil.
+func (s *Student) RequireEditable() error {
+	if s.status == AdmissionWithdrawn {
+		return ErrWithdrawnReadOnly
+	}
 	return nil
 }
 

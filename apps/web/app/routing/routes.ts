@@ -30,6 +30,7 @@ export type View =
   | { screen: "admin" }
   | { screen: "module"; moduleId: string }
   | { screen: "studentEdit"; studentId: string }
+  | { screen: "studentSheet"; studentId: string }
   | { screen: "teacherLoad"; teacherId: string }
   | { screen: "levelDelete"; levelId: string }
   | { screen: "levelPeriods"; levelId: string };
@@ -38,6 +39,8 @@ export type View =
 const MODULE_PREFIX = "/modulo/";
 /** /alumnos/{id}/editar — the full edit page of one pupil's file. */
 const STUDENT_EDIT = /^\/alumnos\/([^/]+)\/editar$/;
+/** /alumnos/{id} — the list with that pupil's ficha open (ISSUE-T14-010). */
+const STUDENT_SHEET = /^\/alumnos\/([^/]+)$/;
 /** /docentes/{id}/carga — one teacher's teaching load (carga académica). */
 const TEACHER_LOAD = /^\/docentes\/([^/]+)\/carga$/;
 /** /configuracion/niveles/{id}/eliminar — the three-step deletion of one level. */
@@ -71,7 +74,7 @@ const BY_SCREEN = {
   teachers: "/docentes",
   uniforms: "/uniformes",
   admin: "/administracion",
-} as const satisfies Record<Exclude<View["screen"], "module" | "studentEdit" | "teacherLoad" | "levelDelete" | "levelPeriods">, string>;
+} as const satisfies Record<Exclude<View["screen"], "module" | "studentEdit" | "studentSheet" | "teacherLoad" | "levelDelete" | "levelPeriods">, string>;
 
 const BY_PATH: ReadonlyMap<string, View> = new Map(
   Object.entries(BY_SCREEN).map(([screen, path]) => [path, { screen } as View]),
@@ -84,6 +87,9 @@ export function viewToPath(view: View): string {
   }
   if (view.screen === "studentEdit") {
     return `/alumnos/${encodeURIComponent(view.studentId)}/editar`;
+  }
+  if (view.screen === "studentSheet") {
+    return `/alumnos/${encodeURIComponent(view.studentId)}`;
   }
   if (view.screen === "teacherLoad") {
     return `/docentes/${encodeURIComponent(view.teacherId)}/carga`;
@@ -126,6 +132,13 @@ export function pathToView(pathname: string): View {
   const studentId = edit?.[1] === undefined ? undefined : safeDecode(edit[1]);
   if (studentId !== undefined) {
     return { screen: "studentEdit", studentId };
+  }
+
+  // After the fixed paths: /alumnos/nuevo is the alta, never a pupil called "nuevo".
+  const sheet = STUDENT_SHEET.exec(clean);
+  const sheetStudentId = sheet?.[1] === undefined ? undefined : safeDecode(sheet[1]);
+  if (sheetStudentId !== undefined) {
+    return { screen: "studentSheet", studentId: sheetStudentId };
   }
 
   const load = TEACHER_LOAD.exec(clean);

@@ -33,12 +33,8 @@ func (r *Repository) PhotoRef(ctx context.Context, studentID string) (ports.Phot
 // see is KindNotFound (an FK check does not pass through RLS).
 func (r *Repository) SavePhotoRef(ctx context.Context, studentID string, ref ports.PhotoRef) error {
 	return r.withTenant(ctx, func(tx *gorm.DB) error {
-		var visible int64
-		if err := tx.Model(&studentModel{}).Where("id = ?", studentID).Count(&visible).Error; err != nil {
-			return glerrors.Wrap(glerrors.KindInternal, "checking the pupil", err)
-		}
-		if visible == 0 {
-			return glerrors.ErrNotFound
+		if err := lockEditable(tx, studentID); err != nil {
+			return err
 		}
 		row := photoModel{TenantID: r.tenantID, StudentID: studentID, ObjectKey: ref.Key, ContentType: ref.ContentType, SizeBytes: ref.Size}
 		err := tx.Clauses(clause.OnConflict{
@@ -54,9 +50,13 @@ func (r *Repository) SavePhotoRef(ctx context.Context, studentID string, ref por
 	})
 }
 
-// DeletePhotoRef removes the pupil's photo reference. Absent is not an error.
+// DeletePhotoRef removes the pupil's photo reference. An absent reference is
+// not an error; a withdrawn pupil's is refused (domain.ErrWithdrawnReadOnly).
 func (r *Repository) DeletePhotoRef(ctx context.Context, studentID string) error {
 	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		if err := lockEditable(tx, studentID); err != nil {
+			return err
+		}
 		if err := tx.Where("student_id = ?", studentID).Delete(&photoModel{}).Error; err != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "deleting photo reference", err)
 		}

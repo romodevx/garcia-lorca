@@ -126,6 +126,9 @@ function url(baseURL: string, path: string): string {
 }
 
 /** POST a JSON body and return the parsed entity. Throws on any non-2xx. */
+/** The students service's refusal code for a write to a withdrawn pupil's file. */
+const STUDENT_WITHDRAWN = "STUDENT_WITHDRAWN";
+
 /**
  * A students failure the UI can act on.
  *
@@ -139,12 +142,20 @@ export class StudentsError extends Error {
   readonly status: number;
   /** The server's own words, when it sent any. */
   readonly detail: string;
+  /** The refusal's machine code (`X-Error-Code`), e.g. STUDENT_WITHDRAWN. */
+  readonly code: string | undefined;
 
-  constructor(status: number, detail: string) {
+  constructor(status: number, detail: string, code?: string) {
     super(detail !== "" ? detail : `HTTP ${status}`);
     this.name = "StudentsError";
     this.status = status;
     this.detail = detail;
+    this.code = code;
+  }
+
+  /** The pupil was withdrawn: identity, medical record and photo no longer change. */
+  get isWithdrawn(): boolean {
+    return this.code === STUDENT_WITHDRAWN;
   }
 
   /** The school already has this pupil. Re-typing the same CURP never helps. */
@@ -160,7 +171,7 @@ export class StudentsError extends Error {
 
 async function studentsFailure(res: Response): Promise<StudentsError> {
   const body = await res.text().catch(() => "");
-  return new StudentsError(res.status, body.trim());
+  return new StudentsError(res.status, body.trim(), res.headers.get("X-Error-Code") ?? undefined);
 }
 
 async function postJSON<T>(baseURL: string, path: string, body: unknown): Promise<T> {
