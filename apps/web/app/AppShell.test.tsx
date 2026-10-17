@@ -119,6 +119,8 @@ const mockMayHaveSession = vi.mocked(mayHaveSession);
 beforeEach(() => {
   // La dirección es estado de módulo: sin esto se filtra de una prueba a otra.
   resetFakeRouter("/");
+  // El destino pendiente vive en sessionStorage (CC-309): también se filtraría.
+  window.sessionStorage.clear();
   mockMe.mockReset();
   mockRefresh.mockReset();
   mockMe.mockRejectedValue(new Error("no session"));
@@ -770,6 +772,34 @@ describe("la dirección manda sobre la pantalla", () => {
       </Providers>
     );
 
+    await submitLogin(user);
+    expect(await screen.findByRole("heading", { name: "Finanzas" })).toBeInTheDocument();
+    expect(fakePath()).toBe("/finanzas");
+  });
+
+  it("el destino sobrevive a que Next vuelva a montar el shell al pasar a /entrar (CC-309)", async () => {
+    // En el navegador, /finanzas → /entrar cambia el valor del catch-all
+    // [[...slug]] y Next monta una página NUEVA: un useRef del primer montaje
+    // ya no existe cuando la persona entra. El router falso no remonta solo,
+    // así que se hace a mano.
+    resetFakeRouter("/finanzas");
+    mockLogin.mockResolvedValue({ expiresIn: 900, mustChangePassword: false });
+    mockMe.mockRejectedValueOnce(new Error("no session")).mockRejectedValueOnce(new Error("no session")).mockResolvedValue(OWNER_ME);
+    const first = render(
+      <Providers flags={{ module_finance: true }}>
+        <AppShell />
+      </Providers>
+    );
+    await screen.findByLabelText("Correo");
+    expect(fakePath()).toBe("/entrar");
+    first.unmount();
+
+    const user = userEvent.setup();
+    render(
+      <Providers flags={{ module_finance: true }}>
+        <AppShell />
+      </Providers>
+    );
     await submitLogin(user);
     expect(await screen.findByRole("heading", { name: "Finanzas" })).toBeInTheDocument();
     expect(fakePath()).toBe("/finanzas");
