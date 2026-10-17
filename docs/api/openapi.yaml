@@ -1253,10 +1253,16 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409':
-          description: Another pupil already has that CURP.
+          description: >
+            Another pupil already has that CURP (no code), or the pupil is
+            withdrawn and the file no longer changes (`X-Error-Code:
+            STUDENT_WITHDRAWN`, T14). Both are 409: the code tells them apart.
+          headers:
+            X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
           content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
+            text/plain:
+              schema: { type: string }
+              example: "ese alumno está dado de baja: su ficha ya no se corrige"
 
   /api/v1/students/{id}/medical:
     get:
@@ -1301,6 +1307,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/StudentWithdrawn' }
 
   /api/v1/students/{id}/photo:
     get:
@@ -1362,6 +1369,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/StudentWithdrawn' }
         '413':
           description: Larger than 2 MB.
           content:
@@ -1380,6 +1388,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/StudentWithdrawn' }
 
   /api/v1/students/{studentId}/contacts/{contactId}:
     put:
@@ -6844,7 +6853,9 @@ components:
         plan, a garment scoped to it, the level's structure in config).
         User deletion (T2): DELETION_PENDING (500, the account is deleted but
         its links or identity-provider account are not yet closed; repeat the
-        DELETE). Absent on a refusal without a code.
+        DELETE). Withdrawn pupil (T14): STUDENT_WITHDRAWN (409, the pupil's
+        identity, medical record and photo no longer change; contacts do).
+        Absent on a refusal without a code.
       schema:
         type: string
         pattern: '^[A-Z][A-Z0-9_]{0,63}$'
@@ -6986,6 +6997,17 @@ components:
       schema: { type: string, format: uuid }
 
   responses:
+    StudentWithdrawn:
+      description: >
+        The pupil is withdrawn (T14): their identity, medical record and photo
+        no longer change. `X-Error-Code: STUDENT_WITHDRAWN`. Contacts stay
+        editable, because the remaining debt is still collected.
+      headers:
+        X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
+      content:
+        text/plain:
+          schema: { type: string }
+          example: "ese alumno está dado de baja: su ficha ya no se corrige"
     ScheduleBadRequest:
       description: >
         The timetable refuses the request's shape (T16); the sentence is shown
