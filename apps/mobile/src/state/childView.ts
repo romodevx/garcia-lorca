@@ -76,6 +76,15 @@ function subtitleOf(student: FamilyStudent): string {
   return formatSubtitle(student.gradeGroup, student.level);
 }
 
+/**
+ * Each linked child's header name by id, but only when there are siblings
+ * (ISSUE-CC-303): with one child, naming her on every notice says nothing.
+ */
+export function siblingNames(students: readonly FamilyStudent[]): ReadonlyMap<string, string> {
+  if (students.length < 2) return new Map();
+  return new Map(students.map((s) => [s.id, formatDisplayName(s.firstName, s.lastName)]));
+}
+
 /** Projects a family student (or null) into the null-safe display view-model. */
 export function toChildView(student: FamilyStudent | null): ChildView {
   if (student === null) {

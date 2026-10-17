@@ -98,4 +98,50 @@ describe("AnnouncementsScreen", () => {
     await waitFor(() => expect(screen.getByText(/No pudimos cargar los avisos/)).toBeTruthy());
     expect(screen.getByRole("button", { name: "Reintentar" })).toBeTruthy();
   });
+
+  // ISSUE-CC-303: with two children the inbox mixes both; each notice says whose
+  // it is, and the family can narrow it to one child.
+  describe("with two children", () => {
+    const students = [
+      { id: "s4", firstName: "ALUMNA", lastName: "CUATRO", level: "Primaria", levelId: "l1", gradeGroup: "B" },
+      { id: "s2", firstName: "ALUMNA", lastName: "DOS", level: "Primaria", levelId: "l1", gradeGroup: "A" },
+    ];
+    const junta: Notif = { ...unread, id: "n4", studentId: "s4", title: "Junta de padres 3º B" };
+    const recordatorio: Notif = { ...unread, id: "n2", studentId: "s2", title: "Recordatorio QA para DOS" };
+
+    function mockSiblings(list: Notif[], children: unknown[] = students): void {
+      globalThis.fetch = jest.fn(async (url: string) => {
+        const body = String(url).endsWith("/family/students") ? { students: children } : { notifications: list };
+        return { ok: true, status: 200, json: async () => body };
+      }) as unknown as typeof fetch;
+    }
+
+    it("says which child each notice is for", async () => {
+      mockSiblings([junta, recordatorio]);
+      await renderWithProviders(<AnnouncementsScreen />);
+      await waitFor(() => expect(screen.getByText("Para Alumna Cuatro")).toBeTruthy());
+      expect(screen.getByText("Para Alumna Dos")).toBeTruthy();
+    });
+
+    it("narrows the inbox to one child and back to all", async () => {
+      mockSiblings([junta, recordatorio]);
+      await renderWithProviders(<AnnouncementsScreen />);
+      await screen.findByText("Junta de padres 3º B");
+
+      await fireEvent.press(screen.getByRole("tab", { name: "Alumna Dos" }));
+      expect(screen.queryByText("Junta de padres 3º B")).toBeNull();
+      expect(screen.getByText("Recordatorio QA para DOS")).toBeTruthy();
+
+      await fireEvent.press(screen.getByRole("tab", { name: "Todos" }));
+      expect(screen.getByText("Junta de padres 3º B")).toBeTruthy();
+    });
+
+    it("neither labels nor filters for a single child", async () => {
+      mockSiblings([junta], [students[0]]);
+      await renderWithProviders(<AnnouncementsScreen />);
+      await screen.findByText("Junta de padres 3º B");
+      expect(screen.queryByText(/^Para /)).toBeNull();
+      expect(screen.queryByRole("tab", { name: "Todos" })).toBeNull();
+    });
+  });
 });
