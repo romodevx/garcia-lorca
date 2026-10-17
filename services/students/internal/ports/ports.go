@@ -23,6 +23,10 @@ type ListFilter struct {
 	PageToken string
 	// Birthday narrows the list to pupils born on a calendar day (nil = any).
 	Birthday *BirthdayFilter
+	// ActiveEnrollment narrows the list to pupils with an active enrollment,
+	// whatever their admission status except withdrawn or rejected (owner
+	// decision D4).
+	ActiveEnrollment bool
 }
 
 // BirthdayFilter is a calendar day without a year. IncludeFeb29 also matches

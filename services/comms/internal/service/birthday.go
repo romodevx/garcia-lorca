@@ -32,16 +32,16 @@ const (
 	maxBirthdayBody  = 500
 )
 
-// Pupil is an enrolled pupil whose birthday it is: the id the greeting is filed
-// under and the first name it says.
+// Pupil is an attending pupil (active enrollment) whose birthday it is: the id
+// the greeting is filed under and the first name it says.
 type Pupil struct {
 	ID        string
 	FirstName string
 }
 
-// BirthdayDirectory answers "which enrolled pupils were born on this calendar
-// day". includeFeb29 also returns those born on February 29. Students owns the
-// answer; the adapter reads it by RPC.
+// BirthdayDirectory answers "which pupils with an active enrollment were born
+// on this calendar day". includeFeb29 also returns those born on February 29.
+// Students owns the answer; the adapter reads it by RPC.
 type BirthdayDirectory interface {
 	BirthdaysOn(ctx context.Context, month, day int, includeFeb29 bool) ([]Pupil, error)
 }
@@ -85,7 +85,7 @@ func WithBirthdays(dir BirthdayDirectory, templates TemplateStore, school *time.
 // errBirthdaysOff is returned when the service was built without WithBirthdays.
 var errBirthdaysOff = glerrors.New(glerrors.KindInternal, "birthday greetings are not configured")
 
-// RunBirthdays greets the family of every enrolled pupil born on date, of any
+// RunBirthdays greets the family of every attending pupil born on date, of any
 // year. An empty date is today in the school's zone: at 21:00 in Mexico City it
 // is already tomorrow in UTC, and the greeting must not go out a day early.
 //

@@ -58,7 +58,8 @@ func servePaged(t *testing.T, p *pagedStudents) *studentsclient.Client {
 	return studentsclient.New(srv.URL, srv.Client())
 }
 
-// BirthdaysOn asks for ENROLLED pupils born on the day and walks every page.
+// BirthdaysOn asks for pupils with an ACTIVE ENROLLMENT born on the day —
+// whatever the admission says (owner decision D4, plan T11) — and walks every page.
 func TestBirthdaysOnWalksEveryPage(t *testing.T) {
 	p := &pagedStudents{total: 5}
 	got, err := servePaged(t, p).BirthdaysOn(context.Background(), 2, 28, true)
@@ -69,7 +70,8 @@ func TestBirthdaysOnWalksEveryPage(t *testing.T) {
 	assert.Equal(t, "s4", got[4].ID)
 	require.Len(t, p.requests, 3)
 	first := p.requests[0]
-	assert.Equal(t, studentsv1.AdmissionStatus_ADMISSION_STATUS_ENROLLED, first.GetStatus())
+	assert.Equal(t, studentsv1.AdmissionStatus_ADMISSION_STATUS_UNSPECIFIED, first.GetStatus(), "an \"en trámite\" pupil who attends is greeted too")
+	assert.True(t, first.GetActiveEnrollment())
 	assert.Equal(t, int32(2), first.GetBirthday().GetMonth())
 	assert.Equal(t, int32(28), first.GetBirthday().GetDay())
 	assert.True(t, first.GetBirthday().GetIncludeFeb_29())

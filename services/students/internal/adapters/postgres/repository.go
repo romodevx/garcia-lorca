@@ -254,6 +254,13 @@ func (r *Repository) List(ctx context.Context, f ports.ListFilter) ([]*domain.St
 		if f.Birthday != nil {
 			q = whereBornOn(q, *f.Birthday)
 		}
+		if f.ActiveEnrollment {
+			// A withdrawn or rejected file is out even if an enrollment was
+			// left open (the admission path does not close it).
+			q = q.Where("EXISTS (SELECT 1 FROM enrollments e WHERE e.student_id = students.id AND e.status = ?)",
+				domain.EnrollmentStatusActive.String()).
+				Where("admission_status NOT IN ?", []string{domain.AdmissionWithdrawn.String(), domain.AdmissionRejected.String()})
+		}
 		if f.PageToken != "" {
 			var err error
 			if q, err = afterToken(q, f.PageToken); err != nil {

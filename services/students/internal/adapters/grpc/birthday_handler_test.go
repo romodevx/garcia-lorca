@@ -58,3 +58,17 @@ func TestCreateApplicantCarriesTheBirthDate(t *testing.T) {
 		t.Errorf("birth date = %q, want 2016-02-29", got)
 	}
 }
+
+// D4 (plan T11): the active-enrollment filter reaches the repository.
+func TestListStudentsMapsTheActiveEnrollmentFilter(t *testing.T) {
+	repo := newFakeRepo()
+	svc := usecase.NewStudentService(repo, &fakePublisher{}, testLevels, testTenant, func() string { return "stu-1" })
+	h := grpcadapter.NewStudentsHandler(svc, nil, nil, usecase.NewHealthService("students"))
+
+	if _, err := h.ListStudents(context.Background(), connect.NewRequest(&studentsv1.ListStudentsRequest{ActiveEnrollment: true})); err != nil {
+		t.Fatalf("ListStudents: %v", err)
+	}
+	if !repo.lastFilter.ActiveEnrollment {
+		t.Errorf("active enrollment filter lost: %+v", repo.lastFilter)
+	}
+}

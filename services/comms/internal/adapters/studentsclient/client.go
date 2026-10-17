@@ -113,14 +113,16 @@ const birthdayPageSize = 200
 // beyond that is broken, and looping on it forever would hang the run.
 const maxBirthdayPages = 100
 
-// BirthdaysOn lists the ENROLLED pupils born on month/day (and on February 29
-// when includeFeb29), walking every page. Each is projected to its id and first
+// BirthdaysOn lists the pupils with an active enrollment born on month/day
+// (and on February 29 when includeFeb29), walking every page. The admission
+// status does not matter: an "en trámite" pupil who attends is greeted too
+// (owner decision D4). Each is projected to its id and first
 // name — the surname never leaves students for a greeting that does not use it.
 func (c *Client) BirthdaysOn(ctx context.Context, month, day int, includeFeb29 bool) ([]service.Pupil, error) {
 	req := &studentsv1.ListStudentsRequest{
-		Status:   studentsv1.AdmissionStatus_ADMISSION_STATUS_ENROLLED,
-		PageSize: birthdayPageSize,
-		Birthday: &studentsv1.BirthdayFilter{Month: int32(month), Day: int32(day), IncludeFeb_29: includeFeb29},
+		ActiveEnrollment: true,
+		PageSize:         birthdayPageSize,
+		Birthday:         &studentsv1.BirthdayFilter{Month: int32(month), Day: int32(day), IncludeFeb_29: includeFeb29},
 	}
 	var out []service.Pupil
 	for range maxBirthdayPages {
