@@ -6,6 +6,7 @@ import { Btn } from "../../_design/Controls";
 import { DateField, MoneyField, TextField } from "../../_design/form";
 import type { Cycle } from "../../config/api";
 import type { EnrollmentConcept, Fee, PriceTier } from "../../finance/api";
+import { dayWithYearLabel } from "../../_lib/localDate";
 import { formatCents } from "../../_lib/money";
 import {
   MONTH_NAMES,
@@ -303,8 +304,8 @@ function ConceptCard({ concept, onChangeTiers, onRemove, onError, registerDraft,
                 </td>
                 <td style={{ padding: "6px 4px", color: "var(--text-muted)" }}>
                   {tier.effectiveTo === ""
-                    ? `desde el ${tier.effectiveFrom}, sin fecha de fin`
-                    : `del ${tier.effectiveFrom} al ${tier.effectiveTo}`}
+                    ? `desde el ${dayWithYearLabel(tier.effectiveFrom)}, sin fecha de fin`
+                    : `del ${dayWithYearLabel(tier.effectiveFrom)} al ${dayWithYearLabel(tier.effectiveTo)}`}
                 </td>
                 <td style={{ padding: "6px 4px", textAlign: "right" }}>
                   <button

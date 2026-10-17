@@ -4,6 +4,7 @@ import { useState, type ReactElement } from "react";
 
 import { SelectField, TextField, TimeField, useRequired, type RequiredState } from "../../_design/form";
 import { API_URL } from "../../api-url";
+import { labelGroups } from "../../config/api";
 import { createBlock, updateBlock, type ScheduleBlock, type ScheduleBoard } from "../../schedule/api";
 import { assignmentsOfGroup, WEEKDAYS, type ScheduleIndex } from "../../schedule/catalog";
 import { defaultEnd, gridBounds, SLOT_MINUTES, timeError, toHHMM, toMinutes } from "../../schedule/time";
@@ -146,9 +147,9 @@ export async function saveBlock(form: BlockForm, target: DrawerTarget, withReaso
 export function BlockFields({ form, board, index, withReason }: { form: BlockForm; board: ScheduleBoard; index: ScheduleIndex; withReason: boolean }): ReactElement {
   const { values, set, required, timeErrors, judgeTimes } = form;
   const bounds = timeBounds(form.span);
-  const groups = board.groups
-    .map((g) => ({ value: g.id, label: index.groupLabel(g.id) }))
-    .sort((a, b) => a.label.localeCompare(b.label, "es-MX", { numeric: true }));
+  // Grade, level and letter, in school order (ISSUE-T14-205): imported names mix
+  // "1° B" and "1º B", and only the level tells two such groups apart.
+  const groups = labelGroups(board.groups, board.grades, board.levels).map((g) => ({ value: g.id, label: g.label }));
   const err = (key: keyof Values): string | undefined => required.errors[key];
   return (
     <div style={{ display: "grid", gap: 16, gridTemplateColumns: "minmax(0, 1fr)" }}>

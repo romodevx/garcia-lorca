@@ -186,7 +186,8 @@ describe("StudentsScreen", () => {
   it("says what the alta page created, once, when the list comes back", async () => {
     leaveStudentsNotice("Alumno creado · ROMO VALENTINA quedó en 1° A");
     const { unmount } = render(<StudentsScreen onBack={() => {}} />);
-    expect(await screen.findByText("Alumno creado · ROMO VALENTINA quedó en 1° A")).toBeInTheDocument();
+    // Announced by the live region, painted by the pill: the same words twice in the DOM.
+    expect(await screen.findByRole("status")).toHaveTextContent("Alumno creado · ROMO VALENTINA quedó en 1° A");
     unmount();
 
     render(<StudentsScreen onBack={() => {}} />);

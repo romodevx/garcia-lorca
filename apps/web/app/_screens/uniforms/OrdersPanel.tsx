@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
 import { ticketPath } from "../../receipts/api";
 import { Btn } from "../../_design/Controls";
 import { listOrders, UniformsError, type Level, type UniformFulfillment, type UniformOrder } from "../../uniforms/api";
 import { EmptyState, ErrorNote, LevelChips, money, SkeletonRows, type SchoolLevel } from "./parts";
 
 import { API_URL } from "../../api-url";
+import { useRoomLabels } from "../../_design/students/roomLabels";
 
 const PAGE_SIZE = 20;
 
@@ -25,7 +26,9 @@ const PAGE_SIZE = 20;
  * the family ordering slice, when there is something to wait for.
  */
 export function OrdersPanel({ narrow, levels }: { narrow: boolean; levels: readonly SchoolLevel[] }): ReactElement {
-  const [rows, setRows] = useState<Row[] | null>(null);
+  const [orders, setOrders] = useState<UniformOrder[] | null>(null);
+  const roomLabels = useRoomLabels();
+  const rows = useMemo(() => (orders === null ? null : toRows(orders, roomLabels)), [orders, roomLabels]);
   const [total, setTotal] = useState(0);
   const [failure, setFailure] = useState<UniformsError | null>(null);
   const [level, setLevel] = useState<Level>("");
@@ -33,7 +36,7 @@ export function OrdersPanel({ narrow, levels }: { narrow: boolean; levels: reado
   const [page, setPage] = useState(0);
 
   const load = useCallback(async (): Promise<void> => {
-    setRows(null);
+    setOrders(null);
     setFailure(null);
     try {
       const res = await listOrders(API_URL, {
@@ -42,10 +45,10 @@ export function OrdersPanel({ narrow, levels }: { narrow: boolean; levels: reado
         pageSize: PAGE_SIZE,
         pageToken: page === 0 ? undefined : String(page * PAGE_SIZE),
       });
-      setRows(toRows(res.orders));
+      setOrders(res.orders);
       setTotal(res.totalCount);
     } catch (err) {
-      setRows([]);
+      setOrders([]);
       setFailure(err instanceof UniformsError ? err : new UniformsError("internal", "Algo salió mal"));
     }
   }, [level, page, query]);
@@ -264,12 +267,14 @@ const ACCENTS = ["var(--forest)", "var(--orange)", "var(--purple)", "var(--yello
  * The pending row carries NO deadline, and that absence says the thing a
  * sentence would have to explain: nothing is held yet, so no clock is running.
  */
-export function toRows(orders: UniformOrder[]): Row[] {
+export function toRows(orders: UniformOrder[], roomLabels: ReadonlyMap<string, string> = new Map()): Row[] {
   return orders.flatMap((order, index) => {
     const accent = ACCENTS[index % ACCENTS.length] as string;
     const who = order.studentName !== "" ? order.studentName : "Venta sin alumno";
-    // The level's name as it was when the order was placed.
-    const levelLabel = order.studentLevel !== undefined && order.studentLevel !== "" ? order.studentLevel : "—";
+    // The pupil's classroom with its grade (ISSUE-T14-204): the order stores only
+    // the level and the letter, so the cycle's enrolment names it; else the stored level.
+    const room = order.studentId !== undefined ? roomLabels.get(order.studentId) : undefined;
+    const levelLabel = room ?? (order.studentLevel !== undefined && order.studentLevel !== "" ? order.studentLevel : "—");
 
     const rows: Row[] = order.fulfillments.map((f) => ({
       key: f.id,

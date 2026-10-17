@@ -16,10 +16,13 @@ export interface SchoolCatalogue {
 }
 
 /** Comparator: level → grade → name; a group whose grade/level is unknown sorts last. */
-export function schoolOrder(cat: SchoolCatalogue): (a: Group, b: Group) => number {
+/** What the order reads of a group. */
+type OrderedGroup = Pick<Group, "gradeLevelId" | "name">;
+
+export function schoolOrder(cat: SchoolCatalogue): (a: OrderedGroup, b: OrderedGroup) => number {
   const levelRank = new Map(cat.levels.map((l, i) => [l.id, l.sortOrder ?? i + 1]));
   const gradeById = new Map(cat.grades.map((g) => [g.id, g]));
-  const rank = (g: Group): { orphan: number; level: number; levelId: string; ordinal: number } => {
+  const rank = (g: OrderedGroup): { orphan: number; level: number; levelId: string; ordinal: number } => {
     const grade = gradeById.get(g.gradeLevelId);
     const levelId = grade?.levelId ?? "";
     return { orphan: grade === undefined ? 1 : 0, level: levelRank.get(levelId) ?? UNKNOWN_RANK, levelId, ordinal: grade?.ordinal ?? 0 };
@@ -39,6 +42,6 @@ export function schoolOrder(cat: SchoolCatalogue): (a: Group, b: Group) => numbe
 }
 
 /** A sorted copy; the input is left untouched. */
-export function sortBySchoolOrder<G extends Group>(groups: readonly G[], cat: SchoolCatalogue): G[] {
+export function sortBySchoolOrder<G extends OrderedGroup>(groups: readonly G[], cat: SchoolCatalogue): G[] {
   return [...groups].sort(schoolOrder(cat));
 }

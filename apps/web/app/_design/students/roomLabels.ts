@@ -6,19 +6,25 @@ import { API_URL } from "../../api-url";
 import { listCycles, listLabelledGroups, type LabelledGroup } from "../../config/api";
 import { listEnrollments, type Enrollment } from "../../students/api";
 
+/** Which enrollment names a pupil's classroom: the active one, else the one they withdrew from. */
+const NAMING_STATUSES: readonly Enrollment["status"][] = ["active", "withdrawn"];
+
 /**
  * Each pupil's classroom as every screen names it — "3° PRIMARIA · A", grade
- * included (ISSUE-T14-018) — from the active enrollment of the cycle. A pupil
- * with no active enrollment, or in a group the list does not have, is absent:
- * the caller then shows what the pupil's file stores.
+ * included (ISSUE-T14-018) — from the active enrollment of the cycle, or for a
+ * withdrawn pupil the enrollment they left (ISSUE-T14-204). A pupil with
+ * neither, or in a group the list does not have, is absent: the caller then
+ * shows what the pupil's file stores.
  */
 export function roomLabelsOf(enrollments: readonly Enrollment[], groups: readonly LabelledGroup[]): ReadonlyMap<string, string> {
   const labelOf = new Map(groups.map((g) => [g.id, g.label]));
   const out = new Map<string, string>();
-  for (const e of enrollments) {
-    if (e.status !== "active" || out.has(e.studentId)) continue;
-    const label = labelOf.get(e.groupId);
-    if (label !== undefined) out.set(e.studentId, label);
+  for (const status of NAMING_STATUSES) {
+    for (const e of enrollments) {
+      if (e.status !== status || out.has(e.studentId)) continue;
+      const label = labelOf.get(e.groupId);
+      if (label !== undefined) out.set(e.studentId, label);
+    }
   }
   return out;
 }

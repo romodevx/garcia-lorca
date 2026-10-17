@@ -3,6 +3,7 @@
 import { useEffect, useState, type ReactElement } from "react";
 import { getIncome, type Income } from "../../finance/api";
 import { API_URL } from "../../api-url";
+import { dayRangeLabel } from "../../_lib/localDate";
 import { formatCents } from "../../_lib/money";
 
 export interface IncomePanelProps {
@@ -44,7 +45,7 @@ export function IncomePanel({ from, to }: IncomePanelProps): ReactElement {
         <div data-testid="income-total" style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 38, color: "var(--text)", marginTop: 4 }}>
           {formatCents(income.totalCents)}
         </div>
-        <p style={{ fontSize: 13, color: "var(--text-faint)", marginTop: 6 }}>{from} → {to}</p>
+        <p style={{ fontSize: 13, color: "var(--text-faint)", marginTop: 6 }}>{dayRangeLabel(from, to)}</p>
         {income.creditNoteCents > 0 && (
           // Credit notes settled debt in the period but are not income (T8):
           // apart, and outside the total above.

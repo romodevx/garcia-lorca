@@ -31,11 +31,19 @@ describe("roomLabelsOf", () => {
     expect(labels.get("s2")).toBe("3° PRIMARIA · A");
   });
 
-  it("knows nothing of a pupil with no active enrollment or an unknown group", () => {
-    const labels = roomLabelsOf([enrollment("s1", "gZ"), enrollment("s2", "gA", "withdrawn")], [group("gA", "3° PRIMARIA · A")]);
+  it("knows nothing of a pupil in an unknown group, nor of one only transferred out", () => {
+    const labels = roomLabelsOf([enrollment("s1", "gZ"), enrollment("s2", "gA", "transferred")], [group("gA", "3° PRIMARIA · A")]);
 
     expect(labels.has("s1")).toBe(false);
     expect(labels.has("s2")).toBe(false);
+  });
+
+  // ISSUE-T14-204: a withdrawn pupil read "PRIMARIA · B" — no active enrollment,
+  // so no label. The classroom they left is still the one to name them by.
+  it("names a withdrawn pupil by the classroom they left", () => {
+    const labels = roomLabelsOf([enrollment("s1", "gB", "withdrawn")], [group("gB", "3° PRIMARIA · B")]);
+
+    expect(labels.get("s1")).toBe("3° PRIMARIA · B");
   });
 });
 

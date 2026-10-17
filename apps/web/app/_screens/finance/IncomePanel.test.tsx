@@ -53,4 +53,11 @@ describe("IncomePanel · notas de crédito (tarea 8)", () => {
     await screen.findByText(/No se recibió nada/);
     expect(screen.queryByTestId("income-credit-notes")).toBeNull();
   });
+
+  // ISSUE-T14-203: the period read "2026-10-01 → 2026-10-17".
+  it("says the period with the month in words", async () => {
+    render(<IncomePanel from="2026-10-01" to="2026-10-17" />);
+
+    expect(await screen.findByText("1 oct 2026 → 17 oct 2026")).toBeInTheDocument();
+  });
 });

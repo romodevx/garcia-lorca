@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type ReactElement } from "react";
 import { Icon } from "../../_design/Icon";
-import { getCashUp, type CashUp, type Deposit } from "../../finance/api";
+import { getCashUp, type CashUp, type CashUpPayment, type Deposit } from "../../finance/api";
 import { depositDay } from "../../finance/depositDay";
 import { API_URL } from "../../api-url";
 import { localISODate, shortDayLabel } from "../../_lib/localDate";
@@ -10,6 +10,7 @@ import { ticketPath } from "../../receipts/api";
 import { formatCents } from "../../_lib/money";
 import { tenderLabel, tenderSummary } from "../../_design/payments/tenders";
 import { CashCutClosing, type CutAccess } from "./CashCutClosing";
+import { cashUpTimeline } from "./cashUpTimeline";
 
 export interface CashUpPanelProps {
   /** The day the money changed hands, "2026-10-10". Empty means today. */
@@ -51,6 +52,7 @@ export function CashUpPanel({ day, onCorrect, access }: CashUpPanelProps): React
     return <p style={{ color: "var(--text-muted)", fontSize: 15 }}>Cargando…</p>;
   }
 
+  const timeline = cashUpTimeline(cut.deposits, cut.payments);
   const methods: { key: string; label: string; cents: number }[] = [
     { key: "cash", label: "Efectivo", cents: cut.cashCents },
     { key: "card", label: "Tarjeta", cents: cut.cardCents },
@@ -92,66 +94,14 @@ export function CashUpPanel({ day, onCorrect, access }: CashUpPanelProps): React
         <p style={{ color: "var(--text-muted)", fontSize: 15, margin: 0 }}>No se recibió nada este día.</p>
       )}
 
-      {cut.deposits.length > 0 && (
+      {timeline.length > 0 && (
+        // One list, in the order the money came in (ISSUE-T14-206). A loose
+        // payment was taken outside a deposit (a counter sale, paid straight
+        // against its charge): it is in the drawer, so it is in the total.
         <div style={{ borderRadius: "var(--r-lg)", border: "1px solid var(--border)", background: "var(--surface)", overflow: "hidden" }}>
-          {cut.deposits.map((d) => (
-            <div key={d.id} data-testid="cash-up-row" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "13px 20px", borderTop: "1px solid var(--border)" }}>
-              <span style={{ fontSize: 14, color: "var(--text-muted)" }}>
-                {/* A back-dated payment carries a day, not an hour: none is shown. */}
-                {capturedLate(d) ? "" : `${hourOf(d.paidAt)} · `}
-                {tenderSummary(d.tenders)}
-                {d.receivedByName !== undefined && d.receivedByName !== "" && ` · ${d.receivedByName}`}
-                {d.folio !== undefined && d.folio !== "" && ` · ${d.folio}`}
-                {capturedLate(d) && (
-                  // A payment dated the day the family paid but keyed later:
-                  // the counterweight to back-dating (task 7).
-                  <span style={{ marginLeft: 8, padding: "2px 8px", borderRadius: 99, background: "var(--warn-bg)", color: "var(--warn-fg)", fontSize: 12, fontWeight: 700 }}>
-                    capturado el {dayLabel(d.capturedAt ?? "")}
-                  </span>
-                )}
-              </span>
-              <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 15.5, color: "var(--text)" }}>{formatCents(d.amountCents)}</span>
-                {/* Task 12: the ticket, printed again on its own 80 mm page. */}
-                <button
-                  type="button"
-                  aria-label={`Reimprimir ${d.folio ?? "comprobante"}`}
-                  title="Reimprimir comprobante"
-                  onClick={() => window.open(ticketPath("payment", d.id), "_blank", "noopener")}
-                  style={{ minWidth: 44, minHeight: 44, display: "grid", placeItems: "center", borderRadius: "var(--r-md)", color: "var(--text-muted)" }}
-                >
-                  <Icon name="documents" size={18} />
-                </button>
-                {onCorrect !== undefined && (
-                  // T9: the receipt is kept and a corrected one issued.
-                  <button
-                    type="button"
-                    aria-label={`Corregir ${d.folio ?? "pago"}`}
-                    title="Corregir pago"
-                    onClick={() => onCorrect(d)}
-                    style={{ minWidth: 44, minHeight: 44, display: "grid", placeItems: "center", borderRadius: "var(--r-md)", color: "var(--text-muted)" }}
-                  >
-                    <Icon name="edit" size={18} />
-                  </button>
-                )}
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {cut.payments.length > 0 && (
-        // Taken outside a deposit: a counter sale, paid straight against its
-        // charge. It is in the drawer, so it is in the total and listed here.
-        <div style={{ borderRadius: "var(--r-lg)", border: "1px solid var(--border)", background: "var(--surface)", overflow: "hidden" }}>
-          {cut.payments.map((p) => (
-            <div key={p.id} data-testid="cash-up-row" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "13px 20px", borderTop: "1px solid var(--border)" }}>
-              <span style={{ fontSize: 14, color: "var(--text-muted)" }}>
-                {`${hourOf(p.paidAt)} · ${tenderLabel(p.method)} · ${p.description}`}
-              </span>
-              <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 15.5, color: "var(--text)" }}>{formatCents(p.amountCents)}</span>
-            </div>
-          ))}
+          {timeline.map((entry) => entry.kind === "deposit"
+            ? <DepositRow key={entry.key} d={entry.deposit} onCorrect={onCorrect} />
+            : <LoosePaymentRow key={entry.key} p={entry.payment} />)}
         </div>
       )}
 
@@ -191,6 +141,65 @@ export function CashUpPanel({ day, onCorrect, access }: CashUpPanelProps): React
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/** A deposit of the day: hour, tenders, who took it, folio; reprint and correct. */
+function DepositRow({ d, onCorrect }: { d: Deposit; onCorrect?: (deposit: Deposit) => void }): ReactElement {
+  return (
+    <div data-testid="cash-up-row" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "13px 20px", borderTop: "1px solid var(--border)" }}>
+      <span style={{ fontSize: 14, color: "var(--text-muted)" }}>
+        {/* A back-dated payment carries a day, not an hour: none is shown. */}
+        {capturedLate(d) ? "" : `${hourOf(d.paidAt)} · `}
+        {tenderSummary(d.tenders)}
+        {d.receivedByName !== undefined && d.receivedByName !== "" && ` · ${d.receivedByName}`}
+        {d.folio !== undefined && d.folio !== "" && ` · ${d.folio}`}
+        {capturedLate(d) && (
+          // A payment dated the day the family paid but keyed later:
+          // the counterweight to back-dating (task 7).
+          <span style={{ marginLeft: 8, padding: "2px 8px", borderRadius: 99, background: "var(--warn-bg)", color: "var(--warn-fg)", fontSize: 12, fontWeight: 700 }}>
+            capturado el {dayLabel(d.capturedAt ?? "")}
+          </span>
+        )}
+      </span>
+      <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 15.5, color: "var(--text)" }}>{formatCents(d.amountCents)}</span>
+        {/* Task 12: the ticket, printed again on its own 80 mm page. */}
+        <button
+          type="button"
+          aria-label={`Reimprimir ${d.folio ?? "comprobante"}`}
+          title="Reimprimir comprobante"
+          onClick={() => window.open(ticketPath("payment", d.id), "_blank", "noopener")}
+          style={{ minWidth: 44, minHeight: 44, display: "grid", placeItems: "center", borderRadius: "var(--r-md)", color: "var(--text-muted)" }}
+        >
+          <Icon name="documents" size={18} />
+        </button>
+        {onCorrect !== undefined && (
+          // T9: the receipt is kept and a corrected one issued.
+          <button
+            type="button"
+            aria-label={`Corregir ${d.folio ?? "pago"}`}
+            title="Corregir pago"
+            onClick={() => onCorrect(d)}
+            style={{ minWidth: 44, minHeight: 44, display: "grid", placeItems: "center", borderRadius: "var(--r-md)", color: "var(--text-muted)" }}
+          >
+            <Icon name="edit" size={18} />
+          </button>
+        )}
+      </span>
+    </div>
+  );
+}
+
+/** A payment taken outside a deposit, with what it paid for. */
+function LoosePaymentRow({ p }: { p: CashUpPayment }): ReactElement {
+  return (
+    <div data-testid="cash-up-row" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "13px 20px", borderTop: "1px solid var(--border)" }}>
+      <span style={{ fontSize: 14, color: "var(--text-muted)" }}>
+        {`${hourOf(p.paidAt)} · ${tenderLabel(p.method)} · ${p.description}`}
+      </span>
+      <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 15.5, color: "var(--text)" }}>{formatCents(p.amountCents)}</span>
     </div>
   );
 }

@@ -183,7 +183,8 @@ func (r *Repository) LoadScheduleCatalog(ctx context.Context, cycleID string) (p
 
 func loadCatalogLists(tx *gorm.DB, cycleID string, cat *ports.ScheduleCatalog) error {
 	var err error
-	if cat.Levels, err = findMapped(tx.Order("name, id"), toDomainLevel); err != nil {
+	// The school's configured order (ISSUE-T14-205), as ListLevels answers.
+	if cat.Levels, err = findMapped(tx.Order("sort_order, name, id"), toDomainLevel); err != nil {
 		return err
 	}
 	if cat.Grades, err = findMapped(tx.Order("level_id, ordinal, id"), toDomainGradeLevel); err != nil {

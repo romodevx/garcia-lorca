@@ -32,6 +32,7 @@ import { Checkmark, StudentFilters, StudentSelectionBand } from "../../_design/s
 import { useStudentFilter } from "../../_design/students/useStudentFilter";
 import { EMPTY_FILTER, filterFromParams, filterToParams, type FilterableStudent, type StudentFilterState } from "../../_design/students/studentFilter";
 import { placeStudents } from "../../_design/students/placement";
+import { roomLabelsOf } from "../../_design/students/roomLabels";
 import { StudentNotesDialog } from "../../_design/students/StudentNotesDialog";
 import { StudentStatementDrawer } from "../../_design/students/StudentStatementDrawer";
 import { useIntent } from "../../routing/pendingIntent";
@@ -220,12 +221,15 @@ function StudentSheet({
   const [current, setCurrent] = useState<Enrollment | null | undefined | "failed">(undefined);
   // A withdrawn file is read-only (plan T2): the withdrawal just made here
   // counts before the roll is re-read (ISSUE-T14-009).
-  const withdrawn = st.admissionStatus === "withdrawn" || (current !== null && current !== undefined && current !== "failed" && current.status === "withdrawn");
+  const withdrawn = isWithdrawn(st, current);
   const admission: AdmissionStatus = withdrawn ? "withdrawn" : st.admissionStatus;
+  // The enrolment's classroom with its grade ("3° PRIMARIA · B"), the one left
+  // included (ISSUE-T14-204); unknown, what the file stores.
+  const enrolledRoom = current !== null && current !== undefined && current !== "failed" ? groups.find((g) => g.id === current.groupId)?.label : undefined;
   const rows: [string, string][] = [
     ["Matrícula", st.enrollmentNumber ?? ""],
     ["CURP", st.curp],
-    ["Nivel", `${levelOf(st)} · ${groupOf(st)}`],
+    ["Nivel", enrolledRoom ?? `${levelOf(st)} · ${groupOf(st)}`],
     ["Tutor", st.guardianName],
     ["Admisión", statusOf(admission).label],
   ];
@@ -256,7 +260,7 @@ function StudentSheet({
     listEnrollments(API_URL, { studentId: st.id, cycleId })
       .then((all) => {
         if (!alive) return;
-        setCurrent(all.find((e) => e.status === "active") ?? all.find((e) => e.status === "withdrawn") ?? null);
+        setCurrent(currentEnrollment(all, st.id));
       })
       // Not knowing is not "no group": offering "Inscribir" then would bring
       // back the second-enrolment 409 this sheet was fixed for.
@@ -619,6 +623,8 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
     const files = students.map((s) => ({ id: s.id, levelId: s.levelId !== "" ? s.levelId : (idOfName.get(fold(s.level)) ?? "") }));
     const placed = placeStudents(files, { enrollments: placementReady ? enrollments : [], groups, grades: gradeLevels });
     const labelOf = new Map(groups.map((g) => [g.id, g.label]));
+    // A withdrawn pupil has no active enrolment: name the classroom they left (ISSUE-T14-204).
+    const roomOf = roomLabelsOf(placementReady ? enrollments : [], groups);
     return students.map((s) => {
       const p = placed.get(s.id) ?? { levelId: s.levelId, gradeLevelId: "", groupId: "" };
       return {
@@ -631,7 +637,7 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
         searchText: [s.curp, s.guardianName, s.bankReference ?? ""],
         levelName: nameOf.get(p.levelId) ?? levelOf(s),
         // Placed: this cycle's classroom, or honestly none. Not yet known: the file's letter.
-        room: placementReady ? (labelOf.get(p.groupId) ?? NO_GROUP) : groupOf(s),
+        room: placementReady ? (labelOf.get(p.groupId) ?? roomOf.get(s.id) ?? NO_GROUP) : groupOf(s),
       };
     });
   }, [students, enrollments, groups, gradeLevels, catalogLevels, placementReady]);
@@ -689,14 +695,19 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
   // A direct link opens its pupil's ficha once, as soon as the roll is read;
   // following another link while one is open opens that one.
   const [linked, setLinked] = useState(linkedStudentId);
+  // An unknown id stays said until dismissed: a 2.6 s toast went unseen (ISSUE-T14-202).
+  const [linkMissed, setLinkMissed] = useState(false);
   useEffect(() => { if (linkedStudentId !== undefined) setLinked(linkedStudentId); }, [linkedStudentId]);
   useEffect(() => {
     if (linked === undefined || loading) return;
     const found = students.find((s) => s.id === linked);
     if (found !== undefined) setSheet(found);
-    else if (!loadFailed) say("No encontramos a ese alumno en el padrón.");
+    else if (!loadFailed) {
+      setLinkMissed(true);
+      onLinkedSheetClosed?.();
+    }
     setLinked(undefined);
-  }, [linked, loading, loadFailed, students, say]);
+  }, [linked, loading, loadFailed, students, onLinkedSheetClosed]);
   const closeSheet = (): void => {
     setSheet(null);
     onLinkedSheetClosed?.();
@@ -772,6 +783,7 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
             </div>
           }
         />
+        <LinkMissedNotice shown={linkMissed} onDismiss={() => setLinkMissed(false)} />
         {placementStatus === "failed" && (
           <p role="alert" style={{ color: "var(--bad-fg)", fontSize: 13.5, margin: "10px 0 0" }}>
             No pudimos leer los grupos de este ciclo: por ahora sólo se filtra por nivel. Recarga la página en un momento.
@@ -842,7 +854,7 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
                 selected={filter.selected.has(row.id)}
                 onToggle={() => filter.toggle(row.id)}
                 onOpen={() => setSheet(row.student)}
-                onEdit={onEdit === undefined ? undefined : () => onEdit(row.id)}
+                onEdit={onEdit === undefined || isWithdrawn(row.student, currentEnrollment(placementReady ? enrollments : [], row.id)) ? undefined : () => onEdit(row.id)}
                 onNotes={() => setNotesOf(row.student)}
                 onStatement={canReadStatement ? () => setStatementOf(row.student) : undefined}
               />
@@ -899,13 +911,53 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
         />
       )}
       {verifying && <VerifyCardDrawer onClose={() => setVerifying(false)} />}
+      {/* ONE live region, always mounted and empty until a message is set into
+          it, so every message is announced (ISSUE-T14-013, T14-202 gate nit).
+          The pill and the banner below paint it; they do not announce it twice. */}
+      <div role="status" data-testid="students-live" style={SR_ONLY}>{toast ?? (linkMissed ? LINK_MISSED : "")}</div>
       {toast !== null && (
-        // role=status: the confirmation is announced, not only painted (ISSUE-T14-013).
-        <div role="status" style={{ position: "fixed", bottom: 28, left: "50%", transform: "translateX(-50%)", zIndex: 80, display: "flex", alignItems: "center", gap: 11, padding: "14px 22px", borderRadius: "var(--r-pill)", background: "var(--forest)", color: "#fff", fontWeight: 600, fontSize: 15, boxShadow: "var(--shadow-pop)", animation: "pop .25s var(--ease) both" }}>
+        <div aria-hidden="true" style={{ position: "fixed", bottom: 28, left: "50%", transform: "translateX(-50%)", zIndex: 80, display: "flex", alignItems: "center", gap: 11, padding: "14px 22px", borderRadius: "var(--r-pill)", background: "var(--forest)", color: "#fff", fontWeight: 600, fontSize: 15, boxShadow: "var(--shadow-pop)", animation: "pop .25s var(--ease) both" }}>
           <Icon name="check" size={20} stroke={2.6} />{toast}
         </div>
       )}
     </Page>
+  );
+}
+
+/** The pupil's enrolment of the cycle that counts: the active one, else the one they withdrew from. */
+function currentEnrollment(all: readonly Enrollment[], studentId: string): Enrollment | null {
+  const own = all.filter((e) => e.studentId === studentId);
+  return own.find((e) => e.status === "active") ?? own.find((e) => e.status === "withdrawn") ?? null;
+}
+
+/**
+ * A withdrawn file is read-only (plan T2): the file says so, or this cycle's
+ * enrolment is a withdrawal not yet reflected on it (ISSUE-T14-009). One rule
+ * for the ficha and the list.
+ */
+function isWithdrawn(st: Student, current: Enrollment | null | undefined | "failed"): boolean {
+  return st.admissionStatus === "withdrawn" || (current !== null && current !== undefined && current !== "failed" && current.status === "withdrawn");
+}
+
+const LINK_MISSED = "No encontramos ese alumno.";
+
+/** Read by assistive tech, not painted. */
+const SR_ONLY: CSSProperties = { position: "absolute", width: 1, height: 1, padding: 0, margin: -1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap", border: 0 };
+
+/**
+ * A direct link named no pupil on the roll; the list stays, the notice says so
+ * until dismissed. Painted only: the screen's live region announces it.
+ */
+function LinkMissedNotice({ shown, onDismiss }: { shown: boolean; onDismiss: () => void }): ReactElement {
+  return (
+    <div data-testid="link-notice" style={shown ? { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginTop: 10, padding: "10px 16px", borderRadius: "var(--r-md)", background: "var(--surface-3)", border: "1px solid var(--border)", color: "var(--text)", fontSize: 14.5 } : undefined}>
+      {shown && (
+        <>
+          <span aria-hidden="true">{LINK_MISSED}</span>
+          <button type="button" onClick={onDismiss} style={{ minHeight: 44, padding: "0 12px", background: "transparent", border: "none", color: "var(--text-muted)", fontWeight: 600, cursor: "pointer" }}>Cerrar aviso</button>
+        </>
+      )}
+    </div>
   );
 }
 

@@ -420,3 +420,71 @@ describe("la liga directa a una ficha", () => {
     expect(await within(screen.getByRole("dialog", { name: "Ficha del alumno" })).findByRole("heading", { name: "Díaz Berta" })).toBeInTheDocument();
   });
 });
+
+// ISSUE-T14-202: /alumnos/<unknown id> painted the list and said nothing.
+describe("la liga directa a un alumno que no existe", () => {
+  it("avisa que no lo encontramos, se queda en la lista y el aviso no se va solo", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      students.listStudents.mockResolvedValue([pupil("lv-pri")]);
+      students.listEnrollments.mockResolvedValue([]);
+      const onLinkedSheetClosed = vi.fn();
+      render(<StudentsScreen onBack={() => {}} linkedStudentId="no-such-id" onLinkedSheetClosed={onLinkedSheetClosed} />);
+      // Gate nit: the live region is there, empty, before the text arrives, so it is announced.
+      expect(screen.getByRole("status")).toBeEmptyDOMElement();
+
+      await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("No encontramos ese alumno."));
+      expect(screen.getByTestId("link-notice")).toHaveTextContent("No encontramos ese alumno.");
+      expect(screen.getByRole("button", { name: "Ver ficha de Cruz Ana" })).toBeInTheDocument();
+      expect(screen.queryByRole("dialog", { name: "Ficha del alumno" })).toBeNull();
+      expect(onLinkedSheetClosed).toHaveBeenCalled();
+
+      vi.advanceTimersByTime(10_000);
+      expect(screen.getByRole("status")).toHaveTextContent("No encontramos ese alumno.");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+// ISSUE-T14-201: the Bajas list still offered "Editar ficha" on a withdrawn pupil.
+describe("un alumno dado de baja en la lista", () => {
+  it("no ofrece Editar ficha, sólo Ver ficha", async () => {
+    students.listStudents.mockResolvedValue([{ ...pupil("lv-pri"), admissionStatus: "withdrawn" }]);
+    students.listEnrollments.mockResolvedValue([]);
+    render(<StudentsScreen onBack={() => {}} onEdit={() => {}} />);
+
+    expect(await screen.findByRole("button", { name: "Ver ficha de Cruz Ana" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Editar ficha de Cruz Ana" })).toBeNull();
+  });
+
+  // Gate nit: the same rule as the ficha — a withdrawn enrollment this cycle
+  // counts even before the file's admission status catches up.
+  it("tampoco ofrece Editar ficha si su inscripción del ciclo es una baja", async () => {
+    students.listStudents.mockResolvedValue([{ ...pupil("lv-pri"), admissionStatus: "enrolled" }]);
+    students.listEnrollments.mockResolvedValue([
+      { id: "e1", studentId: "stu-1", cycleId: "c1", groupId: "g-pri-b", termId: "", status: "withdrawn", enrolledAt: "2026-08-20" },
+    ]);
+    render(<StudentsScreen onBack={() => {}} onEdit={() => {}} />);
+
+    await screen.findByRole("button", { name: "Ver ficha de Cruz Ana" });
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Editar ficha de Cruz Ana" })).toBeNull());
+  });
+
+  // ISSUE-T14-204: with no active enrollment the list and the ficha said
+  // "Primaria · 1° B"; the classroom they left names it with its grade.
+  it("nombra el salón que dejó, con su grado, en la lista y en la ficha", async () => {
+    const user = userEvent.setup();
+    config.listLabelledGroups.mockResolvedValue(GROUPS.map((g) => ({ ...g, label: `${g.name} PRIMARIA · ${g.name.slice(-1)}` })));
+    students.listStudents.mockResolvedValue([{ ...pupil("lv-pri"), admissionStatus: "withdrawn" }]);
+    students.listEnrollments.mockResolvedValue([
+      { id: "e1", studentId: "stu-1", cycleId: "c1", groupId: "g-pri-b", termId: "", status: "withdrawn", enrolledAt: "2026-08-20", withdrawnOn: "2026-10-17" },
+    ]);
+    render(<StudentsScreen onBack={() => {}} />);
+
+    expect((await screen.findAllByText("1° B PRIMARIA · B")).length).toBeGreaterThan(0);
+    await user.click(screen.getByRole("button", { name: "Ver ficha de Cruz Ana" }));
+    const sheet = screen.getByRole("dialog", { name: "Ficha del alumno" });
+    expect(await within(sheet).findByText("1° B PRIMARIA · B")).toBeInTheDocument();
+  });
+});
