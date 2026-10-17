@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -123,5 +123,49 @@ describe("InventoryPanel — the receipt button counts right", () => {
     await user.type(screen.getByLabelText("Piezas talla M"), "1");
 
     expect(screen.getByRole("button", { name: "Guardar 1 pieza" })).toBeInTheDocument();
+  });
+});
+
+// CC-403 (browser check of #142): the fields were not inside a <form>, so Enter
+// sent nothing and said nothing; only the button did.
+describe("InventoryPanel — Enter submits", () => {
+  it("says what is missing on Enter with zero pieces, and sends nothing", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    renderPanel();
+
+    await user.click(screen.getByRole("button", { name: "Entrada de almacén" }));
+    const drawer = screen.getByRole("dialog", { name: "Entrada de almacén" });
+    await user.type(within(drawer).getByLabelText("Piezas talla M"), "0{Enter}");
+
+    expect(within(drawer).getByRole("alert")).toHaveTextContent("Escribe cuántas piezas llegaron de al menos una talla.");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("sends the receipt on Enter with a valid quantity", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ moves: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    renderPanel();
+
+    await user.click(screen.getByRole("button", { name: "Entrada de almacén" }));
+    await user.type(screen.getByLabelText("Piezas talla M"), "3{Enter}");
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect((fetchMock.mock.calls[0] as [string, RequestInit])[1].method).toBe("POST");
+  });
+
+  it("sends a stock correction on Enter", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({}));
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    renderPanel();
+
+    await user.click(screen.getByRole("button", { name: "Ajustar Suéter verde talla M" }));
+    await user.type(screen.getByLabelText("Diferencia", { selector: "input" }), "2");
+    await user.type(screen.getByLabelText(/Motivo/, { selector: "input" }), "conteo físico{Enter}");
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
   });
 });

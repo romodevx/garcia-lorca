@@ -8,6 +8,12 @@ import { adjustStock, receiveStock, UniformsError, type UniformItem } from "../.
 import { API_URL } from "../../api-url";
 import { EmptyState, ErrorNote, field, FieldError, fieldWithError, FieldLabel, label, StockPill } from "./parts";
 
+/*
+ * Both drawers are a <form>: Enter in any field submits, and a submit that
+ * cannot go says why (CC-403 — without it Enter did nothing at all).
+ * noValidate: the browser's own bubbles would block the submit before save()
+ * marks the field.
+ */
 const asUniformsError = (err: unknown): UniformsError =>
   err instanceof UniformsError ? err : new UniformsError("internal", "Algo salió mal. Intenta de nuevo.");
 
@@ -315,77 +321,79 @@ function ReceiveDrawer({
 
   return (
     <Drawer title="Entrada de almacén" icon="plus" onClose={onClose}>
-      {failure !== null && <ErrorNote message={failure.message} detail={failure.detail} />}
-      <label style={label} htmlFor="receive-item">
-        Prenda
-      </label>
-      <select
-        id="receive-item"
-        style={field}
-        value={item.id}
-        onChange={(e) => {
-          const next = items.find((i) => i.id === e.target.value);
-          if (next !== undefined) {
-            setItem(next);
-            setQuantities({});
-          }
-        }}
-      >
-        {items.map((option) => (
-          <option key={option.id} value={option.id}>
-            {option.name}
-          </option>
-        ))}
-      </select>
-
-      <p id="receive-pieces" style={{ ...label, marginTop: 16 }}>Piezas por talla</p>
-      <div ref={quantitiesRef} style={{ display: "grid", gap: 8 }}>
-        {[...item.sizes]
-          .sort((a, b) => a.sizeOrder - b.sizeOrder)
-          .map((size) => (
-            <div key={size.id} style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <span style={{ width: 70, fontWeight: 700 }}>{size.sizeLabel}</span>
-              <input
-                style={{ ...fieldWithError(piecesError !== undefined), maxWidth: 120 }}
-                inputMode="numeric"
-                aria-label={`Piezas talla ${size.sizeLabel}`}
-                aria-invalid={piecesError !== undefined ? true : undefined}
-                aria-describedby={piecesError !== undefined ? "receive-pieces-error" : undefined}
-                value={quantities[size.id] ?? ""}
-                onChange={(e) => {
-                  setQuantities((q) => ({ ...q, [size.id]: e.target.value }));
-                  if (Number(e.target.value) > 0) setPiecesError(undefined);
-                }}
-              />
-              <span style={{ fontSize: 13, color: "var(--text-faint)" }}>tiene {size.onHand}</span>
-            </div>
+      <form noValidate onSubmit={(e) => { e.preventDefault(); void save(); }}>
+        {failure !== null && <ErrorNote message={failure.message} detail={failure.detail} />}
+        <label style={label} htmlFor="receive-item">
+          Prenda
+        </label>
+        <select
+          id="receive-item"
+          style={field}
+          value={item.id}
+          onChange={(e) => {
+            const next = items.find((i) => i.id === e.target.value);
+            if (next !== undefined) {
+              setItem(next);
+              setQuantities({});
+            }
+          }}
+        >
+          {items.map((option) => (
+            <option key={option.id} value={option.id}>
+              {option.name}
+            </option>
           ))}
-      </div>
-      <FieldError htmlFor="receive-pieces" message={piecesError} />
+        </select>
 
-      <FieldLabel
-        htmlFor="receive-note"
-        style={{ marginTop: 16 }}
-        help="De dónde vino la mercancía: el proveedor, el número de factura. Queda en el historial."
-      >
-        Nota
-      </FieldLabel>
-      <input
-        id="receive-note"
-        style={field}
-        aria-describedby="receive-note-help"
-        value={note}
-        onChange={(e) => setNote(e.target.value)}
-      />
+        <p id="receive-pieces" style={{ ...label, marginTop: 16 }}>Piezas por talla</p>
+        <div ref={quantitiesRef} style={{ display: "grid", gap: 8 }}>
+          {[...item.sizes]
+            .sort((a, b) => a.sizeOrder - b.sizeOrder)
+            .map((size) => (
+              <div key={size.id} style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <span style={{ width: 70, fontWeight: 700 }}>{size.sizeLabel}</span>
+                <input
+                  style={{ ...fieldWithError(piecesError !== undefined), maxWidth: 120 }}
+                  inputMode="numeric"
+                  aria-label={`Piezas talla ${size.sizeLabel}`}
+                  aria-invalid={piecesError !== undefined ? true : undefined}
+                  aria-describedby={piecesError !== undefined ? "receive-pieces-error" : undefined}
+                  value={quantities[size.id] ?? ""}
+                  onChange={(e) => {
+                    setQuantities((q) => ({ ...q, [size.id]: e.target.value }));
+                    if (Number(e.target.value) > 0) setPiecesError(undefined);
+                  }}
+                />
+                <span style={{ fontSize: 13, color: "var(--text-faint)" }}>tiene {size.onHand}</span>
+              </div>
+            ))}
+        </div>
+        <FieldError htmlFor="receive-pieces" message={piecesError} />
 
-      <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
-        <Btn kind="ghost" onClick={onClose}>
-          Cancelar
-        </Btn>
-        <Btn icon="check" onClick={() => void save()} busy={pending}>
-          {pending ? "Guardando…" : `Guardar ${pieces(lines.reduce((n, l) => n + l.qty, 0))}`}
-        </Btn>
-      </div>
+        <FieldLabel
+          htmlFor="receive-note"
+          style={{ marginTop: 16 }}
+          help="De dónde vino la mercancía: el proveedor, el número de factura. Queda en el historial."
+        >
+          Nota
+        </FieldLabel>
+        <input
+          id="receive-note"
+          style={field}
+          aria-describedby="receive-note-help"
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+        />
+
+        <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
+          <Btn kind="ghost" onClick={onClose}>
+            Cancelar
+          </Btn>
+          <Btn type="submit" icon="check" busy={pending}>
+            {pending ? "Guardando…" : `Guardar ${pieces(lines.reduce((n, l) => n + l.qty, 0))}`}
+          </Btn>
+        </div>
+      </form>
     </Drawer>
   );
 }
@@ -445,59 +453,61 @@ function AdjustDrawer({
 
   return (
     <Drawer title={`Ajustar ${target.item.name} · ${target.sizeLabel}`} icon="settings" onClose={onClose}>
-      {failure !== null && <ErrorNote message={failure.message} detail={failure.detail} />}
-      <FieldLabel
-        htmlFor="adjust-delta"
-        help="Cuánto cambia la existencia, con signo: un número negativo resta piezas y uno positivo las suma."
-      >
-        Diferencia
-      </FieldLabel>
-      <input
-        id="adjust-delta"
-        ref={deltaInput}
-        style={fieldWithError(deltaError !== undefined)}
-        inputMode="numeric"
-        aria-describedby={deltaError !== undefined ? "adjust-delta-help adjust-delta-error" : "adjust-delta-help"}
-        aria-invalid={deltaError !== undefined ? true : undefined}
-        value={delta}
-        onChange={(e) => {
-          setDelta(e.target.value);
-          const n = Number(e.target.value);
-          if (e.target.value.trim() !== "" && Number.isFinite(n) && n !== 0) setDeltaError(undefined);
-        }}
-      />
-      <FieldError htmlFor="adjust-delta" message={deltaError} />
-      <FieldLabel
-        htmlFor="adjust-note"
-        style={{ marginTop: 16 }}
-        help="Por qué se ajusta: merma, conteo físico, pieza dañada. Un ajuste sin explicación no se puede auditar después."
-      >
-        Motivo (obligatorio)
-      </FieldLabel>
-      <input
-        id="adjust-note"
-        ref={noteInput}
-        style={fieldWithError(noteError !== undefined)}
-        aria-describedby={noteError !== undefined ? "adjust-note-help adjust-note-error" : "adjust-note-help"}
-        aria-invalid={noteError !== undefined ? true : undefined}
-        value={note}
-        onChange={(e) => {
-          setNote(e.target.value);
-          if (e.target.value.trim().length >= MIN_REASON) setNoteError(undefined);
-        }}
-      />
-      <FieldError htmlFor="adjust-note" message={noteError} />
-      <p style={{ fontSize: 12.5, color: "var(--text-faint)", marginTop: 8 }}>
-        Queda registrado con tu nombre y no se puede borrar.
-      </p>
-      <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
-        <Btn kind="ghost" onClick={onClose}>
-          Cancelar
-        </Btn>
-        <Btn icon="check" onClick={() => void save()} busy={pending}>
-          {pending ? "Guardando…" : "Guardar ajuste"}
-        </Btn>
-      </div>
+      <form noValidate onSubmit={(e) => { e.preventDefault(); void save(); }}>
+        {failure !== null && <ErrorNote message={failure.message} detail={failure.detail} />}
+        <FieldLabel
+          htmlFor="adjust-delta"
+          help="Cuánto cambia la existencia, con signo: un número negativo resta piezas y uno positivo las suma."
+        >
+          Diferencia
+        </FieldLabel>
+        <input
+          id="adjust-delta"
+          ref={deltaInput}
+          style={fieldWithError(deltaError !== undefined)}
+          inputMode="numeric"
+          aria-describedby={deltaError !== undefined ? "adjust-delta-help adjust-delta-error" : "adjust-delta-help"}
+          aria-invalid={deltaError !== undefined ? true : undefined}
+          value={delta}
+          onChange={(e) => {
+            setDelta(e.target.value);
+            const n = Number(e.target.value);
+            if (e.target.value.trim() !== "" && Number.isFinite(n) && n !== 0) setDeltaError(undefined);
+          }}
+        />
+        <FieldError htmlFor="adjust-delta" message={deltaError} />
+        <FieldLabel
+          htmlFor="adjust-note"
+          style={{ marginTop: 16 }}
+          help="Por qué se ajusta: merma, conteo físico, pieza dañada. Un ajuste sin explicación no se puede auditar después."
+        >
+          Motivo (obligatorio)
+        </FieldLabel>
+        <input
+          id="adjust-note"
+          ref={noteInput}
+          style={fieldWithError(noteError !== undefined)}
+          aria-describedby={noteError !== undefined ? "adjust-note-help adjust-note-error" : "adjust-note-help"}
+          aria-invalid={noteError !== undefined ? true : undefined}
+          value={note}
+          onChange={(e) => {
+            setNote(e.target.value);
+            if (e.target.value.trim().length >= MIN_REASON) setNoteError(undefined);
+          }}
+        />
+        <FieldError htmlFor="adjust-note" message={noteError} />
+        <p style={{ fontSize: 12.5, color: "var(--text-faint)", marginTop: 8 }}>
+          Queda registrado con tu nombre y no se puede borrar.
+        </p>
+        <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
+          <Btn kind="ghost" onClick={onClose}>
+            Cancelar
+          </Btn>
+          <Btn type="submit" icon="check" busy={pending}>
+            {pending ? "Guardando…" : "Guardar ajuste"}
+          </Btn>
+        </div>
+      </form>
     </Drawer>
   );
 }
