@@ -97,7 +97,7 @@ func TestCorrectingTheDateReworksTheSurcharge(t *testing.T) {
 	if len(got.Corrected.Surcharges) != 1 || got.Corrected.Surcharges[0].Amount().Int64() != 30000 {
 		t.Fatalf("corrected surcharges = %+v, want the $300 of 10 October", got.Corrected.Surcharges)
 	}
-	charges, err := f.svc.ListCharges(context.Background(), testStudent, "")
+	charges, err := allCharges(context.Background(), f.svc, testStudent, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +117,7 @@ func TestCorrectingTheDateOutOfTheWindowTakesBackTheReward(t *testing.T) {
 
 	correct(t, f, early.Deposit.ID(), 310000, "2026-09-25", "corr-window")
 
-	charges, err := f.svc.ListCharges(context.Background(), testStudent, "")
+	charges, err := allCharges(context.Background(), f.svc, testStudent, "")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -780,7 +780,7 @@ func TestListOverduePassesTheInjectedClock(t *testing.T) {
 	concept := f.seedConcept(t, "Colegiatura", 250000)
 	overdue := f.seedCharge(t, concept.ID(), 100000) // due 2026-09-05, before fixedNow
 
-	got, err := f.svc.ListOverdue(context.Background(), testCycle)
+	got, err := allOverdue(context.Background(), f.svc, testCycle)
 
 	requireNoError(t, err)
 	if want := ymdUTC(2026, time.September, 15); !f.repo.overdueToday.Equal(want) {
@@ -816,7 +816,7 @@ func TestListChargesFiltersAndCarriesTheCollectedTotal(t *testing.T) {
 		t.Fatalf("seed payment: %v", err)
 	}
 
-	got, err := f.svc.ListCharges(ctx, testStudent, testCycle)
+	got, err := allCharges(ctx, f.svc, testStudent, testCycle)
 
 	requireNoError(t, err)
 	if len(got) != 1 || got[0].Charge.ID() != mine.ID() {
@@ -836,7 +836,7 @@ func TestListChargesRequiresAScopingFilter(t *testing.T) {
 	f.seedCharge(t, concept.ID(), 100000)
 	ctx := context.Background()
 
-	_, err := f.svc.ListCharges(ctx, "", "")
+	_, err := allCharges(ctx, f.svc, "", "")
 	requireKind(t, err, glerrors.KindInvalid)
 
 	tests := []struct {
@@ -850,7 +850,7 @@ func TestListChargesRequiresAScopingFilter(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if _, err := f.svc.ListCharges(ctx, tt.studentID, tt.cycleID); err != nil {
+			if _, err := allCharges(ctx, f.svc, tt.studentID, tt.cycleID); err != nil {
 				t.Fatalf("ListCharges(%q, %q) = %v, want the scoped read to pass through", tt.studentID, tt.cycleID, err)
 			}
 		})

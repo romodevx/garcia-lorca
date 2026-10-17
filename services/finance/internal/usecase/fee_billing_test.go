@@ -12,7 +12,7 @@ import (
 // chargeDescriptions lists what one pupil's statement actually says.
 func chargeDescriptions(t *testing.T, f *fixture, kind string) []string {
 	t.Helper()
-	charges, err := f.svc.ListCharges(context.Background(), testStudent, testCycle)
+	charges, err := allCharges(context.Background(), f.svc, testStudent, testCycle)
 	if err != nil {
 		t.Fatalf("ListCharges: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestTheSplitFeeAddsToTheMonthItLandsIn(t *testing.T) {
 
 	runOn(t, f, "2026-09-15")
 
-	charges, err := f.svc.ListCharges(context.Background(), testStudent, testCycle)
+	charges, err := allCharges(context.Background(), f.svc, testStudent, testCycle)
 	if err != nil {
 		t.Fatalf("ListCharges: %v", err)
 	}
@@ -143,7 +143,7 @@ func TestAFeeFallsDueWithTheMonthsTuition(t *testing.T) {
 
 	runOn(t, f, "2026-09-15")
 
-	charges, err := f.svc.ListCharges(context.Background(), testStudent, testCycle)
+	charges, err := allCharges(context.Background(), f.svc, testStudent, testCycle)
 	if err != nil {
 		t.Fatalf("ListCharges: %v", err)
 	}
@@ -216,7 +216,7 @@ func TestTheInscriptionUsesTheDeadlineTheSchoolSet(t *testing.T) {
 
 	runOn(t, f, "2026-09-15")
 
-	charges, err := f.svc.ListCharges(context.Background(), testStudent, testCycle)
+	charges, err := allCharges(context.Background(), f.svc, testStudent, testCycle)
 	if err != nil {
 		t.Fatalf("ListCharges: %v", err)
 	}
@@ -240,7 +240,7 @@ func TestAnUnsetInscriptionDeadlineKeepsTheOldRule(t *testing.T) {
 
 	runOn(t, f, "2026-09-15")
 
-	charges, err := f.svc.ListCharges(context.Background(), testStudent, testCycle)
+	charges, err := allCharges(context.Background(), f.svc, testStudent, testCycle)
 	if err != nil {
 		t.Fatalf("ListCharges: %v", err)
 	}
@@ -289,7 +289,7 @@ func TestChangingTheInscriptionDeadlineMovesChargesAlreadyIssued(t *testing.T) {
 	}
 	// Saving the plan moves them at once (T5); the run after it finds nothing
 	// left to move. The run's own move is TestTheRunMovesAChangedStartAlone.
-	charges, err := f.svc.ListCharges(context.Background(), testStudent, testCycle)
+	charges, err := allCharges(context.Background(), f.svc, testStudent, testCycle)
 	if err != nil {
 		t.Fatalf("ListCharges: %v", err)
 	}

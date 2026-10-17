@@ -590,10 +590,14 @@ func (s *FinanceService) levelsWithoutPlan(ctx context.Context, planByLevel map[
 // Follows the repository's Next cursor, never the last row returned: the
 // still-owing filter runs after a page is fetched, so a page of settled charges
 // comes back empty while later pages still hold debt. Stopping on that empty
-// page was the same silent under-billing again.
+// page was the same silent under-billing again
+// (TestRunBillingAccruesPastAPageOfSettledCharges).
+//
+// It is the same walk ListOverduePage serves the screen, scholarship pricing
+// included: a month its scholarship settled in time is not late (T18).
 func (s *FinanceService) allOverdue(ctx context.Context, cycleID string, asOf time.Time) ([]ports.ChargeWithPaid, error) {
 	return walkPages(func(after ports.ChargeCursor) (ports.ChargePage, error) {
-		return s.repo.ListOverduePage(ctx, cycleID, asOf, after, MaxPageSize)
+		return s.overduePage(ctx, cycleID, asOf, after, MaxPageSize)
 	})
 }
 
@@ -615,18 +619,6 @@ func (s *FinanceService) accrueLateFees(
 ) ([]domain.Charge, error) {
 	overdue, err := s.allOverdue(ctx, cycleID, asOf)
 	if err != nil {
-		return nil, err
-	}
-	// A month its scholarship settled in time is not late (T18).
-	ids, err := s.conceptIDs(ctx)
-	if err != nil {
-		return nil, err
-	}
-	pricer, err := s.pricerFor(ctx, studentsOf("", overdue), ids)
-	if err != nil {
-		return nil, err
-	}
-	if overdue, err = stillOwed(pricer, overdue, asOf); err != nil {
 		return nil, err
 	}
 	planOfStudent := make(map[string]domain.TuitionPlan, len(enrollments))

@@ -414,7 +414,7 @@ func TestOverdueAndLateFeesSkipWhatTheScholarshipSettled(t *testing.T) {
 	if got.LateFeesCreated != 0 {
 		t.Fatalf("%d late fees on months a full scholarship settled", got.LateFeesCreated)
 	}
-	overdue, err := b.svc.ListOverdue(context.Background(), testCycle)
+	overdue, err := allOverdue(context.Background(), b.svc, testCycle)
 	requireNoError(t, err)
 	if len(overdue) != 0 {
 		t.Fatalf("overdue lists %d charges the scholarship settled", len(overdue))

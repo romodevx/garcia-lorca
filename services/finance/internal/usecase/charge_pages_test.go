@@ -73,19 +73,6 @@ func TestListChargesPageWalksTheCycleWithoutGapsOrRepeats(t *testing.T) {
 	}
 }
 
-// ListCharges is the whole set, never its first page.
-func TestListChargesReturnsEveryPage(t *testing.T) {
-	f := newFixture(t)
-	want := seedManyCharges(t, f, 1200)
-
-	got, err := f.svc.ListCharges(context.Background(), "", testCycle)
-
-	requireNoError(t, err)
-	if len(got) != len(want) {
-		t.Fatalf("ListCharges = %d charges, want all %d", len(got), len(want))
-	}
-}
-
 func TestListChargesPageSizeDefaultsAndClamps(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -157,8 +144,9 @@ func TestListOverduePageMovesPastAFullyPaidPage(t *testing.T) {
 	}
 }
 
-// The whole overdue list (and the billing run behind it) keeps walking past 500
-// examined candidates that were all paid.
+// A client walking ListOverduePage at the full page size keeps going past 500
+// examined candidates that were all paid (the billing run's own walk is pinned
+// by TestRunBillingAccruesPastAPageOfSettledCharges).
 func TestListOverdueWalksPastAPaidFirstPage(t *testing.T) {
 	f := newFixture(t)
 	concept := f.seedConcept(t, "Colegiatura", 250000)
@@ -178,7 +166,7 @@ func TestListOverdueWalksPastAPaidFirstPage(t *testing.T) {
 		}
 	}
 
-	got, err := f.svc.ListOverdue(context.Background(), testCycle)
+	got, err := allOverdue(context.Background(), f.svc, testCycle)
 
 	requireNoError(t, err)
 	if len(got) != 1 || got[0].Charge.ID() != last.ID() {

@@ -72,7 +72,7 @@ func TestAJoinersFirstMonthFallsDueOnTheirEntryDay(t *testing.T) {
 
 	runOn(t, f, "2026-10-16")
 
-	list, err := f.svc.ListCharges(context.Background(), "stu-join", testCycle)
+	list, err := allCharges(context.Background(), f.svc, "stu-join", testCycle)
 	if err != nil {
 		t.Fatalf("ListCharges: %v", err)
 	}

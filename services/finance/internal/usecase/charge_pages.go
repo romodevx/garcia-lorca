@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"time"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
 	"github.com/garcia-lorca/services/finance/internal/ports"
@@ -56,13 +57,6 @@ func (s *FinanceService) ListChargesPage(ctx context.Context, studentID, cycleID
 	return ports.ChargePage{Charges: priced, Next: page.Next}, nil
 }
 
-// ListCharges is every charge of the filter: ListChargesPage walked to the end.
-func (s *FinanceService) ListCharges(ctx context.Context, studentID, cycleID string) ([]ports.ChargeWithPaid, error) {
-	return walkPages(func(after ports.ChargeCursor) (ports.ChargePage, error) {
-		return s.ListChargesPage(ctx, studentID, cycleID, after, MaxPageSize)
-	})
-}
-
 // ListOverduePage returns one page of the charges past due that still owe
 // money as of the school's today. An empty cycleID spans every cycle.
 //
@@ -70,7 +64,16 @@ func (s *FinanceService) ListCharges(ctx context.Context, studentID, cycleID str
 // settled are dropped (T18: a month a scholarship settled is not a debt), so
 // the page may be short or empty while Next still points further on.
 func (s *FinanceService) ListOverduePage(ctx context.Context, cycleID string, after ports.ChargeCursor, size int) (ports.ChargePage, error) {
-	page, err := s.repo.ListOverduePage(ctx, cycleID, s.clock.Today(), after, pageSize(size))
+	return s.overduePage(ctx, cycleID, s.clock.Today(), after, pageSize(size))
+}
+
+// overduePage is one page of the overdue set as of asOf, with the charges a
+// payment or a scholarship settled dropped (T18). The screen's page and the
+// billing run's whole walk (allOverdue) both read it, so they share one pricing
+// and one still-owed rule. Next is the repository's: the last candidate
+// examined, so an emptied page never ends the walk.
+func (s *FinanceService) overduePage(ctx context.Context, cycleID string, asOf time.Time, after ports.ChargeCursor, size int) (ports.ChargePage, error) {
+	page, err := s.repo.ListOverduePage(ctx, cycleID, asOf, after, size)
 	if err != nil {
 		return ports.ChargePage{}, err
 	}
@@ -78,19 +81,11 @@ func (s *FinanceService) ListOverduePage(ctx context.Context, cycleID string, af
 	if err != nil {
 		return ports.ChargePage{}, err
 	}
-	owed, err := stillOwed(pricer, page.Charges, s.clock.Today())
+	owed, err := stillOwed(pricer, page.Charges, asOf)
 	if err != nil {
 		return ports.ChargePage{}, err
 	}
 	return ports.ChargePage{Charges: owed, Next: page.Next}, nil
-}
-
-// ListOverdue is every overdue charge still owed: ListOverduePage walked to the
-// end.
-func (s *FinanceService) ListOverdue(ctx context.Context, cycleID string) ([]ports.ChargeWithPaid, error) {
-	return walkPages(func(after ports.ChargeCursor) (ports.ChargePage, error) {
-		return s.ListOverduePage(ctx, cycleID, after, MaxPageSize)
-	})
 }
 
 // pagePricer prices one page's pupils.

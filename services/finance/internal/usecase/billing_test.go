@@ -286,7 +286,7 @@ func TestADueDateOnAClosedDayMovesToTheNextWorkingDay(t *testing.T) {
 
 	runOn(t, f, "2026-11-15")
 
-	charges, err := f.svc.ListCharges(context.Background(), testStudent, testCycle)
+	charges, err := allCharges(context.Background(), f.svc, testStudent, testCycle)
 	if err != nil {
 		t.Fatalf("ListCharges: %v", err)
 	}
@@ -321,7 +321,7 @@ func TestALevelDiscountComesOffEveryMonth(t *testing.T) {
 
 	runOn(t, f, "2026-09-15")
 
-	charges, err := f.svc.ListCharges(context.Background(), testStudent, testCycle)
+	charges, err := allCharges(context.Background(), f.svc, testStudent, testCycle)
 	if err != nil {
 		t.Fatalf("ListCharges: %v", err)
 	}
@@ -362,7 +362,7 @@ func TestALevelDiscountDoesNotTouchTheInscription(t *testing.T) {
 
 	runOn(t, f, "2026-09-15")
 
-	charges, err := f.svc.ListCharges(context.Background(), testStudent, testCycle)
+	charges, err := allCharges(context.Background(), f.svc, testStudent, testCycle)
 	if err != nil {
 		t.Fatalf("ListCharges: %v", err)
 	}
@@ -417,7 +417,7 @@ func ladderFixtureFrom(t *testing.T, secondRungFrom time.Time) *fixture {
 // issuedTo maps a pupil's charges by description.
 func issuedTo(t *testing.T, f *fixture, student string) map[string]int64 {
 	t.Helper()
-	list, err := f.svc.ListCharges(context.Background(), student, testCycle)
+	list, err := allCharges(context.Background(), f.svc, student, testCycle)
 	if err != nil {
 		t.Fatalf("ListCharges: %v", err)
 	}
@@ -488,7 +488,7 @@ func TestTheLadderNeverRepricesWhatSomebodyNegotiated(t *testing.T) {
 	f := ladderFixture(t)
 	runOn(t, f, "2026-09-15")
 
-	list, err := f.svc.ListCharges(context.Background(), testStudent, testCycle)
+	list, err := allCharges(context.Background(), f.svc, testStudent, testCycle)
 	if err != nil {
 		t.Fatalf("ListCharges: %v", err)
 	}
@@ -508,7 +508,7 @@ func TestTheLadderNeverRepricesWhatSomebodyNegotiated(t *testing.T) {
 	if got.EnrollmentRepriced != 0 {
 		t.Errorf("repriced %d negotiated charges, want 0", got.EnrollmentRepriced)
 	}
-	after, err := f.svc.ListCharges(context.Background(), testStudent, testCycle)
+	after, err := allCharges(context.Background(), f.svc, testStudent, testCycle)
 	if err != nil {
 		t.Fatalf("ListCharges: %v", err)
 	}
@@ -576,7 +576,7 @@ func TestPayingCollectsTheTierInForceOnTheDayTheMoneyArrives(t *testing.T) {
 		t.Fatalf("RegisterDeposit: %v", err)
 	}
 
-	list, err := f.svc.ListCharges(context.Background(), testStudent, testCycle)
+	list, err := allCharges(context.Background(), f.svc, testStudent, testCycle)
 	if err != nil {
 		t.Fatalf("ListCharges: %v", err)
 	}
@@ -712,7 +712,7 @@ func TestTheQuoteDoesNotRePriceWhatSomebodyNegotiated(t *testing.T) {
 		f := ladderFixtureFrom(t, secondRungFrom)
 		runOn(t, f, "2026-09-15")
 
-		list, err := f.svc.ListCharges(context.Background(), testStudent, testCycle)
+		list, err := allCharges(context.Background(), f.svc, testStudent, testCycle)
 		if err != nil {
 			t.Fatalf("ListCharges: %v", err)
 		}
@@ -888,7 +888,7 @@ func TestAPaymentDatedYearsBackReachesNothingBelowTheFirstTier(t *testing.T) {
 
 func chargeNamed(t *testing.T, f *fixture, student, name string) ports.ChargeWithPaid {
 	t.Helper()
-	list, err := f.svc.ListCharges(context.Background(), student, testCycle)
+	list, err := allCharges(context.Background(), f.svc, student, testCycle)
 	if err != nil {
 		t.Fatalf("ListCharges: %v", err)
 	}
@@ -955,7 +955,7 @@ func TestTheInscriptionOfAMidYearJoinerIsNotBornOverdue(t *testing.T) {
 
 	got := runOn(t, f, "2027-03-25")
 
-	list, err := f.svc.ListCharges(context.Background(), "stu-late", testCycle)
+	list, err := allCharges(context.Background(), f.svc, "stu-late", testCycle)
 	if err != nil {
 		t.Fatalf("ListCharges: %v", err)
 	}

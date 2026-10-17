@@ -57,7 +57,7 @@ func savePlan(t *testing.T, f *fixture, in usecase.TuitionPlanInput) {
 // inscriptionOf is the pupil's inscription charge.
 func inscriptionOf(t *testing.T, f *fixture, student string) ports.ChargeWithPaid {
 	t.Helper()
-	charges, err := f.svc.ListCharges(context.Background(), student, testCycle)
+	charges, err := allCharges(context.Background(), f.svc, student, testCycle)
 	if err != nil {
 		t.Fatalf("ListCharges: %v", err)
 	}
