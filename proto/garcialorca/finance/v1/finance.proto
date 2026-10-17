@@ -430,13 +430,24 @@ message GenerateChargesResponse {
   int32 skipped_count = 2;
 }
 
+// ListChargesRequest reads one page of charges in (due_date, id) order. A cycle
+// holds thousands of charges (pupils x months), so the read is paged: follow
+// next_page_token until it comes back empty.
 message ListChargesRequest {
   string student_id = 1;  // filter (empty = any); at least one of the two required
   string cycle_id = 2;    // filter (empty = any); at least one of the two required
+  // page_token is the opaque next_page_token of the previous page; empty starts
+  // at the beginning. A token the service did not mint is INVALID_ARGUMENT.
+  string page_token = 3;
+  // page_size is how many charges one page holds: 0 means the default (500),
+  // larger values are clamped to that maximum.
+  int32 page_size = 4;
 }
 
 message ListChargesResponse {
   repeated Charge charges = 1;
+  // next_page_token is empty on the last page.
+  string next_page_token = 2;
 }
 
 // PreviewWithdrawalRequest asks which charges would be cancelled for a dated
@@ -636,12 +647,22 @@ message GetStatementResponse {
   string as_of = 7;
 }
 
+// ListOverdueRequest reads one page of the overdue charges in (due_date, id)
+// order. The page examines page_size candidates and returns those still owed,
+// so a page may be SHORTER than page_size (even empty) while more remain:
+// stop on an empty next_page_token, never on a short page.
 message ListOverdueRequest {
   string cycle_id = 1;  // optional filter (empty = any)
+  // page_token: as in ListChargesRequest.
+  string page_token = 2;
+  // page_size: as in ListChargesRequest (0 = 500, clamped to 500).
+  int32 page_size = 3;
 }
 
 message ListOverdueResponse {
   repeated Charge charges = 1;
+  // next_page_token is empty once every candidate has been examined.
+  string next_page_token = 2;
 }
 
 // --- CONTPAQi export (S02) ------------------------------------------------
