@@ -40,6 +40,7 @@ import { StudentsScreen, markStudentsVisit, studentsListPath } from "./_screens/
 import { GradesScreen } from "./_screens/grades/GradesScreen";
 import { Login } from "./_screens/Login";
 import { ChangePassword } from "./_screens/ChangePassword";
+import { ChangePasswordDialog } from "./_screens/account/ChangePasswordDialog";
 import { ModulePlaceholder } from "./_screens/ModulePlaceholder";
 import { AnnouncementsScreen } from "./_screens/announcements/AnnouncementsScreen";
 import { AnnouncementsCompose } from "./_screens/announcements/AnnouncementsCompose";
@@ -242,6 +243,9 @@ export function AppShell(): ReactElement {
   const [authError, setAuthError] = useState<string | undefined>(undefined);
   const [pending, setPending] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  // The at-will change from the account menu (ISSUE-T14-103), not the forced
+  // `changePassword` screen a temporary password lands on.
+  const [changingPassword, setChangingPassword] = useState(false);
 
   // The single flag read for the finance surface (UX-only; the gateway is the
   // security boundary). Hooks must run unconditionally, so we read it here.
@@ -463,6 +467,14 @@ export function AppShell(): ReactElement {
     goReplacing({ screen: "login" });
   };
 
+  // The password changed but the gateway could not sign the caller back in
+  // (its 204): every earlier session, this one included, is revoked.
+  const endSessionAfterPasswordChange = (): void => {
+    setChangingPassword(false);
+    logout();
+    setAuthError("Tu contraseña cambió. Entra con la nueva.");
+  };
+
   // When the session is REFUSED, this is what the person reads.
   //
   // Without it, the 401 went back to whichever panel made the call, and every
@@ -648,7 +660,14 @@ export function AppShell(): ReactElement {
 
   return (
     <div className="app-root" style={{ minHeight: "100vh" }}>
-      <TopBar user={user} theme={theme} onToggle={toggle} onHome={home} onLogout={logout} onOpenPalette={() => setPaletteOpen(true)} />
+      <TopBar user={user} theme={theme} onToggle={toggle} onHome={home} onLogout={logout} onChangePassword={() => setChangingPassword(true)} onOpenPalette={() => setPaletteOpen(true)} />
+      {changingPassword && (
+        <ChangePasswordDialog
+          onSubmit={(current, next) => apiChangePassword(API_URL, current, next)}
+          onClose={() => setChangingPassword(false)}
+          onSessionEnded={endSessionAfterPasswordChange}
+        />
+      )}
       <CommandPaletteHost open={paletteOpen} onOpenChange={setPaletteOpen} onNavigate={navigate} permissions={principal?.permissions} />
       {view.screen === "dashboard" && (
         <Dashboard

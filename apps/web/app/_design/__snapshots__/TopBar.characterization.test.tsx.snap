@@ -89,25 +89,11 @@ exports[`TopBar styles (characterization) > resolves to today's values on a desk
     "display": "flex",
     "gap": "12px",
   },
-  "header>div[3]>button[0]": {
-    "background": "#16331F",
-    "border": "1px solid #1E3727",
-    "border-radius": "50%",
+  "header>div[3]>div[2]": {
     "box-sizing": "border-box",
-    "color": "#EAF4EC",
-    "cursor": "pointer",
-    "display": "grid",
-    "font-family": "<unset>, system-ui, sans-serif",
-    "height": "46px",
-    "place-items": "center",
     "position": "relative",
-    "transition": "all .2s cubic-bezier(.22,.61,.36,1)",
-    "width": "46px",
   },
-  "header>div[3]>button[0]>svg[0]": {
-    "box-sizing": "border-box",
-  },
-  "header>div[3]>button[3]": {
+  "header>div[3]>div[2]>button[0]": {
     "align-items": "center",
     "background": "#16331F",
     "border": "1px solid #1E3727",
@@ -119,24 +105,24 @@ exports[`TopBar styles (characterization) > resolves to today's values on a desk
     "gap": "10px",
     "padding": "5px 6px 5px 14px",
   },
-  "header>div[3]>button[3]>div[0]": {
+  "header>div[3]>div[2]>button[0]>div[0]": {
     "box-sizing": "border-box",
     "line-height": "1.15",
     "text-align": "right",
   },
-  "header>div[3]>button[3]>div[0]>div[0]": {
+  "header>div[3]>div[2]>button[0]>div[0]>div[0]": {
     "box-sizing": "border-box",
     "color": "#EAF4EC",
     "font-family": "<unset>, system-ui, sans-serif",
     "font-size": "14px",
     "font-weight": "700",
   },
-  "header>div[3]>button[3]>div[0]>div[1]": {
+  "header>div[3]>div[2]>button[0]>div[0]>div[1]": {
     "box-sizing": "border-box",
     "color": "#9BB4A4",
     "font-size": "12px",
   },
-  "header>div[3]>button[3]>div[1]": {
+  "header>div[3]>div[2]>button[0]>div[1]": {
     "background": "#0A7A2F",
     "border-radius": "50%",
     "box-shadow": "none",
@@ -151,10 +137,10 @@ exports[`TopBar styles (characterization) > resolves to today's values on a desk
     "place-items": "center",
     "width": "40px",
   },
-  "header>div[3]>span[1]": {
+  "header>div[3]>span[0]": {
     "box-sizing": "border-box",
   },
-  "header>div[3]>span[1]>button[0]": {
+  "header>div[3]>span[0]>button[0]": {
     "background": "#16331F",
     "border": "1px solid #1E3727",
     "border-radius": "999px",
@@ -168,10 +154,10 @@ exports[`TopBar styles (characterization) > resolves to today's values on a desk
     "min-width": "44px",
     "padding": "0 14px",
   },
-  "header>div[3]>span[2]": {
+  "header>div[3]>span[1]": {
     "box-sizing": "border-box",
   },
-  "header>div[3]>span[2]>button[0]": {
+  "header>div[3]>span[1]>button[0]": {
     "background": "#16331F",
     "border": "1px solid #1E3727",
     "border-radius": "50%",
@@ -185,7 +171,7 @@ exports[`TopBar styles (characterization) > resolves to today's values on a desk
     "transition": "all .2s cubic-bezier(.22,.61,.36,1)",
     "width": "46px",
   },
-  "header>div[3]>span[2]>button[0]>svg[0]": {
+  "header>div[3]>span[1]>button[0]>svg[0]": {
     "box-sizing": "border-box",
   },
 }
@@ -280,25 +266,11 @@ exports[`TopBar styles (characterization) > resolves to today's values on a desk
     "display": "flex",
     "gap": "12px",
   },
-  "header>div[3]>button[0]": {
-    "background": "#F1F4EF",
-    "border": "1px solid #E7ECE5",
-    "border-radius": "50%",
+  "header>div[3]>div[2]": {
     "box-sizing": "border-box",
-    "color": "#0C2417",
-    "cursor": "pointer",
-    "display": "grid",
-    "font-family": "<unset>, system-ui, sans-serif",
-    "height": "46px",
-    "place-items": "center",
     "position": "relative",
-    "transition": "all .2s cubic-bezier(.22,.61,.36,1)",
-    "width": "46px",
   },
-  "header>div[3]>button[0]>svg[0]": {
-    "box-sizing": "border-box",
-  },
-  "header>div[3]>button[3]": {
+  "header>div[3]>div[2]>button[0]": {
     "align-items": "center",
     "background": "#F1F4EF",
     "border": "1px solid #E7ECE5",
@@ -310,24 +282,24 @@ exports[`TopBar styles (characterization) > resolves to today's values on a desk
     "gap": "10px",
     "padding": "5px 6px 5px 14px",
   },
-  "header>div[3]>button[3]>div[0]": {
+  "header>div[3]>div[2]>button[0]>div[0]": {
     "box-sizing": "border-box",
     "line-height": "1.15",
     "text-align": "right",
   },
-  "header>div[3]>button[3]>div[0]>div[0]": {
+  "header>div[3]>div[2]>button[0]>div[0]>div[0]": {
     "box-sizing": "border-box",
     "color": "#0C2417",
     "font-family": "<unset>, system-ui, sans-serif",
     "font-size": "14px",
     "font-weight": "700",
   },
-  "header>div[3]>button[3]>div[0]>div[1]": {
+  "header>div[3]>div[2]>button[0]>div[0]>div[1]": {
     "box-sizing": "border-box",
     "color": "#5C6B61",
     "font-size": "12px",
   },
-  "header>div[3]>button[3]>div[1]": {
+  "header>div[3]>div[2]>button[0]>div[1]": {
     "background": "#0A7A2F",
     "border-radius": "50%",
     "box-shadow": "none",
@@ -342,10 +314,10 @@ exports[`TopBar styles (characterization) > resolves to today's values on a desk
     "place-items": "center",
     "width": "40px",
   },
-  "header>div[3]>span[1]": {
+  "header>div[3]>span[0]": {
     "box-sizing": "border-box",
   },
-  "header>div[3]>span[1]>button[0]": {
+  "header>div[3]>span[0]>button[0]": {
     "background": "#F1F4EF",
     "border": "1px solid #E7ECE5",
     "border-radius": "999px",
@@ -359,10 +331,10 @@ exports[`TopBar styles (characterization) > resolves to today's values on a desk
     "min-width": "44px",
     "padding": "0 14px",
   },
-  "header>div[3]>span[2]": {
+  "header>div[3]>span[1]": {
     "box-sizing": "border-box",
   },
-  "header>div[3]>span[2]>button[0]": {
+  "header>div[3]>span[1]>button[0]": {
     "background": "#F1F4EF",
     "border": "1px solid #E7ECE5",
     "border-radius": "50%",
@@ -376,7 +348,7 @@ exports[`TopBar styles (characterization) > resolves to today's values on a desk
     "transition": "all .2s cubic-bezier(.22,.61,.36,1)",
     "width": "46px",
   },
-  "header>div[3]>span[2]>button[0]>svg[0]": {
+  "header>div[3]>span[1]>button[0]>svg[0]": {
     "box-sizing": "border-box",
   },
 }
@@ -476,25 +448,11 @@ exports[`TopBar styles (characterization) > resolves to today's values on a phon
     "display": "flex",
     "gap": "12px",
   },
-  "header>div[3]>button[0]": {
-    "background": "#F1F4EF",
-    "border": "1px solid #E7ECE5",
-    "border-radius": "50%",
+  "header>div[3]>div[2]": {
     "box-sizing": "border-box",
-    "color": "#0C2417",
-    "cursor": "pointer",
-    "display": "grid",
-    "font-family": "<unset>, system-ui, sans-serif",
-    "height": "46px",
-    "place-items": "center",
     "position": "relative",
-    "transition": "all .2s cubic-bezier(.22,.61,.36,1)",
-    "width": "46px",
   },
-  "header>div[3]>button[0]>svg[0]": {
-    "box-sizing": "border-box",
-  },
-  "header>div[3]>button[3]": {
+  "header>div[3]>div[2]>button[0]": {
     "align-items": "center",
     "background": "#F1F4EF",
     "border": "1px solid #E7ECE5",
@@ -506,25 +464,25 @@ exports[`TopBar styles (characterization) > resolves to today's values on a phon
     "gap": "10px",
     "padding": "5px 6px 5px 14px",
   },
-  "header>div[3]>button[3]>div[0]": {
+  "header>div[3]>div[2]>button[0]>div[0]": {
     "box-sizing": "border-box",
     "display": "none",
     "line-height": "1.15",
     "text-align": "right",
   },
-  "header>div[3]>button[3]>div[0]>div[0]": {
+  "header>div[3]>div[2]>button[0]>div[0]>div[0]": {
     "box-sizing": "border-box",
     "color": "#0C2417",
     "font-family": "<unset>, system-ui, sans-serif",
     "font-size": "14px",
     "font-weight": "700",
   },
-  "header>div[3]>button[3]>div[0]>div[1]": {
+  "header>div[3]>div[2]>button[0]>div[0]>div[1]": {
     "box-sizing": "border-box",
     "color": "#5C6B61",
     "font-size": "12px",
   },
-  "header>div[3]>button[3]>div[1]": {
+  "header>div[3]>div[2]>button[0]>div[1]": {
     "background": "#0A7A2F",
     "border-radius": "50%",
     "box-shadow": "none",
@@ -539,11 +497,11 @@ exports[`TopBar styles (characterization) > resolves to today's values on a phon
     "place-items": "center",
     "width": "40px",
   },
-  "header>div[3]>span[1]": {
+  "header>div[3]>span[0]": {
     "box-sizing": "border-box",
     "display": "none",
   },
-  "header>div[3]>span[1]>button[0]": {
+  "header>div[3]>span[0]>button[0]": {
     "background": "#F1F4EF",
     "border": "1px solid #E7ECE5",
     "border-radius": "999px",
@@ -557,10 +515,10 @@ exports[`TopBar styles (characterization) > resolves to today's values on a phon
     "min-width": "44px",
     "padding": "0 14px",
   },
-  "header>div[3]>span[2]": {
+  "header>div[3]>span[1]": {
     "box-sizing": "border-box",
   },
-  "header>div[3]>span[2]>button[0]": {
+  "header>div[3]>span[1]>button[0]": {
     "background": "#F1F4EF",
     "border": "1px solid #E7ECE5",
     "border-radius": "50%",
@@ -574,7 +532,7 @@ exports[`TopBar styles (characterization) > resolves to today's values on a phon
     "transition": "all .2s cubic-bezier(.22,.61,.36,1)",
     "width": "46px",
   },
-  "header>div[3]>span[2]>button[0]>svg[0]": {
+  "header>div[3]>span[1]>button[0]>svg[0]": {
     "box-sizing": "border-box",
   },
 }

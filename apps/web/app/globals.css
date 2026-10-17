@@ -216,6 +216,41 @@ input { font-family: var(--font-ui); }
 .topbar-user-name { font-weight: 700; font-size: 14px; color: var(--text); font-family: var(--font-display); }
 .topbar-user-role { font-size: 12px; color: var(--text-muted); }
 
+/* The account menu the name chip opens (ISSUE-T14-103). Name and role repeat
+   at its top because a phone hides .topbar-user-text below 768px. */
+.topbar-account { position: relative; }
+.account-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 60;
+  min-width: 240px;
+  max-width: calc(100vw - 32px);
+  padding: 8px;
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-pop);
+}
+.account-menu-who { padding: 10px 12px 12px; border-bottom: 1px solid var(--border); margin-bottom: 6px; }
+.account-menu-name { font-weight: 700; font-size: 15px; color: var(--text); font-family: var(--font-display); }
+.account-menu-role { font-size: 13px; color: var(--text-muted); margin-top: 2px; }
+.account-menu-list { display: flex; flex-direction: column; }
+.account-menu-item {
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: var(--r-md);
+  text-align: left;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+.account-menu-item:hover,
+.account-menu-item:focus-visible { background: var(--surface-3); }
+
 /* The top bar's search trigger. These were inline on the element until the
    phone media query needed to override them and could not: an inline style
    beats an author rule, so the box kept its desktop width on a 412px screen

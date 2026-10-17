@@ -17,7 +17,7 @@ import { TopBar } from "./TopBar";
 function renderBar(): HTMLElement {
   const { container } = render(
     <Providers>
-      <TopBar user={USERS.admin} theme="light" onToggle={() => {}} onHome={() => {}} onLogout={() => {}} onOpenPalette={() => {}} />
+      <TopBar user={USERS.admin} theme="light" onToggle={() => {}} onHome={() => {}} onLogout={() => {}} onChangePassword={() => {}} onOpenPalette={() => {}} />
     </Providers>
   );
   const header = container.querySelector("header");

@@ -77,7 +77,19 @@ export async function refresh(baseURL: string): Promise<RefreshResult> {
   return (await res.json()) as RefreshResult;
 }
 
-export async function changePassword(baseURL: string, currentPassword: string, newPassword: string): Promise<void> {
+export interface ChangePasswordResult {
+  /**
+   * The change revokes every session issued before it, the caller's included.
+   * The gateway then signs the caller in again with the new password and sets
+   * fresh cookies (200). When that re-login fails it answers 204: the password
+   * IS changed, but this browser no longer holds a live session.
+   */
+  sessionRenewed: boolean;
+}
+
+const NO_CONTENT = 204;
+
+export async function changePassword(baseURL: string, currentPassword: string, newPassword: string): Promise<ChangePasswordResult> {
   const res = await fetch(url(baseURL, "/api/v1/auth/change-password"), {
     method: "POST",
     credentials: "include",
@@ -87,6 +99,7 @@ export async function changePassword(baseURL: string, currentPassword: string, n
   if (!res.ok) {
     throw new HttpError(res.status, `changePassword: HTTP ${res.status}`);
   }
+  return { sessionRenewed: res.status !== NO_CONTENT };
 }
 
 export async function logout(baseURL: string): Promise<void> {

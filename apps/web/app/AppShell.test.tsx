@@ -139,6 +139,12 @@ async function submitLogin(user: ReturnType<typeof userEvent.setup>): Promise<vo
   await user.click(screen.getByRole("button", { name: "Entrar al sistema" }));
 }
 
+/** Logging out now goes through the account menu (ISSUE-T14-103). */
+async function clickLogout(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+  await user.click(screen.getByRole("button", { name: /Mi cuenta/ }));
+  await user.click(screen.getByRole("menuitem", { name: "Cerrar sesión" }));
+}
+
 // Fake timers WITHOUT shouldAdvanceTime: wall-clock time must never reach the
 // fake clock. Testing Library only drives fake timers through a global `jest`;
 // this shim hands it vitest's, so findBy/waitFor still resolve.
@@ -176,14 +182,14 @@ describe("AppShell navigation flow", () => {
     expect(await screen.findByRole("heading", { name: /Módulos/ })).toBeInTheDocument();
 
     // Logout → server call to expire the cookie, then back to login.
-    await user.click(screen.getByRole("button", { name: "Cerrar sesión" }));
+    await clickLogout(user);
     expect(await screen.findByRole("button", { name: "Entrar al sistema" })).toBeInTheDocument();
     expect(mockLogout).toHaveBeenCalledWith(expect.any(String));
   });
 
   it("routes to the forced change-password screen and then to the dashboard", async () => {
     mockLogin.mockResolvedValue({ expiresIn: 900, mustChangePassword: true });
-    mockChangePassword.mockResolvedValue(undefined);
+    mockChangePassword.mockResolvedValue({ sessionRenewed: true });
     mockRefresh.mockResolvedValue({ expiresIn: 900 });
     const user = userEvent.setup();
     render(
@@ -243,8 +249,9 @@ describe("AppShell navigation flow", () => {
   });
 
   // QA 2026-09-25, ISSUE-001: the bell showed a hard-coded "3" on an empty
-  // school. Nothing feeds it yet, so it shows no count at all.
-  it("shows no invented count on the notifications bell", async () => {
+  // school. ISSUE-T14-104: it then stayed as a button with no onClick. Nothing
+  // feeds it, so there is no bell at all.
+  it("renders no notifications bell", async () => {
     mockMe.mockResolvedValueOnce({ userId: "u1", email: "owner@example.com", permissions: [] });
     render(
       <Providers flags={{}}>
@@ -253,7 +260,7 @@ describe("AppShell navigation flow", () => {
     );
 
     await screen.findByRole("heading", { name: /Módulos/ });
-    expect(screen.getByRole("button", { name: /Notificaciones/ })).not.toHaveTextContent(/\d/);
+    expect(screen.queryByRole("button", { name: /Notificaciones/ })).toBeNull();
   });
 
   it("shows the gateway's real display name (not the email-derived one), with the email as the subtitle", async () => {
@@ -476,7 +483,7 @@ describe("AppShell — la sesión no se cierra por inactividad", () => {
         </Providers>,
       );
       // Wait for the live session to land, or there is nothing to keep open.
-      await screen.findByRole("button", { name: /Salir|Cerrar sesión/i });
+      await screen.findByRole("button", { name: /Mi cuenta/ });
 
       await act(async () => { vi.advanceTimersByTime(2 * 60 * 60 * 1000); });
     } finally {
@@ -486,7 +493,7 @@ describe("AppShell — la sesión no se cierra por inactividad", () => {
     expect(mockLogout).not.toHaveBeenCalled();
     expect(screen.queryByText(/inactividad/i)).not.toBeInTheDocument();
     // Still inside, not on the login screen.
-    expect(screen.getByRole("button", { name: /Salir|Cerrar sesión/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Mi cuenta/ })).toBeInTheDocument();
   });
 });
 
@@ -511,7 +518,7 @@ describe("restoring a session at boot", () => {
     );
 
     // Signed in, on the dashboard — not on the login screen.
-    expect(await screen.findByRole("button", { name: /Salir|Cerrar sesión/i })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /Mi cuenta/ })).toBeInTheDocument();
   });
 
   // FOUND BY /qa (2026-09-12), with the database stopped for real. The retries
@@ -780,7 +787,7 @@ describe("la dirección manda sobre la pantalla", () => {
     );
 
     await screen.findByRole("heading", { name: "Finanzas" });
-    await user.click(screen.getByRole("button", { name: "Cerrar sesión" }));
+    await clickLogout(user);
 
     await screen.findByRole("button", { name: "Entrar al sistema" });
     expect(replaced).toContain("/entrar");
@@ -804,7 +811,7 @@ describe("la guardia de sesión", () => {
 
     await screen.findByRole("button", { name: "Entrar al sistema" });
     expect(screen.queryByRole("heading", { name: "Finanzas" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Cerrar sesión" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Mi cuenta/ })).toBeNull();
   });
 
   it("tras cerrar sesión, 'atrás' no revive el tablero", async () => {
@@ -823,7 +830,7 @@ describe("la guardia de sesión", () => {
     );
 
     await screen.findByRole("heading", { name: "Finanzas" });
-    await user.click(screen.getByRole("button", { name: "Cerrar sesión" }));
+    await clickLogout(user);
     await screen.findByRole("button", { name: "Entrar al sistema" });
 
     // El "atrás" del navegador: la dirección regresa sola a una ruta protegida.
@@ -1102,5 +1109,50 @@ describe("el alta de alumno es una página (T9)", () => {
     expect(await screen.findByRole("heading", { name: "Estudiantes" })).toBeInTheDocument();
     expect(fakePath()).toBe("/alumnos");
     window.history.replaceState(null, "", "/");
+  });
+});
+
+describe("cambiar la contraseña por voluntad propia (ISSUE-T14-103)", () => {
+  async function openDialog(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+    await user.click(await screen.findByRole("button", { name: /Mi cuenta/ }));
+    await user.click(screen.getByRole("menuitem", { name: "Cambiar contraseña" }));
+    await screen.findByRole("dialog", { name: "Cambiar contraseña" });
+    await user.type(screen.getByLabelText("Contraseña actual"), "test-owner-pw");
+    await user.type(screen.getByLabelText("Nueva contraseña"), "test-new-pw-123");
+    await user.type(screen.getByLabelText("Confirmar contraseña"), "test-new-pw-123");
+    await user.click(screen.getByRole("button", { name: "Cambiar contraseña" }));
+  }
+
+  it("changes it from the account menu and stays signed in when the session is renewed", async () => {
+    mockMe.mockResolvedValue(OWNER_ME);
+    mockChangePassword.mockResolvedValue({ sessionRenewed: true });
+    const user = userEvent.setup();
+    render(
+      <Providers flags={{}}>
+        <AppShell />
+      </Providers>
+    );
+    await openDialog(user);
+    expect(mockChangePassword).toHaveBeenCalledWith(expect.any(String), "test-owner-pw", "test-new-pw-123");
+    expect(await screen.findByRole("status")).toHaveTextContent("Tu contraseña cambió");
+    await user.click(screen.getByRole("button", { name: "Listo" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("button", { name: /Mi cuenta/ })).toHaveFocus();
+    expect(mockLogout).not.toHaveBeenCalled();
+  });
+
+  it("sends to sign-in with the reason when the server could not renew the session", async () => {
+    mockMe.mockResolvedValue(OWNER_ME);
+    mockChangePassword.mockResolvedValue({ sessionRenewed: false });
+    mockLogout.mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    render(
+      <Providers flags={{}}>
+        <AppShell />
+      </Providers>
+    );
+    await openDialog(user);
+    expect(await screen.findByRole("button", { name: "Entrar al sistema" })).toBeInTheDocument();
+    expect(screen.getByText("Tu contraseña cambió. Entra con la nueva.")).toBeInTheDocument();
   });
 });

@@ -2,8 +2,9 @@
 
 import { useTranslations } from "next-intl";
 import type { ReactElement } from "react";
-import { Avatar, Logo } from "./Brand";
-import { IconBtn, ThemeToggle } from "./Controls";
+import { AccountMenu } from "./AccountMenu";
+import { Logo } from "./Brand";
+import { ThemeToggle } from "./Controls";
 import { Icon } from "./Icon";
 import type { UserProfile } from "./data";
 import { LanguageToggle } from "../i18n/LanguageToggle";
@@ -15,6 +16,8 @@ export interface TopBarProps {
   onToggle: () => void;
   onHome: () => void;
   onLogout: () => void;
+  /** Opens the change-password dialog (from the account menu). */
+  onChangePassword: () => void;
   /** Opens the Command Palette (the search box is a trigger, not an input). */
   onOpenPalette: () => void;
 }
@@ -25,6 +28,7 @@ export function TopBar({
   onToggle,
   onHome,
   onLogout,
+  onChangePassword,
   onOpenPalette
 }: TopBarProps): ReactElement {
   const t = useTranslations("common");
@@ -61,9 +65,10 @@ export function TopBar({
       </div>
       <div className="topbar-spacer" />
       <div className="topbar-actions">
-        {/* No count until something feeds it: a fixed number announced
-            notices an empty school did not have (QA 2026-09-25, ISSUE-001). */}
-        <IconBtn name="bell" label={t("action.notifications")} />
+        {/* No notifications bell: comms has no staff inbox (its notifications
+            are per pupil, read by families in the app), and a bell with no
+            onClick was a dead button (ISSUE-T14-104). It comes back with a
+            feed that the person at the desk can actually read. */}
         {/* Wrapped so the stylesheet can drop it on a phone: it is the one
             control here that a person changes once and then never again. */}
         <span className="topbar-lang">
@@ -74,18 +79,7 @@ export function TopBar({
         <span className="topbar-theme">
           <ThemeToggle theme={theme} onToggle={onToggle} />
         </span>
-        <button
-          onClick={onLogout}
-          aria-label="Cerrar sesión"
-          title="Cerrar sesión"
-          className="topbar-user"
-        >
-          <div className="topbar-user-text">
-            <div className="topbar-user-name">{user.name}</div>
-            <div className="topbar-user-role">{user.role}</div>
-          </div>
-          <Avatar name={user.name} color={user.color} size={40} />
-        </button>
+        <AccountMenu user={user} onChangePassword={onChangePassword} onLogout={onLogout} />
       </div>
     </header>
   );
