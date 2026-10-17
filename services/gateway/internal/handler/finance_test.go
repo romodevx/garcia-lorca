@@ -581,6 +581,25 @@ func TestFinanceCancelChargeUnknownIs404(t *testing.T) {
 	}
 }
 
+// A discount forgives money: it carries its reason, like a cancellation.
+func TestFinanceApplyDiscountRequiresReason(t *testing.T) {
+	for name, body := range map[string]string{"missing": `{"discountCents":50000}`, "blank": `{"discountCents":50000,"reason":"  "}`} {
+		t.Run(name, func(t *testing.T) {
+			svc := &fakeFinance{charge: sampleCharge}
+			h := handler.NewFinanceHandler(svc)
+
+			rec := doAdminReq(t, http.HandlerFunc(h.ApplyDiscount), http.MethodPost, "/api/v1/finance/charges/chg-1/discount", body, "id", "chg-1")
+
+			if rec.Code != http.StatusBadRequest {
+				t.Errorf("status = %d, want 400", rec.Code)
+			}
+			if svc.discountChargeID != "" {
+				t.Error("a discount without a reason must not reach finance")
+			}
+		})
+	}
+}
+
 // CC-203: a charge is withdrawn with its reason, like a deposit.
 func TestFinanceCancelChargeRequiresReason(t *testing.T) {
 	for name, body := range map[string]string{"no body": "", "empty": `{}`, "blank": `{"reason":"   "}`} {

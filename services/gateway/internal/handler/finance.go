@@ -437,6 +437,10 @@ func (h *FinanceHandler) ApplyDiscount(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
+	if strings.TrimSpace(req.Reason) == "" {
+		http.Error(w, "reason is required to discount a charge", http.StatusBadRequest)
+		return
+	}
 	res, err := h.svc.ApplyDiscount(r.Context(), r.PathValue("id"), req.DiscountCents, req.Reason)
 	if err != nil {
 		writeConnectError(w, err)
