@@ -166,6 +166,28 @@ ps: ## Estado de los servicios
 logs: ## Logs de todo el stack (follow)
 	$(COMPOSE) logs -f --tail=120
 
+# ---- Modo producción local (deploy/PROD-LOCAL.md) --------------------------
+# Las MISMAS imágenes de Cloud Run contra la Postgres local. Detiene los
+# contenedores de la app dev mientras corre y los vuelve a arrancar en prod-down.
+.PHONY: prod-build prod-up prod-status prod-logs prod-down prod-apk
+prod-build: .env ## Construye las 10 imágenes de producción, una por una
+	scripts/prod-local.sh build
+
+prod-up: .env ## Levanta el stack en modo producción (web :13000, gateway :18080)
+	scripts/prod-local.sh up
+
+prod-status: ## Sondea cada puerto del stack en modo producción
+	scripts/prod-local.sh status
+
+prod-logs: ## Logs del stack en modo producción (follow)
+	scripts/prod-local.sh logs
+
+prod-down: ## Baja el modo producción y regresa los contenedores dev
+	scripts/prod-local.sh down
+
+prod-apk: ## APK release de la app de familias apuntando al gateway local
+	scripts/mobile-release-apk.sh
+
 .PHONY: gen
 gen: ## buf generate dentro de un contenedor (no requiere buf en el host)
 	$(BUF_DOCKER) generate
