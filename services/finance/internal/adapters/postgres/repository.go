@@ -262,7 +262,14 @@ func (r *Repository) RescheduleUnpaid(ctx context.Context, items []ports.ChargeR
 	return moved, nil
 }
 
-// CreateChargesBulk issues many charges in ONE statement, skipping the rows
+// chargeInsertBatchSize bounds one INSERT of charges. Postgres caps a statement
+// at 65535 parameters and a charge binds 18 columns, so a single INSERT broke
+// near 3640 rows: the first full-school billing run answered 500 and billed
+// nothing. 1000 rows binds 18000 parameters, and stays under the cap while the
+// table has at most 65 columns.
+const chargeInsertBatchSize = 1000
+
+// CreateChargesBulk issues many charges in one transaction, skipping the rows
 // whose (student, cycle, concept) key already exists instead of failing the
 // batch. Postgres reports only the rows actually inserted, so re-running a
 // generation is idempotent and the caller can infer the skipped count from
@@ -324,7 +331,7 @@ func (r *Repository) CreateChargesBulk(ctx context.Context, cs []domain.Charge) 
 					clause.Expr{SQL: "external_ref = ''"},
 				}},
 				DoNothing: true,
-			}).Create(&keyless)
+			}).CreateInBatches(&keyless, chargeInsertBatchSize)
 			if res.Error != nil {
 				return glerrors.Wrap(glerrors.KindInternal, "bulk creating charges", res.Error)
 			}
@@ -339,7 +346,7 @@ func (r *Repository) CreateChargesBulk(ctx context.Context, cs []domain.Charge) 
 					clause.Expr{SQL: "external_ref <> ''"},
 				}},
 				DoNothing: true,
-			}).Create(&referenced)
+			}).CreateInBatches(&referenced, chargeInsertBatchSize)
 			if res.Error != nil {
 				return glerrors.Wrap(glerrors.KindInternal, "bulk creating charges", res.Error)
 			}
