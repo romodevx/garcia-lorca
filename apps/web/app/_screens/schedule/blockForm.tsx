@@ -2,11 +2,11 @@
 
 import { useState, type ReactElement } from "react";
 
-import { SelectField, TextField, useRequired, type RequiredState } from "../../_design/form";
+import { SelectField, TextField, TimeField, useRequired, type RequiredState } from "../../_design/form";
 import { API_URL } from "../../api-url";
 import { createBlock, updateBlock, type ScheduleBlock, type ScheduleBoard } from "../../schedule/api";
 import { assignmentsOfGroup, WEEKDAYS, type ScheduleIndex } from "../../schedule/catalog";
-import { defaultEnd, SLOT_MINUTES, timeOptions, toHHMM, toMinutes } from "../../schedule/time";
+import { defaultEnd, gridBounds, SLOT_MINUTES, timeError, toHHMM, toMinutes } from "../../schedule/time";
 
 /** What the drawer was opened on: an empty slot, or a class. */
 export type DrawerTarget =
@@ -26,12 +26,48 @@ export interface BlockForm {
   values: Values;
   set: (patch: Partial<Values>) => void;
   required: RequiredState;
-  timeError: string | undefined;
+  /** What is wrong with the typed start or end (range, step, order), judged on blur. */
+  timeErrors: TimeErrors;
+  /** Judges both times: the fields' blur. */
+  judgeTimes: () => void;
+  /** The hours of the chosen group's level: what the times are held to. */
+  span: GridSpan;
   /** Valid: the values the gateway takes. Invalid: marks the fields and gives null. */
   valid: () => Values | null;
 }
 
 const END_BEFORE_START = "La clase debe terminar después de empezar.";
+
+export interface TimeErrors {
+  startsAt?: string;
+  endsAt?: string;
+}
+
+/** The minutes the level's day spans; a class starts and ends inside it. */
+export interface GridSpan {
+  start: number;
+  end: number;
+}
+
+/**
+ * The hours a class of `groupId` may take: its level's day, widened to that
+ * level's classes as the week grid is. A group not chosen yet keeps `shown`,
+ * the grid on screen.
+ */
+export function levelSpan(board: ScheduleBoard, index: ScheduleIndex, groupId: string, shown: GridSpan): GridSpan {
+  const level = index.levelOfGroup(groupId);
+  if (level === "") return shown;
+  const classes = board.blocks.filter((b) => index.levelOfGroup(b.groupId) === level);
+  return gridBounds(board.settings.find((s) => s.levelId === level), classes);
+}
+
+/** The bounds of each time: a start leaves room for one slot, an end follows one. */
+function timeBounds(grid: GridSpan): { startsAt: { min: number; max: number }; endsAt: { min: number; max: number } } {
+  return {
+    startsAt: { min: grid.start, max: grid.end - SLOT_MINUTES },
+    endsAt: { min: grid.start + SLOT_MINUTES, max: grid.end },
+  };
+}
 
 function initial(target: DrawerTarget, board: ScheduleBoard, gridEnd: number): Values {
   if (target.kind === "edit") {
@@ -50,27 +86,38 @@ function initial(target: DrawerTarget, board: ScheduleBoard, gridEnd: number): V
   };
 }
 
-export function useBlockForm(target: DrawerTarget, board: ScheduleBoard, gridEnd: number): BlockForm {
-  const [values, setValues] = useState<Values>(() => initial(target, board, gridEnd));
-  const [timeError, setTimeError] = useState<string | undefined>(undefined);
+export function useBlockForm(target: DrawerTarget, board: ScheduleBoard, index: ScheduleIndex, grid: GridSpan): BlockForm {
+  const [saved] = useState<Values>(() => initial(target, board, grid.end));
+  const [values, setValues] = useState<Values>(saved);
+  const [timeErrors, setTimeErrors] = useState<TimeErrors>({});
   const required = useRequired(board.started ? ["weekday", "startsAt", "endsAt", "groupId", "assignmentId", "reason"] : ["weekday", "startsAt", "endsAt", "groupId", "assignmentId"]);
-  const order = (v: Values): string | undefined => (toMinutes(v.endsAt) <= toMinutes(v.startsAt) ? END_BEFORE_START : undefined);
+
+  // A time already saved is kept as it is, even where the picker would not reach (ISSUE-028).
+  const spanOf = (v: Values): GridSpan => levelSpan(board, index, v.groupId, grid);
+  const judge = (v: Values): TimeErrors => {
+    const bounds = timeBounds(spanOf(v));
+    const startsAt = timeError(v.startsAt, { ...bounds.startsAt, kept: saved.startsAt });
+    const endsAt = timeError(v.endsAt, { ...bounds.endsAt, kept: saved.endsAt });
+    const order = v.startsAt !== "" && v.endsAt !== "" && toMinutes(v.endsAt) <= toMinutes(v.startsAt) ? END_BEFORE_START : undefined;
+    return { startsAt, endsAt: endsAt ?? (startsAt === undefined ? order : undefined) };
+  };
+  const showing = timeErrors.startsAt !== undefined || timeErrors.endsAt !== undefined;
 
   const set = (patch: Partial<Values>): void => {
     const next = { ...values, ...patch };
     setValues(next);
-    // Times are selects: a choice is final, so it is judged at once (and forgiven at once).
-    if (patch.startsAt !== undefined || patch.endsAt !== undefined) setTimeError(order(next));
+    // A typed time is judged on blur; once an error shows, every change re-checks it.
+    if (showing && (patch.startsAt !== undefined || patch.endsAt !== undefined || patch.groupId !== undefined)) setTimeErrors(judge(next));
   };
 
   const valid = (): Values | null => {
     const ok = required.check({ ...values });
-    const problem = order(values);
-    setTimeError(problem);
-    return ok && problem === undefined ? values : null;
+    const problems = judge(values);
+    setTimeErrors(problems);
+    return ok && problems.startsAt === undefined && problems.endsAt === undefined ? values : null;
   };
 
-  return { values, set, required, timeError, valid };
+  return { values, set, required, timeErrors, judgeTimes: () => setTimeErrors(judge(values)), span: spanOf(values), valid };
 }
 
 /** Saves the form; null when it did not validate (nothing was sent). */
@@ -87,10 +134,9 @@ export async function saveBlock(form: BlockForm, target: DrawerTarget, started: 
 }
 
 /** Day, start, end, group, "Asignatura — Docente" and, once the cycle started, the reason. */
-export function BlockFields({ form, board, index, grid }: { form: BlockForm; board: ScheduleBoard; index: ScheduleIndex; grid: { start: number; end: number } }): ReactElement {
-  const { values, set, required, timeError } = form;
-  const starts = timeOptions(grid.start, grid.end - SLOT_MINUTES).map((t) => ({ value: t, label: t }));
-  const ends = timeOptions(grid.start + SLOT_MINUTES, grid.end).map((t) => ({ value: t, label: t }));
+export function BlockFields({ form, board, index }: { form: BlockForm; board: ScheduleBoard; index: ScheduleIndex }): ReactElement {
+  const { values, set, required, timeErrors, judgeTimes } = form;
+  const bounds = timeBounds(form.span);
   const groups = board.groups
     .map((g) => ({ value: g.id, label: index.groupLabel(g.id) }))
     .sort((a, b) => a.label.localeCompare(b.label, "es-MX", { numeric: true }));
@@ -101,10 +147,12 @@ export function BlockFields({ form, board, index, grid }: { form: BlockForm; boa
         onChange={(weekday) => set({ weekday })} options={WEEKDAYS.map((d) => ({ value: String(d.weekday), label: d.label }))} />
       {/* Start and end are one logical entity: a pair, side by side. */}
       <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
-        <SelectField label="Inicio" required value={values.startsAt} error={err("startsAt")} onClearError={() => required.clear("startsAt")}
-          onChange={(startsAt) => set({ startsAt })} options={starts} />
-        <SelectField label="Fin" required value={values.endsAt} error={err("endsAt") ?? timeError} onClearError={() => required.clear("endsAt")}
-          onChange={(endsAt) => set({ endsAt })} options={ends} />
+        <TimeField label="Inicio" required value={values.startsAt} error={err("startsAt") ?? timeErrors.startsAt} onClearError={() => required.clear("startsAt")}
+          onChange={(startsAt) => set({ startsAt })} onBlur={judgeTimes}
+          min={toHHMM(bounds.startsAt.min)} max={toHHMM(bounds.startsAt.max)} stepMinutes={SLOT_MINUTES} />
+        <TimeField label="Fin" required value={values.endsAt} error={err("endsAt") ?? timeErrors.endsAt} onClearError={() => required.clear("endsAt")}
+          onChange={(endsAt) => set({ endsAt })} onBlur={judgeTimes}
+          min={toHHMM(bounds.endsAt.min)} max={toHHMM(bounds.endsAt.max)} stepMinutes={SLOT_MINUTES} />
       </div>
       <SelectField label="Grupo" required value={values.groupId} error={err("groupId")} onClearError={() => required.clear("groupId")}
         onChange={(groupId) => set({ groupId, assignmentId: "" })} options={groups} />

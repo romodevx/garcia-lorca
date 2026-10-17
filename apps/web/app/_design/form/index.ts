@@ -41,4 +41,5 @@ export {
   type TextFieldProps,
 } from "./fields";
 export { DateField, type DateFieldProps } from "./DateField";
+export { TimeField, type TimeFieldProps } from "./TimeField";
 export { MoneyField } from "./MoneyField";

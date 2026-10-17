@@ -283,3 +283,39 @@ describe("deriveSteps: the Siguiente button (§1.3)", () => {
     expect(nextOf(input)).toMatchObject({ profile: "text", cycle: "text", terms: "text" });
   });
 });
+
+describe("ISSUE-024 · what Migrar alumnos will create, from the catalog itself", () => {
+  // The import CREATES the catalog it does not find (config placements, ADR
+  // 0033): a gap is something it will fill, never something it needs first.
+  const hint = (input: SetupInput) => deriveSteps(input, null).importHint;
+
+  it("an empty catalog: it creates levels, grades and groups", () => {
+    expect(hint({ ...complete(), levels: [], grades: ready([]), groups: ready([]) })).toBe("Crea los niveles, grados y grupos que falten.");
+  });
+
+  it("a level without grades: it creates grades and groups", () => {
+    expect(hint({ ...complete(), grades: ready([P1]), groups: ready([group("p1")]) })).toBe("Crea los grados y grupos que falten.");
+  });
+
+  it("a grade without a group in the cycle: it creates groups", () => {
+    expect(hint({ ...complete(), groups: ready([group("p1")]) })).toBe("Crea los grupos que falten.");
+  });
+
+  it("no cycle chosen: groups are what it would create", () => {
+    expect(hint({ ...complete(), selectedCycleId: undefined, groups: ready([]) })).toBe("Crea los grupos que falten.");
+  });
+
+  it("a complete catalog: no hint", () => {
+    expect(hint(complete())).toBeUndefined();
+  });
+
+  it("never asks for anything first", () => {
+    const inputs = [{ ...complete(), levels: [], grades: ready([]), groups: ready([]) }, { ...complete(), groups: ready([]) }];
+    for (const input of inputs) expect(hint(input)).not.toMatch(/Necesita/);
+  });
+
+  it("says nothing while a read is in flight or failed", () => {
+    expect(hint({ ...complete(), grades: LOADING })).toBeUndefined();
+    expect(hint({ ...complete(), groups: FAILED })).toBeUndefined();
+  });
+});

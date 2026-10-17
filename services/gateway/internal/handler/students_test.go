@@ -213,6 +213,39 @@ func TestGetStudentByPathValue(t *testing.T) {
 	}
 }
 
+// T13: the file says whether the pupil has a photo; unknown stays absent, so
+// the page still asks for it.
+func TestGetStudentSaysWhetherThereIsAPhoto(t *testing.T) {
+	yes, no := true, false
+	cases := []struct {
+		name     string
+		hasPhoto *bool
+		want     any
+		present  bool
+	}{
+		{"with a photo", &yes, true, true},
+		{"without one", &no, false, true},
+		{"unknown", nil, nil, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := handler.NewStudentsHandler(&fakeCreator{res: client.StudentResult{ID: "stu-9", HasPhoto: tc.hasPhoto}})
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/students/stu-9", nil)
+			req.SetPathValue("id", "stu-9")
+			rec := httptest.NewRecorder()
+			h.Get(rec, req)
+			var out map[string]any
+			if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			got, present := out["hasPhoto"]
+			if present != tc.present || got != tc.want {
+				t.Errorf("hasPhoto = %v (present %v), want %v (present %v)", got, present, tc.want, tc.present)
+			}
+		})
+	}
+}
+
 func TestGetStudentNotFoundIs404(t *testing.T) {
 	svc := &fakeCreator{err: connect.NewError(connect.CodeNotFound, nil)}
 	h := handler.NewStudentsHandler(svc)

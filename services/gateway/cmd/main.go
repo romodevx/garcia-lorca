@@ -975,9 +975,14 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	// Receipts (task 12): proof of what a deposit or a sale took, as JSON for the
 	// 80 mm ticket the browser prints and as a PDF. A payment's answers to whoever
 	// sees the money (the counter or finance); a sale's to whoever reads orders.
-	var receiptOptions []receipt.Option
+	// ISSUE-017: the pupil's group of the payment's day, with its grade and level.
+	var receiptZone *time.Location
 	if len(schoolLocations) > 0 {
-		receiptOptions = append(receiptOptions, receipt.WithSchoolLocation(schoolLocations[0]))
+		receiptZone = schoolLocations[0]
+	}
+	receiptOptions := []receipt.Option{
+		receipt.WithSchoolLocation(receiptZone),
+		receipt.WithGroupLabeler(handler.NewStudentGroupLabeler(studentsClient, configClient, receiptZone)),
 	}
 	receiptsH := handler.NewReceiptsHandler(receipt.NewBuilder(financeClient, uniformsClient, studentsClient, financeClient, configClient, receiptOptions...))
 	paymentReceipt := func(h http.HandlerFunc) http.Handler {

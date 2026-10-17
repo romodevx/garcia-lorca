@@ -91,6 +91,11 @@ export interface SetupView {
   /** No status read is still in flight: the opening step can be decided. */
   settled: boolean;
   initialStepId: StepId;
+  /**
+   * What Migrar alumnos will create ("Crea los grupos que falten."), or
+   * undefined for a complete catalog — or while a read is in flight or failed.
+   */
+  importHint: string | undefined;
 }
 
 interface Mark {
@@ -241,6 +246,28 @@ function nextKind(def: StepDef, input: SetupInput): NextKind {
   return isEmptyHere(def.id, input) ? "text" : "primary";
 }
 
+const IMPORT_CREATES_ALL = "Crea los niveles, grados y grupos que falten.";
+const IMPORT_CREATES_GRADES = "Crea los grados y grupos que falten.";
+const IMPORT_CREATES_GROUPS = "Crea los grupos que falten.";
+
+/**
+ * ISSUE-024: what Migrar alumnos will create. The import CREATES the levels,
+ * grades and groups it does not find (config placements, ADR 0033), so a gap
+ * is said as what it fills — never as something it needs first. A complete
+ * catalog (every level with grades, every grade with a group) needs no hint.
+ */
+function importHint(input: SetupInput): string | undefined {
+  if (input.levels.length === 0) return IMPORT_CREATES_ALL;
+  if (input.grades.kind !== "ready") return undefined;
+  const grades = input.grades.value;
+  if (input.levels.some((l) => !grades.some((g) => g.levelId === l.id))) return IMPORT_CREATES_GRADES;
+  if (input.selectedCycleId === undefined) return IMPORT_CREATES_GROUPS;
+  if (input.groups.kind !== "ready") return undefined;
+  const groups = input.groups.value;
+  const known = orderedGrades(input.levels, grades);
+  return known.some(({ grade }) => !groups.some((g) => g.gradeLevelId === grade.id)) ? IMPORT_CREATES_GROUPS : undefined;
+}
+
 /** "falta Colegiaturas" / "faltan Grupos y Colegiaturas" / "faltan A, B y 2 más". */
 function gapsPhrase(titles: string[]): string | undefined {
   if (titles.length === 0) return undefined;
@@ -288,5 +315,6 @@ export function deriveSteps(input: SetupInput, storedStepId: string | null): Set
     ready,
     settled: steps.every((s) => s.status !== "loading"),
     initialStepId: initialStep(steps, storedStepId),
+    importHint: importHint(input),
   };
 }

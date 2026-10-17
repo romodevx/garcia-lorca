@@ -213,3 +213,21 @@ describe("el tamaño de pantalla completa", () => {
     expect(screen.getByTestId("drawer-backdrop").style.padding).toBe("0px");
   });
 });
+
+describe("quién juzga lo capturado", () => {
+  // ISSUE-028: una hora guardada fuera del min/max de su campo bloqueaba en
+  // silencio el envío nativo. La pantalla valida (al salir del campo y al
+  // guardar) y el servidor manda; el navegador no se adelanta.
+  it("el formulario del cajón deja la validación a la pantalla", async () => {
+    const onSubmit = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <DrawerShell title="Clase" icon="clock" onClose={vi.fn()} onSubmit={onSubmit}>
+        <input aria-label="Inicio" type="time" min="07:00" max="14:00" step={300} defaultValue="06:32" />
+        <button type="submit">Guardar</button>
+      </DrawerShell>,
+    );
+    await user.click(screen.getByRole("button", { name: "Guardar" }));
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+  });
+});

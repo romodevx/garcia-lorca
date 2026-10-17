@@ -150,6 +150,22 @@ func (s *StudentService) Photo(ctx context.Context, studentID string) (domain.Ph
 	return domain.NewPhoto(data)
 }
 
+// HasPhoto reports whether Photo would find one, without reading its bytes:
+// one reference lookup. A deployment without a bucket has none (T13).
+func (s *StudentService) HasPhoto(ctx context.Context, studentID string) (bool, error) {
+	if s.photos == nil {
+		return false, nil
+	}
+	_, err := s.repo.PhotoRef(ctx, studentID)
+	if glerrors.KindOf(err) == glerrors.KindNotFound {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // DeletePhoto removes a pupil's photo: the reference first, so the file never
 // points at a missing object, then the object.
 func (s *StudentService) DeletePhoto(ctx context.Context, studentID string) error {

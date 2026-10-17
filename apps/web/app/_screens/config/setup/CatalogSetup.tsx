@@ -68,7 +68,7 @@ export function CatalogSetup({ onBack, canDeleteLevels = false, onDeleteLevel, n
         <SetupPresentationProvider compact={compact}>
           <div className={pricing ? "setup-layout setup-layout-solo" : "setup-layout"}>
             {!pricing && (
-              <SetupStepList steps={view.steps} cardTitle={view.cardTitle} openId={nav.openId} onOpen={nav.open} onOpenStudentImport={onOpenStudentImport} showTrash={canDeleteLevels} narrow={narrow} />
+              <SetupStepList steps={view.steps} cardTitle={view.cardTitle} openId={nav.openId} onOpen={nav.open} onOpenStudentImport={onOpenStudentImport} importHint={view.importHint} showTrash={canDeleteLevels} narrow={narrow} />
             )}
             <div ref={main} className="setup-main">
               <SetupPanes

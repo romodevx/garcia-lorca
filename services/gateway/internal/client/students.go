@@ -55,6 +55,9 @@ type StudentResult struct {
 	EnrollmentNumber string
 	// BankReference is the pupil's BBVA payment reference (ADR 0033).
 	BankReference string
+	// HasPhoto says whether the pupil has a photo; only GetStudent sets it,
+	// and nil means unknown (T13).
+	HasPhoto *bool
 }
 
 // NameParts are the pieces studentname orders by.
@@ -212,7 +215,9 @@ func (c *StudentsClient) GetStudent(ctx context.Context, id string) (StudentResu
 	if err != nil {
 		return StudentResult{}, err
 	}
-	return toStudentResult(res.Msg.GetStudent()), nil
+	out := toStudentResult(res.Msg.GetStudent())
+	out.HasPhoto = res.Msg.HasPhoto
+	return out, nil
 }
 
 // --- the virtual card (task 13) ---------------------------------------------

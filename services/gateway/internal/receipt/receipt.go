@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -116,6 +117,12 @@ type (
 	ProfileReader interface {
 		GetSchoolProfile(ctx context.Context) (client.SchoolProfile, bool, error)
 	}
+	// GroupLabeler names the group a pupil was in on a school day (YYYY-MM-DD)
+	// as every screen does ("1° PRIMARIA · A"); found is false for a pupil
+	// with no enrollment.
+	GroupLabeler interface {
+		StudentGroupLabel(ctx context.Context, studentID, day string) (label string, found bool, err error)
+	}
 )
 
 // counterSource is the order source of a counter sale.
@@ -130,6 +137,8 @@ type Builder struct {
 	students StudentReader
 	accounts AccountReader
 	profiles ProfileReader
+	// groups names the pupil's group in full; nil keeps the stored letter.
+	groups GroupLabeler
 	// zone is the school's time zone, whose calendar day a sale prints
 	// (D8). UTC unless WithSchoolLocation says otherwise.
 	zone *time.Location
@@ -146,6 +155,12 @@ func WithSchoolLocation(location *time.Location) Option {
 			b.zone = location
 		}
 	}
+}
+
+// WithGroupLabeler names the pupil's group of the payment's day with its grade
+// and level (ISSUE-017) instead of the bare letter the pupil's row stores.
+func WithGroupLabeler(groups GroupLabeler) Option {
+	return func(b *Builder) { b.groups = groups }
 }
 
 // NewBuilder wires a Builder.
@@ -175,7 +190,7 @@ func (b *Builder) Payment(ctx context.Context, depositID string) (Receipt, error
 	r := Receipt{
 		Kind: KindPayment, Folio: d.Folio, School: school, PaidOn: depositDay(d),
 		Buyer:       pupil.FullName(),
-		BuyerDetail: pupil.GradeGroup,
+		BuyerDetail: b.groupOf(ctx, got.Deposit.StudentID, depositDay(got.Deposit), pupil.GradeGroup),
 		Lines:       make([]Line, 0, len(got.Lines)),
 		CreditCents: got.UnallocatedCents, TotalCents: d.AmountCents,
 		Reference: d.Reference, ReceivedBy: d.ReceivedByName,
@@ -221,7 +236,7 @@ func (b *Builder) Sale(ctx context.Context, orderID string) (Receipt, error) {
 	}
 	r := Receipt{
 		Kind: KindSale, Folio: order.Folio, School: school, PaidOn: b.schoolDayOf(order.CreatedAt),
-		Buyer: buyerOf(order), BuyerDetail: order.StudentGradeGroup,
+		Buyer: buyerOf(order), BuyerDetail: b.groupOf(ctx, order.StudentID, b.schoolDayOf(order.CreatedAt), order.StudentGradeGroup),
 		Lines: make([]Line, 0, len(order.Lines)), TotalCents: order.TotalCents,
 		Tenders: []TenderLine{},
 	}
@@ -243,6 +258,26 @@ func (b *Builder) Sale(ctx context.Context, orderID string) (Receipt, error) {
 		}
 	}
 	return r, nil
+}
+
+// groupOf is the pupil's group on the day the money came, as the receipt
+// prints it. The full name is a courtesy, never a gate: no labeler, no
+// enrollment or a catalog that cannot
+// answer all keep the stored name, and the receipt still prints — logged (ids
+// only) so a broken catalog does not hide behind bare letters.
+func (b *Builder) groupOf(ctx context.Context, studentID, day, stored string) string {
+	if b.groups == nil || studentID == "" {
+		return stored
+	}
+	label, found, err := b.groups.StudentGroupLabel(ctx, studentID, day)
+	if err != nil {
+		slog.WarnContext(ctx, "group lookup failed; the receipt prints the stored group", "student_id", studentID, "error", err)
+		return stored
+	}
+	if !found || label == "" {
+		return stored
+	}
+	return label
 }
 
 func (b *Builder) school(ctx context.Context) (client.SchoolProfile, error) {

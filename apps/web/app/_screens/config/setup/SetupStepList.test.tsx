@@ -98,27 +98,24 @@ describe("SetupStepList — each status (§4.3)", () => {
 });
 
 describe("SetupStepList — Herramientas (§1.5)", () => {
-  it("offers Migrar alumnos once, with what it needs, only when the caller may", async () => {
+  it("offers Migrar alumnos once, saying what it will create, only when the caller may", async () => {
     const onOpenStudentImport = vi.fn();
     const user = userEvent.setup();
-    renderSteps({ onOpenStudentImport });
+    renderSteps({ onOpenStudentImport, importHint: "Crea los grupos que falten." });
 
     const migrate = screen.getByRole("button", { name: /Migrar alumnos del sistema anterior/ });
-    expect(migrate).toHaveTextContent("Necesita niveles, grados y grupos.");
+    expect(migrate).toHaveTextContent("Crea los grupos que falten.");
+    // A gap in the catalog is what the import fills: it never blocks the tool.
+    expect(migrate).toBeEnabled();
+    expect(migrate).not.toHaveAttribute("aria-disabled");
     await user.click(migrate);
     expect(onOpenStudentImport).toHaveBeenCalledTimes(1);
     expect(screen.getAllByRole("button", { name: /Migrar alumnos/ })).toHaveLength(1);
   });
 
-  it("ISSUE-024 · stops asking for levels, grades and groups once those steps are done", () => {
-    renderSteps({ onOpenStudentImport: vi.fn(), steps: stepViews({ levels: { status: "done" }, groups: { status: "done" } }) });
-    const migrate = screen.getByRole("button", { name: /Migrar alumnos del sistema anterior/ });
-    expect(migrate).not.toHaveTextContent("Necesita niveles, grados y grupos.");
-  });
-
-  it("ISSUE-024 · still says what it needs while groups are missing", () => {
-    renderSteps({ onOpenStudentImport: vi.fn(), steps: stepViews({ levels: { status: "done" } }) });
-    expect(screen.getByRole("button", { name: /Migrar alumnos/ })).toHaveTextContent("Necesita niveles, grados y grupos.");
+  it("ISSUE-024 · no hint once the catalog is complete", () => {
+    renderSteps({ onOpenStudentImport: vi.fn(), importHint: undefined });
+    expect(screen.getByRole("button", { name: /Migrar alumnos del sistema anterior/ })).toHaveTextContent(/^Migrar alumnos del sistema anterior$/);
   });
 
   it("shows neither tool without its permission", () => {

@@ -379,6 +379,9 @@ export function DrawerShell({
       {onSubmit !== undefined ? (
         <form
           ref={panelRef as React.RefObject<HTMLFormElement>}
+          // The screen judges what is typed and the server decides; a native
+          // min/max/step must not silently block a value already saved (ISSUE-028).
+          noValidate
           onClick={stop}
           onSubmit={(e: FormEvent) => {
             e.preventDefault();

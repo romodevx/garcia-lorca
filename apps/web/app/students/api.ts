@@ -39,6 +39,8 @@ export interface Student {
   admissionStatus: AdmissionStatus;
   /** The editable half of the file. Absent from gateways older than T5. */
   profile?: StudentProfile;
+  /** Only on the single file: whether there is a photo to ask for. Absent = unknown (T13). */
+  hasPhoto?: boolean;
   /** The matrícula, <year>-<five digits> (task 13). Absent from older gateways. */
   enrollmentNumber?: string;
   /** The BBVA payment reference (ADR 0033); "" or absent when the pupil has none. */
