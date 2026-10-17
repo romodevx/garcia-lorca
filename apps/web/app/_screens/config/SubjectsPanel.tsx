@@ -28,6 +28,8 @@ export interface SubjectsPanelProps {
   gradeLevels: readonly GradeLevel[];
   /** The grade chosen on the page, if any: the new subject goes there by default. */
   selectedGradeLevelId?: string;
+  /** A subject was added, deleted or put back: the setup step re-reads its count. */
+  onChanged?: () => void;
 }
 
 const LOCALE = "es-MX";
@@ -42,7 +44,7 @@ const NO_GRADE = "Elige al menos un grado.";
  * nivel juntas, y el alta pide el nombre una vez y los grados donde va —
  * crea una por grado. Dos campos: renglón en el lugar, no cajón.
  */
-export function SubjectsPanel({ level, gradeLevels, selectedGradeLevelId }: SubjectsPanelProps): ReactElement {
+export function SubjectsPanel({ level, gradeLevels, selectedGradeLevelId, onChanged }: SubjectsPanelProps): ReactElement {
   const grades = useMemo(() => [...gradeLevels].sort((a, b) => a.ordinal - b.ordinal), [gradeLevels]);
   const gradeName = useCallback((id: string): string => grades.find((g) => g.id === id)?.name ?? "", [grades]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
@@ -69,6 +71,7 @@ export function SubjectsPanel({ level, gradeLevels, selectedGradeLevelId }: Subj
 
   const onCreated = (name: string, res: SubjectsInGrades): void => {
     setSubjects((prev) => [...prev, ...res.created]);
+    if (res.created.length > 0) onChanged?.();
     setNotice(createdNotice(name, res, gradeName));
     setError(res.failed.length > 0 ? `No se pudo agregar a ${joinNames(res.failed.map(gradeName))}. Intenta de nuevo.` : undefined);
   };
@@ -93,6 +96,7 @@ export function SubjectsPanel({ level, gradeLevels, selectedGradeLevelId }: Subj
       await deleteSubject(API_URL, s.id);
       setSubjects((prev) => prev.filter((x) => x.id !== s.id));
       setDeleted(s);
+      onChanged?.();
     } catch (cause) {
       setError(
         cause instanceof ConfigError && cause.isConflict
@@ -109,6 +113,7 @@ export function SubjectsPanel({ level, gradeLevels, selectedGradeLevelId }: Subj
     try {
       const back = await createSubject(API_URL, { gradeLevelId: s.gradeLevelId, name: s.name });
       setSubjects((prev) => [...prev, back]);
+      onChanged?.();
     } catch {
       setError(`No se pudo devolver ${s.name}. Agrégala de nuevo.`);
     }
