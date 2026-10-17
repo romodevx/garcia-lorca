@@ -708,9 +708,44 @@ describe("CollectDrawer · cobrado por otra caja (CC-202)", () => {
 
     await user.click(screen.getByRole("button", { name: "Cobrar" }));
 
-    expect(await screen.findByText(paid)).toBeInTheDocument();
+    expect(await screen.findByRole("group", { name: /Revisa esto/ })).toHaveTextContent(paid);
     await waitFor(() => expect(finance.getExpected).toHaveBeenCalledTimes(2));
     expect(finance.getAccount).toHaveBeenCalledTimes(2);
+  });
+
+  // CC-402 (browser check of PR #144): after the 409 the reload chose ANOTHER
+  // charge (the inscription), filled its amount and left focus on Cobrar — one
+  // more click collected what the family did not come to pay. After a conflict
+  // nothing is chosen or filled again, and focus goes to the notice at the top.
+  it("after a 409 chooses nothing, fills nothing, and takes focus to the notice", async () => {
+    const user = userEvent.setup();
+    const paid = "lo elegido ya está pagado: actualiza la cuenta del alumno antes de cobrar";
+    const line = (chargeId: string, description: string, totalCents: number) => ({
+      chargeId, description, dueDate: "2026-10-10", owedCents: totalCents, surchargeCents: 0, discountCents: 0,
+      scholarshipCents: 0, totalCents, due: true, inBalance: true,
+    });
+    finance.getExpected
+      .mockResolvedValueOnce({ amountCents: 25000, surchargeCents: 0, discountCents: 0, annualBalanceCents: 475000,
+        onTimeBalanceCents: 475000, lines: [line("ch-nat", "Natación", 25000), line("ch-ins", "Inscripción", 450000)].map((l, i) => ({ ...l, due: i === 0 })) })
+      .mockResolvedValue({ amountCents: 450000, surchargeCents: 0, discountCents: 0, annualBalanceCents: 450000,
+        onTimeBalanceCents: 450000, lines: [line("ch-ins", "Inscripción", 450000)] });
+    finance.registerDeposit.mockRejectedValue(new HttpError(409, paid, { serverText: paid }));
+    render(<CollectDrawer student={student} onClose={() => {}} onCollected={() => {}} today="2026-10-12" />);
+    expect(await screen.findByRole("checkbox", { name: "Natación" })).toBeChecked();
+
+    await user.click(screen.getByRole("button", { name: "Cobrar" }));
+
+    const notice = await screen.findByRole("group", { name: /Revisa esto/ });
+    expect(notice).toHaveTextContent(paid);
+    await waitFor(() => expect(finance.getExpected).toHaveBeenCalledTimes(2));
+    const inscription = await screen.findByRole("checkbox", { name: "Inscripción" });
+    expect(inscription).not.toBeChecked();
+    expect(screen.getByLabelText("Monto a pagar", { selector: "input" })).toHaveValue("");
+    expect(document.activeElement).toBe(notice);
+
+    // One more click on Cobrar takes nothing.
+    await user.click(screen.getByRole("button", { name: "Cobrar" }));
+    expect(finance.registerDeposit).toHaveBeenCalledTimes(1);
   });
 
   it("does not reload on any other failure", async () => {

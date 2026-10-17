@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
 import { DrawerShell } from "../../_design/DrawerShell";
-import { DateField, MoneyField, useFocusFirstInvalid } from "../../_design/form";
+import { DateField, ErrorSummary, MoneyField, useFocusFirstInvalid } from "../../_design/form";
 import { TenderEditor } from "../../_design/payments/TenderEditor";
 import { AMOUNT_ERROR } from "../../_design/payments/tenders";
 import { depositRequest, newAttemptKey } from "../../_design/payments/depositRequest";
@@ -174,6 +174,12 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
   // Bumped to read the account and the quote again: after a 409 (CC-202) the
   // money was taken by another cashier, and the screen must show what is left.
   const [reloads, setReloads] = useState(0);
+  // CC-402: after that 409 the reload must choose and fill NOTHING — choosing
+  // what is due again picked another charge (the inscription) with its amount
+  // ready, one click away from collecting what the family did not come to pay.
+  // The cashier reads the notice and chooses again.
+  const afterConflict = useRef(false);
+  const [conflict, setConflict] = useState<{ message: string; attempt: number } | null>(null);
   const [attemptKey] = useState(newAttemptKey);
   const describe = useRef<Map<string, string>>(new Map());
 
@@ -248,6 +254,11 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
         }
         setExpected(e);
         setExpectedFor(askedFor);
+        if (afterConflict.current) {
+          afterConflict.current = false;
+          setChosen(new Set());
+          return;
+        }
         // A new quote is a new list: the choice starts over at what is due.
         setChosen(dueOf(e.lines));
         // Pre-filled with what should be paid: the common case is a family
@@ -287,6 +298,7 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
     inFlight.current = true;
     setSaving(true);
     setError(undefined);
+    setConflict(null);
     try {
       const result = await registerDeposit(API_URL, depositRequest({
         studentId: student.id,
@@ -300,11 +312,21 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
       setReceipt(result);
       onCollected();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "No se pudo registrar el cobro.");
-      // The account moved under the cashier (CC-202): read it again, by itself.
+      const message = cause instanceof Error ? cause.message : "No se pudo registrar el cobro.";
       if (cause instanceof HttpError && cause.status === HTTP_CONFLICT) {
+        // The account moved under the cashier (CC-202): read it again, by
+        // itself, with nothing chosen and nothing filled, and say so at the
+        // top where focus goes (CC-402).
+        afterConflict.current = true;
         amountEdited.current = false;
+        prefilledCents.current = 0;
+        setAmount("");
+        setChosen(new Set());
+        tenders.reset();
+        setConflict((c) => ({ message, attempt: (c?.attempt ?? 0) + 1 }));
         setReloads((n) => n + 1);
+      } else {
+        setError(message);
       }
     } finally {
       inFlight.current = false;
@@ -335,6 +357,7 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
                 onSubmit={(e) => { e.preventDefault(); void submit(); }}
                 style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
                 <div style={{ flex: 1, overflowY: "auto", padding: "22px 26px", display: "flex", flexDirection: "column", gap: 20 }}>
+                  {conflict !== null && <ErrorSummary items={[{ field: "Monto a pagar", message: conflict.message }]} attempt={conflict.attempt} />}
                   <div style={{ padding: "18px 20px", borderRadius: "var(--r-md)", background: "var(--surface-3)", border: "1px solid var(--border)" }}>
                     <span style={{ fontSize: 14, color: "var(--text-muted)" }}>{expectedFor === "" ? "Monto esperado hoy" : `Monto esperado al ${shortDayLabel(expectedFor)}`}</span>
                     <div data-testid="amount-expected" style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 38, color: "var(--text)", marginTop: 4 }}>
