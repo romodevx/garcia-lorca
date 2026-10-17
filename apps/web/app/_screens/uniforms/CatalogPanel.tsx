@@ -206,7 +206,8 @@ function CreateDrawer({
   const [failure, setFailure] = useState<UniformsError | null>(null);
   const createdRef = useRef<UniformItem | undefined>(undefined);
   // The article exists and only its one size is missing: its fields are past
-  // changing here, and the retry only puts the size (gate nit on #142).
+  // changing here — read-only, still read aloud — and the retry only puts the
+  // size (gate nits on #142).
   const [awaitingSize, setAwaitingSize] = useState(false);
   // Un ref y no el estado: dos clics llegan antes de que `pending` repinte, y
   // sin clave única nada en el servidor frena un segundo artículo igual.
@@ -257,60 +258,61 @@ function CreateDrawer({
       {awaitingSize && failure !== null && (
         <p role="status" style={{ fontWeight: 600, fontSize: 14, margin: "10px 0" }}>{SIZE_MISSING}</p>
       )}
-      <fieldset disabled={awaitingSize} style={{ border: "none", padding: 0, margin: 0 }}>
-        <p style={label}>Tipo</p>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
-          {CATEGORIES.map((option) => (
-            <button
-              key={option.id}
-              aria-pressed={category === option.id}
-              aria-label={option.label}
-              onClick={() => setCategory(option.id)}
-              style={{
-                height: 38,
-                padding: "0 14px",
-                borderRadius: 99,
-                fontSize: 13.5,
-                fontWeight: 600,
-                cursor: "pointer",
-                border: `1.5px solid ${category === option.id ? "var(--purple)" : "var(--border)"}`,
-                background: category === option.id ? "color-mix(in oklab, var(--purple) 12%, var(--surface))" : "var(--surface)",
-                color: category === option.id ? "var(--purple)" : "var(--text-muted)",
-              }}>
-              {option.label}
-            </button>
-          ))}
-        </div>
+      <p style={label}>Tipo</p>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
+        {CATEGORIES.map((option) => (
+          <button
+            key={option.id}
+            aria-pressed={category === option.id}
+            aria-label={option.label}
+            aria-disabled={awaitingSize || undefined}
+            onClick={() => !awaitingSize && setCategory(option.id)}
+            style={{
+              height: 38,
+              padding: "0 14px",
+              borderRadius: 99,
+              fontSize: 13.5,
+              fontWeight: 600,
+              cursor: "pointer",
+              border: `1.5px solid ${category === option.id ? "var(--purple)" : "var(--border)"}`,
+              background: category === option.id ? "color-mix(in oklab, var(--purple) 12%, var(--surface))" : "var(--surface)",
+              color: category === option.id ? "var(--purple)" : "var(--text-muted)",
+            }}>
+            {option.label}
+          </button>
+        ))}
+      </div>
 
-        <TextField
-          label="Nombre"
-          value={name}
-          onChange={setName}
-          uppercase
+      <TextField
+        label="Nombre"
+        value={name}
+        onChange={setName}
+        uppercase
+        required
+        readOnly={awaitingSize}
+        error={form.errors.name}
+        onClearError={() => form.clear("name")}
+        help="Cómo se llama la prenda o el libro. Es lo que verá la familia."
+      />
+
+      <p style={{ ...label, marginTop: 16 }}>Nivel</p>
+      <LevelChips levels={levels} value={level} onChange={(next) => !awaitingSize && setLevel(next)} allLabel="Todos los niveles" />
+
+      <div style={{ marginTop: 16 }}>
+        <MoneyField
+          label="Precio"
+          value={pesos}
+          onChange={setPesos}
           required
-          error={form.errors.name}
-          onClearError={() => form.clear("name")}
-          help="Cómo se llama la prenda o el libro. Es lo que verá la familia."
+          readOnly={awaitingSize}
+          error={form.errors.price ?? priceError}
+          onClearError={() => {
+            form.clear("price");
+            setPriceError(undefined);
+          }}
+          help="Lo que cuesta una pieza."
         />
-
-        <p style={{ ...label, marginTop: 16 }}>Nivel</p>
-        <LevelChips levels={levels} value={level} onChange={setLevel} allLabel="Todos los niveles" />
-
-        <div style={{ marginTop: 16 }}>
-          <MoneyField
-            label="Precio"
-            value={pesos}
-            onChange={setPesos}
-            required
-            error={form.errors.price ?? priceError}
-            onClearError={() => {
-              form.clear("price");
-              setPriceError(undefined);
-            }}
-            help="Lo que cuesta una pieza."
-          />
-        </div>
-      </fieldset>
+      </div>
 
       <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
         <Btn kind="ghost" onClick={onClose}>

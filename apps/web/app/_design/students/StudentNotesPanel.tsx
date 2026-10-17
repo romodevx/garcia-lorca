@@ -18,6 +18,7 @@ const AUTHOR_VOID_WINDOW_MS = 15 * 60_000;
  * leaves this much earlier, so a click always has time to be undone or sent.
  */
 const VOID_LEAD_MS = 10_000;
+const VOID_SENT = "Se anuló la nota.";
 /** How long before the window closes a pending void is sent: room for the request. */
 const REQUEST_MARGIN_MS = 5_000;
 /** How long after writing it the author is offered "Anular". */
@@ -116,12 +117,17 @@ export function StudentNotesPanel({
   }, [nextCutoff, now, tick]);
   const removal = useUndoableRemoval<StudentNote>();
   // An author's void cannot wait past the server's window for Deshacer.
+  // When it leaves on its own, the page says so: nobody closed the offer.
   const pendingVoid = removal.latest;
   const { flush } = removal;
+  const [sentAlone, setSentAlone] = useState(false);
   useEffect(() => {
     if (pendingVoid === undefined || canVoidAny) return;
     const deadline = Date.parse(pendingVoid.createdAt) + AUTHOR_VOID_WINDOW_MS - REQUEST_MARGIN_MS;
-    const timer = setTimeout(flush, Math.max(0, deadline - now()));
+    const timer = setTimeout(() => {
+      flush();
+      setSentAlone(true);
+    }, Math.max(0, deadline - now()));
     return () => clearTimeout(timer);
   }, [pendingVoid, canVoidAny, flush, now]);
   const focusFirstInvalid = useFocusFirstInvalid();
@@ -182,6 +188,7 @@ export function StudentNotesPanel({
       return;
     }
     state.hide(note);
+    setSentAlone(false);
     removal.remove(note, ({ keepalive }) => {
       voidNote(API_URL, studentId, note.id, { keepalive })
         .then(() => {
@@ -285,6 +292,7 @@ export function StudentNotesPanel({
       )}
 
       {problem !== undefined && <p role="alert" style={{ color: "var(--bad-fg)", fontSize: 13.5 }}>{problem}</p>}
+      {sentAlone && removal.latest === undefined && <p role="status" style={{ color: "var(--text-muted)", fontSize: 13.5 }}>{VOID_SENT}</p>}
       {removal.latest !== undefined && (
         <UndoToast
           message="Se anuló la nota"

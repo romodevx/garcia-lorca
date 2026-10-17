@@ -91,7 +91,10 @@ describe("CatalogPanel — un artículo sin tallas es talla única", () => {
 
     const drawer = await screen.findByRole("dialog", { name: "Nuevo artículo" });
     expect(await within(drawer).findByText("El artículo ya se creó; falta la talla. Vuelve a intentarlo.")).toBeInTheDocument();
-    expect(within(drawer).getByLabelText(/Nombre/, CAMPO)).toBeDisabled();
+    // Read-only, not disabled: a screen reader still reads what was created.
+    expect(within(drawer).getByLabelText(/Nombre/, CAMPO)).toHaveAttribute("readonly");
+    expect(within(drawer).getByLabelText(/Precio/, CAMPO)).toHaveAttribute("readonly");
+    expect(within(drawer).getByLabelText(/Nombre/, CAMPO)).toBeEnabled();
     await user.click(within(drawer).getByRole("button", { name: "Poner talla única" }));
 
     await waitFor(() => expect(posts(fetchMock, "/items/it-book/sizes")).toHaveLength(2));

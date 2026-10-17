@@ -158,6 +158,8 @@ describe("StudentNotesPanel", () => {
       act(() => vi.advanceTimersByTime(60_000));
       expect(api.voidNote).toHaveBeenCalledWith(expect.any(String), "st1", "n-2", { keepalive: false });
       expect(screen.queryByRole("button", { name: /Deshacer/ })).not.toBeInTheDocument();
+      // The offer left without anybody closing it: say what happened.
+      expect(screen.getByRole("status")).toHaveTextContent("Se anuló la nota.");
     } finally {
       useRealClock();
     }
