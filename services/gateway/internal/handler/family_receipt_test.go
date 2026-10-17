@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -28,7 +29,10 @@ func (f *receiptSources) DepositReceipt(_ context.Context, id string) (client.De
 	f.reads++
 	got, ok := f.deposits[id]
 	if !ok {
-		return client.DepositReceipt{}, connect.NewError(connect.CodeNotFound, errors.New("no such deposit"))
+		// Finance's own NotFound carries its sentence and a machine code.
+		err := connect.NewError(connect.CodeNotFound, errors.New("no such deposit"))
+		err.Meta().Set("X-Error-Code", "DEPOSIT_NOT_FOUND")
+		return client.DepositReceipt{}, err
 	}
 	return got, nil
 }
@@ -150,5 +154,43 @@ func TestAFamilyReceiptWithoutPrincipalOrWiringIsRefused(t *testing.T) {
 	bare.ReceiptPDF(rec, familyReceiptRequest("stu-1", "dep-own"))
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("no receipts wired: status = %d, want 404", rec.Code)
+	}
+}
+
+// ISSUE-T14-302: every family-receipt 404 is byte-for-byte the same answer —
+// status, body and headers — so a deposit of another pupil cannot be told
+// apart from one that does not exist.
+func TestEveryFamilyReceipt404IsIdentical(t *testing.T) {
+	serve := func(studentID, depositID string, pdf bool) *httptest.ResponseRecorder {
+		h, _ := familyReceiptFixture()
+		rec := httptest.NewRecorder()
+		if pdf {
+			h.ReceiptPDF(rec, familyReceiptRequest(studentID, depositID))
+		} else {
+			h.ReceiptJSON(rec, familyReceiptRequest(studentID, depositID))
+		}
+		return rec
+	}
+	refusals := [][2]string{
+		{"stu-1", "dep-other"},
+		{"stu-1", "dep-missing"},
+		{"stu-1", "dep-void"},
+		{"stu-1", "dep-superseded"},
+	}
+	// The baseline is the child the caller is not linked to: finance is never read.
+	want := serve("stu-2", "dep-other", false)
+	if want.Code != http.StatusNotFound {
+		t.Fatalf("baseline status = %d, want 404", want.Code)
+	}
+	for _, pdf := range []bool{false, true} {
+		for _, c := range refusals {
+			got := serve(c[0], c[1], pdf)
+			if got.Code != want.Code || !bytes.Equal(got.Body.Bytes(), want.Body.Bytes()) {
+				t.Errorf("%s/%s (pdf=%v): %d %q, want %d %q", c[0], c[1], pdf, got.Code, got.Body.String(), want.Code, want.Body.String())
+			}
+			if !reflect.DeepEqual(got.Header(), want.Header()) {
+				t.Errorf("%s/%s (pdf=%v): headers %v, want %v", c[0], c[1], pdf, got.Header(), want.Header())
+			}
+		}
 	}
 }

@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 
+	"connectrpc.com/connect"
+
 	"github.com/garcia-lorca/services/gateway/internal/middleware"
 	"github.com/garcia-lorca/services/gateway/internal/receipt"
 )
@@ -54,6 +56,13 @@ func (h *FamilyHandler) familyReceipt(w http.ResponseWriter, r *http.Request) (r
 		return receipt.Receipt{}, false
 	}
 	got, err := h.receipts.FamilyPayment(r.Context(), studentID, r.PathValue("depositId"))
+	if connect.CodeOf(err) == connect.CodeNotFound {
+		// One answer for every missing receipt (ISSUE-T14-302): finance's own
+		// sentence or code for an unknown id would tell it apart from a
+		// deposit of another pupil.
+		writeNotFound(w)
+		return receipt.Receipt{}, false
+	}
 	if err != nil {
 		writeConnectError(w, err)
 		return receipt.Receipt{}, false
