@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { forgetPendingDestination, isInternalPath, rememberPendingDestination, takePendingDestination } from "./pendingDestination";
+import { viewToPath } from "./routes";
 
 afterEach(() => {
   forgetPendingDestination();
@@ -47,6 +48,28 @@ describe("the pending destination survives a remount of the shell (CC-309)", () 
       rememberPendingDestination(path);
       expect(takePendingDestination()).toBeUndefined();
     }
+  });
+
+  // Revisión #146: encoded slashes, dot segments and Unicode inside an id must
+  // come back as an address of THIS site, whatever the id holds.
+  it.each([
+    "/alumnos/%2F%2Fevil.example",
+    "/alumnos/..%2F..%2Fx",
+    "/alumnos/%E2%80%AEn%C3%AD%C3%B1o-%F0%9F%8C%B1",
+    "/alumnos/ni%C3%B1o/editar",
+  ])("re-resolves %s to a same-site path", (path) => {
+    rememberPendingDestination(path);
+    const view = takePendingDestination();
+    expect(view).toBeDefined();
+    const back = viewToPath(view ?? { screen: "dashboard" });
+    expect(isInternalPath(back)).toBe(true);
+    expect(back.startsWith("//")).toBe(false);
+    expect(new URL(back, "https://colegio.example").origin).toBe("https://colegio.example");
+  });
+
+  it("never remembers the forced password change", () => {
+    rememberPendingDestination("/cambiar-contrasena");
+    expect(takePendingDestination()).toBeUndefined();
   });
 
   it("forgets on demand", () => {
