@@ -633,13 +633,13 @@ func TestConfigListNonWorkingPeriodsScopesToTheCycle(t *testing.T) {
 	svc := &fakeConfig{periods: []client.NonWorkingPeriod{{ID: "per-1", Label: "Independencia"}}}
 	h := handler.NewConfigHandler(svc)
 
-	rec := doReq(t, h.ListNonWorkingPeriods, http.MethodGet, "/api/v1/config/calendar?cycleId=c1", "")
+	rec := doReq(t, h.ListNonWorkingPeriods, http.MethodGet, "/api/v1/config/calendar?cycleId=c5000000-0000-4000-8000-000000000001", "")
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
-	if svc.periodsCycle != "c1" {
-		t.Errorf("forwarded cycle = %q, want c1", svc.periodsCycle)
+	if svc.periodsCycle != "c5000000-0000-4000-8000-000000000001" {
+		t.Errorf("forwarded cycle = %q, want the cycle", svc.periodsCycle)
 	}
 }
 

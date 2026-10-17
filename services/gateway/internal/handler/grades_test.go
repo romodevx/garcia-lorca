@@ -113,12 +113,12 @@ func TestGetRosterReturnsRows(t *testing.T) {
 	}}
 	h := handler.NewGradesHandler(svc)
 
-	rec := doReq(t, h.GetRoster, http.MethodGet, "/api/v1/grades/roster?assignmentId=asg-1&termId=trm-1", "")
+	rec := doReq(t, h.GetRoster, http.MethodGet, "/api/v1/grades/roster?assignmentId=a5000000-0000-4000-8000-000000000001&termId=a5000000-0000-4000-8000-000000000002", "")
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
-	if svc.rosterAssignment != "asg-1" || svc.rosterTerm != "trm-1" {
+	if svc.rosterAssignment != "a5000000-0000-4000-8000-000000000001" || svc.rosterTerm != "a5000000-0000-4000-8000-000000000002" {
 		t.Errorf("forwarded filters = %q %q", svc.rosterAssignment, svc.rosterTerm)
 	}
 	var out struct {

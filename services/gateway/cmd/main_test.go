@@ -1355,7 +1355,7 @@ func TestGradesRosterNoTokenIs401(t *testing.T) {
 
 func TestGradesRosterWithReadPermissionLists200(t *testing.T) {
 	gw := newTestGateway(t, map[string]bool{"module_grades": true})
-	res := doGateway(t, gw, http.MethodGet, "/api/v1/grades/roster?assignmentId=asg-1&termId=trm-1", "grades-reader", "")
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/grades/roster?assignmentId=a5000000-0000-4000-8000-000000000001&termId=a5000000-0000-4000-8000-000000000002", "grades-reader", "")
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", res.StatusCode)
 	}

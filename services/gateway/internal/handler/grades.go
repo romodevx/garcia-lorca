@@ -96,7 +96,15 @@ func (h *GradesHandler) CaptureGrade(w http.ResponseWriter, r *http.Request) {
 // GetRoster handles GET /api/v1/grades/roster?assignmentId=...&termId=...
 func (h *GradesHandler) GetRoster(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	res, err := h.svc.GetRoster(r.Context(), q.Get("assignmentId"), q.Get("termId"))
+	assignmentID, ok := requireUUIDQuery(w, q, "assignmentId")
+	if !ok {
+		return
+	}
+	termID, ok := optionalUUIDQuery(w, q, "termId")
+	if !ok {
+		return
+	}
+	res, err := h.svc.GetRoster(r.Context(), assignmentID, termID)
 	if err != nil {
 		writeConnectError(w, err)
 		return
