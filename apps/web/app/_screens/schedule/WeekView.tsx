@@ -9,14 +9,15 @@ import { Toast } from "../../_design/Toast";
 import { UndoToast } from "../../_design/UndoToast";
 import { useUndoableRemoval } from "../../_design/useUndoableRemoval";
 import { API_URL } from "../../api-url";
-import { deleteBlock, listUncovered, type ScheduleBoard, type ScheduleBlock } from "../../schedule/api";
+import { deleteBlock, type ScheduleBoard, type ScheduleBlock } from "../../schedule/api";
 import { filterBlocks, indexBoard, NO_WEEK_FILTER, type WeekFilter } from "../../schedule/catalog";
-import { fridayOf, gridBounds, nowInSchoolZone, schoolWeekOf } from "../../schedule/time";
+import { gridBounds, nowInSchoolZone } from "../../schedule/time";
 import { BlockDrawer, type DrawerTarget } from "./BlockDrawer";
 import { GridSettings } from "./GridSettings";
 import { EmptyState } from "./parts";
 import { WeekStepper } from "./UncoveredView";
 import type { ScheduleMode } from "./useScheduleBoard";
+import { useWeekChanges } from "./useWeekChanges";
 import { WeekGrid } from "./WeekGrid";
 
 const TOAST_MS = 3000;
@@ -43,7 +44,7 @@ export function WeekView({ board, mode, canWrite, now, onChanged, version = 0 }:
   const [toast, setToast] = useState<string | undefined>(undefined);
   const removal = useUndoableRemoval<ScheduleBlock>();
   const today = nowInSchoolZone(now).date;
-  const uncovered = useUncoveredWeek(board, mode, today, version);
+  const week = useWeekChanges(board, mode, today, version);
 
   useEffect(() => {
     if (toast === undefined) return;
@@ -100,10 +101,11 @@ export function WeekView({ board, mode, canWrite, now, onChanged, version = 0 }:
 
       <WeekEmptyState board={board} mode={mode} filter={filter} shownCount={shown.length} canWrite={canWrite} />
 
-      {mode === "manage" && <WeekStepper monday={uncovered.monday} onMonday={uncovered.setMonday} />}
+      {mode === "manage" && <WeekStepper monday={week.monday} onMonday={week.setMonday} />}
       <WeekGrid
         blocks={shown}
-        uncovered={uncovered.blocks}
+        uncovered={week.uncovered}
+        substitutes={week.substitutes}
         index={index}
         grid={grid}
         onSlot={canWrite && board.assignments.length > 0 ? newClass : undefined}
@@ -138,28 +140,3 @@ function WeekEmptyState({ board, mode, filter, shownCount, canWrite }: { board: 
   return <EmptyState>No hay clases con estos filtros. Elige un grupo para ver o armar su semana.</EmptyState>;
 }
 
-/**
- * The classes left uncovered by absences (T19) in the week on screen, by
- * block: the base week is the same every week, so the week chosen decides
- * which of its classes are painted "Sin cubrir". The teacher's own week reads
- * no absences (their "¿Qué está pasando ahora?" says "Ausente").
- */
-function useUncoveredWeek(board: ScheduleBoard, mode: ScheduleMode, today: string, version: number): {
-  monday: string;
-  setMonday: (monday: string) => void;
-  blocks: ReadonlySet<string>;
-} {
-  const [monday, setMonday] = useState(() => schoolWeekOf(today));
-  const [blocks, setBlocks] = useState<ReadonlySet<string>>(new Set());
-  useEffect(() => {
-    if (mode !== "manage") return;
-    let live = true;
-    listUncovered(API_URL, board.cycle.id, monday, fridayOf(monday))
-      .then((got) => live && setBlocks(new Set(got.map((u) => u.class.blockId))))
-      .catch(() => live && setBlocks(new Set()));
-    return () => {
-      live = false;
-    };
-  }, [board, mode, monday, version]);
-  return { monday, setMonday, blocks };
-}

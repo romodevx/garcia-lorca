@@ -29,6 +29,8 @@ export interface WeekGridProps {
   onOpen?: (block: ScheduleBlock) => void;
   /** Classes whose teacher is absent that week and nobody covers (T19): painted red, "Sin cubrir". */
   uncovered?: ReadonlySet<string>;
+  /** Block id → the teacher covering it that week (ISSUE-CC-121): the substitute is named on the class. */
+  substitutes?: ReadonlyMap<string, string>;
 }
 
 /**
@@ -36,7 +38,7 @@ export interface WeekGridProps {
  * overlap in one column (several groups of a grade) sit side by side. On a
  * phone the grid scrolls sideways INSIDE its own box; the page never does.
  */
-export function WeekGrid({ blocks, index, grid, onSlot, onOpen, uncovered }: WeekGridProps): ReactElement {
+export function WeekGrid({ blocks, index, grid, onSlot, onOpen, uncovered, substitutes }: WeekGridProps): ReactElement {
   const height = px(grid.end - grid.start);
   const hours: number[] = [];
   for (let h = Math.ceil(grid.start / HOUR) * HOUR; h <= grid.end; h += HOUR) hours.push(h);
@@ -68,7 +70,7 @@ export function WeekGrid({ blocks, index, grid, onSlot, onOpen, uncovered }: Wee
               {onSlot !== undefined && <SlotButtons weekday={d.weekday} label={d.label} grid={grid} hours={hours} onSlot={onSlot} />}
               {dayBlocks.map((b) => (
                 <ClassBlock key={b.id} block={b} index={index} grid={grid} place={placed.get(b.id) ?? { column: 0, columns: 1 }} onOpen={onOpen}
-                  uncovered={uncovered?.has(b.id) === true} />
+                  uncovered={uncovered?.has(b.id) === true} substitute={substitutes?.get(b.id)} />
               ))}
             </div>
           );
@@ -104,7 +106,27 @@ function SlotButtons({ weekday, label, grid, hours, onSlot }: { weekday: number;
   );
 }
 
-function ClassBlock({ block, index, grid, place, onOpen, uncovered }: { block: ScheduleBlock; index: ScheduleIndex; grid: { start: number }; place: { column: number; columns: number }; onOpen?: (block: ScheduleBlock) => void; uncovered: boolean }): ReactElement {
+interface ClassBlockProps {
+  block: ScheduleBlock;
+  index: ScheduleIndex;
+  grid: { start: number };
+  place: { column: number; columns: number };
+  onOpen?: (block: ScheduleBlock) => void;
+  uncovered: boolean;
+  /** The teacher covering this class that week, if any. */
+  substitute?: string;
+}
+
+/** The third line of a class: its time, and what changed it that week. */
+function timeLine(block: ScheduleBlock, uncovered: boolean, substituteName: string | undefined): string {
+  const time = `${block.startsAt}–${block.endsAt}`;
+  if (uncovered) return `${time} · Sin cubrir`;
+  if (substituteName !== undefined) return `Suplente: ${substituteName}`;
+  return time;
+}
+
+function ClassBlock({ block, index, grid, place, onOpen, uncovered, substitute }: ClassBlockProps): ReactElement {
+  const substituteName = substitute === undefined ? undefined : index.teacherName(substitute);
   const start = toMinutes(block.startsAt);
   const end = toMinutes(block.endsAt);
   const subject = index.subjectName(block.subjectId);
@@ -134,12 +156,14 @@ function ClassBlock({ block, index, grid, place, onOpen, uncovered }: { block: S
       <strong style={{ display: "block", fontSize: 12.5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{subject}</strong>
       <span style={{ display: "block", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{index.groupLabel(block.groupId)} · {index.teacherName(block.teacherId)}</span>
       {/* "Sin cubrir" rides the time line: a 50-minute block has room for three lines only (QA T19). */}
-      <span style={{ display: "block", color: uncovered ? "var(--bad-fg)" : "var(--text-muted)", fontWeight: uncovered ? 800 : undefined, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-        {uncovered ? `${block.startsAt}–${block.endsAt} · Sin cubrir` : `${block.startsAt}–${block.endsAt}`}
+      <span style={{ display: "block", color: uncovered ? "var(--bad-fg)" : "var(--text-muted)", fontWeight: uncovered || substituteName !== undefined ? 800 : undefined, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+        {timeLine(block, uncovered, substituteName)}
       </span>
     </>
   );
-  const label = uncovered ? `${blockLabel(index, block)}, sin cubrir` : blockLabel(index, block);
+  const label = uncovered
+    ? `${blockLabel(index, block)}, sin cubrir`
+    : substituteName !== undefined ? `${blockLabel(index, block)}, suplencia de ${substituteName}` : blockLabel(index, block);
   if (onOpen === undefined) {
     return <div data-testid="schedule-block" role="note" aria-label={label} style={style}>{body}</div>;
   }

@@ -215,6 +215,23 @@ describe("Ausencias — en la semana y en «ahora» (T19)", () => {
     await waitFor(() => expect(m.listUncovered).toHaveBeenLastCalledWith(expect.any(String), sampleBoard().cycle.id, "2026-10-12", "2026-10-16"));
   });
 
+  // ISSUE-CC-121: after a substitute was assigned the week still showed the
+  // regular teacher, with no mark.
+  it("marks a covered class with its substitute on the week of that date", async () => {
+    m.getDay.mockImplementation(async (_url, _cycle, date) => ({
+      date, weekday: 1, nonWorking: null,
+      classes: date === "2026-10-05" ? [{ ...uncoveredMate(), status: "substitute", teacherId: LUIS, absence: null, overrideId: "o1" }] : [],
+    }));
+    const user = renderManager();
+    await user.click(await screen.findByRole("button", { name: "Primaria" }));
+    await user.click(screen.getByRole("button", { name: "3.º" }));
+    await user.click(screen.getByRole("button", { name: "A" }));
+
+    const block = await screen.findByRole("button", { name: /^Matemáticas, 3.º A, Ana Ruiz, lunes 08:00 a 08:50, suplencia de Luis Pérez/ });
+    expect(block).toHaveTextContent("Suplente: Luis Pérez");
+    expect(m.getDay).toHaveBeenCalledWith(expect.any(String), sampleBoard().cycle.id, "2026-10-09");
+  });
+
   it("shows an uncovered class in «¿Qué está pasando ahora?» with a way to cover it", async () => {
     m.getDay.mockResolvedValue({ date: "2026-10-05", weekday: 1, nonWorking: null, classes: [uncoveredMate()] });
     const user = renderManager();
