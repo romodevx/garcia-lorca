@@ -124,14 +124,21 @@ func (h *FinanceHandler) GenerateCharges(ctx context.Context, req *connect.Reque
 	}), nil
 }
 
-// ListCharges lists charges, optionally filtered by student and/or cycle.
+// ListCharges lists one page of charges, filtered by student and/or cycle.
 func (h *FinanceHandler) ListCharges(ctx context.Context, req *connect.Request[financev1.ListChargesRequest]) (*connect.Response[financev1.ListChargesResponse], error) {
 	m := req.Msg
-	charges, err := h.finance.ListCharges(ctx, m.GetStudentId(), m.GetCycleId())
+	after, err := decodePageToken(m.GetPageToken())
 	if err != nil {
 		return nil, connectErr(err)
 	}
-	return connect.NewResponse(&financev1.ListChargesResponse{Charges: toProtoCharges(charges)}), nil
+	page, err := h.finance.ListChargesPage(ctx, m.GetStudentId(), m.GetCycleId(), after, int(m.GetPageSize()))
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&financev1.ListChargesResponse{
+		Charges:       toProtoCharges(page.Charges),
+		NextPageToken: encodePageToken(page.Next),
+	}), nil
 }
 
 // PreviewWithdrawal returns the charges a dated withdrawal would cancel and
@@ -301,13 +308,22 @@ func toProtoMovement(m domain.Movement) *financev1.StatementMovement {
 	}
 }
 
-// ListOverdue lists charges past their due date that still owe money.
+// ListOverdue lists one page of the charges past their due date that still owe
+// money. The page may be short, even empty, while a token says more remain.
 func (h *FinanceHandler) ListOverdue(ctx context.Context, req *connect.Request[financev1.ListOverdueRequest]) (*connect.Response[financev1.ListOverdueResponse], error) {
-	charges, err := h.finance.ListOverdue(ctx, req.Msg.GetCycleId())
+	m := req.Msg
+	after, err := decodePageToken(m.GetPageToken())
 	if err != nil {
 		return nil, connectErr(err)
 	}
-	return connect.NewResponse(&financev1.ListOverdueResponse{Charges: toProtoCharges(charges)}), nil
+	page, err := h.finance.ListOverduePage(ctx, m.GetCycleId(), after, int(m.GetPageSize()))
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&financev1.ListOverdueResponse{
+		Charges:       toProtoCharges(page.Charges),
+		NextPageToken: encodePageToken(page.Next),
+	}), nil
 }
 
 // --- deposits (M16) --------------------------------------------------------

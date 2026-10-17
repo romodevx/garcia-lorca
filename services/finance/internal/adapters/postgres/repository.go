@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -27,8 +28,9 @@ const (
 	// maxListLimit caps every unpaginated ledger read, so no single request can
 	// pull an unbounded number of rows into memory (defense in depth behind the
 	// use case's scoping filters). It is a DOCUMENTED bound, not a hidden one:
-	// each capped method says so, as does the proto contract. Explicit pagination
-	// is the follow-up that removes the need for it.
+	// each capped method says so. It is also the largest keyset page
+	// (ListChargesPage, ListOverduePage), which is how a cycle-wide read gets
+	// past it.
 	maxListLimit = 500
 )
 
@@ -518,7 +520,8 @@ func (r *Repository) GetCharge(ctx context.Context, id string) (ports.ChargeWith
 //
 // The read returns AT MOST maxListLimit rows, the earliest due first, ordered by
 // (due_date, id) so the cut is deterministic rather than whatever the planner
-// happened to emit. Explicit pagination is a follow-up.
+// happened to emit. It serves the per-pupil reads; a cycle-wide read walks
+// ListChargesPage, because a cycle holds thousands of charges.
 func (r *Repository) ListCharges(ctx context.Context, studentID, cycleID string) ([]ports.ChargeWithPaid, error) {
 	var out []ports.ChargeWithPaid
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
@@ -814,101 +817,130 @@ func (r *Repository) ListPayments(ctx context.Context, studentID string) ([]doma
 	return out, nil
 }
 
-// ListOverdue returns the charges past their due date that still owe money
-// (due_date < today, effective - paid > 0, not cancelled). An empty cycleID
-// spans every cycle. today is supplied by the caller — never read from a clock
-// here — so the query stays deterministic. The remaining balance is computed
-// from the same single grouped payment query the list reads (no N+1).
+// ListChargesPage returns one keyset page of charges with their collected
+// totals. See ports.FinanceRepository.
 //
-// The read examines AT MOST maxListLimit candidates, the earliest due first,
-// ordered by (due_date, id) — so the collection queue is bounded and its cut is
-// deterministic. Since the still-owing filter is applied afterwards, the result
-// holds no more than that many rows and never fewer of the oldest debts.
-// Explicit pagination is a follow-up.
-func (r *Repository) ListOverdue(ctx context.Context, cycleID string, today time.Time) ([]ports.ChargeWithPaid, error) {
-	var out []ports.ChargeWithPaid
+// One row past `limit` is read so the last page is known without sending the
+// caller back for an empty one. Keyset (due_date, id) rather than OFFSET: a
+// cycle walk runs while the counter writes payments and the billing run writes
+// surcharges, and an OFFSET walk would skip or repeat rows as the set shifts.
+func (r *Repository) ListChargesPage(ctx context.Context, studentID, cycleID string, after ports.ChargeCursor, limit int) (ports.ChargePage, error) {
+	limit = clampPageLimit(limit)
+	if err := validateCursor(after); err != nil {
+		return ports.ChargePage{}, err
+	}
+	var page ports.ChargePage
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
-		q := tx.Model(&chargeModel{}).
-			Where("due_date < ?::date AND status <> ?", today.Format(dateLayout), domain.StatusCancelled).
-			Order("due_date ASC, id ASC").
-			Limit(maxListLimit)
+		q := tx.Model(&chargeModel{})
+		if studentID != "" {
+			q = q.Where("student_id = ?", studentID)
+		}
 		if cycleID != "" {
 			q = q.Where("cycle_id = ?", cycleID)
 		}
-		var rows []chargeModel
-		if err := q.Find(&rows).Error; err != nil {
-			return glerrors.Wrap(glerrors.KindInternal, "listing overdue charges", err)
+		rows, next, err := keysetPage(q, after, limit)
+		if err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "listing charges page", err)
 		}
-		candidates, err := withPaidTotals(tx, rows)
+		charges, err := withPaidTotals(tx, rows)
 		if err != nil {
 			return err
 		}
-		for _, c := range candidates {
-			if c.Charge.Effective().Int64()-c.PaidCents > 0 {
-				out = append(out, c)
-			}
-		}
+		page = ports.ChargePage{Charges: charges, Next: next}
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return ports.ChargePage{}, err
 	}
-	return out, nil
+	return page, nil
 }
 
-// ListOverduePage is the uncapped, keyset-paged walk of the same set.
+// ListOverduePage walks the overdue set in keyset pages. See
+// ports.FinanceRepository.
 //
-// ListOverdue above stops at maxListLimit, which is right for a screen and wrong
-// for the billing run: a school with 400 pupils and eleven monthly charges holds
-// ~4,400 charges in a cycle, so once more than maxListLimit are overdue the run
-// stopped accruing surcharges on the NEWEST debt and said nothing. The school
-// under-billed and nobody was told.
+// It was written for the billing run, which must see every overdue charge: a
+// school with 400 pupils and eleven monthly charges holds ~4,400 charges in a
+// cycle, and the capped read it replaced stopped accruing surcharges on the
+// NEWEST debt past 500 and said nothing.
 //
-// Keyset (due_date, id) rather than OFFSET on purpose: accrueLateFees WRITES
-// surcharge rows while it reads this set, and an OFFSET walk would skip or
-// repeat rows as the result shifts underneath it. A keyset cursor is stable
-// against inserts.
-//
-// The still-owing filter runs after the page is fetched, so a page can come back
-// shorter than `limit` while more pages remain. Callers must therefore stop on
-// an EMPTY page, never on a short one.
-func (r *Repository) ListOverduePage(ctx context.Context, cycleID string, today time.Time, after ports.OverdueCursor, limit int) ([]ports.ChargeWithPaid, error) {
-	if limit <= 0 || limit > maxListLimit {
-		limit = maxListLimit
+// The still-owing filter runs after the page's candidates are fetched, so Next
+// is the last candidate EXAMINED. Taking it from the last row returned instead
+// would stall on a page of settled charges and hide every debt after it.
+func (r *Repository) ListOverduePage(ctx context.Context, cycleID string, today time.Time, after ports.ChargeCursor, limit int) (ports.ChargePage, error) {
+	limit = clampPageLimit(limit)
+	if err := validateCursor(after); err != nil {
+		return ports.ChargePage{}, err
 	}
-	var out []ports.ChargeWithPaid
+	var page ports.ChargePage
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
 		q := tx.Model(&chargeModel{}).
-			Where("due_date < ?::date AND status <> ?", today.Format(dateLayout), domain.StatusCancelled).
-			Order("due_date ASC, id ASC").
-			Limit(limit)
+			Where("due_date < ?::date AND status <> ?", today.Format(dateLayout), domain.StatusCancelled)
 		if cycleID != "" {
 			q = q.Where("cycle_id = ?", cycleID)
 		}
-		if !after.IsZero() {
-			// Row-wise comparison: strictly after (due_date, id) in the same
-			// total order the ORDER BY imposes.
-			q = q.Where("(due_date, id) > (?::date, ?)", after.DueDate.Format(dateLayout), after.ID)
-		}
-		var rows []chargeModel
-		if err := q.Find(&rows).Error; err != nil {
+		rows, next, err := keysetPage(q, after, limit)
+		if err != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "listing overdue charges page", err)
 		}
 		candidates, err := withPaidTotals(tx, rows)
 		if err != nil {
 			return err
 		}
+		owed := candidates[:0:0]
 		for _, c := range candidates {
 			if c.Charge.Effective().Int64()-c.PaidCents > 0 {
-				out = append(out, c)
+				owed = append(owed, c)
 			}
 		}
+		page = ports.ChargePage{Charges: owed, Next: next}
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return ports.ChargePage{}, err
 	}
-	return out, nil
+	return page, nil
+}
+
+// validateCursor refuses a cursor whose id cannot be a charge id. The token it
+// came from decoded, so it is a forgery or a corruption: the caller's mistake,
+// which must not reach the uuid cast and come back as a 500.
+func validateCursor(after ports.ChargeCursor) error {
+	if after.IsZero() {
+		return nil
+	}
+	if _, err := uuid.Parse(after.ID); err != nil {
+		return glerrors.New(glerrors.KindInvalid, "invalid page token")
+	}
+	return nil
+}
+
+// clampPageLimit keeps a page inside (0, maxListLimit].
+func clampPageLimit(limit int) int {
+	if limit <= 0 || limit > maxListLimit {
+		return maxListLimit
+	}
+	return limit
+}
+
+// keysetPage reads up to limit rows of q strictly after `after` in (due_date,
+// id) order, plus one look-ahead row that only says whether another page
+// exists. next is the last row returned when it does, zero when it does not.
+func keysetPage(q *gorm.DB, after ports.ChargeCursor, limit int) ([]chargeModel, ports.ChargeCursor, error) {
+	if !after.IsZero() {
+		// Row-wise comparison: strictly after (due_date, id) in the same total
+		// order the ORDER BY imposes.
+		q = q.Where("(due_date, id) > (?::date, ?)", after.DueDate.Format(dateLayout), after.ID)
+	}
+	var rows []chargeModel
+	if err := q.Order("due_date ASC, id ASC").Limit(limit + 1).Find(&rows).Error; err != nil {
+		return nil, ports.ChargeCursor{}, err
+	}
+	if len(rows) <= limit {
+		return rows, ports.ChargeCursor{}, nil
+	}
+	rows = rows[:limit]
+	last := rows[limit-1]
+	return rows, ports.ChargeCursor{DueDate: last.DueDate, ID: last.ID}, nil
 }
 
 // --- helpers ----------------------------------------------------------------

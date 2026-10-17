@@ -203,8 +203,8 @@ func TestUpsertTuitionPlanRejectsAnUnknownCycle(t *testing.T) {
 // under-billed and nobody was told.
 //
 // The unit tests could not see it because the fake repository returned
-// everything: the double was MORE capable than production. It now models the cap
-// on ListOverdue and offers the paged read the run actually uses.
+// everything: the double was MORE capable than production. It now offers only
+// the keyset pages the run actually walks, cut the way the real query cuts them.
 func TestRunBillingAccruesBeyondTheListCap(t *testing.T) {
 	f := billingFixture(t)
 	const pupils = 700 // deliberately more than the 500-row cap
