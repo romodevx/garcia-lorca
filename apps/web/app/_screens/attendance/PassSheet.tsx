@@ -10,7 +10,7 @@ import { EmptyHint, ErrorAlert, Section } from "../config/parts";
 import { PassSheetRow } from "./PassSheetRow";
 import { Counters, ReadOnlyBanner, ScanBanner, ScanButton } from "./PassSheetParts";
 import { QrScanDialog } from "./QrScanDialog";
-import { dateWindow, readOnlyText, sessionLine } from "./sheetModel";
+import { dateWindow, lastWeekdayOnOrBefore, NO_CLASSES_TEXT, readOnlyText, sessionLine } from "./sheetModel";
 import { useAttendanceSheet, type LoadSheet, type SaveSheet } from "./useAttendanceSheet";
 import { useCardScan } from "./useCardScan";
 import { confirmDiscard } from "./useLeaveGuard";
@@ -21,7 +21,7 @@ export interface PassSheetProps {
   groupId: string;
   /** Only for a per-class list. */
   subjectId?: string;
-  /** The local today: where the list opens; the roster's server day, when sent, bounds the picker. */
+  /** The local today: the list opens on it (or the Friday before, on a weekend); the roster's server day, when sent, bounds the picker. */
   today: string;
   /** A teacher may open only today…today−window; the director any day. */
   restrictDates: boolean;
@@ -46,7 +46,8 @@ const UNTAKEN_LINE = "Lista no tomada ese día";
  * everything wraps, no fixed widths — it is used standing, on a phone.
  */
 export function PassSheet({ title, groupId, subjectId, today, restrictDates, load, save, scan, onDirtyChange }: PassSheetProps): ReactElement {
-  const [date, setDate] = useState(today);
+  // A weekend has no classes: the list opens on the Friday before (ISSUE-T14-101).
+  const [date, setDate] = useState(() => lastWeekdayOnOrBefore(today));
   const list = useAttendanceSheet({ groupId, subjectId, date }, load, save);
   const { sheet, rows, dirty } = list;
   const editable = sheet?.editable ?? false;
@@ -54,6 +55,8 @@ export function PassSheet({ title, groupId, subjectId, today, restrictDates, loa
   const bounds = dateWindow(sheet?.today ?? today, windowDays, restrictDates);
   /** A past (or future) list nobody took: no statuses, no counters — "Presentes 4" would be a lie. */
   const untaken = sheet !== undefined && !editable && sheet.session === null;
+  /** The day on screen has no classes (server calendar): said on the date field itself. */
+  const noClasses = sheet !== undefined && sheet.date === date && sheet.readOnlyReason === "no_classes";
   const locked = list.saving;
   const resolve = useMemo(
     () => (scan === undefined ? undefined : (code: string) => scan({ groupId, ...(subjectId !== undefined ? { subjectId } : {}), date, code })),
@@ -89,7 +92,7 @@ export function PassSheet({ title, groupId, subjectId, today, restrictDates, loa
     <Section title={`Pase de lista · ${title}`} subtitle="Todos empiezan presentes: toca solo a quien faltó.">
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-end", gap: 12, marginBottom: 14 }}>
         <div style={{ flex: "0 1 220px", minWidth: 0 }}>
-          <DateField label="Fecha" value={date} onChange={changeDate} {...bounds} />
+          <DateField label="Fecha" value={date} onChange={changeDate} error={noClasses ? NO_CLASSES_TEXT : undefined} {...bounds} />
         </div>
         {sheet !== undefined && <p style={{ margin: 0, padding: "10px 0", fontSize: 14, fontWeight: 600, color: sheet.session === null ? "var(--text-muted)" : "var(--forest)" }}>{untaken ? UNTAKEN_LINE : sessionLine(sheet.session)}</p>}
       </div>

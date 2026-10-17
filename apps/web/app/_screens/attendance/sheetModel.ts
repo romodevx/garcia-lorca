@@ -55,6 +55,25 @@ export function todayISO(now: Date = new Date()): string {
   return `${now.getFullYear()}-${month}-${day}`;
 }
 
+/** The words for a day without classes — the same sentence the server refuses a save with. */
+export const NO_CLASSES_TEXT = "Ese día no hay clases.";
+
+const SATURDAY = 6;
+const SUNDAY = 0;
+
+/**
+ * Where a list opens: `isoDate` itself on a weekday, else the Friday before it
+ * (a Saturday or Sunday has no classes). UX only — holidays come from the
+ * server's `no_classes`, which is the authority.
+ */
+export function lastWeekdayOnOrBefore(isoDate: string): string {
+  const [year, month, day] = isoDate.split("-").map(Number) as [number, number, number];
+  const weekday = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+  if (weekday === SATURDAY) return addDays(isoDate, -1);
+  if (weekday === SUNDAY) return addDays(isoDate, -2);
+  return isoDate;
+}
+
 /** The days a list may be opened on: a teacher today…today−window, the director any. */
 export function dateWindow(today: string, windowDays: number, restricted: boolean): { min?: string; max?: string } {
   return restricted ? { min: addDays(today, -windowDays), max: today } : {};
@@ -71,6 +90,7 @@ export function sessionLine(session: AttendanceSession | null): string {
 /** Why the list is read-only, in words; without a server reason, the teacher's window or a plain "locked". */
 export function readOnlyText(reason: ReadOnlyReason | undefined, windowDays: number, restricted: boolean): string {
   if (reason === "future") return "No puedes registrar una fecha futura.";
+  if (reason === "no_classes") return NO_CLASSES_TEXT;
   if (reason === "window" || restricted) return `Solo puedes corregir hasta ${windowDays} días atrás.`;
   return "Esta lista ya no se puede modificar.";
 }

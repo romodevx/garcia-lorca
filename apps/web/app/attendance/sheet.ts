@@ -27,8 +27,11 @@ export interface AttendanceSheetRow {
   note: string;
 }
 
-/** Why a list is read-only: a future day, or a teacher past the correction window. */
-export type ReadOnlyReason = "future" | "window";
+/**
+ * Why a list is read-only: a future day, a teacher past the correction window,
+ * or a day the school calendar has no classes (weekend, outside the cycle, closed).
+ */
+export type ReadOnlyReason = "future" | "window" | "no_classes";
 
 export interface AttendanceSheet {
   mode: AttendanceMode;
