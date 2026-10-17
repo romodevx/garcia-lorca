@@ -27,12 +27,37 @@ type fakeImportRepo struct {
 	// writer did between the reads and the transaction.
 	interrupt map[string]func() error
 	seq       int
+	// movable is the pupils whose import enrollment starts after the cycle's
+	// first day; realigns records every call to MoveImportedToCycleStart.
+	movable  map[string]bool
+	realigns []ports.CycleStartMove
+	moveErr  error
 }
 
 func newImportRepo() *fakeImportRepo {
 	return &fakeImportRepo{
 		existing: map[string]ports.ExistingPupil{}, refsTaken: map[string]bool{}, interrupt: map[string]func() error{},
+		movable: map[string]bool{},
 	}
+}
+
+// MoveImportedToCycleStart behaves as the UPDATE does: only the movable pupils
+// answer, and a real run leaves them in place for the next call.
+func (r *fakeImportRepo) MoveImportedToCycleStart(_ context.Context, move ports.CycleStartMove) ([]string, error) {
+	r.realigns = append(r.realigns, move)
+	if r.moveErr != nil {
+		return nil, r.moveErr
+	}
+	var out []string
+	for _, id := range move.StudentIDs {
+		if r.movable[id] {
+			out = append(out, id)
+			if !move.DryRun {
+				delete(r.movable, id)
+			}
+		}
+	}
+	return out, nil
 }
 
 func (r *fakeImportRepo) StudentsByCURP(_ context.Context, curps []string) (map[string]ports.ExistingPupil, error) {
@@ -106,6 +131,9 @@ const (
 
 var importNow = time.Date(2026, 10, 6, 15, 30, 0, 0, time.UTC)
 
+// importCycleStart is the fixture cycle's first day (a config date: midnight UTC).
+var importCycleStart = time.Date(2026, 8, 24, 0, 0, 0, 0, time.UTC)
+
 type importFixture struct {
 	svc     *usecase.ImportService
 	repo    *fakeImportRepo
@@ -123,6 +151,7 @@ func newImportFixtureAt(t *testing.T, now time.Time) importFixture {
 	catalog := &countingCatalog{fakeCatalog: newCatalog(), groupCalls: map[string]int{}}
 	catalog.groups[importGroupA] = groupRef{ID: importGroupA, CycleID: importCycle, Name: "1° A", GradeLevelID: "gl-1", Capacity: 1}
 	catalog.groups[importGroupB] = groupRef{ID: importGroupB, CycleID: importCycle, Name: "1° B", GradeLevelID: "gl-1", Capacity: 25}
+	catalog.cycles[importCycle] = ports.CycleRef{ID: importCycle, StartsOn: importCycleStart}
 	repo := newImportRepo()
 	ids := 0
 	svc := usecase.NewImportService(repo, catalog, fakeLevels{primariaLevel: "Primaria"}, tenant,
@@ -183,8 +212,8 @@ func TestImportStoresAnEnrolledPupilWithAnImportEnrollment(t *testing.T) {
 		t.Errorf("file = %q %q %q", s.MaternalLastName(), s.BankReference(), s.Profile().Sex())
 	}
 	if e.Origin() != domain.EnrollmentOriginImport || e.CycleID() != importCycle || e.GroupID() != importGroupA ||
-		e.StudentID() != s.ID() || e.Status() != domain.EnrollmentStatusActive || !e.EnrolledAt().Equal(importNow) {
-		t.Errorf("enrollment = %+v; want an active import enrollment dated now in the group's cycle", e)
+		e.StudentID() != s.ID() || e.Status() != domain.EnrollmentStatusActive || !e.EnrolledAt().Equal(importCycleStart) {
+		t.Errorf("enrollment = %+v; want an active import enrollment dated the cycle's first day", e)
 	}
 	if cmd.BatchID != importBatch {
 		t.Errorf("batch = %q; want %q", cmd.BatchID, importBatch)

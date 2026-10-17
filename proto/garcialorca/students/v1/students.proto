@@ -90,9 +90,12 @@ service StudentsService {
   // row's group, with an enrolment of origin "import" and NO StudentEnrolled
   // event — the previous system collected their inscription, and finance skips
   // imported enrolments. The cycle and level are derived from the group, never
-  // taken from the caller. A CURP the school already has is reported, not
-  // touched (O4). validate_only runs every check and writes nothing, so the
-  // preview and the commit walk the same path.
+  // taken from the caller. The enrolment starts on the cycle's first day (00:00
+  // school time; now, if the cycle has not opened yet). A CURP the school
+  // already has is reported, not touched (O4) — except that an earlier import
+  // enrolment of theirs dated after the cycle's first day is moved back to it
+  // (moved_to_cycle_start). validate_only runs every check and writes nothing,
+  // so the preview and the commit walk the same path.
   rpc ImportStudents(ImportStudentsRequest) returns (ImportStudentsResponse);
 
   // GetEnrollment fetches a single enrollment by id.
@@ -582,6 +585,11 @@ message Enrollment {
   string origin = 10;
   string withdrawn_on = 11;  // YYYY-MM-DD; empty unless withdrawn.
   string withdrawal_reason = 12;  // Optional free-text reason.
+  // imported_at is when the legacy import brought the pupil in, set only for
+  // origin "import". enrolled_at is the cycle's first day for them (T14), so
+  // this is the instant finance reads as "the day they arrived": a month that
+  // fell due before it accrues no surcharge (owner decision 2026-10-17).
+  google.protobuf.Timestamp imported_at = 13;
 }
 
 // EnrollmentTransfer is a dated, reasoned record of a move between groups.
@@ -926,6 +934,12 @@ message ImportRowResult {
   // reason is a stable code when REJECTED: "curp_invalid", "curp_duplicated",
   // "name_required", "group_not_found", "group_full".
   string reason = 6;
+  // moved_to_cycle_start is set on an ALREADY_* row whose pupil an earlier
+  // import enrolled after the cycle's first day: their import enrollment in
+  // the row's cycle was moved back to it (or, with validate_only, would be).
+  // Imported pupils are enrolled from the start of the cycle (owner decision
+  // 2026-10-17); only enrolled_at changes, never a withdrawal's date.
+  bool moved_to_cycle_start = 7;
 }
 
 message ImportStudentsResponse {

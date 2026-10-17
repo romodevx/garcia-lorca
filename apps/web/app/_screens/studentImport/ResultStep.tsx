@@ -5,7 +5,7 @@ import type { ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
 import { csvName, downloadCsv } from "../../_lib/csv";
 import type { StudentImportResult } from "../../studentImport/api";
-import { migratedText } from "../../studentImport/copy";
+import { migratedText, movedText } from "../../studentImport/copy";
 import { destinationNames, reportCsv } from "../../studentImport/view";
 import { ImportSummary } from "./ImportSummary";
 import { alertStyle, noteStyle } from "./parts";
@@ -34,6 +34,7 @@ export function ResultStep({ result, cut, onAnother, onViewStudents }: ResultSte
         <p role="status" style={{ fontSize: 17, fontWeight: 700, color: "var(--ok-fg)", margin: 0 }}>{migratedText(names)}</p>
       )}
       <ImportSummary summary={result.summary} onPick={() => undefined} />
+      {result.summary.movedToCycleStart > 0 && <p style={noteStyle}>{movedText(result.summary.movedToCycleStart)}</p>}
       <p style={noteStyle}>{CONTACTS_REMINDER}</p>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
         <Btn icon="upload" onClick={onAnother}>Subir otro archivo</Btn>

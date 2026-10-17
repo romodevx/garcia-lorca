@@ -1464,10 +1464,22 @@ func (s *FinanceService) planFor(ctx context.Context, studentID string) (domain.
 	}
 	for _, p := range plans {
 		if p.LevelID() == levels[enrollment.GroupID] {
-			return p, nil
+			return pricedFor(p, enrollment), nil
 		}
 	}
 	return domain.TuitionPlan{}, nil
+}
+
+// pricedFor is the table as it prices this enrolment: for a pupil the legacy
+// import brought in, the months that fell due before the import day accrue no
+// surcharge (owner decision 2026-10-17, T14). The ONE place the grace is
+// attached — planFor (statement, family account, counter quote, deposit) and
+// the monthly run both go through it.
+func pricedFor(plan domain.TuitionPlan, enr ports.EnrollmentRef) domain.TuitionPlan {
+	if !enr.Imported() || enr.ImportedOn.IsZero() {
+		return plan
+	}
+	return plan.WithSurchargeFreeBefore(enr.ImportedOn)
 }
 
 // activeEnrollment finds where a student currently sits. Everything about how

@@ -14,11 +14,22 @@ import (
 	"github.com/garcia-lorca/services/students/internal/usecase"
 )
 
-// fakeImportRepo stores what the handler hands it; every CURP is new.
-type fakeImportRepo struct{ stored []ports.ImportCommand }
+// fakeImportRepo stores what the handler hands it; every CURP is new unless
+// listed in existing, and every existing pupil moves to the cycle start.
+type fakeImportRepo struct {
+	stored   []ports.ImportCommand
+	existing map[string]ports.ExistingPupil
+}
 
 func (r *fakeImportRepo) StudentsByCURP(_ context.Context, _ []string) (map[string]ports.ExistingPupil, error) {
-	return map[string]ports.ExistingPupil{}, nil
+	if r.existing == nil {
+		return map[string]ports.ExistingPupil{}, nil
+	}
+	return r.existing, nil
+}
+
+func (r *fakeImportRepo) MoveImportedToCycleStart(_ context.Context, move ports.CycleStartMove) ([]string, error) {
+	return move.StudentIDs, nil
 }
 
 func (r *fakeImportRepo) BankReferencesTaken(_ context.Context, _ []string) (map[string]bool, error) {
@@ -85,6 +96,25 @@ func TestImportStudentsMapsTheWire(t *testing.T) {
 	s := repo.stored[0].Student
 	if s.MaternalLastName() != "Ríos" || s.Profile().Address().State != "Michoacán" || s.Profile().Phones()[0].Number != "4431234567" {
 		t.Errorf("profile not carried: %q %+v %+v", s.MaternalLastName(), s.Profile().Address(), s.Profile().Phones())
+	}
+}
+
+// A pupil an earlier import dated after the cycle's first day is reported
+// moved back to it on the wire.
+func TestImportStudentsReportsAMoveToTheCycleStart(t *testing.T) {
+	h, repo := importHandler(t)
+	repo.existing = map[string]ports.ExistingPupil{validCURP: {StudentID: "stu-1", ActiveGroupIDs: []string{enrollGroup}}}
+
+	res, err := h.ImportStudents(context.Background(), connect.NewRequest(&studentsv1.ImportStudentsRequest{
+		BatchId: importHandlerBatch,
+		Rows:    []*studentsv1.ImportStudentRow{{RowNumber: 2, Curp: validCURP, FirstName: "Ana", LastName: "Herrera", GroupId: enrollGroup}},
+	}))
+	if err != nil {
+		t.Fatalf("ImportStudents: %v", err)
+	}
+	got := res.Msg.GetResults()[0]
+	if got.GetOutcome() != studentsv1.ImportRowOutcome_IMPORT_ROW_OUTCOME_ALREADY_IMPORTED || !got.GetMovedToCycleStart() {
+		t.Fatalf("row = %+v; want ALREADY_IMPORTED moved to the cycle start", got)
 	}
 }
 

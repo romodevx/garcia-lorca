@@ -66,6 +66,7 @@ type Enrollment struct {
 	withdrawnOn      time.Time
 	withdrawalReason string
 	origin           EnrollmentOrigin
+	importedAt       time.Time // set only for origin import
 }
 
 // EnrollmentOrigin says how a placement was made. Finance reads it: an
@@ -97,6 +98,21 @@ func (e Enrollment) WithOrigin(o EnrollmentOrigin) Enrollment {
 	e.origin = o
 	return e
 }
+
+// WithImportedAt returns the enrollment carrying the instant the legacy import
+// created it. Only an import enrollment keeps it: its enrolled_at is the
+// cycle's first day (T14), so this is the day the pupil actually arrived.
+func (e Enrollment) WithImportedAt(at time.Time) Enrollment {
+	if e.Origin() != EnrollmentOriginImport {
+		return e
+	}
+	e.importedAt = at
+	return e
+}
+
+// ImportedAt is when the legacy import created the enrollment; zero for any
+// other origin.
+func (e Enrollment) ImportedAt() time.Time { return e.importedAt }
 
 // Origin is how the placement was made; manual unless marked otherwise.
 func (e Enrollment) Origin() EnrollmentOrigin {

@@ -138,3 +138,40 @@ func referenceTaken(tx *gorm.DB, ref string) (bool, error) {
 	}
 	return taken, nil
 }
+
+// movableImports is the predicate of an earlier import to move back to the
+// cycle's first day: the pupil's import enrollment in that cycle, dated after
+// it. Whatever its status — only enrolled_at changes, never withdrawn_on.
+const movableImports = `tenant_id = current_setting('app.current_tenant', true)::uuid
+	AND cycle_id = ? AND origin = ? AND enrolled_at > ? AND student_id IN ?`
+
+// MoveImportedToCycleStart moves (or, dry, lists) the earlier imports of the
+// pupils back to the first day of the cycle in ONE statement, and returns the
+// pupils it moved. The predicate is the idempotency: a moved enrollment no
+// longer matches, so a second run moves nobody.
+func (r *Repository) MoveImportedToCycleStart(ctx context.Context, move ports.CycleStartMove) ([]string, error) {
+	if len(move.StudentIDs) == 0 {
+		return nil, nil
+	}
+	args := []any{move.CycleID, string(domain.EnrollmentOriginImport), move.StartsAt, move.StudentIDs}
+	var moved []string
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		query := `SELECT student_id FROM enrollments WHERE ` + movableImports
+		if !move.DryRun {
+			// updated_at only moves on an ACTIVE row: a non-active one's
+			// updated_at is the instant it ended (enrollmentToDomain).
+			query = `UPDATE enrollments SET enrolled_at = ?,
+			            updated_at = CASE WHEN status = 'active' THEN now() ELSE updated_at END
+			          WHERE ` + movableImports + ` RETURNING student_id`
+			args = append([]any{move.StartsAt}, args...)
+		}
+		if err := tx.Raw(query, args...).Scan(&moved).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "moving imports to the cycle start", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return moved, nil
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -69,6 +70,10 @@ type ImportResult struct {
 	EnrollmentNumber string
 	Warnings         []string
 	Reason           string
+	// MovedToCycleStart says the pupil was already here from an earlier import
+	// dated after the cycle's first day, and their enrollment was moved back to
+	// it (or, validating, would be).
+	MovedToCycleStart bool
 }
 
 // ImportService brings the pupils of the previous system in (ADR 0033,
@@ -115,11 +120,12 @@ func (s *ImportService) WithSchoolZone(zone *time.Location) *ImportService {
 }
 
 // placement is a group resolved against config: where the pupil goes, the
-// cycle it derives, and the level the pupil is filed under. A group config does
-// not know is ok=false.
+// cycle it derives, the level the pupil is filed under, and the instant their
+// enrollment starts. A group config does not know is ok=false.
 type placement struct {
 	group ports.GroupRef
 	level domain.Level
+	entry time.Time
 	ok    bool
 }
 
@@ -157,8 +163,11 @@ func (s *ImportService) ImportStudents(ctx context.Context, rows []ImportRow, va
 	}
 	pending = markExisting(rows, pending, existing, results)
 
-	placements, err := s.resolveGroups(ctx, rows, pending)
+	placements, err := s.resolveGroups(ctx, rows, pending, results)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.moveToCycleStart(ctx, rows, placements, validateOnly, batchID, results); err != nil {
 		return nil, err
 	}
 
@@ -229,17 +238,28 @@ func settleExisting(result *ImportResult, pupil ports.ExistingPupil, groupID str
 }
 
 // resolveGroups asks config about each distinct group ONCE (an import of 570
-// pupils spans ~40 groups). It derives the cycle and the level from the group,
-// as Enroll does: the pupil's level IS the group's level, so the same-level
-// rule holds by construction.
-func (s *ImportService) resolveGroups(ctx context.Context, rows []ImportRow, pending []pendingRow) (map[string]placement, error) {
-	out := map[string]placement{}
+// pupils spans ~40 groups), and about each distinct cycle once. It derives the
+// cycle and the level from the group, as Enroll does: the pupil's level IS the
+// group's level, so the same-level rule holds by construction. The groups of
+// the pupils the school already has are resolved too: a re-import repairs
+// their enrollment's first day (moveToCycleStart).
+func (s *ImportService) resolveGroups(ctx context.Context, rows []ImportRow, pending []pendingRow, results []ImportResult) (map[string]placement, error) {
+	ids := make([]string, 0, len(rows))
 	for _, p := range pending {
-		id := rows[p.index].GroupID
+		ids = append(ids, rows[p.index].GroupID)
+	}
+	for i, r := range results {
+		if isExisting(r) {
+			ids = append(ids, rows[i].GroupID)
+		}
+	}
+	out := map[string]placement{}
+	entries := map[string]cycleEntry{}
+	for _, id := range ids {
 		if _, done := out[id]; done || id == "" {
 			continue
 		}
-		resolved, err := s.placementOf(ctx, id)
+		resolved, err := s.placementOf(ctx, id, entries)
 		if err != nil {
 			return nil, err
 		}
@@ -248,9 +268,17 @@ func (s *ImportService) resolveGroups(ctx context.Context, rows []ImportRow, pen
 	return out, nil
 }
 
-// placementOf resolves one group. A group (or grade, or level) config does not
-// know is ok=false — a row's problem; anything else stops the import.
-func (s *ImportService) placementOf(ctx context.Context, groupID string) (placement, error) {
+// cycleEntry is when an import enrollment in a cycle starts, or ok=false for a
+// cycle config does not know.
+type cycleEntry struct {
+	at time.Time
+	ok bool
+}
+
+// placementOf resolves one group. A group (or grade, or level, or cycle) config
+// does not know is ok=false — a row's problem; anything else stops the import.
+// entries caches the cycles already asked about.
+func (s *ImportService) placementOf(ctx context.Context, groupID string, entries map[string]cycleEntry) (placement, error) {
 	if uuid.Validate(groupID) != nil {
 		return placement{}, nil
 	}
@@ -275,7 +303,89 @@ func (s *ImportService) placementOf(ctx context.Context, groupID string) (placem
 	if err != nil {
 		return placement{}, err
 	}
-	return placement{group: grp, level: level, ok: true}, nil
+	entry, err := s.entryOf(ctx, grp.CycleID, entries)
+	if err != nil || !entry.ok {
+		return placement{}, err
+	}
+	return placement{group: grp, level: level, entry: entry.at, ok: true}, nil
+}
+
+// entryOf is when an imported pupil's enrollment in the cycle starts: the
+// cycle's first day at 00:00 on the school's calendar (owner decision
+// 2026-10-17) — they were in school since then and are billed from it. An
+// import run before the cycle opens is dated now instead of in the future;
+// billing and attendance read that as the whole cycle all the same.
+func (s *ImportService) entryOf(ctx context.Context, cycleID string, entries map[string]cycleEntry) (cycleEntry, error) {
+	if known, ok := entries[cycleID]; ok {
+		return known, nil
+	}
+	cycle, err := s.catalog.CycleByID(ctx, cycleID)
+	if glerrors.KindOf(err) == glerrors.KindNotFound {
+		entries[cycleID] = cycleEntry{}
+		return cycleEntry{}, nil
+	}
+	if err != nil {
+		return cycleEntry{}, err
+	}
+	d := cycle.StartsOn.UTC()
+	at := time.Date(d.Year(), d.Month(), d.Day(), 0, 0, 0, 0, s.zone)
+	if now := s.now(); at.After(now) {
+		at = now
+	}
+	entries[cycleID] = cycleEntry{at: at, ok: true}
+	return entries[cycleID], nil
+}
+
+// moveToCycleStart repairs the pupils an earlier import dated on its own day
+// (before the owner's decision of 2026-10-17): for every pupil the school
+// already has whose row is placed, the store moves their import enrollment in
+// that cycle back to its first day. One statement per cycle; validating only
+// reports who would move. The store decides who moves, so a second upload
+// moves nobody.
+//
+// A real move is logged with the batch and the pupils' ids — ids only, no
+// name or CURP — so who was re-dated, and by which upload, is on record.
+func (s *ImportService) moveToCycleStart(ctx context.Context, rows []ImportRow, placements map[string]placement, validateOnly bool, batchID string, results []ImportResult) error {
+	var cycles []string
+	moves := map[string]*ports.CycleStartMove{}
+	for i, r := range results {
+		where := placements[rows[i].GroupID]
+		if !isExisting(r) || !where.ok {
+			continue
+		}
+		move, ok := moves[where.group.CycleID]
+		if !ok {
+			move = &ports.CycleStartMove{CycleID: where.group.CycleID, StartsAt: where.entry, DryRun: validateOnly}
+			moves[where.group.CycleID] = move
+			cycles = append(cycles, where.group.CycleID)
+		}
+		move.StudentIDs = append(move.StudentIDs, r.StudentID)
+	}
+	moved := map[string]bool{}
+	for _, cycleID := range cycles {
+		ids, err := s.repo.MoveImportedToCycleStart(ctx, *moves[cycleID])
+		if err != nil {
+			return fmt.Errorf("moving earlier imports to the cycle start: %w", err)
+		}
+		for _, id := range ids {
+			moved[id] = true
+		}
+		if !validateOnly && len(ids) > 0 {
+			slog.InfoContext(ctx, "import: enrollments moved to the cycle start",
+				"batch", batchID, "cycle", cycleID, "starts_at", moves[cycleID].StartsAt, "student_ids", ids)
+		}
+	}
+	for i := range results {
+		if isExisting(results[i]) && moved[results[i].StudentID] {
+			results[i].MovedToCycleStart = true
+		}
+	}
+	return nil
+}
+
+// isExisting is a row whose CURP the school already has (O4).
+func isExisting(r ImportResult) bool {
+	return r.Outcome == ImportAlreadyExists || r.Outcome == ImportAlreadyImported
 }
 
 // judge finishes a validate_only run: every check a commit would make, and
@@ -361,8 +471,8 @@ func (s *ImportService) importOne(ctx context.Context, r ImportRow, p pendingRow
 }
 
 // command builds the pupil (enrolled, filed under the group's level, named in
-// it) and their import enrollment, dated now — never back to the start of the
-// cycle, so tuition is billed from the month of the import (ADR 0033).
+// it) and their import enrollment, dated from the cycle's first day (entryOf;
+// replaces ADR 0033's "dated the day of the import", owner decision 2026-10-17).
 func (s *ImportService) command(r ImportRow, p pendingRow, where placement, profile domain.Profile, batchID string) (ports.ImportCommand, error) {
 	student, err := domain.NewImported(domain.NewApplicantParams{
 		ID:               s.newID(),
@@ -380,7 +490,7 @@ func (s *ImportService) command(r ImportRow, p pendingRow, where placement, prof
 	}
 	student.PlaceIn(where.group.Name)
 	enrollment, err := domain.NewEnrollment(s.newID(), s.tenant, student.ID(), where.group.CycleID, where.group.ID, "",
-		domain.EnrollmentStatusActive, s.now())
+		domain.EnrollmentStatusActive, where.entry)
 	if err != nil {
 		return ports.ImportCommand{}, err
 	}

@@ -79,6 +79,12 @@ type EnrollmentRef struct {
 	// already inscribed there: this cycle's inscription is not theirs, and
 	// neither are the fees that fell due before they arrived (ADR 0033).
 	Origin string
+	// ImportedOn is when the legacy import brought the pupil in — an instant
+	// from students, turned into the school DAY by schoolDayEnrollments; zero
+	// unless Imported. Their EnrolledAt is the cycle's first day (T14), so this
+	// is the day they actually arrived: a charge due before it accrues no
+	// surcharge (owner decision 2026-10-17).
+	ImportedOn time.Time
 }
 
 // EnrollmentOriginImport marks an enrolment the legacy import created.

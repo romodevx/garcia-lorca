@@ -533,6 +533,7 @@ func toProtoEnrollment(e domain.Enrollment) *studentsv1.Enrollment {
 			return e.WithdrawnOn().Format("2006-01-02")
 		}(),
 		WithdrawalReason: e.WithdrawalReason(),
+		ImportedAt:       optionalTimestamp(e.ImportedAt()),
 	}
 }
 

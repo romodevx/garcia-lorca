@@ -7582,7 +7582,7 @@ components:
               enrollmentNumber: { type: string, example: 2026-00042 }
         summary:
           type: object
-          required: [total, new, warnings, already, skipped, pending]
+          required: [total, new, warnings, already, skipped, pending, movedToCycleStart]
           properties:
             total: { type: integer }
             new: { type: integer }
@@ -7590,6 +7590,15 @@ components:
             already: { type: integer }
             skipped: { type: integer }
             pending: { type: integer }
+            movedToCycleStart:
+              type: integer
+              minimum: 0
+              example: 12
+              description: >-
+                A subset of already: pupils an earlier import enrolled after the
+                cycle's first day, whose enrollment is moved back to it (the
+                preview counts who would move; the commit, who moved). Imported
+                pupils are enrolled from the start of the cycle.
         unresolved: { type: array, items: { type: string }, example: [Preparatoria] }
         planHash: { type: string }
         batchId: { type: string, format: uuid, description: Set by the commit. }

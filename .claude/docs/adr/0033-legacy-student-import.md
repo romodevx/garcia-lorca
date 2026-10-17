@@ -85,3 +85,38 @@ file finishes them); the preview has the same route deadline as the commit; and
 `pkg/gormlog` stops slow-query logs from writing CURPs (they did, in every
 service). Optional later: batch students' group checks (one config call per
 import instead of three per group).
+
+## Enmienda 2026-10-17 (T14): inscritos desde el inicio del ciclo
+
+Decisión del dueño: los alumnos migrados estuvieron en el colegio desde el primer
+día y **se cobran desde septiembre como todos**. Reemplaza O8 y la línea
+"`enrolled_at = now()`… nunca la retrocede" de arriba.
+
+- La importación fecha la inscripción `import` en el **primer día del ciclo**, a
+  las 00:00 de Morelia (ADR 0035). Si el ciclo todavía no abre, se fecha en el
+  momento de la importación (nunca en el futuro); finanzas y asistencia leen eso
+  igual que el ciclo completo.
+- Sigue sin cobrarse la inscripción (O5): eso lo decide `origin = 'import'`, no
+  la fecha.
+- **Volver a subir el archivo repara** las importaciones anteriores: a cada
+  alumno que ya estaba, su inscripción `import` del ciclo de la fila con
+  `enrolled_at` posterior al primer día se mueve a ese día, en una sola sentencia
+  por ciclo (idempotente; nunca toca inscripciones `manual` ni `withdrawn_on`). La
+  vista previa dice cuántas se moverían y el resultado cuántas se movieron.
+  **También se mueven las de alumnos dados de baja** (cuenta su asistencia desde
+  el inicio); su fecha de baja no cambia, ni el `updated_at` que fecha el fin de
+  una inscripción no activa. Ojo: la corrida sólo cobra inscripciones
+  **activas**, así que a un dado de baja no se le emite septiembre nuevo; lo ya
+  emitido mientras estuvo activo se queda como estaba. Cada movimiento real se
+  registra en el log con el lote (`batch`) y los ids de los alumnos, sin datos
+  personales.
+- **Sin recargo lo que venció antes de importarlos** (decisión del dueño,
+  17-oct). Los meses (colegiatura y partes de cuotas) cuyo vencimiento es
+  anterior al día de la importación se deben a precio normal, sin recargo fijo
+  mensual ni recargo diario; tampoco ganan pronto pago (no se pagaron a tiempo).
+  Desde el día de la importación rigen las reglas normales. El día viaja en
+  `Enrollment.imported_at` (el `created_at` de la inscripción `import`; el
+  movimiento al inicio del ciclo no lo toca) y finance lo lee como día de
+  Morelia: `CollectionPolicy.SurchargeFree` es la única regla, y se aplica en
+  `pricedFor` (estado de cuenta, cuenta familiar, ventanilla, depósito) y en la
+  corrida mensual (`accrueLateFees`).

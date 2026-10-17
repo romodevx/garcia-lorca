@@ -196,6 +196,9 @@ type importSummary struct {
 	Already  int `json:"already"`
 	Skipped  int `json:"skipped"`
 	Pending  int `json:"pending"`
+	// MovedToCycleStart is a subset of Already: earlier imports moved back to
+	// the cycle's first day (the preview: would be moved).
+	MovedToCycleStart int `json:"movedToCycleStart"`
 }
 
 type importResponse struct {
@@ -274,7 +277,7 @@ func (h *StudentImportHandler) Commit(w http.ResponseWriter, r *http.Request) {
 	// Who waived these pupils' inscription, and when: the batch id is on every
 	// pupil it created (students.import_batch_id).
 	slog.InfoContext(ctx, "student import committed", "batch", batch, "by", who.UserID, "rows", resp.Summary.Total,
-		"new", resp.Summary.New, "already", resp.Summary.Already, "skipped", resp.Summary.Skipped)
+		"new", resp.Summary.New, "already", resp.Summary.Already, "moved", resp.Summary.MovedToCycleStart, "skipped", resp.Summary.Skipped)
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -640,6 +643,9 @@ func (h *StudentImportHandler) rows(run *importRun, results map[int]client.Impor
 			row.Warnings = append(row.Warnings, res.Warnings...)
 			row.EnrollmentNumber = res.EnrollmentNumber
 			row.Status, row.Reason = outcomeStatus(res, row.Warnings)
+			if res.MovedToCycleStart {
+				sum.MovedToCycleStart++
+			}
 		}
 		tally(&sum, row.Status)
 		out = append(out, row)

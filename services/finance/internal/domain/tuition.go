@@ -257,6 +257,14 @@ func (p TuitionPlan) DueDay() int { return p.dueDay }
 // payment costs per day and what an early one saves.
 func (p TuitionPlan) Policy() CollectionPolicy { return p.policy }
 
+// WithSurchargeFreeBefore is the table as it prices one legacy-imported pupil
+// (CollectionPolicy.WithSurchargeFreeBefore). Read-side only: the plan is never
+// saved from it.
+func (p TuitionPlan) WithSurchargeFreeBefore(day time.Time) TuitionPlan {
+	p.policy = p.policy.WithSurchargeFreeBefore(day)
+	return p
+}
+
 // LateFeeCents is the fixed surcharge added once per completed overdue month.
 func (p TuitionPlan) LateFeeCents() int64 { return p.lateFeeCents }
 

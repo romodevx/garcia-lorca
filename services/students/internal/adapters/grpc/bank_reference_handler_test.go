@@ -87,11 +87,18 @@ func TestEveryEnrollmentCarriesItsOrigin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEnrollment: %v", err)
 	}
-	enrollments.byID["enr-imp"] = imported.WithOrigin(domain.EnrollmentOriginImport)
+	importedAt := time.Date(2026, 10, 17, 16, 0, 0, 0, time.UTC)
+	enrollments.byID["enr-imp"] = imported.WithOrigin(domain.EnrollmentOriginImport).WithImportedAt(importedAt)
+	if got := manual.Msg.GetEnrollment().GetImportedAt(); got != nil {
+		t.Fatalf("a manual enrollment carries imported_at %v", got)
+	}
 
 	one, err := h.GetEnrollment(context.Background(), connect.NewRequest(&studentsv1.GetEnrollmentRequest{Id: "enr-imp"}))
 	if err != nil || one.Msg.GetEnrollment().GetOrigin() != "import" {
 		t.Fatalf("GetEnrollment origin = %q (err %v); want import", one.Msg.GetEnrollment().GetOrigin(), err)
+	}
+	if got := one.Msg.GetEnrollment().GetImportedAt(); got == nil || !got.AsTime().Equal(importedAt) {
+		t.Fatalf("GetEnrollment imported_at = %v; want %v", got, importedAt)
 	}
 	list, err := h.ListEnrollments(context.Background(), connect.NewRequest(&studentsv1.ListEnrollmentsRequest{StudentId: "stu-imp"}))
 	if err != nil || len(list.Msg.GetEnrollments()) != 1 || list.Msg.GetEnrollments()[0].GetOrigin() != "import" {

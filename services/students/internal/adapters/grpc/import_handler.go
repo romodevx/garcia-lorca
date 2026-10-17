@@ -56,12 +56,13 @@ func (h *StudentsHandler) ImportStudents(
 	out := make([]*studentsv1.ImportRowResult, 0, len(results))
 	for _, r := range results {
 		out = append(out, &studentsv1.ImportRowResult{
-			RowNumber:        int32(r.RowNumber),
-			Outcome:          importOutcomes[r.Outcome],
-			StudentId:        r.StudentID,
-			EnrollmentNumber: r.EnrollmentNumber,
-			Warnings:         r.Warnings,
-			Reason:           r.Reason,
+			RowNumber:         int32(r.RowNumber),
+			Outcome:           importOutcomes[r.Outcome],
+			StudentId:         r.StudentID,
+			EnrollmentNumber:  r.EnrollmentNumber,
+			Warnings:          r.Warnings,
+			Reason:            r.Reason,
+			MovedToCycleStart: r.MovedToCycleStart,
 		})
 	}
 	return connect.NewResponse(&studentsv1.ImportStudentsResponse{Results: out}), nil

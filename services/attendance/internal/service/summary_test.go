@@ -128,3 +128,27 @@ func TestSummarizeAttendanceReadsTheWindowInTheSchoolsZone(t *testing.T) {
 	require.Len(t, got.Students, 1)
 	assert.Equal(t, 1, got.Students[0].Lists)
 }
+
+// T14: an imported pupil is enrolled from the cycle's first day at 00:00 in
+// Morelia (06:00 UTC), so every list from that day on is theirs — none taken
+// before the import day reads as "lists counted, zero present" any more.
+func TestSummarizeAttendanceCountsAnImportedPupilFromTheCycleStart(t *testing.T) {
+	mexico, err := time.LoadLocation("America/Mexico_City")
+	require.NoError(t, err)
+	repo := newFakeRepo()
+	repo.history = service.GroupHistory{
+		Lists: []time.Time{day(t, "2026-08-24"), day(t, "2026-09-15"), day(t, "2026-10-16")},
+		Marks: []service.DayMark{{EnrollmentID: enrAna, Date: day(t, "2026-09-15"), Status: "absent"}},
+	}
+	enrollments := &fakeEnrollments{byGroup: map[string][]service.EnrollmentRef{reportGroup: {
+		{ID: enrAna, StudentID: "stu-1", Status: "active", EnrolledAt: time.Date(2026, 8, 24, 0, 0, 0, 0, mexico)},
+	}}}
+	groups := &fakeGroups{existing: map[string]bool{reportGroup: true}}
+	svc := service.NewAttendanceService(repo, enrollments, groups, nil, testTenant, fixedIDs(), nil, service.WithSchoolLocation(mexico))
+
+	got, err := svc.SummarizeAttendance(context.Background(), reportGroup, "2026-08-24", "2026-10-17")
+	require.NoError(t, err)
+	require.Len(t, got.Students, 1)
+	assert.Equal(t, 3, got.Students[0].Lists, "every list from the cycle's first day")
+	assert.Equal(t, 1, got.Students[0].Absent)
+}

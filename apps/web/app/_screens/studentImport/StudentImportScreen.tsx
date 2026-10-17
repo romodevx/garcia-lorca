@@ -79,7 +79,7 @@ export function StudentImportScreen({ onBack, onOpenTuition, onViewStudents, tod
             <PreviewStep result={flow.preview} levels={levels} onChoose={flow.choose} onCapacity={flow.setCapacity} onImport={() => void flow.commit()} onBack={flow.startOver} onCancel={onBack} onOpenTuition={onOpenTuition} focusUnresolved={flow.focusUnresolved} />
           </>
         )}
-        {committing && <p role="status" style={{ fontSize: 16, fontWeight: 700, color: "var(--text)" }}>{busyText((flow.preview?.summary.new ?? 0) + (flow.preview?.summary.pending ?? 0))}</p>}
+        {committing && <p role="status" style={{ fontSize: 16, fontWeight: 700, color: "var(--text)" }}>{busyText((flow.preview?.summary.new ?? 0) + (flow.preview?.summary.pending ?? 0), flow.preview?.summary.movedToCycleStart ?? 0)}</p>}
         {flow.phase === "result" && flow.result !== undefined && (
           <ResultStep result={flow.result} cut={flow.cut} onAnother={flow.startOver} onViewStudents={onViewStudents} />
         )}

@@ -11,8 +11,11 @@ import (
 )
 
 // importedFixture is the billing school with its one pupil brought over from the
-// previous system on 6 October: already inscribed there, so the inscription of
-// this cycle is not theirs to pay here (owner decision O5, ADR 0033).
+// previous system and dated 6 October: already inscribed there, so the
+// inscription of this cycle is not theirs to pay here (owner decision O5, ADR
+// 0033). Since T14 (2026-10-17) students dates an import on the cycle start
+// (imported_cycle_start_test.go); an enrollment still dated mid-year, as the
+// imports before it were until a re-upload moves them, is billed from its month.
 func importedFixture(t *testing.T) *fixture {
 	t.Helper()
 	f := billingFixture(t)
