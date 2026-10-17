@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/garcia-lorca/services/gateway/internal/client"
@@ -115,6 +116,46 @@ func TestPagedFinanceReadsRejectABadPageSize(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// pageToken is bounded at the boundary as the contract says (maxLength 128): a
+// longer one is no token finance minted, so it answers 400 without a call.
+func TestPagedFinanceReadsRejectAnOversizedPageToken(t *testing.T) {
+	const contractMax = 128
+	for _, route := range pagedRoutes {
+		t.Run(route.name, func(t *testing.T) {
+			svc := &fakeFinance{charges: []client.Charge{sampleCharge}, overdue: []client.Charge{sampleCharge}}
+			h := handler.NewFinanceHandler(svc)
+
+			ok := doReq(t, route.serve(h), http.MethodGet, route.target+"&pageToken="+strings.Repeat("a", contractMax), "")
+			if ok.Code != http.StatusOK {
+				t.Fatalf("a %d-char token: status = %d, want 200", contractMax, ok.Code)
+			}
+
+			svc = &fakeFinance{}
+			h = handler.NewFinanceHandler(svc)
+			rec := doReq(t, route.serve(h), http.MethodGet, route.target+"&pageToken="+strings.Repeat("a", contractMax+1), "")
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400", rec.Code)
+			}
+			var envelope struct {
+				Error struct {
+					Code    string            `json:"code"`
+					Details map[string]string `json:"details"`
+				} `json:"error"`
+			}
+			if err := json.NewDecoder(rec.Body).Decode(&envelope); err != nil {
+				t.Fatalf("decode envelope: %v", err)
+			}
+			if envelope.Error.Code != "invalid" || envelope.Error.Details["field"] != "pageToken" {
+				t.Errorf("envelope = %+v, want code invalid on field pageToken", envelope.Error)
+			}
+			if svc.listCycle != "" || svc.overdueCycle != "" {
+				t.Error("finance was called with an oversized page token")
+			}
+		})
 	}
 }
 

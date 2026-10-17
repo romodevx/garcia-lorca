@@ -3770,7 +3770,7 @@ paths:
         - name: pageToken
           in: query
           description: The `nextPageToken` of the previous page; opaque. Omit for the first page.
-          schema: { type: string }
+          schema: { type: string, maxLength: 128 }
         - name: pageSize
           in: query
           description: Charges per page. Defaults to 500, the maximum.
@@ -3807,7 +3807,7 @@ paths:
                         paidCents: 100000
                         remainingCents: 150000
                         scholarshipCents: 0
-                    nextPageToken: MjAyNi0wOS0xMHw2MTAwMDAwMA
+                    nextPageToken: MjAyNi0wOS0xMHw2MTAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMTE
         '400': { $ref: '#/components/responses/PagedFinanceBadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -3833,7 +3833,7 @@ paths:
         - name: pageToken
           in: query
           description: The `nextPageToken` of the previous page; opaque. Omit for the first page.
-          schema: { type: string }
+          schema: { type: string, maxLength: 128 }
         - name: pageSize
           in: query
           description: Candidates examined per page. Defaults to 500, the maximum.
@@ -7221,8 +7221,9 @@ components:
           example: Este nivel se está eliminando
     PagedFinanceBadRequest:
       description: |
-        The paged finance reads refuse a malformed page size at the gateway with
-        the envelope (code `invalid`, details.field = pageSize). A refusal from
+        The paged finance reads refuse a malformed page size, or a page token
+        longer than 128 characters, at the gateway with the envelope (code
+        `invalid`, details.field = pageSize or pageToken). A refusal from
         the finance service (no scoping filter, a page token it did not mint)
         is still the older text/plain sentence.
       content:

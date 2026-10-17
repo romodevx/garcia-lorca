@@ -386,11 +386,22 @@ func (h *FinanceHandler) ListCharges(w http.ResponseWriter, r *http.Request) {
 // must be made here too.
 const maxFinancePageSize = 500
 
-// readPageRequest reads pageToken and pageSize. pageSize, when present, must be
-// a whole number in 1..maxFinancePageSize; anything else answers 400 in the
-// envelope and reports false. Absent means the service default.
+// maxFinancePageTokenLen bounds pageToken as the contract does (maxLength).
+// finance mints ~64 characters (base64 of "YYYY-MM-DD|<uuid>"); the headroom
+// lets the opaque shape grow without a contract change.
+const maxFinancePageTokenLen = 128
+
+// readPageRequest reads pageToken and pageSize. pageToken is at most
+// maxFinancePageTokenLen characters; pageSize, when present, must be a whole
+// number in 1..maxFinancePageSize. Anything else answers 400 in the envelope
+// and reports false. An absent pageSize means the service default.
 func readPageRequest(w http.ResponseWriter, q url.Values) (client.PageRequest, bool) {
 	page := client.PageRequest{Token: q.Get("pageToken")}
+	if len(page.Token) > maxFinancePageTokenLen {
+		middleware.WriteError(w, http.StatusBadRequest, "invalid",
+			fmt.Sprintf("pageToken admite como máximo %d caracteres", maxFinancePageTokenLen), map[string]string{"field": "pageToken"})
+		return client.PageRequest{}, false
+	}
 	if !q.Has("pageSize") {
 		return page, true
 	}
