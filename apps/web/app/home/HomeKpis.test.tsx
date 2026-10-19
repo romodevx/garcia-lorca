@@ -21,7 +21,7 @@ function kpis(over: Partial<Kpis> = {}): Kpis {
   return { students: { status: "ready", value: 412 }, cycle: ACTIVE, ledger: { status: "ready", value: LEDGER }, retryStudents: vi.fn(), retryLedger: vi.fn(), ...over };
 }
 
-function show(k: Kpis, permissions: readonly string[] = OWNER, flags: FlagSet = { module_students: true, module_config: true }): ReturnType<typeof vi.fn> {
+function show(k: Kpis, permissions: readonly string[] = OWNER, flags: FlagSet = { module_students: true, module_config: true, module_finance: true }): ReturnType<typeof vi.fn> {
   const onOpen = vi.fn();
   renderHome(<HomeKpis kpis={k} permissions={permissions} onOpen={onOpen} />, true, flags);
   return onOpen;
@@ -83,7 +83,7 @@ describe("HomeKpis", () => {
   // Review M2 / §3.4: "Ir a Configuración →" only for a caller who can open
   // it. With module_config off, settings lands on a placeholder.
   it("no cycle, but Configuración is off: says so, offers no door to it", () => {
-    show(kpis({ cycle: undefined, ledger: { status: "noCycle" } as LedgerReading }), OWNER, { module_students: true });
+    show(kpis({ cycle: undefined, ledger: { status: "noCycle" } as LedgerReading }), OWNER, { module_students: true, module_finance: true });
     expect(card("Por cobrar")).toHaveTextContent("Sin ciclo activo");
     expect(screen.queryByRole("button", { name: "Ir a Configuración" })).not.toBeInTheDocument();
   });
@@ -134,5 +134,15 @@ describe("HomeKpis", () => {
     show(kpis(), ["students:read"]);
     expect(screen.getByRole("button", { name: "Alumnos" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Por cobrar" })).not.toBeInTheDocument();
+  });
+});
+
+// C2-013: with finance OFF the money pair said "No se pudo cargar" over a 404.
+// A module that is off has no KPI either.
+describe("HomeKpis — finance off", () => {
+  it("draws no money KPI when module_finance is off", () => {
+    show(kpis(), OWNER, { module_students: true, module_config: true });
+    expect(screen.queryByText("Por cobrar")).toBeNull();
+    expect(screen.queryByText("Cobrado")).toBeNull();
   });
 });

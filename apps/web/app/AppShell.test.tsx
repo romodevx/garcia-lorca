@@ -465,20 +465,16 @@ describe("AppShell navigation flow", () => {
   });
 
   it("falls back to the placeholder when module_finance is OFF (UX gating)", async () => {
-    mockLogin.mockResolvedValue({ expiresIn: 900, mustChangePassword: false });
-    // The caller CAN read finance (KPI shortcut visible); the module flag being
-    // OFF is what routes to the placeholder — permission governs visibility,
-    // flag governs real-surface-vs-stub. Boot restore fails, post-login /me resolves.
-    mockMe.mockRejectedValueOnce(new Error("no session")).mockResolvedValue(OWNER_ME);
-    const user = userEvent.setup();
+    // C2-013: an OFF module has no card or KPI on the home, so the only way in
+    // is typing its address; that still lands on the friendly stub, never on the
+    // real surface. Boot restore succeeds with an owner who CAN read finance.
+    resetFakeRouter("/finanzas");
+    mockMe.mockResolvedValue(OWNER_ME);
     render(
       <Providers flags={{}}>
         <AppShell />
       </Providers>
     );
-
-    await submitLogin(user);
-    await user.click(screen.getByRole("button", { name: /Por cobrar/ }));
 
     // Flag OFF → friendly stub, not the real finance table. The placeholder
     // shows the "Módulo «...»" heading; the real surface shows the status tablist.

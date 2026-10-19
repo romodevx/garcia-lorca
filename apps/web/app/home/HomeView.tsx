@@ -31,7 +31,11 @@ export function HomeView({ user, onOpen, permissions, permissionsFailed = false,
 
   // B6: each read only for a caller who may make it.
   const readsCycles = canSee("config:read");
-  const kpis = useHomeKpis({ students: canSee("students:read"), cycles: readsCycles, ledger: readsCycles && canSee("finance:read") });
+  const kpis = useHomeKpis({
+    students: canSee("students:read"),
+    cycles: readsCycles,
+    ledger: readsCycles && canSee("finance:read") && flags.module_finance === true,
+  });
 
   return (
     <Page>

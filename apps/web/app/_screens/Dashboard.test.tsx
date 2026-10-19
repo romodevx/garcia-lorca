@@ -1,8 +1,10 @@
-import { screen } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { MODULES, USERS, isModuleVisible } from "../_design/data";
 import { ALL_MODULES_ON, HOME_VARIANTS, renderHome } from "../home/testing/renderHome";
+import { listCycles } from "../config/api";
+import { listCharges } from "../finance/api";
 import { Dashboard } from "./Dashboard";
 
 // The dashboard now reads real KPIs from the gateway — mock the clients so the
@@ -53,6 +55,21 @@ describe.each(HOME_VARIANTS)("Dashboard (%s home)", (_variant, refresh) => {
       expect(screen.queryByText(label)).not.toBeInTheDocument();
     }
     expect(screen.getByText("Estudiantes")).toBeInTheDocument();
+  });
+
+  // C2-013: nor a money KPI, nor the ledger read behind it (it would only 404).
+  it("neither shows nor reads the money KPIs when finance is off", async () => {
+    vi.mocked(listCharges).mockClear();
+    vi.mocked(listCycles).mockResolvedValue([{ id: "c1", name: "2026-2027", status: "active", startsOn: "2026-08-24", endsOn: "2027-07-09" }]);
+    renderHome(<Dashboard user={USERS.admin} onOpen={() => {}} permissions={OWNER_PERMS} now={NOW} />, refresh, {
+      ...ALL_MODULES_ON,
+      module_finance: false,
+    });
+
+    await waitFor(() => expect(listCycles).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.queryByText("Por cobrar")).toBeNull();
+    expect(listCharges).not.toHaveBeenCalled();
   });
 
   it("hides modules the owner has no backend permission for (Becas/Inventario/Facturación/Reportes)", () => {

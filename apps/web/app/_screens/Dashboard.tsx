@@ -125,6 +125,8 @@ function ClassicDashboard({ user, onOpen, permissions, permissionsFailed = false
   const modulesReady = resolved && flagsResolved;
   const visibleModules = modulesReady ? MODULES.filter((m) => isModuleVisible(m, permissions) && isModuleEnabled(m, flags)) : [];
   const canSee = (perm: string): boolean => resolved && permissions.includes(perm);
+  // The money KPIs read finance's ledger: none while module_finance is off (C2-013).
+  const seesMoney = canSee("finance:read") && flags.module_finance === true;
 
   // Real KPIs — no mock numbers: students from the roster, money from the ledger.
   // Each read runs only for a caller who may make it: a maestro or a cajera has
@@ -135,7 +137,7 @@ function ClassicDashboard({ user, onOpen, permissions, permissionsFailed = false
   const { students, cycle, ledger } = useHomeKpis({
     students: canSee("students:read"),
     cycles: readsCycles,
-    ledger: readsCycles && canSee("finance:read"),
+    ledger: readsCycles && seesMoney,
   });
   const ledgerNow = ledger.status === "ready" ? ledger.value : NO_LEDGER;
   const kpi = {
@@ -169,12 +171,12 @@ function ClassicDashboard({ user, onOpen, permissions, permissionsFailed = false
       </div>
 
       {/* KPIs — each shortcut is shown only to callers who can read its module. */}
-      {(canSee("students:read") || canSee("finance:read")) && (
+      {(canSee("students:read") || seesMoney) && (
         <div className="fade-up" style={{ display: "flex", gap: 18, flexWrap: "wrap", marginBottom: 34 }}>
           {canSee("students:read") && (
             <KpiCard icon="students" color="forest" label="Alumnos" value={String(kpi.students)} sub="Registrados este ciclo" onClick={() => onOpen("students")} />
           )}
-          {canSee("finance:read") && (
+          {seesMoney && (
             <>
               <KpiCard icon="finance" color="orange" label="Por cobrar" value={money(kpi.pending)} sub={`${kpi.withBalance} cargos con saldo`} onClick={() => onOpen("finance")} />
               <KpiCard icon="trend" color="lime" label="Cobrado" value={money(kpi.collected)} sub={`Ciclo ${cycleName ?? "—"}`} onClick={() => onOpen("finance")} />
