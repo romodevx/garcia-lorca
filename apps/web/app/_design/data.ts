@@ -9,7 +9,7 @@
  */
 import type { ColorKey } from "./colors";
 import type { IconName } from "./Icon";
-import type { FlagKey } from "@garcia-lorca/ui/flags";
+import type { FlagKey, FlagSet } from "@garcia-lorca/ui/flags";
 
 /**
  * The home's areas (PLAN-redesign-home §3.1). Required on every module, so a
@@ -43,8 +43,8 @@ export interface ModuleDef {
   perm: string | readonly (string | readonly string[])[];
   /**
    * Deactivated from the product (the school doesn't offer this module). Hidden
-   * from the panel entirely — this is distinct from a flag being OFF, which
-   * shows the module as available-but-disabled ("Próximamente"). Nothing is
+   * from the panel entirely, whatever its flag says (a flag that is OFF hides it
+   * too, see isModuleEnabled; this marker outlives the flag). Nothing is
    * deleted: the service, proto, and flag all remain, so re-enabling is just
    * removing this marker. See project memory [[module-docs-deactivated]].
    */
@@ -115,6 +115,27 @@ export function moduleHasPerm(m: ModuleDef, permissions: readonly string[]): boo
  */
 export function isModuleVisible(m: ModuleDef, permissions: readonly string[]): boolean {
   return m.hidden !== true && moduleHasPerm(m, permissions);
+}
+
+/**
+ * The flags a module's surface needs besides its own: its data lives in another
+ * module, so AppShell opens it only when both are on (and the gateway answers
+ * 404 otherwise).
+ */
+const HOST_FLAGS: Partial<Record<FlagKey, readonly FlagKey[]>> = {
+  module_expenses: ["module_finance"],
+  module_activities: ["module_finance"],
+  module_scholarships: ["module_finance"],
+  module_schedule: ["module_config"],
+};
+
+/**
+ * Whether a module is switched on: its flag and the flags of the module it lives
+ * in (C2-013). A module that is off has no card and no command. UX-only, like
+ * isModuleVisible: the gateway's 404 is the boundary.
+ */
+export function isModuleEnabled(m: ModuleDef, flags: FlagSet): boolean {
+  return [m.flag, ...(HOST_FLAGS[m.flag] ?? [])].every((flag) => flags[flag] === true);
 }
 
 export type Role = "admin" | "teacher";

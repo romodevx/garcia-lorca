@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MODULES, isModuleVisible, type ModuleDef } from "./data";
+import { MODULES, isModuleEnabled, isModuleVisible, type ModuleDef } from "./data";
 
 const gradesModule = (): ModuleDef => {
   const m = MODULES.find((x) => x.id === "grades");
@@ -247,5 +247,34 @@ describe("Becas (T18)", () => {
     expect(becas.flag).toBe("module_scholarships");
     expect(isModuleVisible(becas, ["scholarships:read"])).toBe(true);
     expect(isModuleVisible(becas, ["finance:read", "students:read"])).toBe(false);
+  });
+});
+
+// C2-013: a module whose flag is OFF is not on the panel at all. A module whose
+// data lives in another module also needs that module's flag, as AppShell gates it.
+describe("isModuleEnabled — flags", () => {
+  const byId = (id: string): ModuleDef => {
+    const m = MODULES.find((x) => x.id === id);
+    if (m === undefined) throw new Error(`${id} module missing`);
+    return m;
+  };
+
+  it("is on only when the module's own flag is on", () => {
+    expect(isModuleEnabled(byId("students"), { module_students: true })).toBe(true);
+    expect(isModuleEnabled(byId("students"), {})).toBe(false);
+    expect(isModuleEnabled(byId("finance"), { module_students: true })).toBe(false);
+  });
+
+  it("keeps Egresos, Actividades and Becas off when finance is off", () => {
+    const withoutFinance = { module_expenses: true, module_activities: true, module_scholarships: true };
+    for (const id of ["expenses", "activities", "scholarships"]) {
+      expect(isModuleEnabled(byId(id), withoutFinance)).toBe(false);
+      expect(isModuleEnabled(byId(id), { ...withoutFinance, module_finance: true })).toBe(true);
+    }
+  });
+
+  it("keeps Horarios off when config is off", () => {
+    expect(isModuleEnabled(byId("schedule"), { module_schedule: true })).toBe(false);
+    expect(isModuleEnabled(byId("schedule"), { module_schedule: true, module_config: true })).toBe(true);
   });
 });

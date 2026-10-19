@@ -5,6 +5,7 @@ import { AppShell } from "./AppShell";
 import { requestIntent } from "./routing/pendingIntent";
 import { authFetch } from "./auth/authFetch";
 import { HttpError } from "./auth/httpError";
+import { ALL_MODULES_ON } from "./home/testing/renderHome";
 import { Providers, fakePath, fakeRouter, resetFakeRouter, useFakePathname } from "./test-utils";
 import { changePassword as apiChangePassword, login as apiLogin, logout as apiLogout, me as apiMe, refresh as apiRefresh } from "./auth/api";
 import { mayHaveSession } from "./auth/sessionHint";
@@ -301,7 +302,7 @@ describe("AppShell navigation flow", () => {
       role: "owner",
     });
     render(
-      <Providers flags={{}}>
+      <Providers flags={ALL_MODULES_ON}>
         <AppShell />
       </Providers>
     );
@@ -329,7 +330,7 @@ describe("AppShell navigation flow", () => {
       permissions: ["grades:read"],
     });
     render(
-      <Providers flags={{}}>
+      <Providers flags={ALL_MODULES_ON}>
         <AppShell />
       </Providers>
     );
@@ -621,7 +622,7 @@ describe("when the server ends the session mid-use", () => {
     // A live session on boot, so the shell starts where the owner was: inside.
     mockMe.mockResolvedValueOnce({ userId: "u1", email: "owner@example.com", permissions: ["students:read"] });
     render(
-      <Providers flags={{}}>
+      <Providers flags={ALL_MODULES_ON}>
         <AppShell />
       </Providers>
     );
@@ -811,7 +812,7 @@ describe("la dirección manda sobre la pantalla", () => {
     mockMe.mockRejectedValueOnce(new Error("no session")).mockResolvedValue(OWNER_ME);
     const user = userEvent.setup();
     render(
-      <Providers>
+      <Providers flags={ALL_MODULES_ON}>
         <AppShell />
       </Providers>
     );
@@ -919,7 +920,7 @@ describe("la guardia de módulos", () => {
     email: "maestra@example.com",
     permissions: ["teaching:read", "teaching:write", "attendance_own:read", "attendance_own:write"],
   };
-  const ALL_FLAGS = { module_students: true, module_finance: true, module_teachers: true, module_config: true, module_iam: true };
+  const ALL_FLAGS = { module_students: true, module_finance: true, module_teachers: true, module_config: true, module_iam: true, module_attendance: true, module_grades: true };
 
   it.each(["/alumnos", "/finanzas", "/docentes", "/configuracion", "/administracion", "/alumnos/st1/editar"])(
     "un maestro que escribe %s aterriza en el tablero",

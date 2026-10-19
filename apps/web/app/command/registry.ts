@@ -1,7 +1,7 @@
 import type { Command, CommandKind } from "@garcia-lorca/ui/command-core";
 import type { FlagSet } from "@garcia-lorca/ui/flags";
 
-import { MODULES, moduleHasPerm, type ModuleDef } from "../_design/data";
+import { MODULES, isModuleEnabled, moduleHasPerm, type ModuleDef } from "../_design/data";
 import type { IntentModule, IntentOf } from "../routing/pendingIntent";
 
 /**
@@ -114,7 +114,7 @@ export function buildCommandRegistry(flags: FlagSet, t: Translate, permissions?:
   // the caller holds its READ permission. Deactivated (hidden) modules never pass.
   const allowed = (module: ModuleDef): boolean =>
     module.hidden !== true &&
-    flags[module.flag] === true &&
+    isModuleEnabled(module, flags) &&
     (permissions === undefined || moduleHasPerm(module, permissions));
 
   for (const module of MODULES) {
