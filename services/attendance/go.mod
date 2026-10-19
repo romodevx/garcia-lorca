@@ -9,6 +9,7 @@ require (
 	github.com/testcontainers/testcontainers-go v0.43.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.43.0
 	golang.org/x/net v0.60.0
+	golang.org/x/sync v0.23.0
 	google.golang.org/protobuf v1.36.11
 	gorm.io/driver/postgres v1.6.0
 	gorm.io/gorm v1.31.2
@@ -82,7 +83,6 @@ require (
 	go.opentelemetry.io/otel/trace v1.45.0 // indirect
 	golang.org/x/crypto v0.57.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
-	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
 	golang.org/x/time v0.15.0 // indirect

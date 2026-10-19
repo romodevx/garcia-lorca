@@ -216,6 +216,12 @@ type EnrollmentRepository interface {
 	// ListTransfersIntoGroup returns every move INTO one group, oldest moved_at
 	// first — one read for a whole class list.
 	ListTransfersIntoGroup(ctx context.Context, groupID string) ([]domain.EnrollmentTransfer, error)
+	// ListTransfersTouchingGroup returns every move into OR out of one group,
+	// oldest moved_at first — the group's membership history (CC-301).
+	ListTransfersTouchingGroup(ctx context.Context, groupID string) ([]domain.EnrollmentTransfer, error)
+	// ListEnrollmentsEverInGroup returns every enrollment that was ever in one
+	// group: the ones in it now and the ones moved out of it since.
+	ListEnrollmentsEverInGroup(ctx context.Context, groupID string) ([]domain.Enrollment, error)
 	// SetEnrollmentStatus updates an enrollment's status (e.g. to withdrawn).
 	SetEnrollmentStatus(ctx context.Context, id string, status domain.EnrollmentStatus) error
 	// WithdrawEnrollment atomically stores the dated withdrawal and its outbox event.

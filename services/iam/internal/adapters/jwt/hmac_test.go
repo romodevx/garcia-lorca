@@ -109,22 +109,25 @@ func TestRefreshTokenRoundTrip(t *testing.T) {
 	a := adapterAt(t0)
 	ctx := context.Background()
 
-	rt, err := a.IssueRefreshToken(ctx, "u1", domain.SessionStaff)
+	rt, err := a.IssueRefreshToken(ctx, "u1", domain.SessionStaff, 7)
 	if err != nil {
 		t.Fatalf("IssueRefreshToken: %v", err)
 	}
-	uid, issuedAt, kind, err := a.ParseRefreshToken(ctx, rt)
+	got, err := a.ParseRefreshToken(ctx, rt)
 	if err != nil {
 		t.Fatalf("ParseRefreshToken: %v", err)
 	}
-	if kind != domain.SessionStaff {
-		t.Errorf("kind = %v, want staff", kind)
+	if got.Kind != domain.SessionStaff {
+		t.Errorf("kind = %v, want staff", got.Kind)
 	}
-	if uid != "u1" {
-		t.Errorf("uid = %q, want u1", uid)
+	if got.UserID != "u1" {
+		t.Errorf("uid = %q, want u1", got.UserID)
 	}
-	if !issuedAt.Equal(t0) {
-		t.Errorf("issuedAt = %v, want %v", issuedAt, t0)
+	if !got.IssuedAt.Equal(t0) {
+		t.Errorf("issuedAt = %v, want %v", got.IssuedAt, t0)
+	}
+	if got.CredentialVersion != 7 {
+		t.Errorf("credential version = %d, want 7 (CC-302)", got.CredentialVersion)
 	}
 }
 
@@ -133,24 +136,24 @@ func TestTokenTypesAreNotInterchangeable(t *testing.T) {
 	ctx := context.Background()
 
 	access, _ := a.IssueAccessToken(ctx, sampleClaims())
-	refresh, _ := a.IssueRefreshToken(ctx, "u1", domain.SessionStaff)
+	refresh, _ := a.IssueRefreshToken(ctx, "u1", domain.SessionStaff, 0)
 
 	// A refresh token must not validate as an access token...
 	if _, err := a.ValidateAccessToken(ctx, refresh); glerrors.KindOf(err) != glerrors.KindUnauthorized {
 		t.Errorf("refresh accepted as access: %v", err)
 	}
 	// ...and an access token must not parse as a refresh token.
-	if _, _, _, err := a.ParseRefreshToken(ctx, access); glerrors.KindOf(err) != glerrors.KindUnauthorized {
+	if _, err := a.ParseRefreshToken(ctx, access); glerrors.KindOf(err) != glerrors.KindUnauthorized {
 		t.Errorf("access accepted as refresh: %v", err)
 	}
 }
 
 func TestExpiredRefreshTokenIsUnauthorized(t *testing.T) {
 	issuer := adapterAt(t0) // staff refresh TTL = 24 h
-	rt, _ := issuer.IssueRefreshToken(context.Background(), "u1", domain.SessionStaff)
+	rt, _ := issuer.IssueRefreshToken(context.Background(), "u1", domain.SessionStaff, 0)
 
 	validator := adapterAt(t0.Add(25 * time.Hour))
-	if _, _, _, err := validator.ParseRefreshToken(context.Background(), rt); glerrors.KindOf(err) != glerrors.KindUnauthorized {
+	if _, err := validator.ParseRefreshToken(context.Background(), rt); glerrors.KindOf(err) != glerrors.KindUnauthorized {
 		t.Errorf("want KindUnauthorized for expired refresh, got %v", err)
 	}
 }

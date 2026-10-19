@@ -33,6 +33,7 @@ type fakePeriods struct {
 	err      error
 
 	gotCycle, gotTerm, gotReopenActor string
+	gotReopen                         client.ReopenPeriodInput
 	gotClose                          client.ClosePeriodInput
 	calls                             int
 }
@@ -55,9 +56,9 @@ func (f *fakePeriods) ClosePeriod(_ context.Context, in client.ClosePeriodInput)
 	return f.closeRes, f.err
 }
 
-func (f *fakePeriods) ReopenPeriod(_ context.Context, termID, actorID string) (string, error) {
+func (f *fakePeriods) ReopenPeriod(_ context.Context, in client.ReopenPeriodInput) (string, error) {
 	f.calls++
-	f.gotTerm, f.gotReopenActor = termID, actorID
+	f.gotTerm, f.gotReopenActor, f.gotReopen = in.TermID, in.ActorID, in
 	if f.err != nil {
 		return "", f.err
 	}
@@ -162,18 +163,40 @@ func TestReopenPeriod(t *testing.T) {
 	f := &fakePeriods{}
 	h := handler.NewGradesPeriodsHandler(f, nil)
 	rec := httptest.NewRecorder()
-	h.Reopen(rec, withTerm(closerReq(http.MethodPost, "/x", ""), pTerm))
+	h.Reopen(rec, withTerm(closerReq(http.MethodPost, "/x", `{"reason":"  Corrección de Matemáticas  "}`), pTerm))
 	require.Equal(t, http.StatusOK, rec.Code)
 	assert.JSONEq(t, `{"status":"open"}`, rec.Body.String())
 	assert.Equal(t, pDir, f.gotReopenActor)
+	assert.Equal(t, "Corrección de Matemáticas", f.gotReopen.Reason, "CC-308: the reason travels, trimmed")
 
 	ce := connect.NewError(connect.CodeAlreadyExists, errors.New("El periodo ya está abierto"))
 	ce.Meta().Set("X-Error-Code", "ALREADY_OPEN")
 	f.err = ce
 	rec = httptest.NewRecorder()
-	h.Reopen(rec, withTerm(closerReq(http.MethodPost, "/x", ""), pTerm))
+	h.Reopen(rec, withTerm(closerReq(http.MethodPost, "/x", `{"reason":"otra vez"}`), pTerm))
 	assert.Equal(t, http.StatusConflict, rec.Code)
 	assert.Equal(t, "ALREADY_OPEN", rec.Header().Get("X-Error-Code"))
+}
+
+// CC-308: a reopen without a reason (no body, blank, or over 500 characters)
+// is 400 in the error envelope naming the field, and grades is never called.
+func TestReopenPeriodRequiresAReason(t *testing.T) {
+	for name, body := range map[string]string{
+		"no body":   "",
+		"no reason": `{}`,
+		"blank":     `{"reason":"   "}`,
+		"too long":  `{"reason":"` + strings.Repeat("a", 501) + `"}`,
+		"not json":  `motivo`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := &fakePeriods{}
+			rec := httptest.NewRecorder()
+			handler.NewGradesPeriodsHandler(f, nil).Reopen(rec, withTerm(closerReq(http.MethodPost, "/x", body), pTerm))
+			assert.Equal(t, http.StatusBadRequest, rec.Code)
+			assert.Contains(t, rec.Body.String(), `"field":"reason"`)
+			assert.Zero(t, f.calls, "grades is not called")
+		})
+	}
 }
 
 func TestPeriodWritesWithoutPrincipalAre401(t *testing.T) {

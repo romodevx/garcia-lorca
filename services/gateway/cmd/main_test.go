@@ -457,9 +457,17 @@ func (stubConfig) ListGradeLevels(_ context.Context, _ *connect.Request[configv1
 	}}), nil
 }
 
-// schoolTodayISO is the system's school day (UTC), the one date a teacher may
-// always save.
-func schoolTodayISO() string { return time.Now().UTC().Format("2006-01-02") }
+// schoolTodayISO is the school's day (America/Mexico_City, ADR 0035), the one
+// date a teacher may always save. It used to be UTC's, which after 18:00 in
+// Morelia is already tomorrow — "a future date", 400 — so these tests failed
+// every evening.
+func schoolTodayISO() string {
+	zone, err := time.LoadLocation(defaultSchoolTimezone)
+	if err != nil {
+		panic(err)
+	}
+	return time.Now().In(zone).Format("2006-01-02")
+}
 
 func (stubConfig) ListSubjects(_ context.Context, _ *connect.Request[configv1.ListSubjectsRequest]) (*connect.Response[configv1.ListSubjectsResponse], error) {
 	return connect.NewResponse(&configv1.ListSubjectsResponse{Subjects: []*configv1.Subject{
@@ -1355,7 +1363,7 @@ func TestGradesRosterNoTokenIs401(t *testing.T) {
 
 func TestGradesRosterWithReadPermissionLists200(t *testing.T) {
 	gw := newTestGateway(t, map[string]bool{"module_grades": true})
-	res := doGateway(t, gw, http.MethodGet, "/api/v1/grades/roster?assignmentId=asg-1&termId=trm-1", "grades-reader", "")
+	res := doGateway(t, gw, http.MethodGet, "/api/v1/grades/roster?assignmentId=a5000000-0000-4000-8000-000000000001&termId=a5000000-0000-4000-8000-000000000002", "grades-reader", "")
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", res.StatusCode)
 	}

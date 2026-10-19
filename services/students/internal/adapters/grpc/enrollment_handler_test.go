@@ -34,6 +34,8 @@ type fakeEnrollmentRepo struct {
 	byID    map[string]domain.Enrollment
 	uniq    map[string]bool
 	history map[string][]domain.EnrollmentTransfer // by student id
+	// everInGroup is the last group ListEnrollmentsEverInGroup was asked for.
+	everInGroup string
 }
 
 func newFakeEnrollmentRepo() *fakeEnrollmentRepo {
@@ -88,6 +90,23 @@ func (r *fakeEnrollmentRepo) ListTransfersIntoGroup(_ context.Context, groupID s
 		}
 	}
 	return out, nil
+}
+
+func (r *fakeEnrollmentRepo) ListTransfersTouchingGroup(_ context.Context, groupID string) ([]domain.EnrollmentTransfer, error) {
+	var out []domain.EnrollmentTransfer
+	for _, moves := range r.history {
+		for _, m := range moves {
+			if m.ToGroupID() == groupID || m.FromGroupID() == groupID {
+				out = append(out, m)
+			}
+		}
+	}
+	return out, nil
+}
+
+func (r *fakeEnrollmentRepo) ListEnrollmentsEverInGroup(ctx context.Context, groupID string) ([]domain.Enrollment, error) {
+	r.everInGroup = groupID
+	return r.ListEnrollments(ctx, "", "", groupID)
 }
 
 func (r *fakeEnrollmentRepo) TransferEnrollment(_ context.Context, cmd ports.TransferCommand) error {
@@ -485,6 +504,56 @@ func TestListTransfersIntoGroup(t *testing.T) {
 		if _, err := h.ListTransfers(context.Background(), connect.NewRequest(req)); connect.CodeOf(err) != connect.CodeInvalidArgument {
 			t.Errorf("%s: code = %v, want InvalidArgument", name, connect.CodeOf(err))
 		}
+	}
+}
+
+// CC-301: ListTransfers by group_id answers every move into OR out of the group
+// (its membership history), and ListEnrollments by ever_in_group_id names every
+// enrollment that was ever in it, the moved-out ones included.
+func TestGroupHistoryFilters(t *testing.T) {
+	const pupil = "dddddddd-0000-0000-0000-000000000802"
+	moved := time.Date(2026, 10, 2, 15, 0, 0, 0, time.UTC)
+	out, err := domain.NewEnrollmentTransfer("tr-out", testTenant, "enr-1", enrollGroup, otherGroup, "balanceo", moved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unrelated, err := domain.NewEnrollmentTransfer("tr-x", testTenant, "enr-2", otherGroup, "a0000000-0000-0000-0000-0000000000ff", "otro", moved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := newFakeEnrollmentRepo()
+	repo.history = map[string][]domain.EnrollmentTransfer{pupil: {out, unrelated}}
+	h, _ := enrollmentHandlerWith(t, repo)
+
+	res, err := h.ListTransfers(context.Background(), connect.NewRequest(&studentsv1.ListTransfersRequest{GroupId: enrollGroup}))
+	if err != nil {
+		t.Fatalf("ListTransfers: %v", err)
+	}
+	if got := res.Msg.GetTransfers(); len(got) != 1 || got[0].GetId() != "tr-out" {
+		t.Fatalf("transfers = %+v, want only the move out of the group", got)
+	}
+	for name, req := range map[string]*studentsv1.ListTransfersRequest{
+		"group and student": {StudentId: pupil, GroupId: enrollGroup},
+		"group and to":      {ToGroupId: otherGroup, GroupId: enrollGroup},
+		"bad group":         {GroupId: "nope"},
+	} {
+		if _, err := h.ListTransfers(context.Background(), connect.NewRequest(req)); connect.CodeOf(err) != connect.CodeInvalidArgument {
+			t.Errorf("%s: code = %v, want InvalidArgument", name, connect.CodeOf(err))
+		}
+	}
+
+	ever, err := h.ListEnrollments(context.Background(), connect.NewRequest(&studentsv1.ListEnrollmentsRequest{EverInGroupId: enrollGroup}))
+	if err != nil {
+		t.Fatalf("ListEnrollments: %v", err)
+	}
+	if repo.everInGroup != enrollGroup || ever == nil {
+		t.Fatalf("ever_in_group_id did not reach the repository (got %q)", repo.everInGroup)
+	}
+	if _, err := h.ListEnrollments(context.Background(), connect.NewRequest(&studentsv1.ListEnrollmentsRequest{EverInGroupId: "nope"})); connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Errorf("bad ever_in_group_id: code = %v, want InvalidArgument", connect.CodeOf(err))
+	}
+	if _, err := h.ListEnrollments(context.Background(), connect.NewRequest(&studentsv1.ListEnrollmentsRequest{EverInGroupId: enrollGroup, GroupId: enrollGroup})); connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Errorf("ever_in_group_id with another filter: code = %v, want InvalidArgument", connect.CodeOf(err))
 	}
 }
 

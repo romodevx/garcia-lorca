@@ -105,7 +105,7 @@ func TestPeriodClosureUpsertsTwice(t *testing.T) {
 		c, found, err := tx.Closure(ctx)
 		require.NoError(t, err)
 		require.True(t, found)
-		reopened, err := c.Reopen(reopenAt)
+		reopened, err := c.Reopen(domain.Actor{ID: pDirector, Name: "Directora Ruiz"}, "Corrección de la nota de Ana", reopenAt)
 		require.NoError(t, err)
 		return tx.SaveClosure(ctx, reopened)
 	}))
@@ -113,6 +113,9 @@ func TestPeriodClosureUpsertsTwice(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, got[term].IsClosed(), "the reopen must be written, not dropped by the upsert")
 	assert.True(t, got[term].ReopenedAt().Equal(reopenAt))
+	assert.Equal(t, pDirector, got[term].ReopenedBy(), "CC-308: who reopened it is stored")
+	assert.Equal(t, "Directora Ruiz", got[term].ReopenedByName())
+	assert.Equal(t, "Corrección de la nota de Ana", got[term].ReopenReason())
 	assert.Equal(t, 1, got[term].Version())
 
 	require.NoError(t, repo.WithPeriodLock(ctx, term, func(ctx context.Context, tx ports.PeriodTx) error {

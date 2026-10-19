@@ -282,11 +282,11 @@ func (s *AuthService) AuthenticateWithIDToken(ctx context.Context, idToken strin
 // the password revokes every refresh token issued before it (a stolen token
 // stops working the moment the password is changed).
 func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (AuthResult, error) {
-	userID, issuedAt, kind, err := s.validator.ParseRefreshToken(ctx, refreshToken)
+	claims, err := s.validator.ParseRefreshToken(ctx, refreshToken)
 	if err != nil {
 		return AuthResult{}, glerrors.New(glerrors.KindUnauthorized, "invalid refresh token")
 	}
-	user, err := s.users.FindByID(ctx, userID)
+	user, err := s.users.FindByID(ctx, claims.UserID)
 	if err != nil {
 		// A MISSING USER AND A BROKEN DATABASE ARE DIFFERENT ANSWERS.
 		//
@@ -306,13 +306,14 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (Au
 		}
 		return AuthResult{}, glerrors.New(glerrors.KindUnauthorized, "invalid refresh token")
 	}
-	// Compare at whole-second granularity: a JWT's `iat` is Unix seconds (floored),
-	// while password_changed_at carries sub-second precision. Truncating the floor
-	// to the second means a token issued in the SAME second as the change is NOT
-	// revoked — critical, because the re-issued session (login right after the
-	// change) always lands in that second and must survive. Tokens from any earlier
-	// second are still revoked. The at-most-1s window is a negligible trade.
-	if issuedAt.Before(user.PasswordChangedAt().Truncate(time.Second)) {
+	// The credential version decides exactly (CC-302): a token minted under an
+	// older one is revoked whatever its second, while the session re-issued
+	// right after the change carries the new version and survives. The
+	// whole-second iat floor stays for tokens minted before versions existed.
+	// The old window — any token minted in the change's own second survived,
+	// and a stolen token rotated more than once a second survived forever — is
+	// closed by the version, not by a finer clock (no app/DB clock to agree on).
+	if claims.RevokedFor(user) {
 		// Revoked by a later password change — same generic error as any other
 		// invalid refresh token (do not reveal why).
 		return AuthResult{}, glerrors.New(glerrors.KindUnauthorized, "invalid refresh token")
@@ -322,7 +323,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (Au
 	}
 	// The rotated pair keeps the session's kind, so a family session stays long
 	// and a staff one stays short. It cannot promote itself by rotating.
-	return s.issueFor(ctx, user, kind)
+	return s.issueFor(ctx, user, claims.Kind)
 }
 
 // ChangePassword sets a new password for the principal identified by accessToken
@@ -405,10 +406,10 @@ func (s *AuthService) ValidateToken(ctx context.Context, accessToken string) (do
 // a token minted before the suspension stays dead when the account comes back,
 // instead of working out the rest of its fifteen minutes. Same comparison as
 // RefreshToken — whole seconds, so the session re-issued in the second of the
-// change survives. (The refresh path may move to a dedicated
-// credential_version, PR #147; this check deliberately keeps to
-// password_changed_at, which every revoking write already moves, so the two
-// tokens stay revoked by the same events.)
+// change survives. (The refresh path also checks credential_version, CC-302;
+// this check deliberately keeps to password_changed_at. Both columns move
+// together in the repository's rotateCredential, so the two tokens stay
+// revoked by the same events.)
 func (s *AuthService) requireLiveSession(ctx context.Context, claims domain.Claims) error {
 	refused := glerrors.New(glerrors.KindUnauthorized, "invalid access token")
 	state, err := s.users.SessionStateOf(ctx, claims.Subject)
@@ -489,7 +490,7 @@ func (s *AuthService) issueFor(ctx context.Context, user domain.User, kind domai
 	if err != nil {
 		return AuthResult{}, err
 	}
-	refresh, err := s.issuer.IssueRefreshToken(ctx, user.ID(), kind)
+	refresh, err := s.issuer.IssueRefreshToken(ctx, user.ID(), kind, user.CredentialVersion())
 	if err != nil {
 		return AuthResult{}, err
 	}

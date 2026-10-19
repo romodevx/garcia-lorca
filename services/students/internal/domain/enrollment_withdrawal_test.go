@@ -23,7 +23,7 @@ func TestEnrollmentWithdraw(t *testing.T) {
 	}
 
 	t.Run("records UTC calendar date and trims reason", func(t *testing.T) {
-		got, err := newActive(t).Withdraw(withdrawnOn, "  cambio de domicilio  ", now)
+		got, err := newActive(t).Withdraw(withdrawnOn, "  cambio de domicilio  ", now, time.UTC)
 		require.NoError(t, err)
 		assert.Equal(t, domain.EnrollmentStatusWithdrawn, got.Status())
 		assert.Equal(t, time.Date(2026, time.February, 3, 0, 0, 0, 0, time.UTC), got.WithdrawnOn())
@@ -32,12 +32,12 @@ func TestEnrollmentWithdraw(t *testing.T) {
 	})
 	t.Run("defaults a missing date to today", func(t *testing.T) {
 		today := now.UTC()
-		got, err := newActive(t).Withdraw(time.Time{}, "", now)
+		got, err := newActive(t).Withdraw(time.Time{}, "", now, time.UTC)
 		require.NoError(t, err)
 		assert.Equal(t, time.Date(today.Year(), today.Month(), today.Day(), 0, 0, 0, 0, time.UTC), got.WithdrawnOn())
 	})
 	t.Run("accepts exactly 500 runes", func(t *testing.T) {
-		got, err := newActive(t).Withdraw(withdrawnOn, strings.Repeat("界", 500), now)
+		got, err := newActive(t).Withdraw(withdrawnOn, strings.Repeat("界", 500), now, time.UTC)
 		require.NoError(t, err)
 		assert.Len(t, []rune(got.WithdrawalReason()), 500)
 	})
@@ -57,7 +57,7 @@ func TestEnrollmentWithdraw(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			e, err := domain.NewEnrollment("enr-1", "tenant-1", "student-1", "cycle-1", "group-1", "", tt.status, enrolledAt)
 			require.NoError(t, err)
-			_, err = e.Withdraw(tt.on, tt.reason, now)
+			_, err = e.Withdraw(tt.on, tt.reason, now, time.UTC)
 			want := glerrors.KindInvalid
 			if tt.name == "not active" {
 				want = glerrors.KindConflict
@@ -73,6 +73,6 @@ func TestEnrollmentWithdrawUsesCallerClockForFutureDate(t *testing.T) {
 	e, err := domain.NewEnrollment("enr-1", "tenant-1", "student-1", "cycle-1", "group-1", "", domain.EnrollmentStatusActive, enrolledAt)
 	require.NoError(t, err)
 
-	_, err = e.Withdraw(time.Date(2026, time.February, 1, 0, 0, 0, 0, time.UTC), "motivo", now)
+	_, err = e.Withdraw(time.Date(2026, time.February, 1, 0, 0, 0, 0, time.UTC), "motivo", now, time.UTC)
 	assert.Equal(t, glerrors.KindInvalid, glerrors.KindOf(err))
 }

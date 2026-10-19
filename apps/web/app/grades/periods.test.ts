@@ -66,9 +66,10 @@ describe("periodsClient", () => {
     const fetchMock = vi.fn().mockResolvedValue(json({ status: "open" }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(api.reopen("t1")).resolves.toEqual({ status: "open" });
+    await expect(api.reopen("t1", "Corrección de Matemáticas")).resolves.toEqual({ status: "open" });
     expect(call(fetchMock)[0]).toBe("http://gw/api/v1/grades/periods/t1/reopen");
     expect(call(fetchMock)[1].method).toBe("POST");
+    expect(JSON.parse(call(fetchMock)[1].body as string)).toEqual({ reason: "Corrección de Matemáticas" });
   });
 
   it("lists a group's boletas for a term", async () => {

@@ -1090,7 +1090,11 @@ func (h *ConfigHandler) CreateNonWorkingPeriod(w http.ResponseWriter, r *http.Re
 
 // ListNonWorkingPeriods handles GET /api/v1/config/calendar?cycleId=…
 func (h *ConfigHandler) ListNonWorkingPeriods(w http.ResponseWriter, r *http.Request) {
-	periods, err := h.svc.ListNonWorkingPeriods(r.Context(), r.URL.Query().Get("cycleId"))
+	cycleID, ok := requireUUIDQuery(w, r.URL.Query(), "cycleId")
+	if !ok {
+		return
+	}
+	periods, err := h.svc.ListNonWorkingPeriods(r.Context(), cycleID)
 	if err != nil {
 		writeConnectError(w, err)
 		return
@@ -1162,7 +1166,11 @@ func (h *ConfigHandler) PutSchoolProfile(w http.ResponseWriter, r *http.Request)
 
 // ListSchoolEvents handles GET /api/v1/config/events?cycleId=…
 func (h *ConfigHandler) ListSchoolEvents(w http.ResponseWriter, r *http.Request) {
-	events, err := h.svc.ListSchoolEvents(r.Context(), r.URL.Query().Get("cycleId"))
+	cycleID, ok := requireUUIDQuery(w, r.URL.Query(), "cycleId")
+	if !ok {
+		return
+	}
+	events, err := h.svc.ListSchoolEvents(r.Context(), cycleID)
 	if err != nil {
 		writeConnectError(w, err)
 		return

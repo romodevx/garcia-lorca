@@ -172,6 +172,30 @@ describe("StudentEditScreen", () => {
     expect(api.updateStudent).not.toHaveBeenCalled();
   });
 
+  // CC-314: the file's CURP is checked against its own check digit, the birth
+  // date and the sex — as a warning; the file still saves.
+  it("warns about a CURP that disagrees with itself or the file, and still saves", async () => {
+    const user = userEvent.setup();
+    renderScreen();
+    const curp = await screen.findByLabelText(/^CURP/);
+    await waitFor(() => expect(curp).toHaveValue(student.curp));
+    await user.clear(curp);
+    await user.type(curp, "LOAA190312MDFVDRA1");
+    expect(await screen.findByText(/dígito verificador/)).toBeInTheDocument();
+
+    await user.clear(curp);
+    await user.type(curp, "LOAA190312MDFVDRA2");
+    await waitFor(() => expect(screen.queryByText(/dígito verificador/)).toBeNull());
+
+    fireEvent.change(screen.getByLabelText("Fecha de nacimiento"), { target: { value: "2014-10-17" } });
+    expect(await screen.findByText(/El CURP dice que nació el 12\/03\/2019/)).toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText("Sexo"), "M");
+    expect(await screen.findByText(/El CURP es de mujer/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Guardar ficha" }));
+    await waitFor(() => expect(api.updateStudent).toHaveBeenCalled());
+  });
+
   it("on save, marks a bad postal code and takes the focus there", async () => {
     const user = userEvent.setup();
     renderScreen();

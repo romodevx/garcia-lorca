@@ -138,6 +138,19 @@ func (r *UserRepo) FindAuthByID(ctx context.Context, userID string) (domain.User
 	return user, hash, nil
 }
 
+// rotateCredential adds to a user UPDATE's column set the credential rotation:
+// password_changed_at = now() and credential_version + 1, always together and
+// inside the caller's transaction. It is the ONLY writer of those two columns
+// (UpdatePassword, TouchPasswordChangedAt, SoftDelete, a suspension):
+// RefreshToken honors only a token minted under the current version, so the
+// bump revokes every earlier one exactly, even one minted in the same second
+// (CC-302), and ValidateToken's iat floor reads the same instant.
+func rotateCredential(changes map[string]any) map[string]any {
+	changes["password_changed_at"] = gorm.Expr("now()")
+	changes["credential_version"] = gorm.Expr("credential_version + 1")
+	return changes
+}
+
 // UpdatePassword sets a new hash, clears must_change_password, and stamps
 // password_changed_at = now() in one write. The stamp is what revokes every
 // refresh token issued before this rotation (RefreshToken rejects an earlier
@@ -146,7 +159,7 @@ func (r *UserRepo) UpdatePassword(ctx context.Context, userID, newHash string) e
 	return r.withTenant(ctx, func(tx *gorm.DB) error {
 		res := tx.Model(&userModel{}).
 			Where("id = ?", userID).
-			Updates(map[string]any{"password_hash": newHash, "must_change_password": false, "password_changed_at": gorm.Expr("now()")})
+			Updates(rotateCredential(map[string]any{"password_hash": newHash, "must_change_password": false}))
 		if res.Error != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "updating password", res.Error)
 		}
@@ -167,7 +180,7 @@ func (r *UserRepo) TouchPasswordChangedAt(ctx context.Context, userID string) er
 	return r.withTenant(ctx, func(tx *gorm.DB) error {
 		res := tx.Model(&userModel{}).
 			Where("id = ?", userID).
-			Update("password_changed_at", gorm.Expr("now()"))
+			Updates(rotateCredential(map[string]any{}))
 		if res.Error != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "stamping the password rotation", res.Error)
 		}
@@ -272,7 +285,7 @@ func (r *UserRepo) SetStatus(ctx context.Context, userID string, status domain.S
 			if err := guardLastActiveHolder(tx, userID, keepActiveHolderOf); err != nil {
 				return err
 			}
-			changes["password_changed_at"] = gorm.Expr("now()")
+			rotateCredential(changes)
 		}
 		res := tx.Model(&userModel{}).Where("id = ? AND status <> ?", userID, statusDeleted).Updates(changes)
 		if res.Error != nil {
@@ -333,12 +346,11 @@ func (r *UserRepo) SoftDelete(ctx context.Context, userID, deletedBy, keepActive
 		}
 		res := tx.Model(&userModel{}).
 			Where("id = ? AND status <> ?", userID, statusDeleted).
-			Updates(map[string]any{
-				"status":              statusDeleted,
-				"deleted_at":          gorm.Expr("now()"),
-				"deleted_by":          deletedBy,
-				"password_changed_at": gorm.Expr("now()"),
-			})
+			Updates(rotateCredential(map[string]any{
+				"status":     statusDeleted,
+				"deleted_at": gorm.Expr("now()"),
+				"deleted_by": deletedBy,
+			}))
 		if res.Error != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "deleting user", res.Error)
 		}

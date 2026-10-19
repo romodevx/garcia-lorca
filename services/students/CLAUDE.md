@@ -21,6 +21,11 @@ drift).
 ## Domain invariants
 - A `Student` has a stable identity and a `CURP` unique per tenant (boundary
   shape-check in the domain; the DB owns the authoritative uniqueness constraint).
+  The RENAPO check digit and the birth date / sex the CURP carries are NOT
+  enforced here on purpose (CC-314): the legacy import brings imperfect CURPs.
+  The web warns about them on the alta and the file (`apps/web/app/students/curpCheck.ts`)
+  without blocking the save; there is no server-side warnings model for the
+  manual alta.
 - Admission is a state machine — the single source of truth is
   `allowedTransitions` in `domain/admission.go`:
   `pending → accepted → enrolled`, plus `rejected` (from pending) and

@@ -594,6 +594,11 @@ message ClosePeriodResponse {
 message ReopenPeriodRequest {
   string term_id = 1;
   string actor_id = 2;
+  // CC-308: who reopened it (a name snapshot, like close's actor_name) and
+  // why. The reason is required (InvalidArgument when blank, at most 500
+  // characters); both are stored on the closure with the instant.
+  string actor_name = 3;
+  string reason = 4;
 }
 
 message ReopenPeriodResponse {

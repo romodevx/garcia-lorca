@@ -1,6 +1,7 @@
 package domain_test
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -41,20 +42,45 @@ func TestPeriodClosureLifecycle(t *testing.T) {
 	assert.Equal(t, domain.CodeAlreadyClosed, domain.RefusalCodeOf(err))
 
 	reopenAt := closeAt.Add(time.Hour)
-	reopened, err := closed.Reopen(reopenAt)
+	reopener := domain.Actor{ID: "u-3", Name: "Subdirectora"}
+	reopened, err := closed.Reopen(reopener, "  Corrección de la nota de Ana  ", reopenAt)
 	require.NoError(t, err)
+	assert.Equal(t, "u-3", reopened.ReopenedBy(), "CC-308: who reopened it")
+	assert.Equal(t, "Subdirectora", reopened.ReopenedByName())
+	assert.Equal(t, "Corrección de la nota de Ana", reopened.ReopenReason(), "the reason, trimmed")
 	assert.Equal(t, domain.PeriodOpen, reopened.Status())
 	assert.Equal(t, 1, reopened.Version(), "reopening keeps the version: the report cards stay")
 	assert.Equal(t, []domain.Month{sep, oct}, reopened.Months(), "reopening keeps the last snapshot")
 	assert.Equal(t, reopenAt, reopened.ReopenedAt())
 
-	_, err = reopened.Reopen(reopenAt)
+	_, err = reopened.Reopen(reopener, "otra vez", reopenAt)
 	assert.Equal(t, glerrors.KindConflict, glerrors.KindOf(err))
 	assert.Equal(t, domain.CodeAlreadyOpen, domain.RefusalCodeOf(err))
 
 	again, err := reopened.Close(domain.Actor{ID: "u-2", Name: "Otra"}, reopenAt, nil)
 	require.NoError(t, err)
 	assert.Equal(t, 2, again.Version(), "the second close issues version 2")
+}
+
+// CC-308: a reopen needs a reason — blank or over 500 characters is refused
+// and the period stays closed.
+func TestReopenRequiresAReason(t *testing.T) {
+	closed, err := domain.NewOpenPeriod("term-1", "cyc-1", "lvl-1").Close(domain.Actor{ID: "u-1", Name: "Directora"}, closeAt, nil)
+	require.NoError(t, err)
+	for name, reason := range map[string]string{
+		"empty":    "",
+		"blank":    "  \t ",
+		"too long": strings.Repeat("ñ", 501),
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := closed.Reopen(domain.Actor{ID: "u-1", Name: "Directora"}, reason, closeAt)
+			assert.Equal(t, glerrors.KindInvalid, glerrors.KindOf(err))
+			assert.True(t, closed.IsClosed())
+		})
+	}
+	ok, err := closed.Reopen(domain.Actor{ID: "u-1", Name: "Directora"}, strings.Repeat("ñ", 500), closeAt)
+	require.NoError(t, err)
+	assert.False(t, ok.IsClosed(), "500 characters is the limit, inclusive")
 }
 
 func TestRestorePeriodClosureValidates(t *testing.T) {

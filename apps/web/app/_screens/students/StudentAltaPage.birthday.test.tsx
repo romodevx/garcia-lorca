@@ -60,6 +60,35 @@ async function openAndFill(): Promise<{ drawer: HTMLElement; user: ReturnType<ty
   return { drawer, user };
 }
 
+// CC-314: a CURP whose check digit is invented, or whose date is not the
+// birth date captured, is WARNED about under the field — and still saved:
+// the legacy import brings imperfect CURPs, so it is never a block.
+describe("quick add: CURP warnings (CC-314)", () => {
+  it("warns about an invented check digit and still creates the pupil", async () => {
+    const { drawer, user } = await openAndFill();
+    const curp = within(drawer).getByLabelText(/CURP/, CAMPO);
+    await user.clear(curp);
+    await user.type(curp, "PUCA150101HMNRCLA0");
+
+    expect(await within(drawer).findByText(/dígito verificador/)).toBeInTheDocument();
+    await user.click(within(drawer).getByRole("button", { name: "Crear alumno" }));
+    await waitFor(() => expect(students.createStudent).toHaveBeenCalled());
+    expect(students.createStudent.mock.calls[0]?.[1]).toMatchObject({ curp: "PUCA150101HMNRCLA0" });
+  });
+
+  it("warns when the birth date is not the one the CURP carries", async () => {
+    const { drawer, user } = await openAndFill();
+    const curp = within(drawer).getByLabelText(/CURP/, CAMPO);
+    await user.clear(curp);
+    await user.type(curp, "PUCA150101HMNRCLA5");
+    expect(within(drawer).queryByText(/El CURP dice que nació/)).toBeNull();
+
+    await user.click(within(drawer).getByRole("button", { name: /más datos/i }));
+    fireEvent.change(within(drawer).getByLabelText(/Fecha de nacimiento/, CAMPO), { target: { value: "2014-10-17" } });
+    expect(await within(drawer).findByText(/El CURP dice que nació el 01\/01\/2015/)).toBeInTheDocument();
+  });
+});
+
 // T11: the birth date is what the morning greeting reads. The drawer already
 // holds eight fields, so it waits under "Más datos", collapsed: the 80% case
 // does not need it to create the pupil (ui-forms-and-modals.md).

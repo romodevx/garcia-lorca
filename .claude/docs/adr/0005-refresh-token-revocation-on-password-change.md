@@ -68,3 +68,17 @@ cookies) and the client falls back to the login screen.
 - Suspending a user already blocks refresh (`CanAuthenticate`); this adds the
   password-change axis. Neither yet covers "revoke a specific device now" — that
   needs the stateful store above.
+
+## Amendment 2026-10-17 — credential version (CC-302)
+
+The whole-second floor left a hole: every refresh token minted in the change's
+own second survived it, so a stolen token rotated more than once a second always
+held one and outlived every password change. `users.credential_version`
+(iam/0032) is bumped by every write that stamps `password_changed_at`, the
+refresh JWT carries it as `cv`, and `RefreshToken` honors a token only under the
+CURRENT version (`domain.RefreshClaims.RevokedFor`). A counter, not a finer
+clock: `password_changed_at` is the database's `now()` and `iat` the app's clock,
+and a millisecond comparison between the two would log the re-issued session out
+on any skew. The second floor stays for tokens minted before `cv` existed (they
+read as version 0, the default of every row), so the first rotation after the
+deploy revokes those exactly too.

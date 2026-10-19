@@ -15,7 +15,7 @@ func TestEnrollmentWithdrawalMapperRoundTrip(t *testing.T) {
 	withdrawnOn := time.Date(2026, 10, 1, 18, 0, 0, 0, time.FixedZone("west", -7*60*60))
 	enrollment, err := domain.NewEnrollment("enrollment-a", "tenant-a", "student-a", "cycle-a", "group-a", "", domain.EnrollmentStatusActive, enrolledAt)
 	require.NoError(t, err)
-	withdrawn, err := enrollment.Withdraw(withdrawnOn, "  family moved  ", withdrawnOn)
+	withdrawn, err := enrollment.Withdraw(withdrawnOn, "  family moved  ", withdrawnOn, time.UTC)
 	require.NoError(t, err)
 
 	stored := enrollmentFromDomain(withdrawn)

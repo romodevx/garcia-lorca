@@ -671,6 +671,10 @@ func (h *FinanceHandler) PreviewDeposit(w http.ResponseWriter, r *http.Request) 
 // "Monto esperado" and never lets anybody edit it. withBalance=false (the
 // search list) leaves the year's balance out; it is included by default.
 func (h *FinanceHandler) ExpectedToday(w http.ResponseWriter, r *http.Request) {
+	studentID, ok := requireUUIDQuery(w, r.URL.Query(), "studentId")
+	if !ok {
+		return
+	}
 	on := strings.TrimSpace(r.URL.Query().Get("on"))
 	if on != "" {
 		if _, err := time.Parse("2006-01-02", on); err != nil {
@@ -687,7 +691,7 @@ func (h *FinanceHandler) ExpectedToday(w http.ResponseWriter, r *http.Request) {
 		}
 		withBalance = parsed
 	}
-	expected, err := h.svc.ExpectedToday(r.Context(), r.URL.Query().Get("studentId"), on, withBalance)
+	expected, err := h.svc.ExpectedToday(r.Context(), studentID, on, withBalance)
 	if err != nil {
 		writeConnectError(w, err)
 		return

@@ -99,6 +99,58 @@ func TestListTransfersIntoGroupIsTheClassListHistory(t *testing.T) {
 	assert.Empty(t, none, "RLS hides another tenant's moves")
 }
 
+// CC-301: a past day's class list needs every enrollment that was EVER in the
+// group — including one moved out since (it now carries another group_id) —
+// and every move into or out of it, so attendance can tell who sat in the
+// group on that day. A pupil who never touched the group is not part of it.
+func TestEverInGroupReadsMovedOutPupilsAndBothSidesOfTheMoves(t *testing.T) {
+	repo := appRepo(t, tenantA)
+	ctx := context.Background()
+	stayed := seedStudent(t, tenantA, "dddddddd-0000-0000-0000-000000000621", "HEGB050312HDFRNN81")
+	left := seedStudent(t, tenantA, "dddddddd-0000-0000-0000-000000000622", "HEGB050312HDFRNN82")
+	elsewhere := seedStudent(t, tenantA, "dddddddd-0000-0000-0000-000000000623", "HEGB050312HDFRNN83")
+	const enrStayed, enrLeft, enrElsewhere = "e0000000-0000-0000-0000-000000000621", "e0000000-0000-0000-0000-000000000622", "e0000000-0000-0000-0000-000000000623"
+	require.NoError(t, createRoomy(ctx, repo, enrollment(t, enrStayed, tenantA, stayed, groupOne)))
+	require.NoError(t, createRoomy(ctx, repo, enrollment(t, enrLeft, tenantA, left, groupOne)))
+	require.NoError(t, createRoomy(ctx, repo, enrollment(t, enrElsewhere, tenantA, elsewhere, groupTwo)))
+
+	out, err := domain.NewEnrollmentTransfer("70000000-0000-0000-0000-000000000621", tenantA, enrLeft, groupOne, groupTwo, "balanceo", enrollClock.AddDate(0, 0, 4))
+	require.NoError(t, err)
+	require.NoError(t, repo.TransferEnrollment(ctx, transferInto(enrLeft, groupTwo, out)))
+
+	ever, err := repo.ListEnrollmentsEverInGroup(ctx, groupOne)
+	require.NoError(t, err)
+	ids := make([]string, 0, len(ever))
+	for _, e := range ever {
+		ids = append(ids, e.ID())
+	}
+	assert.Contains(t, ids, enrStayed)
+	assert.Contains(t, ids, enrLeft, "moved out since, still part of the group's past")
+	assert.NotContains(t, ids, enrElsewhere)
+
+	moves, err := repo.ListTransfersTouchingGroup(ctx, groupOne)
+	require.NoError(t, err)
+	var found bool
+	for _, m := range moves {
+		assert.True(t, m.FromGroupID() == groupOne || m.ToGroupID() == groupOne)
+		found = found || m.ID() == "70000000-0000-0000-0000-000000000621"
+	}
+	assert.True(t, found, "the move OUT of the group is part of its history")
+
+	// The container is shared: tenant B may hold its own rows in the group,
+	// never tenant A's.
+	theirs, err := appRepo(t, tenantB).ListEnrollmentsEverInGroup(ctx, groupOne)
+	require.NoError(t, err)
+	for _, e := range theirs {
+		assert.NotContains(t, []string{enrStayed, enrLeft}, e.ID(), "RLS hides another tenant's enrollments")
+	}
+	theirMoves, err := appRepo(t, tenantB).ListTransfersTouchingGroup(ctx, groupOne)
+	require.NoError(t, err)
+	for _, m := range theirMoves {
+		assert.NotEqual(t, "70000000-0000-0000-0000-000000000621", m.ID(), "RLS hides another tenant's moves")
+	}
+}
+
 func indexOf(ids []string, id string) int {
 	for i, v := range ids {
 		if v == id {

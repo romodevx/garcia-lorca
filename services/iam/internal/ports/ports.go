@@ -134,17 +134,20 @@ type TokenIssuer interface {
 	// The kind decides how long the token may sit unused: a staff session
 	// and a family one both last a day, and may diverge again. It is stamped
 	// into the token so a rotation cannot promote itself to the longer life.
-	IssueRefreshToken(ctx context.Context, userID string, kind domain.SessionKind) (string, error)
+	//
+	// credentialVersion is the user's current credential version, stamped into
+	// the token so a later rotation revokes it exactly (CC-302).
+	IssueRefreshToken(ctx context.Context, userID string, kind domain.SessionKind, credentialVersion int64) (string, error)
 }
 
 // TokenValidator verifies signed tokens. An invalid signature or an expired
 // token is a KindUnauthorized error.
 type TokenValidator interface {
 	ValidateAccessToken(ctx context.Context, token string) (domain.Claims, error)
-	// ParseRefreshToken returns the subject (user id) and issued-at instant of a
-	// valid refresh token. The issued-at supports revoking tokens minted before
+	// ParseRefreshToken returns the claims of a valid refresh token. Its
+	// issued-at and credential version support revoking tokens minted before
 	// the user's last password change.
-	ParseRefreshToken(ctx context.Context, token string) (userID string, issuedAt time.Time, kind domain.SessionKind, err error)
+	ParseRefreshToken(ctx context.Context, token string) (domain.RefreshClaims, error)
 }
 
 // VerifiedIdentity is what an external identity provider proves about a caller:

@@ -85,6 +85,12 @@ type User struct {
 	// (a user built in memory imposes no revocation cutoff); the DB is the source
 	// of truth, mapped in on load.
 	passwordChangedAt time.Time
+	// credentialVersion counts the credential's rotations: every password
+	// change (and every revocation that stamps passwordChangedAt) bumps it, and
+	// a refresh token is honored only while it carries the CURRENT value. Unlike
+	// the instant above it has no clock, so a token minted in the same second as
+	// the change, but before it, is revoked too (CC-302).
+	credentialVersion int64
 }
 
 // NewUser constructs a principal. `id` and `tenantID` are required; the email is
@@ -159,6 +165,17 @@ func (u User) PasswordChangedAt() time.Time { return u.passwordChangedAt }
 // keeping NewUser's creation signature unchanged.
 func (u User) WithPasswordChangedAt(t time.Time) User {
 	u.passwordChangedAt = t
+	return u
+}
+
+// CredentialVersion returns how many times the credential was rotated (0 for an
+// account never rotated since versions exist).
+func (u User) CredentialVersion() int64 { return u.credentialVersion }
+
+// WithCredentialVersion returns a copy of the user carrying the stored
+// credential version (hydrated by the persistence layer on load).
+func (u User) WithCredentialVersion(v int64) User {
+	u.credentialVersion = v
 	return u
 }
 

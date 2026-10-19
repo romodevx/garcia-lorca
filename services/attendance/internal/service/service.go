@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
+	"golang.org/x/sync/errgroup"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
 )
@@ -29,6 +30,10 @@ const (
 
 // enrollmentStatusActive is the only enrollment status that appears on a roster.
 const enrollmentStatusActive = "active"
+
+// enrollmentStatusWithdrawn is a dated withdrawal: its withdrawn_on is the
+// pupil's last day of class.
+const enrollmentStatusWithdrawn = "withdrawn"
 
 // maxNoteLength bounds, in CHARACTERS (runes, like the column CHECK length()
 // and the web counter), the free-text justification a client may attach to a
@@ -69,26 +74,36 @@ type EnrollmentRef struct {
 	GroupID   string
 	Status    string
 	// EnrolledAt / EndedAt bound the enrollment (EndedAt zero while active):
-	// the report counts a pupil only on lists taken in between (T12).
+	// a pupil is on a list, and counted by the report, only in between (T12,
+	// CC-301). GroupID is the group it carries TODAY.
 	EnrolledAt time.Time
 	EndedAt    time.Time
+	// EndedOn is a withdrawal's day as students wrote it (withdrawn_on, a
+	// calendar date at midnight UTC), the pupil's LAST day of class. It is read
+	// as is, never through the school zone: ended_at is that same midnight UTC,
+	// which in Morelia still falls on the day before (CC-301 review B1).
+	EndedOn time.Time
 }
 
-// TransferIn is a move of an enrollment INTO a group. A transfer rewrites the
-// enrollment's group in place, so this is how the report learns when a pupil
-// joined the group.
-type TransferIn struct {
+// Move is a move of an enrollment between two groups. A transfer rewrites the
+// enrollment's group in place, so the moves are the only record of which group
+// a pupil sat in on a past day (CC-301).
+type Move struct {
 	EnrollmentID string
+	FromGroupID  string
+	ToGroupID    string
 	MovedAt      time.Time
 }
 
-// EnrollmentReader lists a group's enrollments from the students bounded context
-// (by RPC). A missing group is reported as glerrors.ErrNotFound; any other error
-// propagates unchanged.
+// EnrollmentReader reads a group's membership history from the students bounded
+// context (by RPC). A missing group is reported as glerrors.ErrNotFound; any
+// other error propagates unchanged.
 type EnrollmentReader interface {
-	ByGroup(ctx context.Context, groupID string) ([]EnrollmentRef, error)
-	// TransfersInto lists every move into the group, in one read (T12).
-	TransfersInto(ctx context.Context, groupID string) ([]TransferIn, error)
+	// EverInGroup lists every enrollment that was ever in the group: the ones
+	// in it now and the ones moved out of it since (any status).
+	EverInGroup(ctx context.Context, groupID string) ([]EnrollmentRef, error)
+	// MovesOf lists every move into or out of the group, in one read.
+	MovesOf(ctx context.Context, groupID string) ([]Move, error)
 }
 
 // GroupReader validates a group reference against the config bounded context (by
@@ -357,7 +372,7 @@ type Mark struct {
 // injected newID so tests are deterministic; the day itself always comes from the
 // caller's date, never from a clock here.
 //
-//	Save: group (RPC) ─> active enrollments (RPC) ─> validate marks
+//	Save: group (RPC) ─> who sat in it that day (RPC) ─> validate marks
 //	      ─> reconcile the whole day in one tx ─> publish (best-effort)
 type AttendanceService struct {
 	repo        Repo
@@ -438,7 +453,7 @@ func (s *AttendanceService) GetDailyRoster(ctx context.Context, groupID, dateStr
 	if err != nil {
 		return Roster{}, err
 	}
-	enrollmentIDs, studentByEnrollment, err := s.activeRoster(ctx, groupID)
+	enrollmentIDs, studentByEnrollment, err := s.rosterOn(ctx, groupID, key.Date)
 	if err != nil {
 		return Roster{}, err
 	}
@@ -472,7 +487,7 @@ func (s *AttendanceService) GetDailyRoster(ctx context.Context, groupID, dateStr
 }
 
 // SaveDailyAttendance reconciles one list: req.Marks is the COMPLETE set of
-// exceptions, so every active enrollment missing from it — and every enrollment
+// exceptions, so every pupil of that day's list missing from it — and every enrollment
 // explicitly marked statusPresent — ends the call present. A correction changes
 // the stored rows IN PLACE (their ids survive) and publishes events only for
 // what changed (see DiffList), so re-saving never re-notifies the parents. The
@@ -506,7 +521,7 @@ func (s *AttendanceService) SaveDailyAttendance(ctx context.Context, req SaveReq
 	if err := s.requireSchoolDay(ctx, key); err != nil {
 		return SaveResult{}, err
 	}
-	enrollmentIDs, studentByEnrollment, err := s.activeRoster(ctx, req.GroupID)
+	enrollmentIDs, studentByEnrollment, err := s.rosterOn(ctx, req.GroupID, key.Date)
 	if err != nil {
 		return SaveResult{}, err
 	}
@@ -659,57 +674,154 @@ func (s *AttendanceService) SummarizeAttendance(ctx context.Context, groupID, fr
 	return summarize(pupils, history), nil
 }
 
-// window is the span of days a pupil belonged to the group, clipped to a range.
+// openEnd is the last day of a stay that has not ended.
+var openEnd = time.Date(9999, time.December, 31, 0, 0, 0, 0, time.UTC)
+
+// window is a span of school days, both ends inclusive.
 type window struct{ from, to time.Time }
 
 func (w window) holds(day time.Time) bool { return !day.Before(w.from) && !day.After(w.to) }
 
-// pupilInGroup is an enrollment and the days of the range it was in the group.
+// pupilInGroup is an enrollment and the spans of days it sat in the group.
+// stillIn is true while it is in the group today (active, last stay open).
 type pupilInGroup struct {
 	enrollment EnrollmentRef
-	window     window
+	stays      []window
+	stillIn    bool
 }
 
-// pupilsDuring lists, by enrollment id, every enrollment of the group whose
-// time in it overlaps [from, to]: it starts on the day of enrolling or of the
-// latest move into the group, and ends on the day it ended (open while
-// active). An inactive enrollment without an end is skipped: its span is
-// unknown.
-func (s *AttendanceService) pupilsDuring(ctx context.Context, groupID string, from, to time.Time) ([]pupilInGroup, error) {
-	enrollments, err := s.enrollments.ByGroup(ctx, groupID)
-	if err != nil {
-		return nil, err
-	}
-	moves, err := s.enrollments.TransfersInto(ctx, groupID)
-	if err != nil {
-		return nil, err
-	}
-	joined := make(map[string]time.Time, len(moves))
-	for _, m := range moves {
-		if day := s.schoolDay(m.MovedAt); day.After(joined[m.EnrollmentID]) {
-			joined[m.EnrollmentID] = day
+// inGroupOn reports whether the pupil sat in the group on day.
+func (p pupilInGroup) inGroupOn(day time.Time) bool {
+	for _, w := range p.stays {
+		if w.holds(day) {
+			return true
 		}
+	}
+	return false
+}
+
+// membership reads the group's history in two RPCs — every enrollment ever in
+// it and every move into or out of it — and answers, by enrollment id, the
+// days each one sat in the group (CC-301). A list of day D is who sat in the
+// group on D: enrolled on or before D, not withdrawn before D, and in the group
+// on D according to the moves. On a move day the pupil is on BOTH groups'
+// lists; whichever list marks them first holds the mark (attendance/0004).
+func (s *AttendanceService) membership(ctx context.Context, groupID string) ([]pupilInGroup, error) {
+	// The two reads are independent RPCs: run them side by side, and the
+	// first failure cancels the other.
+	var (
+		enrollments []EnrollmentRef
+		moves       []Move
+	)
+	g, gctx := errgroup.WithContext(ctx)
+	g.Go(func() (err error) {
+		enrollments, err = s.enrollments.EverInGroup(gctx, groupID)
+		return err
+	})
+	g.Go(func() (err error) {
+		moves, err = s.enrollments.MovesOf(gctx, groupID)
+		return err
+	})
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+	movesOf := make(map[string][]Move, len(moves))
+	for _, m := range moves {
+		movesOf[m.EnrollmentID] = append(movesOf[m.EnrollmentID], m)
 	}
 	out := make([]pupilInGroup, 0, len(enrollments))
 	for _, enr := range enrollments {
-		active := enr.Status == enrollmentStatusActive
-		if !active && enr.EndedAt.IsZero() {
+		own := movesOf[enr.ID]
+		sort.SliceStable(own, func(i, j int) bool { return own[i].MovedAt.Before(own[j].MovedAt) })
+		stays := s.staysIn(groupID, enr, own)
+		if len(stays) == 0 {
 			continue
 		}
-		w := window{from: latest(from, s.schoolDay(enr.EnrolledAt), joined[enr.ID]), to: to}
-		if !active {
-			w.to = earliest(to, s.schoolDay(enr.EndedAt))
-		}
-		if w.from.After(w.to) {
-			continue
-		}
-		out = append(out, pupilInGroup{enrollment: enr, window: w})
+		last := stays[len(stays)-1]
+		out = append(out, pupilInGroup{enrollment: enr, stays: stays, stillIn: last.to.Equal(openEnd)})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].enrollment.ID < out[j].enrollment.ID })
 	return out, nil
 }
 
-// summarize counts each pupil's lists and exceptions inside their window.
+// staysIn replays one enrollment's moves (oldest first) into its stays in the
+// group. It starts in the group unless its first move came INTO it; a move
+// out ends a stay on the move day, a move in starts one. The final stay is open
+// while the enrollment is active and ends on the day it ended otherwise; an
+// ended enrollment without an end day has an unknown final stay, so it is
+// dropped (the pre-T12 behavior).
+func (s *AttendanceService) staysIn(groupID string, enr EnrollmentRef, moves []Move) []window {
+	in := len(moves) == 0 || moves[0].FromGroupID == groupID
+	start := s.schoolDay(enr.EnrolledAt)
+	var stays []window
+	for _, m := range moves {
+		day := s.schoolDay(m.MovedAt)
+		if in && m.FromGroupID == groupID {
+			stays = appendStay(stays, window{from: start, to: day})
+			in = false
+		}
+		if m.ToGroupID == groupID {
+			start, in = day, true
+		}
+	}
+	if !in {
+		return stays
+	}
+	end, known := s.endOf(enr)
+	if !known {
+		return stays
+	}
+	return appendStay(stays, window{from: start, to: end})
+}
+
+// appendStay adds a non-empty stay.
+func appendStay(stays []window, w window) []window {
+	if w.from.After(w.to) {
+		return stays
+	}
+	return append(stays, w)
+}
+
+// endOf is the last day of an enrollment's final stay: open while active; for
+// a withdrawal, its withdrawn_on day as written (the last day of class, never
+// shifted by the zone); otherwise the school day it ended. known is false for
+// an ended one without that day.
+func (s *AttendanceService) endOf(enr EnrollmentRef) (end time.Time, known bool) {
+	if enr.Status == enrollmentStatusActive {
+		return openEnd, true
+	}
+	if enr.Status == enrollmentStatusWithdrawn && !enr.EndedOn.IsZero() {
+		return enr.EndedOn, true
+	}
+	if enr.EndedAt.IsZero() {
+		return time.Time{}, false
+	}
+	return s.schoolDay(enr.EndedAt), true
+}
+
+// pupilsDuring lists, by enrollment id, every pupil who sat in the group at
+// some point of [from, to], with their stays clipped to it.
+func (s *AttendanceService) pupilsDuring(ctx context.Context, groupID string, from, to time.Time) ([]pupilInGroup, error) {
+	pupils, err := s.membership(ctx, groupID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]pupilInGroup, 0, len(pupils))
+	for _, p := range pupils {
+		var clipped []window
+		for _, w := range p.stays {
+			clipped = appendStay(clipped, window{from: latest(from, w.from), to: earliest(to, w.to)})
+		}
+		if len(clipped) == 0 {
+			continue
+		}
+		p.stays = clipped
+		out = append(out, p)
+	}
+	return out, nil
+}
+
+// summarize counts each pupil's lists and exceptions inside their stays.
 func summarize(pupils []pupilInGroup, history GroupHistory) AttendanceSummary {
 	marksOf := make(map[string][]DayMark, len(pupils))
 	for _, m := range history.Marks {
@@ -717,14 +829,14 @@ func summarize(pupils []pupilInGroup, history GroupHistory) AttendanceSummary {
 	}
 	out := AttendanceSummary{ListsTaken: len(history.Lists), Students: make([]StudentCounts, 0, len(pupils))}
 	for _, p := range pupils {
-		line := StudentCounts{EnrollmentID: p.enrollment.ID, StudentID: p.enrollment.StudentID, Active: p.enrollment.Status == enrollmentStatusActive}
+		line := StudentCounts{EnrollmentID: p.enrollment.ID, StudentID: p.enrollment.StudentID, Active: p.stillIn}
 		for _, day := range history.Lists {
-			if p.window.holds(day) {
+			if p.inGroupOn(day) {
 				line.Lists++
 			}
 		}
 		for _, m := range marksOf[p.enrollment.ID] {
-			if p.window.holds(m.Date) {
+			if p.inGroupOn(m.Date) {
 				line.ExceptionCounts = line.add(m.Status)
 			}
 		}
@@ -963,24 +1075,25 @@ func (s *AttendanceService) logDroppedEvent(err error, recordID string) {
 		slog.String("record_id", recordID))
 }
 
-// activeRoster resolves a group's ACTIVE enrollments once: the sorted enrollment
-// ids (the deterministic roster order, and the exact scope a day's reconcile
-// replaces) and their student ids.
-func (s *AttendanceService) activeRoster(ctx context.Context, groupID string) ([]string, map[string]string, error) {
-	enrollments, err := s.enrollments.ByGroup(ctx, groupID)
+// rosterOn resolves who sat in the group on day once: the sorted enrollment
+// ids (the deterministic roster order, and the exact scope a list's reconcile
+// replaces) and their student ids. A pupil enrolled after day, withdrawn
+// before it, or in another group that day is not on it (CC-301), so a save
+// that marks them is refused ("enrollment not in group").
+func (s *AttendanceService) rosterOn(ctx context.Context, groupID string, day time.Time) ([]string, map[string]string, error) {
+	pupils, err := s.membership(ctx, groupID)
 	if err != nil {
 		return nil, nil, err
 	}
-	enrollmentIDs := make([]string, 0, len(enrollments))
-	studentByEnrollment := make(map[string]string, len(enrollments))
-	for _, enr := range enrollments {
-		if enr.Status != enrollmentStatusActive {
+	enrollmentIDs := make([]string, 0, len(pupils))
+	studentByEnrollment := make(map[string]string, len(pupils))
+	for _, p := range pupils {
+		if !p.inGroupOn(day) {
 			continue
 		}
-		enrollmentIDs = append(enrollmentIDs, enr.ID)
-		studentByEnrollment[enr.ID] = enr.StudentID
+		enrollmentIDs = append(enrollmentIDs, p.enrollment.ID)
+		studentByEnrollment[p.enrollment.ID] = p.enrollment.StudentID
 	}
-	sort.Strings(enrollmentIDs)
 	return enrollmentIDs, studentByEnrollment, nil
 }
 

@@ -123,10 +123,10 @@ func TestGradesClientPeriodsRoundTrip(t *testing.T) {
 	assert.True(t, proto.Equal(&gradesv1.ClosePeriodRequest{TermId: "term-1", Force: true, ActorId: "usr-dir", ActorName: "Directora"}, stub.closeReq), "request = %v", stub.closeReq)
 	assert.Equal(t, client.ClosePeriodResult{Status: "closed", Version: 2, ReportCards: 31, SkippedWithoutGrades: 1, WithdrawnReportCards: 1}, closed)
 
-	status, err := c.ReopenPeriod(ctx, "term-1", "usr-dir")
+	status, err := c.ReopenPeriod(ctx, client.ReopenPeriodInput{TermID: "term-1", ActorID: "usr-dir", ActorName: "Directora", Reason: "Corrección"})
 	require.NoError(t, err)
 	assert.Equal(t, "open", status)
-	assert.True(t, proto.Equal(&gradesv1.ReopenPeriodRequest{TermId: "term-1", ActorId: "usr-dir"}, stub.reopenReq), "request = %v", stub.reopenReq)
+	assert.True(t, proto.Equal(&gradesv1.ReopenPeriodRequest{TermId: "term-1", ActorId: "usr-dir", ActorName: "Directora", Reason: "Corrección"}, stub.reopenReq), "request = %v", stub.reopenReq)
 
 	cards, err := c.ListReportCards(ctx, client.ReportCardFilter{TermID: "term-1", GroupID: "grp-1", StudentID: "stu-1"})
 	require.NoError(t, err)

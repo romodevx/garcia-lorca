@@ -348,10 +348,7 @@ func (s *EnrollmentService) Withdraw(ctx context.Context, enrollmentID string, o
 	if err != nil {
 		return domain.Enrollment{}, err
 	}
-	if on.IsZero() {
-		on = s.now().UTC()
-	}
-	updated, err := enr.Withdraw(on, reason, s.now())
+	updated, err := enr.Withdraw(on, reason, s.now(), s.zone)
 	if err != nil {
 		return domain.Enrollment{}, err
 	}
@@ -391,6 +388,25 @@ func (s *EnrollmentService) ListTransfersIntoGroup(ctx context.Context, groupID 
 		return nil, glerrors.New(glerrors.KindInvalid, "invalid group id")
 	}
 	return s.enrollments.ListTransfersIntoGroup(ctx, groupID)
+}
+
+// ListTransfersTouchingGroup returns every move into OR out of a group, oldest
+// first: with ListEnrollmentsEverInGroup, who sat in the group on a past day
+// (a transfer rewrites the enrollment's group in place, CC-301).
+func (s *EnrollmentService) ListTransfersTouchingGroup(ctx context.Context, groupID string) ([]domain.EnrollmentTransfer, error) {
+	if err := uuid.Validate(groupID); err != nil {
+		return nil, glerrors.New(glerrors.KindInvalid, "invalid group id")
+	}
+	return s.enrollments.ListTransfersTouchingGroup(ctx, groupID)
+}
+
+// ListEnrollmentsEverInGroup returns every enrollment that was ever in a
+// group, the ones moved out of it since included.
+func (s *EnrollmentService) ListEnrollmentsEverInGroup(ctx context.Context, groupID string) ([]domain.Enrollment, error) {
+	if err := uuid.Validate(groupID); err != nil {
+		return nil, glerrors.New(glerrors.KindInvalid, "invalid group id")
+	}
+	return s.enrollments.ListEnrollmentsEverInGroup(ctx, groupID)
 }
 
 // ListEnrollments returns enrollments matching the given filters ("" skips a filter).

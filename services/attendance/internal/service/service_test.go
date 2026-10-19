@@ -193,22 +193,23 @@ func (f *fakeRepo) ListByEnrollment(_ context.Context, enrollmentID string, from
 	return f.listResult, nil
 }
 
-// fakeEnrollments stands in for the students service: the enrollments of a
-// group, in the arbitrary order an RPC would return them.
+// fakeEnrollments stands in for the students service: every enrollment ever
+// in a group and the group's moves, in the arbitrary order an RPC would
+// return them.
 type fakeEnrollments struct {
-	byGroup   map[string][]service.EnrollmentRef
-	transfers map[string][]service.TransferIn
-	err       error
+	byGroup map[string][]service.EnrollmentRef
+	moves   map[string][]service.Move
+	err     error
 }
 
-func (f *fakeEnrollments) TransfersInto(_ context.Context, groupID string) ([]service.TransferIn, error) {
+func (f *fakeEnrollments) MovesOf(_ context.Context, groupID string) ([]service.Move, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
-	return f.transfers[groupID], nil
+	return f.moves[groupID], nil
 }
 
-func (f *fakeEnrollments) ByGroup(_ context.Context, groupID string) ([]service.EnrollmentRef, error) {
+func (f *fakeEnrollments) EverInGroup(_ context.Context, groupID string) ([]service.EnrollmentRef, error) {
 	if f.err != nil {
 		return nil, f.err
 	}

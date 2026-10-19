@@ -122,7 +122,8 @@ export interface PeriodsClient {
   list: (cycleId: string) => Promise<GradingPeriod[]>;
   progress: (termId: string) => Promise<PeriodCaptureProgress>;
   close: (termId: string, force: boolean) => Promise<CloseResult>;
-  reopen: (termId: string) => Promise<{ status: "open" }>;
+  /** `reason` is required by the server (CC-308): 1–500 characters, stored with who reopened it. */
+  reopen: (termId: string, reason: string) => Promise<{ status: "open" }>;
   reportCards: (termId: string, groupId: string) => Promise<ReportCard[]>;
   reportCardPdf: (reportCardId: string) => Promise<ReportCardFile>;
 }
@@ -149,7 +150,7 @@ export function periodsClient(baseURL: string): PeriodsClient {
     },
     progress: async (termId) => (await (await send(`/periods/${id(termId)}/progress`)).json()) as PeriodCaptureProgress,
     close: async (termId, force) => (await (await post(`/periods/${id(termId)}/close`, { force })).json()) as CloseResult,
-    reopen: async (termId) => (await (await post(`/periods/${id(termId)}/reopen`)).json()) as { status: "open" },
+    reopen: async (termId, reason) => (await (await post(`/periods/${id(termId)}/reopen`, { reason })).json()) as { status: "open" },
     reportCards: async (termId, groupId) => {
       const res = await send(`/report-cards?${new URLSearchParams({ termId, groupId }).toString()}`);
       return ((await res.json()) as { reportCards?: ReportCard[] }).reportCards ?? [];

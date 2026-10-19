@@ -216,9 +216,20 @@ func (c *GradesClient) ClosePeriod(ctx context.Context, in ClosePeriodInput) (Cl
 		WithdrawnReportCards: int(res.Msg.GetWithdrawnReportCards())}, nil
 }
 
+// ReopenPeriodInput is one reopen: the term, who reopens it (id and name
+// snapshot) and why (CC-308).
+type ReopenPeriodInput struct {
+	TermID    string
+	ActorID   string
+	ActorName string
+	Reason    string
+}
+
 // ReopenPeriod reopens a closed term (ALREADY_OPEN otherwise).
-func (c *GradesClient) ReopenPeriod(ctx context.Context, termID, actorID string) (string, error) {
-	res, err := c.rpc.ReopenPeriod(ctx, connect.NewRequest(&gradesv1.ReopenPeriodRequest{TermId: termID, ActorId: actorID}))
+func (c *GradesClient) ReopenPeriod(ctx context.Context, in ReopenPeriodInput) (string, error) {
+	res, err := c.rpc.ReopenPeriod(ctx, connect.NewRequest(&gradesv1.ReopenPeriodRequest{
+		TermId: in.TermID, ActorId: in.ActorID, ActorName: in.ActorName, Reason: in.Reason,
+	}))
 	if err != nil {
 		return "", err
 	}

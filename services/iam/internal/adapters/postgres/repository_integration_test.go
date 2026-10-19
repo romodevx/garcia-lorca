@@ -338,6 +338,21 @@ func TestOwnerUserAuthAndPasswordUpdate(t *testing.T) {
 	if userAfter.MustChangePassword() {
 		t.Error("must_change_password still true after UpdatePassword")
 	}
+	// CC-302: every rotation bumps the credential version, the exact counter
+	// RefreshToken compares (a clock comparison let same-second tokens live).
+	if got, want := userAfter.CredentialVersion(), user.CredentialVersion()+1; got != want {
+		t.Errorf("credential version after UpdatePassword = %d, want %d", got, want)
+	}
+	if err := repo.TouchPasswordChangedAt(context.Background(), user.ID()); err != nil {
+		t.Fatalf("TouchPasswordChangedAt: %v", err)
+	}
+	touched, err := repo.FindByID(context.Background(), user.ID())
+	if err != nil {
+		t.Fatalf("FindByID after touch: %v", err)
+	}
+	if got, want := touched.CredentialVersion(), user.CredentialVersion()+2; got != want {
+		t.Errorf("credential version after TouchPasswordChangedAt = %d, want %d", got, want)
+	}
 }
 
 // TestCreateUserRoundTripWithRoles provisions a user AS THE NON-OWNER app role
@@ -418,6 +433,45 @@ func TestListUsersResolvesRoles(t *testing.T) {
 	gradesRead, _ := domain.NewPermission("grades:read")
 	if !found.HasPermission(gradesRead) || len(found.RoleIDs()) != 1 {
 		t.Errorf("ListUsers did not resolve the user's roles: RoleIDs=%v", found.RoleIDs())
+	}
+}
+
+// CC-302 review B2: suspending rotates the credential like a password change
+// does — credential_version goes up with password_changed_at — so a refresh
+// minted before the suspension stays refused even after the account is
+// reactivated, whatever second it was minted in.
+func TestSuspendBumpsTheCredentialVersionAndRevokesOldRefresh(t *testing.T) {
+	ctx := context.Background()
+	uid := "adadadad-0000-0000-0000-0000000000b2"
+	seedUser(t, uid, tenantA, "suspend-version@garcialorca.mx", "x", "active")
+	repo := pgadapter.NewUserRepo(appDB(t), tenantA)
+
+	before, err := repo.FindByID(ctx, uid)
+	if err != nil {
+		t.Fatalf("FindByID: %v", err)
+	}
+	if err := repo.SetStatus(ctx, uid, domain.StatusSuspended, domain.OwnerRoleID); err != nil {
+		t.Fatalf("suspend: %v", err)
+	}
+	if err := repo.SetStatus(ctx, uid, domain.StatusActive, domain.OwnerRoleID); err != nil {
+		t.Fatalf("reactivate: %v", err)
+	}
+	after, err := repo.FindByID(ctx, uid)
+	if err != nil {
+		t.Fatalf("FindByID after: %v", err)
+	}
+	if got, want := after.CredentialVersion(), before.CredentialVersion()+1; got != want {
+		t.Fatalf("credential version after suspend+reactivate = %d, want %d (reactivating does not rotate)", got, want)
+	}
+	// Minted under the old version but AFTER the rotation instant: only the
+	// version can tell it is stale.
+	old := domain.RefreshClaims{UserID: uid, IssuedAt: after.PasswordChangedAt().Add(time.Second), CredentialVersion: before.CredentialVersion()}
+	if !old.RevokedFor(after) {
+		t.Error("a refresh minted before the suspension must stay revoked")
+	}
+	current := domain.RefreshClaims{UserID: uid, IssuedAt: after.PasswordChangedAt().Add(time.Second), CredentialVersion: after.CredentialVersion()}
+	if current.RevokedFor(after) {
+		t.Error("a refresh of the current credential must survive")
 	}
 }
 

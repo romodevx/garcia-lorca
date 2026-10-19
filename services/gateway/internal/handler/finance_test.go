@@ -1026,7 +1026,7 @@ func TestFinanceExpectedAnswersItsLines(t *testing.T) {
 		OwedCents: 320000, SurchargeCents: 30000, TotalCents: 350000, Due: true,
 	}}}}
 	h := handler.NewFinanceHandler(svc)
-	rec := doReq(t, h.ExpectedToday, http.MethodGet, "/api/v1/finance/expected?studentId=stu-1", "")
+	rec := doReq(t, h.ExpectedToday, http.MethodGet, "/api/v1/finance/expected?studentId=b5000000-0000-4000-8000-000000000001", "")
 	body := rec.Body.String()
 	for _, want := range []string{`"lines"`, `"chargeId":"ch-sep"`, `"surchargeCents":30000`, `"totalCents":350000`, `"due":true`, `"dueDate":"2026-09-10"`} {
 		if !strings.Contains(body, want) {
@@ -1043,7 +1043,7 @@ func TestFinanceExpectedBalanceIsOptional(t *testing.T) {
 	}}}}
 	h := handler.NewFinanceHandler(svc)
 
-	rec := doReq(t, h.ExpectedToday, http.MethodGet, "/api/v1/finance/expected?studentId=stu-1", "")
+	rec := doReq(t, h.ExpectedToday, http.MethodGet, "/api/v1/finance/expected?studentId=b5000000-0000-4000-8000-000000000001", "")
 	body := rec.Body.String()
 	for _, want := range []string{`"onTimeBalanceCents":300000`, `"inBalance":true`} {
 		if !strings.Contains(body, want) {
@@ -1054,12 +1054,12 @@ func TestFinanceExpectedBalanceIsOptional(t *testing.T) {
 		t.Error("the balance is included by default")
 	}
 
-	doReq(t, h.ExpectedToday, http.MethodGet, "/api/v1/finance/expected?studentId=stu-1&withBalance=false", "")
+	doReq(t, h.ExpectedToday, http.MethodGet, "/api/v1/finance/expected?studentId=b5000000-0000-4000-8000-000000000001&withBalance=false", "")
 	if svc.expectedBalance {
 		t.Error("withBalance=false still asked for the balance")
 	}
 
-	if rec := doReq(t, h.ExpectedToday, http.MethodGet, "/api/v1/finance/expected?studentId=stu-1&withBalance=maybe", ""); rec.Code != http.StatusBadRequest {
+	if rec := doReq(t, h.ExpectedToday, http.MethodGet, "/api/v1/finance/expected?studentId=b5000000-0000-4000-8000-000000000001&withBalance=maybe", ""); rec.Code != http.StatusBadRequest {
 		t.Errorf("withBalance=maybe: status %d, want 400", rec.Code)
 	}
 }

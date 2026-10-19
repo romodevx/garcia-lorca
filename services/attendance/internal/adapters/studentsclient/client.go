@@ -1,8 +1,8 @@
 // Package studentsclient implements the attendance EnrollmentReader seam over a
 // Connect client to the students bounded context. Attendance owns no enrollments:
-// a group's roster IS the list of its active enrollments, read from students on
-// every call, and this adapter is the only place the generated students proto
-// types are touched.
+// a group's roster on a day IS who sat in it that day, rebuilt from the group's
+// enrollments and moves read from students on every call, and this adapter is
+// the only place the generated students proto types are touched.
 //
 // Error mapping mirrors the seam's contract: a students NotFound becomes
 // glerrors.ErrNotFound so the service can turn it into a KindInvalid; any other
@@ -43,11 +43,12 @@ func New(baseURL string, httpClient connect.HTTPClient) *Client {
 	return &Client{rpc: studentsv1connect.NewStudentsServiceClient(httpClient, baseURL)}
 }
 
-// ByGroup lists the enrollments of a group and projects each to the
-// attendance-owned view. The service filters to the active ones — that set is
-// both the roster and the exact scope a day's reconcile replaces.
-func (c *Client) ByGroup(ctx context.Context, groupID string) ([]service.EnrollmentRef, error) {
-	res, err := c.rpc.ListEnrollments(ctx, connect.NewRequest(&studentsv1.ListEnrollmentsRequest{GroupId: groupID}))
+// EverInGroup lists every enrollment that was ever in the group — the ones in
+// it now and the ones moved out of it since — and projects each to the
+// attendance-owned view. The service replays the moves to tell who sat in the
+// group on a given day (CC-301).
+func (c *Client) EverInGroup(ctx context.Context, groupID string) ([]service.EnrollmentRef, error) {
+	res, err := c.rpc.ListEnrollments(ctx, connect.NewRequest(&studentsv1.ListEnrollmentsRequest{EverInGroupId: groupID}))
 	if err != nil {
 		return nil, mapStudentsErr(err, "enrollments")
 	}
@@ -70,7 +71,19 @@ func toRef(e *studentsv1.Enrollment) service.EnrollmentRef {
 		Status:     statusString(e.GetStatus()),
 		EnrolledAt: timeOf(e.GetEnrolledAt()),
 		EndedAt:    timeOf(e.GetEndedAt()),
+		EndedOn:    dayOf(e.GetWithdrawnOn()),
 	}
+}
+
+// dayOf is a YYYY-MM-DD calendar date at midnight UTC, with no zone
+// conversion; empty or malformed is the zero time (the service then falls
+// back to ended_at's school day).
+func dayOf(raw string) time.Time {
+	day, err := time.Parse(time.DateOnly, raw)
+	if err != nil {
+		return time.Time{}
+	}
+	return day
 }
 
 // timeOf is a timestamp as a UTC time; an unset one is the zero time.
@@ -81,16 +94,22 @@ func timeOf(ts *timestamppb.Timestamp) time.Time {
 	return ts.AsTime().UTC()
 }
 
-// TransfersInto lists every move INTO the group in ONE read (T12: when each
-// pupil joined it, since a transfer rewrites the enrollment's group in place).
-func (c *Client) TransfersInto(ctx context.Context, groupID string) ([]service.TransferIn, error) {
-	res, err := c.rpc.ListTransfers(ctx, connect.NewRequest(&studentsv1.ListTransfersRequest{ToGroupId: groupID}))
+// MovesOf lists every move into OR out of the group in ONE read: a transfer
+// rewrites the enrollment's group in place, so the moves are the only record
+// of who sat in the group on a past day.
+func (c *Client) MovesOf(ctx context.Context, groupID string) ([]service.Move, error) {
+	res, err := c.rpc.ListTransfers(ctx, connect.NewRequest(&studentsv1.ListTransfersRequest{GroupId: groupID}))
 	if err != nil {
 		return nil, mapStudentsErr(err, "transfers")
 	}
-	out := make([]service.TransferIn, 0, len(res.Msg.GetTransfers()))
+	out := make([]service.Move, 0, len(res.Msg.GetTransfers()))
 	for _, t := range res.Msg.GetTransfers() {
-		out = append(out, service.TransferIn{EnrollmentID: t.GetEnrollmentId(), MovedAt: timeOf(t.GetMovedAt())})
+		out = append(out, service.Move{
+			EnrollmentID: t.GetEnrollmentId(),
+			FromGroupID:  t.GetFromGroupId(),
+			ToGroupID:    t.GetToGroupId(),
+			MovedAt:      timeOf(t.GetMovedAt()),
+		})
 	}
 	return out, nil
 }

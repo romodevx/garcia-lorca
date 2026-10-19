@@ -5,6 +5,8 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/garcia-lorca/services/gateway/internal/client"
 	"github.com/garcia-lorca/services/gateway/internal/middleware"
@@ -28,7 +30,7 @@ type PeriodsService interface {
 	ListPeriods(ctx context.Context, cycleID string) ([]client.Period, error)
 	GetPeriodProgress(ctx context.Context, termID string) (client.PeriodProgress, error)
 	ClosePeriod(ctx context.Context, in client.ClosePeriodInput) (client.ClosePeriodResult, error)
-	ReopenPeriod(ctx context.Context, termID, actorID string) (string, error)
+	ReopenPeriod(ctx context.Context, in client.ReopenPeriodInput) (string, error)
 }
 
 // GradesPeriodsHandler serves /api/v1/grades/periods*.
@@ -194,7 +196,17 @@ func (h *GradesPeriodsHandler) Close(w http.ResponseWriter, r *http.Request) {
 		SkippedWithoutGrades: res.SkippedWithoutGrades, WithdrawnReportCards: res.WithdrawnReportCards})
 }
 
-// Reopen handles POST /api/v1/grades/periods/{termId}/reopen.
+// maxReopenReason bounds, in characters, why a period is reopened (grades
+// and its column hold the same limit).
+const maxReopenReason = 500
+
+type reopenPeriodRequest struct {
+	Reason string `json:"reason"`
+}
+
+// Reopen handles POST /api/v1/grades/periods/{termId}/reopen {reason}. The
+// reason is required (CC-308): missing, blank or over 500 characters is 400
+// in the error envelope, and grades stores it with who reopened the period.
 func (h *GradesPeriodsHandler) Reopen(w http.ResponseWriter, r *http.Request) {
 	p, ok := middleware.PrincipalFrom(r.Context())
 	if !ok {
@@ -206,10 +218,28 @@ func (h *GradesPeriodsHandler) Reopen(w http.ResponseWriter, r *http.Request) {
 		writeNotFound(w)
 		return
 	}
-	status, err := h.grades.ReopenPeriod(r.Context(), termID, p.UserID)
+	var req reopenPeriodRequest
+	if err := decodeJSONBody(w, r, &req); err != nil && !errors.Is(err, io.EOF) {
+		writeReopenReasonError(w)
+		return
+	}
+	reason := strings.TrimSpace(req.Reason)
+	if reason == "" || utf8.RuneCountInString(reason) > maxReopenReason {
+		writeReopenReasonError(w)
+		return
+	}
+	status, err := h.grades.ReopenPeriod(r.Context(), client.ReopenPeriodInput{
+		TermID: termID, ActorID: p.UserID, ActorName: callerName(r.Context(), h.names, p), Reason: reason,
+	})
 	if err != nil {
 		writeConnectError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, periodStatusResponse{Status: status})
+}
+
+// writeReopenReasonError answers a reopen without a usable reason.
+func writeReopenReasonError(w http.ResponseWriter) {
+	middleware.WriteError(w, http.StatusBadRequest, "invalid",
+		"Escribe el motivo para reabrir el periodo (máximo 500 caracteres)", map[string]string{"field": "reason"})
 }

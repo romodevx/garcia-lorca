@@ -17,7 +17,7 @@ type PeriodsUseCase interface {
 	ListPeriods(ctx context.Context, cycleID string) ([]usecase.Period, error)
 	Progress(ctx context.Context, termID string) (usecase.PeriodProgress, error)
 	Close(ctx context.Context, termID string, force bool, actor domain.Actor) (usecase.CloseResult, error)
-	Reopen(ctx context.Context, termID, actorID string) (domain.PeriodStatus, error)
+	Reopen(ctx context.Context, termID string, actor domain.Actor, reason string) (domain.PeriodStatus, error)
 	ReportCards(ctx context.Context, filter ports.ReportCardFilter) ([]domain.ReportCard, error)
 	ReportCard(ctx context.Context, id string) (domain.ReportCard, error)
 	ClosedTerms(ctx context.Context, termIDs []string) ([]string, error)
@@ -92,7 +92,8 @@ func (h *GradesHandler) ClosePeriod(ctx context.Context, req *connect.Request[gr
 
 // ReopenPeriod reopens a closed term.
 func (h *GradesHandler) ReopenPeriod(ctx context.Context, req *connect.Request[gradesv1.ReopenPeriodRequest]) (*connect.Response[gradesv1.ReopenPeriodResponse], error) {
-	status, err := h.periods.Reopen(ctx, req.Msg.GetTermId(), req.Msg.GetActorId())
+	m := req.Msg
+	status, err := h.periods.Reopen(ctx, m.GetTermId(), domain.Actor{ID: m.GetActorId(), Name: m.GetActorName()}, m.GetReason())
 	if err != nil {
 		return nil, connectErr(err)
 	}

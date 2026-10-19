@@ -1976,7 +1976,7 @@ paths:
                   events:
                     type: array
                     items: { $ref: '#/components/schemas/SchoolEvent' }
-        '400': { $ref: '#/components/responses/BadRequest' }
+        '400': { $ref: '#/components/responses/MissingQueryParameter' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/ModuleDisabled' }
@@ -2060,7 +2060,7 @@ paths:
                   periods:
                     type: array
                     items: { $ref: '#/components/schemas/NonWorkingPeriod' }
-        '400': { $ref: '#/components/responses/BadRequest' }
+        '400': { $ref: '#/components/responses/MissingQueryParameter' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/ModuleDisabled' }
@@ -3989,8 +3989,12 @@ paths:
       tags: [attendance]
       summary: A pass list (director)
       description: >
-        One row per active enrollment of the group; a row with no stored mark
-        reads `present`. The director has no date window, so `editable` is
+        One row per pupil who was in the group ON THAT DATE (CC-301): enrolled
+        on or before it, not withdrawn before it (the withdrawal day still
+        counts) and in the group that day by the transfer history — never by
+        today's enrollments, so a later enrollment or group change does not
+        rewrite a past list. On a transfer day the pupil is on both groups'
+        lists. A row with no stored mark reads `present`. The director has no date window, so `editable` is
         always true. The level's mode still applies: a `per_class` group needs
         `subjectId` (400 "Esta lista es por clase: elige la asignatura"), a
         `daily` group refuses one (400 "Esta lista es por día"), and the
@@ -4025,7 +4029,10 @@ paths:
         Reconciles the whole list: `marks` is the COMPLETE set of exceptions,
         so every enrollment missing from it (or marked `present`) ends present.
         Stored rows are corrected in place and events go out only for what
-        changed, so re-saving never re-notifies the family. The caller is
+        changed, so re-saving never re-notifies the family. A mark for a pupil
+        who was not in the group on that date (enrolled later, withdrawn
+        before, or in another group that day) is 400 "enrollment not in
+        group" and nothing is stored (CC-301). The caller is
         stamped as the list's taker. Same mode rules as the roster; any date
         with classes: a weekend, a date outside the group's cycle or a day the
         school calendar closes is 400 `X-Error-Code: NO_CLASSES` ("Ese día no
@@ -4232,7 +4239,8 @@ paths:
       tags: [attendance]
       summary: One of the caller's pass lists (teacher)
       description: >
-        Any date may be read; `editable` says whether the caller may still save
+        The rows are who was in the group on that date, as on the director
+        route (CC-301). Any date may be read; `editable` says whether the caller may still save
         it (`today` and up to `windowDays` back, never the future) and
         `readOnlyReason` why not. As on the director route, a list taken before
         its level changed mode stays readable and correctable. A group the
@@ -4267,8 +4275,9 @@ paths:
         lists (404 otherwise) and to today (the school's day, America/Mexico_City) and up
         to 7 days back: 400 "No puedes registrar una fecha futura" for a date
         after today, "Solo puedes corregir hasta 7 días atrás" for one before
-        the window. An enrollment of another group is refused by the attendance
-        service (400). A day without classes is 400 `X-Error-Code:
+        the window. An enrollment that was not in the group on that date
+        (another group, enrolled later, withdrawn before) is refused by the
+        attendance service (400 "enrollment not in group", CC-301). A day without classes is 400 `X-Error-Code:
         NO_CLASSES` ("Ese día no hay clases."), as on the director route. The
         caller is stamped as the list's taker. Requires
         `attendance_own:write`.
@@ -4806,7 +4815,7 @@ paths:
                             Counted in annualBalanceCents today. false for a
                             charge not yet open (T5) with nothing paid on it:
                             listed so it can be paid ahead, not part of the debt.
-        '400': { $ref: '#/components/responses/BadRequest' }
+        '400': { $ref: '#/components/responses/MissingQueryParameter' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/ModuleDisabled' }
@@ -6896,6 +6905,57 @@ paths:
         '403': { $ref: '#/components/responses/PlainForbidden' }
         '404': { $ref: '#/components/responses/PlainNotFound' }
 
+  /api/v1/grades/roster:
+    get:
+      tags: [grades]
+      summary: An assignment's grade roster (director)
+      description: >
+        One row per active enrollment of the assignment's group, with its grade
+        for the term (`hasValue` false when none is captured). `assignmentId`
+        is required and `termId` optional; a missing or malformed id is 400 in
+        the error envelope naming the parameter (`details.field`), never
+        forwarded (CC-304). Behind `module_grades`. Requires `grades:read`.
+      operationId: getGradesRoster
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: assignmentId
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+        - name: termId
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The roster.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [roster]
+                properties:
+                  roster:
+                    type: array
+                    items:
+                      type: object
+                      required: [enrollmentId, studentId, value, hasValue]
+                      properties:
+                        enrollmentId: { type: string, format: uuid }
+                        studentId: { type: string, format: uuid }
+                        value: { type: number, description: 0 when hasValue is false. }
+                        hasValue: { type: boolean }
+              example:
+                roster:
+                  - enrollmentId: 3f1c2b9a-6d7e-4f80-9a1b-2c3d4e5f6a7b
+                    studentId: 7a6b5c4d-3e2f-4a1b-8c9d-0e1f2a3b4c5d
+                    value: 9
+                    hasValue: true
+        '400': { $ref: '#/components/responses/MissingQueryParameter' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+
   /api/v1/grades/terms:
     get:
       tags: [grades]
@@ -7284,13 +7344,30 @@ paths:
       description: >
         Unlocks the period's months so its grades can be corrected. Its report
         cards stay published until the next close supersedes them. An open
-        period (or one never closed) is 409 `ALREADY_OPEN`. Behind
-        `module_grades`. Requires `grades:close` (owner only).
+        period (or one never closed) is 409 `ALREADY_OPEN`. The reason is
+        required (CC-308): missing, blank or over 500 characters is 400 with
+        `details.field: reason`; grades stores it, trimmed, with who reopened
+        the period and when. Behind `module_grades`. Requires `grades:close`
+        (owner only).
       operationId: reopenGradePeriod
       security: [{ sessionCookie: [] }]
       parameters:
         - $ref: '#/components/parameters/CsrfToken'
         - $ref: '#/components/parameters/TermIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  minLength: 1
+                  maxLength: 500
+                  description: Why the period is reopened, in the director's words.
+            example: { reason: Corrección de la calificación de Matemáticas de 3º B }
       responses:
         '200':
           description: The period is open.
@@ -7302,6 +7379,16 @@ paths:
                 properties:
                   status: { type: string, enum: [open] }
               example: { status: open }
+        '400':
+          description: The reason is missing, blank or longer than 500 characters.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example:
+                error:
+                  code: invalid
+                  message: Escribe el motivo para reabrir el periodo (máximo 500 caracteres)
+                  details: { field: reason }
         '401': { $ref: '#/components/responses/PlainUnauthorized' }
         '403': { $ref: '#/components/responses/PlainForbidden' }
         '404': { $ref: '#/components/responses/PlainNotFound' }
@@ -7836,6 +7923,18 @@ components:
                   when every mark landed.
                 items: { type: string, format: uuid }
           example: { absentCount: 1, markedCount: 2, heldElsewhere: ['3f2504e0-4f89-41d3-9a0c-0305e82c3301'] }
+    MissingQueryParameter:
+      description: >
+        A required id is missing from the query, or is not a uuid (CC-304).
+        The envelope's `details.field` names the parameter.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            error:
+              code: invalid
+              message: Falta el parámetro cycleId
+              details: { field: cycleId }
     BadRequest:
       description: The request did not satisfy the contract.
       content:

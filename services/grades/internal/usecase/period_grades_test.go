@@ -477,7 +477,7 @@ func TestClosedTermLocksItsPeriodForEveryone(t *testing.T) {
 func TestReopenedOrForeignTermDoesNotLock(t *testing.T) {
 	f := newGradesFixture(t)
 	closeTerm(t, f, firstTermID)
-	reopened, err := f.repo.closures[firstTermID].Reopen(sheetNow)
+	reopened, err := f.repo.closures[firstTermID].Reopen(dirActor, reopenReason, sheetNow)
 	require.NoError(t, err)
 	f.repo.closures[firstTermID] = reopened
 	_, err = f.svc.Upsert(context.Background(), upsertInput(period1, enrollmentID, "9"))

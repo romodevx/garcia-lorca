@@ -101,11 +101,11 @@ type fakeEnrollments struct {
 	byGroup map[string][]service.EnrollmentRef
 }
 
-func (f *fakeEnrollments) ByGroup(_ context.Context, groupID string) ([]service.EnrollmentRef, error) {
+func (f *fakeEnrollments) EverInGroup(_ context.Context, groupID string) ([]service.EnrollmentRef, error) {
 	return f.byGroup[groupID], nil
 }
 
-func (f *fakeEnrollments) TransfersInto(context.Context, string) ([]service.TransferIn, error) {
+func (f *fakeEnrollments) MovesOf(context.Context, string) ([]service.Move, error) {
 	return nil, nil
 }
 

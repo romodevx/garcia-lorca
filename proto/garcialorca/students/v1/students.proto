@@ -632,6 +632,10 @@ message ListEnrollmentsRequest {
   string student_id = 1;  // optional filter (empty = any)
   string cycle_id = 2;    // optional filter (empty = any)
   string group_id = 3;    // optional filter (empty = any)
+  // optional filter: every enrollment EVER in that group — the ones in it now
+  // and the ones moved out of it since (a transfer rewrites group_id in place).
+  // With the group's moves (ListTransfers group_id), who sat in it on a past day.
+  string ever_in_group_id = 4;
 }
 
 message ListEnrollmentsResponse {
@@ -639,10 +643,12 @@ message ListEnrollmentsResponse {
 }
 
 message ListTransfersRequest {
-  // Exactly one filter: student_id (that pupil's moves) or to_group_id (every
-  // move INTO that group, whoever made it — one read for a whole class list).
+  // Exactly one filter: student_id (that pupil's moves), to_group_id (every
+  // move INTO that group, whoever made it — one read for a whole class list) or
+  // group_id (every move into OR out of that group: its membership history).
   string student_id = 1;
   string to_group_id = 2;
+  string group_id = 3;
 }
 
 message ListTransfersResponse {
