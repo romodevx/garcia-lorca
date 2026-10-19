@@ -457,9 +457,17 @@ func (stubConfig) ListGradeLevels(_ context.Context, _ *connect.Request[configv1
 	}}), nil
 }
 
-// schoolTodayISO is the system's school day (UTC), the one date a teacher may
-// always save.
-func schoolTodayISO() string { return time.Now().UTC().Format("2006-01-02") }
+// schoolTodayISO is the school's day (America/Mexico_City, ADR 0035), the one
+// date a teacher may always save. It used to be UTC's, which after 18:00 in
+// Morelia is already tomorrow — "a future date", 400 — so these tests failed
+// every evening.
+func schoolTodayISO() string {
+	zone, err := time.LoadLocation(defaultSchoolTimezone)
+	if err != nil {
+		panic(err)
+	}
+	return time.Now().In(zone).Format("2006-01-02")
+}
 
 func (stubConfig) ListSubjects(_ context.Context, _ *connect.Request[configv1.ListSubjectsRequest]) (*connect.Response[configv1.ListSubjectsResponse], error) {
 	return connect.NewResponse(&configv1.ListSubjectsResponse{Subjects: []*configv1.Subject{
