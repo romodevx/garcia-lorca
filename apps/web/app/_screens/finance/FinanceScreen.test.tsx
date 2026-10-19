@@ -6,7 +6,7 @@ import * as financeApi from "../../finance/api";
 import * as configApi from "../../config/api";
 import * as studentsApi from "../../students/api";
 import { clearIntent, requestIntent } from "../../routing/pendingIntent";
-import { FinanceScreen } from "./FinanceScreen";
+import { FinanceScreen, pupilOptions } from "./FinanceScreen";
 
 vi.mock("../../finance/api", () => ({
   listCharges: vi.fn(),
@@ -689,5 +689,52 @@ describe("PayDrawer · lo que se debe hoy (revisión B1)", () => {
     fireEvent.change(within(dialog).getByLabelText("Fecha de pago"), { target: { value: "2026-01-05" } });
 
     await waitFor(() => expect(within(dialog).getByTestId("pay-quote")).toHaveTextContent(/A pagar hoy\s*\$1,000\.00/));
+  });
+});
+
+// C2-006: beside the name the list showed the first characters of the pupil's
+// internal id ("32d3e3e0"). It shows the matrícula, or nothing.
+describe("FinanceScreen · matrícula, nunca el id interno (C2-006)", () => {
+  const ID = "32d3e3e0-5b1c-4c8e-9a51-7f0e2d4b6a10";
+
+  it("shows the pupil's matrícula next to the name", async () => {
+    students.listStudents.mockResolvedValue([{ ...student(ID, "Valentina", "Cruz"), enrollmentNumber: "2026-00017" }]);
+    finance.listCharges.mockResolvedValue([charge("ch1", ID, 100000)]);
+    render(<FinanceScreen onBack={() => {}} />);
+
+    expect(await screen.findByText("2026-00017")).toBeInTheDocument();
+    expect(screen.queryByText(/32d3e3e0/)).toBeNull();
+  });
+
+  it("shows nothing beside the name when the pupil has no matrícula", async () => {
+    students.listStudents.mockResolvedValue([student(ID, "Valentina", "Cruz")]);
+    finance.listCharges.mockResolvedValue([charge("ch1", ID, 100000)]);
+    render(<FinanceScreen onBack={() => {}} />);
+
+    expect(await screen.findByText("Cruz Valentina")).toBeInTheDocument();
+    expect(screen.queryByText(/32d3e3e0/)).toBeNull();
+  });
+
+  it("never shows the id as the name of a pupil it could not read", async () => {
+    students.listStudents.mockResolvedValue([]);
+    finance.listCharges.mockResolvedValue([charge("ch1", ID, 100000)]);
+    render(<FinanceScreen onBack={() => {}} />);
+
+    expect(await screen.findAllByText("Colegiatura")).not.toHaveLength(0);
+    expect(screen.queryByText(/32d3e3e0/)).toBeNull();
+  });
+});
+
+describe("pupilOptions · homónimos sin id interno (C2-006)", () => {
+  it("tells namesakes apart by matrícula, or by a number when there is none", () => {
+    const twins = new Map([
+      ["a1b2c3d4-0000", { ...student("a1b2c3d4-0000", "Ana", "López"), enrollmentNumber: "2026-00001" }],
+      ["e5f6a7b8-0000", { ...student("e5f6a7b8-0000", "Ana", "López"), enrollmentNumber: "2026-00002" }],
+      ["c9d0e1f2-0000", student("c9d0e1f2-0000", "Ana", "López")],
+    ]);
+    const labels = pupilOptions(twins, new Map()).map((p) => p.label);
+
+    expect(labels.join(" | ")).not.toMatch(/a1b2c3d4|e5f6a7b8|c9d0e1f2/);
+    expect(new Set(labels).size).toBe(3);
   });
 });
