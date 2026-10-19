@@ -184,6 +184,19 @@ func TestAdjustStockNamesWhyItRefused(t *testing.T) {
 	}
 }
 
+// TestAdjustStockRefusesAZeroDelta: a correction of nothing is a bad request.
+// The ledger's CHECK (qty <> 0) used to turn it into a server error (C2-014).
+func TestAdjustStockRefusesAZeroDelta(t *testing.T) {
+	ctx := context.Background()
+	repo := appRepo(t, tenantA)
+	_, stock := seedGarment(t, repo, "ADJ-NONE", "8", 32000, 3)
+
+	_, err := repo.AdjustStock(ctx, stock.ID(), 0, "conteo físico", "")
+	if glerrors.KindOf(err) != glerrors.KindInvalid || !strings.Contains(err.Error(), "must move the count") {
+		t.Errorf("zero delta: got %v, want the domain's invalid-argument refusal", err)
+	}
+}
+
 // TestCounterSaleIsIdempotent: a double click at the till sells once.
 func TestCounterSaleIsIdempotent(t *testing.T) {
 	ctx := context.Background()
