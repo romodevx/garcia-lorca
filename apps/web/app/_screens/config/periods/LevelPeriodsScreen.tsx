@@ -91,7 +91,11 @@ export function LevelPeriodsScreen({ levelId, canWrite, onBack }: LevelPeriodsSc
               onSave={() => {
                 void p.save(g.id).then((first) => first !== undefined && setFocusTarget({ key: first.key, field: first.field }));
               }}
-              onCopy={(ids) => p.copy(g.id, ids)}
+              onCopy={async (ids) => {
+                const outcome = await p.copy(g.id, ids);
+                if (outcome.focus !== undefined) setFocusTarget({ key: outcome.focus.key, field: outcome.focus.field });
+                return outcome.copied;
+              }}
             />
           ))}
         </div>
