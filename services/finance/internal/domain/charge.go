@@ -231,10 +231,9 @@ func (c Charge) DiscountReason() string { return c.discountReason }
 // Cancel returns a cancelled copy of the charge. Cancelling twice is a
 // KindConflict.
 //
-// For the MVP a charge may be cancelled regardless of the payments posted
-// against it: the school sometimes voids a charge it has already partially
-// collected, and reconciling that money (refund vs. credit toward another
-// charge) is a later phase, handled by the ledger rather than by blocking here.
+// Cancel does not look at money: callers go through CancelIfUnpaidWithReason,
+// which refuses a charge with payments on it (C2-005). Cancel stays as the
+// status change alone so that guard and older rows read the same transition.
 func (c Charge) Cancel() (Charge, error) {
 	if c.status == StatusCancelled {
 		return Charge{}, glerrors.New(glerrors.KindConflict, "charge already cancelled")

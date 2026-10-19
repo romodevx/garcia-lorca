@@ -64,7 +64,7 @@ func (c *Client) ByID(ctx context.Context, id string) (ports.StudentRef, error) 
 		return ports.StudentRef{}, err
 	}
 	return ports.StudentRef{
-		ID:       s.GetId(),
+		ID: s.GetId(),
 		FullName: studentname.Format(studentname.Parts{
 			First: s.GetFirstName(), Paternal: s.GetLastName(), Maternal: s.GetMaternalLastName(),
 		}),

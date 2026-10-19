@@ -25,6 +25,9 @@ const FAILURE = {
   discount: { conflict: "Este cargo cambió mientras tanto. Vuelve a cargar la lista.", forbiddenAction: "aplicar descuentos", other: "No se pudo aplicar el descuento. Intenta de nuevo." },
   cancel: { conflict: "Este cargo ya estaba cancelado. Vuelve a cargar la lista.", forbiddenAction: "cancelar cargos", other: "No se pudo cancelar el cargo. Intenta de nuevo." },
 } as const;
+/** C2-005: a charge with money on it is not cancelled until that money is settled. */
+const HAS_PAYMENTS = "Este cargo tiene pagos: primero anula o corrige el pago y después cancela el cargo.";
+const HAS_PAYMENTS_REASON = "charge has payments and cannot be cancelled";
 const MODES: readonly { value: Mode; label: string }[] = [
   { value: "discount", label: "Descuento" },
   { value: "cancel", label: "Cancelar cargo" },
@@ -62,7 +65,8 @@ export function ChargeAdjustPanel({ charge, name, onDone, onClose }: ChargeAdjus
         onDone(await cancelCharge(API_URL, charge.id, reason.trim()), `Cargo de ${name} cancelado.`);
       }
     } catch (cause) {
-      setProblem(failureMessage(cause, FAILURE[mode]));
+      const hasPayments = cause instanceof Error && cause.message.includes(HAS_PAYMENTS_REASON);
+      setProblem(hasPayments ? HAS_PAYMENTS : failureMessage(cause, FAILURE[mode]));
     } finally {
       setSaving(false);
     }
@@ -76,6 +80,9 @@ export function ChargeAdjustPanel({ charge, name, onDone, onClose }: ChargeAdjus
       const bad = discountProblem();
       setAmountError(bad);
       if (bad !== undefined) return;
+    } else if (charge.paidCents > 0) {
+      setProblem(HAS_PAYMENTS);
+      return;
     }
     void run();
   };
@@ -98,7 +105,10 @@ export function ChargeAdjustPanel({ charge, name, onDone, onClose }: ChargeAdjus
         <MoneyField label="Monto del descuento" required value={amount} onChange={(v) => { setAmount(v); setAmountError(undefined); }} onClearError={() => required.clear("amount")} error={required.errors.amount ?? amountError} help="El descuento total del cargo: sustituye al que ya tuviera." />
       ) : (
         <p style={{ margin: 0, display: "flex", gap: 8, color: "var(--bad-fg)", fontSize: 14.5, fontWeight: 600 }}>
-          <Icon name="warning" size={18} />Cancelar un cargo no se puede deshacer: deja de contar en el estado de cuenta. Lo que ya se pagó sigue registrado.
+          <Icon name="warning" size={18} />
+          {charge.paidCents > 0
+            ? `Este cargo ya tiene ${formatCents(charge.paidCents)} pagados. Para cancelarlo, primero anula o corrige ese pago.`
+            : "Cancelar un cargo no se puede deshacer: deja de contar en el estado de cuenta."}
         </p>
       )}
       <TextField label="Motivo" required value={reason} onChange={setReason} onClearError={() => required.clear("reason")} error={required.errors.reason} help="Queda en el historial del cargo." />

@@ -22,6 +22,16 @@ beforeEach(() => {
 });
 afterEach(() => vi.clearAllMocks());
 
+// As StudentsError really arrives: the Spanish fallback in `message`, the
+// server's own words in `detail` (C2-003 was first written against `message`
+// and the live screen showed "Los datos cambiaron" instead of asking).
+function staffRefusal(): Error {
+  return Object.assign(new Error("Los datos cambiaron mientras tanto. Actualiza la página."), {
+    status: 409,
+    detail: "that email belongs to a staff account; confirm it is the same person",
+  });
+}
+
 describe("ContactsPanel", () => {
   it("lists everyone the school can call", async () => {
     render(<ContactsPanel studentId="st-1" />);
@@ -129,6 +139,51 @@ describe("ContactsPanel — dar acceso a la app", () => {
 
     expect(await screen.findByText("No se pudo dar el acceso.")).toBeInTheDocument();
     expect(screen.queryByText(/Failed to fetch/)).toBeNull();
+  });
+
+  // C2-003 (decisión del dueño, opción C): an address that belongs to a staff
+  // account is asked about, not merged. Confirming sends the same request with
+  // the confirmation; it is the director who knows it is the same person.
+  it("asks before using a staff account, and confirms on request", async () => {
+    const user = userEvent.setup();
+    students.listContacts.mockResolvedValue([
+      { id: "gl-2", studentId: "st-1", guardianUserId: "", relationship: "father", fullName: "Mateo Contreras", phone: "", email: "maestro@example.com", hasAccount: false },
+    ]);
+    students.inviteContactToApp
+      .mockRejectedValueOnce(staffRefusal())
+      .mockResolvedValueOnce({
+        contact: { id: "gl-2", studentId: "st-1", guardianUserId: "usr-t", relationship: "father", fullName: "Mateo Contreras", phone: "", email: "maestro@example.com", hasAccount: true },
+        invitation: null,
+      });
+    render(<ContactsPanel studentId="st-1" />);
+    await screen.findByText("Mateo Contreras");
+
+    await user.click(screen.getByRole("button", { name: /Dar acceso a la app/ }));
+
+    expect(await screen.findByText(/es la cuenta de alguien del personal/)).toBeInTheDocument();
+    expect(students.inviteContactToApp).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole("button", { name: "Sí, es la misma persona" }));
+
+    await waitFor(() => expect(students.inviteContactToApp).toHaveBeenCalledTimes(2));
+    expect(students.inviteContactToApp.mock.calls[1]?.[3]).toEqual({ confirmStaffAccount: true });
+    expect(await screen.findByText(/ya tenía cuenta con ese correo/)).toBeInTheDocument();
+  });
+
+  it("lets the office fix the address instead", async () => {
+    const user = userEvent.setup();
+    students.listContacts.mockResolvedValue([
+      { id: "gl-2", studentId: "st-1", guardianUserId: "", relationship: "father", fullName: "Mateo Contreras", phone: "", email: "maestro@example.com", hasAccount: false },
+    ]);
+    students.inviteContactToApp.mockRejectedValue(staffRefusal());
+    render(<ContactsPanel studentId="st-1" />);
+    await screen.findByText("Mateo Contreras");
+
+    await user.click(screen.getByRole("button", { name: /Dar acceso a la app/ }));
+    await user.click(await screen.findByRole("button", { name: "No, corregir el correo" }));
+
+    expect(screen.queryByText(/es la cuenta de alguien del personal/)).toBeNull();
+    expect(screen.getByDisplayValue("maestro@example.com")).toBeInTheDocument();
+    expect(students.inviteContactToApp).toHaveBeenCalledTimes(1);
   });
 
   // A contact with no address has nowhere to receive the invitation, so the

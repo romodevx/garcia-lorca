@@ -52,6 +52,19 @@ const NOTHING_REQUIRED = [] as const;
 /** Fuera del componente: useFormatError lo toma como dependencia. */
 const PHONE_RULES = { phone: phoneError } as const;
 
+/** iam's refusal of a staff address not yet confirmed (C2-003). */
+const STAFF_ADDRESS_REASON = "belongs to a staff account";
+
+/**
+ * Whether the refusal is iam asking about a staff address. It reads the
+ * server's own words (`detail`), never `message`: StudentsError puts the
+ * Spanish sentence for the screen there, and a 409's is a generic one.
+ */
+function isStaffAddressRefusal(cause: unknown): boolean {
+  if (typeof cause !== "object" || cause === null || !("detail" in cause)) return false;
+  return typeof cause.detail === "string" && cause.detail.includes(STAFF_ADDRESS_REASON);
+}
+
 export function ContactsPanel({ studentId }: ContactsPanelProps): ReactElement {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [name, setName] = useState("");
@@ -76,6 +89,9 @@ export function ContactsPanel({ studentId }: ContactsPanelProps): ReactElement {
   const [granting, setGranting] = useState<string | undefined>(undefined);
   const [granted, setGranted] = useState<Record<string, ContactAccessResult>>({});
   const [grantError, setGrantError] = useState<Record<string, string>>({});
+  // C2-003: contacts whose address iam said belongs to a staff account, waiting
+  // for the director to say whether it is the same person.
+  const [staffAddress, setStaffAddress] = useState<Record<string, boolean>>({});
 
   const reload = useCallback(() => {
     listContacts(API_URL, studentId)
@@ -134,14 +150,19 @@ export function ContactsPanel({ studentId }: ContactsPanelProps): ReactElement {
     });
   };
 
-  const giveAccess = async (contact: Contact): Promise<void> => {
+  const giveAccess = async (contact: Contact, confirmStaffAccount = false): Promise<void> => {
     setGranting(contact.id);
     setGrantError((prev) => ({ ...prev, [contact.id]: "" }));
+    setStaffAddress((prev) => ({ ...prev, [contact.id]: false }));
     try {
-      const result = await inviteContactToApp(API_URL, studentId, contact.id);
+      const result = await inviteContactToApp(API_URL, studentId, contact.id, confirmStaffAccount ? { confirmStaffAccount: true } : {});
       setGranted((prev) => ({ ...prev, [contact.id]: result }));
       reload();
     } catch (cause) {
+      if (isStaffAddressRefusal(cause)) {
+        setStaffAddress((prev) => ({ ...prev, [contact.id]: true }));
+        return;
+      }
       setGrantError((prev) => ({
         ...prev,
         [contact.id]: (cause instanceof Error ? spanishServerReason(cause.message) : undefined) ?? "No se pudo dar el acceso.",
@@ -210,6 +231,18 @@ export function ContactsPanel({ studentId }: ContactsPanelProps): ReactElement {
             // its access is revoked first. So the button is not offered.
             <Btn kind="ghost" onClick={() => remove(c)} aria-label={`Quitar a ${displayName(c)}`} style={ROW_ACTION}>Quitar</Btn>
           )}
+        </div>
+      ))}
+      {contacts.map((c) => staffAddress[c.id] === true && (
+        <div key={`${c.id}-staff`} role="status" style={{ margin: "8px 0 0", padding: "10px 12px", borderRadius: 10, background: "var(--surface-2)", fontSize: 13.5, color: "var(--text)", display: "grid", gap: 8 }}>
+          <span>
+            <strong>{c.email}</strong> es la cuenta de alguien del personal. Si es la misma persona —por ejemplo,
+            un maestro que también es papá o mamá—, usará esa misma cuenta para entrar a la app. Si no, corrige el correo del contacto.
+          </span>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <Btn onClick={() => void giveAccess(c, true)}>Sí, es la misma persona</Btn>
+            <Btn kind="ghost" onClick={() => { setStaffAddress((prev) => ({ ...prev, [c.id]: false })); setEditing(c.id); }}>No, corregir el correo</Btn>
+          </div>
         </div>
       ))}
       {contacts.map((c) => {

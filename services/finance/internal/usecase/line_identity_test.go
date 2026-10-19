@@ -309,7 +309,7 @@ func TestACancelledLineDoesNotBlockTheConvertedInscription(t *testing.T) {
 	f := billingFixture(t)
 	runOn(t, f, "2026-09-15")
 	old := chargeNamed(t, f, testStudent, "Inscripción")
-	if _, err := f.svc.CancelCharge(context.Background(), old.Charge.ID(), "Cargo duplicado"); err != nil {
+	if _, err := f.svc.CancelCharge(context.Background(), old.Charge.ID(), "Cargo duplicado", testActor); err != nil {
 		t.Fatalf("CancelCharge: %v", err)
 	}
 	conceptsPlan(t, f, "INSCRIPCION")

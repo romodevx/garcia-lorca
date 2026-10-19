@@ -2,6 +2,7 @@ package usecase_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -103,7 +104,7 @@ func TestAssignRoleRefusesTheGuardianRole(t *testing.T) {
 func TestInviteGuardianCreatesAnInvitedGuardian(t *testing.T) {
 	users := &fakeUsers{byID: map[string]domain.User{}}
 
-	got, err := newGuardianService(t, users, true).InviteGuardian(context.Background(), "Mama@GL.mx", "Mamá de Ana")
+	got, err := newGuardianService(t, users, true).InviteGuardian(context.Background(), "Mama@GL.mx", "Mamá de Ana", false)
 	if err != nil {
 		t.Fatalf("InviteGuardian: %v", err)
 	}
@@ -127,7 +128,7 @@ func TestInviteGuardianCreatesAnInvitedGuardian(t *testing.T) {
 func TestInviteGuardianAddsTheRoleToALiveAccount(t *testing.T) {
 	f := newDeleteFixture(t)
 
-	got, err := newGuardianService(t, f.users, true).InviteGuardian(context.Background(), "MAESTRA@gl.mx", "Maestra")
+	got, err := newGuardianService(t, f.users, true).InviteGuardian(context.Background(), "MAESTRA@gl.mx", "Maestra", true)
 	if err != nil {
 		t.Fatalf("InviteGuardian: %v", err)
 	}
@@ -146,10 +147,30 @@ func TestInviteGuardianAddsTheRoleToALiveAccount(t *testing.T) {
 	}
 }
 
+// C2-003 (decisión del dueño, 19-oct, opción C): an address that belongs to a
+// staff account is not turned into a parent's login unasked. A typo would
+// otherwise let an employee read another family's child. The director is asked
+// to confirm it is the same person, and only then does the account gain the role.
+func TestInviteGuardianOnAStaffAccountAsksForConfirmation(t *testing.T) {
+	f := newDeleteFixture(t)
+
+	_, err := newGuardianService(t, f.users, true).InviteGuardian(context.Background(), "MAESTRA@gl.mx", "Maestra", false)
+
+	if glerrors.KindOf(err) != glerrors.KindConflict {
+		t.Fatalf("err = %v, want KindConflict", err)
+	}
+	if !errors.Is(err, usecase.ErrGuardianEmailIsStaff) {
+		t.Errorf("err = %v, want ErrGuardianEmailIsStaff", err)
+	}
+	if len(f.users.added) != 0 || len(f.users.created) != 0 {
+		t.Errorf("an unconfirmed request wrote: added %v, created %v", f.users.added, f.users.created)
+	}
+}
+
 func TestInviteGuardianOnAnAccountThatIsAlreadyGuardianChangesNothing(t *testing.T) {
 	f := newDeleteFixture(t, mustUserUC(t, "u-mama", "mama@gl.mx", domain.StatusActive, guardianRole(t)))
 
-	got, err := newGuardianService(t, f.users, true).InviteGuardian(context.Background(), "mama@gl.mx", "Mamá")
+	got, err := newGuardianService(t, f.users, true).InviteGuardian(context.Background(), "mama@gl.mx", "Mamá", false)
 	if err != nil {
 		t.Fatalf("InviteGuardian: %v", err)
 	}
@@ -161,7 +182,7 @@ func TestInviteGuardianOnAnAccountThatIsAlreadyGuardianChangesNothing(t *testing
 func TestInviteGuardianRestoresADeletedAccountAsGuardian(t *testing.T) {
 	f := newDeleteFixture(t, mustUserUC(t, "u-gone", "gone@gl.mx", domain.StatusDeleted, teacherRole(t)))
 
-	got, err := newGuardianService(t, f.users, true).InviteGuardian(context.Background(), "gone@gl.mx", "Mamá")
+	got, err := newGuardianService(t, f.users, true).InviteGuardian(context.Background(), "gone@gl.mx", "Mamá", false)
 	if err != nil {
 		t.Fatalf("InviteGuardian: %v", err)
 	}
@@ -179,7 +200,7 @@ func TestInviteGuardianRestoresADeletedAccountAsGuardian(t *testing.T) {
 func TestInviteGuardianWithoutTheSeededRoleIsAServerFault(t *testing.T) {
 	users := &fakeUsers{byID: map[string]domain.User{}}
 
-	_, err := newGuardianService(t, users, false).InviteGuardian(context.Background(), "mama@gl.mx", "Mamá")
+	_, err := newGuardianService(t, users, false).InviteGuardian(context.Background(), "mama@gl.mx", "Mamá", false)
 
 	if glerrors.KindOf(err) != glerrors.KindInternal {
 		t.Fatalf("err = %v, want KindInternal", err)

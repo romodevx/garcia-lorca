@@ -54,10 +54,11 @@ func (c *AuthClient) InviteUser(ctx context.Context, email, displayName string, 
 // live account gains the role and comes back with a NIL invitation — nothing
 // was sent; otherwise the account is invited (or restored) and the link
 // returned.
-func (c *AuthClient) InviteGuardian(ctx context.Context, email, displayName string) (User, *Invitation, error) {
+func (c *AuthClient) InviteGuardian(ctx context.Context, email, displayName string, confirmStaff bool) (User, *Invitation, error) {
 	res, err := c.rpc.InviteGuardian(ctx, connect.NewRequest(&iamv1.InviteGuardianRequest{
-		Email:       email,
-		DisplayName: displayName,
+		Email:               email,
+		DisplayName:         displayName,
+		ConfirmStaffAccount: confirmStaff,
 	}))
 	if err != nil {
 		return User{}, nil, err

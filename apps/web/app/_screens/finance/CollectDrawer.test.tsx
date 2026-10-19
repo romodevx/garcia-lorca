@@ -53,7 +53,9 @@ describe("CollectDrawer", () => {
   it("leads with the amount expected today, with the year beside it", async () => {
     render(<CollectDrawer student={student} onClose={() => {}} onCollected={() => {}} />);
 
-    expect(await screen.findByTestId("amount-expected")).toHaveTextContent("6,700");
+    // The box renders before the expected amount arrives; on a slow runner
+    // findByTestId returned it still empty (PR #161). Wait for the figure.
+    await waitFor(() => expect(screen.getByTestId("amount-expected")).toHaveTextContent("6,700"));
     expect(screen.getByTestId("amount-owed")).toHaveTextContent("6,400");
     expect(screen.getByRole("heading", { name: /Cruz Valentina/ })).toBeInTheDocument();
   });

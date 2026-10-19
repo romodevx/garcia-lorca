@@ -196,7 +196,7 @@ func toProtoInvitation(inv usecase.Invitation) *iamv1.Invitation {
 // this RPC hands out (the role is chosen by iam, never the request). The
 // invitation is absent when the address already had a live account.
 func (h *IAMHandler) InviteGuardian(ctx context.Context, req *connect.Request[iamv1.InviteGuardianRequest]) (*connect.Response[iamv1.InviteGuardianResponse], error) {
-	out, err := h.admin.InviteGuardian(ctx, req.Msg.GetEmail(), req.Msg.GetDisplayName())
+	out, err := h.admin.InviteGuardian(ctx, req.Msg.GetEmail(), req.Msg.GetDisplayName(), req.Msg.GetConfirmStaffAccount())
 	if err != nil {
 		return nil, connectErr(err)
 	}

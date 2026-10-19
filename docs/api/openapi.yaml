@@ -1083,7 +1083,11 @@ paths:
         IDEMPOTENT by email. Inviting a contact whose address already has an
         account attaches that account rather than creating a duplicate, and
         gives it the `guardian` role if it lacked it (a teacher who is also a
-        parent keeps one login and can now open the app). A deleted account at
+        parent keeps one login and can now open the app). An address that
+        belongs to a STAFF account (live, not yet a guardian) is refused with
+        409 until the request carries `confirmStaffAccount: true`: a mistyped
+        address would otherwise let an employee read another family's child
+        (C2-003). A deleted account at
         that address is restored as an invited guardian. So a retry after a
         failed send is safe and a mother of two children signs in once for both.
       operationId: inviteContactToApp
@@ -1098,6 +1102,23 @@ paths:
           in: path
           required: true
           schema: { type: string, format: uuid }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                confirmStaffAccount:
+                  type: boolean
+                  default: false
+                  description: >
+                    The director confirmed that the staff account at this
+                    address is the same person as the contact.
+            examples:
+              confirmed:
+                summary: A teacher who is also a parent
+                value: { confirmStaffAccount: true }
       responses:
         '200':
           description: >
@@ -1135,6 +1156,15 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: >
+            The address belongs to a staff account and the request did not
+            confirm it (`that email belongs to a staff account; confirm it is
+            the same person`). Nothing was written; resend with
+            `confirmStaffAccount: true` once the director confirms.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '404':
           description: >
             No such contact for that pupil — or the students module is disabled.
@@ -4664,9 +4694,11 @@ paths:
       description: >
         Cancellation is terminal: the charge stops counting toward the
         account, and cancelling it twice is 409. The row survives with its
-        reason, so the ledger can always say why a debt disappeared. Money
-        already collected against it stays on the ledger. Requires
-        `finance:write`.
+        reason, when and who (the signed-in caller), so the ledger can always
+        say why a debt disappeared. A charge with money collected against it
+        is refused with 409: void or correct the payment first, so the money
+        is not left paying for a debt that no longer exists (C2-005).
+        Requires `finance:write`.
       operationId: cancelCharge
       security: [{ sessionCookie: [] }]
       parameters:
@@ -4703,7 +4735,9 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/ModuleDisabled' }
         '409':
-          description: The charge was already cancelled.
+          description: >
+            The charge was already cancelled, or it has payments on it
+            (`charge has payments and cannot be cancelled`).
   /api/v1/finance/overdue:
     get:
       tags: [finance-payments]

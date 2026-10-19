@@ -50,14 +50,15 @@ func TestInviteGuardianAssignsTheGuardianRole(t *testing.T) {
 	}
 }
 
-// An address that already has an account (a teacher who is also a parent)
-// keeps its one login and gains the role; nothing is sent, so no invitation.
+// An address that already has a staff account (a teacher who is also a
+// parent), once confirmed (C2-003), keeps its one login and gains the role;
+// nothing is sent, so no invitation.
 func TestInviteGuardianOnAnExistingAccountAddsTheRoleWithoutAnInvitation(t *testing.T) {
 	h, users := newHandlerWithUsers(t, false)
 	h = handlerWithMailer(t, users, &fakeRoles{known: domain.GuardianRoleID}, &recordingProvisioner{}, &recordingMailer{})
 
 	res, err := h.InviteGuardian(context.Background(), connect.NewRequest(&iamv1.InviteGuardianRequest{
-		Email: "ana@garcialorca.mx", DisplayName: "Ana",
+		Email: "ana@garcialorca.mx", DisplayName: "Ana", ConfirmStaffAccount: true,
 	}))
 	if err != nil {
 		t.Fatalf("InviteGuardian: %v", err)
@@ -70,5 +71,22 @@ func TestInviteGuardianOnAnExistingAccountAddsTheRoleWithoutAnInvitation(t *test
 	}
 	if res.Msg.GetInvitation() != nil {
 		t.Errorf("invitation = %+v, want none", res.Msg.GetInvitation())
+	}
+}
+
+// C2-003: unconfirmed, a staff address is a conflict the edge can name.
+func TestInviteGuardianOnAStaffAccountUnconfirmedIsAConflict(t *testing.T) {
+	h, users := newHandlerWithUsers(t, false)
+	h = handlerWithMailer(t, users, &fakeRoles{known: domain.GuardianRoleID}, &recordingProvisioner{}, &recordingMailer{})
+
+	_, err := h.InviteGuardian(context.Background(), connect.NewRequest(&iamv1.InviteGuardianRequest{
+		Email: "ana@garcialorca.mx", DisplayName: "Ana",
+	}))
+
+	if connect.CodeOf(err) != connect.CodeAlreadyExists {
+		t.Fatalf("code = %v, want AlreadyExists (the house's conflict)", connect.CodeOf(err))
+	}
+	if len(users.addedRoles) != 0 {
+		t.Errorf("an unconfirmed request added %v", users.addedRoles)
 	}
 }

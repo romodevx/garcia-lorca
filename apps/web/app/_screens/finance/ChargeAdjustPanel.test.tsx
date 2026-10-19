@@ -120,6 +120,33 @@ describe("ChargeAdjustPanel · cancelar (CC-203)", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(message);
   });
 
+  // C2-005: a charge with money on it is not cancelled; the payment is voided
+  // or corrected first. The panel says so up front and does not try.
+  it("sends a charge with money on it to void the payment first", async () => {
+    const user = userEvent.setup();
+    render(<ChargeAdjustPanel charge={{ ...CHARGE, paidCents: 30000, remainingCents: 320000 }} name="CRUZ VALENTINA" onDone={vi.fn()} onClose={vi.fn()} />);
+
+    await user.click(screen.getByRole("radio", { name: "Cancelar cargo" }));
+    expect(screen.getByText(/ya tiene \$300\.00 pagados/)).toBeInTheDocument();
+    await user.type(screen.getByLabelText(/^Motivo/), "Cargo duplicado");
+    await user.click(screen.getByRole("button", { name: "Cancelar este cargo" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/primero anula o corrige el pago/);
+    expect(finance.cancelCharge).not.toHaveBeenCalled();
+  });
+
+  it("explains a payment that arrived meanwhile", async () => {
+    const user = userEvent.setup();
+    finance.cancelCharge.mockRejectedValue(Object.assign(new Error("charge has payments and cannot be cancelled"), { status: 409 }));
+    setup();
+
+    await user.click(screen.getByRole("radio", { name: "Cancelar cargo" }));
+    await user.type(screen.getByLabelText(/^Motivo/), "Cargo duplicado");
+    await user.click(screen.getByRole("button", { name: "Cancelar este cargo" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/primero anula o corrige el pago/);
+  });
+
   it("closing leaves the charge untouched", async () => {
     const user = userEvent.setup();
     const { onClose } = setup();

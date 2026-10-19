@@ -439,16 +439,22 @@ export interface ContactAccessResult {
  * The account lands on THIS contact, so the pupil keeps one list. An address
  * that already has an account is reused — a parent with two children signs in
  * once — and then `invitation` comes back null because there was nothing to send.
+ *
+ * An address that belongs to a staff account is refused (409, C2-003) until the
+ * director confirms it is the same person: `confirmStaffAccount`.
  */
 export async function inviteContactToApp(
   baseURL: string,
   studentId: string,
   contactId: string,
+  options: { confirmStaffAccount?: boolean } = {},
 ): Promise<ContactAccessResult> {
   const root = baseURL.replace(/\/+$/, "");
+  const confirm = options.confirmStaffAccount === true;
   const res = await authFetch(`${root}/api/v1/students/${studentId}/guardians/${contactId}/invite`, {
     method: "POST",
     credentials: "include",
+    ...(confirm ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify({ confirmStaffAccount: true }) } : {}),
   });
   if (!res.ok) {
     throw await studentsFailure(res);

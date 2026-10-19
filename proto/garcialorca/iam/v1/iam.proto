@@ -380,6 +380,10 @@ message InviteUserResponse {
 message InviteGuardianRequest {
   string email = 1;
   string display_name = 2;
+  // An address that already belongs to a staff account is refused with
+  // Conflict (409) until this is true: the director confirmed it
+  // is the same person (C2-003).
+  bool confirm_staff_account = 3;
 }
 
 // InviteGuardianResponse returns the account now holding the role. invitation
