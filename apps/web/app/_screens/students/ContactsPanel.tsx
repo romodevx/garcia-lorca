@@ -55,6 +55,16 @@ const PHONE_RULES = { phone: phoneError } as const;
 /** iam's refusal of a staff address not yet confirmed (C2-003). */
 const STAFF_ADDRESS_REASON = "belongs to a staff account";
 
+/**
+ * Whether the refusal is iam asking about a staff address. It reads the
+ * server's own words (`detail`), never `message`: StudentsError puts the
+ * Spanish sentence for the screen there, and a 409's is a generic one.
+ */
+function isStaffAddressRefusal(cause: unknown): boolean {
+  if (typeof cause !== "object" || cause === null || !("detail" in cause)) return false;
+  return typeof cause.detail === "string" && cause.detail.includes(STAFF_ADDRESS_REASON);
+}
+
 export function ContactsPanel({ studentId }: ContactsPanelProps): ReactElement {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [name, setName] = useState("");
@@ -149,7 +159,7 @@ export function ContactsPanel({ studentId }: ContactsPanelProps): ReactElement {
       setGranted((prev) => ({ ...prev, [contact.id]: result }));
       reload();
     } catch (cause) {
-      if (cause instanceof Error && cause.message.includes(STAFF_ADDRESS_REASON)) {
+      if (isStaffAddressRefusal(cause)) {
         setStaffAddress((prev) => ({ ...prev, [contact.id]: true }));
         return;
       }

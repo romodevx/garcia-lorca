@@ -22,6 +22,16 @@ beforeEach(() => {
 });
 afterEach(() => vi.clearAllMocks());
 
+// As StudentsError really arrives: the Spanish fallback in `message`, the
+// server's own words in `detail` (C2-003 was first written against `message`
+// and the live screen showed "Los datos cambiaron" instead of asking).
+function staffRefusal(): Error {
+  return Object.assign(new Error("Los datos cambiaron mientras tanto. Actualiza la página."), {
+    status: 409,
+    detail: "that email belongs to a staff account; confirm it is the same person",
+  });
+}
+
 describe("ContactsPanel", () => {
   it("lists everyone the school can call", async () => {
     render(<ContactsPanel studentId="st-1" />);
@@ -140,7 +150,7 @@ describe("ContactsPanel — dar acceso a la app", () => {
       { id: "gl-2", studentId: "st-1", guardianUserId: "", relationship: "father", fullName: "Mateo Contreras", phone: "", email: "maestro@example.com", hasAccount: false },
     ]);
     students.inviteContactToApp
-      .mockRejectedValueOnce(Object.assign(new Error("that email belongs to a staff account; confirm it is the same person"), { status: 409 }))
+      .mockRejectedValueOnce(staffRefusal())
       .mockResolvedValueOnce({
         contact: { id: "gl-2", studentId: "st-1", guardianUserId: "usr-t", relationship: "father", fullName: "Mateo Contreras", phone: "", email: "maestro@example.com", hasAccount: true },
         invitation: null,
@@ -164,7 +174,7 @@ describe("ContactsPanel — dar acceso a la app", () => {
     students.listContacts.mockResolvedValue([
       { id: "gl-2", studentId: "st-1", guardianUserId: "", relationship: "father", fullName: "Mateo Contreras", phone: "", email: "maestro@example.com", hasAccount: false },
     ]);
-    students.inviteContactToApp.mockRejectedValue(Object.assign(new Error("that email belongs to a staff account; confirm it is the same person"), { status: 409 }));
+    students.inviteContactToApp.mockRejectedValue(staffRefusal());
     render(<ContactsPanel studentId="st-1" />);
     await screen.findByText("Mateo Contreras");
 
