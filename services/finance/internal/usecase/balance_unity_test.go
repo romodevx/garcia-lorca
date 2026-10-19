@@ -148,8 +148,8 @@ func TestEverySurfaceReadsTheStatementsBalance(t *testing.T) {
 			want: 320000 + 3*15000,
 		},
 		{
-			// $6,000 handed over against $3,200 of September plus its thirty
-			// days: the rest is the family's credit.
+			// $3,500 settles September plus its thirty days; $2,500 more sits
+			// as a credit a deposit from before CC-202 left.
 			name: "unallocated credit is a negative balance",
 			setup: func(t *testing.T) *fixture {
 				f := dailyFixture(t)
@@ -160,7 +160,8 @@ func TestEverySurfaceReadsTheStatementsBalance(t *testing.T) {
 				runOn(t, f, "2026-10-10")
 				settleInscription(t, f)
 				f.clock = noon(2026, time.October, 10)
-				deposit(t, f, 600000, "2026-10-10")
+				deposit(t, f, 350000, "2026-10-10")
+				legacyCredit(t, f, 250000, "2026-10-10")
 				return f
 			},
 			want: -(600000 - 320000 - 30*1000),

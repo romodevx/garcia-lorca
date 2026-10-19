@@ -803,6 +803,7 @@ func toProtoCharge(cwp ports.ChargeWithPaid) *financev1.Charge {
 		RemainingCents:   max(0, c.Effective().Int64()-cwp.PaidCents),
 		ScholarshipCents: c.Scholarship().Int64(),
 		ScholarshipId:    c.ScholarshipID(),
+		CreditNoteCents:  cwp.CreditNoteCents,
 	}
 }
 

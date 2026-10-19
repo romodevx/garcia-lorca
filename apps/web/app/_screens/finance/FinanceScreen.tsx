@@ -10,7 +10,7 @@ import type { NotesAccess } from "../../_design/students/StudentNotesBeside";
 import { useRoomLabels } from "../../_design/students/roomLabels";
 import { listCycles, type Cycle } from "../../config/api";
 import { getOverdue, listCharges, type Charge } from "../../finance/api";
-import { owedCents, pendingCents } from "../../finance/pending";
+import { collectedCents, owedCents, pendingCents } from "../../finance/pending";
 import { dayWithYearLabel } from "../../_lib/localDate";
 import { schoolISODate, schoolMonthStart } from "../../_lib/schoolDay";
 import { centsToPesosInput, formatCents } from "../../_lib/money";
@@ -85,6 +85,9 @@ const EXPORT_COLUMNS: readonly CsvColumn<Row>[] = [
   // T18: Saldo is net of it, so without this column the file would not add up.
   { label: "Beca", value: (r) => centsToPesosInput(r.charge.scholarshipCents ?? 0) },
   { label: "Pagado", value: (r) => centsToPesosInput(r.charge.paidCents) },
+  // CC-207: the part of Pagado credit notes settled — not money — so that
+  // Pagado − Nota de crédito adds up to Cobrado.
+  { label: "Nota de crédito", value: (r) => centsToPesosInput(r.charge.creditNoteCents ?? 0) },
   { label: "Saldo", value: (r) => centsToPesosInput(owedCents(r.charge)) },
   { label: "Estado", value: (r) => STATUS[r.visual].label },
 ];
@@ -173,7 +176,8 @@ export function FinanceScreen({ onBack, today: officeDay, notes, canCorrectPayme
     paid: rows.filter((r) => r.visual === "paid").length,
   }), [rows]);
   const totals = useMemo(() => ({
-    collected: charges.reduce((a, c) => a + c.paidCents, 0),
+    // A credit note settles debt but is not money: "Cobrado" agrees with Ingresos (CC-207).
+    collected: collectedCents(charges),
     // A cancelled (voided) charge is never owed, so it must not count as pending debt.
     pending: pendingCents(charges),
   }), [charges]);

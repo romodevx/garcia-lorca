@@ -40,6 +40,9 @@ func (req correctDepositRequest) invalid() string {
 	if msg := invalidTenders(req.Tenders); msg != "" {
 		return msg
 	}
+	if untypedCard("", "", req.Tenders) {
+		return msgCardWithoutType
+	}
 	return invalidChoice(req.ChargeIDs)
 }
 

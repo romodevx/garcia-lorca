@@ -113,6 +113,16 @@ func TestATenderedDepositRoundTrips(t *testing.T) {
 		t.Errorf("income money = %d, credit note = %d; want 200000 and 120000", money, note)
 	}
 
+	// CC-207: the charge list says how much of what was paid is a credit
+	// note, so "Cobrado" can leave it out as the income report does.
+	charges, err := repo.ListCharges(ctx, student, "")
+	if err != nil {
+		t.Fatalf("ListCharges: %v", err)
+	}
+	if len(charges) != 1 || charges[0].PaidCents != 320000 || charges[0].CreditNoteCents != 120000 {
+		t.Errorf("listed charge = %+v, want paid 320000 of which 120000 by credit note", charges)
+	}
+
 	// RLS: another school sees none of it.
 	if _, err := appRepo(t, tenantB).GetDeposit(ctx, d.ID()); !isNotFound(err) {
 		t.Errorf("tenant B read tenant A's tendered deposit: %v", err)

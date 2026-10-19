@@ -64,6 +64,8 @@ func TestCorrectDepositRefusesAtTheEdge(t *testing.T) {
 		"no amount":           `{"amountCents":0,"reason":"x","tenders":[{"method":"cash","amountCents":100}]}`,
 		"malformed date":      `{"amountCents":100,"paidAt":"09/09/2026","reason":"x","tenders":[{"method":"cash","amountCents":100}]}`,
 		"a charge that isn't": `{"amountCents":100,"reason":"x","tenders":[{"method":"cash","amountCents":100}],"chargeIds":["x"]}`,
+		// CC-205: the bank's cut separates debit from credit.
+		"a card with no type": `{"amountCents":100,"reason":"x","tenders":[{"method":"card","amountCents":100}]}`,
 	}
 	for name, body := range cases {
 		t.Run(name, func(t *testing.T) {

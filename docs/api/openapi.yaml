@@ -4438,6 +4438,7 @@ paths:
                         paidCents: 100000
                         remainingCents: 150000
                         scholarshipCents: 0
+                        creditNoteCents: 0
                     nextPageToken: MjAyNi0wOS0xMHw2MTAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMTE
         '400': { $ref: '#/components/responses/PagedFinanceBadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
@@ -4501,6 +4502,7 @@ paths:
                         paidCents: 0
                         remainingCents: 250000
                         scholarshipCents: 0
+                        creditNoteCents: 0
         '400': { $ref: '#/components/responses/PagedFinanceBadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -4591,9 +4593,12 @@ paths:
       description: >
         A parent hands over an amount and says nothing else. The split lands on
         the oldest debt first, then the surcharge that debt earned, then the next
-        month, and whatever is left over stays as the family's credit. The
-        response carries the whole split so a receipt can be printed without a
-        second call while the parent waits.
+        month — months not yet open included, which is paying ahead. Every peso
+        must land on a charge: an amount past what the charges may take (or past
+        the chosen ones), or chosen charges already paid — a second cashier on
+        the same month — is 409 and NOTHING is stored (CC-202). The response
+        carries the whole split so a receipt can be printed without a second
+        call while the parent waits.
 
 
         Send an idempotencyKey: the retry a lost response provokes must not cost
@@ -4630,7 +4635,10 @@ paths:
                 cardType:
                   type: string
                   enum: [debit, credit]
-                  description: Only on a card. A card type on cash is refused.
+                  description: >
+                    Only on a card, and REQUIRED on a card (CC-205): the bank's
+                    cut separates debit from credit. A card type on cash, or a
+                    card without one, is 400 and nothing is registered.
                 reference: { type: string }
                 paidAt:
                   type: string
@@ -4655,8 +4663,8 @@ paths:
                   items: { type: string, format: uuid }
                   description: >
                     The charges the money may pay, chosen at the counter: paid
-                    oldest first, each month with its surcharge; what is left is
-                    the family's credit. Empty or absent means every charge,
+                    oldest first, each month with its surcharge; money past them
+                    is refused (409). Empty or absent means every charge,
                     oldest first. A charge that is not the student's is refused.
             examples:
               creditNoteAndCash:
@@ -4677,6 +4685,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/ModuleDisabled' }
+        '409': { $ref: '#/components/responses/DepositNotApplicable' }
     get:
       tags: [finance-payments]
       summary: A family's deposits, newest first
@@ -4833,8 +4842,8 @@ paths:
                   items: { type: string, format: uuid }
                   description: >
                     The charges the money may pay, chosen at the counter: paid
-                    oldest first, each month with its surcharge; what is left is
-                    the family's credit. Empty or absent means every charge,
+                    oldest first, each month with its surcharge; money past them
+                    is refused (409). Empty or absent means every charge,
                     oldest first. A charge that is not the student's is refused.
       responses:
         '200':
@@ -4846,6 +4855,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/ModuleDisabled' }
+        '409': { $ref: '#/components/responses/DepositNotApplicable' }
 
   /api/v1/finance/deposits/{id}/void:
     post:
@@ -4962,7 +4972,10 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/ModuleDisabled' }
         '409':
-          description: The deposit was cancelled, or already corrected (correct its replacement).
+          description: >
+            The deposit was cancelled, or already corrected (correct its
+            replacement), or the corrected amount does not land in full on the
+            student's charges (CC-202, as on registerDeposit).
 
   /api/v1/finance/deposits/{id}/corrections:
     get:
@@ -7845,6 +7858,21 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
+    DepositNotApplicable:
+      description: >
+        The money does not land in full on the student's charges (CC-202): the
+        amount exceeds what they owe — paying ahead included — or what the
+        chosen charges owe, or the chosen charges are already paid (two
+        cashiers on the same month). Nothing was stored. The body is the
+        sentence for the cashier.
+      content:
+        text/plain:
+          schema: { $ref: '#/components/schemas/PlainTextError' }
+          examples:
+            alreadyPaid:
+              value: 'lo elegido ya está pagado: actualiza la cuenta del alumno antes de cobrar'
+            overpaid:
+              value: 'el monto excede lo que el alumno debe (máximo $35,750.00), incluido lo que puede pagar por adelantado'
     PlainTextError:
       description: Human-readable error text returned as text/plain by students enrollment handlers.
       content:
@@ -8649,8 +8677,9 @@ components:
       type: object
       description: >
         One debt of one pupil. Every amount is integer cents; paidCents,
-        remainingCents, scholarshipCents and status are derived server-side.
-      required: [id, studentId, cycleId, conceptId, description, amountCents, discountCents, dueDate, status, paidCents, remainingCents, scholarshipCents]
+        remainingCents, scholarshipCents, creditNoteCents and status are derived
+        server-side.
+      required: [id, studentId, cycleId, conceptId, description, amountCents, discountCents, dueDate, status, paidCents, remainingCents, scholarshipCents, creditNoteCents]
       properties:
         id: { type: string, format: uuid }
         studentId: { type: string, format: uuid }
@@ -8665,6 +8694,16 @@ components:
         paidCents: { type: integer, format: int64 }
         remainingCents: { type: integer, format: int64 }
         scholarshipCents: { type: integer, format: int64 }
+        creditNoteCents:
+          type: integer
+          format: int64
+          minimum: 0
+          example: 10000
+          description: >
+            The part of paidCents settled by credit notes (T8, CC-207). It
+            settles the debt but no money came in, so "Cobrado" is paidCents
+            minus this — like the income report and the cash-up. Filled on list
+            reads; 0 on a charge a write returns.
     TuitionPlan:
       type: object
       description: What one level costs in one school year. Every amount is integer cents.
@@ -9105,7 +9144,9 @@ components:
         cardType:
           type: string
           enum: [debit, credit]
-          description: Only on a card.
+          description: >
+            Only on a card. Required on a card tender of a deposit or a
+            correction (CC-205): without it the request is 400.
 
     Deposit:
       type: object

@@ -1,6 +1,9 @@
 package domain
 
 import (
+	"fmt"
+	"strconv"
+
 	glerrors "github.com/garcia-lorca/pkg/errors"
 )
 
@@ -38,3 +41,23 @@ func NewCents(v int64) (Cents, error) {
 
 // Int64 returns the raw minor-unit value, for adapters and arithmetic.
 func (c Cents) Int64() int64 { return int64(c) }
+
+// centsPerPeso is how many minor units make a peso.
+const centsPerPeso = 100
+
+// thousandsGroup is how many digits a thousands separator groups.
+const thousandsGroup = 3
+
+// Pesos is the amount as a person reads it in a message: "$32,300.00". Money
+// in a sentence the cashier reads must look like the money on the screen.
+func (c Cents) Pesos() string {
+	digits := strconv.FormatInt(int64(c)/centsPerPeso, 10)
+	grouped := make([]byte, 0, len(digits)+len(digits)/thousandsGroup)
+	for i := range len(digits) {
+		if i > 0 && (len(digits)-i)%thousandsGroup == 0 {
+			grouped = append(grouped, ',')
+		}
+		grouped = append(grouped, digits[i])
+	}
+	return fmt.Sprintf("$%s.%02d", grouped, int64(c)%centsPerPeso)
+}

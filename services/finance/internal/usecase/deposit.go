@@ -221,8 +221,21 @@ func (s *FinanceService) prepareDeposit(ctx context.Context, in DepositInput, wh
 }
 
 // newDeposit builds the deposit the counter described: by its tenders when it
-// sent them (T8), by its single method otherwise.
+// sent them (T8), by its single method otherwise. Every card part must say
+// debit or credit (CC-205): this is money being taken, not read back.
 func (s *FinanceService) newDeposit(in DepositInput, when paymentDay, calendarVersion string) (domain.Deposit, error) {
+	deposit, err := s.describedDeposit(in, when, calendarVersion)
+	if err != nil {
+		return domain.Deposit{}, err
+	}
+	if err := deposit.RequireCardType(); err != nil {
+		return domain.Deposit{}, err
+	}
+	return deposit, nil
+}
+
+// describedDeposit is the deposit exactly as the counter described it.
+func (s *FinanceService) describedDeposit(in DepositInput, when paymentDay, calendarVersion string) (domain.Deposit, error) {
 	if len(in.Tenders) == 0 {
 		deposit, err := domain.NewDeposit(s.newID(), s.tenantID, in.StudentID, in.AmountCents,
 			in.Method, in.Reference, when.at, in.IdempotencyKey, calendarVersion)
@@ -772,7 +785,52 @@ func (s *FinanceService) DepositReceipt(ctx context.Context, id string) (ports.D
 	if !uuidShape.MatchString(id) {
 		return ports.DepositReceipt{}, glerrors.ErrNotFound
 	}
-	return s.repo.DepositReceipt(ctx, id)
+	receipt, err := s.repo.DepositReceipt(ctx, id)
+	if err != nil {
+		return ports.DepositReceipt{}, err
+	}
+	pending, err := s.pendingAfter(ctx, receipt)
+	if err != nil {
+		return ports.DepositReceipt{}, err
+	}
+	receipt.PendingCents = pending
+	return receipt, nil
+}
+
+// pendingAfter is the receipt's "Saldo pendiente" (CC-201): what the charges a
+// deposit paid still owed right after it, each priced by the rule every other
+// surface reads (scholarshipPricer → domain.ApplyScholarship). A scholarship
+// is READ until the charge settles (ADR 0022), so the stored row says $4,000
+// while the statement, the counter and the app say $3,500 — pricing off the
+// row printed $1,000 pending on a $3,000 abono where everybody else said $500.
+//
+// Priced on the deposit's own day, the day the planner priced the money on,
+// so a reprint says what the paper said even after the due date has passed.
+// A cancelled charge owes nothing.
+func (s *FinanceService) pendingAfter(ctx context.Context, receipt ports.DepositReceipt) (int64, error) {
+	if len(receipt.After) == 0 {
+		return 0, nil
+	}
+	ids, err := s.conceptIDs(ctx)
+	if err != nil {
+		return 0, err
+	}
+	pricer, err := s.pricerFor(ctx, []string{receipt.Deposit.StudentID()}, ids)
+	if err != nil {
+		return 0, err
+	}
+	priced, err := pricer.priceAll(receipt.After, receipt.Deposit.PaidOn())
+	if err != nil {
+		return 0, err
+	}
+	var pending int64
+	for _, c := range priced {
+		if c.Charge.Status() == domain.StatusCancelled {
+			continue
+		}
+		pending += max(0, owed(c))
+	}
+	return pending, nil
 }
 
 // IsDepositID reports whether id has the shape of a deposit's id. The edges
@@ -1115,6 +1173,12 @@ func (p *depositPlanner) plan(open []ports.ChargeWithPaid) (ports.DepositWrite, 
 	}
 
 	allocations, unallocated := domain.Allocate(p.deposit.Amount().Int64(), items)
+	// Planned under the charges' lock, so a second cashier who finds the
+	// month already paid is refused here, inside the transaction: no
+	// deposit, no folio, no credit nobody applies (CC-202).
+	if err := domain.RequireFullyApplied(p.deposit.Amount().Int64(), unallocated, p.chosen != nil); err != nil {
+		return ports.DepositWrite{}, err
+	}
 	fresh = append(fresh, settledWithoutFee(feeOwedBy, allocations)...)
 	scholarships := settledScholarships(becas, allocations)
 

@@ -2,8 +2,9 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { HttpError } from "../../auth/httpError";
 import * as financeApi from "../../finance/api";
-import { CollectDrawer } from "./CollectDrawer";
+import { CollectDrawer, maxPayableCents } from "./CollectDrawer";
 
 vi.mock("../../finance/api", () => ({
   getAccount: vi.fn(),
@@ -670,5 +671,92 @@ describe("CollectDrawer · pagar por adelantado lo que aún no abre (T5)", () =>
 
     expect(await screen.findAllByText(/No puede ser mayor que el adeudo \(\$500\.00\)/)).not.toHaveLength(0);
     expect(finance.registerDeposit).not.toHaveBeenCalled();
+  });
+});
+
+// CC-202: the server refuses money that does not land in full on the charges
+// it may pay. With concepts chosen, it may pay only those: the cap is what
+// they add up to, not every line listed.
+describe("maxPayableCents", () => {
+  const line = (chargeId: string, totalCents: number) => ({
+    chargeId, description: chargeId, dueDate: "2026-10-10", owedCents: totalCents, surchargeCents: 0,
+    discountCents: 0, scholarshipCents: 0, totalCents, due: true, inBalance: true,
+  });
+  const expected = { amountCents: 350000, lines: [line("sep", 350000), line("oct", 320000)] };
+
+  it("is every line listed when the counter pays by its own rule", () => {
+    expect(maxPayableCents(expected, 0, false)).toBe(670000);
+  });
+
+  it("is what the chosen concepts add up to when the cashier chose", () => {
+    expect(maxPayableCents(expected, 320000, true)).toBe(320000);
+  });
+});
+
+// Review of PR #144 (N7): another cashier took the money first and the server
+// answered 409 (CC-202). The counter says why and reads the account again by
+// itself, so the cashier sees what is left without closing the drawer.
+describe("CollectDrawer · cobrado por otra caja (CC-202)", () => {
+  it("reloads the account and the quote after a 409, and says why", async () => {
+    const user = userEvent.setup();
+    const paid = "lo elegido ya está pagado: actualiza la cuenta del alumno antes de cobrar";
+    finance.registerDeposit.mockRejectedValue(new HttpError(409, paid, { serverText: paid }));
+    render(<CollectDrawer student={student} onClose={() => {}} onCollected={() => {}} today="2026-10-12" />);
+    await screen.findByTestId("amount-expected");
+    expect(finance.getExpected).toHaveBeenCalledTimes(1);
+    expect(finance.getAccount).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByRole("button", { name: "Cobrar" }));
+
+    expect(await screen.findByRole("group", { name: /Revisa esto/ })).toHaveTextContent(paid);
+    await waitFor(() => expect(finance.getExpected).toHaveBeenCalledTimes(2));
+    expect(finance.getAccount).toHaveBeenCalledTimes(2);
+  });
+
+  // CC-402 (browser check of PR #144): after the 409 the reload chose ANOTHER
+  // charge (the inscription), filled its amount and left focus on Cobrar — one
+  // more click collected what the family did not come to pay. After a conflict
+  // nothing is chosen or filled again, and focus goes to the notice at the top.
+  it("after a 409 chooses nothing, fills nothing, and takes focus to the notice", async () => {
+    const user = userEvent.setup();
+    const paid = "lo elegido ya está pagado: actualiza la cuenta del alumno antes de cobrar";
+    const line = (chargeId: string, description: string, totalCents: number) => ({
+      chargeId, description, dueDate: "2026-10-10", owedCents: totalCents, surchargeCents: 0, discountCents: 0,
+      scholarshipCents: 0, totalCents, due: true, inBalance: true,
+    });
+    finance.getExpected
+      .mockResolvedValueOnce({ amountCents: 25000, surchargeCents: 0, discountCents: 0, annualBalanceCents: 475000,
+        onTimeBalanceCents: 475000, lines: [line("ch-nat", "Natación", 25000), line("ch-ins", "Inscripción", 450000)].map((l, i) => ({ ...l, due: i === 0 })) })
+      .mockResolvedValue({ amountCents: 450000, surchargeCents: 0, discountCents: 0, annualBalanceCents: 450000,
+        onTimeBalanceCents: 450000, lines: [line("ch-ins", "Inscripción", 450000)] });
+    finance.registerDeposit.mockRejectedValue(new HttpError(409, paid, { serverText: paid }));
+    render(<CollectDrawer student={student} onClose={() => {}} onCollected={() => {}} today="2026-10-12" />);
+    expect(await screen.findByRole("checkbox", { name: "Natación" })).toBeChecked();
+
+    await user.click(screen.getByRole("button", { name: "Cobrar" }));
+
+    const notice = await screen.findByRole("group", { name: /Revisa esto/ });
+    expect(notice).toHaveTextContent(paid);
+    await waitFor(() => expect(finance.getExpected).toHaveBeenCalledTimes(2));
+    const inscription = await screen.findByRole("checkbox", { name: "Inscripción" });
+    expect(inscription).not.toBeChecked();
+    expect(screen.getByLabelText("Monto a pagar", { selector: "input" })).toHaveValue("");
+    expect(document.activeElement).toBe(notice);
+
+    // One more click on Cobrar takes nothing.
+    await user.click(screen.getByRole("button", { name: "Cobrar" }));
+    expect(finance.registerDeposit).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not reload on any other failure", async () => {
+    const user = userEvent.setup();
+    finance.registerDeposit.mockRejectedValue(new HttpError(500, "HTTP 500"));
+    render(<CollectDrawer student={student} onClose={() => {}} onCollected={() => {}} today="2026-10-12" />);
+    await screen.findByTestId("amount-expected");
+
+    await user.click(screen.getByRole("button", { name: "Cobrar" }));
+
+    expect(await screen.findByText("HTTP 500")).toBeInTheDocument();
+    expect(finance.getExpected).toHaveBeenCalledTimes(1);
   });
 });

@@ -7,9 +7,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	glerrors "github.com/garcia-lorca/pkg/errors"
 	"github.com/garcia-lorca/services/finance/internal/domain"
 	"github.com/garcia-lorca/services/finance/internal/ports"
+	"github.com/garcia-lorca/services/finance/internal/usecase"
 )
 
 // correctionFixture is a family with one month of 3,200.00 and a deposit keyed
@@ -285,4 +290,127 @@ func TestRLSIsolatesCorrections(t *testing.T) {
 	if rows, err := other.ListDepositCorrections(ctx, f.student); err != nil || len(rows) != 0 {
 		t.Errorf("tenant B read %d corrections (%v)", len(rows), err)
 	}
+}
+
+// --- CC-202 on the correction path (review of PR #144, N1) -------------------
+//
+// A correction is split by the same planner as a deposit, so the same rule
+// holds: every peso lands on a charge. The office corrects to the maximum and
+// hands back the excess.
+
+// placedIn puts every pupil in one group of one cycle.
+type placedIn struct{ cycle, group string }
+
+func (p placedIn) ListByCycle(context.Context, string, string) ([]ports.EnrollmentRef, error) {
+	return nil, nil
+}
+
+func (p placedIn) ListByStudent(_ context.Context, student string) ([]ports.EnrollmentRef, error) {
+	return []ports.EnrollmentRef{{ID: "cc2c0000-0000-0000-0000-0000000000f9", StudentID: student,
+		GroupID: p.group, CycleID: p.cycle, Status: "active"}}, nil
+}
+
+// groupOfLevel resolves the one group to one level.
+type groupOfLevel struct{ group, level string }
+
+func (g groupOfLevel) ListLevels(context.Context) ([]ports.LevelRef, error) { return nil, nil }
+
+func (g groupOfLevel) GroupLevels(context.Context, string) ([]ports.GroupLevel, error) {
+	return []ports.GroupLevel{{GroupID: g.group, LevelID: g.level}}, nil
+}
+
+func correctTo(svc *usecase.FinanceService, depositID string, cents int64, paidAt time.Time) (usecase.CorrectionResult, error) {
+	return svc.CorrectDeposit(context.Background(), usecase.CorrectionInput{
+		DepositID: depositID, AmountCents: cents, PaidAt: paidAt,
+		Tenders: []usecase.TenderInput{{Method: domain.MethodCash, AmountCents: cents}},
+		Reason:  "Se capturó con otra fecha", IdempotencyKey: uuid.NewString(),
+		By:      domain.Receiver{UserID: "64000000-0000-0000-0000-000000000001", Name: "Directora Ruiz"},
+	})
+}
+
+// $3,200 due 10 September, paid on 10 October with its thirty days of $10:
+// $3,500. It was really paid on 5 September. Corrected to that day the
+// surcharge is not owed, so the same $3,500 does not land in full: 409 with
+// the maximum, nothing changed. Corrected to the $3,200 it goes through.
+func TestACorrectionBeforeTheDueDateMayNotKeepTheSurchargeMoney(t *testing.T) {
+	ctx := context.Background()
+	const (
+		tenant  = "cc2c0000-0000-0000-0000-000000000001"
+		student = "cc2c0000-0000-0000-0000-0000000000a1"
+		cycle   = "cc2c0000-0000-0000-0000-0000000000e1"
+		group   = "cc2c0000-0000-0000-0000-0000000000e2"
+		level   = "cc2c0000-0000-0000-0000-0000000000e3"
+	)
+	seedConceptAndCharge(t, tenant, "cc2c0000-0000-0000-0000-0000000000b1", "COLEGIATURA SEPT QA",
+		"cc2c0000-0000-0000-0000-0000000000c1", student, cycle, 320000, 0, time.Date(2026, 9, 10, 0, 0, 0, 0, time.UTC))
+	repo := appRepo(t, tenant)
+	plan, err := domain.NewTuitionPlan(domain.TuitionPlanSpec{
+		ID: "cc2c0000-0000-0000-0000-0000000000d1", TenantID: tenant, CycleID: cycle, LevelID: level,
+		MonthlyCents: 320000, Months: 10, FirstBilledMonth: 9, DueDay: 10, Active: true,
+		Policy: domain.CollectionPolicy{DailyMode: true, LateFeeDailyCents: 1000, SurchargeCountsAllDays: true},
+	})
+	require.NoError(t, err)
+	_, err = repo.UpsertTuitionPlan(ctx, plan)
+	require.NoError(t, err)
+	svc := usecase.NewFinanceService(repo, knownStudents{}, nil, placedIn{cycle: cycle, group: group},
+		groupOfLevel{group: group, level: level}, nil, nil, tenant, uuid.NewString,
+		usecase.NewSchoolClock(func() time.Time { return counterDay.Add(12 * time.Hour) }, time.UTC))
+
+	late, err := svc.RegisterDeposit(ctx, usecase.DepositInput{
+		StudentID: student, AmountCents: 350000, Method: domain.MethodCash,
+		PaidAt: time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC), IdempotencyKey: uuid.NewString(),
+	})
+	require.NoError(t, err)
+	require.Len(t, late.Surcharges, 1, "the late payment wrote its thirty days")
+
+	inTime := time.Date(2026, 9, 5, 0, 0, 0, 0, time.UTC)
+	_, err = correctTo(svc, late.Deposit.ID(), 350000, inTime)
+	require.Error(t, err)
+	assert.Equal(t, glerrors.KindConflict, glerrors.KindOf(err))
+	assert.Contains(t, glerrors.SafeMessage(err), "máximo $3,200.00")
+	still, err := repo.GetDeposit(ctx, late.Deposit.ID())
+	require.NoError(t, err)
+	assert.True(t, still.Counts(), "a refused correction leaves the original standing")
+
+	fixed, err := correctTo(svc, late.Deposit.ID(), 320000, inTime)
+	require.NoError(t, err)
+	assert.Zero(t, fixed.Corrected.UnallocatedCents)
+	credit, err := repo.UnallocatedCents(ctx, student)
+	require.NoError(t, err)
+	assert.Zero(t, credit, "the $300 is handed back, never kept as credit")
+}
+
+// A deposit stored before the rule with money no charge took ($4,000 on a
+// $3,200 month): corrected with the same amount it is refused with the
+// maximum; corrected to $3,200 the credit is gone.
+func TestALegacyCreditIsCorrectedToTheMaximum(t *testing.T) {
+	ctx := context.Background()
+	const (
+		tenant  = "cc2c1000-0000-0000-0000-000000000001"
+		student = "cc2c1000-0000-0000-0000-0000000000a1"
+	)
+	charge := seedConceptAndCharge(t, tenant, "cc2c1000-0000-0000-0000-0000000000b1", "COLEGIATURA OCT QA",
+		"cc2c1000-0000-0000-0000-0000000000c1", student, "cc2c1000-0000-0000-0000-0000000000e1", 320000, 0,
+		time.Date(2026, 10, 31, 0, 0, 0, 0, time.UTC))
+	repo := appRepo(t, tenant)
+	old := newDeposit(t, "cc2c1000-0000-0000-0000-0000000000d1", tenant, student, 400000, counterDay, "")
+	_, _, err := repo.RegisterDeposit(ctx, old, func([]ports.ChargeWithPaid) (ports.DepositWrite, error) {
+		return ports.DepositWrite{
+			Allocations:      []domain.Payment{newPayment(t, "cc2c1000-0000-0000-0000-0000000000f1", tenant, charge.ID(), 320000, counterDay)},
+			UnallocatedCents: 80000,
+		}, nil
+	}, nil)
+	require.NoError(t, err)
+	svc := depositService(t, repo, tenant)
+
+	_, err = correctTo(svc, old.ID(), 400000, time.Time{})
+	require.Error(t, err)
+	assert.Equal(t, glerrors.KindConflict, glerrors.KindOf(err))
+	assert.Contains(t, glerrors.SafeMessage(err), "máximo $3,200.00")
+
+	_, err = correctTo(svc, old.ID(), 320000, time.Time{})
+	require.NoError(t, err)
+	credit, err := repo.UnallocatedCents(ctx, student)
+	require.NoError(t, err)
+	assert.Zero(t, credit, "the $800 is handed back")
 }

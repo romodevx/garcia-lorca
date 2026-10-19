@@ -56,6 +56,9 @@ type Charge struct {
 	// ScholarshipCents is the scholarship's part (T18); RemainingCents is
 	// already net of it.
 	ScholarshipCents int64
+	// CreditNoteCents is the part of PaidCents credit notes settled (CC-207):
+	// not money, so "Cobrado" leaves it out.
+	CreditNoteCents int64
 }
 
 // WithdrawalCharge is a charge that would be cancelled by a dated withdrawal.
@@ -873,6 +876,7 @@ func toCharge(c *financev1.Charge) Charge {
 		PaidCents:        c.GetPaidCents(),
 		RemainingCents:   c.GetRemainingCents(),
 		ScholarshipCents: c.GetScholarshipCents(),
+		CreditNoteCents:  c.GetCreditNoteCents(),
 	}
 }
 

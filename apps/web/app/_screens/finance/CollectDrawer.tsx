@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
 import { DrawerShell } from "../../_design/DrawerShell";
-import { DateField, MoneyField, useFocusFirstInvalid } from "../../_design/form";
+import { DateField, ErrorSummary, MoneyField, useFocusFirstInvalid } from "../../_design/form";
 import { TenderEditor } from "../../_design/payments/TenderEditor";
 import { AMOUNT_ERROR } from "../../_design/payments/tenders";
 import { depositRequest, newAttemptKey } from "../../_design/payments/depositRequest";
@@ -20,6 +20,7 @@ import {
   type ExpectedLine,
 } from "../../finance/api";
 import { API_URL } from "../../api-url";
+import { HttpError } from "../../auth/httpError";
 import { localISODate, shortDayLabel } from "../../_lib/localDate";
 import { DebtList } from "./DebtList";
 import { DepositPreviewCard, DepositReceipt } from "./DepositReceipt";
@@ -66,6 +67,9 @@ export interface CollectDrawerProps {
   notes?: NotesAccess;
 }
 
+/** The server's answer when the account changed under the cashier (CC-202). */
+const HTTP_CONFLICT = 409;
+
 const FUTURE_PAYMENT = "La fecha de pago no puede ser futura.";
 const MISSING_PAYMENT_DATE = "Falta la fecha de pago.";
 
@@ -89,11 +93,14 @@ function choiceOf(lines: readonly ExpectedLine[], chosen: ReadonlySet<string>): 
 /**
  * The most the counter takes (T8 · T5): every line the quote lists at its
  * figure — the ones not yet open included, which may be paid ahead — or what
- * is asked today, or what was chosen, whichever is largest.
+ * is asked today, whichever is largest. When the cashier CHOSE concepts the
+ * money may pay only those, so the cap is what they add up to: the server
+ * refuses anything past it (CC-202).
  */
-export function maxPayableCents(expected: Pick<Expected, "amountCents" | "lines">, selectedCents: number): number {
+export function maxPayableCents(expected: Pick<Expected, "amountCents" | "lines">, selectedCents: number, chosen: boolean): number {
+  if (chosen) return selectedCents;
   const listed = expected.lines.reduce((sum, l) => sum + l.totalCents, 0);
-  return Math.max(listed, expected.amountCents, selectedCents);
+  return Math.max(listed, expected.amountCents);
 }
 
 /**
@@ -164,6 +171,15 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
   // A ref and not the state: two presses inside one render both read `saving` as false.
   const inFlight = useRef(false);
   const [error, setError] = useState<string | undefined>(undefined);
+  // Bumped to read the account and the quote again: after a 409 (CC-202) the
+  // money was taken by another cashier, and the screen must show what is left.
+  const [reloads, setReloads] = useState(0);
+  // CC-402: after that 409 the reload must choose and fill NOTHING — choosing
+  // what is due again picked another charge (the inscription) with its amount
+  // ready, one click away from collecting what the family did not come to pay.
+  // The cashier reads the notice and chooses again.
+  const afterConflict = useRef(false);
+  const [conflict, setConflict] = useState<{ message: string; attempt: number } | null>(null);
   const [attemptKey] = useState(newAttemptKey);
   const describe = useRef<Map<string, string>>(new Map());
 
@@ -186,11 +202,12 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
   // ONE balance (T5): the quote's, for the day asked about, once it is here —
   // the figure the debt list totals too. Until then, the account's.
   const balance = expected?.annualBalanceCents ?? owed;
-  // The cap is the GROSS debt the quote lists — every line, those not yet open
+  // The cap is the GROSS debt the quote lists (with concepts chosen, what they
+  // add up to: CC-202) — every line, those not yet open
   // included — never the net balance: that one leaves them out and nets the
   // credit (it can be below zero), and would refuse a legitimate payment ahead.
   // Unknown (Infinity) until the quote is here; the server has the last word.
-  const capCents = expected === null ? Number.POSITIVE_INFINITY : maxPayableCents(expected, selectedCents);
+  const capCents = expected === null ? Number.POSITIVE_INFINITY : maxPayableCents(expected, selectedCents, choice !== undefined);
   // How the amount is paid, method by method (T8): it must add up to it.
   const tenders = useTenders(cents);
   const toggle = (chargeId: string): void => {
@@ -220,7 +237,7 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
       })
       .catch(() => { if (live) { setOwed(0); } });
     return () => { live = false; };
-  }, [student.id]);
+  }, [student.id, reloads]);
 
   // What is due on the day the family paid, which is not the same question as
   // what is left for the year. The cashier reads this figure aloud.
@@ -237,6 +254,11 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
         }
         setExpected(e);
         setExpectedFor(askedFor);
+        if (afterConflict.current) {
+          afterConflict.current = false;
+          setChosen(new Set());
+          return;
+        }
         // A new quote is a new list: the choice starts over at what is due.
         setChosen(dueOf(e.lines));
         // Pre-filled with what should be paid: the common case is a family
@@ -248,7 +270,7 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
       })
       .catch(() => {});
     return () => { live = false; };
-  }, [student.id, sentDate, dateOk]);
+  }, [student.id, sentDate, dateOk, reloads]);
 
 
   // Escape closes. Nothing is at risk: the money has not been taken, and the
@@ -276,6 +298,7 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
     inFlight.current = true;
     setSaving(true);
     setError(undefined);
+    setConflict(null);
     try {
       const result = await registerDeposit(API_URL, depositRequest({
         studentId: student.id,
@@ -289,7 +312,22 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
       setReceipt(result);
       onCollected();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "No se pudo registrar el cobro.");
+      const message = cause instanceof Error ? cause.message : "No se pudo registrar el cobro.";
+      if (cause instanceof HttpError && cause.status === HTTP_CONFLICT) {
+        // The account moved under the cashier (CC-202): read it again, by
+        // itself, with nothing chosen and nothing filled, and say so at the
+        // top where focus goes (CC-402).
+        afterConflict.current = true;
+        amountEdited.current = false;
+        prefilledCents.current = 0;
+        setAmount("");
+        setChosen(new Set());
+        tenders.reset();
+        setConflict((c) => ({ message, attempt: (c?.attempt ?? 0) + 1 }));
+        setReloads((n) => n + 1);
+      } else {
+        setError(message);
+      }
     } finally {
       inFlight.current = false;
       setSaving(false);
@@ -319,6 +357,7 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
                 onSubmit={(e) => { e.preventDefault(); void submit(); }}
                 style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
                 <div style={{ flex: 1, overflowY: "auto", padding: "22px 26px", display: "flex", flexDirection: "column", gap: 20 }}>
+                  {conflict !== null && <ErrorSummary items={[{ field: "Monto a pagar", message: conflict.message }]} attempt={conflict.attempt} />}
                   <div style={{ padding: "18px 20px", borderRadius: "var(--r-md)", background: "var(--surface-3)", border: "1px solid var(--border)" }}>
                     <span style={{ fontSize: 14, color: "var(--text-muted)" }}>{expectedFor === "" ? "Monto esperado hoy" : `Monto esperado al ${shortDayLabel(expectedFor)}`}</span>
                     <div data-testid="amount-expected" style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 38, color: "var(--text)", marginTop: 4 }}>

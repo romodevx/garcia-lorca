@@ -30,4 +30,22 @@ describe("useTenders with the recorded tenders", () => {
     expect(result.current.rows).toHaveLength(2);
     expect(new Set(result.current.rows.map((r) => r.key)).size).toBe(2);
   });
+
+  // Review of PR #144 (N6): a card recorded before the type was asked has no
+  // type. Correcting it must not quietly call it debit: nothing is chosen, and
+  // the correction asks for one (the server refuses a card without it, CC-205).
+  it("opens a recorded card with no type unchosen, and asks for one", () => {
+    const { result } = renderHook(() => useTenders(60000, [{ method: "card", amountCents: 60000 }]));
+    expect(result.current.rows[0]?.cardType).toBe("");
+
+    let ok = true;
+    act(() => { ok = result.current.validate(); });
+    expect(ok).toBe(false);
+    expect(Object.values(result.current.errors)).toContain("Elige si la tarjeta es de débito o de crédito.");
+
+    act(() => result.current.setCardType("t0", "debit"));
+    act(() => { ok = result.current.validate(); });
+    expect(ok).toBe(true);
+    expect(result.current.toTenders()).toEqual([{ method: "card", amountCents: 60000, cardType: "debit" }]);
+  });
 });

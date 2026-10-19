@@ -470,6 +470,26 @@ func TestFinanceListChargesForwardsFilters(t *testing.T) {
 	}
 }
 
+// CC-207: the charge on the wire says what credit notes settled, always (a
+// zero included), so "Cobrado" can leave out what is not money.
+func TestFinanceChargeSaysWhatCreditNotesSettled(t *testing.T) {
+	paid := sampleCharge
+	paid.PaidCents, paid.RemainingCents, paid.CreditNoteCents, paid.Status = 150000, 0, 50000, "paid"
+	svc := &fakeFinance{charges: []client.Charge{paid, sampleCharge}}
+
+	rec := doReq(t, handler.NewFinanceHandler(svc).ListCharges, http.MethodGet, "/api/v1/finance/charges?studentId=stu-1", "")
+
+	var out struct {
+		Charges []map[string]any `json:"charges"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if len(out.Charges) != 2 || out.Charges[0]["creditNoteCents"] != float64(50000) || out.Charges[1]["creditNoteCents"] != float64(0) {
+		t.Errorf("body = %v", out)
+	}
+}
+
 // TestFinanceListChargesUnfilteredIs400 pins the edge's half of the unscoped-read
 // blindaje: the handler forwards the two empty filters verbatim — it does not
 // invent a scope — and the finance service's rejection of the whole-ledger read

@@ -143,8 +143,10 @@ export function useTenders(totalCents: number, initial?: readonly Tender[]): Ten
   };
 }
 
+// A recorded card without a type (before CC-205) opens with none chosen: the
+// cashier says which, rather than the screen guessing debit (N6).
 function fromTender(t: Tender, i: number): TenderRow {
-  return { key: `t${i}`, method: t.method, cardType: t.cardType ?? "debit", amount: formatPesosInput(t.amountCents), reference: t.reference ?? "" };
+  return { key: `t${i}`, method: t.method, cardType: t.cardType ?? "", amount: formatPesosInput(t.amountCents), reference: t.reference ?? "" };
 }
 
 function blank(key: string, method: PaymentMethod): TenderRow {

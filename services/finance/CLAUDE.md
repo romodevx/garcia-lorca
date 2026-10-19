@@ -82,6 +82,34 @@ ledger operations run in a single transaction (Unit of Work).
   repo's unpaged `ListCharges` (capped at 500) is for per-pupil reads only.
 - Bulk `GenerateCharges` is idempotent via `UNIQUE(tenant, student, cycle,
   concept)` + ON CONFLICT DO NOTHING (re-run reports created vs skipped).
+- **A deposit is applied in full or not taken (CC-202, QA 2026-10-17).**
+  `domain.RequireFullyApplied` runs in the planner, inside the transaction and
+  under the charges' `FOR UPDATE`: money past what the charges may take (past
+  the CHOSEN ones when the cashier chose), or chosen charges already paid (a
+  second cashier on the same month), is `KindConflict` → 409 in Spanish, and
+  no deposit, folio or credit is stored. Paying ahead is not credit: months
+  not yet open are charges. The preview applies the same rule; a replay under
+  the same key still returns the original — also for a double click that sends
+  the key twice at once: `RegisterDeposit` looks it up again under the
+  charges' lock. **A correction is split by the same planner**, so it obeys the
+  same rule: when the corrected date or amount leaves money no charge takes
+  (e.g. a date before the due day drops the surcharge the original paid), the
+  409 names the maximum; the office corrects to that maximum and hands the
+  excess back to the family. `UnallocatedCents` stays only for **deposits
+  stored before the rule** — they exist only in local QA data (there is no
+  production yet), so nothing is migrated: cancel them, or correct them to the
+  maximum, with the UI.
+- **A card part says debit or credit (CC-205):** `Deposit.RequireCardType` on
+  every deposit or correction being TAKEN (`newDeposit`); reads of older rows
+  without a type keep working. The gateway refuses it at the edge too.
+- **The receipt's "Saldo pendiente" is priced by the use case (CC-201):** the
+  repository returns the charges as they stood right after the deposit
+  (`DepositReceipt.After`) and `pendingAfter` prices them with
+  `scholarshipPricer` on the deposit's day — a scholarship is not on the row
+  until the charge settles (ADR 0022). Never price a debt off the stored row.
+- **"Cobrado" excludes credit notes (CC-207):** list reads fill
+  `ChargeWithPaid.CreditNoteCents` (`Charge.credit_note_cents`); the web's
+  `collectedCents` is paid − credit notes, as Ingresos and the cash-up.
 - `RegisterPayment` is idempotent when the caller sends an `idempotency_key`:
   a repeat under the same key returns the ORIGINAL payment and writes nothing —
   no second row, no status change, and NO second `PaymentRegistered` event. The

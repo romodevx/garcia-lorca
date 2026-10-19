@@ -257,22 +257,6 @@ func TestADepositPaysAnOverdueSaleWithNoCycle(t *testing.T) {
 	}
 }
 
-// Money beyond the debt is the family's credit, not an error. Refusing it sends
-// a parent away from the counter with cash in hand.
-//
-// "Beyond the debt" now means beyond the WHOLE YEAR: ten months at $3,200 plus
-// the surcharge September earned. A parent who settles the year and hands over
-// a little extra keeps it.
-func TestMoneyBeyondTheDebtBecomesCredit(t *testing.T) {
-	f := depositFixture(t)
-
-	got := deposit(t, f, 3300000, "2026-10-10")
-
-	if got.UnallocatedCents <= 0 {
-		t.Errorf("unallocated = %d, want the leftover recorded as credit", got.UnallocatedCents)
-	}
-}
-
 // The retry a lost response provokes must not cost the family twice.
 func TestADepositReplayCollectsNothingTwice(t *testing.T) {
 	f := depositFixture(t)
@@ -322,7 +306,8 @@ func TestVoidingADepositReleasesWhatItSettled(t *testing.T) {
 	}
 }
 
-// A family that overpays has money sitting with the school. If the statement
+// A family with money sitting with the school — a credit left by a deposit
+// taken before CC-202 refused unapplied money — must see it. If the statement
 // does not say so, the office cannot tell an overpayment from a mistake and the
 // parent's credit is invisible to everyone but them.
 func TestTheStatementShowsTheFamilysCredit(t *testing.T) {
@@ -330,7 +315,8 @@ func TestTheStatementShowsTheFamilysCredit(t *testing.T) {
 	// The year is $32,000 of tuition plus $300 of surcharge; anything past that
 	// is credit.
 	const overpaid = 3300000
-	deposit(t, f, overpaid, "2026-10-10")
+	deposit(t, f, 3230000, "2026-10-10")
+	legacyCredit(t, f, overpaid-3230000, "2026-10-10")
 
 	account, err := f.svc.GetAccount(context.Background(), testStudent)
 	if err != nil {
@@ -683,8 +669,9 @@ func TestADepositNamesWhoReceivedIt(t *testing.T) {
 }
 
 // Task 8: the cashier chooses what the money pays. Only the chosen charges are
-// paid, oldest first; a month's surcharge still goes with it; what is left is
-// the family's credit, not spread onto what was not chosen.
+// paid, oldest first; a month's surcharge still goes with it; nothing is
+// spread onto what was not chosen (money past the chosen is refused, CC-202:
+// TestADepositBeyondTheChosenChargesIsRefused).
 func TestADepositPaysOnlyTheChosenCharges(t *testing.T) {
 	f := depositFixture(t)
 	expected, err := f.svc.ExpectedToday(context.Background(), testStudent, time.Date(2026, time.October, 10, 0, 0, 0, 0, time.UTC))
@@ -694,7 +681,7 @@ func TestADepositPaysOnlyTheChosenCharges(t *testing.T) {
 	october := expected.Lines[1].ChargeID
 
 	got, err := f.svc.RegisterDeposit(context.Background(), usecase.DepositInput{
-		StudentID: testStudent, AmountCents: 400000, Method: domain.MethodCash,
+		StudentID: testStudent, AmountCents: 320000, Method: domain.MethodCash,
 		PaidAt: time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC), ChargeIDs: []string{october},
 	})
 	if err != nil {
@@ -703,8 +690,8 @@ func TestADepositPaysOnlyTheChosenCharges(t *testing.T) {
 	if len(got.Allocations) != 1 || got.Allocations[0].ChargeID() != october || got.Allocations[0].Amount().Int64() != 320000 {
 		t.Errorf("allocations = %+v, want October alone, 3,200", got.Allocations)
 	}
-	if got.UnallocatedCents != 80000 {
-		t.Errorf("credit = %d, want the 800 left over", got.UnallocatedCents)
+	if got.UnallocatedCents != 0 {
+		t.Errorf("credit = %d, want none", got.UnallocatedCents)
 	}
 	if len(got.Surcharges) != 0 {
 		t.Errorf("materialised %d surcharges; September was not chosen", len(got.Surcharges))
@@ -911,7 +898,7 @@ func TestAHandTypedSurchargeEarnsNoSurcharge(t *testing.T) {
 		t.Fatalf("CreateCharge: %v", err)
 	}
 	got, err := f.svc.RegisterDeposit(context.Background(), usecase.DepositInput{
-		StudentID: testStudent, AmountCents: 100000, Method: domain.MethodCash,
+		StudentID: testStudent, AmountCents: 5000, Method: domain.MethodCash,
 		PaidAt: time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC), ChargeIDs: []string{manual.Charge.ID()},
 	})
 	if err != nil {
@@ -920,8 +907,8 @@ func TestAHandTypedSurchargeEarnsNoSurcharge(t *testing.T) {
 	if len(got.Surcharges) != 0 {
 		t.Errorf("materialised %d surcharges on a surcharge", len(got.Surcharges))
 	}
-	if got.UnallocatedCents != 95000 {
-		t.Errorf("credit = %d, want 950 left after the 50 surcharge", got.UnallocatedCents)
+	if got.UnallocatedCents != 0 || len(got.Allocations) != 1 || got.Allocations[0].Amount().Int64() != 5000 {
+		t.Errorf("allocations %+v, credit %d; want the $50 alone, no surcharge on it", got.Allocations, got.UnallocatedCents)
 	}
 }
 

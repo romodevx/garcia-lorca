@@ -155,6 +155,19 @@ func (d Deposit) WithCardType(cardType string) (Deposit, error) {
 // CardType is debit or credit on a card payment, and empty otherwise.
 func (d Deposit) CardType() string { return d.cardType }
 
+// RequireCardType is the rule for a deposit being TAKEN (CC-205): every card
+// part says debit or credit, because the bank's cut separates them. A deposit
+// read back from before the school asked may lack it, so the constructors and
+// the mapper do not apply this; the counter's path does.
+func (d Deposit) RequireCardType() error {
+	for _, t := range d.Tenders() {
+		if t.Method() == MethodCard && t.CardType() == "" {
+			return glerrors.New(glerrors.KindInvalid, "falta el tipo de tarjeta: débito o crédito")
+		}
+	}
+	return nil
+}
+
 // NewDeposit builds a validated deposit.
 //
 // calendarVersion is the school calendar the allocation was worked out against.
