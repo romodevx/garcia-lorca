@@ -63,6 +63,9 @@ func TestGroupHistoryReadsTheGroupsListsAndMarks(t *testing.T) {
 		{EnrollmentID: enrollmentReportBeto, Date: day(t, "2026-09-01"), Status: "late"},
 		{EnrollmentID: enrollmentReportBeto, Date: day(t, "2026-09-04"), Status: "absent"},
 	}, got.Marks)
+	assert.Equal(t, []service.DayMark{
+		{EnrollmentID: enrollmentReportCruz, Date: day(t, "2026-09-02"), Status: "absent"},
+	}, got.Elsewhere, "another group's mark comes back apart: that day is that group's (C2-011)")
 
 	gotB, err := b.GroupHistory(ctx, groupReport, scope, day(t, "2026-09-01"), day(t, "2026-09-30"))
 	require.NoError(t, err)

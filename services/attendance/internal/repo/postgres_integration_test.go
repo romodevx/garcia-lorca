@@ -173,9 +173,14 @@ func reconcile(r *repo.Repo, ctx context.Context, scope []string, date time.Time
 	return err
 }
 
+// ownMarks keeps a MarksForList read's own marks (the ones the list shows).
+func ownMarks(m service.ListMarks, err error) (map[string]service.AttendanceRecord, error) {
+	return m.Own, err
+}
+
 // marksFor reads testGroup's daily list on date.
 func marksFor(r *repo.Repo, ctx context.Context, scope []string, date time.Time) (map[string]service.AttendanceRecord, error) {
-	return r.MarksForList(ctx, scope, service.ListKey{GroupID: testGroup, Date: date})
+	return ownMarks(r.MarksForList(ctx, scope, service.ListKey{GroupID: testGroup, Date: date}))
 }
 
 func mark(id, enrollmentID string, date time.Time, status, note string) service.AttendanceRecord {

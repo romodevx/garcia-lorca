@@ -50,11 +50,15 @@ func listKey(key service.ListKey) string {
 	return key.GroupID + "|" + key.Date.Format("2006-01-02") + "|" + key.SubjectID
 }
 
-func (f *fakeRepo) MarksForList(_ context.Context, enrollmentIDs []string, key service.ListKey) (map[string]service.AttendanceRecord, error) {
-	out := make(map[string]service.AttendanceRecord, len(enrollmentIDs))
+func (f *fakeRepo) MarksForList(_ context.Context, enrollmentIDs []string, key service.ListKey) (service.ListMarks, error) {
+	out := service.ListMarks{Own: make(map[string]service.AttendanceRecord, len(enrollmentIDs)), HeldElsewhere: map[string]bool{}}
 	for _, id := range enrollmentIDs {
+		if f.held[id] {
+			out.HeldElsewhere[id] = true
+			continue
+		}
 		if rec, ok := f.rows[markKey(id, key)]; ok {
-			out[id] = rec
+			out.Own[id] = rec
 		}
 	}
 	return out, nil
@@ -67,7 +71,7 @@ func (f *fakeRepo) SessionFor(_ context.Context, key service.ListKey) (service.S
 
 func (f *fakeRepo) ReconcileList(ctx context.Context, key service.ListKey, enrollmentIDs []string, taker service.Taker, plan service.PlanFunc) (service.ListChanges, error) {
 	current, _ := f.MarksForList(ctx, enrollmentIDs, key)
-	changes, err := plan(current)
+	changes, err := plan(current.Own)
 	if err != nil {
 		return service.ListChanges{}, err
 	}

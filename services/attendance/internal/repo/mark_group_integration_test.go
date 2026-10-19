@@ -44,9 +44,11 @@ func TestAnotherGroupsListNeverTouchesAStoredMark(t *testing.T) {
 	require.NotNil(t, markGroup(t, "a0000000-0000-0000-0000-000000001401"))
 	assert.Equal(t, groupBeforeTransfer, *markGroup(t, "a0000000-0000-0000-0000-000000001401"), "a new mark stores its list's group")
 
-	marksB, err := r.MarksForList(ctx, scope, listB)
+	readB, err := r.MarksForList(ctx, scope, listB)
 	require.NoError(t, err)
-	assert.Empty(t, marksB, "B's list does not show A's mark")
+	assert.Empty(t, readB.Own, "B's list does not show A's mark")
+	assert.Equal(t, map[string]bool{enrollmentMoved: true}, readB.HeldElsewhere,
+		"B learns the pupil·day is A's, so its roster leaves the pupil out (C2-011)")
 
 	cleared := saveList(t, r, listB, scope, testTaker)
 	assert.Empty(t, cleared.Deletes, "B's all-present save must not clear A's absence (no correction push)")
@@ -57,7 +59,7 @@ func TestAnotherGroupsListNeverTouchesAStoredMark(t *testing.T) {
 	assert.Empty(t, overwritten.Updates)
 	assert.Equal(t, []string{enrollmentMoved}, overwritten.HeldElsewhere, "the skipped mark is reported, so the save's counts exclude it")
 
-	marksA, err := r.MarksForList(ctx, scope, listA)
+	marksA, err := ownMarks(r.MarksForList(ctx, scope, listA))
 	require.NoError(t, err)
 	require.Contains(t, marksA, enrollmentMoved)
 	assert.Equal(t, "absent", marksA[enrollmentMoved].Status, "A's absence is untouched")
@@ -76,7 +78,7 @@ func TestALegacyMarkBelongsToEveryList(t *testing.T) {
 	list := service.ListKey{GroupID: groupAfterTransfer, Date: day(t, "2026-09-22")}
 	scope := []string{enrollmentLegacy}
 
-	marks, err := r.MarksForList(ctx, scope, list)
+	marks, err := ownMarks(r.MarksForList(ctx, scope, list))
 	require.NoError(t, err)
 	require.Contains(t, marks, enrollmentLegacy)
 

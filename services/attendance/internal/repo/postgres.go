@@ -75,12 +75,12 @@ func subjectScope(tx *gorm.DB, subjectID string) *gorm.DB {
 
 // MarksForList batch-loads the stored marks of many enrollments on one list in a
 // single tenant-bound SELECT, collapsing what would otherwise be one query per
-// roster student (N+1). The returned map is keyed by enrollment_id and holds a
-// record only for enrollments that actually have an exception; present students —
-// and any row hidden by RLS — are simply absent (no rows is not an error). An
-// empty enrollmentIDs slice returns an empty map without querying.
-func (r *Repo) MarksForList(ctx context.Context, enrollmentIDs []string, key service.ListKey) (map[string]service.AttendanceRecord, error) {
-	out := make(map[string]service.AttendanceRecord, len(enrollmentIDs))
+// roster student (N+1), split by ownership (see listMarks). Own holds a record
+// only for enrollments that actually have an exception; present students — and
+// any row hidden by RLS — are simply absent (no rows is not an error). An empty
+// enrollmentIDs slice returns empty maps without querying.
+func (r *Repo) MarksForList(ctx context.Context, enrollmentIDs []string, key service.ListKey) (service.ListMarks, error) {
+	out := service.ListMarks{Own: map[string]service.AttendanceRecord{}, HeldElsewhere: map[string]bool{}}
 	if len(enrollmentIDs) == 0 {
 		return out, nil
 	}
@@ -89,13 +89,11 @@ func (r *Repo) MarksForList(ctx context.Context, enrollmentIDs []string, key ser
 		if err != nil {
 			return err
 		}
-		for id, rec := range marks.own {
-			out[id] = rec
-		}
+		out = service.ListMarks{Own: marks.own, HeldElsewhere: marks.heldElsewhere}
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return service.ListMarks{}, err
 	}
 	return out, nil
 }
@@ -455,13 +453,16 @@ type historyMark struct {
 	EnrollmentID string    `gorm:"column:enrollment_id"`
 	Date         time.Time `gorm:"column:date"`
 	Status       string    `gorm:"column:status"`
+	GroupID      *string   `gorm:"column:group_id"`
 }
 
 // GroupHistory reads, in ONE tenant-bound transaction, the day of every list
 // the group took between two inclusive days, and the exceptions of the given
 // enrollments in that span on the group's lists: marks stamped with this group
 // plus legacy marks (group_id NULL, stored before 0004). A mark another group's
-// list holds is not this group's. The service decides which of them fall in
+// list holds is not this group's: the same read hands it back apart, in
+// Elsewhere, so the service can tell a move day the pupil spent on the other
+// group's list (C2-011). The service decides which of them fall in
 // each pupil's time in the group. The lists are read through the sessions'
 // list key (tenant_id, group_id, date, subject_id); the marks through
 // idx_attendance_enrollment (tenant_id, enrollment_id), one roster's worth.
@@ -482,16 +483,20 @@ func (r *Repo) GroupHistory(ctx context.Context, groupID string, enrollmentIDs [
 		}
 		var rows []historyMark
 		if err := tx.Model(&attendanceModel{}).
-			Select("enrollment_id", "date", "status").
+			Select("enrollment_id", "date", "status", "group_id").
 			Where("enrollment_id IN ? AND date BETWEEN ?::date AND ?::date", enrollmentIDs, fromDay, toDay).
-			Where("(group_id = ? OR group_id IS NULL)", groupID).
 			Order("enrollment_id, date").
 			Scan(&rows).Error; err != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "reading attendance marks", err)
 		}
 		out.Marks = make([]service.DayMark, 0, len(rows))
 		for _, m := range rows {
-			out.Marks = append(out.Marks, service.DayMark{EnrollmentID: m.EnrollmentID, Date: m.Date.UTC(), Status: m.Status})
+			mark := service.DayMark{EnrollmentID: m.EnrollmentID, Date: m.Date.UTC(), Status: m.Status}
+			if m.GroupID != nil && *m.GroupID != groupID {
+				out.Elsewhere = append(out.Elsewhere, mark)
+				continue
+			}
+			out.Marks = append(out.Marks, mark)
 		}
 		return nil
 	})
