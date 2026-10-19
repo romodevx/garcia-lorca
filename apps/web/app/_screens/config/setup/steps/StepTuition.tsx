@@ -8,12 +8,15 @@ import { TuitionPanel } from "../../TuitionPanel";
 import type { CyclesSlice, PricingSlice } from "../../useCatalogState";
 import { StepFrame, type StepSlot } from "../StepFrame";
 import { Prerequisite } from "./Prerequisite";
+import { TuitionNotReadable } from "../../TuitionNotReadable";
 
 export interface StepTuitionProps {
   slot: StepSlot;
   cycles: CyclesSlice;
   levels: readonly Level[];
   pricing: PricingSlice;
+  /** finance:read. Without it the panel is never mounted, so nothing is asked of the gateway (CC-311). */
+  canRead?: boolean;
   onPlansLoaded: (cycleId: string, plans: TuitionPlan[] | "failed") => void;
 }
 
@@ -22,8 +25,15 @@ export interface StepTuitionProps {
  * and nothing else is drawn, but TuitionPanel keeps its exact place in the tree:
  * a remount would open "Editar" blank and save defaults over the plan (§3.3).
  */
-export function StepTuition({ slot, cycles, levels, pricing, onPlansLoaded }: StepTuitionProps): ReactElement {
+export function StepTuition({ slot, cycles, levels, pricing, canRead = false, onPlansLoaded }: StepTuitionProps): ReactElement {
   const cycle = cycles.selected;
+  if (!canRead) {
+    return (
+      <StepFrame {...slot}>
+        <TuitionNotReadable />
+      </StepFrame>
+    );
+  }
   return (
     <StepFrame {...slot} hidden={slot.hidden && !pricing.active} chrome={!pricing.active} ownHeading={cycle === undefined}>
       {cycle === undefined && <Prerequisite need="cycle" onGo={slot.onGo} />}

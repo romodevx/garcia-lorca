@@ -330,7 +330,11 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	// Create needs students:create; list/get (the enroll UI's student picker) need
 	// students:read. Every route sits behind guard.Protect("students", …) so
 	// module_students OFF ⇒ 404.
-	studentsH := handler.NewStudentsHandler(studentsClient)
+	// The list names each classroom with its grade, so Cobranza (students:read,
+	// no config:read) reads "3° PRIMARIA · B" without being handed the catalog
+	// (CC-211, CC-313).
+	studentsH := handler.NewStudentsHandler(studentsClient,
+		handler.WithStudentRoomLabels(handler.NewCycleRoomLabels(configClient, studentsClient)))
 	studentsRead := func(h http.HandlerFunc) http.Handler {
 		return guard.Protect("students", requireAuthChanged(middleware.RequirePermission("students:read")(http.HandlerFunc(h))))
 	}

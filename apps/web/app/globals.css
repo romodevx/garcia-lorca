@@ -1490,7 +1490,7 @@ html:has(.announce-footer) { scroll-padding-bottom: var(--announce-footer-h); }
   vertical-align: -3px;
   color: color-mix(in oklab, var(--forest) var(--icon-ink-share, 60%), var(--text));
 }
-.home-date { color: var(--text-muted); font-size: 1rem; margin-top: 6px; text-transform: capitalize; }
+.home-date { color: var(--text-muted); font-size: 1rem; margin-top: 6px; }
 
 /* Read by a screen reader, never drawn. */
 .home-sr {

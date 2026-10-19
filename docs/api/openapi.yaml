@@ -1151,6 +1151,47 @@ paths:
               example: internal error
 
   /api/v1/students:
+    get:
+      tags: [students]
+      summary: List pupils
+      description: >
+        Every pupil, optionally filtered by admission status, without the
+        profile (a picker needs names, not addresses). Requires students:read.
+        With include=groupLabel, each pupil carries groupLabel: the classroom
+        in the current cycle with its grade ("3° PRIMARIA · B"), so a role
+        without config:read (Cobranza) tells two pupils of the same level and
+        letter apart without being handed the catalog (CC-211). It costs five
+        catalog reads, so it is opt-in. It is absent for a pupil not placed in
+        a group of that cycle, and for every pupil when the catalog cannot be
+        read: a label never fails the list. Then show level and gradeGroup.
+      operationId: listStudents
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: status
+          in: query
+          required: false
+          description: Admission status to keep; omitted lists every pupil.
+          schema: { type: string, enum: [pending, accepted, enrolled, rejected, withdrawn] }
+        - name: include
+          in: query
+          required: false
+          description: Comma-separated extras; groupLabel is the only one. Unknown values are ignored.
+          schema: { type: string, example: "groupLabel" }
+      responses:
+        '200':
+          description: The pupils.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [students]
+                properties:
+                  students:
+                    type: array
+                    items: { $ref: '#/components/schemas/StudentSummary' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
     post:
       tags: [students]
       summary: Register a new pupil (quick add)
@@ -8787,6 +8828,28 @@ components:
         bankReference: { type: string, example: "231076", description: "BBVA payment reference (ADR 0033); empty when the pupil has none." }
         hasPhoto: { type: boolean, example: false, description: "Only on GET /api/v1/students/{id}: whether the pupil has a photo (T13). Absent means unknown; a client then asks for the photo." }
         profile: { $ref: '#/components/schemas/StudentProfile' }
+
+    StudentSummary:
+      type: object
+      description: A pupil as GET /api/v1/students lists it — the file without the profile.
+      required: [id, curp, firstName, lastName, level, levelId, gradeGroup, guardianName, admissionStatus]
+      properties:
+        id: { type: string, format: uuid, example: "e3b0c442-98fc-1c14-9afb-000000000003" }
+        curp: { type: string, example: "LOAA190312MDFVDA01" }
+        firstName: { type: string, example: "ADA" }
+        lastName: { type: string, example: "LOVELACE", description: "Paternal surname." }
+        maternalLastName: { type: string, example: "BYRON", description: "Maternal surname; empty when not captured." }
+        level: { type: string, example: "PRIMARIA" }
+        levelId: { $ref: '#/components/schemas/LevelId' }
+        gradeGroup: { type: string, example: "B", description: "What the pupil's file stores; may be the bare letter." }
+        groupLabel:
+          type: string
+          example: "3° PRIMARIA · B"
+          description: Only with include=groupLabel. The classroom in the current cycle, grade included (CC-211). Absent when unknown.
+        guardianName: { type: string, example: "AUGUSTA BYRON" }
+        admissionStatus: { type: string, enum: [pending, accepted, enrolled, rejected, withdrawn] }
+        enrollmentNumber: { type: string, example: "2026-00042", description: "The matrícula; absent when none." }
+        bankReference: { type: string, example: "231076", description: "BBVA payment reference (ADR 0033); empty when the pupil has none." }
 
     Enrollment:
       type: object

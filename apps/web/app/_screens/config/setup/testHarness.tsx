@@ -161,7 +161,8 @@ export function installSchool(s: FakeSchool): FakeSchool {
 export type User = ReturnType<typeof userEvent.setup>;
 
 export function renderSetup(props: Partial<CatalogProps> = {}): { user: User; props: CatalogProps } {
-  const all: CatalogProps = { onBack: vi.fn(), ...props };
+  // The owner by default: every step writable and the prices readable (CC-311 tests pass less).
+  const all: CatalogProps = { onBack: vi.fn(), canWriteConfig: true, canReadTuition: true, ...props };
   const user = userEvent.setup();
   render(<CatalogSetup {...all} />);
   return { user, props: all };

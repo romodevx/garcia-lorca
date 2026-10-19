@@ -17,7 +17,8 @@ export interface LevelsPanelProps {
   levels: readonly Level[];
   selectedLevelId: string | undefined;
   onSelect: (id: string) => void;
-  onCreate: (input: CreateLevelInput) => Promise<void>;
+  /** config:write only; absent, Nuevo nivel is not offered (CC-311). */
+  onCreate?: (input: CreateLevelInput) => Promise<void>;
   /** Saves how the level takes attendance (per day or per class). */
   onSetAttendanceMode: (levelId: string, mode: AttendanceMode) => Promise<void>;
   /** Saves whether and how the level grades (scale, decimals, passing mark). */
@@ -79,6 +80,7 @@ export function LevelsPanel({ levels, selectedLevelId, onSelect, onCreate, onSet
    * necesita el párrafo que la explica.
    */
   const submit = async (andNew: boolean): Promise<void> => {
+    if (onCreate === undefined) return;
     // Sólo el nombre es obligatorio. La clave SEP es opcional, como dice su
     // ayuda y como siempre lo permitió el servidor: exigirla dejaba fuera a
     // preescolar y a cualquier nivel que la escuela nombre a su manera.
@@ -131,9 +133,9 @@ export function LevelsPanel({ levels, selectedLevelId, onSelect, onCreate, onSet
         <LevelSettings level={selectedLevel} onSetAttendanceMode={onSetAttendanceMode} onSetGrading={onSetGrading} onDelete={onDelete} />
       )}
 
-      <Btn icon="plus" onClick={() => { setError(undefined); setCreating(true); }}>Nuevo nivel</Btn>
+      {onCreate !== undefined && <Btn icon="plus" onClick={() => { setError(undefined); setCreating(true); }}>Nuevo nivel</Btn>}
 
-      {creating && (
+      {creating && onCreate !== undefined && (
         <SlideOver
           title="Nuevo nivel educativo"
           subtitle="Maternal, kínder, primaria…"

@@ -35,6 +35,12 @@ export interface Student {
   /** The config level id ("" only for a legacy pupil no level matched). */
   levelId: string;
   gradeGroup: string;
+  /**
+   * Only in the list: the classroom in the current cycle with its grade,
+   * "3° PRIMARIA · B" (CC-211). Absent when the gateway could not place the
+   * pupil — show level and gradeGroup then (studentRoomLabel).
+   */
+  groupLabel?: string;
   guardianName: string;
   admissionStatus: AdmissionStatus;
   /** The editable half of the file. Absent from gateways older than T5. */
@@ -222,6 +228,15 @@ function query(params: Record<string, string | undefined>): string {
 
 export function listStudents(baseURL: string, status?: string): Promise<Student[]> {
   return getList<Student>(baseURL, `/students${query({ status })}`, "students");
+}
+
+/**
+ * The list with each pupil's `groupLabel` ("3° PRIMARIA · B", CC-211). It costs
+ * the gateway five catalog reads, so only the screens that show the classroom
+ * to a role without config:read ask for it (Registro de pagos, Avisos).
+ */
+export function listStudentsWithRooms(baseURL: string): Promise<Student[]> {
+  return getList<Student>(baseURL, `/students${query({ include: "groupLabel" })}`, "students");
 }
 
 export function getStudent(baseURL: string, id: string): Promise<Student> {

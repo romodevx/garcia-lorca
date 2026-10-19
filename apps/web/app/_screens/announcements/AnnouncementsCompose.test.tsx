@@ -19,7 +19,7 @@ vi.mock("../../comms/api", () => ({
   updateBirthdayTemplate: vi.fn(),
 }));
 vi.mock("../../config/api", () => ({ listCycles: vi.fn(), listLevels: vi.fn(), listLabelledGroups: vi.fn() }));
-vi.mock("../../students/api", () => ({ listStudents: vi.fn() }));
+vi.mock("../../students/api", () => ({ listStudentsWithRooms: vi.fn() }));
 
 const comms = vi.mocked(commsApi);
 const config = vi.mocked(configApi);
@@ -35,7 +35,7 @@ beforeEach(() => {
     { id: "g1", cycleId: "c2", gradeLevelId: "gl1", name: "A", capacity: 30, label: "1° PRIMARIA · A", gradeName: "1°", levelId: "lv1", ordinal: 1 },
     { id: "g2", cycleId: "c2", gradeLevelId: "gl1", name: "B", capacity: 30, label: "1° PRIMARIA · B", gradeName: "1°", levelId: "lv1", ordinal: 1 },
   ]);
-  students.listStudents.mockResolvedValue([
+  students.listStudentsWithRooms.mockResolvedValue([
     { id: "s1", curp: "C1", firstName: "Valentina", lastName: "Cruz", level: "Primaria", levelId: "lv1", gradeGroup: "1° A", guardianName: "", admissionStatus: "enrolled" },
   ]);
   comms.announce.mockResolvedValue({ created: 28, audience: 28 });

@@ -30,8 +30,12 @@ describe("parseGradeInput", () => {
     expect(parseGradeInput("   ")).toEqual({ kind: "empty" });
   });
 
-  it("rejects what is not a number: signs, exponents, hex, inner spaces", () => {
-    for (const raw of ["9..5", "abc", "-3", "1e1", "0x9", "9 5"]) expect(parseGradeInput(raw)).toEqual({ kind: "invalid" });
+  it("rejects what is not a number: plus signs, exponents, hex, inner spaces", () => {
+    for (const raw of ["9..5", "abc", "+3", "- 3", "1e1", "0x9", "9 5"]) expect(parseGradeInput(raw)).toEqual({ kind: "invalid" });
+  });
+
+  it("reads a negative number as a value, so the range check can name the scale (CC-307)", () => {
+    expect(parseGradeInput("-3")).toEqual({ kind: "value", value: -3, decimals: 0 });
   });
 
   it("counts decimals on the exact value, ignoring trailing zeros", () => {
@@ -53,6 +57,10 @@ describe("validateGrade — integers only (T15)", () => {
   it("names the range when out of it", () => {
     expect(validateGrade("11", SCALE)).toBe("La calificación debe estar entre 5 y 10");
     expect(validateGrade("4", SCALE)).toBe("La calificación debe estar entre 5 y 10");
+  });
+
+  it("names the range for a negative grade, like the server does (CC-307)", () => {
+    expect(validateGrade("-3", SCALE)).toBe("La calificación debe estar entre 5 y 10");
   });
 
   it("explains a non-number, in the server's words", () => {

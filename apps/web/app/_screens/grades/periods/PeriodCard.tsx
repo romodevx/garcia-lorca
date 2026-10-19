@@ -51,9 +51,12 @@ export function PeriodCard({ period, canClose, onAction, focusToken }: PeriodCar
   const closedLine = closed && period.closedAt !== undefined
     ? `${dayLabel(period.closedAt)}${period.closedByName !== undefined ? ` · por ${period.closedByName}` : ""}`
     : undefined;
+  // A card's actions repeat on every card: the accessible name carries which
+  // level and period, after the visible words (label in name, CC-312).
+  const title = periodTitle(period);
   return (
     <article
-      aria-label={periodTitle(period)}
+      aria-label={title}
       style={{ display: "grid", gap: 12, alignContent: "start", padding: "18px 20px", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--r-lg)", boxShadow: "var(--shadow-card)" }}
     >
       <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -67,9 +70,9 @@ export function PeriodCard({ period, canClose, onAction, focusToken }: PeriodCar
       <ProgressBar captured={period.progress.captured} expected={period.progress.expected} />
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         {canClose && !closed && dates === undefined && <p style={{ fontSize: 14, color: "var(--warn-fg)", fontWeight: 600 }}>{NO_DATES_HINT}</p>}
-        {canClose && !closed && dates !== undefined && <Btn kind="forest" icon="lock" onClick={() => onAction("close", period)} style={{ height: 44, fontSize: 15 }}>Revisar y cerrar</Btn>}
+        {canClose && !closed && dates !== undefined && <Btn kind="forest" icon="lock" aria-label={`Revisar y cerrar ${title}`} onClick={() => onAction("close", period)} style={{ height: 44, fontSize: 15 }}>Revisar y cerrar</Btn>}
         {canClose && closed && <Btn kind="ghost" onClick={() => onAction("reopen", period)} style={{ height: 44, fontSize: 15 }}>Reabrir</Btn>}
-        {(closed || period.version > 0) && <Btn kind="outline" icon="documents" onClick={() => onAction("cards", period)} style={{ height: 44, fontSize: 15 }}>Ver boletas</Btn>}
+        {(closed || period.version > 0) && <Btn kind="outline" icon="documents" aria-label={`Ver boletas ${title}`} onClick={() => onAction("cards", period)} style={{ height: 44, fontSize: 15 }}>Ver boletas</Btn>}
       </div>
     </article>
   );

@@ -107,7 +107,7 @@ describe("Catalog — boot states (S1.1, S1.2)", () => {
   it("says it is loading and shows neither panels nor stats until the catalog arrives", async () => {
     mocked.listCycles.mockReturnValue(new Promise(() => {}));
 
-    render(<Catalog onBack={() => {}} />);
+    render(<Catalog canWriteConfig canReadTuition onBack={() => {}} />);
 
     expect(screen.getByText("Cargando catálogo…")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Configuración académica" })).toBeInTheDocument();
@@ -119,7 +119,7 @@ describe("Catalog — boot states (S1.1, S1.2)", () => {
   it("says the catalog could not load and paints no panel when the boot read fails", async () => {
     mocked.listLevels.mockRejectedValue(new Error("down"));
 
-    render(<Catalog onBack={() => {}} />);
+    render(<Catalog canWriteConfig canReadTuition onBack={() => {}} />);
 
     expect(await screen.findByRole("alert")).toHaveTextContent("No se pudo cargar el catálogo.");
     expect(screen.queryByText("Cargando catálogo…")).toBeNull();
@@ -136,7 +136,7 @@ describe("Catalog — header and stats", () => {
   it("'Volver al inicio' calls onBack", async () => {
     const onBack = vi.fn();
     const user = userEvent.setup();
-    render(<Catalog onBack={onBack} />);
+    render(<Catalog canWriteConfig canReadTuition onBack={onBack} />);
 
     await user.click(await screen.findByRole("button", { name: "Volver al inicio" }));
 
@@ -147,7 +147,7 @@ describe("Catalog — header and stats", () => {
     mocked.listCycles.mockResolvedValue([ACTIVE, DRAFT]);
     mocked.listLevels.mockResolvedValue([PRIMARIA, SECUNDARIA]);
     const user = userEvent.setup();
-    render(<Catalog onBack={() => {}} />);
+    render(<Catalog canWriteConfig canReadTuition onBack={() => {}} />);
 
     await screen.findByText("Niveles educativos");
     expect(statValue("Ciclos")).toBe("2");
@@ -167,7 +167,7 @@ describe("Catalog — selection dependencies (D2, D3, A7)", () => {
     mocked.listCycles.mockResolvedValue([ACTIVE]);
     mocked.listLevels.mockResolvedValue([PRIMARIA, SECUNDARIA]);
     const user = userEvent.setup();
-    render(<Catalog onBack={() => {}} />);
+    render(<Catalog canWriteConfig canReadTuition onBack={() => {}} />);
 
     await user.click(await screen.findByRole("button", { name: /^PRIMARIA · / }));
     await waitFor(() => expect(mocked.listGradeLevels).toHaveBeenCalledWith(expect.any(String), "l1"));
@@ -188,7 +188,7 @@ describe("Catalog — selection dependencies (D2, D3, A7)", () => {
     mocked.listCycles.mockResolvedValue([ACTIVE, DRAFT]);
     mocked.listLevels.mockResolvedValue([PRIMARIA]);
     const user = userEvent.setup();
-    render(<Catalog onBack={() => {}} />);
+    render(<Catalog canWriteConfig canReadTuition onBack={() => {}} />);
 
     await user.click(await screen.findByRole("button", { name: /^PRIMARIA · / }));
     await user.click(await screen.findByRole("button", { name: "1. 1° PRIMARIA" }));
@@ -215,7 +215,7 @@ describe("Catalog — selection dependencies (D2, D3, A7)", () => {
     mocked.listCycles.mockResolvedValue([ACTIVE]);
     mocked.createLevel.mockResolvedValue(SECUNDARIA);
     const user = userEvent.setup();
-    render(<Catalog onBack={() => {}} />);
+    render(<Catalog canWriteConfig canReadTuition onBack={() => {}} />);
 
     await user.click(await screen.findByRole("button", { name: "Nuevo nivel" }));
     await user.type(screen.getByLabelText(/^Nombre del nivel$/), "Secundaria");
@@ -233,7 +233,7 @@ describe("Catalog — which cycle is selected (D1, handleActivateCycle)", () => 
       { ...DRAFT, id: "c0", name: "2025-2026", startsOn: "2025-08-01", endsOn: "2026-06-30" },
       DRAFT,
     ]);
-    render(<Catalog onBack={() => {}} />);
+    render(<Catalog canWriteConfig canReadTuition onBack={() => {}} />);
 
     expect(await screen.findByRole("button", { name: "2025-2026 · Borrador" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "2027-2028 · Borrador" })).toHaveAttribute("aria-pressed", "false");
@@ -244,7 +244,7 @@ describe("Catalog — which cycle is selected (D1, handleActivateCycle)", () => 
     mocked.listCycles.mockResolvedValue([ACTIVE, DRAFT]);
     mocked.activateCycle.mockResolvedValue({ ...DRAFT, status: "active" });
     const user = userEvent.setup();
-    render(<Catalog onBack={() => {}} />);
+    render(<Catalog canWriteConfig canReadTuition onBack={() => {}} />);
 
     // The active cycle is the one selected on boot.
     expect(await screen.findByText("2026-2027 es el ciclo en curso.")).toBeInTheDocument();
@@ -269,7 +269,7 @@ describe("Catalog — pricing mode hides the rest and restores it (D6)", () => {
     mocked.listCycles.mockResolvedValue([ACTIVE]);
     mocked.listLevels.mockResolvedValue([PRIMARIA]);
     const user = userEvent.setup();
-    render(<Catalog onBack={() => {}} canDeleteLevels onDeleteLevel={vi.fn()} onOpenStudentImport={vi.fn()} />);
+    render(<Catalog canWriteConfig canReadTuition onBack={() => {}} canDeleteLevels onDeleteLevel={vi.fn()} onOpenStudentImport={vi.fn()} />);
 
     const visibleOutsidePricing = async (): Promise<void> => {
       expect(await screen.findByRole("heading", { name: "Configuración académica" })).toBeInTheDocument();
@@ -310,7 +310,7 @@ describe("Catalog — pricing mode hides the rest and restores it (D6)", () => {
     mocked.listCycles.mockResolvedValue([ACTIVE]);
     mocked.listLevels.mockResolvedValue([PRIMARIA]);
     const user = userEvent.setup();
-    render(<Catalog onBack={() => {}} />);
+    render(<Catalog canWriteConfig canReadTuition onBack={() => {}} />);
 
     await user.click(await screen.findByRole("button", { name: /^PRIMARIA · / }));
     await screen.findByRole("heading", { name: "Grados de PRIMARIA" });
@@ -336,7 +336,7 @@ describe("Catalog — pricing mode hides the rest and restores it (D6)", () => {
     ]);
     mocked.deleteNonWorkingPeriod.mockResolvedValue(undefined);
     const user = userEvent.setup();
-    render(<Catalog onBack={() => {}} />);
+    render(<Catalog canWriteConfig canReadTuition onBack={() => {}} />);
 
     await user.click(await screen.findByRole("button", { name: "Quitar INDEPENDENCIA" }));
     expect(mocked.deleteNonWorkingPeriod).not.toHaveBeenCalled();

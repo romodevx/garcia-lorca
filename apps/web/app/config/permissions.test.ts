@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { canDeleteLevels, canWriteConfig } from "./permissions";
+import { canDeleteLevels, canReadTuition, canWriteConfig } from "./permissions";
 
 describe("canDeleteLevels", () => {
   it("only with levels:delete", () => {
@@ -18,5 +18,13 @@ describe("canWriteConfig", () => {
     expect(canWriteConfig(["config:read", "config:write"])).toBe(true);
     expect(canWriteConfig(["config:read"])).toBe(false);
     expect(canWriteConfig(undefined)).toBe(false);
+  });
+});
+
+describe("canReadTuition (CC-311)", () => {
+  it("only finance:read reads the tabuladores; config:read alone does not", () => {
+    expect(canReadTuition(["config:read", "finance:read"])).toBe(true);
+    expect(canReadTuition(["config:read"])).toBe(false);
+    expect(canReadTuition(undefined)).toBe(false);
   });
 });

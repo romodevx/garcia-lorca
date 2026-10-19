@@ -90,7 +90,7 @@ describe("Catalog — cycles", () => {
       endsOn: "2027-06-30",
     });
 
-    render(<Catalog onBack={() => {}} />);
+    render(<Catalog canWriteConfig canReadTuition onBack={() => {}} />);
 
     // Creating is a drawer now — the same one a new pupil opens — so the screen
     // shows a choice OR a form, never both at once.
@@ -128,7 +128,7 @@ describe("Catalog — nested level → grade level", () => {
       { id: "g2", levelId: "l1", name: "2° PRIMARIA", ordinal: 2 },
     ]);
     mocked.listSubjects.mockResolvedValue([{ id: "s2", gradeLevelId: "g2", name: "HISTORIA" }]);
-    render(<Catalog onBack={() => {}} />);
+    render(<Catalog canWriteConfig canReadTuition onBack={() => {}} />);
 
     await user.click(await screen.findByRole("button", { name: /PRIMARIA/ }));
 
@@ -141,7 +141,7 @@ describe("Catalog — nested level → grade level", () => {
     const user = userEvent.setup();
     const onOpenLevelPeriods = vi.fn();
     mocked.listLevels.mockResolvedValue([{ id: "l1", name: "PRIMARIA", sepCode: "", enrollmentGranularity: "cycle" }]);
-    render(<Catalog onBack={() => {}} onOpenLevelPeriods={onOpenLevelPeriods} />);
+    render(<Catalog canWriteConfig canReadTuition onBack={() => {}} onOpenLevelPeriods={onOpenLevelPeriods} />);
 
     await user.click(await screen.findByRole("button", { name: /PRIMARIA/ }));
     await user.click(await screen.findByRole("button", { name: "Periodos por grado de PRIMARIA" }));
@@ -154,7 +154,7 @@ describe("Catalog — nested level → grade level", () => {
     const secundaria = { id: "l1", name: "SECUNDARIA", sepCode: "", enrollmentGranularity: "cycle" as const, attendanceMode: "daily" as const };
     mocked.listLevels.mockResolvedValue([secundaria]);
     mocked.updateLevelAttendanceMode.mockResolvedValue({ ...secundaria, attendanceMode: "per_class" });
-    render(<Catalog onBack={() => {}} />);
+    render(<Catalog canWriteConfig canReadTuition onBack={() => {}} />);
 
     await user.click(await screen.findByRole("button", { name: /SECUNDARIA/ }));
     await user.click(screen.getByRole("radio", { name: "Por clase" }));
@@ -169,7 +169,7 @@ describe("Catalog — nested level → grade level", () => {
     const off = { enabled: false, min: 5, max: 10, decimals: 0, passing: 6 };
     mocked.listLevels.mockResolvedValue([kinder]);
     mocked.updateLevelGrading.mockResolvedValue({ ...kinder, grading: off });
-    render(<Catalog onBack={() => {}} />);
+    render(<Catalog canWriteConfig canReadTuition onBack={() => {}} />);
 
     await user.click(await screen.findByRole("button", { name: /KINDER/ }));
     await user.click(screen.getByRole("checkbox", { name: "Lleva calificación numérica" }));
@@ -186,7 +186,7 @@ describe("Catalog — nested level → grade level", () => {
     mocked.listLevels.mockResolvedValue([{ id: "l1", name: "PREESCOLAR", sepCode: "", enrollmentGranularity: "cycle" }]);
     mocked.listGradeLevels.mockResolvedValue([]);
     mocked.createGradeLevel.mockRejectedValue(new Error("conflict"));
-    render(<Catalog onBack={() => {}} />);
+    render(<Catalog canWriteConfig canReadTuition onBack={() => {}} />);
 
     await user.click(await screen.findByRole("button", { name: /PREESCOLAR/ }));
     await user.click(await screen.findByRole("button", { name: "Nuevo grado" }));
@@ -201,7 +201,7 @@ describe("Catalog — nested level → grade level", () => {
     const user = userEvent.setup();
     mocked.listCycles.mockResolvedValue([]);
     mocked.createLevel.mockResolvedValue({ id: "l9", name: "PREESCOLAR", sepCode: "", enrollmentGranularity: "cycle" });
-    render(<Catalog onBack={() => {}} />);
+    render(<Catalog canWriteConfig canReadTuition onBack={() => {}} />);
 
     await user.click(await screen.findByRole("button", { name: "Nuevo nivel" }));
     const levelDrawer = await screen.findByRole("dialog", { name: "Nuevo nivel educativo" });
@@ -230,7 +230,7 @@ describe("Catalog — nested level → grade level", () => {
     });
     mocked.createGradeLevel.mockResolvedValue({ id: "g1", levelId: "l1", name: "1° PRIMARIA", ordinal: 1 });
 
-    render(<Catalog onBack={() => {}} />);
+    render(<Catalog canWriteConfig canReadTuition onBack={() => {}} />);
 
     // Create a level, in its drawer. "Por ciclo" comes pre-selected: it is what
     // nearly every level is, and a required choice with no default was one more
@@ -283,7 +283,7 @@ describe("Catalog — todo se crea en modal", () => {
       { id: "l1", name: "PRIMARIA", sepCode: "PRI", enrollmentGranularity: "cycle" },
     ]);
 
-    render(<Catalog onBack={() => {}} />);
+    render(<Catalog canWriteConfig canReadTuition onBack={() => {}} />);
     await screen.findByRole("button", { name: "Nuevo ciclo" });
 
     // No drawer, and none of the fields that live in one.
@@ -297,7 +297,7 @@ describe("Catalog — todo se crea en modal", () => {
     const user = userEvent.setup();
     mocked.listCycles.mockResolvedValue([]);
 
-    render(<Catalog onBack={() => {}} />);
+    render(<Catalog canWriteConfig canReadTuition onBack={() => {}} />);
     await user.click(await screen.findByRole("button", { name: "Nuevo ciclo" }));
     await screen.findByRole("dialog", { name: "Nuevo ciclo escolar" });
 
@@ -316,7 +316,7 @@ describe("Catalog — todo se crea en modal", () => {
     const user = userEvent.setup();
     mocked.listCycles.mockResolvedValue([]);
 
-    render(<Catalog onBack={() => {}} />);
+    render(<Catalog canWriteConfig canReadTuition onBack={() => {}} />);
     await user.click(await screen.findByRole("button", { name: "Nuevo ciclo" }));
     const drawer = await screen.findByRole("dialog", { name: "Nuevo ciclo escolar" });
     // It opens with a proposed year (ISSUE-T14-023): empty it to see what is missing.
@@ -351,7 +351,7 @@ describe("crear varios niveles de corrido", () => {
       id: "l1", name: "MATERNAL", sepCode: "MAT", enrollmentGranularity: "cycle",
     });
 
-    render(<Catalog onBack={() => {}} />);
+    render(<Catalog canWriteConfig canReadTuition onBack={() => {}} />);
     await user.click(await screen.findByRole("button", { name: "Nuevo nivel" }));
     const drawer = await screen.findByRole("dialog", { name: "Nuevo nivel educativo" });
     await user.clear(within(drawer).getByLabelText(/^Nombre del (ciclo|nivel)$/));
@@ -391,7 +391,7 @@ describe("el tabulador sabe de qué ciclo copiar", () => {
       cycleId === "c1" ? [PLAN_ANTERIOR] : [],
     );
 
-    render(<Catalog onBack={() => {}} />);
+    render(<Catalog canWriteConfig canReadTuition onBack={() => {}} />);
     await screen.findByRole("button", { name: /Definir|Editar/ });
     await user.click(screen.getByRole("button", { name: /Definir|Editar/ }));
 
@@ -409,7 +409,7 @@ describe("el tabulador sabe de qué ciclo copiar", () => {
       { id: "l1", name: "KÍNDER", sepCode: "KIN", enrollmentGranularity: "cycle" },
     ]);
 
-    render(<Catalog onBack={() => {}} />);
+    render(<Catalog canWriteConfig canReadTuition onBack={() => {}} />);
     await screen.findByRole("button", { name: /Definir|Editar/ });
     await user.click(screen.getByRole("button", { name: /Definir|Editar/ }));
 
@@ -436,7 +436,7 @@ describe("capturar precios ocupa la pantalla", () => {
     mocked.listLevels.mockResolvedValue([
       { id: "l1", name: "KÍNDER", sepCode: "KIN", enrollmentGranularity: "cycle" },
     ]);
-    render(<Catalog onBack={() => {}} />);
+    render(<Catalog canWriteConfig canReadTuition onBack={() => {}} />);
     await screen.findByRole("button", { name: /Definir|Editar/ });
     await user.click(screen.getByRole("button", { name: /Definir|Editar/ }));
     await screen.findByRole("heading", { name: /^Precios de / });
@@ -507,7 +507,7 @@ describe("editar un tabulador existente", () => {
       },
     ]);
 
-    render(<Catalog onBack={() => {}} />);
+    render(<Catalog canWriteConfig canReadTuition onBack={() => {}} />);
     await user.click(await screen.findByRole("button", { name: /Editar/ }));
     await screen.findByRole("heading", { name: /^Precios de / });
 
@@ -529,7 +529,7 @@ describe("Catalog — meses de cada periodo (tarea 7)", () => {
     mocked.listTerms.mockResolvedValue([t1]);
     mocked.setTermMonths.mockResolvedValue({ ...t1, months: ["2026-09"] });
 
-    render(<Catalog onBack={() => {}} />);
+    render(<Catalog canWriteConfig canReadTuition onBack={() => {}} />);
     await user.click(await screen.findByRole("button", { name: /PRIMARIA/ }));
     await user.click(await screen.findByRole("button", { name: "septiembre de 2026 en 1.er trimestre" }));
 
@@ -547,7 +547,7 @@ describe("Catalog — meses de cada periodo (tarea 7)", () => {
     mocked.setTermMonths.mockResolvedValue({ ...T1, months: ["2026-09"] });
     mocked.createTerm.mockResolvedValue({ ...T1, id: "t2", name: "BIMESTRE EXTRA", ordinal: 2, months: [] });
 
-    render(<Catalog onBack={() => {}} />);
+    render(<Catalog canWriteConfig canReadTuition onBack={() => {}} />);
     await user.click(await screen.findByRole("button", { name: /PRIMARIA/ }));
     await user.click(await screen.findByRole("button", { name: "septiembre de 2026 en 1.er trimestre" }));
     await waitFor(() => expect(mocked.setTermMonths).toHaveBeenCalled());
@@ -570,7 +570,7 @@ describe("Catalog — meses de cada periodo (tarea 7)", () => {
     ]);
     mocked.listTerms.mockImplementation((_url: string, _cycleId: string, levelId?: string) => (levelId === "l1" ? Promise.resolve([T1]) : new Promise<api.Term[]>(() => {})));
 
-    render(<Catalog onBack={() => {}} />);
+    render(<Catalog canReadTuition onBack={() => {}} />);
     await user.click(await screen.findByRole("button", { name: /PRIMARIA/ }));
     expect(await screen.findByRole("button", { name: "septiembre de 2026 en 1.er trimestre" })).toBeInTheDocument();
 
@@ -587,7 +587,7 @@ describe("Catalog — meses de cada periodo (tarea 7)", () => {
     mocked.listLevels.mockResolvedValue([{ id: "l1", name: "PRIMARIA", sepCode: "PRI", enrollmentGranularity: "cycle" }]);
     mocked.listTerms.mockRejectedValue(new Error("boom"));
 
-    render(<Catalog onBack={() => {}} />);
+    render(<Catalog canWriteConfig canReadTuition onBack={() => {}} />);
     await user.click(await screen.findByRole("button", { name: /PRIMARIA/ }));
 
     expect(await screen.findByText("No se pudieron cargar los periodos de este nivel.")).toBeInTheDocument();

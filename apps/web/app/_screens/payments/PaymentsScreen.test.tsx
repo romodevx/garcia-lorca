@@ -14,7 +14,7 @@ vi.mock("../../finance/api", () => ({
   registerDeposit: vi.fn(),
   getCashUp: vi.fn(),
 }));
-vi.mock("../../students/api", () => ({ listStudents: vi.fn(), listEnrollments: vi.fn() }));
+vi.mock("../../students/api", () => ({ listStudentsWithRooms: vi.fn(), listEnrollments: vi.fn() }));
 vi.mock("../../config/api", () => ({ listCycles: vi.fn(), listLabelledGroups: vi.fn() }));
 
 const finance = vi.mocked(financeApi);
@@ -27,7 +27,7 @@ const student = (id: string, first: string, last: string): studentsApi.Student =
 });
 
 beforeEach(() => {
-  students.listStudents.mockResolvedValue([student("s1", "Valentina", "Cruz"), student("s2", "Mateo", "Sánchez")]);
+  students.listStudentsWithRooms.mockResolvedValue([student("s1", "Valentina", "Cruz"), student("s2", "Mateo", "Sánchez")]);
   finance.getExpected.mockResolvedValue({ amountCents: 670000, surchargeCents: 0, discountCents: 0, annualBalanceCents: 1300000, onTimeBalanceCents: 1300000, lines: [] });
   finance.getAccount.mockResolvedValue({ charges: [], payments: [], totalBalanceCents: 1300000, unallocatedCents: 0, dueTodayCents: 0, surchargeCents: 0, earlyDiscountCents: 0, asOf: "" });
   finance.previewDeposit.mockResolvedValue({ allocations: [], surcharges: [], unallocatedCents: 0 });
@@ -83,7 +83,7 @@ describe("PaymentsScreen", () => {
   // somebody looking for a registration problem that is not there.
   it("says the list could not be loaded, instead of claiming the pupil does not exist", async () => {
     const user = userEvent.setup();
-    students.listStudents.mockRejectedValue(new Error("students is down"));
+    students.listStudentsWithRooms.mockRejectedValue(new Error("students is down"));
     render(<PaymentsScreen onBack={() => {}} />);
 
     await user.type(await screen.findByLabelText("Buscar alumno"), "Valen");
@@ -96,11 +96,11 @@ describe("PaymentsScreen", () => {
   // back is the common case, and a dead end at the counter is not acceptable.
   it("can retry the list", async () => {
     const user = userEvent.setup();
-    students.listStudents.mockRejectedValueOnce(new Error("students is down"));
+    students.listStudentsWithRooms.mockRejectedValueOnce(new Error("students is down"));
     render(<PaymentsScreen onBack={() => {}} />);
     await screen.findByRole("alert");
 
-    students.listStudents.mockResolvedValue([student("s1", "Valentina", "Cruz")]);
+    students.listStudentsWithRooms.mockResolvedValue([student("s1", "Valentina", "Cruz")]);
     await user.click(screen.getByRole("button", { name: /Reintentar/ }));
 
     await user.type(screen.getByLabelText("Buscar alumno"), "Valen");
@@ -113,7 +113,7 @@ describe("PaymentsScreen", () => {
   // round trips.
   it("asks what each pupil owes once", async () => {
     const user = userEvent.setup();
-    students.listStudents.mockResolvedValue([
+    students.listStudentsWithRooms.mockResolvedValue([
       student("s1", "Valentina", "Cruz"),
       student("s2", "Valeria", "Cruz"),
       student("s3", "Valentín", "Cruz"),
@@ -131,7 +131,7 @@ describe("PaymentsScreen", () => {
   // balance, which would cost the service two more reads per name.
   it("asks for what is due without the year's balance", async () => {
     const user = userEvent.setup();
-    students.listStudents.mockResolvedValue([student("s1", "Valentina", "Cruz")]);
+    students.listStudentsWithRooms.mockResolvedValue([student("s1", "Valentina", "Cruz")]);
     render(<PaymentsScreen onBack={() => {}} />);
     await screen.findByLabelText("Buscar alumno");
 
@@ -158,11 +158,10 @@ describe("PaymentsScreen · corte de caja", () => {
 
 // ISSUE-T14-018: the search and the counter's header said "PRIMARIA · A";
 // the receipt said "3° PRIMARIA · A". Two A's are told apart by the grade.
-describe("PaymentsScreen · el grupo con su grado (T14-018)", () => {
-  it("names the classroom with its grade in the results and the counter's header", async () => {
-    students.listStudents.mockResolvedValue([{ ...student("s1", "Valentina", "Cruz"), gradeGroup: "A" }]);
-    config.listLabelledGroups.mockResolvedValue([{ id: "gA", cycleId: "c1", gradeLevelId: "g3", name: "A", capacity: 30, label: "3° PRIMARIA · A" }]);
-    students.listEnrollments.mockResolvedValue([{ id: "e1", studentId: "s1", cycleId: "c1", groupId: "gA", termId: "", status: "active", enrolledAt: "2026-08-20" }]);
+// CC-211: Cobranza has no config:read, so the label comes with the list itself.
+describe("PaymentsScreen · el grupo con su grado (T14-018, CC-211)", () => {
+  it("names the classroom with its grade in the results and the counter's header, from the list alone", async () => {
+    students.listStudentsWithRooms.mockResolvedValue([{ ...student("s1", "Valentina", "Cruz"), gradeGroup: "A", groupLabel: "3° PRIMARIA · A" }]);
     const user = userEvent.setup();
     render(<PaymentsScreen onBack={() => {}} />);
     await screen.findByLabelText("Buscar alumno");
@@ -173,5 +172,25 @@ describe("PaymentsScreen · el grupo con su grado (T14-018)", () => {
     await user.click(screen.getByRole("button", { name: /Cruz Valentina/ }));
     const dialog = await screen.findByRole("dialog", { name: /^Cobrar/ });
     expect(dialog).toHaveTextContent("3° PRIMARIA · A");
+  });
+
+  it("never asks config for the catalog the cashier cannot read", async () => {
+    render(<PaymentsScreen onBack={() => {}} />);
+    await screen.findByLabelText("Buscar alumno");
+    await waitFor(() => expect(students.listStudentsWithRooms).toHaveBeenCalled());
+
+    expect(config.listCycles).not.toHaveBeenCalled();
+    expect(config.listLabelledGroups).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the level and the stored group when the list carries no label", async () => {
+    students.listStudentsWithRooms.mockResolvedValue([{ ...student("s1", "Valentina", "Cruz"), gradeGroup: "A" }]);
+    const user = userEvent.setup();
+    render(<PaymentsScreen onBack={() => {}} />);
+    await screen.findByLabelText("Buscar alumno");
+
+    await user.type(screen.getByLabelText("Buscar alumno"), "Valen");
+
+    expect(await screen.findByText("primaria · A")).toBeInTheDocument();
   });
 });

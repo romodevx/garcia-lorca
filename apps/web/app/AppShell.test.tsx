@@ -84,6 +84,7 @@ vi.mock("./admin/api", async (importOriginal) => ({
 
 vi.mock("./students/api", () => ({
   listStudents: vi.fn().mockResolvedValue([]),
+  listStudentsWithRooms: vi.fn().mockResolvedValue([]),
   listEnrollments: vi.fn().mockResolvedValue([]),
   listContacts: vi.fn().mockResolvedValue([]),
   listNotes: vi.fn().mockResolvedValue([]),
@@ -119,6 +120,8 @@ const mockMayHaveSession = vi.mocked(mayHaveSession);
 beforeEach(() => {
   // La dirección es estado de módulo: sin esto se filtra de una prueba a otra.
   resetFakeRouter("/");
+  // El destino pendiente vive en sessionStorage (CC-309): también se filtraría.
+  window.sessionStorage.clear();
   mockMe.mockReset();
   mockRefresh.mockReset();
   mockMe.mockRejectedValue(new Error("no session"));
@@ -266,7 +269,7 @@ describe("AppShell navigation flow", () => {
     );
 
     // No login submit — the boot restore lands straight on the dashboard.
-    expect(await screen.findByRole("heading", { name: /Módulos/ })).toBeInTheDocument();
+    expect(await screen.findByText("No tienes módulos asignados")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Entrar al sistema" })).not.toBeInTheDocument();
   });
 
@@ -281,7 +284,7 @@ describe("AppShell navigation flow", () => {
       </Providers>
     );
 
-    await screen.findByRole("heading", { name: /Módulos/ });
+    await screen.findByText("No tienes módulos asignados");
     expect(screen.queryByRole("button", { name: /Notificaciones/ })).toBeNull();
   });
 
@@ -352,7 +355,7 @@ describe("AppShell navigation flow", () => {
       </Providers>
     );
 
-    expect(await screen.findByRole("heading", { name: /Módulos/ })).toBeInTheDocument();
+    expect(await screen.findByText("No tienes módulos asignados")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Entrar al sistema" })).not.toBeInTheDocument();
   });
 
@@ -775,6 +778,34 @@ describe("la dirección manda sobre la pantalla", () => {
     expect(fakePath()).toBe("/finanzas");
   });
 
+  it("el destino sobrevive a que Next vuelva a montar el shell al pasar a /entrar (CC-309)", async () => {
+    // En el navegador, /finanzas → /entrar cambia el valor del catch-all
+    // [[...slug]] y Next monta una página NUEVA: un useRef del primer montaje
+    // ya no existe cuando la persona entra. El router falso no remonta solo,
+    // así que se hace a mano.
+    resetFakeRouter("/finanzas");
+    mockLogin.mockResolvedValue({ expiresIn: 900, mustChangePassword: false });
+    mockMe.mockRejectedValueOnce(new Error("no session")).mockRejectedValueOnce(new Error("no session")).mockResolvedValue(OWNER_ME);
+    const first = render(
+      <Providers flags={{ module_finance: true }}>
+        <AppShell />
+      </Providers>
+    );
+    await screen.findByLabelText("Correo");
+    expect(fakePath()).toBe("/entrar");
+    first.unmount();
+
+    const user = userEvent.setup();
+    render(
+      <Providers flags={{ module_finance: true }}>
+        <AppShell />
+      </Providers>
+    );
+    await submitLogin(user);
+    expect(await screen.findByRole("heading", { name: "Finanzas" })).toBeInTheDocument();
+    expect(fakePath()).toBe("/finanzas");
+  });
+
   it("sin sesión y sin link, entrar aterriza en el tablero", async () => {
     mockLogin.mockResolvedValue({ expiresIn: 900, mustChangePassword: false });
     mockMe.mockRejectedValueOnce(new Error("no session")).mockResolvedValue(OWNER_ME);
@@ -788,6 +819,25 @@ describe("la dirección manda sobre la pantalla", () => {
     await submitLogin(user);
     await screen.findByRole("heading", { name: /Módulos/ });
     expect(fakePath()).toBe("/");
+  });
+
+  it("cerrar sesión borra el destino pendiente: la siguiente persona en la pestaña no hereda la liga (revisión #146)", async () => {
+    resetFakeRouter("/finanzas");
+    mockMe.mockResolvedValue(OWNER_ME);
+    mockLogout.mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    render(
+      <Providers flags={{ module_finance: true }}>
+        <AppShell />
+      </Providers>
+    );
+    await screen.findByRole("heading", { name: "Finanzas" });
+    window.sessionStorage.setItem("gl.pendingDestination", "/horarios");
+
+    await clickLogout(user);
+
+    await screen.findByRole("button", { name: "Entrar al sistema" });
+    expect(window.sessionStorage.getItem("gl.pendingDestination")).toBeNull();
   });
 
   it("cerrar sesión no deja el tablero en el historial", async () => {

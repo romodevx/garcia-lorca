@@ -37,6 +37,15 @@ describe("StudentSearch", () => {
     expect(screen.getByText("1 de 3 alumnos")).toBeInTheDocument();
   });
 
+  it("names the group with its grade when the list carries it, not just the level and letter (CC-313)", async () => {
+    const user = userEvent.setup();
+    render(<Harness students={[{ ...pupil("s2", "Dos", "Prueba", "B"), level: "PRIMARIA", groupLabel: "3° PRIMARIA · B" }]} />);
+    await user.type(search(), "dos");
+    const result = screen.getByRole("button", { name: "Prueba Dos" });
+    expect(result).toHaveTextContent("3° PRIMARIA · B");
+    expect(result).not.toHaveTextContent(/^PRIMARIA · B/);
+  });
+
   it("finds a pupil by the spoken order too", async () => {
     const user = userEvent.setup();
     render(<Harness students={PUPILS} />);

@@ -21,7 +21,7 @@ vi.mock("../../comms/api", () => ({
   updateBirthdayTemplate: vi.fn(),
 }));
 vi.mock("../../config/api", () => ({ listCycles: vi.fn(), listLevels: vi.fn(), listLabelledGroups: vi.fn() }));
-vi.mock("../../students/api", () => ({ listStudents: vi.fn() }));
+vi.mock("../../students/api", () => ({ listStudentsWithRooms: vi.fn() }));
 
 const comms = vi.mocked(commsApi);
 const config = vi.mocked(configApi);
@@ -40,7 +40,7 @@ beforeEach(() => {
     { id: "g1", cycleId: "c2", gradeLevelId: "gl1", name: "A", capacity: 30, label: "1° A" },
     { id: "g2", cycleId: "c2", gradeLevelId: "gl1", name: "B", capacity: 30, label: "1° B" },
   ]);
-  students.listStudents.mockResolvedValue([
+  students.listStudentsWithRooms.mockResolvedValue([
     { id: "s1", curp: "C1", firstName: "Valentina", lastName: "Cruz", level: "primaria", levelId: "", gradeGroup: "1° A", guardianName: "Tutor", admissionStatus: "enrolled" },
     { id: "s2", curp: "C2", firstName: "Mateo", lastName: "Andrade", level: "primaria", levelId: "", gradeGroup: "1° B", guardianName: "Tutor", admissionStatus: "enrolled" },
   ]);
@@ -70,7 +70,7 @@ describe.each(VIEWS)("Avisos ($name) — behavior contract", ({ Screen, pickStud
     const expectLoadedOnce = (): void => {
       expect(config.listCycles).toHaveBeenCalledTimes(1);
       expect(config.listLevels).toHaveBeenCalledTimes(1);
-      expect(students.listStudents).toHaveBeenCalledTimes(1);
+      expect(students.listStudentsWithRooms).toHaveBeenCalledTimes(1);
       expect(comms.getBirthdayTemplate).toHaveBeenCalledTimes(1);
       expect(config.listLabelledGroups).toHaveBeenCalledTimes(1);
       expect(config.listLabelledGroups).toHaveBeenCalledWith(API_URL, "c2");

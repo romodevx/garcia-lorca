@@ -5,7 +5,7 @@ import { Avatar } from "../../_design/Brand";
 import { Btn } from "../../_design/Controls";
 import { Icon } from "../../_design/Icon";
 import { Page } from "../../_design/Page";
-import { listStudents, type Student } from "../../students/api";
+import { listStudentsWithRooms, type Student } from "../../students/api";
 import { getExpected } from "../../finance/api";
 import { API_URL } from "../../api-url";
 import { formatCents } from "../../_lib/money";
@@ -13,7 +13,7 @@ import type { CutAccess } from "../finance/CashCutClosing";
 import { CashUpDrawer } from "../finance/CashUpDrawer";
 import { CollectDrawer, type CollectStudent } from "../finance/CollectDrawer";
 import type { NotesAccess } from "../../_design/students/StudentNotesBeside";
-import { useRoomLabels } from "../../_design/students/roomLabels";
+import { studentRoomLabel } from "../../_design/students/studentRoom";
 import { matchesSearch } from "../../_design/textSearch";
 import { formatStudentName, sortStudents, studentNameSearchKeys } from "../../_design/students/studentName";
 import { ModuleHeaderIcon } from "../../_design/ModuleHeaderIcon";
@@ -63,13 +63,13 @@ export function PaymentsScreen({ onBack, canGrantDiscounts = false, notes, canCo
   const [cashUp, setCashUp] = useState(false);
   const [owed, setOwed] = useState<Map<string, number>>(new Map());
   const [toast, setToast] = useState<string | null>(null);
-  // "3° PRIMARIA · A", as the receipt says it (T14-018); the file's own words until read.
-  const rooms = useRoomLabels();
-  const roomOf = (s: Student): string => rooms.get(s.id) ?? `${s.level} · ${s.gradeGroup}`;
+  // "3° PRIMARIA · A", as the receipt says it (T14-018). The list itself carries
+  // it (CC-211): the cashier has no config:read to resolve it here.
+  const roomOf = studentRoomLabel;
 
   const loadRoll = useCallback(() => {
     setRoll("loading");
-    listStudents(API_URL)
+    listStudentsWithRooms(API_URL)
       .then((rows) => { setStudents(rows); setRoll("ready"); })
       .catch(() => setRoll("failed"));
   }, []);

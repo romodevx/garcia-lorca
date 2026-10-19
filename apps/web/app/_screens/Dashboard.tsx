@@ -150,7 +150,7 @@ function ClassicDashboard({ user, onOpen, permissions, permissionsFailed = false
           <h1 style={{ fontSize: 34, fontWeight: 800, color: "var(--text)" }}>
             {greet}, {user.first} 🌱
           </h1>
-          <p style={{ color: "var(--text-muted)", fontSize: 16, marginTop: 6, textTransform: "capitalize" }}>
+          <p style={{ color: "var(--text-muted)", fontSize: 16, marginTop: 6 }}>
             {today}{cycleName !== undefined && ` · Ciclo ${cycleName}`}
           </p>
         </div>
@@ -176,11 +176,13 @@ function ClassicDashboard({ user, onOpen, permissions, permissionsFailed = false
         </div>
       )}
 
-      {/* modules */}
-      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 16 }}>
-        <h2 style={{ fontSize: 21, fontWeight: 700, color: "var(--text)" }}>Módulos</h2>
-        <span style={{ fontSize: 14, color: "var(--text-faint)" }}>Todo el sistema, a la vista</span>
-      </div>
+      {/* modules — no heading over nothing: NoModules says it on its own (CC-315) */}
+      {!(resolved && !permissionsFailed && visibleModules.length === 0) && (
+        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 16 }}>
+          <h2 style={{ fontSize: 21, fontWeight: 700, color: "var(--text)" }}>Módulos</h2>
+          <span style={{ fontSize: 14, color: "var(--text-faint)" }}>Todo el sistema, a la vista</span>
+        </div>
+      )}
       {permissionsFailed ? (
         <PermissionsUnavailable onRetry={onRetryPermissions} />
       ) : !resolved ? (

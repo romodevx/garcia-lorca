@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useFlag } from "@garcia-lorca/ui/flags";
 import { pathToView, viewToPath, type View } from "./routing/routes";
 import { canReachView } from "./routing/moduleAccess";
+import { forgetPendingDestination, rememberPendingDestination, takePendingDestination } from "./routing/pendingDestination";
 import { CommandPaletteHost } from "./command/CommandPaletteHost";
 import { TopBar } from "./_design/TopBar";
 import { MODULES, USERS, type ModuleDef, type Role, type UserProfile } from "./_design/data";
@@ -29,7 +30,7 @@ import { LevelPeriodsScreen } from "./_screens/config/periods/LevelPeriodsScreen
 import { StudentImportScreen } from "./_screens/studentImport/StudentImportScreen";
 import { canImportStudents } from "./studentImport/file";
 import { clearLevelNotice, leaveLevelNotice, peekLevelNotice } from "./_screens/config/levelDeletion/pendingNotice";
-import { canDeleteLevels, canWriteConfig } from "./config/permissions";
+import { canDeleteLevels, canReadTuition, canWriteConfig } from "./config/permissions";
 import { canDeleteUsers } from "./admin/permissions";
 import { AdminScreen } from "./_screens/admin/AdminScreen";
 import { StudentEditScreen } from "./_screens/students/StudentEditScreen";
@@ -178,15 +179,6 @@ export function AppShell(): ReactElement {
   // dónde iba esta persona", y no debe moverse cuando navegue después.
   const bootPath = useRef(pathname);
 
-  /**
-   * A dónde iba quien tocó un link directo sin sesión viva.
-   *
-   * Se guarda como View YA RESUELTA, no como el texto de la URL: así el destino
-   * sólo puede ser una de las rutas que routes.ts reconoce, y un link de fuera
-   * no puede empujar a nadie a otro sitio. Vive en memoria del cliente y nunca
-   * en la barra de direcciones, que es donde un ?next= sería copiable.
-   */
-  const pendingDestination = useRef<View | undefined>(undefined);
 
   // Mientras se pregunta si hay sesión no se puede pintar ni el tablero (sería
   // un parpadeo de datos a quien no ha entrado) ni la pantalla de entrada (sería
@@ -359,12 +351,10 @@ export function AppShell(): ReactElement {
       }
       const asked = pathToView(bootPath.current);
       if (!alive) {
-        // Sólo vale la pena recordar un destino que NO sea el que se ofrece por
-        // omisión: mandar a alguien "de vuelta" al tablero no es devolverlo a
-        // ningún lado.
-        if (asked.screen !== "login" && asked.screen !== "dashboard" && asked.screen !== "changePassword") {
-          pendingDestination.current = asked;
-        }
+        // A dónde iba quien tocó un link directo sin sesión viva. Se guarda
+        // fuera del componente: pasar a /entrar remonta la página (CC-309).
+        // Sólo rutas propias, y nunca el tablero ni la entrada.
+        rememberPendingDestination(viewToPath(asked));
         goReplacing({ screen: "login" });
       } else if (asked.screen === "login" || asked.screen === "changePassword") {
         // Con sesión viva, la pantalla de entrada no tiene nada que hacer.
@@ -405,7 +395,7 @@ export function AppShell(): ReactElement {
         // forzado —esta rama sale antes de la línea que lo limpia— y la
         // SIGUIENTE persona que entrara en la misma pestaña compartida
         // aterrizaba en el módulo que pidió la anterior.
-        pendingDestination.current = undefined;
+        forgetPendingDestination();
         setAuthenticated(true);
         // `replace`: una vez cambiada, esa pantalla ya no es un destino.
         goReplacing({ screen: "changePassword" });
@@ -418,9 +408,7 @@ export function AppShell(): ReactElement {
       setAuthenticated(true);
       await loadPrincipal();
       // De vuelta al link que trajo aquí a esta persona, si lo hubo.
-      const target = pendingDestination.current ?? { screen: "dashboard" as const };
-      pendingDestination.current = undefined;
-      goReplacing(target);
+      goReplacing(takePendingDestination() ?? { screen: "dashboard" });
     } catch {
       setAuthError("Correo o contraseña incorrectos.");
     } finally {
@@ -452,6 +440,9 @@ export function AppShell(): ReactElement {
     // The SDK is imported lazily and only when it is in use — signing out of a
     // session that was never started is not worth 468 KB.
     void endSession(API_URL, apiLogout, providerLoginEnabled(), () => import("./auth/firebase"));
+    // A link left pending in this tab belongs to whoever opened it, not to the
+    // next person who signs in at the same desk.
+    forgetPendingDestination();
     setPrincipal(undefined);
     setAuthenticated(false);
     goReplacing({ screen: "login" });
@@ -548,6 +539,7 @@ export function AppShell(): ReactElement {
   // answers reads with config:read and edits with config:write.
   const openLevelPeriods = (levelId: string): void => go({ screen: "levelPeriods", levelId });
   const mayWriteConfig = canWriteConfig(principal?.permissions);
+  const mayReadTuition = canReadTuition(principal?.permissions);
   // Owner-only (students:import). UX only: the gateway refuses without it.
   const mayImportStudents = studentImportEnabled && canImportStudents(principal?.permissions);
   const openStudentImport = mayImportStudents ? (): void => go({ screen: "studentImport" }) : undefined;
@@ -718,9 +710,9 @@ export function AppShell(): ReactElement {
         (view.screen === "studentImport" && !mayImportStudents)) &&
         (configEnabled ? (
           configSetupView ? (
-            <CatalogSetup onBack={home} canDeleteLevels={mayDeleteLevels} onDeleteLevel={openLevelDelete} onOpenLevelPeriods={openLevelPeriods} onOpenStudentImport={openStudentImport} notice={configNotice} canWriteConfig={mayWriteConfig} />
+            <CatalogSetup onBack={home} canDeleteLevels={mayDeleteLevels} onDeleteLevel={openLevelDelete} onOpenLevelPeriods={openLevelPeriods} onOpenStudentImport={openStudentImport} notice={configNotice} canWriteConfig={mayWriteConfig} canReadTuition={mayReadTuition} />
           ) : (
-            <Catalog onBack={home} canDeleteLevels={mayDeleteLevels} onDeleteLevel={openLevelDelete} onOpenLevelPeriods={openLevelPeriods} onOpenStudentImport={openStudentImport} notice={configNotice} canWriteConfig={mayWriteConfig} />
+            <Catalog onBack={home} canDeleteLevels={mayDeleteLevels} onDeleteLevel={openLevelDelete} onOpenLevelPeriods={openLevelPeriods} onOpenStudentImport={openStudentImport} notice={configNotice} canWriteConfig={mayWriteConfig} canReadTuition={mayReadTuition} />
           )
         ) : (
           // Flag OFF: never render the catalog; show the friendly stub so

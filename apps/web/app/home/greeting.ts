@@ -4,7 +4,12 @@ export function greetingFor(now: Date): string {
   return hour < 12 ? "Buenos días" : hour < 19 ? "Buenas tardes" : "Buenas noches";
 }
 
-/** The date under the greeting, es-MX, capitalized by CSS (B2). */
+/**
+ * The date under the greeting, es-MX, as a sentence: "Sábado, 17 de octubre"
+ * (B2). Only the first letter goes up — CSS `capitalize` raised every word and
+ * wrote "17 De Octubre" (CC-315).
+ */
 export function todayLabel(now: Date): string {
-  return now.toLocaleDateString("es-MX", { weekday: "long", day: "numeric", month: "long" });
+  const text = now.toLocaleDateString("es-MX", { weekday: "long", day: "numeric", month: "long" });
+  return text.charAt(0).toLocaleUpperCase("es-MX") + text.slice(1);
 }
