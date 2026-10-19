@@ -26,8 +26,23 @@ import { FirstCategoryInvite } from "./FirstCategoryInvite";
 
 export const METHOD_LABEL: Record<ExpenseMethod, string> = { cash: "Efectivo", card: "Tarjeta", transfer: "Transferencia" };
 const METHODS: readonly ExpenseMethod[] = ["cash", "card", "transfer"];
-const RECEIPT_TYPES = "image/jpeg,image/png,application/pdf";
+const RECEIPT_MIME_TYPES = ["image/jpeg", "image/png", "application/pdf"] as const;
+const RECEIPT_TYPES = RECEIPT_MIME_TYPES.join(",");
+const RECEIPT_EXTENSION = /\.(jpe?g|png|pdf)$/i;
 const FUTURE_DATE = "La fecha no puede ser posterior a hoy.";
+
+/**
+ * What is wrong with a chosen receipt, if anything (CC-206). `accept` is only
+ * a hint — "Todos los archivos" lets a .txt through — so the field says so
+ * before anything is saved, with the same rule the server applies.
+ */
+export function receiptFileError(file: File): string | undefined {
+  const typed = (RECEIPT_MIME_TYPES as readonly string[]).includes(file.type);
+  if (!typed && !(file.type === "" && RECEIPT_EXTENSION.test(file.name))) {
+    return `«${file.name}» no se puede adjuntar: el comprobante debe ser JPG, PNG o PDF.`;
+  }
+  return file.size > MAX_RECEIPT_BYTES ? "El comprobante pesa más de 5 MB." : undefined;
+}
 
 /** What is wrong with an expense's day, if anything: never after the office's today. */
 export function spentOnError(spentOn: string, today: string): string | undefined {
@@ -85,6 +100,9 @@ export function ExpenseDrawer({ expense, categories, today, canWrite, onClose, o
   const required = useRequired(["spentOn", "categoryId", "amount"]);
   const cancelRequired = useRequired(["cancelReason"]);
   const fileInput = useRef<HTMLInputElement>(null);
+  const [fileError, setFileError] = useState<string | undefined>(undefined);
+  /** Saved, but its receipt was refused: the next save only attaches it (CC-206). */
+  const savedExpense = useRef<Expense | undefined>(undefined);
 
   useEffect(() => {
     if (expense === undefined) return;
@@ -124,31 +142,34 @@ export function ExpenseDrawer({ expense, categories, today, canWrite, onClose, o
       setError("Escribe el monto en pesos, por ejemplo 1,250.50");
       return;
     }
-    if (file !== null && file.size > MAX_RECEIPT_BYTES) {
-      setError("El comprobante pesa más de 5 MB.");
-      return;
-    }
+    const wrongFile = file === null ? undefined : receiptFileError(file);
+    setFileError(wrongFile);
+    if (wrongFile !== undefined) return;
     setPending(true);
     setError(undefined);
     try {
       const input = { spentOn, categoryId, amountCents, method, description: description.trim() };
-      const saved = editing
-        ? await updateExpense(API_URL, expense.id, { ...input, reason: reason.trim() })
-        : await createExpense(API_URL, input);
-      let note = "";
+      // A retry after a refused receipt only attaches it: the expense is
+      // already saved, and creating it again would record it twice.
+      const saved = savedExpense.current
+        ?? (editing
+          ? await updateExpense(API_URL, expense.id, { ...input, reason: reason.trim() })
+          : await createExpense(API_URL, input));
+      savedExpense.current = undefined;
       if (file !== null) {
-        // The expense is saved by now. A failed upload must not leave a
-        // "new expense" form whose retry records it twice: say what happened
-        // and close; the receipt can be attached by opening the expense.
         try {
           await uploadReceipt(API_URL, saved.id, file);
         } catch (err) {
-          note = ` — el comprobante no se subió (${err instanceof Error ? err.message : "error"}); ábrelo para adjuntarlo`;
-          keepOpen = false;
+          // CC-206: the refusal stays on the field, with the form as it was.
+          // The list is refreshed now, since the expense IS recorded.
+          savedExpense.current = saved;
+          setFileError(`El egreso ya quedó registrado, pero el comprobante no se subió: ${err instanceof Error ? err.message : "error"}. Elige un JPG, PNG o PDF y vuelve a guardar, o cierra para dejarlo sin comprobante.`);
+          onSaved(`${editing ? "Egreso actualizado" : "Egreso registrado"} sin comprobante`, true);
+          return;
         }
       }
       if (keepOpen) reset();
-      onSaved(`${editing ? "Egreso actualizado" : "Egreso registrado"}${note}`, keepOpen);
+      onSaved(editing ? "Egreso actualizado" : "Egreso registrado", keepOpen);
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo guardar el egreso.");
     } finally {
@@ -248,10 +269,15 @@ export function ExpenseDrawer({ expense, categories, today, canWrite, onClose, o
       <TextField label="Descripción" value={description} onChange={setDescription} disabled={readOnly}
         help="Qué se pagó y a quién: «Tóner para dirección, Papelería López»." />
       {!readOnly && (
-        <Field label="Comprobante" help="Foto del ticket o factura: JPG, PNG o PDF de hasta 5 MB.">
+        <Field label="Comprobante" help="Foto del ticket o factura: JPG, PNG o PDF de hasta 5 MB." error={fileError}>
           {(id, describedBy) => (
             <input id={id} ref={fileInput} type="file" accept={RECEIPT_TYPES} aria-describedby={describedBy}
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)} style={{ fontSize: 15, minHeight: 44 }} />
+              aria-invalid={fileError !== undefined}
+              onChange={(e) => {
+                const chosen = e.target.files?.[0] ?? null;
+                setFile(chosen);
+                setFileError(chosen === null ? undefined : receiptFileError(chosen));
+              }} style={{ fontSize: 15, minHeight: 44 }} />
           )}
         </Field>
       )}

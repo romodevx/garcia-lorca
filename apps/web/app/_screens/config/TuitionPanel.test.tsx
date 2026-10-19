@@ -176,7 +176,22 @@ describe("running the month", () => {
 
     // "Ya existían" is what makes a second press legible instead of frightening.
     expect(await screen.findByText(/30 colegiaturas/)).toBeInTheDocument();
-    expect(screen.getByText(/6 ya existían/)).toBeInTheDocument();
+    // CC-213: the count says WHAT already existed, and that nobody was charged twice.
+    expect(screen.getByText(/6 cargos ya existían/)).toHaveTextContent(
+      "6 cargos ya existían (colegiaturas, inscripciones, cuotas o actividades emitidos antes) y no se volvieron a cobrar.",
+    );
+  });
+
+  it("says nothing already existed when the run skipped nothing", async () => {
+    const user = userEvent.setup();
+    finance.runBilling.mockResolvedValue({
+      tuitionCreated: 30, enrollmentCreated: 10, lateFeesCreated: 4, feesCreated: 0, enrollmentMoved: 0, skipped: 0, levelsWithoutPlan: [],
+    });
+    render(<Host />);
+    await screen.findByText("Primaria");
+    await user.click(screen.getByRole("button", { name: /Generar cargos/ }));
+    expect(await screen.findByText(/30 colegiaturas/)).toBeInTheDocument();
+    expect(screen.queryByText(/ya existían/)).toBeNull();
   });
 
   // T17: the same run issues the activities' charges.

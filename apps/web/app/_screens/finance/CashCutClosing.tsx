@@ -230,7 +230,7 @@ function ClosedCut({ closure, modified, day, canReopen, onChanged }: {
       {row("Diferencia", formatCents(closure.differenceCents), "cash-up-closure-difference", differenceColor(closure.differenceCents))}
       {modified && (
         <p style={{ margin: 0, fontSize: 13.5, color: "var(--warn-fg)" }}>
-          Un movimiento de este día cambió después de cerrar (una corrección, una cancelación o un egreso). Las cifras de arriba son las de hoy; el cierre conserva las de entonces.
+          Algo de este día cambió después de cerrar: un cobro nuevo, una corrección, una cancelación o un egreso. Las cifras de arriba son las de hoy; el cierre conserva las de entonces.
         </p>
       )}
       {canReopen && !reopening && (

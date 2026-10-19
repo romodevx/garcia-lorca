@@ -111,10 +111,27 @@ func (c ChargeConcept) WithKind(kind string) (ChargeConcept, error) {
 	}
 }
 
+// ErrSystemConceptStaysActive is the message a school reads when it tries to
+// deactivate a concept billing depends on (CC-404).
+const ErrSystemConceptStaysActive = "este concepto es del sistema: la facturación lo usa y no se puede desactivar"
+
+// IsSystem reports whether billing finds the concept by its kind.
+func (c ChargeConcept) IsSystem() bool { return c.kind != KindCustom && c.kind != "" }
+
 // WithUpdate returns a re-validated copy carrying the new mutable attributes,
-// leaving the receiver and the concept's identity untouched.
+// leaving the receiver, the concept's identity and its kind untouched. A system
+// concept cannot be deactivated: billing finds it by kind and ignores `active`,
+// so the switch would claim to stop charges that keep coming (CC-404).
 func (c ChargeConcept) WithUpdate(name string, defaultAmountCents int64, recurrence string, active bool) (ChargeConcept, error) {
-	return NewChargeConcept(c.id, c.tenantID, name, defaultAmountCents, recurrence, active)
+	if c.IsSystem() && !active {
+		return ChargeConcept{}, glerrors.New(glerrors.KindInvalid, ErrSystemConceptStaysActive)
+	}
+	updated, err := NewChargeConcept(c.id, c.tenantID, name, defaultAmountCents, recurrence, active)
+	if err != nil {
+		return ChargeConcept{}, err
+	}
+	updated.kind = c.kind
+	return updated, nil
 }
 
 // Accessors.

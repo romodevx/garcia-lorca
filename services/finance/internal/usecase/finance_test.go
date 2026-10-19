@@ -3,6 +3,7 @@ package usecase_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -112,6 +113,21 @@ func TestUpdateConceptReactivatesARetiredConcept(t *testing.T) {
 	requireNoError(t, err)
 	if !revived.Active() {
 		t.Fatal("a retired concept must be re-activatable through UpdateConcept")
+	}
+}
+
+// CC-404: billing finds tuition by kind and ignores `active`; deactivating it
+// would claim to stop charges that keep coming.
+func TestUpdateConceptRefusesToDeactivateASystemConcept(t *testing.T) {
+	f := newFixture(t)
+	tuition, err := f.repo.EnsureConceptOfKind(context.Background(), "k-tuition", domain.KindTuition, "Colegiatura")
+	requireNoError(t, err)
+
+	_, err = f.svc.UpdateConcept(context.Background(), tuition.ID(), "Colegiatura", 0, domain.RecurrenceMonthly, false)
+
+	requireKind(t, err, glerrors.KindInvalid)
+	if !f.repo.concepts[tuition.ID()].Active() {
+		t.Fatal("the system concept must stay active")
 	}
 }
 
@@ -428,7 +444,7 @@ func TestApplyDiscountRejected(t *testing.T) {
 		f := newFixture(t)
 		concept := f.seedConcept(t, "Colegiatura", 250000)
 		charge := f.seedCharge(t, concept.ID(), 100000)
-		if _, err := f.svc.CancelCharge(context.Background(), charge.ID()); err != nil {
+		if _, err := f.svc.CancelCharge(context.Background(), charge.ID(), "Cargo duplicado"); err != nil {
 			t.Fatalf("seed cancel: %v", err)
 		}
 
@@ -454,7 +470,7 @@ func TestCancelCharge(t *testing.T) {
 	concept := f.seedConcept(t, "Colegiatura", 250000)
 	charge := f.seedCharge(t, concept.ID(), 100000)
 
-	got, err := f.svc.CancelCharge(context.Background(), charge.ID())
+	got, err := f.svc.CancelCharge(context.Background(), charge.ID(), "Cargo duplicado")
 
 	requireNoError(t, err)
 	if got.Charge.Status() != domain.StatusCancelled {
@@ -464,15 +480,55 @@ func TestCancelCharge(t *testing.T) {
 		t.Fatalf("stored status = %q, want the cancellation persisted", stored.Status())
 	}
 
-	_, err = f.svc.CancelCharge(context.Background(), charge.ID())
+	_, err = f.svc.CancelCharge(context.Background(), charge.ID(), "Cargo duplicado")
 
 	requireKind(t, err, glerrors.KindConflict)
+}
+
+// CC-203: the school withdraws a debt from the screen, and the ledger must say
+// why. The reason is required and stored on the charge.
+func TestCancelChargeReason(t *testing.T) {
+	tests := []struct {
+		name       string
+		reason     string
+		wantErr    glerrors.Kind
+		wantStored string
+	}{
+		{name: "stored trimmed", reason: "  Cargo duplicado  ", wantStored: "Cargo duplicado"},
+		{name: "empty is invalid", reason: "", wantErr: glerrors.KindInvalid},
+		{name: "blank is invalid", reason: "   ", wantErr: glerrors.KindInvalid},
+		{name: "too long is invalid", reason: strings.Repeat("a", 501), wantErr: glerrors.KindInvalid},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newFixture(t)
+			concept := f.seedConcept(t, "Colegiatura", 250000)
+			charge := f.seedCharge(t, concept.ID(), 100000)
+
+			got, err := f.svc.CancelCharge(context.Background(), charge.ID(), tt.reason)
+
+			if tt.wantErr != glerrors.KindUnknown {
+				requireKind(t, err, tt.wantErr)
+				if stored := f.repo.charges[charge.ID()]; stored.Status() == domain.StatusCancelled {
+					t.Fatal("a refused cancellation must leave the charge as it was")
+				}
+				return
+			}
+			requireNoError(t, err)
+			if got.Charge.CancellationReason() != tt.wantStored {
+				t.Fatalf("reason = %q, want %q", got.Charge.CancellationReason(), tt.wantStored)
+			}
+			if stored := f.repo.charges[charge.ID()]; stored.CancellationReason() != tt.wantStored {
+				t.Fatalf("stored reason = %q, want %q", stored.CancellationReason(), tt.wantStored)
+			}
+		})
+	}
 }
 
 func TestCancelChargeUnknownIsInvalid(t *testing.T) {
 	f := newFixture(t)
 
-	_, err := f.svc.CancelCharge(context.Background(), "ghost")
+	_, err := f.svc.CancelCharge(context.Background(), "ghost", "Cargo duplicado")
 
 	requireKind(t, err, glerrors.KindInvalid)
 }
@@ -655,7 +711,7 @@ func TestRegisterPaymentRejected(t *testing.T) {
 		f := newFixture(t)
 		concept := f.seedConcept(t, "Colegiatura", 250000)
 		charge := f.seedCharge(t, concept.ID(), 100000)
-		if _, err := f.svc.CancelCharge(context.Background(), charge.ID()); err != nil {
+		if _, err := f.svc.CancelCharge(context.Background(), charge.ID(), "Cargo duplicado"); err != nil {
 			t.Fatalf("seed cancel: %v", err)
 		}
 
@@ -718,7 +774,7 @@ func TestGetAccount(t *testing.T) {
 		t.Fatalf("seed payment: %v", err)
 	}
 	voided := f.seedCharge(t, trip.ID(), 30000)
-	if _, err := f.svc.CancelCharge(ctx, voided.ID()); err != nil {
+	if _, err := f.svc.CancelCharge(ctx, voided.ID(), "Cargo duplicado"); err != nil {
 		t.Fatalf("seed cancel: %v", err)
 	}
 	// Another student's debt must never reach this statement.

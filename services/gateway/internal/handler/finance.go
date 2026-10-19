@@ -30,7 +30,7 @@ type FinanceService interface {
 	RunBilling(ctx context.Context, cycleID, asOfDate string) (client.BillingRun, error)
 	ListCharges(ctx context.Context, studentID, cycleID string, page client.PageRequest) (client.ChargePage, error)
 	ApplyDiscount(ctx context.Context, chargeID string, discountCents int64, reason string) (client.Charge, error)
-	CancelCharge(ctx context.Context, chargeID string) (client.Charge, error)
+	CancelCharge(ctx context.Context, chargeID, reason string) (client.Charge, error)
 	RegisterTenderedPayment(ctx context.Context, in client.TenderedPayment) ([]client.Payment, client.Charge, error)
 	GetAccount(ctx context.Context, studentID string) (client.AccountStatement, error)
 	RegisterDeposit(ctx context.Context, studentID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time, grantEarlyPayment bool, cardType string, receiver client.Receiver, chargeIDs []string, tenders []client.Tender) (client.DepositResult, error)
@@ -181,6 +181,7 @@ type conceptResponse struct {
 	DefaultAmountCents int64  `json:"defaultAmountCents"`
 	Recurrence         string `json:"recurrence"`
 	Active             bool   `json:"active"`
+	Kind               string `json:"kind"`
 }
 
 func toConceptResponse(c client.ChargeConcept) conceptResponse {
@@ -190,7 +191,16 @@ func toConceptResponse(c client.ChargeConcept) conceptResponse {
 		DefaultAmountCents: c.DefaultAmountCents,
 		Recurrence:         c.Recurrence,
 		Active:             c.Active,
+		Kind:               conceptKind(c.Kind),
 	}
+}
+
+// conceptKind defaults an unset kind to "custom", the school's own concept.
+func conceptKind(kind string) string {
+	if kind == "" {
+		return "custom"
+	}
+	return kind
 }
 
 type chargeResponse struct {
@@ -437,6 +447,10 @@ func (h *FinanceHandler) ApplyDiscount(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
+	if strings.TrimSpace(req.Reason) == "" {
+		http.Error(w, "reason is required to discount a charge", http.StatusBadRequest)
+		return
+	}
 	res, err := h.svc.ApplyDiscount(r.Context(), r.PathValue("id"), req.DiscountCents, req.Reason)
 	if err != nil {
 		writeConnectError(w, err)
@@ -445,10 +459,24 @@ func (h *FinanceHandler) ApplyDiscount(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toChargeResponse(res))
 }
 
-// CancelCharge handles POST /api/v1/finance/charges/{id}/cancel. It carries no
-// body: the charge id in the path is the whole request.
+// cancelChargeRequest is the body of a charge cancellation.
+type cancelChargeRequest struct {
+	Reason string `json:"reason"`
+}
+
+// CancelCharge handles POST /api/v1/finance/charges/{id}/cancel. The reason is
+// required (CC-203): a debt that disappears without one cannot be explained.
 func (h *FinanceHandler) CancelCharge(w http.ResponseWriter, r *http.Request) {
-	res, err := h.svc.CancelCharge(r.Context(), r.PathValue("id"))
+	var req cancelChargeRequest
+	if err := decodeJSONBody(w, r, &req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(req.Reason) == "" {
+		http.Error(w, "reason is required to cancel a charge", http.StatusBadRequest)
+		return
+	}
+	res, err := h.svc.CancelCharge(r.Context(), r.PathValue("id"), req.Reason)
 	if err != nil {
 		writeConnectError(w, err)
 		return

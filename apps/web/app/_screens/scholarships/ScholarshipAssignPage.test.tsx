@@ -81,7 +81,8 @@ describe("ScholarshipAssignPage (T18)", () => {
     expect(screen.getByRole("checkbox", { name: "Arce Ana" })).toBeChecked();
   });
 
-  it("takes it away without asking, and the toast stays at least 8 seconds", async () => {
+  // CC-210: taken away at once, with an Undo that does not time out.
+  it("takes it away without asking and keeps Deshacer on screen", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
       const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
@@ -92,13 +93,42 @@ describe("ScholarshipAssignPage (T18)", () => {
       expect(m.unassignScholarship).toHaveBeenCalledWith(expect.any(String), BECA, ["s3"]);
       expect(await screen.findByText("1 alumno ya sin Beca HERMANOS")).toBeInTheDocument();
       expect(within(holders()).queryByText("Cano Ceci")).not.toBeInTheDocument();
-      act(() => vi.advanceTimersByTime(7900));
-      expect(screen.getByText("1 alumno ya sin Beca HERMANOS")).toBeInTheDocument();
-      act(() => vi.advanceTimersByTime(200));
-      expect(screen.queryByText("1 alumno ya sin Beca HERMANOS")).not.toBeInTheDocument();
+      act(() => vi.advanceTimersByTime(60_000));
+      const status = screen.getByText("1 alumno ya sin Beca HERMANOS").closest<HTMLElement>("[role=status]");
+      expect(status).not.toBeNull();
+      if (status === null) return;
+      expect(within(status).getByRole("button", { name: "Deshacer" })).toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("Deshacer gives the scholarship back without asking again", async () => {
+    const user = userEvent.setup();
+    m.unassignScholarship.mockResolvedValue(1);
+    m.assignScholarship.mockResolvedValue([{ studentId: "s3", startsOn: "2026-10-17", overlaps: [{ scholarshipId: "b2", name: "Excelencia" }] }]);
+    open();
+    await user.click(await within(holders()).findByRole("checkbox", { name: "Cano Ceci" }));
+    await user.click(screen.getByRole("button", { name: /Quitar beca/ }));
+    await user.click(await screen.findByRole("button", { name: "Deshacer" }));
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(m.assignScholarship).toHaveBeenCalledWith(expect.any(String), BECA, ["s3"]);
+    expect(await within(holders()).findByText("Cano Ceci")).toBeInTheDocument();
+    expect(await screen.findByText("Deshecho: 1 alumno con Beca HERMANOS otra vez")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Deshacer" })).not.toBeInTheDocument();
+  });
+
+  it("Cerrar aviso hides Deshacer and keeps the scholarship taken away", async () => {
+    const user = userEvent.setup();
+    m.unassignScholarship.mockResolvedValue(1);
+    open();
+    await user.click(await within(holders()).findByRole("checkbox", { name: "Cano Ceci" }));
+    await user.click(screen.getByRole("button", { name: /Quitar beca/ }));
+    await user.click(await screen.findByRole("button", { name: "Cerrar aviso" }));
+
+    expect(screen.queryByRole("button", { name: "Deshacer" })).not.toBeInTheDocument();
+    expect(m.assignScholarship).not.toHaveBeenCalled();
   });
 
   it("shows the gateway's refusal and keeps the lists as they were", async () => {

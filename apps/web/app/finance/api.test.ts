@@ -43,6 +43,7 @@ const concept = {
   defaultAmountCents: 185000,
   recurrence: "monthly",
   active: true,
+  kind: "custom",
 };
 
 const charge = {
@@ -321,6 +322,17 @@ describe("concepts write path", () => {
 });
 
 describe("charges write path", () => {
+  it("listConcepts reads the kind, and an unknown or absent one is the school's own (CC-404)", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ concepts: [
+      { id: "k1", name: "Colegiatura", defaultAmountCents: 1, recurrence: "monthly", active: true, kind: "tuition" },
+      { id: "k2", name: "Credencial", defaultAmountCents: 1, recurrence: "once", active: true },
+    ] })));
+
+    const got = await listConcepts(BASE);
+
+    expect(got.map((c) => c.kind)).toEqual(["tuition", "custom"]);
+  });
+
   it("createCharge POSTs the single-charge shape", async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(charge, 201));
     vi.stubGlobal("fetch", fetchMock);
@@ -375,17 +387,23 @@ describe("charges write path", () => {
     await expect(getAccount(BASE, "st1")).resolves.toMatchObject({ payments: [{ id: "p1", method: "cash" }] });
   });
 
-  it("cancelCharge POSTs the cancel route with no body", async () => {
+  it("a refused write carries its HTTP status, so the screen can tell 409 from 403", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("charge already cancelled", { status: 409 })));
+
+    await expect(cancelCharge(BASE, "ch1", "Duplicado")).rejects.toMatchObject({ status: 409, message: "charge already cancelled" });
+  });
+
+  it("cancelCharge POSTs the cancel route with the reason (CC-203)", async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ ...charge, status: "cancelled" }));
     vi.stubGlobal("fetch", fetchMock);
 
-    const res = await cancelCharge(BASE, "ch1");
+    const res = await cancelCharge(BASE, "ch1", "Cargo duplicado");
 
     expect(res.status).toBe("cancelled");
     const [url, init] = lastCall(fetchMock);
     expect(url).toBe("http://gw/api/v1/finance/charges/ch1/cancel");
     expect(init.method).toBe("POST");
-    expect(init.body).toBeUndefined();
+    expect(JSON.parse(String(init.body))).toEqual({ reason: "Cargo duplicado" });
   });
 });
 

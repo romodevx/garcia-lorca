@@ -797,7 +797,7 @@ func TestCancelChargeThenPayingItIsInvalidArgument(t *testing.T) {
 	charge := f.seedCharge(t, concept.GetId(), 100000)
 	ctx := context.Background()
 
-	res, err := f.h.CancelCharge(ctx, connect.NewRequest(&financev1.CancelChargeRequest{ChargeId: charge.GetId()}))
+	res, err := f.h.CancelCharge(ctx, connect.NewRequest(&financev1.CancelChargeRequest{ChargeId: charge.GetId(), Reason: "Cargo duplicado"}))
 	if err != nil {
 		t.Fatalf("CancelCharge: %v", err)
 	}

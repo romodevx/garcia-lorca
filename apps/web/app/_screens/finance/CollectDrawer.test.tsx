@@ -603,7 +603,7 @@ describe("CollectDrawer · nota de crédito + pago combinado (tarea 8)", () => {
     await user.type(amount, "9000");
     await user.click(screen.getByRole("button", { name: "Cobrar" }));
 
-    expect(await screen.findByText(/No puede ser mayor que el adeudo/)).toBeInTheDocument();
+    expect(await screen.findByText(/No puede ser mayor que lo que se puede cobrar hoy/)).toBeInTheDocument();
     await waitFor(() => expect(document.activeElement).toBe(amount));
     expect(finance.registerDeposit).not.toHaveBeenCalled();
   });
@@ -648,7 +648,7 @@ describe("CollectDrawer · pagar por adelantado lo que aún no abre (T5)", () =>
 
     await waitFor(() => expect(finance.registerDeposit).toHaveBeenCalled());
     expect(finance.registerDeposit.mock.calls[0]?.[1]).toMatchObject({ amountCents: 50000 });
-    expect(screen.queryByText(/No puede ser mayor que el adeudo/)).toBeNull();
+    expect(screen.queryByText(/No puede ser mayor que lo que se puede cobrar hoy/)).toBeNull();
   });
 
   it("still refuses more than every line listed adds up to", async () => {
@@ -669,7 +669,7 @@ describe("CollectDrawer · pagar por adelantado lo que aún no abre (T5)", () =>
     await user.type(amount, "600");
     await user.click(screen.getByRole("button", { name: "Cobrar" }));
 
-    expect(await screen.findAllByText(/No puede ser mayor que el adeudo \(\$500\.00\)/)).not.toHaveLength(0);
+    expect(await screen.findAllByText(/No puede ser mayor que lo que se puede cobrar hoy \(\$500\.00\)/)).not.toHaveLength(0);
     expect(finance.registerDeposit).not.toHaveBeenCalled();
   });
 });
@@ -758,5 +758,41 @@ describe("CollectDrawer · cobrado por otra caja (CC-202)", () => {
 
     expect(await screen.findByText("HTTP 500")).toBeInTheDocument();
     expect(finance.getExpected).toHaveBeenCalledTimes(1);
+  });
+});
+
+// CC-214: "Del año debe $35,000" and a cap of $33,400 on the same screen read
+// as two debts. The cap is what may be taken today: the months not yet due
+// carry their early-payment discount. The screen says so, before and after.
+describe("CollectDrawer · lo cobrable hoy frente a lo del año (CC-214)", () => {
+  const line = (id: string, cents: number): financeApi.ExpectedLine => ({
+    chargeId: id, description: id, dueDate: "2026-11-10", owedCents: cents, surchargeCents: 0, discountCents: 0, scholarshipCents: 0, totalCents: cents, due: false, inBalance: true,
+  });
+
+  beforeEach(() => {
+    finance.getExpected.mockResolvedValue({
+      amountCents: 0, surchargeCents: 0, discountCents: 0, annualBalanceCents: 3500000, onTimeBalanceCents: 3340000,
+      lines: [line("Colegiatura noviembre", 1670000), line("Colegiatura diciembre", 1670000)],
+    });
+  });
+
+  it("names both figures in the error and says why they differ", async () => {
+    const user = userEvent.setup();
+    render(<CollectDrawer student={student} onClose={() => {}} onCollected={() => {}} today="2026-10-17" />);
+    await screen.findByRole("checkbox", { name: "Colegiatura noviembre" });
+    const amount = screen.getByLabelText(/Monto a pagar/, { selector: "input" });
+    await user.clear(amount);
+    await user.type(amount, "35000");
+    await user.click(screen.getByRole("button", { name: "Cobrar" }));
+
+    expect(await screen.findAllByText(
+      "No puede ser mayor que lo que se puede cobrar hoy ($33,400.00). Es menos que lo que debe del año ($35,000.00) porque los meses que aún no vencen llevan su descuento por pronto pago.",
+    )).not.toHaveLength(0);
+    expect(finance.registerDeposit).not.toHaveBeenCalled();
+  });
+
+  it("says the cap beside the field before anyone goes over it", async () => {
+    render(<CollectDrawer student={student} onClose={() => {}} onCollected={() => {}} today="2026-10-17" />);
+    expect(await screen.findByText(/Hoy se puede cobrar hasta \$33,400\.00: los meses que aún no vencen llevan su descuento por pronto pago\./)).toBeInTheDocument();
   });
 });

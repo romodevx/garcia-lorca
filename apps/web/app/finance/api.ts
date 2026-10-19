@@ -37,12 +37,19 @@ import {
 
 export type Recurrence = "once" | "monthly";
 
+/**
+ * `custom` is the school's own concept; every other kind is one billing finds
+ * by kind (CC-404) — it can be renamed or repriced, never deactivated.
+ */
+export type ConceptKind = "custom" | "tuition" | "enrollment" | "late_fee" | "fee" | "activity";
+
 export interface ChargeConcept {
   id: string;
   name: string;
   defaultAmountCents: number;
   recurrence: Recurrence;
   active: boolean;
+  kind: ConceptKind;
 }
 
 /** Lifecycle of a charge, recomputed server-side after every payment/discount. */
@@ -371,6 +378,7 @@ export interface ChargeFilters {
 type Wire<T, K extends keyof T> = Omit<T, K> & { [P in K]: string };
 
 const RECURRENCES: readonly Recurrence[] = ["once", "monthly"];
+const CONCEPT_KINDS: readonly ConceptKind[] = ["custom", "tuition", "enrollment", "late_fee", "fee", "activity"];
 const CHARGE_STATUSES: readonly ChargeStatus[] = ["pending", "partial", "paid", "cancelled"];
 const PAYMENT_METHODS: readonly PaymentMethod[] = ["cash", "card", "transfer", "credit_note"];
 const DEPOSIT_METHODS: readonly DepositMethod[] = [...PAYMENT_METHODS, "mixed"];
@@ -381,9 +389,11 @@ function oneOf<T extends string>(allowed: readonly T[], value: string, fallback:
   return (allowed as readonly string[]).includes(value) ? (value as T) : fallback;
 }
 
-const toConcept = (raw: Wire<ChargeConcept, "recurrence">): ChargeConcept => ({
+const toConcept = (raw: Wire<ChargeConcept, "recurrence" | "kind">): ChargeConcept => ({
   ...raw,
   recurrence: oneOf(RECURRENCES, raw.recurrence, "monthly"),
+  // An older gateway sends no kind: the safe reading is "the school's own".
+  kind: oneOf(CONCEPT_KINDS, raw.kind ?? "", "custom"),
 });
 
 /**
@@ -415,12 +425,20 @@ function url(baseURL: string, path: string): string {
  * show WHY the payment bounced instead of a generic message. Falls back to the
  * status when the body is empty.
  */
+/** A non-2xx answer from the finance gateway, with its HTTP status (409 vs 403…). */
+export class FinanceError extends HttpError {
+  constructor(status: number, message: string, detail: { serverText?: string } = {}) {
+    super(status, message, detail);
+    this.name = "FinanceError";
+  }
+}
+
 async function failure(res: Response): Promise<Error> {
   const body = await res.text().catch(() => "");
   const detail = body.trim();
   // The status travels with the sentence: a 409 (CC-202, another cashier got
   // there first) is a state to reload, not just a message to show.
-  return new HttpError(res.status, detail !== "" ? detail : `HTTP ${res.status}`, detail !== "" ? { serverText: detail } : {});
+  return new FinanceError(res.status, detail !== "" ? detail : `HTTP ${res.status}`, detail !== "" ? { serverText: detail } : {});
 }
 
 /** Send a JSON body (POST/PUT) and return the parsed entity. Throws on non-2xx. */
@@ -431,15 +449,6 @@ async function sendJSON<T>(baseURL: string, path: string, method: "POST" | "PUT"
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  if (!res.ok) {
-    throw await failure(res);
-  }
-  return (await res.json()) as T;
-}
-
-/** POST a bodyless action (the id in the path is the whole request). */
-async function postAction<T>(baseURL: string, path: string): Promise<T> {
-  const res = await authFetch(url(baseURL, `${BASE_PATH}${path}`), { method: "POST", credentials: "include" });
   if (!res.ok) {
     throw await failure(res);
   }
@@ -524,7 +533,7 @@ export async function createConcept(baseURL: string, input: CreateConceptInput):
     defaultAmountCents: input.defaultAmountCents,
     recurrence: input.recurrence,
   };
-  return toConcept(await sendJSON<Wire<ChargeConcept, "recurrence">>(baseURL, "/concepts", "POST", body));
+  return toConcept(await sendJSON<Wire<ChargeConcept, "recurrence" | "kind">>(baseURL, "/concepts", "POST", body));
 }
 
 /** Full replace of a concept's mutable fields, `active` included. */
@@ -535,13 +544,13 @@ export async function updateConcept(baseURL: string, id: string, input: UpdateCo
     recurrence: input.recurrence,
     active: input.active,
   };
-  return toConcept(await sendJSON<Wire<ChargeConcept, "recurrence">>(baseURL, `/concepts/${id}`, "PUT", body));
+  return toConcept(await sendJSON<Wire<ChargeConcept, "recurrence" | "kind">>(baseURL, `/concepts/${id}`, "PUT", body));
 }
 
 /** Active concepts by default; `includeInactive` adds the archived ones. */
 export async function listConcepts(baseURL: string, includeInactive = false): Promise<ChargeConcept[]> {
   const qs = query({ includeInactive: includeInactive ? "true" : undefined });
-  const rows = await getList<Wire<ChargeConcept, "recurrence">>(baseURL, `/concepts${qs}`, "concepts");
+  const rows = await getList<Wire<ChargeConcept, "recurrence" | "kind">>(baseURL, `/concepts${qs}`, "concepts");
   return rows.map(toConcept);
 }
 
@@ -596,9 +605,13 @@ export async function applyDiscount(baseURL: string, chargeId: string, discountC
   return toCharge(await sendJSON<Wire<Charge, "status">>(baseURL, `/charges/${chargeId}/discount`, "POST", body));
 }
 
-/** Void a charge. Returns it with `status: "cancelled"` — no longer collectable. */
-export async function cancelCharge(baseURL: string, chargeId: string): Promise<Charge> {
-  return toCharge(await postAction<Wire<Charge, "status">>(baseURL, `/charges/${chargeId}/cancel`));
+/**
+ * Void a charge, with the reason the school gives (CC-203). Returns it with
+ * `status: "cancelled"` — no longer collectable. Terminal: the gateway answers
+ * 409 to a second cancel.
+ */
+export async function cancelCharge(baseURL: string, chargeId: string, reason: string): Promise<Charge> {
+  return toCharge(await sendJSON<Wire<Charge, "status">>(baseURL, `/charges/${chargeId}/cancel`, "POST", { reason }));
 }
 
 /** Every charge past its due date with a remaining balance, across all pages. */

@@ -4386,6 +4386,113 @@ paths:
         '404': { $ref: '#/components/responses/ModuleDisabled' }
         '409': { $ref: '#/components/responses/PlainLevelBeingDeleted' }
 
+  /api/v1/finance/concepts:
+    get:
+      tags: [finance-payments]
+      summary: The school's catalog of charge concepts
+      description: >
+        Active concepts by default; `includeInactive=true` adds the archived
+        ones. A concept is deactivated, never deleted, so issued charges keep
+        pointing at it. Requires `finance:read`.
+      operationId: listConcepts
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: includeInactive
+          in: query
+          description: Only the literal `true` includes the archived concepts.
+          schema: { type: boolean, default: false }
+      responses:
+        '200':
+          description: The catalog.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [concepts]
+                properties:
+                  concepts:
+                    type: array
+                    items: { $ref: '#/components/schemas/ChargeConcept' }
+              examples:
+                catalog:
+                  summary: Two concepts, one archived
+                  value:
+                    concepts:
+                      - { id: 31000000-0000-4000-8000-000000000009, name: CREDENCIAL, defaultAmountCents: 8000, recurrence: once, active: true, kind: custom }
+                      - { id: 31000000-0000-4000-8000-000000000010, name: EXAMEN EXTRAORDINARIO, defaultAmountCents: 25000, recurrence: once, active: false, kind: custom }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+    post:
+      tags: [finance-payments]
+      summary: Add a concept to the catalog
+      description: A new concept is always active. Requires `finance:write`.
+      operationId: createConcept
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ChargeConceptInput' }
+            examples:
+              credencial:
+                summary: A one-off fee
+                value: { name: CREDENCIAL, defaultAmountCents: 8000, recurrence: once }
+      responses:
+        '201':
+          description: The stored concept.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChargeConcept' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+  /api/v1/finance/concepts/{id}:
+    put:
+      tags: [finance-payments]
+      summary: Replace a concept's name, amount, recurrence and active flag
+      description: >
+        A full replace, `active` included: sending `active: false` archives the
+        concept (it is no longer offered for new charges) and `true` brings it
+        back. Charges already issued keep their own amount. A system concept
+        (any kind but `custom`) cannot be deactivated: 400. Requires
+        `finance:write`.
+      operationId: updateConcept
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - { $ref: '#/components/parameters/CsrfToken' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - { $ref: '#/components/schemas/ChargeConceptInput' }
+                - type: object
+                  required: [active]
+                  properties:
+                    active: { type: boolean }
+            examples:
+              archive:
+                summary: Stop offering a concept
+                value: { name: CREDENCIAL, defaultAmountCents: 8000, recurrence: once, active: false }
+      responses:
+        '200':
+          description: The concept as stored.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChargeConcept' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
   /api/v1/finance/charges:
     get:
       tags: [finance-payments]
@@ -4453,6 +4560,150 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/ModuleDisabled' }
+    post:
+      tags: [finance-payments]
+      summary: Charge one concept to one pupil
+      description: >
+        A loose charge (credencial, examen extraordinario). The amount and the
+        description default to the concept's when sent as 0 and "". A pupil owes
+        a concept at most once per cycle: a second one is 409. Requires
+        `finance:write`.
+      operationId: createCharge
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [studentId, cycleId, conceptId, dueDate]
+              properties:
+                studentId: { type: string, format: uuid }
+                cycleId: { type: string, format: uuid }
+                conceptId: { type: string, format: uuid }
+                amountCentsOverride:
+                  type: integer
+                  format: int64
+                  minimum: 0
+                  description: 0 takes the concept's default amount.
+                descriptionOverride:
+                  type: string
+                  description: Empty takes the concept's name.
+                dueDate: { type: string, format: date }
+            examples:
+              credencial:
+                summary: A replacement ID card
+                value:
+                  studentId: 51000000-0000-4000-8000-000000000001
+                  cycleId: 41000000-0000-4000-8000-000000000001
+                  conceptId: 31000000-0000-4000-8000-000000000009
+                  amountCentsOverride: 8000
+                  descriptionOverride: ''
+                  dueDate: '2026-10-17'
+      responses:
+        '201':
+          description: The new charge.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FinanceCharge' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+        '409':
+          description: The pupil already owes this concept in this cycle.
+  /api/v1/finance/charges/{id}/discount:
+    post:
+      tags: [finance-payments]
+      summary: Forgive part of a charge, with the reason
+      description: >
+        The discount REPLACES any previous one; together with a scholarship it
+        may not exceed the charge's amount. The status is re-derived from what
+        was already collected, so a discount covering the rest settles it. A
+        cancelled charge cannot be discounted. Requires `finance:write`.
+      operationId: applyDiscount
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - { $ref: '#/components/parameters/CsrfToken' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [discountCents, reason]
+              properties:
+                discountCents: { type: integer, format: int64, minimum: 0 }
+                reason:
+                  type: string
+                  minLength: 1
+                  description: Required. Why the school forgave the money.
+            examples:
+              sibling:
+                summary: A sibling discount
+                value: { discountCents: 50000, reason: Hermano en el colegio }
+      responses:
+        '200':
+          description: The charge with its recomputed balance and status.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FinanceCharge' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+  /api/v1/finance/charges/{id}/cancel:
+    post:
+      tags: [finance-payments]
+      summary: Withdraw a charge, with the reason
+      description: >
+        Cancellation is terminal: the charge stops counting toward the
+        account, and cancelling it twice is 409. The row survives with its
+        reason, so the ledger can always say why a debt disappeared. Money
+        already collected against it stays on the ledger. Requires
+        `finance:write`.
+      operationId: cancelCharge
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - { $ref: '#/components/parameters/CsrfToken' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  minLength: 1
+                  maxLength: 500
+                  description: Required. Why the school withdrew the debt.
+            examples:
+              duplicated:
+                summary: A charge issued twice
+                value: { reason: Cargo duplicado }
+      responses:
+        '200':
+          description: The charge, now cancelled.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FinanceCharge' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+        '409':
+          description: The charge was already cancelled.
   /api/v1/finance/overdue:
     get:
       tags: [finance-payments]
@@ -8772,6 +9023,30 @@ components:
         enrollmentId: { type: string, format: uuid, description: The row to mark (the pupil's active enrollment in the group). }
         studentId: { type: string, format: uuid }
         name: { type: string, description: '"First Last".' }
+    ChargeConceptInput:
+      type: object
+      required: [name, defaultAmountCents, recurrence]
+      properties:
+        name: { type: string, minLength: 1, example: CREDENCIAL }
+        defaultAmountCents: { type: integer, format: int64, minimum: 0, example: 8000 }
+        recurrence: { type: string, enum: [once, monthly] }
+    ChargeConcept:
+      type: object
+      description: One entry of the school's catalog. Amounts are integer cents.
+      required: [id, name, defaultAmountCents, recurrence, active, kind]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        defaultAmountCents: { type: integer, format: int64 }
+        recurrence: { type: string, enum: [once, monthly] }
+        active: { type: boolean }
+        kind:
+          type: string
+          enum: [custom, tuition, enrollment, late_fee, fee, activity]
+          description: >
+            `custom` is the school's own concept. Any other kind is a system
+            concept billing finds by kind: it can be renamed or repriced but
+            never deactivated (400).
     FinanceCharge:
       type: object
       description: >

@@ -3,6 +3,7 @@ package handler_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -68,6 +69,7 @@ type fakeFinance struct {
 	discountReason   string
 
 	cancelChargeID string
+	cancelReason   string
 
 	payChargeID string
 	payAmount   int64
@@ -220,8 +222,8 @@ func (f *fakeFinance) ApplyDiscount(_ context.Context, chargeID string, discount
 	return f.charge, nil
 }
 
-func (f *fakeFinance) CancelCharge(_ context.Context, chargeID string) (client.Charge, error) {
-	f.cancelChargeID = chargeID
+func (f *fakeFinance) CancelCharge(_ context.Context, chargeID, reason string) (client.Charge, error) {
+	f.cancelChargeID, f.cancelReason = chargeID, reason
 	if f.err != nil {
 		return client.Charge{}, f.err
 	}
@@ -306,6 +308,24 @@ func TestFinanceCreateConceptInvalidArgumentIs400(t *testing.T) {
 	}
 }
 
+// CC-404: finance's Spanish reason for refusing to deactivate a system
+// concept reaches the screen as a 400 with that text.
+func TestFinanceUpdateConceptSystemKindIs400WithReason(t *testing.T) {
+	const reason = "este concepto es del sistema: la facturación lo usa y no se puede desactivar"
+	svc := &fakeFinance{err: connect.NewError(connect.CodeInvalidArgument, errors.New(reason))}
+	h := handler.NewFinanceHandler(svc)
+
+	rec := doAdminReq(t, http.HandlerFunc(h.UpdateConcept), http.MethodPut, "/api/v1/finance/concepts/cpt-1",
+		`{"name":"Colegiatura","defaultAmountCents":350000,"recurrence":"monthly","active":false}`, "id", "cpt-1")
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), reason) {
+		t.Errorf("body = %q, want the reason", rec.Body.String())
+	}
+}
+
 func TestFinanceListConceptsPassesIncludeInactive(t *testing.T) {
 	svc := &fakeFinance{concepts: []client.ChargeConcept{
 		{ID: "cpt-1", Name: "Colegiatura", DefaultAmountCents: 150000, Recurrence: "monthly", Active: true},
@@ -328,6 +348,27 @@ func TestFinanceListConceptsPassesIncludeInactive(t *testing.T) {
 		t.Fatalf("decode body: %v", err)
 	}
 	if len(out.Concepts) != 2 || out.Concepts[1]["defaultAmountCents"] != float64(500000) || out.Concepts[1]["active"] != false {
+		t.Errorf("body = %v", out)
+	}
+}
+
+// CC-404: the screen must know which concepts billing finds by kind.
+func TestFinanceListConceptsSaysTheKind(t *testing.T) {
+	svc := &fakeFinance{concepts: []client.ChargeConcept{
+		{ID: "cpt-1", Name: "Colegiatura", Recurrence: "monthly", Active: true, Kind: "tuition"},
+		{ID: "cpt-2", Name: "Credencial", Recurrence: "once", Active: true, Kind: "custom"},
+	}}
+	h := handler.NewFinanceHandler(svc)
+
+	rec := doReq(t, h.ListConcepts, http.MethodGet, "/api/v1/finance/concepts", "")
+
+	var out struct {
+		Concepts []map[string]any `json:"concepts"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if len(out.Concepts) != 2 || out.Concepts[0]["kind"] != "tuition" || out.Concepts[1]["kind"] != "custom" {
 		t.Errorf("body = %v", out)
 	}
 }
@@ -551,13 +592,16 @@ func TestFinanceCancelChargeUsesPathID(t *testing.T) {
 	svc := &fakeFinance{charge: cancelled}
 	h := handler.NewFinanceHandler(svc)
 
-	rec := doAdminReq(t, http.HandlerFunc(h.CancelCharge), http.MethodPost, "/api/v1/finance/charges/chg-1/cancel", "", "id", "chg-1")
+	rec := doAdminReq(t, http.HandlerFunc(h.CancelCharge), http.MethodPost, "/api/v1/finance/charges/chg-1/cancel", `{"reason":"Cargo duplicado"}`, "id", "chg-1")
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
 	if svc.cancelChargeID != "chg-1" {
 		t.Errorf("forwarded charge id = %q", svc.cancelChargeID)
+	}
+	if svc.cancelReason != "Cargo duplicado" {
+		t.Errorf("forwarded reason = %q, want the body's", svc.cancelReason)
 	}
 	var out map[string]any
 	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
@@ -571,9 +615,47 @@ func TestFinanceCancelChargeUsesPathID(t *testing.T) {
 func TestFinanceCancelChargeUnknownIs404(t *testing.T) {
 	svc := &fakeFinance{err: connect.NewError(connect.CodeNotFound, nil)}
 	h := handler.NewFinanceHandler(svc)
-	rec := doAdminReq(t, http.HandlerFunc(h.CancelCharge), http.MethodPost, "/api/v1/finance/charges/ghost/cancel", "", "id", "ghost")
+	rec := doAdminReq(t, http.HandlerFunc(h.CancelCharge), http.MethodPost, "/api/v1/finance/charges/ghost/cancel", `{"reason":"Cargo duplicado"}`, "id", "ghost")
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", rec.Code)
+	}
+}
+
+// A discount forgives money: it carries its reason, like a cancellation.
+func TestFinanceApplyDiscountRequiresReason(t *testing.T) {
+	for name, body := range map[string]string{"missing": `{"discountCents":50000}`, "blank": `{"discountCents":50000,"reason":"  "}`} {
+		t.Run(name, func(t *testing.T) {
+			svc := &fakeFinance{charge: sampleCharge}
+			h := handler.NewFinanceHandler(svc)
+
+			rec := doAdminReq(t, http.HandlerFunc(h.ApplyDiscount), http.MethodPost, "/api/v1/finance/charges/chg-1/discount", body, "id", "chg-1")
+
+			if rec.Code != http.StatusBadRequest {
+				t.Errorf("status = %d, want 400", rec.Code)
+			}
+			if svc.discountChargeID != "" {
+				t.Error("a discount without a reason must not reach finance")
+			}
+		})
+	}
+}
+
+// CC-203: a charge is withdrawn with its reason, like a deposit.
+func TestFinanceCancelChargeRequiresReason(t *testing.T) {
+	for name, body := range map[string]string{"no body": "", "empty": `{}`, "blank": `{"reason":"   "}`} {
+		t.Run(name, func(t *testing.T) {
+			svc := &fakeFinance{charge: sampleCharge}
+			h := handler.NewFinanceHandler(svc)
+
+			rec := doAdminReq(t, http.HandlerFunc(h.CancelCharge), http.MethodPost, "/api/v1/finance/charges/chg-1/cancel", body, "id", "chg-1")
+
+			if rec.Code != http.StatusBadRequest {
+				t.Errorf("status = %d, want 400", rec.Code)
+			}
+			if svc.cancelChargeID != "" {
+				t.Error("a cancel without a reason must not reach finance")
+			}
+		})
 	}
 }
 

@@ -23,3 +23,20 @@ export function useToast(): { toast: string | undefined; say: (message: string, 
 
   return { toast, say };
 }
+
+/** A done change and how to put it back (CC-210). */
+export interface UndoOffer {
+  message: string;
+  restore: () => void;
+}
+
+/**
+ * The house rule for a reversible removal: do it, then offer Deshacer — and
+ * the offer does NOT time out. It stays until it is used or the next action
+ * replaces it, so a person who looks away does not lose the way back.
+ */
+export function useUndoOffer(): { offer: UndoOffer | undefined; offerUndo: (offer: UndoOffer) => void; withdraw: () => void } {
+  const [offer, setOffer] = useState<UndoOffer | undefined>(undefined);
+  const withdraw = useCallback((): void => setOffer(undefined), []);
+  return { offer, offerUndo: setOffer, withdraw };
+}

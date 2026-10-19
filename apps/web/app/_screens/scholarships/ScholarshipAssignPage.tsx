@@ -6,12 +6,13 @@ import { ConfirmDialog } from "../../_design/ConfirmDialog";
 import { Icon } from "../../_design/Icon";
 import { Page } from "../../_design/Page";
 import { Toast } from "../../_design/Toast";
+import { UndoToast } from "../../_design/UndoToast";
 import { DualPanelPicker } from "../../_design/students/DualPanelPicker";
 import { useStudentRoster, type RosterStudent } from "../../_design/students/useStudentRoster";
 import { API_URL } from "../../api-url";
 import { assignScholarship, listScholarshipHolders, unassignScholarship, type Scholarship, type ScholarshipOverlap, type ScholarshipTarget } from "../../scholarships/api";
 import { overlapWarning, scholarshipTitle, scholarshipValueLabel, targetsSummary } from "../../scholarships/format";
-import { LONG_TOAST_MS, useToast } from "../activities/useToast";
+import { LONG_TOAST_MS, useToast, useUndoOffer } from "../activities/useToast";
 import { ErrorAlert } from "../config/parts";
 
 const LABELS = { available: "Alumnos", assigned: "Con beca", assign: "Asignar beca", unassign: "Quitar beca", emptyAssigned: "Nadie tiene esta beca todavía." };
@@ -29,7 +30,8 @@ export interface ScholarshipAssignPageProps {
  * Who holds a scholarship (T18): the shared DualPanelPicker, "Con beca" on the
  * right with a warning beside whoever also holds another one on the same
  * charges (they do not stack). Giving it changes pending charges at once, so
- * moving pupils in asks first; taking it away does not.
+ * moving pupils in asks first; taking it away does not — it is done at once
+ * and offers Deshacer, which does not time out (CC-210).
  */
 export function ScholarshipAssignPage({ scholarship, targets, canWrite, onBack }: ScholarshipAssignPageProps): ReactElement {
   const roster = useStudentRoster();
@@ -41,6 +43,7 @@ export function ScholarshipAssignPage({ scholarship, targets, canWrite, onBack }
   const [failure, setFailure] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
   const { toast, say } = useToast();
+  const { offer, offerUndo, withdraw } = useUndoOffer();
   const [asking, setAsking] = useState<{ ids: string[]; answer: (yes: boolean) => void } | null>(null);
 
   const confirmAssign = (ids: string[]): Promise<boolean> => new Promise((answer) => setAsking({ ids, answer }));
@@ -63,6 +66,7 @@ export function ScholarshipAssignPage({ scholarship, targets, canWrite, onBack }
     if (busy) return;
     setBusy(true);
     setFailure(undefined);
+    withdraw();
     try {
       await work();
     } catch (err: unknown) {
@@ -78,10 +82,19 @@ export function ScholarshipAssignPage({ scholarship, targets, canWrite, onBack }
     say(`${plural(added.length, "alumno", "alumnos")} con ${title}`, LONG_TOAST_MS);
   });
 
+  // Giving it back is the way back (CC-210): it re-applies to the pending
+  // charges exactly as the first assignment did. No second confirmation — the
+  // person is undoing, not deciding something new.
+  const reassign = (ids: string[]): void => void run(async () => {
+    const added = await assignScholarship(API_URL, scholarship.id, ids);
+    setHolders((prev) => new Map([...prev, ...added.map((h): [string, ScholarshipOverlap[]] => [h.studentId, h.overlaps])]));
+    say(`Deshecho: ${plural(added.length, "alumno", "alumnos")} con ${title} otra vez`, LONG_TOAST_MS);
+  });
+
   const unassign = (ids: string[]): void => void run(async () => {
     const removed = await unassignScholarship(API_URL, scholarship.id, ids);
     setHolders((prev) => new Map([...prev].filter(([id]) => !ids.includes(id))));
-    say(`${plural(removed, "alumno", "alumnos")} ya sin ${title}`, LONG_TOAST_MS);
+    offerUndo({ message: `${plural(removed, "alumno", "alumnos")} ya sin ${title}`, restore: () => reassign(ids) });
   });
 
   const overlapBadge = (s: RosterStudent): ReactElement | null => {
@@ -133,7 +146,9 @@ export function ScholarshipAssignPage({ scholarship, targets, canWrite, onBack }
           </p>
         </ConfirmDialog>
       )}
-      {toast !== undefined && <Toast>{toast}</Toast>}
+      {offer !== undefined
+        ? <UndoToast message={offer.message} onUndo={offer.restore} onDismiss={withdraw} />
+        : toast !== undefined && <Toast>{toast}</Toast>}
     </Page>
   );
 }

@@ -1667,7 +1667,7 @@ func TestFinanceDiscountRouteReadOnlyPermissionIs403(t *testing.T) {
 
 func TestFinanceCancelRouteDisabledModuleIs404(t *testing.T) {
 	gw := newTestGateway(t, map[string]bool{}) // module_finance OFF
-	res := doGateway(t, gw, http.MethodPost, "/api/v1/finance/charges/chg-1/cancel", "finance-writer", "")
+	res := doGateway(t, gw, http.MethodPost, "/api/v1/finance/charges/chg-1/cancel", "finance-writer", `{"reason":"x"}`)
 	if res.StatusCode != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", res.StatusCode)
 	}

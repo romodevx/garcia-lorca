@@ -31,6 +31,9 @@ type ChargeConcept struct {
 	DefaultAmountCents int64
 	Recurrence         string
 	Active             bool
+	// Kind is "custom" for the school's own concepts; any other value is a
+	// system concept billing finds by kind (it cannot be deactivated).
+	Kind string
 }
 
 // Charge is the edge's view of one debt owed by a student for a concept in a
@@ -272,11 +275,12 @@ func (c *FinanceClient) ApplyDiscount(ctx context.Context, chargeID string, disc
 	return toCharge(res.Msg.GetCharge()), nil
 }
 
-// CancelCharge voids a charge: it stops counting toward the account balance and
-// can no longer receive payments.
-func (c *FinanceClient) CancelCharge(ctx context.Context, chargeID string) (Charge, error) {
+// CancelCharge voids a charge, with the reason the school gave: it stops
+// counting toward the account balance and can no longer receive payments.
+func (c *FinanceClient) CancelCharge(ctx context.Context, chargeID, reason string) (Charge, error) {
 	res, err := c.rpc.CancelCharge(ctx, connect.NewRequest(&financev1.CancelChargeRequest{
 		ChargeId: chargeID,
+		Reason:   reason,
 	}))
 	if err != nil {
 		return Charge{}, err
@@ -857,6 +861,7 @@ func toChargeConcept(c *financev1.ChargeConcept) ChargeConcept {
 		DefaultAmountCents: c.GetDefaultAmountCents(),
 		Recurrence:         c.GetRecurrence(),
 		Active:             c.GetActive(),
+		Kind:               c.GetKind(),
 	}
 }
 

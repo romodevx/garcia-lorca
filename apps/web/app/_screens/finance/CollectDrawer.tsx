@@ -103,13 +103,35 @@ export function maxPayableCents(expected: Pick<Expected, "amountCents" | "lines"
   return Math.max(listed, expected.amountCents);
 }
 
+/** Why the cap can be below the year's debt (CC-214). */
+const EARLY_PAYMENT_WHY = "los meses que aún no vencen llevan su descuento por pronto pago";
+
+/** True when today's cap is below the year's balance — the case that needs saying. */
+function capBelowYear(capCents: number, balanceCents: number | null | undefined): balanceCents is number {
+  return Number.isFinite(capCents) && balanceCents !== null && balanceCents !== undefined && capCents < balanceCents;
+}
+
 /**
  * What is wrong with the amount to pay, if anything. It may not exceed what the
  * family owes (T8) — `capCents`, unknown (Infinity) until the quote is read.
+ * When that cap is below the year's balance the message names both figures,
+ * or the counter reads two different debts (CC-214).
  */
-export function amountToPayError(cents: number, capCents: number): string | undefined {
+export function amountToPayError(cents: number, capCents: number, balanceCents?: number | null): string | undefined {
   if (!Number.isFinite(cents) || cents <= 0) return AMOUNT_ERROR;
-  return cents > capCents ? `No puede ser mayor que el adeudo (${formatCents(capCents)}).` : undefined;
+  if (cents <= capCents) return undefined;
+  const refusal = `No puede ser mayor que lo que se puede cobrar hoy (${formatCents(capCents)}).`;
+  return capBelowYear(capCents, balanceCents)
+    ? `${refusal} Es menos que lo que debe del año (${formatCents(balanceCents)}) porque ${EARLY_PAYMENT_WHY}.`
+    : refusal;
+}
+
+/** The amount field's help: the cap said up front when it differs from the year's figure. */
+export function amountToPayHelp(capCents: number, balanceCents: number | null | undefined): string {
+  const base = "Lo que la familia paga ahora: puede ser un abono, nunca más de lo que debe.";
+  return capBelowYear(capCents, balanceCents)
+    ? `${base} Hoy se puede cobrar hasta ${formatCents(capCents)}: ${EARLY_PAYMENT_WHY}.`
+    : base;
 }
 
 /** What is wrong with a payment date, if anything. */
@@ -287,7 +309,7 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
     }
     // Every problem is marked at once, then the view goes to the first of them.
     const wrongDate = paymentDateError(paidOn, day);
-    const wrongAmount = amountToPayError(cents, capCents);
+    const wrongAmount = amountToPayError(cents, capCents, balance);
     setDateError(wrongDate);
     setAmountError(wrongAmount);
     const tendersOk = wrongAmount === undefined && tenders.validate();
@@ -332,7 +354,7 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
       inFlight.current = false;
       setSaving(false);
     }
-  }, [student.id, cents, capCents, tenders, attemptKey, grantEarly, sentDate, paidOn, day, choice, focusFirstInvalid, onCollected]);
+  }, [student.id, cents, capCents, balance, tenders, attemptKey, grantEarly, sentDate, paidOn, day, choice, focusFirstInvalid, onCollected]);
 
   return (
     <DrawerShell
@@ -380,9 +402,9 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
                       setAmount(v);
                       if (amountToPayError(pesosToCents(v), capCents) === undefined) setAmountError(undefined);
                     }}
-                    onBlur={() => setAmountError(amountToPayError(cents, capCents))}
+                    onBlur={() => setAmountError(amountToPayError(cents, capCents, balance))}
                     error={amountError}
-                    help="Lo que la familia paga ahora: puede ser un abono, nunca más de lo que debe."
+                    help={amountToPayHelp(capCents, balance)}
                     required
                   />
 

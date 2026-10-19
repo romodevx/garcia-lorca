@@ -16,6 +16,9 @@ import { schoolISODate, schoolMonthStart } from "../../_lib/schoolDay";
 import { centsToPesosInput, formatCents } from "../../_lib/money";
 import { listStudents, type Student } from "../../students/api";
 import { useIntent } from "../../routing/pendingIntent";
+import { ChargeAdjustPanel } from "./ChargeAdjustPanel";
+import { ConceptsPanel } from "./ConceptsPanel";
+import { ManualChargePanel, type PupilOption } from "./ManualChargePanel";
 
 import { API_URL } from "../../api-url";
 import type { CutAccess } from "./CashCutClosing";
@@ -102,9 +105,24 @@ export interface FinanceScreenProps {
   canCorrectPayments?: boolean;
   /** T10: expenses and closing the day in the cut. Absent: module_expenses is off. */
   cutAccess?: CutAccess;
+  /** finance:write: manual charges, discounts, cancellations and the concept catalog (CC-203, CC-111). UX only. */
+  canManageCharges?: boolean;
 }
 
-export function FinanceScreen({ onBack, today: officeDay, notes, canCorrectPayments = false, cutAccess }: FinanceScreenProps): ReactElement {
+/** Every pupil once, labelled so two namesakes in one room still differ. */
+function pupilOptions(students: ReadonlyMap<string, Student>, rooms: ReadonlyMap<string, string>): PupilOption[] {
+  const seen = new Set<string>();
+  return [...students.values()]
+    .map((s) => ({ id: s.id, label: `${formatStudentName(s)} · ${rooms.get(s.id) ?? [s.gradeGroup, s.level].filter((x) => x !== "").join(" ")}` }))
+    .sort((a, b) => compareStudentNames(a.label, b.label))
+    .map((p) => {
+      const label = seen.has(p.label) ? `${p.label} · ${p.id.slice(0, 8)}` : p.label;
+      seen.add(p.label);
+      return { id: p.id, label };
+    });
+}
+
+export function FinanceScreen({ onBack, today: officeDay, notes, canCorrectPayments = false, cutAccess, canManageCharges = false }: FinanceScreenProps): ReactElement {
   const [charges, setCharges] = useState<Charge[]>([]);
   const [overdueIds, setOverdueIds] = useState<Set<string>>(new Set());
   const [studentMap, setStudentMap] = useState<Map<string, Student>>(new Map());
@@ -138,6 +156,10 @@ export function FinanceScreen({ onBack, today: officeDay, notes, canCorrectPayme
    * Cobrar un cargo suelto desde aquí sigue existiendo: es `PayDrawer`.
    */
   const [cashUp, setCashUp] = useState(false);
+  // CC-203: one inline panel at a time — a new charge, or one row's adjustment.
+  const [newCharge, setNewCharge] = useState(false);
+  const [adjusting, setAdjusting] = useState<string | null>(null);
+  const [showConcepts, setShowConcepts] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [pageSize, setPageSize] = useState(20);
   const [page, setPage] = useState(0);
@@ -214,6 +236,14 @@ export function FinanceScreen({ onBack, today: officeDay, notes, canCorrectPayme
     say(`${filtered.length} renglones exportados`);
   };
 
+  const replaceCharge = (updated: Charge, message: string): void => {
+    setCharges((prev) => (prev.some((c) => c.id === updated.id) ? prev.map((c) => (c.id === updated.id ? updated : c)) : [...prev, updated]));
+    setAdjusting(null);
+    setNewCharge(false);
+    say(message);
+  };
+  const pupils = useMemo(() => (newCharge ? pupilOptions(studentMap, rooms) : []), [newCharge, studentMap, rooms]);
+
   const onPaid = (): void => { setPaidCount((n) => n + 1); if (activeCycleId !== undefined) load(activeCycleId); };
 
   const tabs: [typeof tab, string][] = [["all", "Todos"], ["overdue", "Vencidos"], ["due", "Por vencer"], ["paid", "Pagados"]];
@@ -238,7 +268,8 @@ export function FinanceScreen({ onBack, today: officeDay, notes, canCorrectPayme
             <p style={{ color: "var(--text-muted)", fontSize: 15, marginTop: 3 }}>Ciclo {cycleName} · Ingresos recibidos y adeudos</p>
           </div>
         </div>
-        <div style={{ display: "flex", gap: 12 }}>
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+          {canManageCharges && activeCycleId !== undefined && <Btn kind="ghost" icon="plus" onClick={() => { setAdjusting(null); setNewCharge(true); }}>Nuevo cargo</Btn>}
           <Btn kind="ghost" icon="download" onClick={() => exportView()}>Exportar</Btn>
           <Btn
             kind="ghost"
@@ -273,6 +304,10 @@ export function FinanceScreen({ onBack, today: officeDay, notes, canCorrectPayme
 
       <h2 className="fade-up" style={{ fontSize: 20, fontWeight: 700, color: "var(--text)", marginBottom: 14 }}>Adeudos</h2>
 
+      {newCharge && activeCycleId !== undefined && (
+        <ManualChargePanel cycleId={activeCycleId} pupils={pupils} today={officeDay ?? schoolISODate()} onCreated={replaceCharge} onClose={() => setNewCharge(false)} />
+      )}
+
       <div className="fade-up" style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", marginBottom: 18 }}>
         <div style={{ display: "flex", gap: 6, padding: 5, background: "var(--surface-3)", borderRadius: "var(--r-pill)", border: "1px solid var(--border)" }}>
           {tabs.map(([id, label]) => {
@@ -302,7 +337,7 @@ export function FinanceScreen({ onBack, today: officeDay, notes, canCorrectPayme
 
       <div className="fade-up" style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--r-xl)", boxShadow: "var(--shadow-card)", overflow: "hidden" }}>
         <div style={{ display: "grid", gridTemplateColumns: "2.2fr 1fr 1.3fr 0.9fr 1.1fr auto", gap: 16, padding: "14px 24px 12px", borderBottom: "1px solid var(--border)", fontSize: 12.5, fontWeight: 700, color: "var(--text-faint)", textTransform: "uppercase", letterSpacing: ".04em" }}>
-          <div>Alumno</div><div>Nivel</div><div>Concepto</div><div>Vence</div><div>Saldo · Estado</div><div style={{ width: 148 }} />
+          <div>Alumno</div><div>Nivel</div><div>Concepto</div><div>Vence</div><div>Saldo · Estado</div><div style={{ width: ACTIONS_WIDTH }} />
         </div>
         <div style={{ padding: 8 }}>
           {loading ? (
@@ -314,7 +349,13 @@ export function FinanceScreen({ onBack, today: officeDay, notes, canCorrectPayme
               <div style={{ color: "var(--text-muted)", fontSize: 15, marginTop: 6 }}>No hay cargos en esta vista.</div>
             </div>
           ) : (
-            paged.map((r, i) => <FinRow key={r.charge.id} r={r} i={i} onPay={() => setPay(r)} />)
+            paged.map((r, i) => (
+              <div key={r.charge.id}>
+                <FinRow r={r} i={i} onPay={() => setPay(r)} adjusting={adjusting === r.charge.id}
+                  onAdjust={canManageCharges && r.visual !== "cancelled" ? () => { setNewCharge(false); setAdjusting((cur) => (cur === r.charge.id ? null : r.charge.id)); } : undefined} />
+                {adjusting === r.charge.id && <ChargeAdjustPanel charge={r.charge} name={r.name} onDone={replaceCharge} onClose={() => setAdjusting(null)} />}
+              </div>
+            ))
           )}
         </div>
         {!loading && total > 0 && (
@@ -336,6 +377,13 @@ export function FinanceScreen({ onBack, today: officeDay, notes, canCorrectPayme
         )}
       </div>
 
+      <div className="fade-up" style={{ marginTop: 26 }}>
+        <button type="button" aria-expanded={showConcepts} onClick={() => setShowConcepts((v) => !v)} style={{ display: "inline-flex", alignItems: "center", gap: 8, minHeight: 44, marginBottom: 12, fontSize: 18, fontWeight: 700, color: "var(--text)", background: "none", border: "none", cursor: "pointer" }}>
+          <Icon name="chevron" size={18} stroke={2.4} style={{ transform: showConcepts ? "rotate(90deg)" : "none" }} />Conceptos de cobro
+        </button>
+        {showConcepts && <ConceptsPanel canWrite={canManageCharges} />}
+      </div>
+
       {pay !== null && <PayDrawer charge={pay.charge} name={pay.name} today={officeDay} notes={notes} onClose={() => setPay(null)} onPaid={onPaid} />}
       {cashUp && <CashUpDrawer today={officeDay} canCorrect={canCorrectPayments} cutAccess={cutAccess} onClose={() => setCashUp(false)} />}
       {toast !== null && (
@@ -347,7 +395,9 @@ export function FinanceScreen({ onBack, today: officeDay, notes, canCorrectPayme
   );
 }
 
-function FinRow({ r, i, onPay }: { r: Row; i: number; onPay: () => void }): ReactElement {
+const ACTIONS_WIDTH = 204;
+
+function FinRow({ r, i, onPay, onAdjust, adjusting }: { r: Row; i: number; onPay: () => void; onAdjust?: () => void; adjusting: boolean }): ReactElement {
   const [hov, setHov] = useState(false);
   const s = STATUS[r.visual];
   return (
@@ -369,7 +419,12 @@ function FinRow({ r, i, onPay }: { r: Row; i: number; onPay: () => void }): Reac
         <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 16, color: owedCents(r.charge) > 0 ? "var(--text)" : "var(--text-faint)" }}>{money(owedCents(r.charge))}</div>
         <div style={{ marginTop: 4 }}><StatusPill status={r.visual} /></div>
       </div>
-      <div style={{ display: "flex", justifyContent: "flex-end", width: 148 }}>
+      <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 6, width: ACTIONS_WIDTH }}>
+        {onAdjust !== undefined && (
+          <button type="button" aria-expanded={adjusting} aria-label={`Ajustar cargo de ${r.name}`} title="Descuento o cancelar" onClick={onAdjust} style={{ width: 44, height: 44, flexShrink: 0, display: "grid", placeItems: "center", borderRadius: 99, border: "1px solid var(--border)", background: adjusting ? "var(--surface-3)" : "var(--surface)", color: "var(--text-muted)", cursor: "pointer" }}>
+            <Icon name="edit" size={17} />
+          </button>
+        )}
         {r.visual === "paid" ? (
           <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color: "var(--forest)", fontSize: 13.5, fontWeight: 600 }}><Icon name="check" size={18} stroke={2.5} />Al corriente</span>
         ) : r.visual === "cancelled" ? (

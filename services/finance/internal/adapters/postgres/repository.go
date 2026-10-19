@@ -600,9 +600,10 @@ func (r *Repository) SaveCharge(ctx context.Context, c domain.Charge) (domain.Ch
 		// one statement: RepriceUnpaid for the run, DepositWrite.Repriced for the
 		// counter. A price that moves needs one of those, never this.
 		res := tx.Model(&chargeModel{}).Where("id = ?", c.ID()).Updates(map[string]any{
-			"discount_cents": c.Discount().Int64(),
-			"status":         c.Status(),
-			"updated_at":     gorm.Expr("now()"),
+			"discount_cents":      c.Discount().Int64(),
+			"status":              c.Status(),
+			"cancellation_reason": c.CancellationReason(),
+			"updated_at":          gorm.Expr("now()"),
 		})
 		if res.Error != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "saving charge", res.Error)
