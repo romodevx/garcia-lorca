@@ -254,14 +254,38 @@ describe("LevelPeriodsScreen — a level's grades with their evaluation periods 
     expect(mocked.copyEvaluationPeriods).not.toHaveBeenCalled();
   });
 
-  it("asks before copying over unsaved changes of the source", async () => {
+  // C2-001: the button used to refuse unsaved values; it now applies what is on screen.
+  it("applies the unsaved values on screen: saves this grade first, then copies them to the level", async () => {
+    mocked.copyEvaluationPeriods.mockResolvedValue([]);
     renderScreen();
     await waitFor(() => expect(field("1° PRIMARIA", 1, "Nombre").value).toBe("1.ER TRIMESTRE"));
     fireEvent.change(field("1° PRIMARIA", 1, "Fin"), { target: { value: "2026-11-27" } });
 
     await userEvent.click(within(gradeBlock("1° PRIMARIA")).getByRole("button", { name: "Aplicar a todo el nivel" }));
 
-    expect(within(gradeBlock("1° PRIMARIA")).getByRole("alert")).toHaveTextContent("Guarda primero los cambios de este grado para copiarlos.");
+    await waitFor(() => expect(mocked.copyEvaluationPeriods).toHaveBeenCalledWith(expect.anything(), {
+      cycleId: "c1", fromGradeLevelId: "g1", toGradeLevelIds: ["g2", "g3"],
+    }));
+    expect(mocked.saveGradeEvaluationPeriods).toHaveBeenCalledWith(expect.anything(), "g1", "c1", [
+      expect.objectContaining({ name: "1.ER TRIMESTRE", endsOn: "2026-11-27" }),
+      expect.objectContaining({ name: "2.º TRIMESTRE" }),
+    ]);
+    expect(mocked.saveGradeEvaluationPeriods.mock.invocationCallOrder[0]).toBeLessThan(
+      mocked.copyEvaluationPeriods.mock.invocationCallOrder[0] ?? 0,
+    );
+    expect(await screen.findByRole("button", { name: "Deshacer" })).toBeInTheDocument();
+  });
+
+  it("unsaved values that are wrong are not applied: the field says why and gets the focus", async () => {
+    renderScreen();
+    await waitFor(() => expect(field("1° PRIMARIA", 1, "Nombre").value).toBe("1.ER TRIMESTRE"));
+    fireEvent.change(field("1° PRIMARIA", 1, "Fin"), { target: { value: "2026-08-01" } });
+
+    await userEvent.click(within(gradeBlock("1° PRIMARIA")).getByRole("button", { name: "Aplicar a todo el nivel" }));
+
+    expect(await within(row("1° PRIMARIA", 1)).findByText("El fin es antes que el inicio.")).toBeInTheDocument();
+    await waitFor(() => expect(field("1° PRIMARIA", 1, "Fin")).toHaveFocus());
+    expect(mocked.saveGradeEvaluationPeriods).not.toHaveBeenCalled();
     expect(mocked.copyEvaluationPeriods).not.toHaveBeenCalled();
   });
 

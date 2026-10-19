@@ -34,7 +34,6 @@ const FIELD_ORDER: readonly PeriodField[] = ["name", "startsOn", "endsOn"];
 const SAVE_FAILED = "No se pudieron guardar los periodos. Intenta de nuevo.";
 const COPY_FAILED = "No se pudieron copiar los periodos. Intenta de nuevo.";
 const RESTORE_FAILED = "No se pudieron restaurar los periodos de este grado.";
-const SAVE_SOURCE_FIRST = "Guarda primero los cambios de este grado para copiarlos.";
 const SOURCE_EMPTY = "Este grado aún no tiene periodos guardados para copiar.";
 
 type ByGrade<T> = Readonly<Record<string, T>>;
@@ -46,6 +45,20 @@ export interface PendingUndo {
   message: string;
   previous: ByGrade<EvaluationPeriod[]>;
 }
+
+/** What copying did: whether it landed, and the field to fix when it could not. */
+export interface CopyOutcome {
+  copied: boolean;
+  /** The first wrong field of the source's unsaved values, in reading order. */
+  focus?: PeriodProblem;
+}
+
+/** One grade's set written to the server: what it holds now, or why it was refused. */
+type Persisted =
+  | { kind: "saved"; periods: EvaluationPeriod[] }
+  | { kind: "invalid"; first: PeriodProblem | undefined }
+  | { kind: "failed" }
+  | { kind: "stale" };
 
 export interface LevelPeriods {
   load: PeriodsLoad;
@@ -67,7 +80,8 @@ export interface LevelPeriods {
   add: (gradeId: string) => string;
   remove: (gradeId: string, key: string) => void;
   save: (gradeId: string) => Promise<PeriodProblem | undefined>;
-  copy: (fromGradeId: string, toGradeIds: readonly string[]) => Promise<boolean>;
+  /** Copies what the source shows on screen: unsaved values are saved first (C2-001). */
+  copy: (fromGradeId: string, toGradeIds: readonly string[]) => Promise<CopyOutcome>;
   takeBack: () => Promise<void>;
   /** The person closed the Deshacer offer: the copy stays. */
   dismissUndo: () => void;
@@ -229,56 +243,80 @@ export function useLevelPeriods(levelId: string): LevelPeriods {
     setGradeProblems(gradeId, (prev) => prev.filter((p) => p.key !== key));
   }, []);
 
-  const save = useCallback(
-    async (gradeId: string): Promise<PeriodProblem | undefined> => {
-      if (cycle === undefined || busy[gradeId] === true) return undefined;
+  // Validates and writes one grade's rows; every answer for an old cycle is dropped.
+  const persist = useCallback(
+    async (gradeId: string, current: Cycle): Promise<Persisted> => {
       const rows = drafts[gradeId] ?? [];
-      const found = periodProblems(rows, cycle);
+      const found = periodProblems(rows, current);
       setProblems((prev) => ({ ...prev, [gradeId]: found }));
-      if (found.length > 0) return firstInOrder(found, rows);
+      if (found.length > 0) return { kind: "invalid", first: firstInOrder(found, rows) };
       setBusy((prev) => ({ ...prev, [gradeId]: true }));
       try {
-        const result = await saveGradeEvaluationPeriods(API_URL, gradeId, cycle.id, toInputs(rows));
-        if (shownCycle.current !== cycle.id) return undefined;
+        const result = await saveGradeEvaluationPeriods(API_URL, gradeId, current.id, toInputs(rows));
+        if (shownCycle.current !== current.id) return { kind: "stale" };
         adopt({ [gradeId]: result });
-        const grade = grades.find((g) => g.id === gradeId);
-        setNotice(`Periodos de ${grade?.name ?? "el grado"} guardados.`);
+        return { kind: "saved", periods: result };
       } catch (err) {
-        if (shownCycle.current !== cycle.id) return undefined;
+        if (shownCycle.current !== current.id) return { kind: "stale" };
         const detail = err instanceof ConfigError && err.detail !== "" ? err.detail : SAVE_FAILED;
         setErrors((prev) => ({ ...prev, [gradeId]: detail }));
+        return { kind: "failed" };
       } finally {
         setBusy((prev) => ({ ...prev, [gradeId]: false }));
       }
+    },
+    [drafts, adopt],
+  );
+
+  const save = useCallback(
+    async (gradeId: string): Promise<PeriodProblem | undefined> => {
+      if (cycle === undefined || busy[gradeId] === true) return undefined;
+      const outcome = await persist(gradeId, cycle);
+      if (outcome.kind === "invalid") return outcome.first;
+      if (outcome.kind === "saved") {
+        const grade = grades.find((g) => g.id === gradeId);
+        setNotice(`Periodos de ${grade?.name ?? "el grado"} guardados.`);
+      }
       return undefined;
     },
-    [cycle, busy, drafts, grades, adopt],
+    [cycle, busy, grades, persist],
+  );
+
+  // The source as the person sees it: saved first when it has unsaved values.
+  const sourceOnScreen = useCallback(
+    async (gradeId: string, current: Cycle): Promise<Persisted> => {
+      const stored = saved[gradeId] ?? [];
+      if (sameSet(drafts[gradeId] ?? [], draftsOf(stored))) return { kind: "saved", periods: stored };
+      return persist(gradeId, current);
+    },
+    [saved, drafts, persist],
   );
 
   const copy = useCallback(
-    async (fromGradeId: string, toGradeIds: readonly string[]): Promise<boolean> => {
-      if (cycle === undefined || toGradeIds.length === 0) return false;
-      const source = saved[fromGradeId] ?? [];
-      const fail = (message: string): false => {
+    async (fromGradeId: string, toGradeIds: readonly string[]): Promise<CopyOutcome> => {
+      if (cycle === undefined || toGradeIds.length === 0 || busy[fromGradeId] === true) return { copied: false };
+      const fail = (message: string): CopyOutcome => {
         setErrors((prev) => ({ ...prev, [fromGradeId]: message }));
-        return false;
+        return { copied: false };
       };
-      if (!sameSet(drafts[fromGradeId] ?? [], draftsOf(source))) return fail(SAVE_SOURCE_FIRST);
-      if (source.length === 0) return fail(SOURCE_EMPTY);
+      const source = await sourceOnScreen(fromGradeId, cycle);
+      if (source.kind === "invalid") return { copied: false, focus: source.first };
+      if (source.kind !== "saved") return { copied: false };
+      if (source.periods.length === 0) return fail(SOURCE_EMPTY);
       const previous = Object.fromEntries(toGradeIds.map((g) => [g, saved[g] ?? []]));
       try {
         const result = groupByGrade(await copyEvaluationPeriods(API_URL, { cycleId: cycle.id, fromGradeLevelId: fromGradeId, toGradeLevelIds: [...toGradeIds] }));
-        if (shownCycle.current !== cycle.id) return true;
+        if (shownCycle.current !== cycle.id) return { copied: true };
         adopt(Object.fromEntries(toGradeIds.map((g) => [g, result[g] ?? []])));
         const n = toGradeIds.length;
         setNotice(undefined);
         setUndo({ message: n === 1 ? "Periodos copiados a 1 grado." : `Periodos copiados a ${n} grados.`, previous });
-        return true;
+        return { copied: true };
       } catch (err) {
         return fail(err instanceof ConfigError && err.detail !== "" ? err.detail : COPY_FAILED);
       }
     },
-    [cycle, saved, drafts, adopt],
+    [cycle, busy, saved, sourceOnScreen, adopt],
   );
 
   const takeBack = useCallback(async (): Promise<void> => {
