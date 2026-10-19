@@ -205,6 +205,8 @@ describe("step 3 — the password", () => {
   it.each([
     [new ConfigError(403, ""), "Sólo el director puede eliminar niveles."],
     [new ConfigError(404, ""), "Este nivel ya no existe."],
+    // C2-012: the gateway's throttle is not a dropped connection.
+    [new ConfigError(429, "Too Many Requests"), "Demasiados intentos. Espera un minuto y vuelve a intentarlo."],
     [new TypeError("Failed to fetch"), "No se pudo eliminar el nivel. Revisa tu conexión e intenta de nuevo."],
   ])("explains %s", async (err, text) => {
     api.deleteLevel.mockRejectedValue(err);

@@ -41,3 +41,20 @@ const REFUSED_STATUSES = new Set([401, 403]);
 export function isRefusal(err: unknown): boolean {
   return err instanceof HttpError && REFUSED_STATUSES.has(err.status);
 }
+
+/** HTTP 429: the gateway's throttle (10 a minute on sensitive writes). */
+const TOO_MANY_REQUESTS = 429;
+
+/** What a person reads when the throttle stopped them. */
+export const TOO_MANY_ATTEMPTS = "Demasiados intentos. Espera un minuto y vuelve a intentarlo.";
+
+/**
+ * The throttle's sentence when `err` is a 429, from any module's error class
+ * (each carries a numeric `status`); undefined otherwise. A 429 is neither a
+ * dropped connection nor a refusal: waiting is the fix, so the screen must say
+ * so instead of "check your connection" (C2-012).
+ */
+export function tooManyAttempts(err: unknown): string | undefined {
+  if (typeof err !== "object" || err === null || !("status" in err)) return undefined;
+  return err.status === TOO_MANY_REQUESTS ? TOO_MANY_ATTEMPTS : undefined;
+}

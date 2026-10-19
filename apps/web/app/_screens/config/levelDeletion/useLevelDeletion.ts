@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { API_URL } from "../../../api-url";
+import { tooManyAttempts } from "../../../auth/httpError";
 import { ConfigError, deleteLevel, getLevelDeletionPreview, type LevelDeletionPreview } from "../../../config/api";
 import { DELETION_IN_PROGRESS, longDay, namesMatch } from "./copy";
 
@@ -122,7 +123,7 @@ export function useLevelDeletion(levelId: string, onDeleted: (message: string) =
     if (err.code === "DELETION_INCOMPLETE" || err.code === "LEVEL_BEING_DELETED") return setSubmitError(err.message);
     if (err.status === 403) return setSubmitError(FORBIDDEN);
     if (err.status === 404) return setSubmitError(GONE);
-    setSubmitError(NETWORK);
+    setSubmitError(tooManyAttempts(err) ?? NETWORK);
   };
 
   const submit = async (): Promise<void> => {
