@@ -268,10 +268,10 @@ func (f *fakeRepo) CreateCharge(_ context.Context, c domain.Charge) (domain.Char
 }
 
 func (f *fakeRepo) CancelChargeIfUnpaid(ctx context.Context, id string) (ports.ChargeWithPaid, error) {
-	return f.CancelChargeIfUnpaidWithReason(ctx, id, "")
+	return f.CancelChargeIfUnpaidWithReason(ctx, id, "", "")
 }
 
-func (f *fakeRepo) CancelChargeIfUnpaidWithReason(_ context.Context, id, reason string) (ports.ChargeWithPaid, error) {
+func (f *fakeRepo) CancelChargeIfUnpaidWithReason(_ context.Context, id, reason, _ string) (ports.ChargeWithPaid, error) {
 	c, ok := f.charges[id]
 	if !ok {
 		return ports.ChargeWithPaid{}, glerrors.ErrNotFound

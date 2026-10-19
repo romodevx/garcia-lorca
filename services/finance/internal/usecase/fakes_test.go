@@ -159,12 +159,17 @@ func (s *spyPublisher) PublishPaymentRegistered(_ context.Context, e ports.Payme
 
 // --- repository --------------------------------------------------------------
 
+// testActor is the signed-in caller the gateway would stamp on a write.
+const testActor = "a0000000-0000-4000-8000-0000000000ac"
+
 type fakeRepo struct {
-	concepts map[string]domain.ChargeConcept
-	charges  map[string]domain.Charge
-	payments map[string][]domain.Payment // keyed by charge id
-	plans    map[string]domain.TuitionPlan
-	deposits []domain.Deposit
+	// cancelledBy records who cancelled each charge (C2-005).
+	cancelledBy map[string]string
+	concepts    map[string]domain.ChargeConcept
+	charges     map[string]domain.Charge
+	payments    map[string][]domain.Payment // keyed by charge id
+	plans       map[string]domain.TuitionPlan
+	deposits    []domain.Deposit
 	// depositOfPayment stands in for payments.deposit_id: which deposit an
 	// allocation came from, so voiding can find and release exactly those.
 	depositOfPayment map[string]string
@@ -185,10 +190,11 @@ type fakeRepo struct {
 
 func newFakeRepo() *fakeRepo {
 	return &fakeRepo{
-		concepts: map[string]domain.ChargeConcept{},
-		charges:  map[string]domain.Charge{},
-		payments: map[string][]domain.Payment{},
-		plans:    map[string]domain.TuitionPlan{},
+		cancelledBy: map[string]string{},
+		concepts:    map[string]domain.ChargeConcept{},
+		charges:     map[string]domain.Charge{},
+		payments:    map[string][]domain.Payment{},
+		plans:       map[string]domain.TuitionPlan{},
 
 		depositOfPayment: map[string]string{},
 	}
@@ -287,10 +293,10 @@ func (f *fakeRepo) CreateCharge(_ context.Context, c domain.Charge) (domain.Char
 // under the charge's row lock; here it is enough to apply the same domain rule
 // against the payments recorded for the charge.
 func (f *fakeRepo) CancelChargeIfUnpaid(ctx context.Context, id string) (ports.ChargeWithPaid, error) {
-	return f.CancelChargeIfUnpaidWithReason(ctx, id, "")
+	return f.CancelChargeIfUnpaidWithReason(ctx, id, "", "")
 }
 
-func (f *fakeRepo) CancelChargeIfUnpaidWithReason(_ context.Context, id, reason string) (ports.ChargeWithPaid, error) {
+func (f *fakeRepo) CancelChargeIfUnpaidWithReason(_ context.Context, id, reason, actorUserID string) (ports.ChargeWithPaid, error) {
 	f.cancelIfUnpaidCalls++
 	c, ok := f.charges[id]
 	if !ok {
@@ -302,6 +308,7 @@ func (f *fakeRepo) CancelChargeIfUnpaidWithReason(_ context.Context, id, reason 
 		return ports.ChargeWithPaid{}, err
 	}
 	f.charges[id] = cancelled
+	f.cancelledBy[id] = actorUserID
 	return ports.ChargeWithPaid{Charge: cancelled, PaidCents: paid}, nil
 }
 

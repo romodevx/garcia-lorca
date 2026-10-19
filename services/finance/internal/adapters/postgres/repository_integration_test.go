@@ -1370,7 +1370,7 @@ func TestWithdrawalCancellationWaitsForLockedPaymentDecision(t *testing.T) {
 	cancelResult := make(chan error, 1)
 	go func() {
 		close(cancelStarted)
-		_, err := repo.CancelChargeIfUnpaidWithReason(ctx, chargeID, "baja")
+		_, err := repo.CancelChargeIfUnpaidWithReason(ctx, chargeID, "baja", "")
 		cancelResult <- err
 	}()
 	<-cancelStarted
@@ -1410,5 +1410,40 @@ func TestWithdrawalCancellationWaitsForLockedPaymentDecision(t *testing.T) {
 	}
 	if stored.Charge.Status() == domain.StatusCancelled || stored.PaidCents != 1000 {
 		t.Errorf("charge after race = %q, paid %d; want partially paid and not cancelled", stored.Charge.Status(), stored.PaidCents)
+	}
+}
+
+// TestGuardedCancellationRecordsWhenAndWho: C2-005 — the cancellation keeps
+// its reason, the moment and the account that did it.
+func TestGuardedCancellationRecordsWhenAndWho(t *testing.T) {
+	ctx := context.Background()
+	const (
+		conceptID = "c0000000-0000-0000-0000-00000000c205"
+		studentID = "50000000-0000-0000-0000-00000000c205"
+		chargeID  = "d0000000-0000-0000-0000-00000000c205"
+		actorID   = "a0000000-0000-0000-0000-00000000c205"
+	)
+	repo := appRepo(t, tenantA)
+	if _, err := repo.CreateConcept(ctx, newConcept(t, conceptID, tenantA, "cancel-audit", 24000)); err != nil {
+		t.Fatalf("seed concept: %v", err)
+	}
+	if _, err := repo.CreateCharge(ctx, newCharge(t, chargeID, tenantA, studentID, cycleOne, conceptID, 24000, 0, tomorrow())); err != nil {
+		t.Fatalf("seed charge: %v", err)
+	}
+
+	if _, err := repo.CancelChargeIfUnpaidWithReason(ctx, chargeID, "Cargo duplicado", actorID); err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+
+	var row struct {
+		CancelledBy *string
+		Stamped     bool
+	}
+	if err := superDB.Raw(`SELECT cancelled_by::text AS cancelled_by, cancelled_at IS NOT NULL AS stamped
+		FROM charges WHERE id = ?`, chargeID).Scan(&row).Error; err != nil {
+		t.Fatalf("read audit: %v", err)
+	}
+	if row.CancelledBy == nil || *row.CancelledBy != actorID || !row.Stamped {
+		t.Fatalf("audit = by %v, stamped %v; want by %s and a time", row.CancelledBy, row.Stamped, actorID)
 	}
 }

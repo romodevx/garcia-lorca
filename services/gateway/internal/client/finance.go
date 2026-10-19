@@ -277,10 +277,11 @@ func (c *FinanceClient) ApplyDiscount(ctx context.Context, chargeID string, disc
 
 // CancelCharge voids a charge, with the reason the school gave: it stops
 // counting toward the account balance and can no longer receive payments.
-func (c *FinanceClient) CancelCharge(ctx context.Context, chargeID, reason string) (Charge, error) {
+func (c *FinanceClient) CancelCharge(ctx context.Context, chargeID, reason, actorUserID string) (Charge, error) {
 	res, err := c.rpc.CancelCharge(ctx, connect.NewRequest(&financev1.CancelChargeRequest{
-		ChargeId: chargeID,
-		Reason:   reason,
+		ChargeId:    chargeID,
+		Reason:      reason,
+		ActorUserId: actorUserID,
 	}))
 	if err != nil {
 		return Charge{}, err

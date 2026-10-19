@@ -41,7 +41,7 @@ func (s *FinanceService) WithdrawStudent(ctx context.Context, studentID, cycleID
 	}
 	plan := planWithdrawal(charges, on)
 	for _, charge := range plan.ToCancel {
-		if _, err := s.repo.CancelChargeIfUnpaidWithReason(ctx, charge.ID(), withdrawalCancelReason); err != nil {
+		if _, err := s.repo.CancelChargeIfUnpaidWithReason(ctx, charge.ID(), withdrawalCancelReason, ""); err != nil {
 			// A payment or another withdrawal can win after the preview read. The
 			// row lock is authoritative; either conflict means this row must stay.
 			if glerrors.KindOf(err) == glerrors.KindConflict {

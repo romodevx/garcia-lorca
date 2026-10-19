@@ -4664,9 +4664,11 @@ paths:
       description: >
         Cancellation is terminal: the charge stops counting toward the
         account, and cancelling it twice is 409. The row survives with its
-        reason, so the ledger can always say why a debt disappeared. Money
-        already collected against it stays on the ledger. Requires
-        `finance:write`.
+        reason, when and who (the signed-in caller), so the ledger can always
+        say why a debt disappeared. A charge with money collected against it
+        is refused with 409: void or correct the payment first, so the money
+        is not left paying for a debt that no longer exists (C2-005).
+        Requires `finance:write`.
       operationId: cancelCharge
       security: [{ sessionCookie: [] }]
       parameters:
@@ -4703,7 +4705,9 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/ModuleDisabled' }
         '409':
-          description: The charge was already cancelled.
+          description: >
+            The charge was already cancelled, or it has payments on it
+            (`charge has payments and cannot be cancelled`).
   /api/v1/finance/overdue:
     get:
       tags: [finance-payments]

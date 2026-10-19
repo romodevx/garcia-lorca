@@ -444,7 +444,7 @@ func TestApplyDiscountRejected(t *testing.T) {
 		f := newFixture(t)
 		concept := f.seedConcept(t, "Colegiatura", 250000)
 		charge := f.seedCharge(t, concept.ID(), 100000)
-		if _, err := f.svc.CancelCharge(context.Background(), charge.ID(), "Cargo duplicado"); err != nil {
+		if _, err := f.svc.CancelCharge(context.Background(), charge.ID(), "Cargo duplicado", testActor); err != nil {
 			t.Fatalf("seed cancel: %v", err)
 		}
 
@@ -470,7 +470,7 @@ func TestCancelCharge(t *testing.T) {
 	concept := f.seedConcept(t, "Colegiatura", 250000)
 	charge := f.seedCharge(t, concept.ID(), 100000)
 
-	got, err := f.svc.CancelCharge(context.Background(), charge.ID(), "Cargo duplicado")
+	got, err := f.svc.CancelCharge(context.Background(), charge.ID(), "Cargo duplicado", testActor)
 
 	requireNoError(t, err)
 	if got.Charge.Status() != domain.StatusCancelled {
@@ -480,7 +480,7 @@ func TestCancelCharge(t *testing.T) {
 		t.Fatalf("stored status = %q, want the cancellation persisted", stored.Status())
 	}
 
-	_, err = f.svc.CancelCharge(context.Background(), charge.ID(), "Cargo duplicado")
+	_, err = f.svc.CancelCharge(context.Background(), charge.ID(), "Cargo duplicado", testActor)
 
 	requireKind(t, err, glerrors.KindConflict)
 }
@@ -505,7 +505,7 @@ func TestCancelChargeReason(t *testing.T) {
 			concept := f.seedConcept(t, "Colegiatura", 250000)
 			charge := f.seedCharge(t, concept.ID(), 100000)
 
-			got, err := f.svc.CancelCharge(context.Background(), charge.ID(), tt.reason)
+			got, err := f.svc.CancelCharge(context.Background(), charge.ID(), tt.reason, testActor)
 
 			if tt.wantErr != glerrors.KindUnknown {
 				requireKind(t, err, tt.wantErr)
@@ -525,10 +525,43 @@ func TestCancelChargeReason(t *testing.T) {
 	}
 }
 
+// C2-005 (decisión del dueño, 19-oct): a charge with money on it is not
+// cancelled. The money has to be settled first — the payment voided or
+// corrected — or it is left paying for a debt that no longer exists, neither
+// income nor credit.
+func TestCancelChargeRefusesWhileMoneyIsOnIt(t *testing.T) {
+	f := newFixture(t)
+	concept := f.seedConcept(t, "Colegiatura", 250000)
+	charge := f.seedCharge(t, concept.ID(), 100000)
+	pay(t, f, charge.ID(), 30000)
+
+	_, err := f.svc.CancelCharge(context.Background(), charge.ID(), "Cargo duplicado", testActor)
+
+	requireKind(t, err, glerrors.KindConflict)
+	if stored := f.repo.charges[charge.ID()]; stored.Status() == domain.StatusCancelled {
+		t.Fatal("a charge with money on it was cancelled")
+	}
+}
+
+// C2-005: who cancelled travels with the cancellation, set by the gateway from
+// the signed-in caller.
+func TestCancelChargeRecordsWhoCancelled(t *testing.T) {
+	f := newFixture(t)
+	concept := f.seedConcept(t, "Colegiatura", 250000)
+	charge := f.seedCharge(t, concept.ID(), 100000)
+
+	_, err := f.svc.CancelCharge(context.Background(), charge.ID(), "Cargo duplicado", testActor)
+
+	requireNoError(t, err)
+	if got := f.repo.cancelledBy[charge.ID()]; got != testActor {
+		t.Fatalf("cancelled by = %q, want %q", got, testActor)
+	}
+}
+
 func TestCancelChargeUnknownIsInvalid(t *testing.T) {
 	f := newFixture(t)
 
-	_, err := f.svc.CancelCharge(context.Background(), "ghost", "Cargo duplicado")
+	_, err := f.svc.CancelCharge(context.Background(), "ghost", "Cargo duplicado", testActor)
 
 	requireKind(t, err, glerrors.KindInvalid)
 }
@@ -711,7 +744,7 @@ func TestRegisterPaymentRejected(t *testing.T) {
 		f := newFixture(t)
 		concept := f.seedConcept(t, "Colegiatura", 250000)
 		charge := f.seedCharge(t, concept.ID(), 100000)
-		if _, err := f.svc.CancelCharge(context.Background(), charge.ID(), "Cargo duplicado"); err != nil {
+		if _, err := f.svc.CancelCharge(context.Background(), charge.ID(), "Cargo duplicado", testActor); err != nil {
 			t.Fatalf("seed cancel: %v", err)
 		}
 
@@ -774,7 +807,7 @@ func TestGetAccount(t *testing.T) {
 		t.Fatalf("seed payment: %v", err)
 	}
 	voided := f.seedCharge(t, trip.ID(), 30000)
-	if _, err := f.svc.CancelCharge(ctx, voided.ID(), "Cargo duplicado"); err != nil {
+	if _, err := f.svc.CancelCharge(ctx, voided.ID(), "Cargo duplicado", testActor); err != nil {
 		t.Fatalf("seed cancel: %v", err)
 	}
 	// Another student's debt must never reach this statement.

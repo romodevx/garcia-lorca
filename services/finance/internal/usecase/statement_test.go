@@ -286,7 +286,7 @@ func TestACancelledChargeIsNotAMovement(t *testing.T) {
 	f := newFixture(t)
 	concept := f.seedConcept(t, "Excursión", 50000)
 	charge := f.seedCharge(t, concept.ID(), 50000)
-	if _, err := f.svc.CancelCharge(context.Background(), charge.ID(), "Cargo duplicado"); err != nil {
+	if _, err := f.svc.CancelCharge(context.Background(), charge.ID(), "Cargo duplicado", testActor); err != nil {
 		t.Fatalf("CancelCharge: %v", err)
 	}
 
@@ -305,9 +305,11 @@ func TestACancelledChargeWithMoneyOnItKeepsWhatWasCollected(t *testing.T) {
 	concept := f.seedConcept(t, "Excursión", 50000)
 	charge := f.seedCharge(t, concept.ID(), 50000)
 	pay(t, f, charge.ID(), 50000)
-	if _, err := f.svc.CancelCharge(context.Background(), charge.ID(), "Cargo duplicado"); err != nil {
-		t.Fatalf("CancelCharge: %v", err)
-	}
+	// Cancelling with money on it is refused since C2-005; such charges remain
+	// only from before the rule, so the cancellation is seeded as it stood.
+	cancelled, err := f.repo.charges[charge.ID()].Cancel()
+	requireNoError(t, err)
+	f.repo.charges[charge.ID()] = cancelled
 
 	st := statementOf(t, f, testStudent)
 

@@ -484,6 +484,9 @@ message CancelChargeRequest {
   // reason is required: a debt that disappears without one cannot be
   // explained to the family or the auditor.
   string reason = 2;
+  // The authenticated caller, set by the gateway — never by a client. Kept as
+  // who cancelled (C2-005).
+  string actor_user_id = 3;
 }
 
 message CancelChargeIfUnpaidRequest {

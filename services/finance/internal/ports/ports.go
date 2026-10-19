@@ -531,8 +531,9 @@ type FinanceRepository interface {
 	// before the write. A charge with payments is KindConflict. Automated
 	// callers use this; CancelCharge stays the school's unguarded override.
 	CancelChargeIfUnpaid(ctx context.Context, id string) (ChargeWithPaid, error)
-	// CancelChargeIfUnpaidWithReason is the guarded cancellation with an audit reason.
-	CancelChargeIfUnpaidWithReason(ctx context.Context, id, reason string) (ChargeWithPaid, error)
+	// CancelChargeIfUnpaidWithReason is the guarded cancellation with an audit
+	// reason and who did it (empty for the system's own sweeps).
+	CancelChargeIfUnpaidWithReason(ctx context.Context, id, reason, actorUserID string) (ChargeWithPaid, error)
 	// SaveCharge persists the mutable part of an existing charge (its discount
 	// and derived status), as left by ApplyDiscount or CancelCharge.
 	SaveCharge(ctx context.Context, c domain.Charge) (domain.Charge, error)

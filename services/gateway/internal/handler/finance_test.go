@@ -70,6 +70,7 @@ type fakeFinance struct {
 
 	cancelChargeID string
 	cancelReason   string
+	cancelActor    string
 
 	payChargeID string
 	payAmount   int64
@@ -222,8 +223,8 @@ func (f *fakeFinance) ApplyDiscount(_ context.Context, chargeID string, discount
 	return f.charge, nil
 }
 
-func (f *fakeFinance) CancelCharge(_ context.Context, chargeID, reason string) (client.Charge, error) {
-	f.cancelChargeID, f.cancelReason = chargeID, reason
+func (f *fakeFinance) CancelCharge(_ context.Context, chargeID, reason, actorUserID string) (client.Charge, error) {
+	f.cancelChargeID, f.cancelReason, f.cancelActor = chargeID, reason, actorUserID
 	if f.err != nil {
 		return client.Charge{}, f.err
 	}
@@ -609,6 +610,23 @@ func TestFinanceCancelChargeUsesPathID(t *testing.T) {
 	}
 	if out["status"] != "cancelled" || out["remainingCents"] != float64(0) {
 		t.Errorf("body = %v", out)
+	}
+}
+
+// C2-005: who cancelled is the signed-in caller, never a body field.
+func TestFinanceCancelChargeForwardsTheCaller(t *testing.T) {
+	svc := &fakeFinance{charge: sampleCharge}
+	h := handler.NewFinanceHandler(svc)
+	caller := principalHolding(ownerCallerPerms...)
+	caller.UserID = "usr-owner"
+
+	rec := adminReqAs(t, http.HandlerFunc(h.CancelCharge), caller, http.MethodPost, "/api/v1/finance/charges/chg-1/cancel", `{"reason":"Cargo duplicado","actorUserId":"usr-forged"}`, "id", "chg-1")
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if svc.cancelActor != "usr-owner" {
+		t.Errorf("forwarded actor = %q, want the signed-in caller", svc.cancelActor)
 	}
 }
 
