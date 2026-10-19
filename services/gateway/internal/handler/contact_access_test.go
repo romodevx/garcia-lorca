@@ -3,6 +3,7 @@ package handler_test
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -30,10 +31,12 @@ type fakeIssuer struct {
 	inviteErr    error
 	// ensuredOn is the existing account the role was added to, if any.
 	ensuredOn string
+	// confirmed is what the edge forwarded as the director's confirmation.
+	confirmed bool
 }
 
-func (f *fakeIssuer) InviteGuardian(_ context.Context, email, displayName string) (client.User, *client.Invitation, error) {
-	f.invitedEmail, f.invitedName = email, displayName
+func (f *fakeIssuer) InviteGuardian(_ context.Context, email, displayName string, confirmStaff bool) (client.User, *client.Invitation, error) {
+	f.invitedEmail, f.invitedName, f.confirmed = email, displayName, confirmStaff
 	if f.inviteErr != nil {
 		return client.User{}, nil, f.inviteErr
 	}
@@ -106,10 +109,20 @@ func plainContact() client.GuardianLink {
 // doInvite drives the handler through a router so the path values are real.
 func doInvite(t *testing.T, h *handler.ContactAccessHandler, studentID, contactID string) *httptest.ResponseRecorder {
 	t.Helper()
+	return doInviteWith(t, h, studentID, contactID, "")
+}
+
+// doInviteWith sends a body; "" sends none, as the button did before C2-003.
+func doInviteWith(t *testing.T, h *handler.ContactAccessHandler, studentID, contactID, body string) *httptest.ResponseRecorder {
+	t.Helper()
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/v1/students/{studentId}/guardians/{contactId}/invite", h.Invite)
+	var reader io.Reader
+	if body != "" {
+		reader = strings.NewReader(body)
+	}
 	req := httptest.NewRequest(http.MethodPost,
-		"/api/v1/students/"+studentID+"/guardians/"+contactID+"/invite", nil)
+		"/api/v1/students/"+studentID+"/guardians/"+contactID+"/invite", reader)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 	return rec
@@ -312,5 +325,50 @@ func TestInviteContactPropagatesAGrantConflict(t *testing.T) {
 
 	if rec := doInvite(t, h, "stu-1", "gl-1"); rec.Code != http.StatusConflict {
 		t.Errorf("status = %d, want 409", rec.Code)
+	}
+}
+
+// C2-003: the director's "sí, es la misma persona" travels to iam; without a
+// body it is false, so an address of the staff is never merged unasked.
+func TestInviteContactForwardsTheStaffConfirmation(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+		want bool
+	}{
+		{name: "no body", body: "", want: false},
+		{name: "confirmed", body: `{"confirmStaffAccount":true}`, want: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			iam := issuerWithGuardianRole()
+			h := handler.NewContactAccessHandler(iam, granterWithContact(plainContact()))
+
+			rec := doInviteWith(t, h, "stu-1", "gl-1", tc.body)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d (body=%s)", rec.Code, rec.Body.String())
+			}
+			if iam.confirmed != tc.want {
+				t.Errorf("confirmed = %v, want %v", iam.confirmed, tc.want)
+			}
+		})
+	}
+}
+
+// C2-003: iam's refusal keeps its meaning and its reason at the edge, so the
+// screen can ask the director instead of showing a generic failure.
+func TestInviteContactOnAStaffAddressIs409WithItsReason(t *testing.T) {
+	iam := issuerWithGuardianRole()
+	iam.inviteErr = connect.NewError(connect.CodeAlreadyExists, errString("that email belongs to a staff account; confirm it is the same person"))
+	students := granterWithContact(plainContact())
+	h := handler.NewContactAccessHandler(iam, students)
+
+	rec := doInvite(t, h, "stu-1", "gl-1")
+
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "staff account") {
+		t.Fatalf("status = %d body = %s, want 409 naming the staff account", rec.Code, rec.Body.String())
+	}
+	if students.grantUserID != "" {
+		t.Errorf("a refused invitation still granted access to %q", students.grantUserID)
 	}
 }

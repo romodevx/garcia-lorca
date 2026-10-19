@@ -176,7 +176,12 @@ type GuardianAccess struct {
 //
 // A deployment without the seeded role (migrations/iam/0010) is OUR fault, not
 // the caller's: inviting into no role would create a login that sees nothing.
-func (s *AdminService) InviteGuardian(ctx context.Context, rawEmail, displayName string) (GuardianAccess, error) {
+//
+// A live account that is not yet a guardian belongs to someone on the staff.
+// It gains the role only when the caller confirms it is the same person
+// (confirmStaff, C2-003): a mistyped address would otherwise let an employee
+// read another family's child, and nobody would be told.
+func (s *AdminService) InviteGuardian(ctx context.Context, rawEmail, displayName string, confirmStaff bool) (GuardianAccess, error) {
 	email, err := domain.NewEmail(rawEmail)
 	if err != nil {
 		return GuardianAccess{}, err
@@ -188,6 +193,9 @@ func (s *AdminService) InviteGuardian(ctx context.Context, rawEmail, displayName
 	existing, _, err := s.users.FindAuthByEmail(ctx, s.tenantID, email)
 	switch {
 	case err == nil && !existing.IsDeleted():
+		if !confirmStaff && !slices.ContainsFunc(existing.RoleIDs(), domain.IsGuardianRoleID) {
+			return GuardianAccess{}, ErrGuardianEmailIsStaff
+		}
 		return s.ensureGuardianRole(ctx, existing, guardian)
 	case err != nil && glerrors.KindOf(err) != glerrors.KindNotFound:
 		return GuardianAccess{}, err
@@ -198,6 +206,10 @@ func (s *AdminService) InviteGuardian(ctx context.Context, rawEmail, displayName
 	}
 	return GuardianAccess{User: out.User, Invitation: &out}, nil
 }
+
+// ErrGuardianEmailIsStaff refuses, until confirmed, to give app access through
+// an address that already belongs to a staff account (C2-003).
+var ErrGuardianEmailIsStaff = glerrors.New(glerrors.KindConflict, "that email belongs to a staff account; confirm it is the same person")
 
 // ensureGuardianRole adds the guardian role to a live account that lacks it.
 // AddRole is idempotent, but skipping the write keeps a repeat press free.

@@ -131,6 +131,51 @@ describe("ContactsPanel — dar acceso a la app", () => {
     expect(screen.queryByText(/Failed to fetch/)).toBeNull();
   });
 
+  // C2-003 (decisión del dueño, opción C): an address that belongs to a staff
+  // account is asked about, not merged. Confirming sends the same request with
+  // the confirmation; it is the director who knows it is the same person.
+  it("asks before using a staff account, and confirms on request", async () => {
+    const user = userEvent.setup();
+    students.listContacts.mockResolvedValue([
+      { id: "gl-2", studentId: "st-1", guardianUserId: "", relationship: "father", fullName: "Mateo Contreras", phone: "", email: "maestro@example.com", hasAccount: false },
+    ]);
+    students.inviteContactToApp
+      .mockRejectedValueOnce(Object.assign(new Error("that email belongs to a staff account; confirm it is the same person"), { status: 409 }))
+      .mockResolvedValueOnce({
+        contact: { id: "gl-2", studentId: "st-1", guardianUserId: "usr-t", relationship: "father", fullName: "Mateo Contreras", phone: "", email: "maestro@example.com", hasAccount: true },
+        invitation: null,
+      });
+    render(<ContactsPanel studentId="st-1" />);
+    await screen.findByText("Mateo Contreras");
+
+    await user.click(screen.getByRole("button", { name: /Dar acceso a la app/ }));
+
+    expect(await screen.findByText(/es la cuenta de alguien del personal/)).toBeInTheDocument();
+    expect(students.inviteContactToApp).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole("button", { name: "Sí, es la misma persona" }));
+
+    await waitFor(() => expect(students.inviteContactToApp).toHaveBeenCalledTimes(2));
+    expect(students.inviteContactToApp.mock.calls[1]?.[3]).toEqual({ confirmStaffAccount: true });
+    expect(await screen.findByText(/ya tenía cuenta con ese correo/)).toBeInTheDocument();
+  });
+
+  it("lets the office fix the address instead", async () => {
+    const user = userEvent.setup();
+    students.listContacts.mockResolvedValue([
+      { id: "gl-2", studentId: "st-1", guardianUserId: "", relationship: "father", fullName: "Mateo Contreras", phone: "", email: "maestro@example.com", hasAccount: false },
+    ]);
+    students.inviteContactToApp.mockRejectedValue(Object.assign(new Error("that email belongs to a staff account; confirm it is the same person"), { status: 409 }));
+    render(<ContactsPanel studentId="st-1" />);
+    await screen.findByText("Mateo Contreras");
+
+    await user.click(screen.getByRole("button", { name: /Dar acceso a la app/ }));
+    await user.click(await screen.findByRole("button", { name: "No, corregir el correo" }));
+
+    expect(screen.queryByText(/es la cuenta de alguien del personal/)).toBeNull();
+    expect(screen.getByDisplayValue("maestro@example.com")).toBeInTheDocument();
+    expect(students.inviteContactToApp).toHaveBeenCalledTimes(1);
+  });
+
   // A contact with no address has nowhere to receive the invitation, so the
   // button is not offered: an action that cannot succeed should not be pressable.
   it("does not offer the button to a contact with no email", async () => {

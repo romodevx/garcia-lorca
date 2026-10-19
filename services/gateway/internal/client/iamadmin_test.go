@@ -2,6 +2,7 @@ package client_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	connect "connectrpc.com/connect"
@@ -178,7 +179,10 @@ func TestAuthClientSetUserStatusSuspend(t *testing.T) {
 
 func (stubIAM) InviteGuardian(_ context.Context, req *connect.Request[iamv1.InviteGuardianRequest]) (*connect.Response[iamv1.InviteGuardianResponse], error) {
 	if req.Msg.GetEmail() == "existe@example.com" {
-		// A live account: iam adds the role and sends nothing.
+		if !req.Msg.GetConfirmStaffAccount() {
+			return nil, connect.NewError(connect.CodeAlreadyExists, errors.New("that email belongs to a staff account; confirm it is the same person"))
+		}
+		// A live account, confirmed: iam adds the role and sends nothing.
 		return connect.NewResponse(&iamv1.InviteGuardianResponse{
 			User: &iamv1.User{Id: "usr-old", Email: req.Msg.GetEmail(), Status: iamv1.UserStatus_USER_STATUS_ACTIVE},
 		}), nil
@@ -193,7 +197,7 @@ func TestAuthClientInviteGuardian(t *testing.T) {
 	c, stop := newStubServer(t)
 	defer stop()
 
-	u, inv, err := c.InviteGuardian(context.Background(), "mama@example.com", "Mamá")
+	u, inv, err := c.InviteGuardian(context.Background(), "mama@example.com", "Mamá", false)
 	if err != nil {
 		t.Fatalf("InviteGuardian: %v", err)
 	}
@@ -206,7 +210,10 @@ func TestAuthClientInviteGuardian(t *testing.T) {
 
 	// An existing account comes back with no invitation at all — not an empty
 	// one that would read as "a link was issued and not sent".
-	old, none, err := c.InviteGuardian(context.Background(), "existe@example.com", "Papá")
+	if _, _, err := c.InviteGuardian(context.Background(), "existe@example.com", "Papá", false); connect.CodeOf(err) != connect.CodeAlreadyExists {
+		t.Errorf("unconfirmed staff address: code = %v, want AlreadyExists", connect.CodeOf(err))
+	}
+	old, none, err := c.InviteGuardian(context.Background(), "existe@example.com", "Papá", true)
 	if err != nil {
 		t.Fatalf("InviteGuardian (existing): %v", err)
 	}

@@ -2,6 +2,8 @@ package handler
 
 import (
 	"context"
+	"errors"
+	"io"
 	"net/http"
 	"strings"
 
@@ -17,7 +19,7 @@ import (
 // keyed on the address and ENSURES the role: an account that already exists
 // (a teacher who is also a parent) gains it and the invitation comes back nil.
 type ContactAccountIssuer interface {
-	InviteGuardian(ctx context.Context, email, displayName string) (client.User, *client.Invitation, error)
+	InviteGuardian(ctx context.Context, email, displayName string, confirmStaff bool) (client.User, *client.Invitation, error)
 }
 
 // ContactGranter is the students surface: the pupil's contact list, and
@@ -63,6 +65,13 @@ type contactAccessResponse struct {
 	Invitation *invitationResponse `json:"invitation"`
 }
 
+// inviteRequest is the optional body of an invitation. confirmStaffAccount is
+// the director's answer when iam said the address belongs to a staff account
+// (C2-003); no body means "not confirmed".
+type inviteRequest struct {
+	ConfirmStaffAccount bool `json:"confirmStaffAccount"`
+}
+
 // Invite handles POST /api/v1/students/{studentId}/guardians/{contactId}/invite.
 //
 // ORDER OF OPERATIONS. Every refusal that can be decided from the contact alone
@@ -78,6 +87,11 @@ type contactAccessResponse struct {
 func (h *ContactAccessHandler) Invite(w http.ResponseWriter, r *http.Request) {
 	studentID := r.PathValue("studentId")
 	contactID := r.PathValue("contactId")
+	var req inviteRequest
+	if err := decodeJSONBody(w, r, &req); err != nil && !errors.Is(err, io.EOF) {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
 
 	contact, err := h.findContact(r.Context(), studentID, contactID)
 	if err != nil {
@@ -102,7 +116,7 @@ func (h *ContactAccessHandler) Invite(w http.ResponseWriter, r *http.Request) {
 
 	// A deployment missing migrations/iam/0010_guardians.sql has no guardian
 	// role; iam refuses that as a server fault (5xx), before writing anything.
-	user, invitation, err := h.accountFor(r.Context(), email, contact.FullName)
+	user, invitation, err := h.accountFor(r.Context(), email, contact.FullName, req.ConfirmStaffAccount)
 	if err != nil {
 		writeConnectError(w, err)
 		return
@@ -146,8 +160,8 @@ func (h *ContactAccessHandler) findContact(ctx context.Context, studentID, conta
 //
 // The returned invitation is nil when the address already had an account:
 // nothing was sent.
-func (h *ContactAccessHandler) accountFor(ctx context.Context, email, displayName string) (client.User, *invitationResponse, error) {
-	user, invitation, err := h.iam.InviteGuardian(ctx, email, displayName)
+func (h *ContactAccessHandler) accountFor(ctx context.Context, email, displayName string, confirmStaff bool) (client.User, *invitationResponse, error) {
+	user, invitation, err := h.iam.InviteGuardian(ctx, email, displayName, confirmStaff)
 	if err != nil || invitation == nil {
 		return user, nil, err
 	}
