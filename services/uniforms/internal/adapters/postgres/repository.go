@@ -403,6 +403,9 @@ func (r *Repository) allocateWaitingLines(tx *gorm.DB, stockID string) ([]string
 // is expressed in the WHERE clause, so the decision is made by the database in
 // one statement rather than read-then-write across two.
 func (r *Repository) AdjustStock(ctx context.Context, stockID string, delta int, note, actorUserID string) (domain.StockLevel, error) {
+	if delta == 0 {
+		return domain.StockLevel{}, domain.ErrAdjustmentMustMove
+	}
 	var out domain.StockLevel
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
 		res := tx.Model(&stockModel{}).

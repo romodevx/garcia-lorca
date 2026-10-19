@@ -158,13 +158,17 @@ func (s StockLevel) Receive(qty int) (StockLevel, error) {
 	return s, nil
 }
 
+// ErrAdjustmentMustMove refuses a correction of zero pieces: it moves nothing
+// and leaves a ledger entry that says nothing.
+var ErrAdjustmentMustMove = glerrors.New(glerrors.KindInvalid, "an adjustment must move the count")
+
 // Adjust corrects the count after a breakage, a loss or a miscount. It may not
 // take the shelf below what families are already holding: those goods are
 // promised, and letting the holds go is a decision for a person, not a side
 // effect of a stock count.
 func (s StockLevel) Adjust(delta int) (StockLevel, error) {
 	if delta == 0 {
-		return StockLevel{}, glerrors.New(glerrors.KindInvalid, "an adjustment must move the count")
+		return StockLevel{}, ErrAdjustmentMustMove
 	}
 	next := s.onHand + delta
 	if next < 0 {
