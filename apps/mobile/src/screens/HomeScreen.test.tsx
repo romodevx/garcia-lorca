@@ -1,4 +1,5 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react-native";
+import { StyleSheet } from "react-native";
 import { router } from "expo-router";
 import { clearTokens, saveTokens } from "../api";
 import { HomeScreen } from "./HomeScreen";
@@ -48,6 +49,20 @@ describe("HomeScreen today's attendance icon", () => {
     await waitFor(() => expect(screen.getByText("Falta justificada")).toBeTruthy());
     expect(screen.getByTestId("today-status-document")).toBeTruthy();
     expect(screen.queryByTestId("today-status-check-circle")).toBeNull();
+  });
+
+  // C2-009: a textTransform "capitalize" upper-cased every word ("18 De Octubre").
+  it("shows the date line as written, without capitalizing every word", async () => {
+    gatewayWithToday("present");
+    jest.useFakeTimers({ now: new Date(2026, 9, 18, 9, 0, 0), doNotFake: ["nextTick", "setImmediate", "setTimeout", "setInterval", "queueMicrotask"] });
+    try {
+      await renderWithProviders(<HomeScreen />);
+
+      const date = await waitFor(() => screen.getByText("Domingo, 18 de octubre"));
+      expect(StyleSheet.flatten(date.props.style).textTransform).toBeUndefined();
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it("keeps the check for a day the child attended", async () => {

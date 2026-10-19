@@ -130,7 +130,7 @@ export function HomeScreen(): ReactElement {
 const styles = StyleSheet.create({
   greetRow: { paddingHorizontal: 4, paddingTop: 8, paddingBottom: 2 },
   hello: { fontSize: 22, fontWeight: "800", letterSpacing: -0.3 },
-  date: { fontSize: 13, fontWeight: "700", marginTop: 1, textTransform: "capitalize" },
+  date: { fontSize: 13, fontWeight: "700", marginTop: 1 },
   hero: { padding: 18 },
   heroTop: { flexDirection: "row", alignItems: "center", gap: 12 },
   statusCircle: { width: 52, height: 52, borderRadius: 18, alignItems: "center", justifyContent: "center" },
