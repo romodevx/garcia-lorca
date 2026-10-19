@@ -85,8 +85,9 @@ describe("GradeLevelsPanel", () => {
     await user.type(screen.getByLabelText("Orden"), "0");
     await user.type(screen.getByLabelText("Nombre del grado"), "Cero{Enter}");
 
-    expect(await screen.findByText("El orden del grado tiene que ser un número mayor que cero.")).toBeInTheDocument();
+    expect(await screen.findAllByText("El orden del grado tiene que ser un número mayor que cero.")).not.toHaveLength(0);
     expect(props.onCreate).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Orden")).toHaveAccessibleDescription(/mayor que cero/);
   });
 
   it("a refused create names both reasons and keeps what was typed", async () => {

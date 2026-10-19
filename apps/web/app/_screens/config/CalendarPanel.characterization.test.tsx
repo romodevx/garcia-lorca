@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -23,7 +23,6 @@ vi.mock("../../config/api", async (importOriginal) => ({
 const config = vi.mocked(configApi);
 
 const cycle = { id: "c1", name: "2026-2027", status: "active" as const, startsOn: "2026-08-01", endsOn: "2027-06-30" };
-const UNDO_MS = 8000;
 
 const VACATION = { id: "d2", cycleId: "c1", label: "INVIERNO", kind: "vacation" as const, startsOn: "2026-12-21", endsOn: "2027-01-06" };
 const FESTIVAL = { id: "ev1", cycleId: "c1", title: "FESTIVAL", description: "", startsOn: "2026-11-20", endsOn: "2026-11-20" };
@@ -161,7 +160,7 @@ describe("CalendarPanel — characterization", () => {
     expect(config.deleteSchoolEvent).not.toHaveBeenCalled();
   });
 
-  it("an activity removal nobody undoes reaches the server after the undo window", async () => {
+  it("an activity removal reaches the server once the person closes the undo offer", async () => {
     useFakeClock();
     config.listSchoolEvents.mockResolvedValue([FESTIVAL]);
     config.deleteSchoolEvent.mockResolvedValue(undefined);
@@ -169,9 +168,26 @@ describe("CalendarPanel — characterization", () => {
     render(<CalendarPanel cycle={cycle} />);
 
     await user.click(await screen.findByRole("button", { name: "Quitar FESTIVAL" }));
-    await act(async () => { vi.advanceTimersByTime(UNDO_MS); });
+    await user.click(screen.getByRole("button", { name: "Cerrar aviso" }));
 
-    expect(config.deleteSchoolEvent).toHaveBeenCalledWith(expect.any(String), "ev1");
+    expect(config.deleteSchoolEvent).toHaveBeenCalledWith(expect.any(String), "ev1", { keepalive: false });
+  });
+
+  // ISSUE-CC-105: removing an activity is another action, so the closed day
+  // still on offer leaves the offer and reaches the server.
+  it("removing an activity commits a closed day still on offer", async () => {
+    config.listNonWorkingPeriods.mockResolvedValue([VACATION]);
+    config.listSchoolEvents.mockResolvedValue([FESTIVAL]);
+    config.deleteNonWorkingPeriod.mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    render(<CalendarPanel cycle={cycle} />);
+
+    await user.click(await screen.findByRole("button", { name: "Quitar INVIERNO" }));
+    await user.click(await screen.findByRole("button", { name: "Quitar FESTIVAL" }));
+
+    expect(config.deleteNonWorkingPeriod).toHaveBeenCalledWith(expect.any(String), "d2", { keepalive: false });
+    expect(config.deleteSchoolEvent).not.toHaveBeenCalled();
+    expect(screen.getAllByRole("button", { name: "Deshacer" })).toHaveLength(1);
   });
 
   it("says when a closed day could not be removed", async () => {
@@ -182,7 +198,7 @@ describe("CalendarPanel — characterization", () => {
     render(<CalendarPanel cycle={cycle} />);
 
     await user.click(await screen.findByRole("button", { name: "Quitar INVIERNO" }));
-    await act(async () => { vi.advanceTimersByTime(UNDO_MS); });
+    await user.click(screen.getByRole("button", { name: "Cerrar aviso" }));
 
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("No se pudo quitar ese día."));
   });
@@ -195,7 +211,7 @@ describe("CalendarPanel — characterization", () => {
     render(<CalendarPanel cycle={cycle} />);
 
     await user.click(await screen.findByRole("button", { name: "Quitar FESTIVAL" }));
-    await act(async () => { vi.advanceTimersByTime(UNDO_MS); });
+    await user.click(screen.getByRole("button", { name: "Cerrar aviso" }));
 
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("No se pudo quitar esa actividad."));
   });

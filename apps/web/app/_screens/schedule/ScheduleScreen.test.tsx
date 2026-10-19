@@ -101,6 +101,14 @@ describe("Horarios — la semana (T16)", () => {
     expect(blocks().every((b) => /Ana Ruiz/.test(b.getAttribute("aria-label") ?? ""))).toBe(true);
   });
 
+  // ISSUE-CC-122: sorted by last name but shown "first last", the list read as unsorted.
+  it("lists the teachers in the order their names are shown", async () => {
+    renderManager();
+    await screen.findByRole("button", { name: "Primaria" });
+    const names = within(screen.getByLabelText("Docente")).getAllByRole("option").map((o) => o.textContent).filter((t) => t !== "");
+    expect(names).toEqual(["Ana Ruiz", "Luis Pérez"]);
+  });
+
   it("says what to do when a group has no classes yet", async () => {
     m.getBoard.mockResolvedValue(sampleBoard({ blocks: [] }));
     const user = renderManager();
@@ -292,6 +300,16 @@ describe("Horarios — ¿Qué está pasando ahora? (T16)", () => {
     expect(m.getDay).toHaveBeenCalledWith(expect.any(String), sampleBoard().cycle.id, "2026-10-05");
   });
 
+  // ISSUE-CC-122: the hour picker offered every five minutes from 00:00.
+  it("offers only the hours of the school day, plus the current minute", async () => {
+    const user = renderManager();
+    await user.click(await screen.findByRole("tab", { name: "¿Qué está pasando ahora?" }));
+    const hours = within(await screen.findByLabelText("Hora", { selector: "select" })).getAllByRole("option").map((o) => o.textContent).filter((t) => t !== "");
+    expect(hours[0]).toBe("07:00");
+    expect(hours.at(-1)).toBe("14:00");
+    expect(hours).not.toContain("00:00");
+  });
+
   it("says so when nothing is happening", async () => {
     const user = renderManager();
     await user.click(await screen.findByRole("tab", { name: "¿Qué está pasando ahora?" }));
@@ -334,6 +352,48 @@ describe("Horarios — cambios reversibles (T16)", () => {
     await user.click(screen.getByRole("button", { name: "Deshacer" }));
     expect(screen.getByRole("button", { name: /^Matemáticas, 3.º A/ })).toBeInTheDocument();
     expect(m.deleteBlock).not.toHaveBeenCalled();
+  });
+
+  // Gate B1 on #142: closing the tab must not cancel the delete.
+  it("closing the tab sends the class's delete with keepalive", async () => {
+    m.deleteBlock.mockResolvedValue(undefined);
+    const user = renderManager();
+    await chooseGroup3A(user);
+    await user.click(screen.getByRole("button", { name: /^Matemáticas, 3.º A/ }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Quitar clase" }));
+
+    window.dispatchEvent(new Event("pagehide"));
+
+    expect(m.deleteBlock).toHaveBeenCalledWith(expect.any(String), BLOCK_MATE, undefined, { keepalive: true });
+  });
+
+  // Gate nit on #142: once the delete is confirmed the class stays hidden
+  // until the board says so, instead of reappearing (and inviting a 2nd DELETE).
+  it("keeps a removed class hidden once its delete is sent", async () => {
+    m.deleteBlock.mockResolvedValue(undefined);
+    const user = renderManager();
+    await chooseGroup3A(user);
+    await user.click(screen.getByRole("button", { name: /^Matemáticas, 3.º A/ }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Quitar clase" }));
+
+    await user.click(screen.getByRole("button", { name: "Cerrar aviso" }));
+
+    await waitFor(() => expect(m.deleteBlock).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(m.getBoard.mock.calls.length).toBeGreaterThan(1));
+    expect(screen.queryByRole("button", { name: /^Matemáticas, 3.º A/ })).not.toBeInTheDocument();
+  });
+
+  // Gate B4 on #142: a refused DELETE must give the class back, not hide it for good.
+  it("shows a class again when its delete is refused", async () => {
+    m.deleteBlock.mockRejectedValue(new Error("No se pudo quitar la clase."));
+    const user = renderManager();
+    await chooseGroup3A(user);
+    await user.click(screen.getByRole("button", { name: /^Matemáticas, 3.º A/ }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Quitar clase" }));
+
+    await user.click(screen.getByRole("button", { name: "Cerrar aviso" }));
+
+    expect(await screen.findByRole("button", { name: /^Matemáticas, 3.º A/ })).toBeInTheDocument();
   });
 
   it("undoes a date's change from the day list", async () => {

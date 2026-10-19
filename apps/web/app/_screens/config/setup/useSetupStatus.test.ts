@@ -11,6 +11,7 @@ vi.mock("../../../config/api", () => ({
   listGradeLevels: vi.fn(),
   listTerms: vi.fn(),
   listGroups: vi.fn(),
+  listSubjects: vi.fn(),
 }));
 const config = vi.mocked(configApi);
 
@@ -35,6 +36,7 @@ beforeEach(() => {
   config.listTerms.mockImplementation(async (_url, cycleId, levelId) =>
     db.terms.filter((t) => t.cycleId === cycleId && (levelId === undefined || t.levelId === levelId)),
   );
+  config.listSubjects.mockResolvedValue([{ id: "m1", gradeLevelId: "p1", name: "MATEMÁTICAS" }]);
   config.listGroups.mockImplementation(async (_url, cycleId, gradeLevelId) =>
     db.groups.filter((g) => g.cycleId === cycleId && (gradeLevelId === undefined || g.gradeLevelId === gradeLevelId)),
   );
@@ -211,5 +213,22 @@ describe("useSetupStatus: what the mounted panels report", () => {
 
     act(() => result.current.onCalendarLoaded("c2", "failed"));
     expect(result.current.closedDays.kind).toBe("failed");
+  });
+});
+
+// ISSUE-CC-107: Materias reads the school's subjects so its step can be done.
+describe("useSetupStatus: subjects", () => {
+  it("reads every subject of the school, and re-reads on refresh", async () => {
+    const { result } = renderHook(() => useSetupStatus("c1"));
+    await waitFor(() => expect(ids(result.current.subjects)).toEqual(["m1"]));
+    expect(config.listSubjects).toHaveBeenCalledWith(API_URL, "");
+
+    config.listSubjects.mockResolvedValue([
+      { id: "m1", gradeLevelId: "p1", name: "MATEMÁTICAS" },
+      { id: "m2", gradeLevelId: "s1", name: "ESPAÑOL" },
+    ]);
+    act(() => result.current.refresh("subjects"));
+
+    await waitFor(() => expect(ids(result.current.subjects)).toEqual(["m1", "m2"]));
   });
 });

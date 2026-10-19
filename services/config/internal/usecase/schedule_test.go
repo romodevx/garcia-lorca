@@ -288,7 +288,7 @@ func TestCreateBlockRefusesDoubleBooking(t *testing.T) {
 	_, err := s.CreateBlock(context.Background(), usecase.BlockInput{AssignmentID: aMat3B, Weekday: 1, Start: at(8, 30), End: at(9, 20)}, director)
 	require.Error(t, err)
 	assert.Equal(t, domain.CodeScheduleTeacherBusy, codeOf(err))
-	assert.Equal(t, "Ana Ruiz ya da Matemáticas a 3.º A el lunes de 08:00 a 08:50", glerrors.SafeMessage(err))
+	assert.Equal(t, "Ana Ruiz ya da Matemáticas a 3.º Primaria · A el lunes de 08:00 a 08:50", glerrors.SafeMessage(err))
 
 	_, err = s.CreateBlock(context.Background(), usecase.BlockInput{AssignmentID: aMus3A, Weekday: 1, Start: at(8, 45), End: at(9, 30)}, director)
 	assert.Equal(t, domain.CodeScheduleGroupBusy, codeOf(err))
@@ -347,7 +347,7 @@ func TestBaseEditsAfterTheCycleStartedNeedAReasonAndAreRecorded(t *testing.T) {
 	assert.Equal(t, domain.ActionBlockCreated, e.Action)
 	assert.Equal(t, director, e.By)
 	assert.Equal(t, "Nueva materia", e.Reason)
-	assert.Equal(t, "Clase nueva: Música, 3.º A, lunes 09:00–09:50, Luis Pérez", e.Summary)
+	assert.Equal(t, "Clase nueva: Música, 3.º Primaria · A, lunes 09:00–09:50, Luis Pérez", e.Summary)
 
 	_, err = s.UpdateBlock(context.Background(), b.ID(), usecase.BlockInput{AssignmentID: aMat3A, Weekday: 2, Start: at(8, 0), End: at(8, 50), Reason: "Ajuste"}, director)
 	require.NoError(t, err)
@@ -389,14 +389,14 @@ func TestSubstituteForOneDate(t *testing.T) {
 	_, err := s.CreateOverride(ctx, usecase.OverrideInput{BlockID: music.ID(), Date: mon5, Kind: domain.OverrideSubstitute, TeacherID: tEva, Reason: "Llegó tarde"}, director)
 	require.Error(t, err)
 	assert.Equal(t, domain.CodeScheduleTeacherBusy, codeOf(err))
-	assert.Equal(t, "Eva Soto ya da Español a 4.º A el lunes de 09:00 a 09:50", glerrors.SafeMessage(err))
+	assert.Equal(t, "Eva Soto ya da Español a 4.º Primaria · A el lunes de 09:00 a 09:50", glerrors.SafeMessage(err))
 
 	o, err := s.CreateOverride(ctx, usecase.OverrideInput{BlockID: music.ID(), Date: mon5, Kind: domain.OverrideSubstitute, TeacherID: tZoe, Reason: "Llegó tarde"}, director)
 	require.NoError(t, err)
 	assert.Equal(t, director, o.By())
 	require.Len(t, f.events, 1)
 	assert.Equal(t, domain.ActionOverrideCreated, f.events[0].Action)
-	assert.Equal(t, "Suplencia el 5 de octubre de 2026: Música, 3.º A, 08:50–09:40 — Zoe Alba en lugar de Luis Pérez", f.events[0].Summary)
+	assert.Equal(t, "Suplencia el 5 de octubre de 2026: Música, 3.º Primaria · A, 08:50–09:40 — Zoe Alba en lugar de Luis Pérez", f.events[0].Summary)
 	assert.Equal(t, mon5, f.events[0].Date)
 
 	// the base is untouched

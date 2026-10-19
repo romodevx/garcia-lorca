@@ -343,6 +343,6 @@ describe("Catalog — pricing mode hides the rest and restores it (D6)", () => {
 
     await user.click(screen.getByRole("button", { name: "Definir" }));
 
-    await waitFor(() => expect(mocked.deleteNonWorkingPeriod).toHaveBeenCalledWith(expect.any(String), "d1"));
+    await waitFor(() => expect(mocked.deleteNonWorkingPeriod).toHaveBeenCalledWith(expect.any(String), "d1", { keepalive: false }));
   });
 });

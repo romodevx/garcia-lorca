@@ -963,7 +963,8 @@ func findSubject(cat ports.ScheduleCatalog, id string) (domain.Subject, bool) {
 func foldName(name string) string { return strings.ToLower(strings.TrimSpace(name)) }
 
 // scheduleNames resolves the catalog's ids to what a person reads; a group is
-// "<grade> <group>" ("3.º A").
+// "<grade> <level> · <group>" ("1º PRIMARIA · A"), the label the screens use.
+// ISSUE-CC-119: "3.º A" alone did not say whether it was Primaria or Secundaria.
 type scheduleNames struct {
 	teachers map[string]string
 	subjects map[string]string
@@ -978,14 +979,38 @@ func newScheduleNames(cat ports.ScheduleCatalog) scheduleNames {
 	for _, s := range cat.Subjects {
 		n.subjects[s.ID()] = s.Name()
 	}
+	levels := make(map[string]string, len(cat.Levels))
+	for _, l := range cat.Levels {
+		levels[l.ID()] = l.Name()
+	}
 	grades := make(map[string]string, len(cat.Grades))
 	for _, g := range cat.Grades {
-		grades[g.ID()] = g.Name()
+		grades[g.ID()] = gradeWithLevel(g.Name(), levels[g.LevelID()])
 	}
 	for _, g := range cat.Groups {
-		n.groups[g.ID()] = strings.TrimSpace(grades[g.GradeLevelID()] + " " + g.Name())
+		n.groups[g.ID()] = groupLabel(grades[g.GradeLevelID()], g.Name())
 	}
 	return n
+}
+
+// groupLabelSeparator joins a grade and its group, as the web's labelGroups does.
+const groupLabelSeparator = " · "
+
+// gradeWithLevel adds the level when the grade's own name does not carry it:
+// a school names its grades "1º" under both Primaria and Secundaria.
+func gradeWithLevel(grade, level string) string {
+	if grade == "" || level == "" || strings.Contains(strings.ToUpper(grade), strings.ToUpper(level)) {
+		return grade
+	}
+	return grade + " " + level
+}
+
+// groupLabel is the bare group name when its grade is unknown.
+func groupLabel(grade, group string) string {
+	if grade == "" {
+		return group
+	}
+	return grade + groupLabelSeparator + group
 }
 
 func (n scheduleNames) Teacher(id string) string { return orDash(n.teachers[id]) }

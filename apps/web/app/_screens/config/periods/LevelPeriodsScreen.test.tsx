@@ -313,7 +313,8 @@ describe("LevelPeriodsScreen — a level's grades with their evaluation periods 
     expect(onBack).toHaveBeenCalled();
   });
 
-  it("the undo offer leaves on its own after eight seconds", async () => {
+  // ISSUE-CC-105: the undo offer never leaves on its own; the person closes it.
+  it("the undo offer stays until the person closes it", async () => {
     mocked.copyEvaluationPeriods.mockResolvedValue([]);
     renderScreen();
     await waitFor(() => expect(field("1° PRIMARIA", 1, "Nombre").value).toBe("1.ER TRIMESTRE"));
@@ -324,8 +325,11 @@ describe("LevelPeriodsScreen — a level's grades with their evaluation periods 
     expect(await screen.findByRole("button", { name: "Deshacer" })).toBeInTheDocument();
     await act(async () => {}); // the effect that starts the clock has run
     await act(async () => {
-      vi.advanceTimersByTime(8_100);
+      vi.advanceTimersByTime(60_000);
     });
+    expect(screen.getByRole("button", { name: "Deshacer" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Cerrar aviso" }));
     expect(screen.queryByRole("button", { name: "Deshacer" })).toBeNull();
   });
 });

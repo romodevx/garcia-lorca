@@ -18,6 +18,8 @@
 
 // --- entity types (match the gateway JSON contract) -----------------------
 
+import type { DeferredInit } from "../_lib/deferredInit";
+import { GENERIC_SERVER_FAILURE, spanishServerReason } from "../_lib/serverReason";
 import { authFetch } from "../auth/authFetch";
 
 export type AdmissionStatus = "pending" | "accepted" | "enrolled" | "rejected" | "withdrawn";
@@ -144,6 +146,14 @@ const STUDENT_WITHDRAWN = "STUDENT_WITHDRAWN";
  * for both ("verifica el CURP"), which it also showed when the server fell over,
  * so a person could re-type a perfectly good CURP forever.
  */
+/** What to say when the server's reason cannot be shown, by status. */
+function fallbackFor(status: number): string {
+  if (status === 403) return "Tu cuenta no tiene permiso para esta acción.";
+  if (status === 404) return "No encontramos ese registro. Actualiza la página e intenta de nuevo.";
+  if (status === 409) return "Los datos cambiaron mientras tanto. Actualiza la página e intenta de nuevo.";
+  return GENERIC_SERVER_FAILURE;
+}
+
 export class StudentsError extends Error {
   readonly status: number;
   /** The server's own words, when it sent any. */
@@ -152,7 +162,9 @@ export class StudentsError extends Error {
   readonly code: string | undefined;
 
   constructor(status: number, detail: string, code?: string) {
-    super(detail !== "" ? detail : `HTTP ${status}`);
+    // ISSUE-CC-113: `message` is what a screen shows, so it is never the
+    // service's English. `detail` keeps the raw words for code that branches.
+    super(spanishServerReason(detail) ?? fallbackFor(status));
     this.name = "StudentsError";
     this.status = status;
     this.detail = detail;
@@ -180,8 +192,9 @@ async function studentsFailure(res: Response): Promise<StudentsError> {
   return new StudentsError(res.status, body.trim(), res.headers.get("X-Error-Code") ?? undefined);
 }
 
-async function postJSON<T>(baseURL: string, path: string, body: unknown): Promise<T> {
+async function postJSON<T>(baseURL: string, path: string, body: unknown, init: DeferredInit = {}): Promise<T> {
   const res = await authFetch(url(baseURL, `${BASE_PATH}${path}`), {
+    ...init,
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
@@ -495,8 +508,8 @@ async function sendJSON<T>(target: string, method: "PUT" | "PATCH", body: unknow
   return (await res.json()) as T;
 }
 
-async function sendEmpty(target: string, method: "DELETE"): Promise<void> {
-  const res = await authFetch(target, { method, credentials: "include" });
+async function sendEmpty(target: string, method: "DELETE", init: DeferredInit = {}): Promise<void> {
+  const res = await authFetch(target, { ...init, method, credentials: "include" });
   if (!res.ok) {
     throw await studentsFailure(res);
   }
@@ -574,8 +587,8 @@ export function updateContact(
 }
 
 /** Refused with 409 while the contact can open the family app. */
-export function removeContact(baseURL: string, studentId: string, contactId: string): Promise<void> {
-  return sendEmpty(studentPath(baseURL, studentId, `/contacts/${encodeURIComponent(contactId)}`), "DELETE");
+export function removeContact(baseURL: string, studentId: string, contactId: string, init?: DeferredInit): Promise<void> {
+  return sendEmpty(studentPath(baseURL, studentId, `/contacts/${encodeURIComponent(contactId)}`), "DELETE", init);
 }
 
 // --- notes (T6) -------------------------------------------------------------
@@ -621,11 +634,12 @@ export function editNote(baseURL: string, studentId: string, noteId: string, bod
 }
 
 /** 403 after the author's 15 minutes (unless the caller may void any); 409 if already voided. */
-export function voidNote(baseURL: string, studentId: string, noteId: string): Promise<StudentNote> {
+export function voidNote(baseURL: string, studentId: string, noteId: string, init?: DeferredInit): Promise<StudentNote> {
   return postJSON<StudentNote>(
     baseURL,
     `/students/${encodeURIComponent(studentId)}/notes/${encodeURIComponent(noteId)}/void`,
     {},
+    init,
   );
 }
 

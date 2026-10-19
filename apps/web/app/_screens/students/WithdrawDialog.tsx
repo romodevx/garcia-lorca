@@ -78,7 +78,7 @@ export function WithdrawPanel({ enrollment, onBack, onSuccess }: { enrollment: E
       const updated = await withdraw(API_URL, enrollment.id, { withdrawnOn: date, ...(reason.trim() ? { reason: reason.trim() } : {}) });
       onSuccess(updated);
     } catch (error) {
-      setMessage(error instanceof StudentsError ? error.detail || error.message : error instanceof Error ? error.message : "No se pudo dar de baja.");
+      setMessage(error instanceof StudentsError ? error.message : error instanceof Error ? error.message : "No se pudo dar de baja.");
     } finally {
       busy.current = false;
       setSaving(false);

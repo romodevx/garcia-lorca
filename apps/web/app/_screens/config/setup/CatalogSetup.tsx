@@ -31,6 +31,7 @@ function setupInput(state: CatalogState, status: SetupStatus, access: { canWrite
     groups: status.groups,
     plans: status.plans,
     closedDays: status.closedDays,
+    subjects: status.subjects,
     ...access,
   };
 }

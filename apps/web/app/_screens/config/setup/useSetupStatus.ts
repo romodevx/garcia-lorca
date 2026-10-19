@@ -3,18 +3,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { API_URL } from "../../../api-url";
-import { listGradeLevels, listGroups, listTerms, type GradeLevel, type Group, type SchoolProfile, type Term } from "../../../config/api";
+import { listGradeLevels, listGroups, listSubjects, listTerms, type GradeLevel, type Group, type SchoolProfile, type Subject, type Term } from "../../../config/api";
 import type { TuitionPlan } from "../../../finance/api";
 import { useLatest } from "../useLatest";
 import type { StatusRead } from "./setupSteps";
 
 /** What a create invalidates (plan §4.2): one read, or all three on a cycle created or activated. */
-export type RefreshKind = "grades" | "terms" | "groups" | "all";
+export type RefreshKind = "grades" | "terms" | "groups" | "subjects" | "all";
 
 export interface SetupStatus {
   grades: StatusRead<GradeLevel[]>;
   terms: StatusRead<Term[]>;
   groups: StatusRead<Group[]>;
+  /** Every subject of the school: subjects belong to a grade, not to a cycle. */
+  subjects: StatusRead<Subject[]>;
   profile: StatusRead<SchoolProfile>;
   plans: StatusRead<TuitionPlan[]>;
   closedDays: StatusRead<number>;
@@ -82,6 +84,7 @@ function useKeyedRead<T>(key: string | undefined, load: (key: string) => Promise
 const loadAllGrades = (): Promise<GradeLevel[]> => listGradeLevels(API_URL);
 const loadCycleTerms = (cycleId: string): Promise<Term[]> => listTerms(API_URL, cycleId);
 const loadCycleGroups = (cycleId: string): Promise<Group[]> => listGroups(API_URL, cycleId);
+const loadAllSubjects = (): Promise<Subject[]> => listSubjects(API_URL, "");
 
 /** A value a mounted panel reports for one cycle; another cycle's report is dropped. */
 function useCycleReport<T>(cycleId: string | undefined): { read: StatusRead<T>; report: (cycleId: string, result: T | "failed") => void } {
@@ -107,6 +110,7 @@ export function useSetupStatus(cycleId: string | undefined): SetupStatus {
   const grades = useKeyedRead(SCHOOL_KEY, loadAllGrades);
   const terms = useKeyedRead(cycleId, loadCycleTerms);
   const groups = useKeyedRead(cycleId, loadCycleGroups);
+  const subjects = useKeyedRead(SCHOOL_KEY, loadAllSubjects);
 
   const [profile, setProfile] = useState<StatusRead<SchoolProfile>>(LOADING);
   const onProfileLoaded = useCallback((result: SchoolProfile | "failed"): void => setProfile(toRead(result)), []);
@@ -116,19 +120,22 @@ export function useSetupStatus(cycleId: string | undefined): SetupStatus {
   const { refresh: refreshGrades } = grades;
   const { refresh: refreshTerms } = terms;
   const { refresh: refreshGroups } = groups;
+  const { refresh: refreshSubjects } = subjects;
   const refresh = useCallback(
     (kind: RefreshKind): void => {
       if (kind === "grades" || kind === "all") refreshGrades();
       if (kind === "terms" || kind === "all") refreshTerms();
       if (kind === "groups" || kind === "all") refreshGroups();
+      if (kind === "subjects" || kind === "all") refreshSubjects();
     },
-    [refreshGrades, refreshTerms, refreshGroups],
+    [refreshGrades, refreshTerms, refreshGroups, refreshSubjects],
   );
 
   return {
     grades: grades.read,
     terms: terms.read,
     groups: groups.read,
+    subjects: subjects.read,
     profile,
     plans: plans.read,
     closedDays: closedDays.read,

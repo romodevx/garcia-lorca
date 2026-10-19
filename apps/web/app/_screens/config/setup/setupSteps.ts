@@ -1,4 +1,4 @@
-import type { Cycle, GradeLevel, Group, Level, SchoolProfile, Term } from "../../../config/api";
+import type { Cycle, GradeLevel, Group, Level, SchoolProfile, Subject, Term } from "../../../config/api";
 import { cycleMonths } from "../../../config/termMonths";
 import type { TuitionPlan } from "../../../finance/api";
 
@@ -74,6 +74,8 @@ export interface SetupInput {
   plans: StatusRead<Pick<TuitionPlan, "levelId">[]>;
   /** Closed days of the selected cycle. */
   closedDays: StatusRead<number>;
+  /** Every subject of the school (subjects are per grade, not per cycle). */
+  subjects: StatusRead<Pick<Subject, "gradeLevelId">[]>;
   /** finance:read — without it the tabuladores are never read (CC-311). Absent means readable. */
   tuitionReadable?: boolean;
   /** config:write — without it this is a reading view, not a setup to finish (CC-311). Absent means writable. */
@@ -228,12 +230,34 @@ function calendarMark(input: SetupInput): Mark {
   return fromRead(input.closedDays, (n) => (n > 0 ? done(plural(n, "día cerrado", "días cerrados")) : OPTIONAL_MARK));
 }
 
+const REVIEW_MARK: Mark = { status: "review", line: "Revisar" };
+
+/**
+ * ISSUE-CC-107: the step was hard-wired to "Revisar", so 121 subjects in 17
+ * grades still looked unfinished. Done means every known grade has a subject.
+ * It stays out of "listo para inscribir" (measurable: false): a school may
+ * enroll before its subjects exist.
+ */
+function subjectsMark(input: SetupInput): Mark {
+  if (input.grades.kind === "loading" || input.subjects.kind === "loading") return LOADING_MARK;
+  if (input.grades.kind === "failed" || input.subjects.kind === "failed") return REVIEW_MARK;
+  const known = orderedGrades(input.levels, input.grades.value);
+  if (known.length === 0) return REVIEW_MARK;
+  const subjects = input.subjects.value;
+  const missing = known.filter(({ grade }) => !subjects.some((s) => s.gradeLevelId === grade.id));
+  if (missing.length > 0) {
+    return { status: "review", line: missingLine("Sin materias en", missing.map(({ grade, level }) => `${grade.name} de ${level.name}`)) };
+  }
+  const inKnown = subjects.filter((s) => known.some(({ grade }) => grade.id === s.gradeLevelId)).length;
+  return done(`${plural(inKnown, "materia", "materias")} en ${plural(known.length, "grado", "grados")}`);
+}
+
 const MARKS: Record<StepId, (input: SetupInput) => Mark> = {
   profile: profileMark,
   cycle: cycleMark,
   levels: levelsMark,
   terms: termsMark,
-  subjects: () => ({ status: "review", line: "Revisar" }),
+  subjects: subjectsMark,
   groups: groupsMark,
   tuition: tuitionMark,
   calendar: calendarMark,

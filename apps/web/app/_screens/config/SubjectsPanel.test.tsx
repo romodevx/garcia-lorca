@@ -97,6 +97,22 @@ describe("SubjectsPanel — the level's subjects, grade by grade (T13)", () => {
     expect(screen.getByRole("button", { name: "2° PRIMARIA", pressed: true })).toBeInTheDocument();
   });
 
+  // ISSUE-CC-107: the setup step re-reads its count when the subjects change.
+  it("tells the page when a subject was added or deleted", async () => {
+    mocked.createSubjectInGrades.mockResolvedValue({ created: [sub("n1", "g1", "ARTES")], existing: [], failed: [] });
+    mocked.deleteSubject.mockResolvedValue(undefined);
+    const onChanged = vi.fn();
+    render(<SubjectsPanel level={LEVEL} gradeLevels={GRADES} selectedGradeLevelId="g1" onChanged={onChanged} />);
+    await screen.findAllByText("MATEMÁTICAS");
+
+    await userEvent.type(nameField(), "artes");
+    await userEvent.click(screen.getByRole("button", { name: /agregar materia/i }));
+    await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
+
+    await userEvent.click(within(gradeBlock("1° PRIMARIA")).getByRole("button", { name: "Eliminar ESPAÑOL" }));
+    await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(2));
+  });
+
   it("starts with only the grade chosen on the page, and toggles grades and 'Todos'", async () => {
     mocked.createSubjectInGrades.mockResolvedValue({ created: [sub("n2", "g2", "INGLÉS")], existing: [], failed: [] });
     renderPanel("g2");
@@ -196,7 +212,8 @@ describe("SubjectsPanel — the level's subjects, grade by grade (T13)", () => {
     expect(await within(block).findByText("ESPAÑOL")).toBeInTheDocument();
   });
 
-  it("the undo offer leaves on its own after eight seconds", async () => {
+  // ISSUE-CC-105: the undo offer never leaves on its own; the person closes it.
+  it("the undo offer stays until the person closes it", async () => {
     mocked.deleteSubject.mockResolvedValue(undefined);
     renderPanel();
     const block = await screen.findByRole("region", { name: "Materias de 1° PRIMARIA" });
@@ -209,8 +226,11 @@ describe("SubjectsPanel — the level's subjects, grade by grade (T13)", () => {
     });
     expect(screen.getByRole("button", { name: /deshacer/i })).toBeInTheDocument();
     await act(async () => {
-      vi.advanceTimersByTime(8_100);
+      vi.advanceTimersByTime(60_000);
     });
+    expect(screen.getByRole("button", { name: /deshacer/i })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Cerrar aviso" }));
     expect(screen.queryByRole("button", { name: /deshacer/i })).toBeNull();
   });
 

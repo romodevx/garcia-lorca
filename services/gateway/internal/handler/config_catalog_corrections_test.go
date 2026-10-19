@@ -1,9 +1,11 @@
 package handler_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -187,6 +189,7 @@ type fakeGroupConfig struct {
 	renameErr error
 	usage     client.ConfigGroupUsage
 	deleteErr error
+	gradeErr  error
 	renamed   string
 	deleted   string
 }
@@ -210,6 +213,18 @@ func (f *fakeGroupConfig) RenameGroup(_ context.Context, id, name string) (clien
 
 func (f *fakeGroupConfig) GroupUsage(context.Context, string) (client.ConfigGroupUsage, error) {
 	return f.usage, nil
+}
+
+// The group's grade and level, for the refusal's label (ISSUE-CC-119).
+func (f *fakeGroupConfig) GetGradeLevel(_ context.Context, id string) (client.GradeLevelResult, error) {
+	if f.gradeErr != nil {
+		return client.GradeLevelResult{}, f.gradeErr
+	}
+	return client.GradeLevelResult{ID: id, LevelID: "lvl-pri", Name: "1º", Ordinal: 1}, nil
+}
+
+func (f *fakeGroupConfig) GetLevel(_ context.Context, id string) (client.LevelResult, error) {
+	return client.LevelResult{ID: id, Name: "PRIMARIA"}, nil
 }
 
 func (f *fakeGroupConfig) DeleteGroup(_ context.Context, id string) error {
@@ -328,7 +343,7 @@ func TestDeleteGroupWithHistoryExplainsWhyAndDeletesNothing(t *testing.T) {
 
 	assert.Equal(t, http.StatusConflict, rec.Code)
 	assert.Equal(t, "GROUP_IN_USE", rec.Header().Get("X-Error-Code"))
-	assert.Equal(t, "No se puede borrar el grupo A: tiene 25 inscripciones y 40 listas de asistencia. Ese historial se conserva; puedes cambiarle el nombre.",
+	assert.Equal(t, "No se puede borrar el grupo 1º PRIMARIA · A: tiene 25 inscripciones y 40 listas de asistencia. Ese historial se conserva; puedes cambiarle el nombre.",
 		strings.TrimSpace(rec.Body.String()))
 	assert.Empty(t, g.config.deleted)
 }
@@ -342,7 +357,7 @@ func TestDeleteGroupNamesEveryBlockerInOrder(t *testing.T) {
 
 	rec := doPathReq(t, g.handler().DeleteGroup, http.MethodDelete, "/api/v1/config/groups/"+grpT8, grpT8, "")
 
-	assert.Equal(t, "No se puede borrar el grupo A: tiene 1 clase asignada, 2 bloques de horario, 1 inscripción, 1 cambio de grupo, "+
+	assert.Equal(t, "No se puede borrar el grupo 1º PRIMARIA · A: tiene 1 clase asignada, 2 bloques de horario, 1 inscripción, 1 cambio de grupo, "+
 		"1 lista de asistencia, 3 registros de asistencia y 1 boleta. Ese historial se conserva; puedes cambiarle el nombre.",
 		strings.TrimSpace(rec.Body.String()))
 }
@@ -354,7 +369,7 @@ func TestDeleteGroupWithOnlyClassesSaysToFreeThem(t *testing.T) {
 	rec := doPathReq(t, g.handler().DeleteGroup, http.MethodDelete, "/api/v1/config/groups/"+grpT8, grpT8, "")
 
 	assert.Equal(t, http.StatusConflict, rec.Code)
-	assert.Equal(t, "No se puede borrar el grupo A: tiene 4 clases asignadas y 6 bloques de horario. Quita primero sus clases asignadas.",
+	assert.Equal(t, "No se puede borrar el grupo 1º PRIMARIA · A: tiene 4 clases asignadas y 6 bloques de horario. Quita primero sus clases asignadas.",
 		strings.TrimSpace(rec.Body.String()))
 	assert.Empty(t, g.config.deleted)
 }
@@ -412,4 +427,28 @@ func TestCatalogCorrectionsContractDocumentsPlainTextErrors(t *testing.T) {
 			assert.Contains(t, doc.resolve(t, response).Content, "text/plain", "%s %s %s", op.method, op.path, status)
 		}
 	}
+}
+
+// ISSUE-CC-119: "el grupo A" did not say whether it was 1º de PRIMARIA or of
+// SECUNDARIA. When the grade cannot be read the refusal still goes out, with
+// the bare name.
+func TestDeleteGroupRefusalKeepsTheBareNameWhenTheGradeCannotBeRead(t *testing.T) {
+	g := newGroupFixture()
+	g.config.usage = client.ConfigGroupUsage{TeachingAssignments: 1}
+	g.config.gradeErr = connect.NewError(connect.CodeUnavailable, errors.New("down"))
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	rec := doPathReq(t, g.handler().DeleteGroup, http.MethodDelete, "/api/v1/config/groups/"+grpT8, grpT8, "")
+
+	assert.Equal(t, http.StatusConflict, rec.Code)
+	assert.Equal(t, "No se puede borrar el grupo A: tiene 1 clase asignada. Quita primero sus clases asignadas.",
+		strings.TrimSpace(rec.Body.String()))
+	// Gate nit on #142: the fallback is visible when debugging, and says which
+	// group by id only (no names, no PII).
+	assert.Contains(t, logs.String(), "group label falls back to the bare name")
+	assert.Contains(t, logs.String(), "group_id="+grpT8)
+	assert.NotContains(t, logs.String(), "name=")
 }

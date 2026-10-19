@@ -27,8 +27,8 @@ import {
   type PeriodProblem,
 } from "../../../config/evaluationPeriods";
 
-/** How long "Deshacer" stays on offer after a copy (≥ 8 s, house rule). */
-export const UNDO_MS = 8_000;
+/** How long a plain notice stays. "Deshacer" has no clock: the person closes it (ISSUE-CC-105). */
+export const NOTICE_MS = 8_000;
 
 const FIELD_ORDER: readonly PeriodField[] = ["name", "startsOn", "endsOn"];
 const SAVE_FAILED = "No se pudieron guardar los periodos. Intenta de nuevo.";
@@ -69,6 +69,8 @@ export interface LevelPeriods {
   save: (gradeId: string) => Promise<PeriodProblem | undefined>;
   copy: (fromGradeId: string, toGradeIds: readonly string[]) => Promise<boolean>;
   takeBack: () => Promise<void>;
+  /** The person closed the Deshacer offer: the copy stays. */
+  dismissUndo: () => void;
 }
 
 function groupByGrade(periods: readonly EvaluationPeriod[]): Record<string, EvaluationPeriod[]> {
@@ -177,14 +179,8 @@ export function useLevelPeriods(levelId: string): LevelPeriods {
   }, [cycleId, levelId, grades, adopt, attempt]);
 
   useEffect(() => {
-    if (undo === undefined) return;
-    const timer = setTimeout(() => setUndo(undefined), UNDO_MS);
-    return () => clearTimeout(timer);
-  }, [undo]);
-
-  useEffect(() => {
     if (notice === undefined) return;
-    const timer = setTimeout(() => setNotice(undefined), UNDO_MS);
+    const timer = setTimeout(() => setNotice(undefined), NOTICE_MS);
     return () => clearTimeout(timer);
   }, [notice]);
 
@@ -307,8 +303,10 @@ export function useLevelPeriods(levelId: string): LevelPeriods {
     setCycleId(id);
   }, []);
 
+  const dismissUndo = useCallback((): void => setUndo(undefined), []);
+
   return {
     load, level, cycles, cycle, grades, drafts, problems, errors, busy, notice, undo,
-    selectCycle, retry, edit, blur, add, remove, save, copy, takeBack,
+    selectCycle, retry, edit, blur, add, remove, save, copy, takeBack, dismissUndo,
   };
 }

@@ -6,7 +6,7 @@ import { BodyPortal } from "./BodyPortal";
 import { Icon } from "./Icon";
 
 /**
- * Borrar, y dar ocho segundos para arrepentirse.
+ * Borrar, y dejar el Deshacer a mano hasta que la persona siga con otra cosa.
  *
  * Un diálogo de confirmación en cada borrado entrena a la gente a descartarlo
  * por reflejo — incluidos los que sí importan (NN/g). Y la alternativa que hay
@@ -15,14 +15,10 @@ import { Icon } from "./Icon";
  * Esto no cuesta un clic de más y sí da la red. El diálogo se reserva para lo
  * irreversible; un feriado mal capturado no lo es.
  *
- * El registro NO se borra del servidor hasta que se acaba el plazo: deshacer no
- * es "volverlo a crear", es que nunca llegó a irse.
- *
- * SÓLO ANUNCIA. El plazo lo lleva `useUndoableRemoval`, y esa separación es la
- * corrección de dos defectos que tuvo cuando el reloj vivía aquí: sólo cabía un
- * pendiente —quitar dos cosas seguidas perdía el borrado de la primera— y el
- * efecto colgaba de un `onCommit` escrito en línea, así que cualquier repintado
- * del panel reiniciaba los ocho segundos.
+ * NO se cierra solo (ISSUE-CC-105, regla de la casa): un aviso que se va a los
+ * ocho segundos deja sin Deshacer a quien leía despacio. Se va cuando la persona
+ * lo cierra (`onDismiss`), quita otra cosa o deja la pantalla. Lo diferido lo
+ * compromete `useUndoableRemoval`; este componente SÓLO anuncia.
  *
  * Se pinta en `document.body` (portal): dentro de un panel escondido el
  * Deshacer desaparecería mientras el plazo sigue corriendo y confirma.
@@ -31,9 +27,11 @@ export interface UndoToastProps {
   message: string;
   /** Restituir. Todavía no se había ido a ningún lado. */
   onUndo: () => void;
+  /** La persona cerró el aviso: lo quitado se queda quitado. */
+  onDismiss: () => void;
 }
 
-export function UndoToast({ message, onUndo }: UndoToastProps): ReactElement {
+export function UndoToast({ message, onUndo, onDismiss }: UndoToastProps): ReactElement {
   return (
     <BodyPortal>
       <div
@@ -80,6 +78,24 @@ export function UndoToast({ message, onUndo }: UndoToastProps): ReactElement {
           }}
         >
           Deshacer
+        </button>
+        <button
+          type="button"
+          aria-label="Cerrar aviso"
+          onClick={onDismiss}
+          style={{
+            display: "inline-grid",
+            placeItems: "center",
+            width: 44,
+            height: 44,
+            borderRadius: "var(--r-pill)",
+            background: "transparent",
+            color: "inherit",
+            cursor: "pointer",
+            border: "none",
+          }}
+        >
+          <Icon name="close" size={18} stroke={2.4} />
         </button>
       </div>
     </BodyPortal>

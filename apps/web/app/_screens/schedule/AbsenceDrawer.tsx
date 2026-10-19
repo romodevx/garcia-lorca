@@ -5,6 +5,7 @@ import { useState, type KeyboardEvent, type ReactElement } from "react";
 import { DateField, SelectField, TextArea, useRequired } from "../../_design/form";
 import { SlideOver } from "../../_design/SlideOver";
 import { ChipRow } from "../../_design/students/StudentFilters";
+import { byFullName, fullName } from "../../_lib/personName";
 import { API_URL } from "../../api-url";
 import { createAbsence, updateAbsence, type AbsenceInput, type AbsenceKind, type AbsenceSaved, type TeacherAbsence } from "../../schedule/api";
 import { timeOptions, toMinutes } from "../../schedule/time";
@@ -121,9 +122,7 @@ export function AbsenceDrawer(props: AbsenceDrawerProps): ReactElement {
     }
   };
 
-  const teacherOptions = [...teachers]
-    .sort((a, b) => a.lastName.localeCompare(b.lastName, "es-MX"))
-    .map((t) => ({ value: t.id, label: `${t.firstName} ${t.lastName}` }));
+  const teacherOptions = byFullName(teachers).map((t) => ({ value: t.id, label: fullName(t) }));
 
   return (
     <SlideOver

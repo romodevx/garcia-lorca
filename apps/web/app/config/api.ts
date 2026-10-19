@@ -12,6 +12,7 @@
 
 // --- entity types (match the gateway JSON contract) -----------------------
 
+import type { DeferredInit } from "../_lib/deferredInit";
 import { matchesSearch } from "../_design/textSearch";
 import { authFetch } from "../auth/authFetch";
 import type { AttendanceMode } from "../attendance/sheet";
@@ -288,8 +289,9 @@ export function listNonWorkingPeriods(baseURL: string, cycleId: string): Promise
  * Removes one period. A day entered by mistake has to be removable, or the
  * calendar stops being trusted and the school goes back to a sheet on the wall.
  */
-export async function deleteNonWorkingPeriod(baseURL: string, id: string): Promise<void> {
+export async function deleteNonWorkingPeriod(baseURL: string, id: string, init: DeferredInit = {}): Promise<void> {
   const res = await authFetch(url(baseURL, `${BASE_PATH}/calendar/${id}`), {
+    ...init,
     method: "DELETE",
     credentials: "include",
   });
@@ -349,8 +351,9 @@ export function listSchoolEvents(baseURL: string, cycleId: string): Promise<Scho
 }
 
 /** Removes a date entered by mistake. */
-export async function deleteSchoolEvent(baseURL: string, id: string): Promise<void> {
+export async function deleteSchoolEvent(baseURL: string, id: string, init: DeferredInit = {}): Promise<void> {
   const res = await authFetch(url(baseURL, `${BASE_PATH}/events/${id}`), {
+    ...init,
     method: "DELETE",
     credentials: "include",
   });

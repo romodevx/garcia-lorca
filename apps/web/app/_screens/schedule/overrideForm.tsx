@@ -4,6 +4,7 @@ import { useEffect, useState, type ReactElement } from "react";
 
 import { DateField, Field, inputStyle, SelectField, TextField, useRequired, type RequiredState } from "../../_design/form";
 import { ChipRow } from "../../_design/students/StudentFilters";
+import { byFullName, fullName } from "../../_lib/personName";
 import { API_URL } from "../../api-url";
 import { createOverride, listAvailableTeachers, type AvailableTeacher, type OverrideKind, type ScheduleBlock, type ScheduleBoard, type TeacherMatch } from "../../schedule/api";
 import { WEEKDAYS, type ScheduleIndex } from "../../schedule/catalog";
@@ -135,11 +136,11 @@ function SubstitutePicker({ form, available }: { form: OverrideForm; available: 
           onChange={(e) => { set({ teacherId: e.target.value }); required.clear("teacherId"); }}>
           <option value="" />
           {MATCH_ORDER.map((match) => {
-            const teachers = (available ?? []).filter((t) => t.match === match);
+            const teachers = byFullName((available ?? []).filter((t) => t.match === match));
             if (teachers.length === 0) return null;
             return (
               <optgroup key={match} label={MATCH_LABEL[match]}>
-                {teachers.map((t) => <option key={t.teacherId} value={t.teacherId}>{`${t.firstName} ${t.lastName}`}</option>)}
+                {teachers.map((t) => <option key={t.teacherId} value={t.teacherId}>{fullName(t)}</option>)}
               </optgroup>
             );
           })}

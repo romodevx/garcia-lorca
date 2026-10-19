@@ -32,6 +32,9 @@ type GroupEditConfig interface {
 	RenameGroup(ctx context.Context, id, name string) (client.GroupResult, error)
 	GroupUsage(ctx context.Context, groupID string) (client.ConfigGroupUsage, error)
 	DeleteGroup(ctx context.Context, id string) error
+	// The group's grade and level name it in a refusal: "1º PRIMARIA · A".
+	GetGradeLevel(ctx context.Context, id string) (client.GradeLevelResult, error)
+	GetLevel(ctx context.Context, id string) (client.LevelResult, error)
 }
 
 // GroupEditStudents is what students keeps of a group and its file labels.
@@ -147,6 +150,24 @@ func (u groupUsage) refusal(groupName string) string {
 	return "No se puede borrar el grupo " + groupName + ": tiene " + what + "." + advice
 }
 
+// groupLabel names the group the way a screen does, "1º PRIMARIA · A"
+// (ISSUE-CC-119): every grade has an "A", and "el grupo A" did not say which.
+// It is only wording, so a failed read falls back to the bare name rather
+// than failing the refusal.
+func (h *GroupEditHandler) groupLabel(ctx context.Context, g client.GroupResult) string {
+	grade, err := h.deps.Config.GetGradeLevel(ctx, g.GradeLevelID)
+	if err != nil {
+		slog.DebugContext(ctx, "group label falls back to the bare name", "group_id", g.ID, "missing", "grade", "error", err)
+		return g.Name
+	}
+	level, err := h.deps.Config.GetLevel(ctx, grade.LevelID)
+	if err != nil {
+		slog.DebugContext(ctx, "group label falls back to the grade without its level", "group_id", g.ID, "missing", "level", "error", err)
+		return groupLabel(grade.Name, g.Name)
+	}
+	return groupLabel(gradeWithLevel(grade.Name, level.Name), g.Name)
+}
+
 // collectUsage asks every service, concurrently, what it keeps of the group.
 // Any failure fails the whole answer: an unknown count never reads as zero.
 func (h *GroupEditHandler) collectUsage(ctx context.Context, groupID string) (groupUsage, error) {
@@ -177,7 +198,7 @@ func (h *GroupEditHandler) DeleteGroup(w http.ResponseWriter, r *http.Request) {
 		writeConnectError(w, err)
 		return
 	}
-	if msg := usage.refusal(group.Name); msg != "" {
+	if msg := usage.refusal(h.groupLabel(r.Context(), group)); msg != "" {
 		writeCodedError(w, http.StatusConflict, codeGroupInUse, msg)
 		return
 	}

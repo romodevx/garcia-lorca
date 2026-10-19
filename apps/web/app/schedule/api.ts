@@ -9,6 +9,7 @@
  * weekday 1 = Monday … 5 = Friday. A refusal is a sentence shown as is, with
  * its machine code in `X-Error-Code`.
  */
+import type { DeferredInit } from "../_lib/deferredInit";
 import { authFetch } from "../auth/authFetch";
 
 export type ClassStatus = "regular" | "substitute" | "swapped" | "cancelled" | "uncovered";
@@ -241,8 +242,8 @@ async function send<T>(baseURL: string, path: string, method: "POST" | "PUT", bo
   return (await res.json()) as T;
 }
 
-async function remove(baseURL: string, path: string): Promise<void> {
-  await raw(baseURL, path, { method: "DELETE" });
+async function remove(baseURL: string, path: string, init: DeferredInit = {}): Promise<void> {
+  await raw(baseURL, path, { ...init, method: "DELETE" });
 }
 
 function oneOf<T extends string>(allowed: readonly T[], value: unknown, fallback: T): T {
@@ -310,8 +311,8 @@ export async function updateBlock(baseURL: string, id: string, input: BlockInput
   return (await send<{ block: ScheduleBlock }>(baseURL, `/api/v1/schedule/blocks/${checkedId(id)}`, "PUT", input)).block;
 }
 
-export async function deleteBlock(baseURL: string, id: string, reason?: string): Promise<void> {
-  await remove(baseURL, `/api/v1/schedule/blocks/${checkedId(id)}${query({ reason })}`);
+export async function deleteBlock(baseURL: string, id: string, reason?: string, init?: DeferredInit): Promise<void> {
+  await remove(baseURL, `/api/v1/schedule/blocks/${checkedId(id)}${query({ reason })}`, init);
 }
 
 export async function createOverride(baseURL: string, input: OverrideInput): Promise<void> {

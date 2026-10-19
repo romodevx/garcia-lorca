@@ -3,11 +3,19 @@
 import { useMemo, useState, type ReactElement } from "react";
 
 import { InlineCreateRow } from "../../_design/InlineCreateRow";
+import type { FormatRule } from "../../_design/form/useFormatError";
 import type { CreateGradeLevelInput, GradeLevel, Level } from "../../config/api";
 import { CorrectableName, type NameCorrections } from "./CorrectableName";
 import { DeletionStatus, useDeletionFeedback } from "./useDeletionFeedback";
 import { EmptyHint, ErrorAlert, Section, SelectChip } from "./parts";
 import { useSetupPresentation } from "./SetupPresentation";
+
+const NO_ORDINAL = "El orden del grado tiene que ser un número mayor que cero.";
+
+/** Checked in the row at save (ISSUE-CC-104): said on the cell, not only below the table. */
+const ORDINAL_RULES: Readonly<Record<string, FormatRule>> = {
+  ordinal: (value) => (Number(value) >= 1 ? undefined : NO_ORDINAL),
+};
 
 export interface GradeLevelsPanelProps {
   level: Level;
@@ -93,6 +101,7 @@ export function GradeLevelsPanel({
       <div ref={feedback.fallbackRef} style={{ border: "1px solid var(--border)", borderRadius: "var(--r-md)", overflow: "hidden" }}>
         <InlineCreateRow
           addLabel="Nuevo grado"
+          rules={ORDINAL_RULES}
           defaults={defaults}
           columns={[
             {
@@ -109,10 +118,10 @@ export function GradeLevelsPanel({
             const ordinal = Number(values.ordinal);
             if (!Number.isFinite(ordinal) || ordinal < 1) {
               // Number("") es 0, y un 0 que nadie escribió es un dato falso.
-              setError("El orden del grado tiene que ser un número mayor que cero.");
+              setError(NO_ORDINAL);
               // También se relanza: para el renglón, "no pasó" es no pasó, sea
               // por la red o por el dato.
-              throw new Error("El orden del grado tiene que ser un número mayor que cero.");
+              throw new Error(NO_ORDINAL);
             }
             setError(undefined);
             try {

@@ -18,6 +18,7 @@
  * here. Available is the only number a parent should ever see, and two places
  * deriving it is two chances to disagree with the till.
  */
+import { GENERIC_SERVER_FAILURE, spanishServerReason } from "../_lib/serverReason";
 import { authFetch } from "../auth/authFetch";
 import type { PaymentMethod, Tender } from "../finance/api";
 
@@ -266,13 +267,26 @@ async function failure(res: Response): Promise<UniformsError> {
     const parsed = JSON.parse(body) as { error?: { code?: string; message?: string; details?: Record<string, string> } };
     const err = parsed.error;
     if (err?.code !== undefined && err.message !== undefined) {
-      return new UniformsError(err.code, err.message, err.details?.reason);
+      return fromEnvelope(err.code, err.message, spanishServerReason(err.details?.reason));
     }
   } catch {
     // Not the envelope — an older handler, or a proxy that swallowed the body.
   }
-  const detail = body.trim();
-  return new UniformsError("internal", detail !== "" ? detail : `HTTP ${res.status}`);
+  return new UniformsError("internal", spanishServerReason(body) ?? GENERIC_SERVER_FAILURE);
+}
+
+/** The gateway's sentence for every 409 that is not an empty shelf. */
+const CONFLICT_HEADLINE = "Eso ya existe";
+const CONFLICT_FALLBACK = "No se pudo hacer el cambio con los datos actuales. Actualiza la página e intenta de nuevo.";
+
+/**
+ * ISSUE-CC-113: the gateway titles EVERY `conflict` "Eso ya existe", but a 409
+ * is also a correction that would strip a family's hold. The translated reason
+ * is the better headline; without one, a conflict says nothing about duplicates.
+ */
+function fromEnvelope(code: string, message: string, reason: string | undefined): UniformsError {
+  if (code !== "conflict" || message !== CONFLICT_HEADLINE) return new UniformsError(code, message, reason);
+  return new UniformsError(code, reason ?? CONFLICT_FALLBACK);
 }
 
 async function get<T>(baseURL: string, path: string): Promise<T> {

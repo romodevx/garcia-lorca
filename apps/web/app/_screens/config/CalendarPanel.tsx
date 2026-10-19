@@ -192,8 +192,9 @@ export function CalendarPanel({ cycle, onLoaded }: CalendarPanelProps): ReactEle
             <button
               onClick={() => {
                 setPeriods((prev) => prev.filter((x) => x.id !== p.id));
-                dayRemoval.remove(p, () => {
-                  void deleteNonWorkingPeriod(API_URL, p.id)
+                eventRemoval.flush();
+                dayRemoval.remove(p, ({ keepalive }) => {
+                  void deleteNonWorkingPeriod(API_URL, p.id, { keepalive })
                     .then(reload)
                     .catch(() => setError("No se pudo quitar ese día."));
                 });
@@ -238,8 +239,9 @@ export function CalendarPanel({ cycle, onLoaded }: CalendarPanelProps): ReactEle
               <button
                 onClick={() => {
                   setEvents((prev) => prev.filter((x) => x.id !== ev.id));
-                  eventRemoval.remove(ev, () => {
-                    void deleteSchoolEvent(API_URL, ev.id)
+                  dayRemoval.flush();
+                  eventRemoval.remove(ev, ({ keepalive }) => {
+                    void deleteSchoolEvent(API_URL, ev.id, { keepalive })
                       .then(reload)
                       .catch(() => setError("No se pudo quitar esa actividad."));
                   });
@@ -276,6 +278,7 @@ export function CalendarPanel({ cycle, onLoaded }: CalendarPanelProps): ReactEle
             // Notify-only, like the reads: the count is back without asking the server again.
             notify.current?.(cycle.id, restored.length);
           }}
+          onDismiss={dayRemoval.dismiss}
         />
       )}
 
@@ -288,6 +291,7 @@ export function CalendarPanel({ cycle, onLoaded }: CalendarPanelProps): ReactEle
               [...prev, ...devueltas].sort((a, b) => a.startsOn.localeCompare(b.startsOn)),
             );
           }}
+          onDismiss={eventRemoval.dismiss}
         />
       )}
     </Section>

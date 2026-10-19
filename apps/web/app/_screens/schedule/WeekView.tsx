@@ -8,18 +8,22 @@ import { GroupChain } from "../../_design/students/GroupChain";
 import { Toast } from "../../_design/Toast";
 import { UndoToast } from "../../_design/UndoToast";
 import { useUndoableRemoval } from "../../_design/useUndoableRemoval";
+import { byFullName, fullName } from "../../_lib/personName";
+import { spanishServerReason } from "../../_lib/serverReason";
 import { API_URL } from "../../api-url";
-import { deleteBlock, listUncovered, type ScheduleBoard, type ScheduleBlock } from "../../schedule/api";
+import { deleteBlock, type ScheduleBoard, type ScheduleBlock } from "../../schedule/api";
 import { filterBlocks, indexBoard, NO_WEEK_FILTER, type WeekFilter } from "../../schedule/catalog";
-import { fridayOf, gridBounds, nowInSchoolZone, schoolWeekOf } from "../../schedule/time";
+import { gridBounds, nowInSchoolZone } from "../../schedule/time";
 import { BlockDrawer, type DrawerTarget } from "./BlockDrawer";
 import { GridSettings } from "./GridSettings";
-import { EmptyState } from "./parts";
 import { WeekStepper } from "./UncoveredView";
 import type { ScheduleMode } from "./useScheduleBoard";
+import { useWeekChanges } from "./useWeekChanges";
+import { WeekEmptyState } from "./WeekEmptyState";
 import { WeekGrid } from "./WeekGrid";
 
 const TOAST_MS = 3000;
+const REMOVE_FAILED = "No se pudo quitar la clase.";
 
 export interface WeekViewProps {
   board: ScheduleBoard;
@@ -42,8 +46,9 @@ export function WeekView({ board, mode, canWrite, now, onChanged, version = 0 }:
   const [target, setTarget] = useState<DrawerTarget | null>(null);
   const [toast, setToast] = useState<string | undefined>(undefined);
   const removal = useUndoableRemoval<ScheduleBlock>();
+  const [gone, setGone] = useState<ReadonlySet<string>>(new Set());
   const today = nowInSchoolZone(now).date;
-  const uncovered = useUncoveredWeek(board, mode, today, version);
+  const week = useWeekChanges(board, mode, today, version);
 
   useEffect(() => {
     if (toast === undefined) return;
@@ -51,21 +56,33 @@ export function WeekView({ board, mode, canWrite, now, onChanged, version = 0 }:
     return () => clearTimeout(t);
   }, [toast]);
 
-  const shown = filterBlocks(board, filter).filter((b) => !removal.pending.some((p) => p.id === b.id));
+  const shown = filterBlocks(board, filter).filter((b) => !gone.has(b.id) && !removal.pending.some((p) => p.id === b.id));
   const gridLevel = filter.levelId !== "" ? filter.levelId : index.levelOfGroup(shown[0]?.groupId ?? "");
   const grid = gridBounds(board.settings.find((s) => s.levelId === gridLevel), shown);
   const newClass = (weekday: number, start: number): void => setTarget({ kind: "new", weekday, start, groupId: filter.groupId, teacherId: filter.teacherId });
 
   const remove = (block: ScheduleBlock, reason: string): void => {
     setTarget(null);
-    removal.remove(block, () => {
-      deleteBlock(API_URL, block.id, reason === "" ? undefined : reason)
-        .catch((err: unknown) => setToast(err instanceof Error ? err.message : "No se pudo quitar la clase."))
+    removal.remove(block, ({ keepalive }) => {
+      // Hidden while sent: until the board is read again it still lists it, and
+      // a class back on screen invites a second DELETE (gate #142). A refused
+      // DELETE gives it back (gate B4).
+      setGone((prev) => new Set(prev).add(block.id));
+      deleteBlock(API_URL, block.id, reason === "" ? undefined : reason, { keepalive })
+        .catch((err: unknown) => {
+          setGone((prev) => {
+            const next = new Set(prev);
+            next.delete(block.id);
+            return next;
+          });
+          setToast((err instanceof Error ? spanishServerReason(err.message) : undefined) ?? REMOVE_FAILED);
+        })
         .finally(onChanged);
     });
   };
 
   const saved = (message: string): void => {
+    removal.flush();
     setTarget(null);
     setToast(message);
     onChanged();
@@ -82,9 +99,7 @@ export function WeekView({ board, mode, canWrite, now, onChanged, version = 0 }:
                 label="Docente"
                 value={filter.teacherId}
                 onChange={(teacherId) => setFilter({ ...filter, teacherId })}
-                options={[...board.teachers]
-                  .sort((a, b) => a.lastName.localeCompare(b.lastName, "es-MX"))
-                  .map((t) => ({ value: t.id, label: `${t.firstName} ${t.lastName}` }))}
+                options={byFullName(board.teachers).map((t) => ({ value: t.id, label: fullName(t) }))}
               />
             </div>
             {canWrite && filter.levelId !== "" && (
@@ -99,10 +114,11 @@ export function WeekView({ board, mode, canWrite, now, onChanged, version = 0 }:
 
       <WeekEmptyState board={board} mode={mode} filter={filter} shownCount={shown.length} canWrite={canWrite} />
 
-      {mode === "manage" && <WeekStepper monday={uncovered.monday} onMonday={uncovered.setMonday} />}
+      {mode === "manage" && <WeekStepper monday={week.monday} onMonday={week.setMonday} />}
       <WeekGrid
         blocks={shown}
-        uncovered={uncovered.blocks}
+        uncovered={week.uncovered}
+        substitutes={week.substitutes}
         index={index}
         grid={grid}
         onSlot={canWrite && board.assignments.length > 0 ? newClass : undefined}
@@ -112,53 +128,8 @@ export function WeekView({ board, mode, canWrite, now, onChanged, version = 0 }:
       {target !== null && (
         <BlockDrawer target={target} board={board} index={index} grid={grid} today={today} onClose={() => setTarget(null)} onSaved={saved} onRemove={remove} />
       )}
-      {removal.latest !== undefined && <UndoToast message="Clase quitada" onUndo={() => removal.undo()} />}
+      {removal.latest !== undefined && <UndoToast message="Clase quitada" onUndo={() => removal.undo()} onDismiss={removal.dismiss} />}
       {toast !== undefined && removal.latest === undefined && <Toast>{toast}</Toast>}
     </div>
   );
-}
-
-/** Why the grid is empty, and what to do about it. */
-function WeekEmptyState({ board, mode, filter, shownCount, canWrite }: { board: ScheduleBoard; mode: ScheduleMode; filter: WeekFilter; shownCount: number; canWrite: boolean }): ReactElement | null {
-  if (mode === "teacher") return shownCount === 0 ? <EmptyState>Aún no tienes clases en el horario de este ciclo.</EmptyState> : null;
-  if (board.assignments.length === 0) {
-    return (
-      <EmptyState>
-        Este ciclo aún no tiene asignaciones de docentes. Una clase se arma con una de ellas: primero asigna a cada docente
-        sus materias y grupos en Docentes (carga académica) y vuelve aquí.
-      </EmptyState>
-    );
-  }
-  if (shownCount > 0) return null;
-  if (filter.groupId !== "") {
-    return <EmptyState>{canWrite ? "Este grupo aún no tiene clases — haz clic en un hueco para agregar una." : "Este grupo aún no tiene clases."}</EmptyState>;
-  }
-  if (filter.teacherId !== "") return <EmptyState>Este docente aún no tiene clases en el horario.</EmptyState>;
-  return <EmptyState>No hay clases con estos filtros. Elige un grupo para ver o armar su semana.</EmptyState>;
-}
-
-/**
- * The classes left uncovered by absences (T19) in the week on screen, by
- * block: the base week is the same every week, so the week chosen decides
- * which of its classes are painted "Sin cubrir". The teacher's own week reads
- * no absences (their "¿Qué está pasando ahora?" says "Ausente").
- */
-function useUncoveredWeek(board: ScheduleBoard, mode: ScheduleMode, today: string, version: number): {
-  monday: string;
-  setMonday: (monday: string) => void;
-  blocks: ReadonlySet<string>;
-} {
-  const [monday, setMonday] = useState(() => schoolWeekOf(today));
-  const [blocks, setBlocks] = useState<ReadonlySet<string>>(new Set());
-  useEffect(() => {
-    if (mode !== "manage") return;
-    let live = true;
-    listUncovered(API_URL, board.cycle.id, monday, fridayOf(monday))
-      .then((got) => live && setBlocks(new Set(got.map((u) => u.class.blockId))))
-      .catch(() => live && setBlocks(new Set()));
-    return () => {
-      live = false;
-    };
-  }, [board, mode, monday, version]);
-  return { monday, setMonday, blocks };
 }

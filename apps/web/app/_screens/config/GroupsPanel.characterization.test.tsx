@@ -77,8 +77,11 @@ describe("GroupsPanel", () => {
     await user.clear(screen.getByLabelText("Cupo"));
     await user.type(screen.getByLabelText("Cupo"), "0{Enter}");
 
-    expect(await screen.findByText("El cupo del grupo tiene que ser un número mayor que cero.")).toBeInTheDocument();
+    expect(await screen.findAllByText("El cupo del grupo tiene que ser un número mayor que cero.")).not.toHaveLength(0);
     expect(props.onCreate).not.toHaveBeenCalled();
+    // ISSUE-CC-104: said in the row, on the cell, not only somewhere below the table.
+    expect(screen.getByLabelText("Cupo")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByLabelText("Cupo")).toHaveAccessibleDescription(/mayor que cero/);
   });
 
   it("a refused create says the name may already exist", async () => {

@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { GENERIC_SERVER_FAILURE } from "../_lib/serverReason";
 import {
   adjustStock,
   counterSale,
@@ -225,7 +227,7 @@ describe("failures", () => {
           error: {
             code: "insufficient_stock",
             message: "Esa talla ya no está disponible, actualizamos la lista",
-            details: { reason: "there are not enough of Suéter verde in size M" },
+            details: { reason: "not enough stock available" },
           },
         },
         409,
@@ -241,7 +243,7 @@ describe("failures", () => {
     // and conflict are both 409, and only one is the cashier's fault.
     expect(typed.isOutOfStock).toBe(true);
     expect(typed.message).toContain("ya no está disponible");
-    expect(typed.detail).toContain("Suéter verde");
+    expect(typed.detail).toBe("No hay suficientes piezas de esa talla.");
   });
 
   it("tells a forbidden apart, so the panel can say what is missing", async () => {
@@ -265,7 +267,8 @@ describe("failures", () => {
     const err = (await listItems(BASE).catch((e: unknown) => e)) as UniformsError;
 
     expect(err).toBeInstanceOf(UniformsError);
-    expect(err.message).toBe("forbidden");
+    // ISSUE-CC-113: a raw English body never reaches the screen.
+    expect(err.message).toBe(GENERIC_SERVER_FAILURE);
   });
 
   it("falls back to the status when the body is empty", async () => {
@@ -274,7 +277,46 @@ describe("failures", () => {
 
     const err = (await listItems(BASE).catch((e: unknown) => e)) as UniformsError;
 
-    expect(err.message).toBe("HTTP 502");
+    expect(err.message).toBe(GENERIC_SERVER_FAILURE);
+  });
+
+  // ISSUE-CC-113: a 409 is not always "ya existe". A stock correction that
+  // would strip a family's hold came back titled "Eso ya existe" with the
+  // service's English underneath.
+  it("titles a conflict with its translated reason, not with 'Eso ya existe'", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({
+      error: {
+        code: "conflict",
+        message: "Eso ya existe",
+        details: { reason: "that correction would leave fewer pieces than families are already holding" },
+      },
+    }, 409)));
+
+    const err = (await adjustStock(BASE, "st1", -5, "conteo").catch((e: unknown) => e)) as UniformsError;
+
+    expect(err.message).toBe("Ese ajuste dejaría menos piezas de las que ya están apartadas para familias.");
+    expect(err.detail).toBeUndefined();
+  });
+
+  it("drops a reason it cannot say in Spanish, and a conflict never claims it already exists", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({
+      error: { code: "conflict", message: "Eso ya existe", details: { reason: "the line is in a state that cannot move" } },
+    }, 409)));
+
+    const err = (await adjustStock(BASE, "st1", -5, "conteo").catch((e: unknown) => e)) as UniformsError;
+
+    expect(err.message).not.toMatch(/ya existe/i);
+    expect(err.detail).toBeUndefined();
+  });
+
+  it("keeps 'ya existe' for a real duplicate, in Spanish", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({
+      error: { code: "conflict", message: "Eso ya existe", details: { reason: "a garment with that code already exists" } },
+    }, 409)));
+
+    const err = (await adjustStock(BASE, "st1", -5, "conteo").catch((e: unknown) => e)) as UniformsError;
+
+    expect(err.message).toBe("Ya existe una prenda con esa clave.");
   });
 });
 

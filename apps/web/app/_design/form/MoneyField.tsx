@@ -25,7 +25,7 @@ const PREFIX_WIDTH = 30;
  * `pesosToCents` al guardar. Ningún flotante regresa.
  */
 export function MoneyField(props: BaseFieldProps): ReactElement {
-  const { label, value, onChange, required, error, onClearError, help, disabled, onBlur } = props;
+  const { label, value, onChange, required, error, onClearError, help, disabled, readOnly, onBlur } = props;
 
   const format = (): void => {
     if (value.trim() === "") return;
@@ -59,6 +59,7 @@ export function MoneyField(props: BaseFieldProps): ReactElement {
             inputMode="decimal"
             value={value}
             disabled={disabled}
+            readOnly={readOnly}
             aria-describedby={describedBy}
             aria-invalid={error !== undefined ? true : undefined}
             aria-required={required === true ? true : undefined}

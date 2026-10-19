@@ -13,8 +13,6 @@ import type { LoadCatalogue, LoadSlot } from "../../teachers/load";
 import { describeLoadWriteError, isAlreadyGone, isConcurrentChange } from "../../teachers/loadErrors";
 import type { NamedConflict } from "./ConflictNotice";
 
-/** The undo window for a freed class — at least eight seconds (ui-forms rules). */
-const UNDO_MS = 8000;
 const TOAST_MS = 2600;
 /** Said when the bulk call only skipped: every picked group was already the teacher's. */
 const ALREADY_ASSIGNED = "Esos grupos ya los tenía asignados.";
@@ -24,9 +22,11 @@ export interface LoadWrites {
   assign: (items: TeachingLoadItem[]) => Promise<void>;
   remove: (slot: LoadSlot) => void;
   undo: () => Promise<void>;
+  /** The person closed the Deshacer offer: the freed classes stay freed. */
+  dismissUndo: () => void;
   replaceConflicts: () => Promise<void>;
   keepConflicts: () => void;
-  /** Classes freed inside the current undo window; empty when there is none. */
+  /** Classes freed and still offered for Deshacer; empty when there is none. */
   undoable: readonly LoadSlot[];
   /** Assignment ids whose DELETE is in flight; their × ignores clicks. */
   removing: ReadonlySet<string>;
@@ -66,7 +66,6 @@ export function useLoadWrites({ teacherId, cycleId, catalogue, reload, drop }: L
   const [undoable, setUndoable] = useState<readonly LoadSlot[]>(NOTHING_TO_UNDO);
   const [toast, setToast] = useState<string | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
-  const undoTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const shownCycle = useRef(cycleId);
   // The ref guards synchronously (two clicks can land before a re-render);
@@ -75,14 +74,12 @@ export function useLoadWrites({ teacherId, cycleId, catalogue, reload, drop }: L
   const [removing, setRemoving] = useState<ReadonlySet<string>>(new Set());
 
   useEffect(() => () => {
-    clearTimeout(undoTimer.current);
     clearTimeout(toastTimer.current);
   }, []);
 
   // A conflict or an undo of another cycle must never act on this one.
   useEffect(() => {
     shownCycle.current = cycleId;
-    clearTimeout(undoTimer.current);
     setRaw([]);
     setUndoable(NOTHING_TO_UNDO);
     setError(undefined);
@@ -129,11 +126,9 @@ export function useLoadWrites({ teacherId, cycleId, catalogue, reload, drop }: L
   const freed = useCallback(
     (slot: LoadSlot): void => {
       drop(slot.assignmentId);
-      // Each removal joins the batch and restarts the window; when it runs
-      // out the whole batch is kept as removed.
-      clearTimeout(undoTimer.current);
+      // Each removal joins the batch; Deshacer has no clock (ISSUE-CC-105):
+      // the batch stays undoable until the person closes the offer.
       setUndoable((batch) => [...batch, slot]);
-      undoTimer.current = setTimeout(() => setUndoable(NOTHING_TO_UNDO), UNDO_MS);
     },
     [drop],
   );
@@ -174,7 +169,6 @@ export function useLoadWrites({ teacherId, cycleId, catalogue, reload, drop }: L
 
   const undo = useCallback(async (): Promise<void> => {
     if (undoable.length === 0) return;
-    clearTimeout(undoTimer.current);
     setUndoable(NOTHING_TO_UNDO);
     const items = undoable.map(({ groupId, subjectId }) => ({ groupId, subjectId }));
     await send(items, false).catch((cause: unknown) => setError(describeLoadWriteError(cause, restoreFailed(undoable))));
@@ -186,8 +180,9 @@ export function useLoadWrites({ teacherId, cycleId, catalogue, reload, drop }: L
   }, [raw, send]);
 
   const keepConflicts = useCallback(() => setRaw([]), []);
+  const dismissUndo = useCallback(() => setUndoable(NOTHING_TO_UNDO), []);
 
-  return { assign, remove, undo, replaceConflicts, keepConflicts, undoable, removing, conflicts: nameConflicts(raw, catalogue), toast, error };
+  return { assign, remove, undo, dismissUndo, replaceConflicts, keepConflicts, undoable, removing, conflicts: nameConflicts(raw, catalogue), toast, error };
 }
 
 function nameConflicts(conflicts: readonly TeachingLoadConflict[], catalogue: LoadCatalogue): NamedConflict[] {

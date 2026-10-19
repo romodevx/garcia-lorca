@@ -48,6 +48,7 @@ function complete(): SetupInput {
     groups: ready([group("p1"), group("s1"), group("s2")]),
     plans: ready([plan("prim"), plan("sec")]),
     closedDays: ready(3),
+    subjects: ready([{ gradeLevelId: "p1" }, { gradeLevelId: "p1" }, { gradeLevelId: "s1" }, { gradeLevelId: "s2" }]),
   };
 }
 
@@ -106,8 +107,23 @@ describe("deriveSteps: done lines (§1.2)", () => {
     expect(step(input, "calendar").line).toBe("1 día cerrado");
   });
 
-  it("Materias always shows Revisar and is never done", () => {
-    expect(step(complete(), "subjects")).toMatchObject({ status: "review", line: "Revisar" });
+  // ISSUE-CC-107: 121 subjects in 17 grades and the step still said "Revisar".
+  it("Materias is done once every grade has a subject, and says how many", () => {
+    expect(step(complete(), "subjects")).toMatchObject({ status: "done", line: "4 materias en 3 grados" });
+  });
+
+  it("Materias names the grades still without a subject", () => {
+    const input = { ...complete(), subjects: ready([{ gradeLevelId: "p1" }]) };
+    expect(step(input, "subjects")).toMatchObject({ status: "review", line: "Sin materias en 1º de Secundaria y 1 más" });
+  });
+
+  it("Materias still says Revisar while its read is in flight or failed", () => {
+    expect(step({ ...complete(), subjects: LOADING }, "subjects").status).toBe("loading");
+    expect(step({ ...complete(), subjects: FAILED }, "subjects")).toMatchObject({ status: "review", line: "Revisar" });
+  });
+
+  it("Materias never counts towards ready", () => {
+    expect(deriveSteps({ ...complete(), subjects: ready([]) }, null).ready).toBe(true);
   });
 });
 
