@@ -56,9 +56,12 @@ describe("dates do not depend on the device's Intl", () => {
     expect(formatDayWithYear("2026-10-17")).toBe("17 oct 2026");
   });
 
-  it("writes the home's date with weekday and month in words", () => {
-    expect(formatLongDay(new Date(2026, 9, 17))).toBe("sábado, 17 de octubre");
-    expect(formatLongDay(new Date(2026, 9, 19))).toBe("lunes, 19 de octubre");
+  // C2-009: only the first letter is upper case, as on the web (CC-315):
+  // "Domingo, 18 de octubre", never "Domingo, 18 De Octubre".
+  it("writes the home's date as a sentence: weekday capitalized, the rest lower case", () => {
+    expect(formatLongDay(new Date(2026, 9, 17))).toBe("Sábado, 17 de octubre");
+    expect(formatLongDay(new Date(2026, 9, 18))).toBe("Domingo, 18 de octubre");
+    expect(formatLongDay(new Date(2026, 9, 21))).toBe("Miércoles, 21 de octubre");
   });
 
   it("writes a row's day with the month in words, short and long", () => {

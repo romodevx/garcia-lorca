@@ -15,9 +15,14 @@ const MONTHS_LONG = [
 
 const WEEKDAYS_LONG = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
 
-/** The home's date line, e.g. "sábado, 17 de octubre", from the tables above. */
+/**
+ * The home's date line, e.g. "Sábado, 17 de octubre", from the tables above.
+ * Sentence case, as the web's (CC-315): only the first letter is upper case —
+ * "de" and the month stay lower case (C2-009).
+ */
 export function formatLongDay(date: Date): string {
-  return `${WEEKDAYS_LONG[date.getDay()]}, ${date.getDate()} de ${MONTHS_LONG[date.getMonth()]}`;
+  const text = `${WEEKDAYS_LONG[date.getDay()]}, ${date.getDate()} de ${MONTHS_LONG[date.getMonth()]}`;
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 /**
