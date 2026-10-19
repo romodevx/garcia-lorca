@@ -44,9 +44,14 @@ const STATUS: Record<VisualStatus, { label: string; dot: string; bg: string; fg:
 
 const pager = (disabled: boolean): CSSProperties => ({ display: "inline-flex", alignItems: "center", gap: 6, height: 40, padding: "0 16px", borderRadius: 99, fontSize: 14, fontWeight: 600, fontFamily: "var(--font-display)", border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text)", cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.45 : 1 });
 
+/** A charge whose pupil is not (yet) read: a neutral word, never the internal id (C2-006). */
+const UNKNOWN_PUPIL = "Alumno";
+
 interface Row {
   charge: Charge;
   name: string;
+  /** The matrícula; "" when the pupil has none (never the internal id: C2-006). */
+  enrollmentNumber: string;
   level: string;
   grade: string;
   /** The classroom as every screen names it ("3° PRIMARIA · A"); absent until read (T14-018). */
@@ -109,16 +114,17 @@ export interface FinanceScreenProps {
   canManageCharges?: boolean;
 }
 
-/** Every pupil once, labelled so two namesakes in one room still differ. */
-function pupilOptions(students: ReadonlyMap<string, Student>, rooms: ReadonlyMap<string, string>): PupilOption[] {
-  const seen = new Set<string>();
+/** Every pupil once, labelled so two namesakes in one room still differ: by matrícula, or by a number. */
+export function pupilOptions(students: ReadonlyMap<string, Student>, rooms: ReadonlyMap<string, string>): PupilOption[] {
+  const seen = new Map<string, number>();
   return [...students.values()]
-    .map((s) => ({ id: s.id, label: `${formatStudentName(s)} · ${rooms.get(s.id) ?? [s.gradeGroup, s.level].filter((x) => x !== "").join(" ")}` }))
+    .map((s) => ({ id: s.id, enrollmentNumber: s.enrollmentNumber ?? "", label: `${formatStudentName(s)} · ${rooms.get(s.id) ?? [s.gradeGroup, s.level].filter((x) => x !== "").join(" ")}` }))
     .sort((a, b) => compareStudentNames(a.label, b.label))
     .map((p) => {
-      const label = seen.has(p.label) ? `${p.label} · ${p.id.slice(0, 8)}` : p.label;
-      seen.add(p.label);
-      return { id: p.id, label };
+      const count = (seen.get(p.label) ?? 0) + 1;
+      seen.set(p.label, count);
+      if (count === 1) return { id: p.id, label: p.label };
+      return { id: p.id, label: `${p.label} · ${p.enrollmentNumber !== "" ? p.enrollmentNumber : count}` };
     });
 }
 
@@ -188,7 +194,10 @@ export function FinanceScreen({ onBack, today: officeDay, notes, canCorrectPayme
 
   const rows: Row[] = useMemo(() => charges.map((c) => {
     const s = studentMap.get(c.studentId);
-    return { charge: c, name: s !== undefined ? formatStudentName(s) : c.studentId, level: s?.level ?? "", grade: s?.gradeGroup ?? "", room: rooms.get(c.studentId), visual: visual(c) };
+    return {
+      charge: c, name: s !== undefined ? formatStudentName(s) : UNKNOWN_PUPIL, enrollmentNumber: s?.enrollmentNumber ?? "",
+      level: s?.level ?? "", grade: s?.gradeGroup ?? "", room: rooms.get(c.studentId), visual: visual(c),
+    };
   }), [charges, studentMap, visual, rooms]);
 
   const counts = useMemo(() => ({
@@ -407,7 +416,7 @@ function FinRow({ r, i, onPay, onAdjust, adjusting }: { r: Row; i: number; onPay
         <Avatar name={r.name} color={AV[i % AV.length]} size={42} />
         <div style={{ minWidth: 0 }}>
           <div style={{ fontWeight: 600, fontSize: 15.5, color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.name}</div>
-          <div style={{ fontSize: 12.5, color: "var(--text-faint)", fontFamily: "monospace" }}>{r.charge.studentId.slice(0, 8)}</div>
+          {r.enrollmentNumber !== "" && <div style={{ fontSize: 12.5, color: "var(--text-faint)", fontFamily: "monospace" }}>{r.enrollmentNumber}</div>}
         </div>
       </div>
       {r.room !== undefined
