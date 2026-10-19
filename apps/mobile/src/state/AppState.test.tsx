@@ -1,6 +1,7 @@
-import { act, screen, waitFor } from "@testing-library/react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { type ReactElement } from "react";
-import { Text } from "react-native";
+import { Pressable, Text } from "react-native";
 import { clearTokens, saveTokens } from "../api";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { useAppState } from "./AppState";
@@ -134,6 +135,113 @@ describe("AppState child slice", () => {
 
     await waitFor(() => expect(text("childError")).toBe("true"));
     expect(text("selected")).toBe("none");
+  });
+});
+
+/** Re-runs the child load, like the logout does after clearing tokens. */
+function RefreshProbe(): ReactElement {
+  const { refreshChildren } = useAppState();
+  return (
+    <Pressable accessibilityRole="button" accessibilityLabel="refresh children" onPress={() => void refreshChildren()}>
+      <Text>refresh</Text>
+    </Pressable>
+  );
+}
+
+// CC-303 gate: a slow child load of the guardian who signed out must not paint
+// their children after the logout emptied the slice.
+describe("AppState child load after logout", () => {
+  afterEach(async () => {
+    await clearTokens();
+  });
+
+  it("discards an in-flight child list once the logout has run", async () => {
+    await saveTokens({ accessToken: "a1", refreshToken: "r1" });
+    let answerStudents: (value: unknown) => void = () => undefined;
+    globalThis.fetch = jest.fn((url: string) => {
+      if (!String(url).includes("/family/students")) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => ({ notifications: [] }) });
+      }
+      return new Promise((resolve) => {
+        answerStudents = resolve;
+      });
+    }) as unknown as typeof fetch;
+
+    await renderWithProviders(
+      <>
+        <ChildProbe />
+        <RefreshProbe />
+      </>,
+    );
+    await clearTokens();
+    await fireEvent.press(screen.getByRole("button", { name: "refresh children" }));
+    await waitFor(() => expect(text("childLoading")).toBe("false"));
+
+    await act(async () => {
+      answerStudents({
+        ok: true,
+        status: 200,
+        json: async () => ({ students: [{ id: "s1", firstName: "Mateo", lastName: "Herrera", level: "primaria", gradeGroup: "3° A" }] }),
+      });
+    });
+
+    expect(text("childCount")).toBe("0");
+    expect(text("selected")).toBe("none");
+    expect(text("childLoading")).toBe("false");
+  });
+});
+
+/** Selects a child by id, like the header's switcher does. */
+function SelectProbe({ id }: { id: string }): ReactElement {
+  const { selectChild } = useAppState();
+  return (
+    <Pressable accessibilityRole="button" accessibilityLabel={`select ${id}`} onPress={() => selectChild(id)}>
+      <Text>select</Text>
+    </Pressable>
+  );
+}
+
+// ISSUE-CC-303: the parent's choice of child survives a relaunch.
+describe("AppState remembers the selected child", () => {
+  const siblings = [
+    { id: "s1", firstName: "Mateo", lastName: "Herrera", level: "primaria", gradeGroup: "3° A" },
+    { id: "s2", firstName: "Sofía", lastName: "Herrera", level: "kinder", gradeGroup: "K3" },
+  ];
+
+  afterEach(async () => {
+    await clearTokens();
+    await AsyncStorage.clear();
+  });
+
+  it("restores the child chosen before the app was closed", async () => {
+    await saveTokens({ accessToken: "a1", refreshToken: "r1" });
+    mockFamilyFetch(siblings);
+    const first = await renderWithProviders(
+      <>
+        <ChildProbe />
+        <SelectProbe id="s2" />
+      </>,
+    );
+    await waitFor(() => expect(text("selected")).toBe("s1"));
+    fireEvent.press(screen.getByRole("button", { name: "select s2" }));
+    await waitFor(() => expect(text("selected")).toBe("s2"));
+    await first.unmount();
+
+    await renderWithProviders(<ChildProbe />);
+
+    await waitFor(() => expect(text("childCount")).toBe("2"));
+    await waitFor(() => expect(text("selected")).toBe("s2"));
+  });
+
+  it("falls back to the first child when the remembered one is no longer linked", async () => {
+    await saveTokens({ accessToken: "a1", refreshToken: "r1" });
+    await AsyncStorage.setItem("gl.selectedChildId", "gone");
+    mockFamilyFetch(siblings);
+
+    await renderWithProviders(<ChildProbe />);
+
+    await waitFor(() => expect(text("childCount")).toBe("2"));
+    expect(text("selected")).toBe("s1");
   });
 });
 

@@ -149,3 +149,18 @@ const PILLS: Record<AttendanceStatus, Pill> = {
 export function statusPill(status: AttendanceStatus): Pill {
   return PILLS[status] ?? PILLS.not_taken;
 }
+
+const NO_CLASSES: Pill = { label: "No hay clases", kind: "neutral" };
+
+/**
+ * The pill a whole day is tagged with. A weekend day without a list is not a
+ * list the teacher forgot (ISSUE-CC-310): it has no classes. The family
+ * surface carries no school calendar, so a weekday holiday still reads from
+ * its status.
+ */
+export function dayPill(day: AttendanceDay): Pill {
+  if (day.status === "not_taken" && isWeekend(day.date)) {
+    return NO_CLASSES;
+  }
+  return statusPill(day.status);
+}

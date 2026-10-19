@@ -1,7 +1,8 @@
 import { router } from "expo-router";
-import { type ReactElement } from "react";
+import { useState, type ReactElement } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { ChildSheet } from "./ChildSheet";
 import { Icon } from "../icons";
 import { LanguageToggle } from "../i18n/LanguageToggle";
 import { useAppState } from "../state/AppState";
@@ -10,15 +11,15 @@ import { useTheme, useThemeControls } from "../theme";
 import { Avatar } from "../ui";
 
 /**
- * Persistent app header carrying the single-child context (story-ring avatar,
- * greeting with group, child name) plus theme toggle and a bell that routes to
+ * Persistent app header carrying the selected child's context (avatar, group,
+ * child name — the child switcher when there are siblings) plus theme toggle
+ * and a bell that routes to
  * Avisos with an unread badge. Shown across the tab screens.
  */
 export function AppHeader(): ReactElement {
   const theme = useTheme();
   const { toggleTheme } = useThemeControls();
-  const { child, unreadCount } = useAppState();
-  const view = toChildView(child);
+  const { unreadCount } = useAppState();
   const insets = useSafeAreaInsets();
 
   return (
@@ -28,20 +29,7 @@ export function AppHeader(): ReactElement {
         { paddingTop: insets.top + 12, backgroundColor: theme.colors.bg, borderBottomColor: theme.colors.line },
       ]}
     >
-      <View style={styles.id}>
-        <Avatar initials={view.initials} size={40} />
-        <View style={styles.idText}>
-          <Text style={[styles.greet, { color: theme.colors.text3, fontFamily: theme.fonts.uiExtra }]}>
-            {view.present ? view.subtitle : "García Lorca"}
-          </Text>
-          <Text
-            style={[styles.name, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]}
-            numberOfLines={2}
-          >
-            {view.present ? view.headerName : "Portal de familias"}
-          </Text>
-        </View>
-      </View>
+      <ChildIdentity />
 
       <View style={styles.actions}>
         <LanguageToggle />
@@ -56,6 +44,58 @@ export function AppHeader(): ReactElement {
         </IconButton>
       </View>
     </View>
+  );
+}
+
+/**
+ * Whose information the app shows. With more than one linked child it is the
+ * switcher (ISSUE-CC-303): the whole block opens the child sheet.
+ */
+function ChildIdentity(): ReactElement {
+  const theme = useTheme();
+  const { child, children: linkedChildren, selectedChildId, selectChild } = useAppState();
+  const [picking, setPicking] = useState(false);
+  const view = toChildView(child);
+  const switchable = view.present && linkedChildren.length > 1;
+
+  const identity = (
+    <>
+      <Avatar initials={view.initials} size={40} />
+      <View style={styles.idText}>
+        <Text style={[styles.greet, { color: theme.colors.text3, fontFamily: theme.fonts.uiExtra }]}>
+          {view.present ? view.subtitle : "García Lorca"}
+        </Text>
+        <View style={styles.nameRow}>
+          <Text style={[styles.name, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]} numberOfLines={2}>
+            {view.present ? view.headerName : "Portal de familias"}
+          </Text>
+          {switchable ? <Icon name="chevron-down" size={18} stroke={2.6} color={theme.colors.text2} /> : null}
+        </View>
+      </View>
+    </>
+  );
+
+  if (!switchable) {
+    return <View style={styles.id}>{identity}</View>;
+  }
+  return (
+    <>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`Cambiar de hijo(a). Ahora: ${view.headerName}`}
+        onPress={() => setPicking(true)}
+        style={styles.id}
+      >
+        {identity}
+      </Pressable>
+      <ChildSheet
+        visible={picking}
+        linkedChildren={linkedChildren}
+        selectedId={selectedChildId}
+        onSelect={selectChild}
+        onClose={() => setPicking(false)}
+      />
+    </>
   );
 }
 
@@ -99,6 +139,7 @@ const styles = StyleSheet.create({
   },
   id: { flexDirection: "row", alignItems: "center", gap: 11, flexShrink: 1, minWidth: 0 },
   idText: { minWidth: 0, flexShrink: 1 },
+  nameRow: { flexDirection: "row", alignItems: "center", gap: 4 },
   greet: { fontSize: 12, fontWeight: "700" },
   name: { fontSize: 20, fontWeight: "800", letterSpacing: -0.4 },
   actions: { marginLeft: "auto", flexDirection: "row", alignItems: "center", gap: 8 },

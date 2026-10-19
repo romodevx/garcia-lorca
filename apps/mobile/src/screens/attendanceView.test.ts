@@ -1,6 +1,7 @@
 import type { AttendanceDay, AttendanceMonth } from "../api/attendance";
 import {
   dayLabel,
+  dayPill,
   findToday,
   monthLabel,
   monthOf,
@@ -157,5 +158,16 @@ describe("attendance view helpers", () => {
     expect(statusPill("late")).toEqual({ label: "Retardo", kind: "late" });
     expect(statusPill("partial").label).toBe("Parcial");
     expect(statusPill("not_taken").label).toBe("Sin lista");
+  });
+
+  // ISSUE-CC-310: a Saturday with no list is not a list the teacher forgot.
+  it("says there are no classes on a weekend day without a list", () => {
+    expect(dayPill(day({ date: "2026-10-17", status: "not_taken" }))).toEqual({ label: "No hay clases", kind: "neutral" });
+    expect(dayPill(day({ date: "2026-10-18", status: "not_taken" })).label).toBe("No hay clases");
+  });
+
+  it("keeps 'Sin lista' for a school day without a list, and the status pill otherwise", () => {
+    expect(dayPill(day({ date: "2026-10-16", status: "not_taken" })).label).toBe("Sin lista");
+    expect(dayPill(day({ date: "2026-10-17", status: "present" })).label).toBe("Asistió");
   });
 });

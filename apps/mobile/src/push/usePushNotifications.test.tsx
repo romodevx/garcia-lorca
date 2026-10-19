@@ -1,3 +1,4 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { act, renderHook, waitFor } from "@testing-library/react-native";
 import * as Notifications from "expo-notifications";
 import { router } from "expo-router";
@@ -67,6 +68,8 @@ describe("usePushNotifications", () => {
   });
   afterEach(async () => {
     await clearTokens();
+    // A tap selects a child and the choice is remembered (ISSUE-CC-303): start each test fresh.
+    await AsyncStorage.clear();
   });
 
   it("registers for push once the signed-in family has loaded", async () => {

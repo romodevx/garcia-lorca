@@ -1,9 +1,11 @@
 import { router } from "expo-router";
-import { type ReactElement } from "react";
+import { useMemo, useState, type ReactElement } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import type { FamilyNotification } from "../api";
 import { useRefreshHandler } from "../components/refresh";
 import { useAppState } from "../state/AppState";
+import { siblingNames } from "../state/childView";
+import { ALL_CHILDREN, ChildFilter } from "./announcements/ChildFilter";
 import { useTheme } from "../theme";
 import { Card, EmptyState, ScreenTitle, TintIcon } from "../ui";
 import { NotificationsErrorState } from "./NotificationsErrorState";
@@ -23,16 +25,25 @@ import { formatNotificationDate, isUnread, notificationKind } from "./notificati
  */
 export function AnnouncementsScreen(): ReactElement {
   const {
+    children: linkedChildren,
     notifications,
     notificationsLoading,
     notificationsError,
     refreshNotifications,
     readIds,
-    unreadCount,
     markRead,
-    markAllRead,
   } = useAppState();
   useRefreshHandler(refreshNotifications);
+  const names = useMemo(() => siblingNames(linkedChildren), [linkedChildren]);
+  const [filter, setFilter] = useState(ALL_CHILDREN);
+  // A filter on a child no longer linked shows everything rather than nothing.
+  const activeFilter = names.has(filter) ? filter : ALL_CHILDREN;
+  const visible =
+    activeFilter === ALL_CHILDREN ? notifications : notifications.filter((n) => n.studentId === activeFilter);
+  // "Marcar leídos" acts on what is on screen: with one child filtered, the
+  // other child's news stays unread.
+  const visibleUnread = visible.filter((n) => isUnread(n, readIds));
+  const markVisibleRead = (): void => visibleUnread.forEach((n) => markRead(n.id));
 
   const open = (id: string): void => {
     markRead(id);
@@ -43,14 +54,23 @@ export function AnnouncementsScreen(): ReactElement {
     <>
       <View style={styles.titleRow}>
         <ScreenTitle>Avisos</ScreenTitle>
-        {unreadCount > 0 ? <MarkAllAction onPress={markAllRead} /> : null}
+        {visibleUnread.length > 0 ? <MarkAllAction onPress={markVisibleRead} /> : null}
       </View>
 
+      {names.size > 0 ? (
+        <ChildFilter
+          options={[...names].map(([id, name]) => ({ id, name }))}
+          value={activeFilter}
+          onChange={setFilter}
+        />
+      ) : null}
+
       <AnnouncementsBody
-        notifications={notifications}
+        notifications={visible}
         loading={notificationsLoading}
         error={notificationsError}
         readIds={readIds}
+        names={names}
         onRetry={refreshNotifications}
         onOpen={open}
       />
@@ -74,12 +94,14 @@ interface BodyProps {
   loading: boolean;
   error: boolean;
   readIds: ReadonlySet<string>;
+  /** Child names by id, only when there are siblings (ISSUE-CC-303). */
+  names: ReadonlyMap<string, string>;
   onRetry: () => void;
   onOpen: (id: string) => void;
 }
 
 /** Renders exactly one of: loading, error+retry, empty, or the notification list. */
-function AnnouncementsBody({ notifications, loading, error, readIds, onRetry, onOpen }: BodyProps): ReactElement {
+function AnnouncementsBody({ notifications, loading, error, readIds, names, onRetry, onOpen }: BodyProps): ReactElement {
   // Error takes precedence over a stale/empty list so a failed refresh is never
   // mistaken for "no news".
   if (error) {
@@ -109,6 +131,7 @@ function AnnouncementsBody({ notifications, loading, error, readIds, onRetry, on
           key={n.id}
           notification={n}
           unread={isUnread(n, readIds)}
+          recipient={names.get(n.studentId)}
           divider={i > 0}
           onPress={() => onOpen(n.id)}
         />
@@ -120,11 +143,13 @@ function AnnouncementsBody({ notifications, loading, error, readIds, onRetry, on
 interface RowProps {
   notification: FamilyNotification;
   unread: boolean;
+  /** The child it is for, when the family has more than one. */
+  recipient?: string;
   divider: boolean;
   onPress: () => void;
 }
 
-function NotificationRow({ notification, unread, divider, onPress }: RowProps): ReactElement {
+function NotificationRow({ notification, unread, recipient, divider, onPress }: RowProps): ReactElement {
   const theme = useTheme();
   const kind = notificationKind(notification.type);
   return (
@@ -155,6 +180,12 @@ function NotificationRow({ notification, unread, divider, onPress }: RowProps): 
         <View style={styles.meta}>
           <Text style={[styles.from, { color: theme.colors.text2, fontFamily: theme.fonts.ui }]}>{kind.label}</Text>
           <Text style={[styles.metaSep, { color: theme.colors.text3 }]}>·</Text>
+          {recipient !== undefined ? (
+            <>
+              <Text style={[styles.from, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]}>{`Para ${recipient}`}</Text>
+              <Text style={[styles.metaSep, { color: theme.colors.text3 }]}>·</Text>
+            </>
+          ) : null}
           <Text style={[styles.time, { color: theme.colors.text3, fontFamily: theme.fonts.uiSemi }]}>
             {formatNotificationDate(notification.createdAt, "short")}
           </Text>

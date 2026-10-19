@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -17,27 +18,28 @@ import {
 } from "../api";
 import { isUnread } from "../screens/notificationView";
 import { useFreshDataSignal } from "./freshness";
+import { readSelectedChild, rememberSelectedChild } from "./selectedChildStore";
 
 /**
  * App-wide interactive state for the parent app.
  *
  * Both slices are REAL: the child slice bootstraps the guardian's linked children
  * from the gateway's self-scoped family surface (`GET /api/v1/family/students`)
- * and selects one (single-child MVP, but the list + a selected id are kept so
- * multi-child is a future toggle); the notifications slice hydrates from
+ * and selects one — the header's switcher changes it and the choice survives a
+ * relaunch (ISSUE-CC-303); the notifications slice hydrates from
  * `GET /api/v1/family/notifications`. Both are auth-gated: with no access token
  * they settle empty and fire no request. Per-child reads (account, attendance,
  * grades) live in their own hooks keyed on the selected child id (see
  * ./familyData.ts).
  */
 interface AppStateValue {
-  /** The guardian's linked children (single-child MVP, but the full list is kept). */
+  /** The guardian's linked children. */
   children: FamilyStudent[];
   /** The currently selected child, or null while loading / when none are linked. */
   child: FamilyStudent | null;
   /** Id of the selected child, or null. */
   selectedChildId: string | null;
-  /** Selects a child by id (future multi-child toggle). */
+  /** Selects a child by id and remembers it for the next launch. */
   selectChild: (id: string) => void;
   /** True while the first (or a manual) child load is in flight. */
   childLoading: boolean;
@@ -61,8 +63,6 @@ interface AppStateValue {
   unreadCount: number;
   /** Acknowledges one notification (persists via the family API). */
   markRead: (id: string) => void;
-  /** Acknowledges every unread notification. */
-  markAllRead: () => void;
 }
 
 const AppStateContext = createContext<AppStateValue | null>(null);
@@ -85,7 +85,14 @@ export function AppStateProvider({ children }: AppStateProviderProps): ReactNode
   // until the next refetch stamps readAt server-side. Ids are notification ids.
   const [readIds, setReadIds] = useState<ReadonlySet<string>>(() => new Set());
 
+  // Every child load (and the signed-out reset a logout runs) takes a new
+  // generation; a load that is no longer the latest writes nothing, so the
+  // previous guardian's slow list never repaints the slice after a logout.
+  const childGeneration = useRef(0);
+
   const refreshChildren = useCallback(async () => {
+    const generation = (childGeneration.current += 1);
+    const isCurrent = (): boolean => generation === childGeneration.current;
     // Signed out: no token to authenticate the family request, so treat the child
     // list as cleanly empty rather than firing an unauthenticated call. This also
     // empties the slice after logout.
@@ -99,17 +106,21 @@ export function AppStateProvider({ children }: AppStateProviderProps): ReactNode
     setChildLoading(true);
     setChildError(false);
     try {
-      const list = await listChildren();
+      const [list, remembered] = await Promise.all([listChildren(), readSelectedChild()]);
+      if (!isCurrent()) return;
       setChildList(list);
-      // Keep the current selection if it still exists; otherwise select the first
-      // child (single-child MVP lands here every time).
-      setSelectedChildId((prev) =>
-        prev !== null && list.some((c) => c.id === prev) ? prev : (list[0]?.id ?? null),
-      );
+      // Keep the current selection if it still exists; else the child chosen
+      // before the app was closed (ISSUE-CC-303); else the first child.
+      const linked = (id: string | null): id is string => id !== null && list.some((c) => c.id === id);
+      setSelectedChildId((prev) => {
+        if (linked(prev)) return prev;
+        if (linked(remembered)) return remembered;
+        return list[0]?.id ?? null;
+      });
     } catch {
-      setChildError(true);
+      if (isCurrent()) setChildError(true);
     } finally {
-      setChildLoading(false);
+      if (isCurrent()) setChildLoading(false);
     }
   }, []);
 
@@ -140,7 +151,10 @@ export function AppStateProvider({ children }: AppStateProviderProps): ReactNode
   // Back from the background or an attendance push: the inbox may have news.
   useFreshDataSignal(refreshNotifications);
 
-  const selectChild = useCallback((id: string) => setSelectedChildId(id), []);
+  const selectChild = useCallback((id: string) => {
+    setSelectedChildId(id);
+    rememberSelectedChild(id);
+  }, []);
 
   const markRead = useCallback((id: string) => {
     // Optimistic: reflect the acknowledgement immediately, then persist it. A
@@ -154,14 +168,6 @@ export function AppStateProvider({ children }: AppStateProviderProps): ReactNode
       });
     });
   }, []);
-
-  const markAllRead = useCallback(() => {
-    for (const n of notifications) {
-      if (isUnread(n, readIds)) {
-        markRead(n.id);
-      }
-    }
-  }, [notifications, readIds, markRead]);
 
   const unreadCount = useMemo(
     () => notifications.filter((n) => isUnread(n, readIds)).length,
@@ -189,7 +195,6 @@ export function AppStateProvider({ children }: AppStateProviderProps): ReactNode
       readIds,
       unreadCount,
       markRead,
-      markAllRead,
     }),
     [
       childList,
@@ -206,7 +211,6 @@ export function AppStateProvider({ children }: AppStateProviderProps): ReactNode
       readIds,
       unreadCount,
       markRead,
-      markAllRead,
     ],
   );
 

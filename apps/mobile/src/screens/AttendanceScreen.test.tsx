@@ -100,6 +100,15 @@ describe("AttendanceScreen", () => {
       await render();
       await waitFor(() => expect(screen.getByLabelText("Hoy: Lista aún no tomada")).toBeTruthy());
     });
+
+    // ISSUE-CC-310: the gateway sends a Saturday today as not_taken.
+    it("tags a Saturday without a list as 'No hay clases' in the day list", async () => {
+      serverToday = "2026-10-17";
+      mockGateway({ "2026-10": { status: 200, days: [day({ date: "2026-10-17", status: "not_taken" })] } });
+      await render("2026-10");
+      await waitFor(() => expect(screen.getByLabelText("Sáb 17 oct: No hay clases")).toBeTruthy());
+      expect(screen.queryByText("Sin lista")).toBeNull();
+    });
   });
 
   it("shows the month's summary counts with their words", async () => {
