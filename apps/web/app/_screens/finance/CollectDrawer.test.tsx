@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { HttpError } from "../../auth/httpError";
 import * as financeApi from "../../finance/api";
-import { CollectDrawer, maxPayableCents } from "./CollectDrawer";
+import { amountToPayError, CollectDrawer, maxPayableCents } from "./CollectDrawer";
 
 vi.mock("../../finance/api", () => ({
   getAccount: vi.fn(),
@@ -765,8 +765,9 @@ describe("CollectDrawer · cobrado por otra caja (CC-202)", () => {
 // as two debts. The cap is what may be taken today: the months not yet due
 // carry their early-payment discount. The screen says so, before and after.
 describe("CollectDrawer · lo cobrable hoy frente a lo del año (CC-214)", () => {
+  const EARLY = 80000;
   const line = (id: string, cents: number): financeApi.ExpectedLine => ({
-    chargeId: id, description: id, dueDate: "2026-11-10", owedCents: cents, surchargeCents: 0, discountCents: 0, scholarshipCents: 0, totalCents: cents, due: false, inBalance: true,
+    chargeId: id, description: id, dueDate: "2026-11-10", owedCents: cents + EARLY, surchargeCents: 0, discountCents: EARLY, scholarshipCents: 0, totalCents: cents, due: false, inBalance: true,
   });
 
   beforeEach(() => {
@@ -794,5 +795,53 @@ describe("CollectDrawer · lo cobrable hoy frente a lo del año (CC-214)", () =>
   it("says the cap beside the field before anyone goes over it", async () => {
     render(<CollectDrawer student={student} onClose={() => {}} onCollected={() => {}} today="2026-10-17" />);
     expect(await screen.findByText(/Hoy se puede cobrar hasta \$33,400\.00: los meses que aún no vencen llevan su descuento por pronto pago\./)).toBeInTheDocument();
+  });
+});
+
+// C2-004: with concepts chosen the cap is what they add up to; the error blamed
+// the early-payment discount even when no discount lowered anything.
+describe("amountToPayError · por qué no se puede cobrar más (C2-004)", () => {
+  it("with concepts chosen and no discount, names only what was selected", () => {
+    expect(amountToPayError(400000, { cents: 320000, balanceCents: 640000, chosen: true, discountCents: 0 }))
+      .toBe("El pago no puede ser mayor que lo seleccionado ($3,200.00).");
+  });
+
+  it("with concepts chosen that carry a discount, says the selection already has it", () => {
+    expect(amountToPayError(400000, { cents: 320000, balanceCents: 640000, chosen: true, discountCents: 30000 }))
+      .toBe("El pago no puede ser mayor que lo seleccionado ($3,200.00), ya con su descuento por pronto pago.");
+  });
+
+  it("below the year's balance without any discount, does not blame one", () => {
+    expect(amountToPayError(700000, { cents: 600000, balanceCents: 640000, chosen: false, discountCents: 0 }))
+      .toBe("No puede ser mayor que lo que se puede cobrar hoy ($6,000.00).");
+  });
+
+  it("below the year's balance because of the discount, says why", () => {
+    expect(amountToPayError(3500000, { cents: 3340000, balanceCents: 3500000, chosen: false, discountCents: 160000 }))
+      .toBe("No puede ser mayor que lo que se puede cobrar hoy ($33,400.00). Es menos que lo que debe del año ($35,000.00) porque los meses que aún no vencen llevan su descuento por pronto pago.");
+  });
+});
+
+describe("CollectDrawer · sobrepago sobre lo seleccionado (C2-004)", () => {
+  const line = (id: string, cents: number): financeApi.ExpectedLine => ({
+    chargeId: id, description: id, dueDate: "2026-10-10", owedCents: cents, surchargeCents: 0, discountCents: 0, scholarshipCents: 0, totalCents: cents, due: true, inBalance: true,
+  });
+
+  it("blames the selection, not a discount that does not exist", async () => {
+    const user = userEvent.setup();
+    finance.getExpected.mockResolvedValue({
+      amountCents: 640000, surchargeCents: 0, discountCents: 0, annualBalanceCents: 640000, onTimeBalanceCents: 640000,
+      lines: [line("Colegiatura septiembre", 320000), line("Colegiatura octubre", 320000)],
+    });
+    render(<CollectDrawer student={student} onClose={() => {}} onCollected={() => {}} today="2026-10-12" />);
+    await user.click(await screen.findByRole("checkbox", { name: "Colegiatura octubre" }));
+    const amount = screen.getByLabelText(/Monto a pagar/, { selector: "input" });
+    await user.clear(amount);
+    await user.type(amount, "4000");
+    await user.click(screen.getByRole("button", { name: "Cobrar" }));
+
+    expect(await screen.findAllByText("El pago no puede ser mayor que lo seleccionado ($3,200.00).")).not.toHaveLength(0);
+    expect(screen.queryByText(/descuento por pronto pago/)).toBeNull();
+    expect(finance.registerDeposit).not.toHaveBeenCalled();
   });
 });

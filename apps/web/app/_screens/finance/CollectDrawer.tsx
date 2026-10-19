@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
 import { DrawerShell } from "../../_design/DrawerShell";
 import { DateField, ErrorSummary, MoneyField, useFocusFirstInvalid } from "../../_design/form";
@@ -106,31 +106,57 @@ export function maxPayableCents(expected: Pick<Expected, "amountCents" | "lines"
 /** Why the cap can be below the year's debt (CC-214). */
 const EARLY_PAYMENT_WHY = "los meses que aún no vencen llevan su descuento por pronto pago";
 
-/** True when today's cap is below the year's balance — the case that needs saying. */
-function capBelowYear(capCents: number, balanceCents: number | null | undefined): balanceCents is number {
-  return Number.isFinite(capCents) && balanceCents !== null && balanceCents !== undefined && capCents < balanceCents;
+/**
+ * The most the counter takes, with what explains it: the concepts the cashier
+ * chose, or the early-payment discount the counted lines carry (C2-004).
+ */
+export interface PayCap {
+  /** Unknown (Infinity) until the quote is read. */
+  cents: number;
+  /** The year's balance, the figure the cap is read against. */
+  balanceCents?: number | null;
+  /** The cashier chose the concepts: the cap is what they add up to. */
+  chosen: boolean;
+  /** The early-payment discount inside the cap; 0 when none lowers it. */
+  discountCents: number;
+}
+
+/** The early-payment discount the lines inside the cap carry. */
+export function discountInCap(lines: readonly ExpectedLine[], chosen: ReadonlySet<string>, byChoice: boolean): number {
+  return lines.reduce((sum, l) => sum + (!byChoice || chosen.has(l.chargeId) ? l.discountCents : 0), 0);
+}
+
+/** True when a discount brings today's cap below the year's balance — the case that needs saying. */
+function discountLowersCap(cap: PayCap): cap is PayCap & { balanceCents: number } {
+  const { cents, balanceCents } = cap;
+  return cap.discountCents > 0 && Number.isFinite(cents) && balanceCents !== null && balanceCents !== undefined && cents < balanceCents;
 }
 
 /**
  * What is wrong with the amount to pay, if anything. It may not exceed what the
- * family owes (T8) — `capCents`, unknown (Infinity) until the quote is read.
- * When that cap is below the year's balance the message names both figures,
- * or the counter reads two different debts (CC-214).
+ * family owes (T8) — the cap. With concepts chosen it names the selection;
+ * otherwise, when a discount brings the cap below the year's balance, the
+ * message names both figures, or the counter reads two different debts
+ * (CC-214). A discount that is not there is never blamed (C2-004).
  */
-export function amountToPayError(cents: number, capCents: number, balanceCents?: number | null): string | undefined {
+export function amountToPayError(cents: number, cap: PayCap): string | undefined {
   if (!Number.isFinite(cents) || cents <= 0) return AMOUNT_ERROR;
-  if (cents <= capCents) return undefined;
-  const refusal = `No puede ser mayor que lo que se puede cobrar hoy (${formatCents(capCents)}).`;
-  return capBelowYear(capCents, balanceCents)
-    ? `${refusal} Es menos que lo que debe del año (${formatCents(balanceCents)}) porque ${EARLY_PAYMENT_WHY}.`
+  if (cents <= cap.cents) return undefined;
+  if (cap.chosen) {
+    const withDiscount = cap.discountCents > 0 ? ", ya con su descuento por pronto pago" : "";
+    return `El pago no puede ser mayor que lo seleccionado (${formatCents(cap.cents)})${withDiscount}.`;
+  }
+  const refusal = `No puede ser mayor que lo que se puede cobrar hoy (${formatCents(cap.cents)}).`;
+  return discountLowersCap(cap)
+    ? `${refusal} Es menos que lo que debe del año (${formatCents(cap.balanceCents)}) porque ${EARLY_PAYMENT_WHY}.`
     : refusal;
 }
 
-/** The amount field's help: the cap said up front when it differs from the year's figure. */
-export function amountToPayHelp(capCents: number, balanceCents: number | null | undefined): string {
+/** The amount field's help: the cap said up front when a discount sets it below the year's figure. */
+export function amountToPayHelp(cap: PayCap): string {
   const base = "Lo que la familia paga ahora: puede ser un abono, nunca más de lo que debe.";
-  return capBelowYear(capCents, balanceCents)
-    ? `${base} Hoy se puede cobrar hasta ${formatCents(capCents)}: ${EARLY_PAYMENT_WHY}.`
+  return !cap.chosen && discountLowersCap(cap)
+    ? `${base} Hoy se puede cobrar hasta ${formatCents(cap.cents)}: ${EARLY_PAYMENT_WHY}.`
     : base;
 }
 
@@ -229,7 +255,13 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
   // included — never the net balance: that one leaves them out and nets the
   // credit (it can be below zero), and would refuse a legitimate payment ahead.
   // Unknown (Infinity) until the quote is here; the server has the last word.
-  const capCents = expected === null ? Number.POSITIVE_INFINITY : maxPayableCents(expected, selectedCents, choice !== undefined);
+  const byChoice = choice !== undefined;
+  const capCents = expected === null ? Number.POSITIVE_INFINITY : maxPayableCents(expected, selectedCents, byChoice);
+  const capDiscountCents = discountInCap(lines, chosen, byChoice);
+  const cap = useMemo<PayCap>(
+    () => ({ cents: capCents, balanceCents: balance, chosen: byChoice, discountCents: capDiscountCents }),
+    [capCents, balance, byChoice, capDiscountCents],
+  );
   // How the amount is paid, method by method (T8): it must add up to it.
   const tenders = useTenders(cents);
   const toggle = (chargeId: string): void => {
@@ -309,7 +341,7 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
     }
     // Every problem is marked at once, then the view goes to the first of them.
     const wrongDate = paymentDateError(paidOn, day);
-    const wrongAmount = amountToPayError(cents, capCents, balance);
+    const wrongAmount = amountToPayError(cents, cap);
     setDateError(wrongDate);
     setAmountError(wrongAmount);
     const tendersOk = wrongAmount === undefined && tenders.validate();
@@ -354,7 +386,7 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
       inFlight.current = false;
       setSaving(false);
     }
-  }, [student.id, cents, capCents, balance, tenders, attemptKey, grantEarly, sentDate, paidOn, day, choice, focusFirstInvalid, onCollected]);
+  }, [student.id, cents, cap, tenders, attemptKey, grantEarly, sentDate, paidOn, day, choice, focusFirstInvalid, onCollected]);
 
   return (
     <DrawerShell
@@ -400,11 +432,11 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
                     onChange={(v) => {
                       if (pesosToCents(v) !== prefilledCents.current) amountEdited.current = true;
                       setAmount(v);
-                      if (amountToPayError(pesosToCents(v), capCents) === undefined) setAmountError(undefined);
+                      if (amountToPayError(pesosToCents(v), cap) === undefined) setAmountError(undefined);
                     }}
-                    onBlur={() => setAmountError(amountToPayError(cents, capCents, balance))}
+                    onBlur={() => setAmountError(amountToPayError(cents, cap))}
                     error={amountError}
-                    help={amountToPayHelp(capCents, balance)}
+                    help={amountToPayHelp(cap)}
                     required
                   />
 
