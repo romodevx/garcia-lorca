@@ -27,6 +27,10 @@ make prod-apk       # APK release de la app de familias (ver abajo)
 Tras cambiar código: `make prod-build && make prod-up` (`up` sólo construye
 cuando falta alguna imagen; no detecta imágenes viejas).
 
+Desde un worktree: copiar el `.env` del checkout principal antes de `prod-up`.
+El `.env` por omisión del worktree apunta Postgres a 5432 y `prod-up` sale con
+"Postgres on :5432 did not become ready".
+
 Las imágenes se construyen **en secuencia a propósito**: en paralelo el daemon de
 Docker corta con `unexpected EOF` y además es más lento (lo mismo que en Cloud
 Build, PR #72). Si `gen/go` está vacío, el script corre `buf generate` con la

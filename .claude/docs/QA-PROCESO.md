@@ -262,7 +262,7 @@ pasos dependen de los anteriores.
 
 #### 1.9 Tabuladores (inscripción, colegiatura, recargos, pronto pago)
 - **Rol · Ruta**: Director · `/configuracion` → Colegiaturas (página del tabulador).
-- **Datos**: Primaria: inscripción $4,000, colegiatura $3,500 × 10 desde septiembre, límite día 10, recargo diario $10, pronto pago $200 antes del día 5. Un tramo de inscripción con precio que sube por fecha (ADR 0011). Otro nivel con recargo mensual fijo. Uno usando "copiar del ciclo anterior" si existe.
+- **Datos**: Primaria: inscripción $4,000, colegiatura $3,500 × 10 desde septiembre, límite día 10, recargo diario $10, pronto pago $200 antes del día 5. Un tramo de inscripción con precio que sube por fecha (ADR 0011). Otro nivel con otro recargo diario (el recargo mensual fijo ya no existe desde M16). Uno usando "copiar del ciclo anterior" si existe.
 - **Pasos**: definir, guardar, reabrir.
 - **Esperado**: el resumen "Año completo" suma la inscripción mientras se captura [T14-007]; "Vigente desde" viene prellenado.
 - **Verificación**: `GET /api/v1/finance/tuition-plans?cycleId=…` · `SELECT * FROM tuition_plans;` (montos en centavos).
