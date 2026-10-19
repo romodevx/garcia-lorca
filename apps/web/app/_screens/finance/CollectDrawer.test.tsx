@@ -758,6 +758,8 @@ describe("CollectDrawer · cobrado por otra caja (CC-202)", () => {
 
     expect(await screen.findByText("HTTP 500")).toBeInTheDocument();
     expect(finance.getExpected).toHaveBeenCalledTimes(1);
+  });
+});
 
 // CC-214: "Del año debe $35,000" and a cap of $33,400 on the same screen read
 // as two debts. The cap is what may be taken today: the months not yet due
