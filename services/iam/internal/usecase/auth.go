@@ -406,10 +406,10 @@ func (s *AuthService) ValidateToken(ctx context.Context, accessToken string) (do
 // a token minted before the suspension stays dead when the account comes back,
 // instead of working out the rest of its fifteen minutes. Same comparison as
 // RefreshToken — whole seconds, so the session re-issued in the second of the
-// change survives. (The refresh path may move to a dedicated
-// credential_version, PR #147; this check deliberately keeps to
-// password_changed_at, which every revoking write already moves, so the two
-// tokens stay revoked by the same events.)
+// change survives. (The refresh path also checks credential_version, CC-302;
+// this check deliberately keeps to password_changed_at. Both columns move
+// together in the repository's rotateCredential, so the two tokens stay
+// revoked by the same events.)
 func (s *AuthService) requireLiveSession(ctx context.Context, claims domain.Claims) error {
 	refused := glerrors.New(glerrors.KindUnauthorized, "invalid access token")
 	state, err := s.users.SessionStateOf(ctx, claims.Subject)
