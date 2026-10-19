@@ -240,7 +240,7 @@ func TestDeleteUserAlreadyDeletedRetriesTheRest(t *testing.T) {
 func TestSetUserStatusCannotResurrectADeletedUser(t *testing.T) {
 	f := newDeleteFixture(t, mustUserUC(t, "u-gone", "gone@gl.mx", domain.StatusDeleted, teacherRole(t)))
 
-	err := f.service(t).SetUserStatus(context.Background(), "u-gone", domain.StatusActive)
+	err := f.service(t).SetUserStatus(context.Background(), directorID, "u-gone", domain.StatusActive)
 
 	if glerrors.KindOf(err) != glerrors.KindNotFound {
 		t.Errorf("err = %v, want KindNotFound — users:write must not undo an owner-only deletion", err)

@@ -8,18 +8,16 @@ import (
 	"github.com/garcia-lorca/services/gateway/internal/client"
 )
 
-// guardianRoleName is the iam role that lets somebody open the family app. It
-// carries exactly `family:read`; the per-child scoping is the guardian↔student
-// link, not the permission (ADR 0004).
-const guardianRoleName = "guardian"
-
-// ContactAccountIssuer is the iam surface this action needs: which roles exist,
-// which accounts already do, and how to invite a new one. Consumer-defined, so
-// the handler is testable without iam.
+// ContactAccountIssuer is the iam surface this action needs. Consumer-defined,
+// so the handler is testable without iam.
+//
+// InviteGuardian takes no role: iam picks the guardian role itself, and it is
+// the ONLY road into that role — InviteUser refuses it (ISSUE-CC-115), so the
+// staff screen cannot mint a family login that no pupil is linked to. It is
+// keyed on the address and ENSURES the role: an account that already exists
+// (a teacher who is also a parent) gains it and the invitation comes back nil.
 type ContactAccountIssuer interface {
-	ListRoles(ctx context.Context) ([]client.Role, error)
-	ListUsers(ctx context.Context) ([]client.User, error)
-	InviteUser(ctx context.Context, email, displayName string, roleIDs []string) (client.User, client.Invitation, error)
+	InviteGuardian(ctx context.Context, email, displayName string) (client.User, *client.Invitation, error)
 }
 
 // ContactGranter is the students surface: the pupil's contact list, and
@@ -31,12 +29,13 @@ type ContactGranter interface {
 
 // ContactAccessHandler gives a family the app.
 //
-// WHY THIS EXISTS AT ALL. Until now there was no way to do it. Creating the
-// account by hand and assigning the `guardian` role is refused for everybody by
-// the anti-escalation guard on CreateUser/InviteUser — a caller may only assign
-// roles whose permissions it holds, and `family:read` was held by nobody. The
-// fix was to give the owner that permission (ADR 0012), not to weaken the guard;
-// this handler is what that unblocks.
+// WHY THIS EXISTS AT ALL. It is the ONE road to a family login. Creating the
+// account by hand with the `guardian` role is refused by iam on every manual
+// road — InviteUser, CreateUser, AssignRole (ISSUE-CC-115) — because a guardian
+// account means nothing without the link to a pupil that this handler makes
+// right after. iam's InviteGuardian picks the role itself; the edge never names
+// it. (The owner holds `family:read` so the anti-escalation guard lets it
+// delegate the role at all, ADR 0012.)
 //
 // WHY IT COMPOSES RATHER THAN PROXIES. "Dar acceso a la app" is one action for
 // the school and two services underneath: iam owns accounts, students owns who a
@@ -101,20 +100,9 @@ func (h *ContactAccessHandler) Invite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	roleID, err := h.guardianRoleID(r.Context())
-	if err != nil {
-		writeConnectError(w, err)
-		return
-	}
-	if roleID == "" {
-		// The deployment is missing migrations/iam/0010_guardians.sql. Inviting
-		// into no role would create a login that can see nothing, so refuse —
-		// and refuse as OUR fault, not the caller's.
-		http.Error(w, "the guardian role is missing from this deployment", http.StatusInternalServerError)
-		return
-	}
-
-	user, invitation, err := h.accountFor(r.Context(), email, contact.FullName, roleID)
+	// A deployment missing migrations/iam/0010_guardians.sql has no guardian
+	// role; iam refuses that as a server fault (5xx), before writing anything.
+	user, invitation, err := h.accountFor(r.Context(), email, contact.FullName)
 	if err != nil {
 		writeConnectError(w, err)
 		return
@@ -148,34 +136,21 @@ func (h *ContactAccessHandler) findContact(ctx context.Context, studentID, conta
 	return nil, nil
 }
 
-// guardianRoleID resolves the guardian role by NAME rather than hard-coding the
-// uuid the migration seeds: the id is an implementation detail of a migration,
-// and a deployment that ever reseeds it would silently start inviting nobody
-// into nothing.
-func (h *ContactAccessHandler) guardianRoleID(ctx context.Context) (string, error) {
-	roles, err := h.iam.ListRoles(ctx)
-	if err != nil {
-		return "", err
-	}
-	role, _ := findRoleByName(roles, guardianRoleName)
-	return role.ID, nil
-}
-
-// accountFor returns the iam account for this address, inviting one if there is
-// none. An existing account is REUSED rather than duplicated: a parent with two
-// children at the school has one login, and a second account for the same
-// address would be one they never open and the school cannot tell apart.
+// accountFor returns the iam account for this address holding the guardian
+// role. iam does the matching, so an existing account is REUSED rather than
+// duplicated — a parent with two children, or a teacher who is also a parent,
+// has one login — and it is iam that adds the role to it. Reusing the account
+// here, at the edge, used to skip that: the account was linked to the pupil
+// without the role, and with the manual roads closed it could never open the
+// app.
 //
-// The returned invitation is nil in that case — nothing was sent.
-func (h *ContactAccessHandler) accountFor(ctx context.Context, email, displayName, roleID string) (client.User, *invitationResponse, error) {
-	if existing, found, err := userByEmail(ctx, h.iam, email); err != nil || found {
-		return existing, nil, err
+// The returned invitation is nil when the address already had an account:
+// nothing was sent.
+func (h *ContactAccessHandler) accountFor(ctx context.Context, email, displayName string) (client.User, *invitationResponse, error) {
+	user, invitation, err := h.iam.InviteGuardian(ctx, email, displayName)
+	if err != nil || invitation == nil {
+		return user, nil, err
 	}
-
-	user, invitation, err := h.iam.InviteUser(ctx, email, displayName, []string{roleID})
-	if err != nil {
-		return client.User{}, nil, err
-	}
-	res := toInvitationResponse(invitation)
+	res := toInvitationResponse(*invitation)
 	return user, &res, nil
 }

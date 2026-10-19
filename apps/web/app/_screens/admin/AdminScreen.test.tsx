@@ -181,9 +181,9 @@ describe("AdminScreen", () => {
 
     // The invited row: it can be re-invited, and it must NOT be "reactivated".
     expect(screen.getByRole("button", { name: "Reenviar invitación" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Reactivar" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reactivar a Invitada" })).not.toBeInTheDocument();
     // Exactly one Reactivar — the suspended row's — and no resend on it.
-    expect(screen.getAllByRole("button", { name: "Reactivar" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: /^Reactivar a / })).toHaveLength(1);
     expect(screen.getAllByRole("button", { name: "Reenviar invitación" })).toHaveLength(1);
   });
 });

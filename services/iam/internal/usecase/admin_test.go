@@ -113,11 +113,13 @@ func TestAdminCreateUserUnknownRoleIsInvalidAndDoesNotCreate(t *testing.T) {
 }
 
 func TestAdminSetUserStatusSuspends(t *testing.T) {
-	users := &fakeUsers{}
+	email, _ := domain.NewEmail("u1@garcialorca.mx")
+	target, _ := domain.NewUser("u1", testTenant, email, "U1", domain.StatusActive, false, nil)
+	users := &fakeUsers{byID: map[string]domain.User{"u1": target}}
 	roles := &fakeRoles{}
 	svc := newAdmin(users, roles, func() string { return "u-new" })
 
-	if err := svc.SetUserStatus(context.Background(), "u1", domain.StatusSuspended); err != nil {
+	if err := svc.SetUserStatus(context.Background(), "u-admin", "u1", domain.StatusSuspended); err != nil {
 		t.Fatalf("SetUserStatus error: %v", err)
 	}
 	if got, ok := users.statusSet["u1"]; !ok || got != domain.StatusSuspended {

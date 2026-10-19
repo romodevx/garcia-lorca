@@ -59,7 +59,18 @@ type UserRepository interface {
 	// account is KindNotFound: only SoftDelete and Restore move it. (Restore is
 	// reached by inviting the address again, which puts the account back to
 	// `invited` — it still has to be opened from the new link.)
-	SetStatus(ctx context.Context, userID string, status domain.Status) error
+	//
+	// Leaving `active` (a suspension) refuses with domain.ErrLastOwner when the
+	// account is the only ACTIVE holder of keepActiveHolderOf — checked and
+	// written atomically, as SoftDelete does — and moves password_changed_at,
+	// so every refresh token the account held dies with the suspension instead
+	// of coming back to life on reactivation (ADR 0005).
+	SetStatus(ctx context.Context, userID string, status domain.Status, keepActiveHolderOf string) error
+
+	// SessionStateOf returns only what ValidateToken needs on every request —
+	// the lifecycle state and the session floor — without loading roles. An
+	// unknown id is KindNotFound.
+	SessionStateOf(ctx context.Context, userID string) (SessionState, error)
 
 	// SoftDelete marks the account deleted, stamping who did it and when, and
 	// moves the refresh-token floor (password_changed_at) so every session it
@@ -80,6 +91,15 @@ type UserRepository interface {
 
 	// SetUserRoles replaces the user's entire role set with roleIDs.
 	SetUserRoles(ctx context.Context, userID string, roleIDs []string) error
+}
+
+// SessionState is the slice of an account that decides whether a token minted
+// for it may still be used: the account must be active, and the token must not
+// predate PasswordChangedAt (the session floor, ADR 0005), which password
+// changes, suspensions and deletions all move.
+type SessionState struct {
+	Status            domain.Status
+	PasswordChangedAt time.Time
 }
 
 // RoleRepository loads and persists roles (used to validate AssignRole targets,

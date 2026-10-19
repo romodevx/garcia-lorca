@@ -118,6 +118,10 @@ func (h *HMAC) ValidateAccessToken(_ context.Context, token string) (domain.Clai
 	if body.ExpiresAt != nil {
 		expiresAt = body.ExpiresAt.Time
 	}
+	issuedAt := time.Time{}
+	if body.IssuedAt != nil {
+		issuedAt = body.IssuedAt.Time
+	}
 	return domain.Claims{
 		Subject:            body.Subject,
 		TenantID:           body.TenantID,
@@ -125,6 +129,7 @@ func (h *HMAC) ValidateAccessToken(_ context.Context, token string) (domain.Clai
 		Permissions:        body.Permissions,
 		MustChangePassword: body.MustChangePassword,
 		ExpiresAt:          expiresAt,
+		IssuedAt:           issuedAt,
 	}, nil
 }
 

@@ -16,29 +16,35 @@ import (
 
 // --- doubles ---------------------------------------------------------------
 
-// fakeIssuer is the iam half: the roles it can see, the users that already
-// exist, and what an invitation produces.
+// fakeIssuer is the iam half. It behaves like iam's InviteGuardian, which
+// ENSURES the guardian role keyed on the address: an address that already has an
+// account gets the role on THAT account and nothing is sent; otherwise a new
+// account is invited. There is no role to pass: iam picks it (ISSUE-CC-115).
 type fakeIssuer struct {
-	roles []client.Role
-	users []client.User
+	users []client.User // accounts that already exist
 
-	invitedEmail   string
-	invitedName    string
-	invitedRoleIDs []string
-	invitedUser    client.User
-	invitation     client.Invitation
-	inviteErr      error
+	invitedEmail string
+	invitedName  string
+	invitedUser  client.User
+	invitation   client.Invitation
+	inviteErr    error
+	// ensuredOn is the existing account the role was added to, if any.
+	ensuredOn string
 }
 
-func (f *fakeIssuer) ListRoles(context.Context) ([]client.Role, error) { return f.roles, nil }
-func (f *fakeIssuer) ListUsers(context.Context) ([]client.User, error) { return f.users, nil }
-
-func (f *fakeIssuer) InviteUser(_ context.Context, email, displayName string, roleIDs []string) (client.User, client.Invitation, error) {
-	f.invitedEmail, f.invitedName, f.invitedRoleIDs = email, displayName, roleIDs
+func (f *fakeIssuer) InviteGuardian(_ context.Context, email, displayName string) (client.User, *client.Invitation, error) {
+	f.invitedEmail, f.invitedName = email, displayName
 	if f.inviteErr != nil {
-		return client.User{}, client.Invitation{}, f.inviteErr
+		return client.User{}, nil, f.inviteErr
 	}
-	return f.invitedUser, f.invitation, nil
+	for _, u := range f.users {
+		if strings.EqualFold(u.Email, email) {
+			f.ensuredOn = u.ID
+			return u, nil, nil
+		}
+	}
+	inv := f.invitation
+	return f.invitedUser, &inv, nil
 }
 
 // fakeGranter is the students half: the pupil's contact list and the grant.
@@ -76,14 +82,8 @@ func (f *fakeGranter) GrantContactAccess(_ context.Context, contactID, studentID
 
 // --- helpers ---------------------------------------------------------------
 
-const guardianRoleID = "00000000-0000-0000-0000-0000000000a2"
-
 func issuerWithGuardianRole() *fakeIssuer {
 	return &fakeIssuer{
-		roles: []client.Role{
-			{ID: "role-owner", Name: "owner", Permissions: []string{"users:write"}},
-			{ID: guardianRoleID, Name: "guardian", Permissions: []string{"family:read"}},
-		},
 		invitedUser: client.User{ID: "usr-new", Email: "mateo@example.com"},
 		invitation:  client.Invitation{URL: "https://x/invite/abc", Sent: true},
 	}
@@ -132,9 +132,6 @@ func TestInviteContactCreatesTheAccountAndAttachesIt(t *testing.T) {
 	if iam.invitedEmail != "mateo@example.com" || iam.invitedName != "Mateo Contreras" {
 		t.Errorf("invited %q/%q, want the contact's own address and name", iam.invitedEmail, iam.invitedName)
 	}
-	if len(iam.invitedRoleIDs) != 1 || iam.invitedRoleIDs[0] != guardianRoleID {
-		t.Errorf("invited into roles %v, want exactly the guardian role", iam.invitedRoleIDs)
-	}
 	if students.grantContactID != "gl-1" || students.grantStudentID != "stu-1" || students.grantUserID != "usr-new" {
 		t.Errorf("granted %q/%q/%q", students.grantContactID, students.grantStudentID, students.grantUserID)
 	}
@@ -175,8 +172,11 @@ func TestInviteContactReusesAnExistingAccount(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200 (body=%s)", rec.Code, rec.Body.String())
 	}
-	if iam.invitedEmail != "" {
-		t.Errorf("a second account was minted for %q — the address already had one", iam.invitedEmail)
+	// iam is ALWAYS asked: it is what adds the guardian role to the account
+	// that already exists. Reusing it at the edge without the role left a
+	// teacher who is also a parent unable to open the app (tech-lead BLOCK).
+	if iam.ensuredOn != "usr-old" {
+		t.Errorf("guardian role ensured on %q, want the existing account usr-old", iam.ensuredOn)
 	}
 	if students.grantUserID != "usr-old" {
 		t.Errorf("attached %q, want the account that already existed", students.grantUserID)
@@ -259,13 +259,17 @@ func TestInviteUnknownContactIs404(t *testing.T) {
 // deployment's fault, not the caller's, so it must not read as a bad request.
 func TestInviteContactWithoutTheGuardianRoleIs500(t *testing.T) {
 	iam := issuerWithGuardianRole()
-	iam.roles = []client.Role{{ID: "role-owner", Name: "owner"}}
-	h := handler.NewContactAccessHandler(iam, granterWithContact(plainContact()))
+	iam.inviteErr = connect.NewError(connect.CodeInternal, errString("the guardian role is missing from this deployment"))
+	students := granterWithContact(plainContact())
+	h := handler.NewContactAccessHandler(iam, students)
 
 	rec := doInvite(t, h, "stu-1", "gl-1")
 
 	if rec.Code < 500 {
 		t.Errorf("status = %d, want a 5xx — a missing role is the deployment's fault", rec.Code)
+	}
+	if students.grantUserID != "" {
+		t.Errorf("granted %q after a failed invitation", students.grantUserID)
 	}
 }
 

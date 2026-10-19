@@ -191,3 +191,24 @@ func TestIsOwnerRoleID(t *testing.T) {
 		}
 	}
 }
+
+func TestIsGuardianRoleID(t *testing.T) {
+	tests := []struct {
+		id   string
+		want bool
+	}{
+		{domain.GuardianRoleID, true},
+		{"00000000-0000-0000-0000-0000000000a2", true},
+		// Postgres reads a uuid in any case; so must the guard.
+		{"00000000-0000-0000-0000-0000000000A2", true},
+		{" 00000000-0000-0000-0000-0000000000a2 ", true},
+		{domain.OwnerRoleID, false},
+		{"guardian", false}, // a name is never the id.
+		{"", false},
+	}
+	for _, tt := range tests {
+		if got := domain.IsGuardianRoleID(tt.id); got != tt.want {
+			t.Errorf("IsGuardianRoleID(%q) = %v, want %v", tt.id, got, tt.want)
+		}
+	}
+}

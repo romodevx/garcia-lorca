@@ -9,6 +9,7 @@ import (
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
 	"github.com/garcia-lorca/services/iam/internal/domain"
+	"github.com/garcia-lorca/services/iam/internal/ports"
 	"github.com/garcia-lorca/services/iam/internal/usecase"
 )
 
@@ -42,6 +43,7 @@ type fakeUsers struct {
 	created      []createdUser            // CreateUser calls
 	listOut      []domain.User            // ListUsers return
 	statusSet    map[string]domain.Status // SetStatus calls
+	statusKeep   map[string]string        // SetStatus calls: user -> keepActiveHolderOf
 	passwordsSet map[string]string        // UpdatePassword calls
 	rotated      map[string]bool          // TouchPasswordChangedAt calls
 	rolesSet     map[string][]string      // SetUserRoles calls
@@ -144,17 +146,40 @@ func (f *fakeUsers) ListUsers(_ context.Context) ([]domain.User, error) {
 	return f.listOut, nil
 }
 
-func (f *fakeUsers) SetStatus(_ context.Context, userID string, status domain.Status) error {
+func (f *fakeUsers) SetStatus(_ context.Context, userID string, status domain.Status, keepActiveHolderOf string) error {
 	// A deleted row is out of reach of a plain status change, as in the
 	// repository: only Restore brings it back.
-	if u, ok := f.byID[userID]; ok && u.IsDeleted() {
+	target, ok := f.byID[userID]
+	if !ok {
+		target, ok = f.byID[strings.ToLower(userID)]
+	}
+	if ok && target.IsDeleted() {
 		return glerrors.ErrNotFound
+	}
+	// The repository's last-holder rule, as SoftDelete emulates it: leaving
+	// `active` is refused for the only active holder of keepActiveHolderOf.
+	if ok && status != domain.StatusActive && target.Status() == domain.StatusActive &&
+		slices.Contains(target.RoleIDs(), keepActiveHolderOf) && !f.otherActiveHolder(target.ID(), keepActiveHolderOf) {
+		return domain.ErrLastOwner
 	}
 	if f.statusSet == nil {
 		f.statusSet = map[string]domain.Status{}
+		f.statusKeep = map[string]string{}
 	}
 	f.statusSet[userID] = status
+	f.statusKeep[userID] = keepActiveHolderOf
 	return nil
+}
+
+// SessionStateOf reads the account's lifecycle state and session floor the way
+// FindByID finds it, failing with findByIDErr when that stands in for an
+// unavailable database.
+func (f *fakeUsers) SessionStateOf(ctx context.Context, userID string) (ports.SessionState, error) {
+	u, err := f.FindByID(ctx, userID)
+	if err != nil {
+		return ports.SessionState{}, err
+	}
+	return ports.SessionState{Status: u.Status(), PasswordChangedAt: u.PasswordChangedAt()}, nil
 }
 
 // SoftDelete emulates the repository's atomic rule: the only ACTIVE holder of
@@ -262,6 +287,7 @@ func (fakeHasher) Verify(hash, plain string) error {
 // fakeTokens is both issuer and validator; tokens are inspectable strings.
 type fakeTokens struct {
 	lastClaims      domain.Claims
+	accessIssuedAt  time.Time // issued-at reported by ValidateAccessToken
 	refreshFor      string
 	refreshIssuedAt time.Time // issued-at reported by ParseRefreshToken (zero ⇒ no floor)
 	// lastKind is the session kind the last refresh token was issued for, and
@@ -282,7 +308,7 @@ func (t *fakeTokens) IssueRefreshToken(_ context.Context, userID string, kind do
 }
 func (t *fakeTokens) ValidateAccessToken(_ context.Context, token string) (domain.Claims, error) {
 	if token == "access:u1" {
-		return domain.Claims{Subject: "u1", Permissions: []string{"students:read"}}, nil
+		return domain.Claims{Subject: "u1", Permissions: []string{"students:read"}, IssuedAt: t.accessIssuedAt}, nil
 	}
 	return domain.Claims{}, glerrors.ErrUnauthorized
 }

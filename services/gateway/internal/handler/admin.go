@@ -20,7 +20,7 @@ type AdminService interface {
 	ResendInvitation(ctx context.Context, userID string) (client.Invitation, error)
 	GetUser(ctx context.Context, id string) (client.User, error)
 	ListUsers(ctx context.Context) ([]client.User, error)
-	SetUserStatus(ctx context.Context, userID, status string) (client.User, error)
+	SetUserStatus(ctx context.Context, accessToken, userID, status string) (client.User, error)
 	DeleteUser(ctx context.Context, accessToken, userID string) error
 	AssignRole(ctx context.Context, userID, roleID string) error
 	RevokeRole(ctx context.Context, userID, roleID string) error
@@ -358,13 +358,17 @@ type setUserStatusRequest struct {
 }
 
 // SetUserStatus handles POST /api/v1/users/{id}/status: suspend or reactivate.
+//
+// The caller's OWN token goes to iam, as DeleteUser does, because that is where
+// the rules live (ISSUE-CC-117): nobody suspends themself, and the last active
+// owner stays. Both refusals come back in iam's own words.
 func (h *AdminHandler) SetUserStatus(w http.ResponseWriter, r *http.Request) {
 	var req setUserStatusRequest
 	if err := decodeJSONBody(w, r, &req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	res, err := h.svc.SetUserStatus(r.Context(), r.PathValue("id"), req.Status)
+	res, err := h.svc.SetUserStatus(r.Context(), middleware.TokenFrom(r), r.PathValue("id"), req.Status)
 	if err != nil {
 		writeConnectError(w, err)
 		return

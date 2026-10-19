@@ -41,7 +41,7 @@ func TestDeletedStatusHasAName(t *testing.T) {
 	c, stop := newStubServer(t)
 	defer stop()
 
-	u, err := c.SetUserStatus(context.Background(), "usr-1", "deleted")
+	u, err := c.SetUserStatus(context.Background(), "caller-token", "usr-1", "deleted")
 	// The stub echoes the status it received; "deleted" is not a status a
 	// caller may SET (iam refuses it), but it must have a wire name so a
 	// deleted row reads as deleted rather than "unknown".

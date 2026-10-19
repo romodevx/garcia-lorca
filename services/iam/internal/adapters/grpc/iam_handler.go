@@ -192,6 +192,21 @@ func toProtoInvitation(inv usecase.Invitation) *iamv1.Invitation {
 	}
 }
 
+// InviteGuardian ensures a family contact holds the guardian role, which only
+// this RPC hands out (the role is chosen by iam, never the request). The
+// invitation is absent when the address already had a live account.
+func (h *IAMHandler) InviteGuardian(ctx context.Context, req *connect.Request[iamv1.InviteGuardianRequest]) (*connect.Response[iamv1.InviteGuardianResponse], error) {
+	out, err := h.admin.InviteGuardian(ctx, req.Msg.GetEmail(), req.Msg.GetDisplayName())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	res := &iamv1.InviteGuardianResponse{User: toProtoUser(out.User)}
+	if out.Invitation != nil {
+		res.Invitation = toProtoInvitation(*out.Invitation)
+	}
+	return connect.NewResponse(res), nil
+}
+
 func (h *IAMHandler) CreateUser(ctx context.Context, req *connect.Request[iamv1.CreateUserRequest]) (*connect.Response[iamv1.CreateUserResponse], error) {
 	user, err := h.admin.CreateUser(ctx, req.Msg.GetEmail(), req.Msg.GetDisplayName(), req.Msg.GetTempPassword(), req.Msg.GetRoleIds())
 	if err != nil {
@@ -220,15 +235,28 @@ func (h *IAMHandler) ListUsers(ctx context.Context, _ *connect.Request[iamv1.Lis
 	return connect.NewResponse(&iamv1.ListUsersResponse{Users: out}), nil
 }
 
+// SetUserStatus suspends or reactivates an account. Like DeleteUser, the caller
+// is the verified subject of the access token: the self-suspension guard must
+// not trust anything the request says about who is asking.
 func (h *IAMHandler) SetUserStatus(ctx context.Context, req *connect.Request[iamv1.SetUserStatusRequest]) (*connect.Response[iamv1.SetUserStatusResponse], error) {
+	claims, err := h.auth.ValidateToken(ctx, req.Msg.GetAccessToken())
+	if err != nil {
+		return nil, connectErr(err)
+	}
 	status, err := fromProtoStatus(req.Msg.GetStatus())
 	if err != nil {
 		return nil, connectErr(err)
 	}
-	if err := h.admin.SetUserStatus(ctx, req.Msg.GetUserId(), status); err != nil {
+	// Validated here, at the boundary, as DeleteUser does: an id that is not a
+	// uuid names no account, and parsing gives the ONE spelling compared after.
+	target, err := uuid.Parse(req.Msg.GetUserId())
+	if err != nil {
+		return nil, connectErr(glerrors.ErrNotFound)
+	}
+	if err := h.admin.SetUserStatus(ctx, claims.Subject, target.String(), status); err != nil {
 		return nil, connectErr(err)
 	}
-	user, err := h.admin.GetUser(ctx, req.Msg.GetUserId())
+	user, err := h.admin.GetUser(ctx, target.String())
 	if err != nil {
 		return nil, connectErr(err)
 	}

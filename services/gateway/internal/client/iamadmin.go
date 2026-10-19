@@ -48,6 +48,28 @@ func (c *AuthClient) InviteUser(ctx context.Context, email, displayName string, 
 	return toUser(res.Msg.GetUser()), toInvitation(res.Msg.GetInvitation()), nil
 }
 
+// InviteGuardian ensures a family contact holds the guardian role. It takes no
+// role: iam chooses it, and this is the only road into it (InviteUser refuses
+// the guardian role, ISSUE-CC-115). iam keys it on the address: an existing
+// live account gains the role and comes back with a NIL invitation — nothing
+// was sent; otherwise the account is invited (or restored) and the link
+// returned.
+func (c *AuthClient) InviteGuardian(ctx context.Context, email, displayName string) (User, *Invitation, error) {
+	res, err := c.rpc.InviteGuardian(ctx, connect.NewRequest(&iamv1.InviteGuardianRequest{
+		Email:       email,
+		DisplayName: displayName,
+	}))
+	if err != nil {
+		return User{}, nil, err
+	}
+	user := toUser(res.Msg.GetUser())
+	if res.Msg.GetInvitation() == nil {
+		return user, nil, nil
+	}
+	inv := toInvitation(res.Msg.GetInvitation())
+	return user, &inv, nil
+}
+
 // Invitation is what came of issuing the link: whether it was delivered, why
 // not, and — when it was not — the link itself, so the caller has something to
 // hand over.
@@ -139,11 +161,13 @@ func (c *AuthClient) ListUsers(ctx context.Context) ([]User, error) {
 
 // SetUserStatus suspends or reactivates an identity. status is the canonical
 // lowercase name ("active"/"suspended"); an unknown value maps to the
-// unspecified wire enum, which iam rejects as invalid.
-func (c *AuthClient) SetUserStatus(ctx context.Context, userID, status string) (User, error) {
+// unspecified wire enum, which iam rejects as invalid. accessToken is the
+// CALLER's own: iam's self-suspension guard reads the verified subject from it.
+func (c *AuthClient) SetUserStatus(ctx context.Context, accessToken, userID, status string) (User, error) {
 	res, err := c.rpc.SetUserStatus(ctx, connect.NewRequest(&iamv1.SetUserStatusRequest{
-		UserId: userID,
-		Status: userStatusFromName(status),
+		AccessToken: accessToken,
+		UserId:      userID,
+		Status:      userStatusFromName(status),
 	}))
 	if err != nil {
 		return User{}, err

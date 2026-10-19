@@ -44,6 +44,26 @@ var ErrDeletionPending = errors.New("user deleted; closing steps pending")
 var ErrLastOwner = glerrors.New(glerrors.KindConflict,
 	"no se puede eliminar al último director activo")
 
+// ErrLastOwnerSuspension is the same rule for suspending: a suspended account
+// cannot sign in either, so suspending the only active owner would leave the
+// school with nobody to administer it once the session runs out.
+var ErrLastOwnerSuspension = glerrors.New(glerrors.KindConflict,
+	"no se puede suspender al último director activo")
+
+// ErrSelfSuspension refuses suspending your own account: the session in hand
+// would be the last thing you could do as yourself.
+var ErrSelfSuspension = glerrors.New(glerrors.KindForbidden,
+	"no puedes suspender tu propia cuenta")
+
+// ErrOwnerSuspensionByNonOwner refuses a non-director suspending a director:
+// users:write can be delegated, the owner's account must not be at its mercy.
+var ErrOwnerSuspensionByNonOwner = glerrors.New(glerrors.KindForbidden,
+	"sólo un director puede suspender a otro director")
+
+// ErrGuardianRoleIsNotManual refuses handing the guardian role out by hand.
+var ErrGuardianRoleIsNotManual = glerrors.New(glerrors.KindInvalid,
+	"el rol de tutor (guardian) no se asigna a mano: se da desde la ficha del alumno, con «Dar acceso a la app»")
+
 // User is the IAM principal: a stable identity with an email (unique per
 // tenant), a lifecycle status, and a set of assigned roles. Authorization is
 // derived from the union of the roles' permissions.
