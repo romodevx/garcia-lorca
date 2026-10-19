@@ -324,7 +324,7 @@ func correctTo(svc *usecase.FinanceService, depositID string, cents int64, paidA
 		DepositID: depositID, AmountCents: cents, PaidAt: paidAt,
 		Tenders: []usecase.TenderInput{{Method: domain.MethodCash, AmountCents: cents}},
 		Reason:  "Se capturó con otra fecha", IdempotencyKey: uuid.NewString(),
-		By:      domain.Receiver{UserID: "64000000-0000-0000-0000-000000000001", Name: "Directora Ruiz"},
+		By: domain.Receiver{UserID: "64000000-0000-0000-0000-000000000001", Name: "Directora Ruiz"},
 	})
 }
 
