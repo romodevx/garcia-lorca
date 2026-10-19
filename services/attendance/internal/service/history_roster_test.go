@@ -88,7 +88,8 @@ func TestRosterIsWhoWasInTheGroupThatDay(t *testing.T) {
 		{"before Lalo enrolled, with Mía still in A and Rita not yet gone", histGroupA, "2026-10-14", []string{enrMia, enrRita, enrTono}},
 		{"Rita's last day is hers (she left that evening)", histGroupA, "2026-10-15", []string{enrMia, enrRita, enrTono}},
 		{"the day after Rita left", histGroupA, "2026-10-16", []string{enrMia, enrTono}},
-		{"the move day: Mía is on both lists, Lalo's first day", histGroupA, "2026-10-17", []string{enrLalo, enrMia, enrTono}},
+		// C2-011: unmarked on the move day, Mía counts in her new group only.
+		{"the move day: Mía (unmarked) is no longer on A's list, Lalo's first day", histGroupA, "2026-10-17", []string{enrLalo, enrTono}},
 		{"after the move, Mía is no longer in A", histGroupA, "2026-10-19", []string{enrLalo, enrTono}},
 		{"B before Mía joined does not show her", histGroupB, "2026-10-16", []string{}},
 		{"B from the move day on", histGroupB, "2026-10-17", []string{enrMia}},
@@ -201,7 +202,8 @@ func TestSummaryCountsAMovedOutPupilUntilTheMove(t *testing.T) {
 	for _, line := range got.Students {
 		byID[line.EnrollmentID] = line
 	}
-	assert.Equal(t, 3, byID[enrMia].Lists, "the 14th, 16th and the move day")
+	// C2-011: unmarked on the move day, she counts in B that day, not here.
+	assert.Equal(t, 2, byID[enrMia].Lists, "the 14th and 16th; the move day is B's")
 	assert.False(t, byID[enrMia].Active, "she left the group")
 	assert.Equal(t, 2, byID[enrLalo].Lists, "from enrolling on the 17th")
 	assert.Equal(t, 1, byID[enrRita].Lists, "until withdrawing on the 15th")

@@ -55,6 +55,11 @@ type fakeRepo struct {
 	// holds: like the real repository, a planned insert for one is not stored
 	// and is reported in ListChanges.HeldElsewhere.
 	held map[string]bool
+	// owners records which group's list stored each row (subjectDayKey →
+	// group), as the real repository's group_id does (attendance/0004): a row
+	// stored by one group's list is held elsewhere for every other group's.
+	// A seeded row with no owner is legacy and belongs to every list.
+	owners map[string]string
 
 	historyCalls     int
 	lastHistoryGroup string
@@ -87,7 +92,15 @@ func (f *fakeRepo) ListSessions(_ context.Context, groupIDs []string, from, to t
 }
 
 func newFakeRepo() *fakeRepo {
-	return &fakeRepo{rows: map[string]service.AttendanceRecord{}, sessions: map[string]service.Session{}}
+	return &fakeRepo{rows: map[string]service.AttendanceRecord{}, sessions: map[string]service.Session{}, owners: map[string]string{}}
+}
+
+// heldElsewhere reports whether another group's list holds the pupil·day·subject
+// of key: flagged in held, or stored by a different group's list.
+func (f *fakeRepo) heldElsewhere(enrollmentID string, key service.ListKey) bool {
+	k := subjectDayKey(enrollmentID, key.Date, key.SubjectID)
+	owner, owned := f.owners[k]
+	return f.held[k] || (owned && owner != key.GroupID)
 }
 
 // dayKey keys a DAILY-list mark (no subject); subjectDayKey a per-class one.
@@ -103,20 +116,29 @@ func sessionKey(k service.ListKey) string {
 	return k.GroupID + "|" + k.Date.Format(dateLayout) + "|" + k.SubjectID
 }
 
-func (f *fakeRepo) MarksForList(_ context.Context, enrollmentIDs []string, key service.ListKey) (map[string]service.AttendanceRecord, error) {
+func (f *fakeRepo) MarksForList(_ context.Context, enrollmentIDs []string, key service.ListKey) (service.ListMarks, error) {
 	f.marksForDateCalls++
 	f.lastMarksIDs = append([]string(nil), enrollmentIDs...)
 	f.lastMarksDate = key.Date
 	f.lastMarksSubject = key.SubjectID
 	if f.err != nil {
-		return nil, f.err
+		return service.ListMarks{}, f.err
 	}
-	return f.current(enrollmentIDs, key), nil
+	out := service.ListMarks{Own: f.current(enrollmentIDs, key), HeldElsewhere: map[string]bool{}}
+	for _, id := range enrollmentIDs {
+		if f.heldElsewhere(id, key) {
+			out.HeldElsewhere[id] = true
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeRepo) current(enrollmentIDs []string, key service.ListKey) map[string]service.AttendanceRecord {
 	out := make(map[string]service.AttendanceRecord, len(enrollmentIDs))
 	for _, id := range enrollmentIDs {
+		if f.heldElsewhere(id, key) {
+			continue
+		}
 		if rec, ok := f.rows[subjectDayKey(id, key.Date, key.SubjectID)]; ok {
 			out[id] = rec
 		}
@@ -155,13 +177,14 @@ func (f *fakeRepo) ReconcileList(_ context.Context, key service.ListKey, enrollm
 	// starts at 1 and every in-place write bumps the stored one.
 	stored := service.ListChanges{Deletes: changes.Deletes}
 	for _, rec := range changes.Inserts {
-		if f.held[subjectDayKey(rec.EnrollmentID, rec.Date, rec.SubjectID)] {
+		if f.heldElsewhere(rec.EnrollmentID, key) {
 			stored.HeldElsewhere = append(stored.HeldElsewhere, rec.EnrollmentID)
 			continue
 		}
 		rec.Revision = 1
 		stored.Inserts = append(stored.Inserts, rec)
 		f.rows[subjectDayKey(rec.EnrollmentID, rec.Date, rec.SubjectID)] = rec
+		f.owners[subjectDayKey(rec.EnrollmentID, rec.Date, rec.SubjectID)] = key.GroupID
 	}
 	for _, u := range changes.Updates {
 		u.Record.Revision = current[u.Record.EnrollmentID].Revision + 1
@@ -171,6 +194,7 @@ func (f *fakeRepo) ReconcileList(_ context.Context, key service.ListKey, enrollm
 	f.lastChanges = changes
 	for _, rec := range changes.Deletes {
 		delete(f.rows, subjectDayKey(rec.EnrollmentID, rec.Date, rec.SubjectID))
+		delete(f.owners, subjectDayKey(rec.EnrollmentID, rec.Date, rec.SubjectID))
 	}
 	sk := sessionKey(key)
 	s, ok := f.sessions[sk]

@@ -69,7 +69,7 @@ func TestPerClassListsAreIndependentKeys(t *testing.T) {
 	saveList(t, r, daily, scope, testTaker, subjectMark("a0000000-0000-0000-0000-000000000103", enrollmentPerClass, date, "", "excused"))
 
 	for key, want := range map[service.ListKey]string{math: "absent", spanish: "late", daily: "excused"} {
-		marks, err := r.MarksForList(ctx, scope, key)
+		marks, err := ownMarks(r.MarksForList(ctx, scope, key))
 		require.NoError(t, err)
 		got, ok := marks[enrollmentPerClass]
 		require.True(t, ok, "list %q lost its mark", key.SubjectID)
@@ -79,7 +79,7 @@ func TestPerClassListsAreIndependentKeys(t *testing.T) {
 
 	// Clearing the math list leaves the other two alone.
 	saveList(t, r, math, scope, testTaker)
-	marks, err := r.MarksForList(ctx, scope, math)
+	marks, err := ownMarks(r.MarksForList(ctx, scope, math))
 	require.NoError(t, err)
 	assert.Empty(t, marks)
 	assert.Equal(t, int64(2), countMarks(t, tenantA, enrollmentPerClass))
@@ -158,7 +158,7 @@ func TestReconcileListUpdatesInPlace(t *testing.T) {
 	require.Len(t, changes.Updates, 1)
 	assert.True(t, changes.Updates[0].StatusChanged)
 
-	marks, err := r.MarksForList(context.Background(), scope, key)
+	marks, err := ownMarks(r.MarksForList(context.Background(), scope, key))
 	require.NoError(t, err)
 	got := marks[enrollmentSession]
 	assert.Equal(t, "a0000000-0000-0000-0000-000000000401", got.ID, "the stored id survives a correction")
@@ -265,7 +265,7 @@ func TestConcurrentReconcilesReportOnlyTheStoredRow(t *testing.T) {
 	require.NoError(t, errs[1])
 
 	require.Equal(t, int64(1), countMarks(t, tenantA, enrollmentListRace), "exactly one stored row")
-	marks, err := appRepo(t, tenantA).MarksForList(ctx, scope, key)
+	marks, err := ownMarks(appRepo(t, tenantA).MarksForList(ctx, scope, key))
 	require.NoError(t, err)
 	stored := marks[enrollmentListRace].ID
 
@@ -329,7 +329,7 @@ func TestReconcileListReportsTheStoredRevision(t *testing.T) {
 	assert.Equal(t, storedID, changes.Updates[0].Record.ID)
 	assert.Equal(t, int64(4), changes.Updates[0].Record.Revision)
 
-	marks, err := r.MarksForList(ctx, scope, key)
+	marks, err := ownMarks(r.MarksForList(ctx, scope, key))
 	require.NoError(t, err)
 	assert.Equal(t, int64(4), marks[enrollmentRevision].Revision, "reads carry the stored revision")
 
