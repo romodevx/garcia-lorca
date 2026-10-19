@@ -69,7 +69,8 @@ function ledgerFace(k: HomeKpis, toConfig: boolean, ready: (l: Ledger) => KpiFac
 /**
  * The KPI cards this caller sees, and the face each one shows. Students for
  * students:read (B4); the money pair for finance:read (B5) plus config:read,
- * since the ledger is read per cycle and only config:read reads cycles.
+ * since the ledger is read per cycle and only config:read reads cycles, and
+ * only while module_finance is on (C2-013).
  */
 export function homeKpiCards(k: HomeKpis, permissions: readonly string[], flags: FlagSet): KpiCard[] {
   const can = (p: string): boolean => permissions.includes(p);
@@ -77,7 +78,7 @@ export function homeKpiCards(k: HomeKpis, permissions: readonly string[], flags:
   if (can("students:read")) {
     cards.push({ id: "students", labelKey: "kpi.students.label", icon: "students", color: "forest", opens: { id: "students" }, face: studentsFace(k, permissions, flags) });
   }
-  if (!can("finance:read") || !can("config:read")) return cards;
+  if (!can("finance:read") || !can("config:read") || flags.module_finance !== true) return cards;
 
   const toConfig = opensSettings(permissions, flags);
   const toPayments = payments !== undefined && isModuleVisible(payments, permissions);

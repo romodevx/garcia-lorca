@@ -1,12 +1,14 @@
 "use client";
 
+import { useFlags } from "@garcia-lorca/ui/flags";
 import type { CSSProperties, ReactElement } from "react";
 import { Btn } from "../_design/Controls";
 import { formatCents as money } from "../_lib/money";
 import { Icon, type IconName } from "../_design/Icon";
 import { Page } from "../_design/Page";
 import { COLOR, type ColorKey } from "../_design/colors";
-import { MODULES, isModuleVisible, type ModuleDef } from "../_design/data";
+import { MODULES, isModuleEnabled, isModuleVisible, type ModuleDef } from "../_design/data";
+import { useFlagsResolved } from "../flags-resolved";
 import { greetingFor, todayLabel } from "../home/greeting";
 import { HomeView } from "../home/HomeView";
 import { NoModules, PermissionsUnavailable } from "../home/HomeNotices";
@@ -113,11 +115,18 @@ function ClassicDashboard({ user, onOpen, permissions, permissionsFailed = false
   const greet = greetingFor(now);
   const today = todayLabel(now);
 
-  // Role-aware visibility: a tile/shortcut is shown IFF the principal holds the
-  // module's READ permission. `undefined` means `me()` has not resolved yet.
+  // Role-aware visibility: a tile/shortcut is shown IFF the module is switched
+  // on and the principal holds its READ permission. `undefined` means `me()`
+  // has not resolved yet.
+  const flags = useFlags();
   const resolved = permissions !== undefined;
-  const visibleModules = resolved ? MODULES.filter((m) => isModuleVisible(m, permissions)) : [];
+  // Until /features answers every flag reads OFF: the grid waits for both.
+  const flagsResolved = useFlagsResolved();
+  const modulesReady = resolved && flagsResolved;
+  const visibleModules = modulesReady ? MODULES.filter((m) => isModuleVisible(m, permissions) && isModuleEnabled(m, flags)) : [];
   const canSee = (perm: string): boolean => resolved && permissions.includes(perm);
+  // The money KPIs read finance's ledger: none while module_finance is off (C2-013).
+  const seesMoney = canSee("finance:read") && flags.module_finance === true;
 
   // Real KPIs — no mock numbers: students from the roster, money from the ledger.
   // Each read runs only for a caller who may make it: a maestro or a cajera has
@@ -128,7 +137,7 @@ function ClassicDashboard({ user, onOpen, permissions, permissionsFailed = false
   const { students, cycle, ledger } = useHomeKpis({
     students: canSee("students:read"),
     cycles: readsCycles,
-    ledger: readsCycles && canSee("finance:read"),
+    ledger: readsCycles && seesMoney,
   });
   const ledgerNow = ledger.status === "ready" ? ledger.value : NO_LEDGER;
   const kpi = {
@@ -162,12 +171,12 @@ function ClassicDashboard({ user, onOpen, permissions, permissionsFailed = false
       </div>
 
       {/* KPIs — each shortcut is shown only to callers who can read its module. */}
-      {(canSee("students:read") || canSee("finance:read")) && (
+      {(canSee("students:read") || seesMoney) && (
         <div className="fade-up" style={{ display: "flex", gap: 18, flexWrap: "wrap", marginBottom: 34 }}>
           {canSee("students:read") && (
             <KpiCard icon="students" color="forest" label="Alumnos" value={String(kpi.students)} sub="Registrados este ciclo" onClick={() => onOpen("students")} />
           )}
-          {canSee("finance:read") && (
+          {seesMoney && (
             <>
               <KpiCard icon="finance" color="orange" label="Por cobrar" value={money(kpi.pending)} sub={`${kpi.withBalance} cargos con saldo`} onClick={() => onOpen("finance")} />
               <KpiCard icon="trend" color="lime" label="Cobrado" value={money(kpi.collected)} sub={`Ciclo ${cycleName ?? "—"}`} onClick={() => onOpen("finance")} />
@@ -177,7 +186,7 @@ function ClassicDashboard({ user, onOpen, permissions, permissionsFailed = false
       )}
 
       {/* modules — no heading over nothing: NoModules says it on its own (CC-315) */}
-      {!(resolved && !permissionsFailed && visibleModules.length === 0) && (
+      {!(modulesReady && !permissionsFailed && visibleModules.length === 0) && (
         <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 16 }}>
           <h2 style={{ fontSize: 21, fontWeight: 700, color: "var(--text)" }}>Módulos</h2>
           <span style={{ fontSize: 14, color: "var(--text-faint)" }}>Todo el sistema, a la vista</span>
@@ -185,7 +194,7 @@ function ClassicDashboard({ user, onOpen, permissions, permissionsFailed = false
       )}
       {permissionsFailed ? (
         <PermissionsUnavailable onRetry={onRetryPermissions} />
-      ) : !resolved ? (
+      ) : !modulesReady ? (
         <ModulesSkeleton />
       ) : visibleModules.length === 0 ? (
         <NoModules permissions={permissions} />

@@ -1,11 +1,13 @@
 "use client";
 
+import { useFlags } from "@garcia-lorca/ui/flags";
 import type { ReactElement } from "react";
 
 import { Btn } from "../_design/Controls";
 import { Icon } from "../_design/Icon";
 import { Page } from "../_design/Page";
-import { MODULES, isModuleVisible } from "../_design/data";
+import { MODULES, isModuleEnabled, isModuleVisible } from "../_design/data";
+import { useFlagsResolved } from "../flags-resolved";
 import { greetingFor, todayLabel } from "./greeting";
 import { HomeKpis } from "./HomeKpis";
 import { HomeModules, HomeModulesSkeleton } from "./HomeModules";
@@ -19,13 +21,21 @@ import { useHomeKpis } from "./useHomeKpis";
  * as the classic home (§2, B1–B12); only the layout and the KPI states change.
  */
 export function HomeView({ user, onOpen, permissions, permissionsFailed = false, onRetryPermissions, now = new Date() }: HomeProps): ReactElement {
+  const flags = useFlags();
   const resolved = permissions !== undefined;
   const canSee = (perm: string): boolean => resolved && permissions.includes(perm);
-  const visibleModules = resolved ? MODULES.filter((m) => isModuleVisible(m, permissions)) : [];
+  // Until /features answers every flag reads OFF: the cards wait for both.
+  const flagsResolved = useFlagsResolved();
+  const modulesReady = resolved && flagsResolved;
+  const visibleModules = modulesReady ? MODULES.filter((m) => isModuleVisible(m, permissions) && isModuleEnabled(m, flags)) : [];
 
   // B6: each read only for a caller who may make it.
   const readsCycles = canSee("config:read");
-  const kpis = useHomeKpis({ students: canSee("students:read"), cycles: readsCycles, ledger: readsCycles && canSee("finance:read") });
+  const kpis = useHomeKpis({
+    students: canSee("students:read"),
+    cycles: readsCycles,
+    ledger: readsCycles && canSee("finance:read") && flags.module_finance === true,
+  });
 
   return (
     <Page>
@@ -51,7 +61,7 @@ export function HomeView({ user, onOpen, permissions, permissionsFailed = false,
 
         {permissionsFailed ? (
           <PermissionsUnavailable onRetry={onRetryPermissions} />
-        ) : !resolved ? (
+        ) : !modulesReady ? (
           <HomeModulesSkeleton />
         ) : visibleModules.length === 0 ? (
           <NoModules permissions={permissions} />

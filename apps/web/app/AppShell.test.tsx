@@ -5,6 +5,7 @@ import { AppShell } from "./AppShell";
 import { requestIntent } from "./routing/pendingIntent";
 import { authFetch } from "./auth/authFetch";
 import { HttpError } from "./auth/httpError";
+import { ALL_MODULES_ON } from "./home/testing/renderHome";
 import { Providers, fakePath, fakeRouter, resetFakeRouter, useFakePathname } from "./test-utils";
 import { changePassword as apiChangePassword, login as apiLogin, logout as apiLogout, me as apiMe, refresh as apiRefresh } from "./auth/api";
 import { mayHaveSession } from "./auth/sessionHint";
@@ -301,7 +302,7 @@ describe("AppShell navigation flow", () => {
       role: "owner",
     });
     render(
-      <Providers flags={{}}>
+      <Providers flags={ALL_MODULES_ON}>
         <AppShell />
       </Providers>
     );
@@ -329,7 +330,7 @@ describe("AppShell navigation flow", () => {
       permissions: ["grades:read"],
     });
     render(
-      <Providers flags={{}}>
+      <Providers flags={ALL_MODULES_ON}>
         <AppShell />
       </Providers>
     );
@@ -464,20 +465,16 @@ describe("AppShell navigation flow", () => {
   });
 
   it("falls back to the placeholder when module_finance is OFF (UX gating)", async () => {
-    mockLogin.mockResolvedValue({ expiresIn: 900, mustChangePassword: false });
-    // The caller CAN read finance (KPI shortcut visible); the module flag being
-    // OFF is what routes to the placeholder — permission governs visibility,
-    // flag governs real-surface-vs-stub. Boot restore fails, post-login /me resolves.
-    mockMe.mockRejectedValueOnce(new Error("no session")).mockResolvedValue(OWNER_ME);
-    const user = userEvent.setup();
+    // C2-013: an OFF module has no card or KPI on the home, so the only way in
+    // is typing its address; that still lands on the friendly stub, never on the
+    // real surface. Boot restore succeeds with an owner who CAN read finance.
+    resetFakeRouter("/finanzas");
+    mockMe.mockResolvedValue(OWNER_ME);
     render(
       <Providers flags={{}}>
         <AppShell />
       </Providers>
     );
-
-    await submitLogin(user);
-    await user.click(screen.getByRole("button", { name: /Por cobrar/ }));
 
     // Flag OFF → friendly stub, not the real finance table. The placeholder
     // shows the "Módulo «...»" heading; the real surface shows the status tablist.
@@ -621,7 +618,7 @@ describe("when the server ends the session mid-use", () => {
     // A live session on boot, so the shell starts where the owner was: inside.
     mockMe.mockResolvedValueOnce({ userId: "u1", email: "owner@example.com", permissions: ["students:read"] });
     render(
-      <Providers flags={{}}>
+      <Providers flags={ALL_MODULES_ON}>
         <AppShell />
       </Providers>
     );
@@ -811,7 +808,7 @@ describe("la dirección manda sobre la pantalla", () => {
     mockMe.mockRejectedValueOnce(new Error("no session")).mockResolvedValue(OWNER_ME);
     const user = userEvent.setup();
     render(
-      <Providers>
+      <Providers flags={ALL_MODULES_ON}>
         <AppShell />
       </Providers>
     );
@@ -919,7 +916,7 @@ describe("la guardia de módulos", () => {
     email: "maestra@example.com",
     permissions: ["teaching:read", "teaching:write", "attendance_own:read", "attendance_own:write"],
   };
-  const ALL_FLAGS = { module_students: true, module_finance: true, module_teachers: true, module_config: true, module_iam: true };
+  const ALL_FLAGS = { module_students: true, module_finance: true, module_teachers: true, module_config: true, module_iam: true, module_attendance: true, module_grades: true };
 
   it.each(["/alumnos", "/finanzas", "/docentes", "/configuracion", "/administracion", "/alumnos/st1/editar"])(
     "un maestro que escribe %s aterriza en el tablero",

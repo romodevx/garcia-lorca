@@ -26,6 +26,13 @@ describe("buildCommandRegistry", () => {
     expect(got).toContain("finance.nav");
   });
 
+  // C2-013: Becas lives in finance; with finance OFF the palette must not offer it.
+  it("excludes a module whose host module is off", () => {
+    const got = ids({ module_students: true, module_scholarships: true, module_expenses: true });
+    expect(got.some((id) => id.startsWith("scholarships."))).toBe(false);
+    expect(got.some((id) => id.startsWith("expenses."))).toBe(false);
+  });
+
   it("excludes ALL commands of a disabled module (flag OFF → 0 commands)", () => {
     const got = ids({ module_students: true }); // finance OFF
     expect(got).toContain("students.nav");
