@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	connect "connectrpc.com/connect"
+	"github.com/ledongthuc/pdf"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -275,4 +277,29 @@ func TestReportCardJSONOfAPeriodCard(t *testing.T) {
 	assert.Contains(t, body, `"periods":[{"id":"per-1","ordinal":1,"name":"1.er trimestre"}],"months":[]`)
 	assert.Contains(t, body, `"periods":{"per-1":9},"months":{},"average":8.66`)
 	assert.Contains(t, body, `"generalAverage":8.66`)
+}
+
+// C2-008: the handler hands the school's zone to the PDF, so a card issued at
+// 20:52 in Morelia on 18 Oct (19 Oct in UTC) prints the 18th.
+func TestTheReportCardPDFPrintsTheSchoolsIssueDay(t *testing.T) {
+	morelia, err := time.LoadLocation("America/Mexico_City")
+	require.NoError(t, err)
+	card := issuedCard()
+	card.IssuedAt = time.Date(2026, 10, 19, 2, 52, 0, 0, time.UTC)
+	h := handler.NewReportCardsHandler(&fakeReportCards{card: card}, fakeProfiles{}, fakeLinks{},
+		handler.WithReportCardZone(morelia))
+	req := closerReq(http.MethodGet, "/x", "")
+	req.SetPathValue("id", rcID)
+	rec := httptest.NewRecorder()
+
+	h.PDF(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	r, err := pdf.NewReader(bytes.NewReader(rec.Body.Bytes()), int64(rec.Body.Len()))
+	require.NoError(t, err)
+	plain, err := r.GetPlainText()
+	require.NoError(t, err)
+	text, err := io.ReadAll(plain)
+	require.NoError(t, err)
+	assert.Contains(t, string(text), "Emitida el 18 de octubre de 2026")
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/garcia-lorca/pkg/studentname"
 	"github.com/garcia-lorca/services/gateway/internal/client"
@@ -31,11 +32,25 @@ type ReportCardsHandler struct {
 	grades   ReportCardsService
 	profiles SchoolProfileReader
 	links    GuardianLinkReader
+	zone     *time.Location
+}
+
+// ReportCardsOption configures a ReportCardsHandler.
+type ReportCardsOption func(*ReportCardsHandler)
+
+// WithReportCardZone sets the school's time zone, so the PDF's issue date is
+// the school's day (ADR 0035). Without it the PDF prints the UTC day.
+func WithReportCardZone(zone *time.Location) ReportCardsOption {
+	return func(h *ReportCardsHandler) { h.zone = zone }
 }
 
 // NewReportCardsHandler wires the handler. links is the family ownership gate.
-func NewReportCardsHandler(grades ReportCardsService, profiles SchoolProfileReader, links GuardianLinkReader) *ReportCardsHandler {
-	return &ReportCardsHandler{grades: grades, profiles: profiles, links: links}
+func NewReportCardsHandler(grades ReportCardsService, profiles SchoolProfileReader, links GuardianLinkReader, opts ...ReportCardsOption) *ReportCardsHandler {
+	h := &ReportCardsHandler{grades: grades, profiles: profiles, links: links}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h
 }
 
 const (
@@ -313,7 +328,7 @@ func (h *ReportCardsHandler) servePDF(w http.ResponseWriter, r *http.Request, c 
 		writeConnectError(w, err)
 		return
 	}
-	doc, err := reportcard.PDF(reportcard.Document{School: school, Card: c})
+	doc, err := reportcard.PDF(reportcard.Document{School: school, Card: c, Zone: h.zone})
 	if err != nil {
 		http.Error(w, "the report card could not be rendered", http.StatusInternalServerError)
 		return
