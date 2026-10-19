@@ -415,17 +415,14 @@ func (r *Repository) AdjustStock(ctx context.Context, stockID string, delta int,
 			return glerrors.Wrap(glerrors.KindInternal, "adjusting stock", res.Error)
 		}
 		if res.RowsAffected == 0 {
-			// Either the size does not exist or the correction would strip a
-			// family's hold. Tell them apart, because the fixes differ.
-			var exists int64
-			if err := tx.Model(&stockModel{}).Where("id = ?", stockID).Count(&exists).Error; err != nil {
-				return glerrors.Wrap(glerrors.KindInternal, "checking stock", err)
+			// The size does not exist, or the correction would go below zero,
+			// or it would strip a family's hold. Tell them apart, because the
+			// fixes differ.
+			var current stockModel
+			if err := tx.Where("id = ?", stockID).First(&current).Error; err != nil {
+				return translateFindErr(err)
 			}
-			if exists == 0 {
-				return glerrors.ErrNotFound
-			}
-			return glerrors.New(glerrors.KindConflict,
-				"that correction would leave fewer pieces than families are already holding")
+			return adjustRefusal(current, delta)
 		}
 		if err := r.appendMove(tx, stockID, "", "adjust", delta, note, actorUserID); err != nil {
 			return err
@@ -442,6 +439,21 @@ func (r *Repository) AdjustStock(ctx context.Context, stockID string, delta int,
 		return nil
 	})
 	return out, err
+}
+
+// adjustRefusal explains why the conditional UPDATE refused a correction by
+// replaying it on the row as it stands: the domain names the cause (below zero
+// versus below what families hold). When the row would now accept it, a
+// concurrent write moved the count in between; the refusal stands as a hold.
+func adjustRefusal(current stockModel, delta int) error {
+	level, err := toDomainStock(current)
+	if err != nil {
+		return err
+	}
+	if _, err := level.Adjust(delta); err != nil {
+		return err
+	}
+	return glerrors.New(glerrors.KindConflict, "an adjustment cannot take the count below what is held")
 }
 
 // appendMove writes one entry in the append-only stock ledger. Every movement of
