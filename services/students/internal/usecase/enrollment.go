@@ -254,8 +254,10 @@ func (s *EnrollmentService) Transfer(ctx context.Context, enrollmentID, toGroupI
 	if err != nil {
 		return domain.Enrollment{}, err
 	}
+	// The office reads these refusals as written, like the full-group 409
+	// (CC-405), so they are in Spanish.
 	if !enr.CanTransfer() {
-		return domain.Enrollment{}, glerrors.New(glerrors.KindInvalid, "enrollment is not active")
+		return domain.Enrollment{}, glerrors.New(glerrors.KindInvalid, notTransferable(enr))
 	}
 
 	toGrp, err := groupOf(ctx, s.catalog, toGroupID)
@@ -263,10 +265,10 @@ func (s *EnrollmentService) Transfer(ctx context.Context, enrollmentID, toGroupI
 		return domain.Enrollment{}, err
 	}
 	if toGrp.CycleID != enr.CycleID() {
-		return domain.Enrollment{}, glerrors.New(glerrors.KindInvalid, "cannot transfer across cycles")
+		return domain.Enrollment{}, glerrors.New(glerrors.KindInvalid, "ese grupo es de otro ciclo")
 	}
 	if toGroupID == enr.GroupID() {
-		return domain.Enrollment{}, glerrors.New(glerrors.KindInvalid, "already in that group")
+		return domain.Enrollment{}, glerrors.New(glerrors.KindInvalid, "el alumno ya está en ese grupo")
 	}
 	student, err := s.students.FindByID(ctx, enr.StudentID())
 	if err != nil {
@@ -296,6 +298,15 @@ func (s *EnrollmentService) Transfer(ctx context.Context, enrollmentID, toGroupI
 		return domain.Enrollment{}, err
 	}
 	return s.enrollments.GetEnrollment(ctx, enrollmentID)
+}
+
+// notTransferable says why an enrollment that is not active cannot move: a
+// withdrawn pupil is the case the office meets; any other state is a stale row.
+func notTransferable(enr domain.Enrollment) string {
+	if enr.Status() == domain.EnrollmentStatusWithdrawn {
+		return "el alumno está dado de baja: no se puede cambiar de grupo"
+	}
+	return "su inscripción ya no está activa: no se puede cambiar de grupo"
 }
 
 // requireSameLevel refuses a grade outside the pupil's level. Four groups can
