@@ -47,6 +47,12 @@ ledger operations run in a single transaction (Unit of Work).
   callback), so concurrent cashiers serialize on the charge row.
 - Charge status is a projection of the summed payments, re-derived on every
   write; only `cancelled` is set independently and is terminal.
+- **A charge with money on it is not cancelled (C2-005, owner 2026-10-19).**
+  `CancelCharge` goes through `CancelChargeIfUnpaidWithReason`, under the
+  charge's `FOR UPDATE`: paid > 0 is 409 `charge has payments and cannot be
+  cancelled`; the payment is voided or corrected first. Every cancellation
+  stores `cancelled_at` + `cancelled_by` (0029; NULL for system sweeps and for
+  rows cancelled before the rule).
 - Overdue is a function of due date + a clock passed in (deterministic; no
   `time.Now()` inside the domain).
 - **"Today" is Morelia's calendar day (D8, ADR 0035).** ONE source of time,
