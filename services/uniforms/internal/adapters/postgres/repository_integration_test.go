@@ -165,6 +165,25 @@ func TestCounterSaleCannotSpendAHold(t *testing.T) {
 	}
 }
 
+// TestAdjustStockNamesWhyItRefused (C2-002): going below zero with nothing held
+// and stripping a family's hold are different refusals, and say so.
+func TestAdjustStockNamesWhyItRefused(t *testing.T) {
+	ctx := context.Background()
+	repo := appRepo(t, tenantA)
+	_, bare := seedGarment(t, repo, "ADJ-ZERO", "8", 32000, 3)
+	_, held := seedGarment(t, repo, "ADJ-HOLD", "8", 32000, 5)
+	holdStock(t, held.ID(), 4)
+
+	_, err := repo.AdjustStock(ctx, bare.ID(), -5, "conteo físico", "")
+	if glerrors.KindOf(err) != glerrors.KindConflict || !strings.Contains(err.Error(), "below zero") {
+		t.Errorf("below zero with nothing held: got %v", err)
+	}
+	_, err = repo.AdjustStock(ctx, held.ID(), -3, "conteo físico", "")
+	if glerrors.KindOf(err) != glerrors.KindConflict || !strings.Contains(err.Error(), "below what is held") {
+		t.Errorf("below the holds: got %v", err)
+	}
+}
+
 // TestCounterSaleIsIdempotent: a double click at the till sells once.
 func TestCounterSaleIsIdempotent(t *testing.T) {
 	ctx := context.Background()
