@@ -16,14 +16,18 @@ import (
 	"github.com/signintech/gopdf"
 	"golang.org/x/text/unicode/norm"
 
+	"github.com/garcia-lorca/pkg/schoolcal"
 	"github.com/garcia-lorca/services/gateway/internal/client"
 	"github.com/garcia-lorca/services/gateway/internal/pdffont"
 )
 
 // Document is what a report card PDF prints: the snapshot and the school.
+// Zone is the school's time zone, so the issue date is the school's day
+// (ADR 0035); nil prints the UTC day.
 type Document struct {
 	School client.SchoolProfile
 	Card   client.ReportCard
+	Zone   *time.Location
 }
 
 const (
@@ -108,7 +112,7 @@ func PDF(d Document) ([]byte, error) {
 		w.text(pdffont.Bold, bodySize, NoGradesNotice)
 		w.rule()
 	}
-	w.foot(d.Card)
+	w.foot(d.Card, d.Zone)
 	if w.err != nil {
 		return nil, fmt.Errorf("rendering report card %s: %w", d.Card.ID, w.err)
 	}
@@ -299,12 +303,12 @@ func (w *writer) row(family, subject string, values []string, average string) {
 
 // foot prints the scale and the issue date. The school's legend is the
 // receipt's footer ("Gracias por su pago…"), so it never prints here.
-func (w *writer) foot(c client.ReportCard) {
+func (w *writer) foot(c client.ReportCard, zone *time.Location) {
 	w.y += lineGap
 	s := c.Scale
 	w.text(pdffont.Regular, smallSize, fmt.Sprintf("Calificación mínima aprobatoria: %s · Escala de %s a %s",
 		decimal(s.PassingHundredths), decimal(s.MinHundredths), decimal(s.MaxHundredths)))
-	w.text(pdffont.Regular, smallSize, prefixed("Emitida el ", spanishDate(c.IssuedAt)))
+	w.text(pdffont.Regular, smallSize, prefixed("Emitida el ", spanishDate(c.IssuedAt, zone)))
 }
 
 // --- primitives ----------------------------------------------------------------
@@ -391,13 +395,17 @@ func monthLabels(months []string) []string {
 	return out
 }
 
-// spanishDate is "1 de diciembre de 2026" (the UTC day, the platform's school day).
-func spanishDate(t time.Time) string {
+// spanishDate is "1 de diciembre de 2026": the day t falls on in zone (UTC
+// when zone is nil).
+func spanishDate(t time.Time, zone *time.Location) string {
 	if t.IsZero() {
 		return ""
 	}
-	u := t.UTC()
-	return fmt.Sprintf("%d de %s de %d", u.Day(), monthLong[u.Month()-1], u.Year())
+	if zone == nil {
+		zone = time.UTC
+	}
+	day := schoolcal.Date(t, zone)
+	return fmt.Sprintf("%d de %s de %d", day.Day(), monthLong[day.Month()-1], day.Year())
 }
 
 // decimal prints hundredths as the shortest exact decimal (600 → "6", 950 → "9.5").

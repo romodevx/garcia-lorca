@@ -230,3 +230,18 @@ func TestHasGrades(t *testing.T) {
 	card.Lines = nil
 	assert.False(t, reportcard.HasGrades(card), "no subjects, no grades")
 }
+
+// C2-008: the issue date is the school's day (ADR 0035). At 20:52 in Morelia
+// on 18 Oct it is already 19 Oct in UTC; the card must still say the 18th.
+func TestTheIssueDateIsTheSchoolsDayNotUTCs(t *testing.T) {
+	morelia, err := time.LoadLocation("America/Mexico_City")
+	require.NoError(t, err)
+	card := sampleCard()
+	card.IssuedAt = time.Date(2026, 10, 19, 2, 52, 0, 0, time.UTC)
+
+	doc, err := reportcard.PDF(reportcard.Document{School: school, Card: card, Zone: morelia})
+	require.NoError(t, err)
+	text := textOf(t, doc)
+	assert.Contains(t, text, "Emitida el 18 de octubre de 2026")
+	assert.NotContains(t, text, "19 de octubre")
+}

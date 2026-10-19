@@ -587,7 +587,11 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("GET /api/v1/grades/periods/{termId}/progress", gradesRead(periodsH.Progress))
 	mux.Handle("POST /api/v1/grades/periods/{termId}/close", gradesClose(periodsH.Close))
 	mux.Handle("POST /api/v1/grades/periods/{termId}/reopen", gradesClose(periodsH.Reopen))
-	reportCardsH := handler.NewReportCardsHandler(gradesClient, configClient, studentsClient)
+	var reportCardOptions []handler.ReportCardsOption
+	if len(schoolLocations) > 0 {
+		reportCardOptions = append(reportCardOptions, handler.WithReportCardZone(schoolLocations[0]))
+	}
+	reportCardsH := handler.NewReportCardsHandler(gradesClient, configClient, studentsClient, reportCardOptions...)
 	mux.Handle("GET /api/v1/grades/report-cards", gradesRead(reportCardsH.List))
 	mux.Handle("GET /api/v1/grades/report-cards/{id}", gradesRead(reportCardsH.Get))
 	mux.Handle("GET /api/v1/grades/report-cards/{id}/pdf", gradesRead(reportCardsH.PDF))
