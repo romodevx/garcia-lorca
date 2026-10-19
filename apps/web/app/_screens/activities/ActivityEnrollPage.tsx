@@ -167,7 +167,7 @@ export function ActivityEnrollPage({ activity, canWrite, onBack }: ActivityEnrol
         </ConfirmDialog>
       )}
       {offer !== undefined
-        ? <UndoToast message={offer.message} onUndo={offer.restore} />
+        ? <UndoToast message={offer.message} onUndo={offer.restore} onDismiss={withdraw} />
         : toast !== undefined && <Toast>{toast}</Toast>}
     </Page>
   );

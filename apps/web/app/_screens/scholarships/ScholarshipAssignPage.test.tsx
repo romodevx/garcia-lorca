@@ -119,6 +119,18 @@ describe("ScholarshipAssignPage (T18)", () => {
     expect(screen.queryByRole("button", { name: "Deshacer" })).not.toBeInTheDocument();
   });
 
+  it("Cerrar aviso hides Deshacer and keeps the scholarship taken away", async () => {
+    const user = userEvent.setup();
+    m.unassignScholarship.mockResolvedValue(1);
+    open();
+    await user.click(await within(holders()).findByRole("checkbox", { name: "Cano Ceci" }));
+    await user.click(screen.getByRole("button", { name: /Quitar beca/ }));
+    await user.click(await screen.findByRole("button", { name: "Cerrar aviso" }));
+
+    expect(screen.queryByRole("button", { name: "Deshacer" })).not.toBeInTheDocument();
+    expect(m.assignScholarship).not.toHaveBeenCalled();
+  });
+
   it("shows the gateway's refusal and keeps the lists as they were", async () => {
     const user = userEvent.setup();
     m.assignScholarship.mockRejectedValue(new Error("La beca está inactiva."));
