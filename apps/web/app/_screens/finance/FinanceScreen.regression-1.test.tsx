@@ -49,6 +49,9 @@ beforeEach(() => {
   finance.getOverdue.mockResolvedValue([]);
   finance.getIncome.mockResolvedValue({ lines: [], totalCents: 0, creditNoteCents: 0 });
   finance.registerDeposit.mockResolvedValue(DEPOSIT);
+  // PayDrawer quotes the deposit after a debounce; an undefined mock throws
+  // from that timer once the test has moved on and fails the whole run.
+  finance.previewDeposit.mockResolvedValue({ allocations: [], surcharges: [], unallocatedCents: 0 });
 });
 afterEach(() => vi.clearAllMocks());
 
