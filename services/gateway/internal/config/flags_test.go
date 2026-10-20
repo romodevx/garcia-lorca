@@ -43,14 +43,15 @@ func TestParseEnabledModulesAcceptsFullKeys(t *testing.T) {
 }
 
 func TestAllModuleFlagsCoversRegistry(t *testing.T) {
-	// FLAGS.md registers 22 module flags; the enumeration must match so
+	// FLAGS.md registers 23 module flags; the enumeration must match so
 	// GET /features reports every module. (M14 added module_teachers; task 13,
 	// module_student_card; T10, module_expenses; T16, module_schedule; T17,
 	// module_activities; the legacy student import, module_student_import; the
 	// Configuración setup view, module_config_setup; the app-wide look refresh,
-	// module_ui_refresh; the Avisos view, module_announcements_view.)
-	if len(config.AllModuleFlags) != 22 {
-		t.Errorf("AllModuleFlags has %d entries, want 22", len(config.AllModuleFlags))
+	// module_ui_refresh; the Avisos view, module_announcements_view; the
+	// «Estructura de la escuela» step, module_school_structure.)
+	if len(config.AllModuleFlags) != 23 {
+		t.Errorf("AllModuleFlags has %d entries, want 23", len(config.AllModuleFlags))
 	}
 	seen := map[string]bool{}
 	for _, k := range config.AllModuleFlags {
@@ -122,6 +123,7 @@ func TestPresentationFlagsAreRegisteredAndDefaultOff(t *testing.T) {
 	}{
 		{key: "module_config_setup", baseline: "config", enabling: "config,config_setup"},
 		{key: "module_announcements_view", baseline: "comms", enabling: "comms,announcements_view"},
+		{key: "module_school_structure", baseline: "config,config_setup", enabling: "config,config_setup,school_structure"},
 		// The app-wide look (PLAN-redesign-home F2b) dresses every module, so
 		// its baseline is the whole local compose list.
 		{key: "module_ui_refresh", baseline: composeModules, enabling: composeModules + ",ui_refresh"},

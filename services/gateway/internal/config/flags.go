@@ -48,6 +48,11 @@ var AllModuleFlags = []string{
 	// Presentation only: it guards no route; the boundary stays module_comms +
 	// comms:read/write.
 	featureflag.Key("announcements_view"),
+	// Configuración académica: niveles, grados y grupos in one step, «Estructura
+	// de la escuela» (PLAN-redesign-estructura). Presentation only, inside the
+	// setup view (module_config_setup); the boundary stays module_config +
+	// config:read/write.
+	featureflag.Key("school_structure"),
 }
 
 // ParseEnabledModules turns a comma-separated list of module names (or full
