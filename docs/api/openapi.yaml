@@ -367,6 +367,32 @@ paths:
         '403': { $ref: '#/components/responses/PlainForbidden' }
         '404': { $ref: '#/components/responses/PlainNotFound' }
 
+  /api/v1/family/students/{studentId}/payment-info:
+    get:
+      tags: [family]
+      summary: How to pay for a child by transfer
+      description: >
+        The school's CLABE, its bank, who receives the money (the legal name,
+        or the school's name without one) and the child's own bank reference,
+        which is how the school tells whose deposit it is. An empty `clabe`
+        means the school has not captured one; an empty `reference`, that the
+        child has none yet. A child that is not the caller's is 404. Behind
+        `module_finance` AND `module_students`. Requires `family:read`.
+      operationId: getFamilyPaymentInfo
+      security: [{ familyBearer: [] }]
+      parameters: [{ $ref: '#/components/parameters/FamilyStudentIdPath' }]
+      responses:
+        '200':
+          description: How to pay.
+          headers:
+            Cache-Control: { $ref: '#/components/headers/NoStore' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FamilyPaymentInfo' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
   /api/v1/family/students/{studentId}/statement/pdf:
     get:
       tags: [family]
@@ -2031,6 +2057,62 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/BirthdayTemplate' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+
+  /api/v1/config/school-profile:
+    get:
+      tags: [config]
+      summary: The school's details
+      description: >
+        What a receipt, card and report card print about the school, plus the
+        CLABE the family app shows for transfers. A school that has not filled
+        them answers 200 with found=false. Requires `config:read`.
+      operationId: getSchoolProfile
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200':
+          description: The school's details.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [profile, found]
+                properties:
+                  profile: { $ref: '#/components/schemas/SchoolProfile' }
+                  found: { type: boolean, example: true }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ModuleDisabled' }
+    put:
+      tags: [config]
+      summary: Replace the school's details
+      description: >
+        Every field is replaced: one left empty is empty afterwards. The name is
+        required; the RFC and CCT must have the SAT's and SEP's shape, the phone
+        ten digits, and the CLABE eighteen digits with Banxico's check digit
+        (spaces and dashes are dropped). `clabeBank` is ignored on input.
+        Requires `config:write`.
+      operationId: putSchoolProfile
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SchoolProfile' }
+      responses:
+        '200':
+          description: The details as saved, normalised.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [profile]
+                properties:
+                  profile: { $ref: '#/components/schemas/SchoolProfile' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -8426,6 +8508,42 @@ components:
           example: teaching assignment not found
 
   schemas:
+    SchoolProfile:
+      type: object
+      required: [name, legalName, rfc, cct, address, phone, legend, clabe, clabeBank]
+      properties:
+        name: { type: string, maxLength: 200 }
+        legalName: { type: string, maxLength: 200 }
+        rfc: { type: string, maxLength: 13 }
+        cct: { type: string, maxLength: 10 }
+        address: { type: string, maxLength: 300 }
+        phone: { type: string, description: 'Ten digits, or empty.' }
+        legend: { type: string, maxLength: 500 }
+        clabe: { type: string, description: 'Eighteen digits with a valid check digit, or empty.' }
+        clabeBank: { type: string, readOnly: true, description: "The CLABE's bank; empty when unknown." }
+      example:
+        name: COLEGIO GARCÍA LORCA
+        legalName: Educación García Lorca, S.C.
+        rfc: EGL150101AB1
+        cct: 09PPR0001A
+        address: Av. Siempre Viva 742, Centro
+        phone: '5512345678'
+        legend: Gracias por su pago.
+        clabe: '012180001234567899'
+        clabeBank: BBVA México
+    FamilyPaymentInfo:
+      type: object
+      required: [clabe, bank, beneficiary, reference]
+      properties:
+        clabe: { type: string, description: Empty while the school has not captured one. }
+        bank: { type: string }
+        beneficiary: { type: string }
+        reference: { type: string, description: "The child's bank reference; empty when none." }
+      example:
+        clabe: '012180001234567899'
+        bank: BBVA México
+        beneficiary: Educación García Lorca, S.C.
+        reference: '1234567'
     StudentImportRequest:
       type: object
       required: [fileBase64]

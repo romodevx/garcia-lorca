@@ -75,7 +75,7 @@ export function freshSchool(over: Partial<FakeSchool> = {}): FakeSchool {
   };
 }
 
-const EMPTY_PROFILE = { name: "", legalName: "", rfc: "", cct: "", address: "", phone: "", legend: "" };
+const EMPTY_PROFILE = { name: "", legalName: "", rfc: "", cct: "", address: "", phone: "", legend: "", clabe: "" };
 const RUN = { tuitionCreated: 3, enrollmentCreated: 0, lateFeesCreated: 0, feesCreated: 0, enrollmentMoved: 0, skipped: 0, levelsWithoutPlan: [] };
 
 let seq = 0;

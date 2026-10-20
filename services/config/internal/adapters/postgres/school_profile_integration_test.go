@@ -19,14 +19,14 @@ func TestSchoolProfileUpsertAndIsolation(t *testing.T) {
 	if _, found, err := repoA.GetSchoolProfile(ctx); err != nil || found {
 		t.Fatalf("before any save: found %v, err %v", found, err)
 	}
-	first, err := domain.NewSchoolProfile(tenantA, domain.SchoolProfileInput{Name: "Colegio A", RFC: "EGL150101AB1"})
+	first, err := domain.NewSchoolProfile(tenantA, domain.SchoolProfileInput{Name: "Colegio A", RFC: "EGL150101AB1", CLABE: "012180001234567899"})
 	if err != nil {
 		t.Fatalf("NewSchoolProfile: %v", err)
 	}
 	if err := repoA.UpsertSchoolProfile(ctx, first); err != nil {
 		t.Fatalf("first save: %v", err)
 	}
-	second, err := domain.NewSchoolProfile(tenantA, domain.SchoolProfileInput{Name: "Colegio A renombrado", Legend: "Gracias"})
+	second, err := domain.NewSchoolProfile(tenantA, domain.SchoolProfileInput{Name: "Colegio A renombrado", Legend: "Gracias", CLABE: "032180000118359719"})
 	if err != nil {
 		t.Fatalf("NewSchoolProfile: %v", err)
 	}
@@ -36,6 +36,9 @@ func TestSchoolProfileUpsertAndIsolation(t *testing.T) {
 	got, found, err := repoA.GetSchoolProfile(ctx)
 	if err != nil || !found {
 		t.Fatalf("read back: found %v, err %v", found, err)
+	}
+	if got.CLABE() != "032180000118359719" {
+		t.Errorf("CLABE read back %q; want the second save's", got.CLABE())
 	}
 	if got.Name() != "Colegio A renombrado" || got.RFC() != "" || got.Legend() != "Gracias" {
 		t.Errorf("read back %q rfc %q legend %q; want the second save whole", got.Name(), got.RFC(), got.Legend())

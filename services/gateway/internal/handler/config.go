@@ -1145,23 +1145,38 @@ func (h *ConfigHandler) GetSchoolProfile(w http.ResponseWriter, r *http.Request)
 		writeConnectError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"profile": p, "found": found})
+	writeJSON(w, http.StatusOK, map[string]any{"profile": toSchoolProfileBody(p), "found": found})
 }
 
 // PutSchoolProfile handles PUT /api/v1/config/school-profile: every field is
 // replaced (task 12).
 func (h *ConfigHandler) PutSchoolProfile(w http.ResponseWriter, r *http.Request) {
-	var req client.SchoolProfile
+	var req schoolProfileBody
 	if err := decodeJSONBody(w, r, &req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	saved, err := h.svc.SetSchoolProfile(r.Context(), req)
+	in := req.SchoolProfile
+	in.CLABE = req.CLABE
+	saved, err := h.svc.SetSchoolProfile(r.Context(), in)
 	if err != nil {
 		writeConnectError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"profile": saved})
+	writeJSON(w, http.StatusOK, map[string]any{"profile": toSchoolProfileBody(saved)})
+}
+
+// schoolProfileBody is the school's details as the configuration screen reads
+// and writes them: the printed fields plus the CLABE, which only this screen
+// and the family's payment info carry.
+type schoolProfileBody struct {
+	client.SchoolProfile
+	CLABE     string `json:"clabe"`
+	CLABEBank string `json:"clabeBank"`
+}
+
+func toSchoolProfileBody(p client.SchoolProfile) schoolProfileBody {
+	return schoolProfileBody{SchoolProfile: p, CLABE: p.CLABE, CLABEBank: p.CLABEBank}
 }
 
 // ListSchoolEvents handles GET /api/v1/config/events?cycleId=…

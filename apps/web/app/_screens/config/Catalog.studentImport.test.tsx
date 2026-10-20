@@ -31,7 +31,7 @@ beforeEach(() => {
   mocked.listTerms.mockResolvedValue([]);
   mocked.listNonWorkingPeriods.mockResolvedValue([]);
   mocked.listSchoolEvents.mockResolvedValue([]);
-  mocked.getSchoolProfile.mockResolvedValue({ profile: { name: "", legalName: "", rfc: "", cct: "", address: "", phone: "", legend: "" }, found: false });
+  mocked.getSchoolProfile.mockResolvedValue({ profile: { name: "", legalName: "", rfc: "", cct: "", address: "", phone: "", legend: "", clabe: "" }, found: false });
   vi.mocked(financeApi).listTuitionPlans.mockResolvedValue([]);
 });
 afterEach(() => vi.clearAllMocks());

@@ -178,6 +178,27 @@ export async function getStatement(studentId: string): Promise<FamilyStatement> 
   };
 }
 
+/**
+ * How to pay for a child by transfer: the school's CLABE, its bank, who receives
+ * the money and the child's own bank reference. An empty `clabe` means the
+ * school has not captured one; an empty `reference`, that the child has none.
+ */
+export interface FamilyPaymentInfo {
+  clabe: string;
+  bank: string;
+  beneficiary: string;
+  reference: string;
+}
+
+/** Reads how to pay for one child. */
+export async function getPaymentInfo(studentId: string): Promise<FamilyPaymentInfo> {
+  const data = await unwrap<Partial<FamilyPaymentInfo>>(
+    await apiFetch(`/api/v1/family/students/${encodeURIComponent(studentId)}/payment-info`),
+    "payment info",
+  );
+  return { clabe: data.clabe ?? "", bank: data.bank ?? "", beneficiary: data.beneficiary ?? "", reference: data.reference ?? "" };
+}
+
 /** The authenticated path of the statement's PDF. */
 export function statementPdfPath(studentId: string): string {
   return `/api/v1/family/students/${studentId}/statement/pdf`;

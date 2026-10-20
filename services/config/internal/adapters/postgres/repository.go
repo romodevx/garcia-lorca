@@ -1109,7 +1109,7 @@ func (r *Repository) UpsertSchoolProfile(ctx context.Context, p domain.SchoolPro
 	return r.withTenant(ctx, func(tx *gorm.DB) error {
 		err := tx.Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "tenant_id"}},
-			DoUpdates: clause.AssignmentColumns([]string{"name", "legal_name", "rfc", "cct", "address", "phone", "legend", "updated_at"}),
+			DoUpdates: clause.AssignmentColumns([]string{"name", "legal_name", "rfc", "cct", "address", "phone", "legend", "clabe", "updated_at"}),
 		}).Create(&model).Error
 		if err != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "saving the school's details", err)

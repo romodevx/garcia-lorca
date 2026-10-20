@@ -385,7 +385,7 @@ describe("what a failure tells the user", () => {
 describe("school profile", () => {
   const profile = {
     name: "Colegio García Lorca", legalName: "", rfc: "EGL150101AB1", cct: "",
-    address: "", phone: "5512345678", legend: "",
+    address: "", phone: "5512345678", legend: "", clabe: "",
   };
 
   it("reads the details and whether the school has filled them", async () => {

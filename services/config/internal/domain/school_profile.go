@@ -35,10 +35,11 @@ type SchoolProfileInput struct {
 	Address   string
 	Phone     string
 	Legend    string
+	CLABE     string
 }
 
-// SchoolProfile is what a receipt prints about the school (task 12): one per
-// school. The name is the only field a receipt cannot do without; the rest is
+// SchoolProfile is what a receipt prints about the school (task 12), and the
+// CLABE the family app shows for transfers: one per school. The name is the only field a receipt cannot do without; the rest is
 // printed when the school has filled it in.
 type SchoolProfile struct {
 	tenantID  string
@@ -49,6 +50,7 @@ type SchoolProfile struct {
 	address   string
 	phone     string
 	legend    string
+	clabe     string
 }
 
 // NewSchoolProfile validates and normalises the school's details: trimmed text,
@@ -86,9 +88,13 @@ func NewSchoolProfile(tenantID string, in SchoolProfileInput) (SchoolProfile, er
 	if utf8.RuneCountInString(legend) > maxProfileLegendLen {
 		return SchoolProfile{}, glerrors.New(glerrors.KindInvalid, "the legend is too long")
 	}
+	clabe, err := normaliseCLABE(in.CLABE)
+	if err != nil {
+		return SchoolProfile{}, err
+	}
 	return SchoolProfile{
 		tenantID: tenantID, name: name, legalName: legalName, rfc: rfc, cct: cct,
-		address: address, phone: phone, legend: legend,
+		address: address, phone: phone, legend: legend, clabe: clabe,
 	}, nil
 }
 
@@ -121,3 +127,4 @@ func (p SchoolProfile) CCT() string       { return p.cct }
 func (p SchoolProfile) Address() string   { return p.address }
 func (p SchoolProfile) Phone() string     { return p.phone }
 func (p SchoolProfile) Legend() string    { return p.legend }
+func (p SchoolProfile) CLABE() string     { return p.clabe }

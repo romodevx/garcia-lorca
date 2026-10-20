@@ -169,7 +169,7 @@ describe("useSetupStatus: races", () => {
 });
 
 const plan = (cycleId: string, levelId: string): TuitionPlan => ({ id: `${cycleId}-${levelId}`, cycleId, levelId }) as TuitionPlan;
-const PROFILE: SchoolProfile = { name: "Colegio", legalName: "", rfc: "", cct: "", address: "", phone: "", legend: "" };
+const PROFILE: SchoolProfile = { name: "Colegio", legalName: "", rfc: "", cct: "", address: "", phone: "", legend: "", clabe: "" };
 
 describe("useSetupStatus: what the mounted panels report", () => {
   it("takes the profile from SchoolProfilePanel, and its failure", () => {

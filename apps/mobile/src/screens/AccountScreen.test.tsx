@@ -390,4 +390,43 @@ describe("AccountScreen (the backend's ledger, T7)", () => {
     expect(screen.queryByText("Al corriente")).toBeNull();
     expect(screen.queryByText("$0.00")).toBeNull();
   });
+
+  // How to pay by transfer, beside the balance: the school's CLABE and this
+  // child's reference.
+  it("shows how to pay by transfer when the school has a CLABE", async () => {
+    globalThis.fetch = jest.fn(async (url: string) => {
+      const u = String(url);
+      if (u.includes("/family/students/s1/payment-info")) {
+        return { ok: true, status: 200, json: async () => ({ clabe: "012180001234567899", bank: "BBVA México", beneficiary: "COLEGIO", reference: "1234567" }) };
+      }
+      if (u.includes("/family/students/s1/statement")) {
+        return { ok: true, status: 200, json: async () => ({ movements: [], totals: ZERO, dueTodayCents: 0, asOf: "2026-10-01" }) };
+      }
+      if (u.includes("/family/students")) return { ok: true, status: 200, json: async () => ({ students: [child] }) };
+      return { ok: true, status: 200, json: async () => ({ notifications: [] }) };
+    }) as unknown as typeof fetch;
+
+    await renderWithProviders(<AccountScreen />);
+
+    expect(await screen.findByText("Cómo pagar por transferencia")).toBeTruthy();
+    expect(screen.getByText("012 180 00123456789 9")).toBeTruthy();
+    expect(screen.getByText("1234567")).toBeTruthy();
+  });
+
+  it("keeps the account on screen when how-to-pay cannot be read", async () => {
+    globalThis.fetch = jest.fn(async (url: string) => {
+      const u = String(url);
+      if (u.includes("/payment-info")) return { ok: false, status: 500, json: async () => ({}) };
+      if (u.includes("/family/students/s1/statement")) {
+        return { ok: true, status: 200, json: async () => ({ movements: [line("charge", "2026-09-10", "Colegiatura septiembre", 320000, 320000)], totals: ZERO, dueTodayCents: 0, asOf: "2026-10-01" }) };
+      }
+      if (u.includes("/family/students")) return { ok: true, status: 200, json: async () => ({ students: [child] }) };
+      return { ok: true, status: 200, json: async () => ({ notifications: [] }) };
+    }) as unknown as typeof fetch;
+
+    await renderWithProviders(<AccountScreen />);
+
+    expect(await screen.findByText("Colegiatura septiembre")).toBeTruthy();
+    expect(screen.queryByText("Cómo pagar por transferencia")).toBeNull();
+  });
 });

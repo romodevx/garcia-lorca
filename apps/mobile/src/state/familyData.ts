@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { getCard, getStatement, type FamilyCard, type FamilyStatement } from "../api";
+import { getCard, getPaymentInfo, getStatement, type FamilyCard, type FamilyPaymentInfo, type FamilyStatement } from "../api";
 import { getAttendanceMonth, type AttendanceMonth } from "../api/attendance";
 import { getPeriodGrades, type PeriodGrades } from "../api/grades";
 import { getReportCard, listReportCards, type ReportCard, type ReportCardSummary } from "../api/reportCards";
@@ -37,6 +37,12 @@ function sharedAttendanceMonth(childId: string, month: string): Promise<Attendan
 /** The selected child's account statement: finance's ledger (T7). */
 export function useChildStatement(childId: string | null): AsyncResource<FamilyStatement> {
   const load = useMemo(() => (childId ? () => getStatement(childId) : null), [childId]);
+  return useAsyncResource(load);
+}
+
+/** How to pay for the selected child by transfer (the school's CLABE, the child's reference). */
+export function useChildPaymentInfo(childId: string | null): AsyncResource<FamilyPaymentInfo> {
+  const load = useMemo(() => (childId ? () => getPaymentInfo(childId) : null), [childId]);
   return useAsyncResource(load);
 }
 

@@ -135,7 +135,7 @@ describe("CatalogSetup — the step that opens (§1.4)", () => {
     await screen.findByRole("navigation", { name: "Puesta en marcha" });
 
     await user.click(stepButton("Calendario"));
-    await act(async () => answer({ found: false, profile: { name: "", legalName: "", rfc: "", cct: "", address: "", phone: "", legend: "" } }));
+    await act(async () => answer({ found: false, profile: { name: "", legalName: "", rfc: "", cct: "", address: "", phone: "", legend: "", clabe: "" } }));
     await settled();
 
     expect(stepButton("Calendario")).toHaveAttribute("aria-current", "step");

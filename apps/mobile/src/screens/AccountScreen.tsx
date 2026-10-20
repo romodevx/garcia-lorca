@@ -4,10 +4,11 @@ import { useMemo, type ReactElement } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { statementPdfPath } from "../api";
 import { useAppState } from "../state/AppState";
-import { useChildStatement } from "../state/familyData";
+import { useChildPaymentInfo, useChildStatement } from "../state/familyData";
 import { useRefreshHandler } from "../components/refresh";
 import { useTheme } from "../theme";
 import { Button, Card, Chip, EmptyState, ListRow, ScreenTitle, SectionLabel, TintIcon } from "../ui";
+import { HowToPayCard } from "./account/HowToPayCard";
 import { MovementList } from "./account/MovementList";
 import { splitLedger } from "./account/ledgerView";
 import { useReceiptDownload } from "./account/useReceiptDownload";
@@ -34,7 +35,12 @@ const PDF_MESSAGES = {
 export function AccountScreen(): ReactElement {
   const { selectedChildId, childLoading, childError, refreshChildren } = useAppState();
   const { data, loading, error, reload } = useChildStatement(selectedChildId);
-  useRefreshHandler(reload);
+  // How to pay is a companion read: when it fails the card is simply absent,
+  // never a reason to hide the account.
+  const payment = useChildPaymentInfo(selectedChildId);
+  useRefreshHandler(async () => {
+    await Promise.all([reload(), payment.reload()]);
+  });
   const cardEnabled = useFlag("module_student_card");
   const theme = useTheme();
   const pdfTarget = useMemo(
@@ -153,6 +159,8 @@ export function AccountScreen(): ReactElement {
           )}
         </View>
       </Card>
+
+      {payment.data !== null ? <HowToPayCard info={payment.data} /> : null}
 
       {cardEnabled && (
         // The child's virtual card (task 13), behind module_student_card.

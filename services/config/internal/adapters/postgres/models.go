@@ -196,6 +196,7 @@ type schoolProfileModel struct {
 	Address   string    `gorm:"column:address"`
 	Phone     string    `gorm:"column:phone"`
 	Legend    string    `gorm:"column:legend"`
+	CLABE     string    `gorm:"column:clabe"`
 	UpdatedAt time.Time `gorm:"column:updated_at;autoUpdateTime"`
 }
 

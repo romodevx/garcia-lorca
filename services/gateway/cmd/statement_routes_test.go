@@ -54,6 +54,10 @@ func TestStatementRoutes(t *testing.T) {
 		{"another family's child", "/api/v1/family/students/stu-999/statement", "family-reader", on, http.StatusNotFound, ""},
 		{"staff cannot use the family's door", "/api/v1/family/students/stu-1/statement", "finance-reader", on, http.StatusForbidden, ""},
 		{"finance off hides the family's", "/api/v1/family/students/stu-1/statement", "family-reader", map[string]bool{"module_students": true}, http.StatusNotFound, ""},
+		{"family reads how to pay", "/api/v1/family/students/stu-1/payment-info", "family-reader", on, http.StatusOK, ""},
+		{"how to pay for another family's child", "/api/v1/family/students/stu-999/payment-info", "family-reader", on, http.StatusNotFound, ""},
+		{"staff cannot read the family's payment info", "/api/v1/family/students/stu-1/payment-info", "finance-reader", on, http.StatusForbidden, ""},
+		{"finance off hides how to pay", "/api/v1/family/students/stu-1/payment-info", "family-reader", map[string]bool{"module_students": true}, http.StatusNotFound, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

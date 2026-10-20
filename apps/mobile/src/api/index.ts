@@ -16,6 +16,7 @@ export {
   listChildren,
   getProfile,
   getStatement,
+  getPaymentInfo,
   statementPdfPath,
   receiptPdfPath,
   getGrades,
@@ -30,6 +31,7 @@ export {
   type MovementKind,
   type FamilyGradeEntry,
   type FamilyCard,
+  type FamilyPaymentInfo,
   getCard,
   cardPhotoPath,
 } from "./family";

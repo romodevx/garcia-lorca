@@ -75,7 +75,7 @@ beforeEach(() => {
   mocked.listNonWorkingPeriods.mockResolvedValue([]);
   mocked.listSchoolEvents.mockResolvedValue([]);
   mocked.getSchoolProfile.mockResolvedValue({
-    profile: { name: "", legalName: "", rfc: "", cct: "", address: "", phone: "", legend: "" },
+    profile: { name: "", legalName: "", rfc: "", cct: "", address: "", phone: "", legend: "", clabe: "" },
     found: false,
   });
   mocked.listSubjects.mockResolvedValue([]);

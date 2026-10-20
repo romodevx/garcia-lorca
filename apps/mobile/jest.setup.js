@@ -32,6 +32,9 @@ jest.mock("expo-secure-store", () => {
   };
 }, { virtual: true });
 
+// expo-clipboard is a native module; screens only need the call to resolve.
+jest.mock("expo-clipboard", () => ({ setStringAsync: jest.fn(async () => true) }), { virtual: true });
+
 // expo-font: fonts are always "loaded" in tests so screens render immediately.
 jest.mock("expo-font", () => ({
   useFonts: () => [true, null],

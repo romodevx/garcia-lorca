@@ -17,7 +17,21 @@ import { ConfigError, getSchoolProfile, saveSchoolProfile, type SchoolProfile } 
 import { ErrorAlert, Section } from "./parts";
 import { useLatest } from "./useLatest";
 
-const EMPTY: SchoolProfile = { name: "", legalName: "", rfc: "", cct: "", address: "", phone: "", legend: "" };
+const EMPTY: SchoolProfile = { name: "", legalName: "", rfc: "", cct: "", address: "", phone: "", legend: "", clabe: "" };
+
+const CLABE_WEIGHTS = [3, 7, 1];
+
+/** The CLABE as its digits: a person types it in groups. */
+const clabeDigits = (v: string): string => v.replace(/[\s-]/g, "");
+
+/** Banxico's check: each digit by 3, 7, 1…, modulo 10, takes the sum to a ten. */
+export function isValidClabe(raw: string): boolean {
+  const clabe = clabeDigits(raw);
+  if (!/^[0-9]{18}$/.test(clabe)) return false;
+  let sum = 0;
+  for (let i = 0; i < 17; i++) sum += (Number(clabe[i]) * (CLABE_WEIGHTS[i % 3] ?? 1)) % 10;
+  return (10 - (sum % 10)) % 10 === Number(clabe[17]);
+}
 
 // The shapes the domain checks (config/domain/school_profile.go), said in the
 // office's words. Checked on blur and again on save; the server is the last word.
@@ -25,6 +39,7 @@ const RULES: Readonly<Record<string, FormatRule>> = {
   rfc: (v) => (/^[A-ZÑ&]{3,4}[0-9]{6}[A-Z0-9]{3}$/.test(v.trim().toUpperCase()) ? undefined : "El RFC no tiene la forma del SAT (12 o 13 caracteres)."),
   cct: (v) => (/^[0-9]{2}[A-Z]{3}[0-9]{4}[A-Z]$/.test(v.trim().toUpperCase()) ? undefined : "La CCT no tiene la forma de la SEP (10 caracteres, p. ej. 09PPR1234X)."),
   phone: (v) => (v.replace(/\D/g, "").length === 10 ? undefined : "El teléfono lleva 10 dígitos."),
+  clabe: (v) => (isValidClabe(v) ? undefined : "La CLABE no es válida: son 18 dígitos y el último es de verificación. Revísala contra el estado de cuenta del banco."),
 };
 
 const REQUIRED = ["name"] as const;
@@ -40,8 +55,9 @@ export interface SchoolProfilePanelProps {
 
 /**
  * Datos del colegio (task 12): what every receipt prints about the school. One
- * set per school, so it is a summary with "Editar", and a drawer with its seven
- * fields (the forms rule: 5–8 fields is a drawer).
+ * set per school, so it is a summary with "Editar", and a drawer with its eight
+ * fields (the forms rule: 5–8 fields is a drawer). The CLABE is also what the
+ * family app shows for transfers.
  */
 export function SchoolProfilePanel({ onLoaded }: SchoolProfilePanelProps = {}): ReactElement {
   const [profile, setProfile] = useState<SchoolProfile | undefined>(undefined);
@@ -102,7 +118,8 @@ export function SchoolProfilePanel({ onLoaded }: SchoolProfilePanelProps = {}): 
 
 /** One line under the name: what is filled, in the order a receipt prints it. */
 function summaryOf(p: SchoolProfile): string {
-  const parts = [p.rfc !== "" ? `RFC ${p.rfc}` : "", p.cct !== "" ? `CCT ${p.cct}` : "", p.phone, p.address];
+  const clabe = p.clabe !== "" ? `CLABE ${p.clabeBank !== undefined && p.clabeBank !== "" ? `${p.clabeBank} ` : ""}${p.clabe}` : "";
+  const parts = [p.rfc !== "" ? `RFC ${p.rfc}` : "", p.cct !== "" ? `CCT ${p.cct}` : "", p.phone, p.address, clabe];
   const shown = parts.filter((x) => x !== "");
   return shown.length > 0 ? shown.join(" · ") : "Sin RFC, CCT, teléfono ni dirección";
 }
@@ -122,14 +139,14 @@ function SchoolProfileDrawer({
   const required = useRequired(REQUIRED);
   const format = useFormatError(RULES);
   const focusFirstInvalid = useFocusFirstInvalid();
-  const values = useMemo<Record<string, string>>(() => ({ ...form }), [form]);
+  const values = useMemo<Record<string, string>>(() => ({ ...form, clabeBank: form.clabeBank ?? "" }), [form]);
 
   const edit = (key: keyof SchoolProfile) => (value: string): void => {
     const next = { ...form, [key]: value };
     setForm(next);
     format.onChange(key, value, next);
   };
-  const blur = (key: keyof SchoolProfile) => (): void => format.onBlur(key, form[key], values);
+  const blur = (key: keyof SchoolProfile) => (): void => format.onBlur(key, form[key] ?? "", values);
 
   const save = async (): Promise<void> => {
     if (pending) return;
@@ -142,7 +159,7 @@ function SchoolProfileDrawer({
     setPending(true);
     setFailure(undefined);
     try {
-      onSaved(await saveSchoolProfile(API_URL, form));
+      onSaved(await saveSchoolProfile(API_URL, { ...form, clabe: clabeDigits(form.clabe) }));
     } catch (err) {
       setFailure(err instanceof ConfigError && err.isInvalid ? `Revisa los datos: ${err.detail}` : "No se pudieron guardar los datos.");
     } finally {
@@ -174,6 +191,8 @@ function SchoolProfileDrawer({
           error={format.errors.cct} help="La clave de la SEP, 10 caracteres." />
         <TextField label="Dirección" uppercase value={form.address} onChange={edit("address")} />
         <TextField label="Teléfono" value={form.phone} onChange={edit("phone")} onBlur={blur("phone")} error={format.errors.phone} />
+        <TextField label="Cuenta CLABE" value={form.clabe} onChange={edit("clabe")} onBlur={blur("clabe")} error={format.errors.clabe}
+          help="18 dígitos. La ven las familias en la app, junto con la referencia de cada alumno, para pagar por transferencia." />
         <TextArea label="Leyenda al pie del comprobante" value={form.legend} onChange={edit("legend")} />
         {failure !== undefined && <ErrorAlert message={failure} />}
       </div>
