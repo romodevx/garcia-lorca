@@ -54,6 +54,9 @@ func (h *GradesHandler) GetPeriodSheet(ctx context.Context, req *connect.Request
 		}
 		if r.HasValue {
 			row.Value, row.UpdatedAt = r.Value.String(), timestampOrNil(r.UpdatedAt)
+			if r.Letter != "" {
+				row.Value = string(r.Letter)
+			}
 		}
 		rows = append(rows, row)
 	}
@@ -67,6 +70,7 @@ func (h *GradesHandler) GetPeriodSheet(ctx context.Context, req *connect.Request
 		Periods:         toProtoPeriods(sheet.Periods),
 		Scale:           toProtoScale(sheet.Scale),
 		GradingEnabled:  sheet.GradingEnabled,
+		GradingLetters:  sheet.GradingLetters,
 		Editable:        sheet.Editable,
 		ReadOnlyReason:  sheet.ReadOnlyReason,
 		Rows:            rows,
@@ -88,7 +92,8 @@ func (h *GradesHandler) GetEnrollmentPeriodGrades(ctx context.Context, req *conn
 	}
 	return connect.NewResponse(&gradesv1.GetEnrollmentPeriodGradesResponse{
 		CycleId: got.CycleID, CycleName: got.CycleName, Periods: toProtoPeriods(got.Periods),
-		Scale: toProtoScale(got.Scale), GradingEnabled: got.GradingEnabled, SubjectIds: got.SubjectIDs, Grades: grades,
+		Scale: toProtoScale(got.Scale), GradingEnabled: got.GradingEnabled, GradingLetters: got.GradingLetters,
+		SubjectIds: got.SubjectIDs, Grades: grades,
 	}), nil
 }
 
@@ -106,7 +111,7 @@ func (h *GradesHandler) PeriodsWithGrades(ctx context.Context, req *connect.Requ
 // InvalidArgument; a disabling request ignores the scale.
 func (h *GradesHandler) CountScaleViolations(ctx context.Context, req *connect.Request[gradesv1.CountScaleViolationsRequest]) (*connect.Response[gradesv1.CountScaleViolationsResponse], error) {
 	m := req.Msg
-	check := ports.ScaleCheck{GradingEnabled: m.GetGradingEnabled()}
+	check := ports.ScaleCheck{GradingEnabled: m.GetGradingEnabled(), GradingLetters: m.GetGradingLetters() && !m.GetGradingEnabled()}
 	if check.GradingEnabled {
 		sc := m.GetScale()
 		scale, err := domain.NewGradingScale(int(sc.GetMinHundredths()), int(sc.GetMaxHundredths()), int(sc.GetPassingHundredths()), int(sc.GetDecimals()))
@@ -134,7 +139,7 @@ func scopeOf(schoolWide bool) usecase.CaptureScope {
 func toProtoPeriodGrade(g domain.PeriodGrade) *gradesv1.PeriodGrade {
 	return &gradesv1.PeriodGrade{
 		EnrollmentId: g.EnrollmentID(), SubjectId: g.SubjectID(), PeriodId: g.PeriodID(),
-		Value: g.Value().String(), UpdatedAt: timestampOrNil(g.UpdatedAt()), CapturedByName: g.CapturedByName(),
+		Value: g.Text(), UpdatedAt: timestampOrNil(g.UpdatedAt()), CapturedByName: g.CapturedByName(),
 	}
 }
 

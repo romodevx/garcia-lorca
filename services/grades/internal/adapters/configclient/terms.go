@@ -81,7 +81,7 @@ func (c *Client) LevelCatalog(ctx context.Context, cycleID, levelID string) (por
 		return ports.LevelCatalog{}, err
 	}
 	return ports.LevelCatalog{
-		LevelName: res.Msg.GetLevel().GetName(), GradingEnabled: level.GradingEnabled, Scale: level.Scale,
+		LevelName: res.Msg.GetLevel().GetName(), GradingEnabled: level.GradingEnabled, GradingLetters: level.GradingLetters, Scale: level.Scale,
 		Groups: groups, Assignments: assignments, SubjectNames: subjects, TeacherNames: teachers,
 		Deleting: isDeleting(res.Msg.GetLevel()),
 	}, nil

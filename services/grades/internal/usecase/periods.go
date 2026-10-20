@@ -380,8 +380,8 @@ func (s *PeriodsService) ListPeriods(ctx context.Context, cycleID string) ([]Per
 	out := make([]Period, 0, len(terms))
 	for _, t := range terms {
 		v := views[t.LevelID]
-		if !v.catalog.GradingEnabled && !everClosed[t.LevelID] {
-			continue // no numeric grades and no card ever issued: nothing to list (T10 ISSUE-019)
+		if !v.catalog.Graded() && !everClosed[t.LevelID] {
+			continue // no grades and no card ever issued: nothing to list (T10 ISSUE-019)
 		}
 		closure, ok := closures[t.ID]
 		if !ok {
@@ -443,7 +443,7 @@ func (s *PeriodsService) Close(ctx context.Context, termID string, force bool, a
 	if view.catalog.Deleting {
 		return CloseResult{}, levelarchive.LevelBeingDeleted()
 	}
-	if !view.catalog.GradingEnabled {
+	if !view.catalog.Graded() {
 		return CloseResult{}, domain.Conflict(domain.CodeLevelNotGraded, msgGradingDisabled)
 	}
 	if without := view.groupsWithoutPeriod(term); len(without) > 0 {
@@ -800,10 +800,10 @@ func (s *PeriodsService) unfinished(v levelView, term ports.TermRef) bool {
 // (a pupil who joined the group after that period ended owes none; a group
 // whose grade lacks the period owes none here, and blocks the close) — how
 // many are captured, and what is missing per group and subject. A level
-// without numeric grades owes nothing.
+// without grades (neither numbers nor letters) owes nothing.
 func (s *PeriodsService) tally(v levelView, term ports.TermRef, grades []domain.PeriodGrade) (expected, captured int, missing []MissingGrades) {
 	missing = []MissingGrades{}
-	if !v.catalog.GradingEnabled {
+	if !v.catalog.Graded() {
 		return 0, 0, missing
 	}
 	have := make(map[string]bool, len(grades))
@@ -879,6 +879,7 @@ func (s *PeriodsService) buildReportCards(v levelView, term ports.TermRef, close
 			EnrollmentNumber: student.EnrollmentNumber, GroupLabel: v.groupLabel[e.GroupID],
 			LevelName: v.catalog.LevelName, CycleName: v.cycle.Name, TermName: termName,
 			TermOrdinal: term.Ordinal, Periods: cardPeriods(v.columns(term, e.GroupID)), Scale: v.catalog.Scale,
+			Letters: v.catalog.GradingLetters,
 		}, s.subjectsFor(v, e.GroupID, graded[e.ID]), grades)
 		if err != nil {
 			return nil, err

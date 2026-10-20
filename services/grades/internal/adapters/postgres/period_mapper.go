@@ -69,6 +69,7 @@ func fromDomainReportCard(rc domain.ReportCard) (reportCardModel, []reportCardLi
 		Months: monthTexts(h.Months), GeneralAverage: averageText(rc.GeneralAverage()),
 		ScaleMinHundredths: h.Scale.MinHundredths(), ScaleMaxHundredths: h.Scale.MaxHundredths(),
 		ScaleDecimals: h.Scale.Decimals(), ScalePassingHundredths: h.Scale.PassingHundredths(),
+		GradingLetters: &h.Letters,
 	}
 	columns := make([]periodColumn, 0, len(h.Periods))
 	for _, p := range h.Periods {
@@ -103,9 +104,12 @@ func toDomainReportCard(m reportCardModel, lineRows []reportCardLineModel) (doma
 	if err != nil {
 		return domain.ReportCard{}, glerrors.Wrap(glerrors.KindInternal, "invalid report card month", err)
 	}
-	scale, err := domain.NewGradingScale(m.ScaleMinHundredths, m.ScaleMaxHundredths, m.ScalePassingHundredths, m.ScaleDecimals)
-	if err != nil {
-		return domain.ReportCard{}, glerrors.Wrap(glerrors.KindInternal, "invalid report card scale", err)
+	letters := m.GradingLetters != nil && *m.GradingLetters
+	var scale domain.GradingScale
+	if !letters { // a letters card has no numeric scale
+		if scale, err = domain.NewGradingScale(m.ScaleMinHundredths, m.ScaleMaxHundredths, m.ScalePassingHundredths, m.ScaleDecimals); err != nil {
+			return domain.ReportCard{}, glerrors.Wrap(glerrors.KindInternal, "invalid report card scale", err)
+		}
 	}
 	periods, err := parseColumns(m.Periods)
 	if err != nil {
@@ -117,7 +121,7 @@ func toDomainReportCard(m reportCardModel, lineRows []reportCardLineModel) (doma
 	}
 	lines := make([]domain.ReportCardLine, 0, len(lineRows))
 	for _, l := range lineRows {
-		line, err := toDomainLine(l)
+		line, err := toDomainLine(l, letters)
 		if err != nil {
 			return domain.ReportCard{}, err
 		}
@@ -128,7 +132,7 @@ func toDomainReportCard(m reportCardModel, lineRows []reportCardLineModel) (doma
 		GroupID: m.GroupID, EnrollmentID: m.EnrollmentID, StudentID: m.StudentID, Version: m.Version,
 		IssuedAt: m.IssuedAt, IssuedBy: m.IssuedBy, StudentName: m.StudentName, EnrollmentNumber: m.EnrollmentNumber,
 		GroupLabel: m.GroupLabel, LevelName: m.LevelName, CycleName: m.CycleName, TermName: m.TermName,
-		TermOrdinal: m.TermOrdinal, Months: months, Periods: periods, Scale: scale,
+		TermOrdinal: m.TermOrdinal, Months: months, Periods: periods, Scale: scale, Letters: letters,
 	}, domain.ReportCardStatus(m.Status), general, lines)
 	if err != nil {
 		return domain.ReportCard{}, glerrors.Wrap(glerrors.KindInternal, "invalid report card row", err)
@@ -136,7 +140,10 @@ func toDomainReportCard(m reportCardModel, lineRows []reportCardLineModel) (doma
 	return rc, nil
 }
 
-func toDomainLine(l reportCardLineModel) (domain.ReportCardLine, error) {
+func toDomainLine(l reportCardLineModel, letters bool) (domain.ReportCardLine, error) {
+	if letters {
+		return toDomainLettersLine(l)
+	}
 	monthTexts, err := decodeValues(l.MonthValues)
 	if err != nil {
 		return domain.ReportCardLine{}, err
@@ -160,6 +167,29 @@ func toDomainLine(l reportCardLineModel) (domain.ReportCardLine, error) {
 	return domain.ReportCardLine{
 		SubjectID: l.SubjectID, SubjectName: l.SubjectName, Position: l.Position,
 		MonthValues: months, PeriodValues: periods, Average: avg,
+	}, nil
+}
+
+// toDomainLettersLine reads a letters card's line: letters per period, no
+// average.
+func toDomainLettersLine(l reportCardLineModel) (domain.ReportCardLine, error) {
+	out := map[string]domain.Letter{}
+	if l.PeriodValues != "" {
+		var texts map[string]string
+		if err := json.Unmarshal([]byte(l.PeriodValues), &texts); err != nil {
+			return domain.ReportCardLine{}, glerrors.Wrap(glerrors.KindInternal, "invalid report card line letters", err)
+		}
+		for id, text := range texts {
+			letter, err := domain.ParseLetter(text)
+			if err != nil {
+				return domain.ReportCardLine{}, glerrors.Wrap(glerrors.KindInternal, "invalid report card line letter", err)
+			}
+			out[id] = letter
+		}
+	}
+	return domain.ReportCardLine{
+		SubjectID: l.SubjectID, SubjectName: l.SubjectName, Position: l.Position,
+		PeriodValues: map[string]domain.GradeValue{}, PeriodLetters: out, MonthValues: map[domain.Month]domain.GradeValue{},
 	}, nil
 }
 

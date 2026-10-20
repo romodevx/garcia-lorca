@@ -46,7 +46,7 @@ func toLevelRef(l *configv1.Level) (ports.LevelRef, error) {
 	}
 	deleting := isDeleting(l)
 	if !g.GetEnabled() {
-		return ports.LevelRef{ID: l.GetId(), GradingEnabled: false, Deleting: deleting}, nil
+		return ports.LevelRef{ID: l.GetId(), GradingLetters: g.GetLetters(), Deleting: deleting}, nil
 	}
 	scale, err := domain.NewGradingScale(int(g.GetMinHundredths()), int(g.GetMaxHundredths()), int(g.GetPassingHundredths()), int(g.GetDecimals()))
 	if err != nil {

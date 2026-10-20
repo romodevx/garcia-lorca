@@ -31,6 +31,7 @@ func (r *Repository) UpsertPeriodGrade(ctx context.Context, g domain.PeriodGrade
 			Columns: []clause.Column{{Name: "tenant_id"}, {Name: "enrollment_id"}, {Name: "subject_id"}, {Name: "period_id"}},
 			DoUpdates: clause.Assignments(map[string]any{
 				"value":            model.Value,
+				"letter":           model.Letter,
 				"captured_by":      model.CapturedBy,
 				"captured_by_name": model.CapturedByName,
 				"updated_at":       gorm.Expr("now()"),
@@ -149,7 +150,8 @@ func (r *Repository) PeriodsWithGrades(ctx context.Context, periodIDs []string) 
 
 // CountScaleViolations counts, in ONE tenant-bound query, the period grades of
 // the named enrollments that check refuses: out of range (bounds travel as
-// decimal text cast to numeric — no float). Period grades are whole numbers,
+// decimal text cast to numeric — no float) or a letter, for a numeric check;
+// every number, for a switch to letters; everything, for no grades. Period grades are whole numbers,
 // so a scale's decimals can never refuse one.
 func (r *Repository) CountScaleViolations(ctx context.Context, enrollmentIDs []string, check ports.ScaleCheck) (int, error) {
 	if len(enrollmentIDs) == 0 {
@@ -158,9 +160,12 @@ func (r *Repository) CountScaleViolations(ctx context.Context, enrollmentIDs []s
 	var n int64
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
 		q := tx.Model(&periodGradeModel{}).Where("enrollment_id IN ?", enrollmentIDs)
-		if check.GradingEnabled {
+		switch {
+		case check.GradingEnabled:
 			s := check.Scale
-			q = q.Where("(value < ?::numeric OR value > ?::numeric)", hundredthsText(s.MinHundredths()), hundredthsText(s.MaxHundredths()))
+			q = q.Where("(letter IS NOT NULL OR value < ?::numeric OR value > ?::numeric)", hundredthsText(s.MinHundredths()), hundredthsText(s.MaxHundredths()))
+		case check.GradingLetters:
+			q = q.Where("letter IS NULL")
 		}
 		if err := q.Count(&n).Error; err != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "counting scale violations", err)
@@ -180,23 +185,42 @@ func hundredthsText(h int) string {
 const hundredthsPerUnit = 100
 
 func fromDomainPeriodGrade(g domain.PeriodGrade) periodGradeModel {
-	return periodGradeModel{
+	m := periodGradeModel{
 		ID: g.ID(), TenantID: g.TenantID(), EnrollmentID: g.EnrollmentID(), SubjectID: g.SubjectID(),
-		PeriodID: g.PeriodID(), Value: hundredthsText(g.Value().Hundredths()),
-		CapturedBy: g.CapturedBy(), CapturedByName: g.CapturedByName(),
+		PeriodID: g.PeriodID(), CapturedBy: g.CapturedBy(), CapturedByName: g.CapturedByName(),
 	}
+	if g.IsLetter() {
+		letter := string(g.Letter())
+		m.Letter = &letter
+	} else {
+		value := hundredthsText(g.Value().Hundredths())
+		m.Value = &value
+	}
+	return m
 }
 
 func toDomainPeriodGrade(m periodGradeModel) (domain.PeriodGrade, error) {
-	h, err := hundredthsOf(m.Value)
-	if err != nil {
-		return domain.PeriodGrade{}, err
-	}
-	g, err := domain.NewPeriodGrade(domain.PeriodGradeFields{
+	fields := domain.PeriodGradeFields{
 		ID: m.ID, TenantID: m.TenantID, EnrollmentID: m.EnrollmentID, SubjectID: m.SubjectID, PeriodID: m.PeriodID,
-		CapturedBy: m.CapturedBy, CapturedByName: m.CapturedByName,
-		Value: domain.GradeValueFromHundredths(h), UpdatedAt: m.UpdatedAt,
-	})
+		CapturedBy: m.CapturedBy, CapturedByName: m.CapturedByName, UpdatedAt: m.UpdatedAt,
+	}
+	switch {
+	case m.Letter != nil:
+		letter, err := domain.ParseLetter(*m.Letter)
+		if err != nil {
+			return domain.PeriodGrade{}, glerrors.Wrap(glerrors.KindInternal, "invalid period grade letter", err)
+		}
+		fields.Letter = letter
+	case m.Value != nil:
+		h, err := hundredthsOf(*m.Value)
+		if err != nil {
+			return domain.PeriodGrade{}, err
+		}
+		fields.Value = domain.GradeValueFromHundredths(h)
+	default:
+		return domain.PeriodGrade{}, glerrors.New(glerrors.KindInternal, "period grade row has neither value nor letter")
+	}
+	g, err := domain.NewPeriodGrade(fields)
 	if err != nil {
 		return domain.PeriodGrade{}, glerrors.Wrap(glerrors.KindInternal, "invalid period grade row", err)
 	}

@@ -345,6 +345,9 @@ message CountScaleViolationsRequest {
   // grade of the cycle is a violation.
   bool grading_enabled = 2;
   GradingScale scale = 3;
+  // grading_letters=true means "switch to letters": every captured number is
+  // a violation (and a numeric check counts every captured letter).
+  bool grading_letters = 4;
 }
 
 message CountScaleViolationsResponse {
@@ -435,6 +438,8 @@ message GetPeriodSheetResponse {
   string current_period_id = 10;
   // today is the school's current local day, "YYYY-MM-DD".
   string today = 11;
+  // grading_letters: the level grades with letters (A–D): values are letters, never averaged.
+  bool grading_letters = 12;
 }
 
 message GetEnrollmentPeriodGradesRequest {
@@ -450,6 +455,8 @@ message GetEnrollmentPeriodGradesResponse {
   // subject_ids are the group's subjects plus any subject already graded.
   repeated string subject_ids = 6;
   repeated PeriodGrade grades = 7;
+  // grading_letters: the level grades with letters (A–D): grade values are letters.
+  bool grading_letters = 8;
 }
 
 message PeriodsWithGradesRequest {
@@ -631,6 +638,8 @@ message ReportCardSummary {
   int32 term_ordinal = 12;
   string cycle_id = 13;
   string cycle_name = 14;
+  // letters: the card carries letters, not numbers: no general average.
+  bool letters = 15;
 }
 
 message ListReportCardsResponse {
@@ -692,6 +701,8 @@ message ReportCard {
   // first up to the one closed. Empty on a card issued before T15, whose
   // columns are `months`.
   repeated ReportCardPeriod periods = 23;
+  // letters: issued for a level that grades with letters: period_values hold A–D and there is no average.
+  bool letters = 24;
 }
 
 message GetReportCardResponse {

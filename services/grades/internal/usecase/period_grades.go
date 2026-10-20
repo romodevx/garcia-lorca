@@ -103,9 +103,11 @@ type UpsertPeriodGradeInput struct {
 // period, if any. Editable is whether THIS row accepts a write from the
 // caller; ReadOnlyReason says why not.
 type PeriodSheetRow struct {
-	EnrollmentID   string
-	StudentID      string
-	Value          domain.GradeValue
+	EnrollmentID string
+	StudentID    string
+	Value        domain.GradeValue
+	// Letter is the grade of a level that grades with letters (HasValue too).
+	Letter         domain.Letter
 	HasValue       bool
 	UpdatedAt      time.Time
 	Editable       bool
@@ -122,6 +124,7 @@ type PeriodSheet struct {
 	Today           time.Time
 	Scale           domain.GradingScale
 	GradingEnabled  bool
+	GradingLetters  bool
 	Editable        bool
 	ReadOnlyReason  string
 	Rows            []PeriodSheetRow
@@ -137,6 +140,7 @@ type EnrollmentPeriodGrades struct {
 	Periods        []domain.EvaluationPeriod
 	Scale          domain.GradingScale
 	GradingEnabled bool
+	GradingLetters bool
 	SubjectIDs     []string
 	Grades         []domain.PeriodGrade
 }
@@ -175,15 +179,19 @@ func (s *PeriodGradesService) Upsert(ctx context.Context, in UpsertPeriodGradeIn
 	if err != nil {
 		return domain.PeriodGrade{}, err
 	}
-	value, err := gc.level.Scale.ParseWholeValue(in.Value)
+	fields := domain.PeriodGradeFields{
+		ID: s.newID(), TenantID: s.tenantID, EnrollmentID: in.EnrollmentID, SubjectID: gc.assignment.SubjectID,
+		PeriodID: period.ID, CapturedBy: in.CapturedBy, CapturedByName: in.CapturedByName, UpdatedAt: s.now(),
+	}
+	if gc.level.GradingLetters {
+		fields.Letter, err = domain.ParseLetter(in.Value)
+	} else {
+		fields.Value, err = gc.level.Scale.ParseWholeValue(in.Value)
+	}
 	if err != nil {
 		return domain.PeriodGrade{}, err
 	}
-	g, err := domain.NewPeriodGrade(domain.PeriodGradeFields{
-		ID: s.newID(), TenantID: s.tenantID, EnrollmentID: in.EnrollmentID, SubjectID: gc.assignment.SubjectID,
-		PeriodID: period.ID, CapturedBy: in.CapturedBy, CapturedByName: in.CapturedByName,
-		Value: value, UpdatedAt: s.now(),
-	})
+	g, err := domain.NewPeriodGrade(fields)
 	if err != nil {
 		return domain.PeriodGrade{}, err
 	}
@@ -210,7 +218,8 @@ func (s *PeriodGradesService) Sheet(ctx context.Context, scope CaptureScope, ass
 	}
 	sheet := PeriodSheet{
 		AssignmentID: assignmentID, Periods: gc.periods, Today: gc.today, Scale: gc.level.Scale,
-		GradingEnabled: gc.level.GradingEnabled, Editable: true, ClosedPeriodIDs: gc.closedIDs(),
+		GradingEnabled: gc.level.GradingEnabled, GradingLetters: gc.level.GradingLetters, Editable: true,
+		ClosedPeriodIDs: gc.closedIDs(),
 	}
 	if current, ok := domain.PeriodOn(gc.periods, gc.today); ok {
 		sheet.CurrentPeriodID = current.ID
@@ -224,7 +233,7 @@ func (s *PeriodGradesService) Sheet(ctx context.Context, scope CaptureScope, ass
 	}
 	sheet.PeriodID = period.ID
 	switch {
-	case !gc.level.GradingEnabled:
+	case !gc.level.Graded():
 		sheet.Editable, sheet.ReadOnlyReason = false, msgGradingDisabled
 	case !hasPeriod:
 		sheet.Editable, sheet.ReadOnlyReason = false, msgGradeWithout
@@ -328,14 +337,15 @@ func (s *PeriodGradesService) ForEnrollment(ctx context.Context, enrollmentID st
 		return EnrollmentPeriodGrades{}, err
 	}
 	var assignments []ports.AssignmentRef
-	if level.GradingEnabled {
+	if level.Graded() {
 		if assignments, err = s.catalog.AssignmentsByGroup(ctx, enr.CycleID, enr.GroupID); err != nil {
 			return EnrollmentPeriodGrades{}, err
 		}
 	}
 	out := EnrollmentPeriodGrades{
 		CycleID: cycle.ID, CycleName: cycle.Name, Periods: periods, Scale: level.Scale,
-		GradingEnabled: level.GradingEnabled, SubjectIDs: subjectsOf(assignments, grades), Grades: grades,
+		GradingEnabled: level.GradingEnabled, GradingLetters: level.GradingLetters,
+		SubjectIDs: subjectsOf(assignments, grades), Grades: grades,
 	}
 	if out.Grades == nil {
 		out.Grades = []domain.PeriodGrade{}
@@ -404,7 +414,7 @@ func (s *PeriodGradesService) authorizeWrite(ctx context.Context, scope CaptureS
 	if gc.level.Deleting {
 		return gradeContext{}, domain.EvaluationPeriod{}, levelarchive.LevelBeingDeleted()
 	}
-	if !gc.level.GradingEnabled {
+	if !gc.level.Graded() {
 		return gradeContext{}, domain.EvaluationPeriod{}, domain.Refusal(domain.CodeLevelNotGraded, msgGradingDisabled)
 	}
 	if err := s.requireEnrollmentInGroup(ctx, enrollmentID, gc.assignment); err != nil {
@@ -569,7 +579,7 @@ func (s *PeriodGradesService) sheetRows(ctx context.Context, asg ports.Assignmen
 	}
 	for i := range rows {
 		if g, ok := grades[rows[i].EnrollmentID]; ok {
-			rows[i].Value, rows[i].HasValue, rows[i].UpdatedAt = g.Value(), true, g.UpdatedAt()
+			rows[i].Value, rows[i].Letter, rows[i].HasValue, rows[i].UpdatedAt = g.Value(), g.Letter(), true, g.UpdatedAt()
 		}
 	}
 	return rows, nil
