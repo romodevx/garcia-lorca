@@ -90,7 +90,7 @@ export function CashUpPanel({ day, onCorrect, access }: CashUpPanelProps): React
         <CashCutClosing cut={cut} day={day} access={access} onChanged={() => setReads((n) => n + 1)} />
       )}
 
-      {cut.deposits.length === 0 && cut.cancelled.length === 0 && cut.superseded.length === 0 && cut.payments.length === 0 && (
+      {cut.deposits.length === 0 && cut.cancelled.length === 0 && cut.superseded.length === 0 && cut.payments.length === 0 && (cut.cancelledSales ?? []).length === 0 && (
         <p style={{ color: "var(--text-muted)", fontSize: 15, margin: 0 }}>No se recibió nada este día.</p>
       )}
 
@@ -126,7 +126,7 @@ export function CashUpPanel({ day, onCorrect, access }: CashUpPanelProps): React
         </div>
       )}
 
-      {cut.cancelled.length > 0 && (
+      {(cut.cancelled.length > 0 || (cut.cancelledSales ?? []).length > 0) && (
         <div style={{ borderRadius: "var(--r-lg)", border: "1px solid var(--border)", background: "var(--surface)", overflow: "hidden" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 20px", background: "var(--surface-2)", fontSize: 13, fontWeight: 700, color: "var(--text-muted)", fontFamily: "var(--font-display)" }}>
             <Icon name="warning" size={16} />Cancelados · no cuentan
@@ -136,6 +136,14 @@ export function CashUpPanel({ day, onCorrect, access }: CashUpPanelProps): React
               <span style={{ fontSize: 14, color: "var(--text-muted)" }}>{capturedLate(d) ? "" : `${hourOf(d.paidAt)} · `}{d.voidReason ?? "sin motivo"}</span>
               <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 15.5, color: "var(--text-faint)", textDecoration: "line-through" }}>
                 {formatCents(d.amountCents)}
+              </span>
+            </div>
+          ))}
+          {(cut.cancelledSales ?? []).map((s) => (
+            <div key={s.paymentId} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "13px 20px", borderTop: "1px solid var(--border)" }}>
+              <span style={{ fontSize: 14, color: "var(--text-muted)" }}>{s.description} · Devolución: {s.reason}</span>
+              <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 15.5, color: "var(--text-faint)", textDecoration: "line-through" }}>
+                {formatCents(s.amountCents)}
               </span>
             </div>
           ))}

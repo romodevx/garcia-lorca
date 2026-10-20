@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
 import { ticketPath } from "../../receipts/api";
 import { Btn } from "../../_design/Controls";
 import { listOrders, UniformsError, type Level, type UniformFulfillment, type UniformOrder } from "../../uniforms/api";
@@ -8,6 +8,7 @@ import { EmptyState, ErrorNote, LevelChips, money, SkeletonRows, type SchoolLeve
 
 import { API_URL } from "../../api-url";
 import { useRoomLabels } from "../../_design/students/roomLabels";
+import { ReturnSalePanel } from "./ReturnSalePanel";
 
 const PAGE_SIZE = 20;
 
@@ -34,6 +35,10 @@ export function OrdersPanel({ narrow, levels }: { narrow: boolean; levels: reado
   const [level, setLevel] = useState<Level>("");
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(0);
+  // C2-015: the row whose return panel is open, and what the last return said.
+  const [returning, setReturning] = useState<string | undefined>(undefined);
+  const [notice, setNotice] = useState<string | undefined>(undefined);
+  const orderById = useMemo(() => new Map((orders ?? []).map((o) => [o.id, o])), [orders]);
 
   const load = useCallback(async (): Promise<void> => {
     setOrders(null);
@@ -59,9 +64,36 @@ export function OrdersPanel({ narrow, levels }: { narrow: boolean; levels: reado
 
   const filtering = level !== "" || query.trim() !== "";
 
+  const returnPanel = (row: Row): ReactElement | null => {
+    const order = row.returnOrderId === undefined ? undefined : orderById.get(row.returnOrderId);
+    if (returning !== row.key || order === undefined) return null;
+    return (
+      <ReturnSalePanel
+        order={order}
+        onClose={() => setReturning(undefined)}
+        onDone={(_, message) => {
+          setReturning(undefined);
+          setNotice(message);
+          void load();
+        }}
+      />
+    );
+  };
+  const rowActions = (row: Row): ReactElement => (
+    <span style={{ display: "inline-flex", gap: 6, flexWrap: "wrap" }}>
+      {row.receiptOrderId !== undefined && <ReprintButton orderId={row.receiptOrderId} folio={row.folioStem} />}
+      {row.returnOrderId !== undefined && (
+        <Btn kind="ghost" type="button" aria-label={`${row.refundPending === true ? "Terminar el reembolso de" : "Devolver"} ${row.folioStem}`} onClick={() => { setNotice(undefined); setReturning(row.key); }}>
+          {row.refundPending === true ? "Terminar reembolso" : "Devolver"}
+        </Btn>
+      )}
+    </span>
+  );
+
   return (
     <div style={{ display: "grid", gap: 16 }}>
       {failure !== null && <ErrorNote message={failure.message} detail={failure.detail} onRetry={() => void load()} />}
+      {notice !== undefined && <p role="status" style={{ margin: 0, fontWeight: 600, color: "var(--good-fg, var(--text))" }}>{notice}</p>}
 
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
         <input
@@ -146,7 +178,8 @@ export function OrdersPanel({ narrow, levels }: { narrow: boolean; levels: reado
               <p style={{ fontSize: 13, color: "var(--text-faint)" }}>
                 {row.itemsLabel} · {row.statusLabel}
               </p>
-              {row.receiptOrderId !== undefined && <ReprintButton orderId={row.receiptOrderId} folio={row.folioStem} />}
+              {rowActions(row)}
+              {returnPanel(row)}
             </div>
           ))}
         </div>
@@ -176,7 +209,8 @@ export function OrdersPanel({ narrow, levels }: { narrow: boolean; levels: reado
             </thead>
             <tbody>
               {rows.map((row) => (
-                <tr key={row.key} style={{ borderBottom: "1px solid var(--border)" }}>
+                <Fragment key={row.key}>
+                <tr style={{ borderBottom: "1px solid var(--border)" }}>
                   <td style={{ ...cell, borderLeft: `4px solid ${row.accent}` }}>
                     <FolioText stem={row.folioStem} suffix={row.folioSuffix} />
                   </td>
@@ -185,8 +219,14 @@ export function OrdersPanel({ narrow, levels }: { narrow: boolean; levels: reado
                   <td style={cell}>{row.itemsLabel}</td>
                   <td style={{ ...cell, fontWeight: 700 }}>{money(row.amountCents)}</td>
                   <td style={cell}>{row.statusLabel}</td>
-                  <td style={cell}>{row.receiptOrderId !== undefined && <ReprintButton orderId={row.receiptOrderId} folio={row.folioStem} />}</td>
+                  <td style={cell}>{rowActions(row)}</td>
                 </tr>
+                {returning === row.key && (
+                  <tr>
+                    <td colSpan={7}>{returnPanel(row)}</td>
+                  </tr>
+                )}
+                </Fragment>
               ))}
             </tbody>
           </table>
@@ -246,6 +286,10 @@ export interface Row {
   accent: string;
   /** Set on a counter sale: its receipt can be printed again (task 12). */
   receiptOrderId?: string;
+  /** Set when the sale can be returned, or its pending refund finished (C2-015). */
+  returnOrderId?: string;
+  /** The return's refund is still to be recorded: the button finishes it. */
+  refundPending?: boolean;
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -256,7 +300,21 @@ const STATUS_LABELS: Record<string, string> = {
   expired: "Vencida",
   cancelled: "Cancelada",
   sold_at_counter: "Vendida en mostrador",
+  returned: "Devuelta",
 };
+
+/** A returned sale says so even when it also needs attention (C2-015). */
+function statusLabelOf(f: UniformFulfillment): string {
+  if (f.status === "returned") {
+    return f.return?.refundStatus === "pending" ? "Devuelta · reembolso pendiente" : "Devuelta";
+  }
+  return f.requiresAttention ? "Requiere atención" : (STATUS_LABELS[f.status] ?? f.status);
+}
+
+/** A counter sale may be returned; a return with its refund pending, finished. */
+function returnable(f: UniformFulfillment): boolean {
+  return f.status === "sold_at_counter" || (f.status === "returned" && f.return?.refundStatus === "pending");
+}
 
 const ACCENTS = ["var(--forest)", "var(--orange)", "var(--purple)", "var(--yellow)", "var(--lime)"];
 
@@ -286,9 +344,11 @@ export function toRows(orders: UniformOrder[], roomLabels: ReadonlyMap<string, s
       levelLabel,
       itemsLabel: itemsLabel(order, f),
       amountCents: f.amountCents,
-      statusLabel: f.requiresAttention ? "Requiere atención" : (STATUS_LABELS[f.status] ?? f.status),
+      statusLabel: statusLabelOf(f),
       accent,
-      ...(f.status === "sold_at_counter" ? { receiptOrderId: order.id } : {}),
+      ...(f.status === "sold_at_counter" || f.status === "returned" ? { receiptOrderId: order.id } : {}),
+      ...(returnable(f) ? { returnOrderId: order.id } : {}),
+      ...(f.return?.refundStatus === "pending" ? { refundPending: true } : {}),
     }));
 
     const pending = order.lines.filter((line) => line.status === "awaiting_stock");

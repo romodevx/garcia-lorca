@@ -75,7 +75,7 @@ export type ItemCategory = "uniform" | "book" | "supply" | "other";
  * stock; `released` and `cancelled` are terminal — a line the school reclaimed
  * is not picked up again, the family orders afresh.
  */
-export type LineStatus = "awaiting_stock" | "reserved" | "sold" | "released" | "cancelled";
+export type LineStatus = "awaiting_stock" | "reserved" | "sold" | "released" | "cancelled" | "returned";
 
 /** One garment in one order. */
 export interface UniformOrderLine {
@@ -100,7 +100,8 @@ export type FulfillmentStatus =
   | "dispatched"
   | "expired"
   | "cancelled"
-  | "sold_at_counter";
+  | "sold_at_counter"
+  | "returned";
 
 /** One delivery of an order. This is where the state machine lives. */
 export interface UniformFulfillment {
@@ -117,6 +118,33 @@ export interface UniformFulfillment {
   /** No rule could settle this one — it needs a person. */
   requiresAttention: boolean;
   attentionReason?: string;
+  /** Set when the counter sale was returned (C2-015). */
+  return?: UniformReturn;
+}
+
+/**
+ * A counter sale taken back whole (C2-015). refundMode: void (the day of the
+ * sale, its payments voided) | expense (another day, refunded as an expense of
+ * that day) | none (no money had reached finance).
+ */
+export interface UniformReturn {
+  reason: string;
+  refundMode: "void" | "expense" | "none";
+  refundMethod?: "cash" | "card" | "transfer";
+  refundCents: number;
+  /** pending: the expense is still to be recorded; returning again finishes it. */
+  refundStatus: "done" | "pending";
+  damagedUnits: number;
+  actorName?: string;
+  returnedAt?: string;
+}
+
+/** What a return sends (C2-015). Who returns it is the signed-in caller. */
+export interface ReturnSale {
+  reason: string;
+  damagedLineIds: string[];
+  /** How the money goes back when the sale is of an earlier day. */
+  refundMethod?: "cash" | "card" | "transfer";
 }
 
 /**
@@ -124,7 +152,7 @@ export interface UniformFulfillment {
  * honest ending for an order that delivered only some of what was asked for —
  * without it, the module's worst outcome would read exactly like its best.
  */
-export type OrderLabel = "awaiting_stock" | "partial" | "in_progress" | "closed" | "closed_partial";
+export type OrderLabel = "awaiting_stock" | "partial" | "in_progress" | "closed" | "closed_partial" | "returned";
 
 /** What a family asked for, with everything hanging off it. */
 export interface UniformOrder {
@@ -471,6 +499,11 @@ export async function listOrders(baseURL: string, query: OrdersQuery = {}): Prom
   if (query.pageToken !== undefined && query.pageToken !== "") params.set("pageToken", query.pageToken);
   const q = params.toString();
   return get<UniformOrdersPage>(baseURL, q === "" ? "/orders" : `/orders?${q}`);
+}
+
+/** Takes a counter sale back whole (C2-015). */
+export async function returnCounterSale(baseURL: string, orderId: string, body: ReturnSale): Promise<UniformOrder> {
+  return send<UniformOrder>(baseURL, `/orders/${encodeURIComponent(orderId)}/return`, "POST", body);
 }
 
 export async function getOrder(baseURL: string, id: string): Promise<UniformOrder> {
