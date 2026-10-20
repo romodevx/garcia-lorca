@@ -78,7 +78,11 @@ export function useLevelMoves(levels: readonly Level[], onReorder: (levelIds: st
     const { levelId, direction } = focusAfterMove;
     const other: Direction = direction === "up" ? "down" : "up";
     const find = (d: Direction) => document.querySelector<HTMLButtonElement>(`[data-level-move="${levelId}:${d}"]`);
-    (find(direction) ?? find(other))?.focus();
+    const target = find(direction) ?? find(other);
+    if (target === null) return;
+    target.focus();
+    // Used once: a later change to the list (a new level, a rename) must not pull the focus back here.
+    setFocusAfterMove(undefined);
   }, [focusAfterMove, levels]);
 
   const move = async (level: Level, index: number, direction: Direction): Promise<void> => {

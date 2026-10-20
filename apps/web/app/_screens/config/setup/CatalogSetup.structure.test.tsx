@@ -16,8 +16,8 @@ async function openStructure(props: Parameters<typeof renderSetup>[0] = {}): Pro
 
 /** The card of one level: the region its h3 names. */
 const card = (step: HTMLElement, level: string): HTMLElement => within(step).getByRole("region", { name: level });
-/** One grade's row inside its level's card. */
-const row = (scope: HTMLElement, grade: string): HTMLElement => within(scope).getByRole("listitem", { name: grade });
+/** One grade's row inside its level's card: the group its name labels. */
+const row = (scope: HTMLElement, grade: string): HTMLElement => within(scope).getByRole("group", { name: grade });
 
 /*
  * module_school_structure ON (PLAN-redesign-estructura): «Estructura de la
@@ -88,16 +88,17 @@ describe("Estructura de la escuela — the tree", () => {
   it("keeps rename and delete visible beside every grade and group", async () => {
     const { step } = await openStructure();
     const first = row(card(step, "PRIMARIA"), G1.name);
-    expect(within(first).getByRole("button", { name: `Renombrar grado ${G1.name}` })).toBeInTheDocument();
-    expect(within(first).getByRole("button", { name: `Borrar grado ${G1.name}` })).toBeInTheDocument();
-    expect(within(first).getByRole("button", { name: "Renombrar grupo A" })).toBeInTheDocument();
-    expect(within(first).getByRole("button", { name: "Borrar grupo A" })).toBeInTheDocument();
+    // Every level has a 1°: the names say which one (design review MUST 3).
+    expect(within(first).getByRole("button", { name: `Renombrar grado ${G1.name} de PRIMARIA` })).toBeInTheDocument();
+    expect(within(first).getByRole("button", { name: `Borrar grado ${G1.name} de PRIMARIA` })).toBeInTheDocument();
+    expect(within(first).getByRole("button", { name: `Renombrar grupo A de ${G1.name} de PRIMARIA` })).toBeInTheDocument();
+    expect(within(first).getByRole("button", { name: `Borrar grupo A de ${G1.name} de PRIMARIA` })).toBeInTheDocument();
   });
 
   it("creates a group in the grade of its row, with the same call and defaults, and proposes the next letter at once", async () => {
     const { user, step } = await openStructure();
     const second = row(card(step, "PRIMARIA"), G2.name);
-    await user.click(within(second).getByRole("button", { name: `Agregar grupo a ${G2.name}` }));
+    await user.click(within(second).getByRole("button", { name: `Agregar grupo a ${G2.name} de PRIMARIA` }));
     await user.click(within(second).getByRole("textbox", { name: /Nombre del grupo/ }));
     await user.keyboard("{Enter}");
     await waitFor(() => expect(config.createGroup).toHaveBeenCalledWith(expect.any(String), { cycleId: "c1", gradeLevelId: G2.id, name: "A", capacity: 30 }));
@@ -113,7 +114,7 @@ describe("Estructura de la escuela — the tree", () => {
     await user.click(within(sec).getByRole("button", { name: "Agregar grado a SECUNDARIA" }));
     await user.type(within(sec).getByRole("textbox", { name: /Nombre del grado/ }), "2° SECUNDARIA{Enter}");
     await waitFor(() => expect(config.createGradeLevel).toHaveBeenCalledWith(expect.any(String), { levelId: SECUNDARIA.id, name: "2° SECUNDARIA", ordinal: 2 }));
-    expect(await within(sec).findByRole("listitem", { name: "2° SECUNDARIA" })).toBeInTheDocument();
+    expect(await within(sec).findByRole("group", { name: "2° SECUNDARIA" })).toBeInTheDocument();
   });
 
   it("moves a level with Subir / Bajar in its card", async () => {
@@ -162,10 +163,10 @@ describe("Estructura de la escuela — the tree", () => {
   it("after deleting a group, the focus lands on its grade's create row and the deletion is said", async () => {
     const { user, step } = await openStructure();
     const first = row(card(step, "PRIMARIA"), G1.name);
-    await user.click(within(first).getByRole("button", { name: "Borrar grupo A" }));
+    await user.click(within(first).getByRole("button", { name: `Borrar grupo A de ${G1.name} de PRIMARIA` }));
     await user.click(await screen.findByRole("button", { name: "Borrar grupo" }));
     await waitFor(() => expect(config.deleteGroup).toHaveBeenCalledWith(expect.any(String), "gr1"));
-    await waitFor(() => expect(within(first).getByRole("button", { name: `Agregar grupo a ${G1.name}` })).toHaveFocus());
+    await waitFor(() => expect(within(first).getByRole("button", { name: `Agregar grupo a ${G1.name} de PRIMARIA` })).toHaveFocus());
     expect(within(first).getByRole("status")).toHaveTextContent("Grupo A borrado");
     expect(within(first).getByText("Sin grupos")).toBeInTheDocument();
   });
@@ -173,10 +174,22 @@ describe("Estructura de la escuela — the tree", () => {
   it("after deleting a grade, the focus moves to the next grade's rename control", async () => {
     const { user, step } = await openStructure();
     const prim = card(step, "PRIMARIA");
-    await user.click(within(row(prim, G1.name)).getByRole("button", { name: `Borrar grado ${G1.name}` }));
+    await user.click(within(row(prim, G1.name)).getByRole("button", { name: `Borrar grado ${G1.name} de PRIMARIA` }));
     await user.click(await screen.findByRole("button", { name: "Borrar grado" }));
-    await waitFor(() => expect(within(prim).getByRole("button", { name: `Renombrar grado ${G2.name}` })).toHaveFocus());
-    expect(within(prim).queryByRole("listitem", { name: G1.name })).toBeNull();
+    await waitFor(() => expect(within(prim).getByRole("button", { name: `Renombrar grado ${G2.name} de PRIMARIA` })).toHaveFocus());
+    expect(within(prim).queryByRole("group", { name: G1.name })).toBeNull();
+  });
+
+  // Tech-lead H2: a refresh that fails after a write keeps the tree and says so.
+  it("offers Reintentar when the refresh after a write failed", async () => {
+    const { user, step } = await openStructure();
+    config.listGroups.mockRejectedValueOnce(new Error("down"));
+    const second = row(card(step, "PRIMARIA"), G2.name);
+    await user.click(within(second).getByRole("button", { name: `Agregar grupo a ${G2.name} de PRIMARIA` }));
+    await user.click(within(second).getByRole("textbox", { name: /Nombre del grupo/ }));
+    await user.keyboard("{Enter}");
+    expect(await within(step).findByRole("button", { name: "Reintentar" })).toBeInTheDocument();
+    expect(within(second).getByText("A · 30 lugares")).toBeInTheDocument();
   });
 });
 

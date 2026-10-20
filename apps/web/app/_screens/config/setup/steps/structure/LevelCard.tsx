@@ -16,8 +16,8 @@ export interface LevelCardProps {
   level: Level;
   /** This level's grades, by ordinal. */
   grades: readonly GradeLevel[];
-  /** The selected cycle's groups; undefined while they cannot be told. */
-  groups: readonly Group[] | undefined;
+  /** The selected cycle's groups by grade id; undefined while they cannot be told. */
+  groupsByGrade: ReadonlyMap<string, readonly Group[]> | undefined;
   cycle: Cycle | undefined;
   createGrade: (input: CreateGradeLevelInput) => Promise<void>;
   createGroup: (input: CreateGroupInput) => Promise<void>;
@@ -29,6 +29,9 @@ export interface LevelCardProps {
   isLast: boolean;
   onOpenSettings: () => void;
 }
+
+/** Stable identity for a grade without groups (the create row memoizes on it). */
+const NO_GROUPS: readonly Group[] = [];
 
 const cardStyle: CSSProperties = {
   display: "grid",
@@ -57,18 +60,18 @@ const settingsButton: CSSProperties = {
  * glance, Subir / Bajar and «Ajustes» in its header, then a row per grade and
  * «Agregar grado a …» — the same create row as «Niveles y grados».
  */
-export function LevelCard({ level, grades, groups, cycle, createGrade, createGroup, gradeCorrections, groupCorrections, move, isFirst, isLast, onOpenSettings }: LevelCardProps): ReactElement {
+export function LevelCard({ level, grades, groupsByGrade, cycle, createGrade, createGroup, gradeCorrections, groupCorrections, move, isFirst, isLast, onOpenSettings }: LevelCardProps): ReactElement {
   const titleId = useId();
   const feedback = useDeletionFeedback();
   const row = useGradeCreateRow(level, grades, createGrade);
-  const groupsOf = (gradeId: string): readonly Group[] | undefined => groups?.filter((g) => g.gradeLevelId === gradeId);
+  const groupsOf = (gradeId: string): readonly Group[] | undefined => (groupsByGrade === undefined ? undefined : groupsByGrade.get(gradeId) ?? NO_GROUPS);
 
   return (
     <section aria-labelledby={titleId} style={cardStyle}>
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "6px 10px" }}>
         <div style={{ flex: "1 1 240px", minWidth: 0 }}>
           <h3 id={titleId} style={{ fontSize: 18, fontWeight: 800, color: "var(--text)", margin: 0 }}>{level.name}</h3>
-          <p style={{ margin: "2px 0 0", fontSize: 14, color: "var(--text-muted)" }}>{levelSummary(grades, groups)}</p>
+          <p style={{ margin: "2px 0 0", fontSize: 14, color: "var(--text-muted)" }}>{levelSummary(grades, groupsByGrade)}</p>
           <p style={{ margin: "2px 0 0", fontSize: 13.5, color: "var(--text-faint)" }}>{settingsSummary(level)}</p>
         </div>
         {move !== undefined && !isFirst && <MoveButton level={level} direction="up" onClick={() => move("up")} />}

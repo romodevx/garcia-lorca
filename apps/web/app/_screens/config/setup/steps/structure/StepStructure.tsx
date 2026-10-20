@@ -46,14 +46,9 @@ export function StepStructure({ slot, cycle, levels, grades, groups, refresh, ac
   const moves = useLevelMoves(list, levels.reorder);
   const settingsLevel = list.find((l) => l.id === settingsOf);
 
-  // Grouped once per read, not in every row (L1).
-  const byLevel = useMemo(() => {
-    const out = new Map<string, GradeLevel[]>();
-    if (grades.kind !== "ready") return out;
-    for (const g of [...grades.value].sort((a, b) => a.ordinal - b.ordinal)) out.set(g.levelId, [...(out.get(g.levelId) ?? []), g]);
-    return out;
-  }, [grades]);
-  const groupsRead = groups.kind === "ready" ? groups.value : undefined;
+  // Grouped once per read, never in a row (L1): the create rows memoize on these lists.
+  const byLevel = useMemo(() => groupBy(grades.kind === "ready" ? [...grades.value].sort((a, b) => a.ordinal - b.ordinal) : [], (g) => g.levelId), [grades]);
+  const byGrade = useMemo(() => (groups.kind === "ready" ? groupBy(groups.value, (g) => g.gradeLevelId) : undefined), [groups]);
   const { structure } = actions;
 
   return (
@@ -69,16 +64,16 @@ export function StepStructure({ slot, cycle, levels, grades, groups, refresh, ac
           </div>
         )}
         {cycle === undefined && list.length > 0 && <Prerequisite need="cycle" onGo={slot.onGo} />}
-        {grades.kind === "failed" && <Failed message="No se pudieron leer los grados." onRetry={() => refresh("grades")} />}
-        {groups.kind === "failed" && cycle !== undefined && <Failed message="No se pudieron leer los grupos." onRetry={() => refresh("groups")} />}
+        {unconfirmed(grades) && <Failed message="No se pudieron leer los grados." onRetry={() => refresh("grades")} />}
+        {unconfirmed(groups) && cycle !== undefined && <Failed message="No se pudieron leer los grupos." onRetry={() => refresh("groups")} />}
         {moves.error !== undefined && <ErrorAlert message={moves.error} />}
 
         {grades.kind === "ready" && list.map((level, i) => (
           <LevelCard
             key={level.id}
             level={level}
-            grades={byLevel.get(level.id) ?? []}
-            groups={cycle === undefined ? undefined : groupsRead}
+            grades={byLevel.get(level.id) ?? NO_GRADES}
+            groupsByGrade={cycle === undefined ? undefined : byGrade}
             cycle={cycle}
             createGrade={structure.createGrade}
             createGroup={structure.createGroup}
@@ -104,6 +99,22 @@ export function StepStructure({ slot, cycle, levels, grades, groups, refresh, ac
       )}
     </StepFrame>
   );
+}
+
+/** Stable identity for a level without grades (the create row memoizes on it). */
+const NO_GRADES: readonly GradeLevel[] = [];
+
+/** The read failed, or its last refresh did (H2): what is shown is not confirmed. */
+const unconfirmed = <T,>(read: StatusRead<T>): boolean => read.kind === "failed" || (read.kind === "ready" && read.stale === true);
+
+function groupBy<T>(items: readonly T[], keyOf: (item: T) => string): Map<string, T[]> {
+  const out = new Map<string, T[]>();
+  for (const item of items) {
+    const list = out.get(keyOf(item));
+    if (list === undefined) out.set(keyOf(item), [item]);
+    else list.push(item);
+  }
+  return out;
 }
 
 function Failed({ message, onRetry }: { message: string; onRetry: () => void }): ReactElement {

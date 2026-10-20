@@ -65,7 +65,15 @@ const FALLBACK_STEP: StepId = "levels";
 const MAX_NAMED_GAPS = 2;
 
 /** One status read: in flight, failed, or its value. */
-export type StatusRead<T> = { kind: "loading" } | { kind: "failed" } | { kind: "ready"; value: T };
+/**
+ * One status read: in flight, failed, or its value. `stale` marks a value kept
+ * after a refresh failed (the tree keeps painting it and offers Reintentar);
+ * every step mark reads a stale value as a failed read, as it always did.
+ */
+export type StatusRead<T> = { kind: "loading" } | { kind: "failed" } | { kind: "ready"; value: T; stale?: boolean };
+
+/** A read the marks may trust: ready and not left over from a failed refresh. */
+const fresh = <T,>(read: StatusRead<T>): read is { kind: "ready"; value: T } => read.kind === "ready" && read.stale !== true;
 
 /**
  * "unknown" is a failed read: no mark and no line — the status helps, it is
@@ -147,7 +155,7 @@ function missingLine(prefix: string, names: string[]): string {
 /** Folds a read into a mark: in flight and failed are the same for every step. */
 function fromRead<T>(read: StatusRead<T>, decide: (value: T) => Mark): Mark {
   if (read.kind === "loading") return LOADING_MARK;
-  if (read.kind === "failed") return UNKNOWN_MARK;
+  if (!fresh(read)) return UNKNOWN_MARK;
   return decide(read.value);
 }
 
@@ -238,10 +246,10 @@ function structureMark(input: SetupInput): Mark {
   const levels = levelsMark(input);
   if (levels.status !== "done") return levels;
   const groups = groupsMark(input);
-  if (groups.status !== "done" || input.grades.kind !== "ready" || input.groups.kind !== "ready") return groups;
+  if (groups.status !== "done" || !fresh(input.grades) || !fresh(input.groups)) return groups;
   const known = orderedGrades(input.levels, input.grades.value);
   const grouped = input.groups.value.filter((g) => known.some(({ grade }) => grade.id === g.gradeLevelId)).length;
-  return done(`${levels.line ?? ""} · ${plural(grouped, "grupo", "grupos")}`);
+  return done([levels.line, plural(grouped, "grupo", "grupos")].filter((part) => part !== undefined).join(" · "));
 }
 
 /** A role without finance:read: the step says who sees it instead of "Revisando…" forever. */
@@ -274,7 +282,7 @@ const REVIEW_MARK: Mark = { status: "review", line: "Revisar" };
  */
 function subjectsMark(input: SetupInput): Mark {
   if (input.grades.kind === "loading" || input.subjects.kind === "loading") return LOADING_MARK;
-  if (input.grades.kind === "failed" || input.subjects.kind === "failed") return REVIEW_MARK;
+  if (!fresh(input.grades) || !fresh(input.subjects)) return REVIEW_MARK;
   const known = orderedGrades(input.levels, input.grades.value);
   if (known.length === 0) return REVIEW_MARK;
   const subjects = input.subjects.value;
@@ -325,11 +333,11 @@ const IMPORT_CREATES_GROUPS = "Crea los grupos que falten.";
  */
 function importHint(input: SetupInput): string | undefined {
   if (input.levels.length === 0) return IMPORT_CREATES_ALL;
-  if (input.grades.kind !== "ready") return undefined;
+  if (!fresh(input.grades)) return undefined;
   const grades = input.grades.value;
   if (input.levels.some((l) => !grades.some((g) => g.levelId === l.id))) return IMPORT_CREATES_GRADES;
   if (input.selectedCycleId === undefined) return IMPORT_CREATES_GROUPS;
-  if (input.groups.kind !== "ready") return undefined;
+  if (!fresh(input.groups)) return undefined;
   const groups = input.groups.value;
   const known = orderedGrades(input.levels, grades);
   return known.some(({ grade }) => !groups.some((g) => g.gradeLevelId === grade.id)) ? IMPORT_CREATES_GROUPS : undefined;

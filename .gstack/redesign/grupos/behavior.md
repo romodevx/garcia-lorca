@@ -106,3 +106,7 @@ All tests are in `_screens/config/` unless a path says otherwise.
 10. In setup, picking another level clears the selected grade (step 3 grades pane, step 6 GroupsPanel). Legacy only (`Catalog.characterization`).
 11. Group create with a closed cycle selected. There is no UI rule for it.
 12. A rename that leaves the name unchanged closing with no call. I didn't find a test for it.
+
+## Cambios aceptados (rediseño, 20-oct)
+- El cajón «Nuevo nivel» descarta lo escrito al cancelar (antes lo conservaba hasta recargar la pantalla).
+- Una recarga de grados o grupos que falla después de una lectura buena conserva el valor (marcado `stale`); las marcas de los pasos siguen leyéndolo como fallida.

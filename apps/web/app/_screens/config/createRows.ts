@@ -84,7 +84,8 @@ export function useGradeCreateRow(level: Level, gradeLevels: readonly GradeLevel
   return { columns: GRADE_COLUMNS, rules: ORDINAL_RULES, defaults, onCreate, error };
 }
 
-export function useGroupCreateRow(cycle: Cycle, gradeLevel: GradeLevel, groups: readonly Group[], create: (input: CreateGroupInput) => Promise<void>): CreateRow {
+/** `cycle` undefined: there is nothing to create groups in, and the row refuses (callers do not draw it then). */
+export function useGroupCreateRow(cycle: Cycle | undefined, gradeLevel: GradeLevel, groups: readonly Group[], create: (input: CreateGroupInput) => Promise<void>): CreateRow {
   const [error, setError] = useState<string | undefined>(undefined);
   const defaults = useMemo(() => ({ name: nextLetter(groups), capacity: String(DEFAULT_CAPACITY) }), [groups]);
   const onCreate = async (values: Record<string, string>): Promise<void> => {
@@ -95,6 +96,7 @@ export function useGroupCreateRow(cycle: Cycle, gradeLevel: GradeLevel, groups: 
       setError(NO_CAPACITY);
       throw new Error(NO_CAPACITY);
     }
+    if (cycle === undefined) throw new Error("no cycle to create the group in");
     setError(undefined);
     try {
       await create({ cycleId: cycle.id, gradeLevelId: gradeLevel.id, name: (values.name ?? "").trim(), capacity });

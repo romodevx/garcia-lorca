@@ -33,6 +33,12 @@ export interface CorrectableNameProps {
   deleteDescription: string;
   /** How the name is shown when not being edited (a chip, a pill). */
   children: ReactNode;
+  /**
+   * Where it is, for the pencil's and the trash's names when the same name
+   * repeats on screen («de PRIMARIA»: every level has a 1°). Absent, the names
+   * stay «Renombrar grado 1°».
+   */
+  qualifier?: string;
 }
 
 /** The rename went through in config but the pupils' files did not follow: saving again finishes it. */
@@ -64,13 +70,14 @@ function neighbourControl(item: HTMLElement | null): HTMLElement | null {
  * deleting a grade or a group does not undo — and any refusal is shown right
  * here, in the server's words.
  */
-export function CorrectableName({ name, noun, onRename, onDelete, onDeleted, deleteDescription, children }: CorrectableNameProps): ReactElement {
+export function CorrectableName({ name, noun, onRename, onDelete, onDeleted, deleteDescription, children, qualifier }: CorrectableNameProps): ReactElement {
   const [editing, setEditing] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
   const deleting = useRef(false);
   const itemRef = useRef<HTMLLIElement>(null);
   const label = `${noun} ${name}`;
+  const controlLabel = qualifier === undefined ? label : `${label} ${qualifier}`;
 
   const remove = async (): Promise<void> => {
     setConfirming(false);
@@ -97,10 +104,10 @@ export function CorrectableName({ name, noun, onRename, onDelete, onDeleted, del
     <li ref={itemRef} style={itemStyle}>
       <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
         {children}
-        <button type="button" data-correct-rename="" aria-label={`Renombrar ${label}`} onClick={() => { setError(undefined); setEditing(true); }} style={iconButton}>
+        <button type="button" data-correct-rename="" aria-label={`Renombrar ${controlLabel}`} onClick={() => { setError(undefined); setEditing(true); }} style={iconButton}>
           <Icon name="edit" size={16} />
         </button>
-        <button type="button" aria-label={`Borrar ${label}`} onClick={() => { setError(undefined); setConfirming(true); }} style={iconButton}>
+        <button type="button" aria-label={`Borrar ${controlLabel}`} onClick={() => { setError(undefined); setConfirming(true); }} style={iconButton}>
           <Icon name="trash" size={16} />
         </button>
       </span>

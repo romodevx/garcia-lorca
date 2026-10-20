@@ -335,3 +335,14 @@ describe("ISSUE-024 · what Migrar alumnos will create, from the catalog itself"
     expect(hint({ ...complete(), groups: FAILED })).toBeUndefined();
   });
 });
+
+// A refresh that failed keeps its last value for the tree (stale), but the
+// step marks read it as they always did: unknown, no line.
+describe("a stale read", () => {
+  it("marks its steps unknown, as a failed read did", () => {
+    const input = complete();
+    const stale = { ...input, groups: { kind: "ready" as const, value: [group("p1")], stale: true } };
+    expect(step(stale, "groups").status).toBe("unknown");
+  });
+});
+

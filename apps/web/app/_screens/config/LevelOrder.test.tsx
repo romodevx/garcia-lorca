@@ -68,4 +68,26 @@ describe("LevelOrder", () => {
     expect(b.style.minHeight).toBe("44px");
     expect(b.style.minWidth).toBe("44px");
   });
+
+  // PLAN-redesign-estructura (tech-lead M3): the arrow takes the focus once; a
+  // later change to the list (a new level, a rename) must not pull it back.
+  it("puts the focus on the moved arrow once, never again on a later list change", async () => {
+    function Host(): ReactElement {
+      const [levels, setLevels] = useState(LEVELS);
+      return (
+        <>
+          <input aria-label="Otro campo" />
+          <button type="button" onClick={() => setLevels((prev) => [...prev, level("l4", "BACHILLERATO")])}>Agregar</button>
+          <LevelOrder levels={levels} onReorder={async () => undefined} />
+        </>
+      );
+    }
+    const user = userEvent.setup();
+    render(<Host />);
+    await user.click(screen.getByRole("button", { name: "Bajar PREESCOLAR" }));
+    await user.click(screen.getByRole("textbox", { name: "Otro campo" }));
+    await user.click(screen.getByRole("button", { name: "Agregar" }));
+    expect(screen.getByRole("button", { name: "Agregar" })).toHaveFocus();
+  });
 });
+

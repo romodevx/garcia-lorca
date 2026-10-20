@@ -8,12 +8,12 @@ import type { GradeLevel, Group, Level } from "../../../../../config/api";
 const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
 
 /** "6 grados · 12 grupos · 1 sin grupos"; the groups are left out while they cannot be told. */
-export function levelSummary(grades: readonly GradeLevel[], groups: readonly Group[] | undefined): string {
+export function levelSummary(grades: readonly GradeLevel[], groupsByGrade: ReadonlyMap<string, readonly Group[]> | undefined): string {
   const parts = [plural(grades.length, "grado", "grados")];
-  if (groups !== undefined) {
-    const inLevel = groups.filter((g) => grades.some((gr) => gr.id === g.gradeLevelId));
-    parts.push(plural(inLevel.length, "grupo", "grupos"));
-    const empty = grades.filter((gr) => !inLevel.some((g) => g.gradeLevelId === gr.id)).length;
+  if (groupsByGrade !== undefined) {
+    const count = grades.reduce((n, gr) => n + (groupsByGrade.get(gr.id)?.length ?? 0), 0);
+    parts.push(plural(count, "grupo", "grupos"));
+    const empty = grades.filter((gr) => (groupsByGrade.get(gr.id)?.length ?? 0) === 0).length;
     if (empty > 0) parts.push(`${empty} sin grupos`);
   }
   return parts.join(" · ");

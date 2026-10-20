@@ -72,7 +72,11 @@ function useKeyedRead<T>(key: string | undefined, load: (key: string) => Promise
       const ticket = ++newest.current;
       const settle = (read: StatusRead<T>): void => {
         if (ticket !== newest.current) return;
-        setStored((prev) => (read.kind === "failed" && prev?.key === k && prev.read.kind === "ready" ? prev : { key: k, read }));
+        setStored((prev) =>
+          read.kind === "failed" && prev?.key === k && prev.read.kind === "ready"
+            ? { key: k, read: { kind: "ready", value: prev.read.value, stale: true } }
+            : { key: k, read },
+        );
       };
       load(k)
         .then((value) => settle({ kind: "ready", value }))
@@ -82,7 +86,7 @@ function useKeyedRead<T>(key: string | undefined, load: (key: string) => Promise
   );
 
   const patch = useCallback((change: (value: T) => T): void => {
-    setStored((prev) => (prev?.read.kind === "ready" ? { key: prev.key, read: { kind: "ready", value: change(prev.read.value) } } : prev));
+    setStored((prev) => (prev?.read.kind === "ready" ? { key: prev.key, read: { ...prev.read, value: change(prev.read.value) } } : prev));
   }, []);
 
   useEffect(() => {

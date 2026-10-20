@@ -125,3 +125,19 @@ Un día de trabajo, más que lo que decía el borrador por lo que encontró la r
 - Los grados se muestran en orden.
 - Hay foco tras crear y tras borrar.
 - Hay capturas en el `/qa` a 360 px.
+
+## 9. Revisión de código (tech-lead, 20-oct) y lo que queda pendiente
+
+- **Corregido:**
+  - H2 completo: una recarga que falla deja el valor marcado como `stale`. El árbol ofrece «Reintentar» y las marcas de los pasos lo leen como una lectura fallida, igual que antes, también con el flag apagado.
+  - L1: los grupos se agrupan por grado una sola vez, y las listas vacías mantienen siempre la misma identidad.
+  - El foco después de Subir/Bajar se usa una sola vez.
+  - Los nombres accesibles llevan el nivel: «Agregar grupo a 1° de PRIMARIA», «Borrar grado 1° de PRIMARIA».
+  - Se quitó el ciclo de relleno.
+  - El vecino que recibe el foco se calcula antes de borrar.
+  - La fila del grado es un grupo con nombre (`role=group`, nombrado por el nombre visible del grado).
+- **Para después** (SHOULD de diseño, sin cambio de comportamiento):
+  - una sola fila en línea abierta a la vez;
+  - anunciar «PRIMARIA ahora es 3 de 5» al mover un nivel;
+  - que «Lo que falta» lleve a la primera fila «Sin grupos».
+- **Aceptado (LOW 6):** el cajón «Nuevo nivel» ahora se desmonta al cerrarse. Lo escrito antes de «Cancelar» ya no reaparece al volver a abrirlo. Lo esperado al cancelar es que se descarte.

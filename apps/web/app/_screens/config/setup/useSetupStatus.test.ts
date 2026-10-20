@@ -251,7 +251,9 @@ describe("useSetupStatus — the structure tree's edits (PLAN-redesign-estructur
     config.listGroups.mockRejectedValueOnce(new Error("down"));
     act(() => result.current.refresh("groups"));
     await waitFor(() => expect(config.listGroups).toHaveBeenCalledTimes(2));
-    await new Promise((r) => setTimeout(r, 0));
-    expect(result.current.groups.kind).toBe("ready");
+    await waitFor(() => expect(result.current.groups).toMatchObject({ kind: "ready", stale: true }));
+    // The next refresh that answers clears the mark.
+    act(() => result.current.refresh("groups"));
+    await waitFor(() => expect(result.current.groups).toEqual({ kind: "ready", value: db.groups.filter((g) => g.cycleId === "c1") }));
   });
 });
