@@ -122,15 +122,27 @@ function proposedEnd(index: number, startsOn: string, cycle: CycleSpan): string 
   return threeMonths > cycle.endsOn ? cycle.endsOn : threeMonths;
 }
 
+/** A period the level already has (step 4), offered as a grade's next row. */
+export interface PeriodTemplate {
+  name: string;
+  startsOn: string;
+  endsOn: string;
+}
+
 /**
- * A new row with everything a person would type anyway: the trimester's name,
- * and dates from the day after the last period to the end of its third of the
- * cycle. A cycle already covered leaves the dates to the person.
+ * A new row with everything a person would type anyway. When the level has
+ * its own periods (`template`, in calendar order) the next one that starts
+ * after the rows already there is proposed as is — a level by semesters gets
+ * semesters. Otherwise the trimester's name, and dates from the day after the
+ * last period to the end of its third of the cycle. A cycle already covered
+ * leaves the dates to the person.
  */
-export function nextDraft(rows: readonly PeriodDraft[], cycle: CycleSpan, key: string): PeriodDraft {
+export function nextDraft(rows: readonly PeriodDraft[], cycle: CycleSpan, key: string, template: readonly PeriodTemplate[] = []): PeriodDraft {
   const index = rows.length;
-  const name = periodName(index);
   const lastEnd = rows.reduce((max, r) => (r.endsOn > max ? r.endsOn : max), "");
+  const fromLevel = template.find((t) => t.startsOn > lastEnd);
+  if (fromLevel !== undefined) return { key, id: "", name: fromLevel.name, startsOn: fromLevel.startsOn, endsOn: fromLevel.endsOn };
+  const name = template.length > 0 ? `${index + 1}.º periodo` : periodName(index);
   const startsOn = lastEnd === "" ? cycle.startsOn : addDays(lastEnd, 1);
   if (startsOn > cycle.endsOn) return { key, id: "", name, startsOn: "", endsOn: "" };
   return { key, id: "", name, startsOn, endsOn: proposedEnd(index, startsOn, cycle) };
