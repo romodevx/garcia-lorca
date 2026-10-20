@@ -253,6 +253,8 @@ export function AppShell(): ReactElement {
   const configEnabled = useFlag("module_config");
   // Presentation only: which view of /configuracion (PLAN-redesign-configuracion).
   const configSetupView = useFlag("module_config_setup");
+  // Presentation only, inside the setup view: «Estructura de la escuela» (PLAN-redesign-estructura).
+  const schoolStructureView = useFlag("module_school_structure");
   // The enrollment surface is gated by module_students (UX-only; the gateway is
   // the boundary). The "students" module (Estudiantes) opens this surface.
   const studentsEnabled = useFlag("module_students");
@@ -710,7 +712,7 @@ export function AppShell(): ReactElement {
         (view.screen === "studentImport" && !mayImportStudents)) &&
         (configEnabled ? (
           configSetupView ? (
-            <CatalogSetup onBack={home} canDeleteLevels={mayDeleteLevels} onDeleteLevel={openLevelDelete} onOpenLevelPeriods={openLevelPeriods} onOpenStudentImport={openStudentImport} notice={configNotice} canWriteConfig={mayWriteConfig} canReadTuition={mayReadTuition} />
+            <CatalogSetup onBack={home} canDeleteLevels={mayDeleteLevels} onDeleteLevel={openLevelDelete} onOpenLevelPeriods={openLevelPeriods} onOpenStudentImport={openStudentImport} notice={configNotice} canWriteConfig={mayWriteConfig} canReadTuition={mayReadTuition} structureView={schoolStructureView} />
           ) : (
             <Catalog onBack={home} canDeleteLevels={mayDeleteLevels} onDeleteLevel={openLevelDelete} onOpenLevelPeriods={openLevelPeriods} onOpenStudentImport={openStudentImport} notice={configNotice} canWriteConfig={mayWriteConfig} canReadTuition={mayReadTuition} />
           )

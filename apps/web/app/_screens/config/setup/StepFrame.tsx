@@ -5,7 +5,8 @@ import type { CSSProperties, ReactElement, ReactNode } from "react";
 import { Btn } from "../../../_design/Controls";
 import { UnderStepTitle } from "../SetupPresentation";
 import { QUIET_TEXT } from "./setupColors";
-import { STEPS, type StepDef, type StepId, type StepView } from "./setupSteps";
+import { useSetupSteps } from "./stepsContext";
+import type { StepDef, StepId, StepView } from "./setupSteps";
 
 /*
  * The open step's frame (PLAN-redesign-configuracion §1.2–§1.3): "Paso N de 8",
@@ -68,7 +69,7 @@ const footStyle: CSSProperties = {
 
 const textLinkStyle: CSSProperties = { minHeight: 44, color: "var(--text-muted)", fontWeight: 600, fontSize: 14.5, cursor: "pointer" };
 
-const neighbour = (step: StepDef, offset: number): StepDef | undefined => STEPS[step.number - 1 + offset];
+const neighbour = (steps: readonly StepDef[], step: StepDef, offset: number): StepDef | undefined => steps[step.number - 1 + offset];
 
 export function StepFrame({ step, tool = false, hidden = false, chrome = true, ownHeading = false, onGo, children }: StepFrameProps): ReactElement {
   const framed = chrome && !tool ? step : undefined;
@@ -85,9 +86,10 @@ export function StepFrame({ step, tool = false, hidden = false, chrome = true, o
 }
 
 function StepIntro({ step, ownHeading }: { step: StepView; ownHeading: boolean }): ReactElement {
+  const steps = useSetupSteps();
   return (
     <div style={{ marginBottom: 18 }}>
-      <p style={eyebrowStyle}>Paso {step.number} de {STEPS.length}</p>
+      <p style={eyebrowStyle}>Paso {step.number} de {steps.length}</p>
       {/* With a panel, its own h2 and subtitle already title the step and say what it is for. */}
       {ownHeading && (
         <>
@@ -102,8 +104,9 @@ function StepIntro({ step, ownHeading }: { step: StepView; ownHeading: boolean }
 }
 
 function StepFoot({ step, onGo }: { step: StepView; onGo: (id: StepId) => void }): ReactElement {
-  const previous = neighbour(step, -1);
-  const next = neighbour(step, 1);
+  const steps = useSetupSteps();
+  const previous = neighbour(steps, step, -1);
+  const next = neighbour(steps, step, 1);
   return (
     <div style={footStyle}>
       {previous !== undefined ? (

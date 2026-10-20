@@ -4,7 +4,8 @@ import type { ReactElement } from "react";
 
 import type { Cycle, Level } from "../../../../config/api";
 import { EmptyHint } from "../../parts";
-import { STEPS, type StepId } from "../setupSteps";
+import { useSetupSteps } from "../stepsContext";
+import type { StepId } from "../setupSteps";
 
 /*
  * A step that cannot work yet says what comes first and links there (§4.3):
@@ -31,7 +32,7 @@ export const linkStyle = { minHeight: 44, color: "var(--forest)", fontWeight: 60
 
 export function Prerequisite({ need, onGo }: { need: Need; onGo: (id: StepId) => void }): ReactElement {
   const { text, step } = NEEDS[need];
-  const number = STEPS.find((s) => s.id === step)?.number;
+  const number = useSetupSteps().find((s) => s.id === step)?.number;
   return (
     <div style={{ display: "grid", justifyItems: "start", gap: 4 }}>
       <EmptyHint>{text}</EmptyHint>

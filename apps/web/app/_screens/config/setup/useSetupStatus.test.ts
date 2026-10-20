@@ -232,3 +232,26 @@ describe("useSetupStatus: subjects", () => {
     await waitFor(() => expect(ids(result.current.subjects)).toEqual(["m1", "m2"]));
   });
 });
+
+describe("useSetupStatus — the structure tree's edits (PLAN-redesign-estructura H1/H2)", () => {
+  // H1: a create shows at once, so «Guardar y crear otro» proposes the next letter before the GET answers.
+  it("patches a read in place, before any refresh", async () => {
+    const { result } = renderHook(() => useSetupStatus("c1"));
+    await waitFor(() => expect(result.current.groups.kind).toBe("ready"));
+    act(() => result.current.patchGroups((list) => [...list, group("g9", "c1", "p1")]));
+    expect(result.current.groups).toEqual({ kind: "ready", value: [...db.groups.filter((g) => g.cycleId === "c1"), group("g9", "c1", "p1")] });
+    act(() => result.current.patchGrades((list) => list.filter((g) => g.id !== "s1")));
+    expect(result.current.grades).toEqual({ kind: "ready", value: [grade("p1", "prim")] });
+  });
+
+  // H2: the tree paints from these reads; a failed refresh keeps what it had instead of emptying it.
+  it("keeps the last good answer when a refresh fails", async () => {
+    const { result } = renderHook(() => useSetupStatus("c1"));
+    await waitFor(() => expect(result.current.groups.kind).toBe("ready"));
+    config.listGroups.mockRejectedValueOnce(new Error("down"));
+    act(() => result.current.refresh("groups"));
+    await waitFor(() => expect(config.listGroups).toHaveBeenCalledTimes(2));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(result.current.groups.kind).toBe("ready");
+  });
+});

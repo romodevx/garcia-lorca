@@ -11,6 +11,7 @@ import type { StatusRead } from "./setupSteps";
 /** What a create invalidates (plan §4.2): one read, or all three on a cycle created or activated. */
 export type RefreshKind = "grades" | "terms" | "groups" | "subjects" | "all";
 
+
 export interface SetupStatus {
   grades: StatusRead<GradeLevel[]>;
   terms: StatusRead<Term[]>;
@@ -21,6 +22,13 @@ export interface SetupStatus {
   plans: StatusRead<TuitionPlan[]>;
   closedDays: StatusRead<number>;
   refresh: (kind: RefreshKind) => void;
+  /**
+   * Apply a write the server already took to a ready read, at once — the
+   * refresh that follows confirms it; a read not yet ready is left alone. The
+   * «Estructura de la escuela» tree paints from these (PLAN-redesign-estructura H1).
+   */
+  patchGrades: (change: (list: GradeLevel[]) => GradeLevel[]) => void;
+  patchGroups: (change: (list: Group[]) => Group[]) => void;
   /** For `SchoolProfilePanel onLoaded`. */
   onProfileLoaded: (profile: SchoolProfile | "failed") => void;
   /** For `TuitionPanel onPlansLoaded`. */
@@ -51,9 +59,11 @@ function readFor<T>(stored: Keyed<T> | undefined, key: string | undefined): Stat
 /**
  * One keyed read with a refresh. Only the newest request may answer: a late
  * answer for an older key, or for an older refresh of the same key, is dropped.
- * While a refresh is in flight the previous answer stays (no flicker to "loading").
+ * While a refresh is in flight the previous answer stays (no flicker to
+ * "loading"), and a refresh that FAILS keeps it too: the tree that paints from
+ * it must not empty itself over one lost request (H2). Only a first read fails.
  */
-function useKeyedRead<T>(key: string | undefined, load: (key: string) => Promise<T>): { read: StatusRead<T>; refresh: () => void } {
+function useKeyedRead<T>(key: string | undefined, load: (key: string) => Promise<T>): { read: StatusRead<T>; refresh: () => void; patch: (change: (value: T) => T) => void } {
   const [stored, setStored] = useState<Keyed<T> | undefined>(undefined);
   const newest = useRef(0);
 
@@ -61,7 +71,8 @@ function useKeyedRead<T>(key: string | undefined, load: (key: string) => Promise
     (k: string): void => {
       const ticket = ++newest.current;
       const settle = (read: StatusRead<T>): void => {
-        if (ticket === newest.current) setStored({ key: k, read });
+        if (ticket !== newest.current) return;
+        setStored((prev) => (read.kind === "failed" && prev?.key === k && prev.read.kind === "ready" ? prev : { key: k, read }));
       };
       load(k)
         .then((value) => settle({ kind: "ready", value }))
@@ -69,6 +80,10 @@ function useKeyedRead<T>(key: string | undefined, load: (key: string) => Promise
     },
     [load],
   );
+
+  const patch = useCallback((change: (value: T) => T): void => {
+    setStored((prev) => (prev?.read.kind === "ready" ? { key: prev.key, read: { kind: "ready", value: change(prev.read.value) } } : prev));
+  }, []);
 
   useEffect(() => {
     if (key !== undefined) fetchFor(key);
@@ -78,7 +93,7 @@ function useKeyedRead<T>(key: string | undefined, load: (key: string) => Promise
     if (key !== undefined) fetchFor(key);
   }, [key, fetchFor]);
 
-  return { read: readFor(stored, key), refresh };
+  return { read: readFor(stored, key), refresh, patch };
 }
 
 const loadAllGrades = (): Promise<GradeLevel[]> => listGradeLevels(API_URL);
@@ -132,6 +147,8 @@ export function useSetupStatus(cycleId: string | undefined): SetupStatus {
   );
 
   return {
+    patchGrades: grades.patch,
+    patchGroups: groups.patch,
     grades: grades.read,
     terms: terms.read,
     groups: groups.read,

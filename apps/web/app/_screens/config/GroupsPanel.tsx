@@ -1,11 +1,11 @@
 "use client";
 
-import { useMemo, useState, type ReactElement } from "react";
+import { type ReactElement } from "react";
 
 import { InlineCreateRow } from "../../_design/InlineCreateRow";
-import type { FormatRule } from "../../_design/form/useFormatError";
 import type { CreateGroupInput, Cycle, GradeLevel, Group } from "../../config/api";
 import { CorrectableName, type NameCorrections } from "./CorrectableName";
+import { useGroupCreateRow } from "./createRows";
 import { DeletionStatus, useDeletionFeedback } from "./useDeletionFeedback";
 import { EmptyHint, ErrorAlert, Section } from "./parts";
 
@@ -16,19 +16,6 @@ export interface GroupsPanelProps {
   onCreate: (input: CreateGroupInput) => Promise<void>;
   /** config:write: rename / delete beside each group (T8). Absent = read-only pills. */
   corrections?: NameCorrections;
-}
-
-const DEFAULT_CAPACITY = 30;
-const NO_CAPACITY = "El cupo del grupo tiene que ser un número mayor que cero.";
-
-/** Checked in the row at save (ISSUE-CC-104): cupo 0 + Enter used to say nothing there. */
-const CAPACITY_RULES: Readonly<Record<string, FormatRule>> = {
-  capacity: (value) => (Number(value) >= 1 ? undefined : NO_CAPACITY),
-};
-
-/** La letra que sigue: A, B, C… */
-function nextLetter(groups: readonly Group[]): string {
-  return String.fromCharCode("A".charCodeAt(0) + Math.min(groups.length, 25));
 }
 
 /**
@@ -43,15 +30,8 @@ function nextLetter(groups: readonly Group[]): string {
  * nuevo, y un salón más chico que los demás tiene que poder capturarse.
  */
 export function GroupsPanel({ cycle, gradeLevel, groups, onCreate, corrections }: GroupsPanelProps): ReactElement {
-  const [error, setError] = useState<string | undefined>(undefined);
+  const row = useGroupCreateRow(cycle, gradeLevel, groups, onCreate);
   const feedback = useDeletionFeedback();
-
-  // Identidad estable: el renglón la observa para poner al día la celda que
-  // nadie tocó, y un objeto nuevo en cada render la reescribiría siempre.
-  const defaults = useMemo(
-    () => ({ name: nextLetter(groups), capacity: String(DEFAULT_CAPACITY) }),
-    [groups],
-  );
 
   return (
     <Section title="Grupos" subtitle={`De ${gradeLevel.name} en ${cycle.name}.`}>
@@ -83,56 +63,7 @@ export function GroupsPanel({ cycle, gradeLevel, groups, onCreate, corrections }
 
       <DeletionStatus message={feedback.message} />
       <div ref={feedback.fallbackRef} style={{ border: "1px solid var(--border)", borderRadius: "var(--r-md)", overflow: "hidden" }}>
-        <InlineCreateRow
-          addLabel="Nuevo grupo"
-          defaults={defaults}
-          rules={CAPACITY_RULES}
-          columns={[
-            {
-              key: "name",
-              label: "Nombre del grupo",
-              kind: "text",
-              uppercase: true,
-              required: true,
-              help: "La letra o el nombre que distingue este salón de los otros del mismo grado.",
-            },
-            {
-              key: "capacity",
-              label: "Cupo",
-              kind: "number",
-              required: true,
-              width: 140,
-              help: "Cuántos alumnos caben. La asignación automática no mete a nadie de más.",
-            },
-          ]}
-          onCreate={async (values) => {
-            const capacity = Number(values.capacity);
-            if (!Number.isFinite(capacity) || capacity < 1) {
-              // Number("") es 0, y un cupo 0 que nadie escribió no acepta
-              // alumnos: la asignación automática se salta ese grupo en silencio.
-              setError(NO_CAPACITY);
-              // También se relanza: para el renglón, "no pasó" es no pasó, sea
-              // por la red o por el dato.
-              throw new Error(NO_CAPACITY);
-            }
-            setError(undefined);
-            try {
-              await onCreate({
-                cycleId: cycle.id,
-                gradeLevelId: gradeLevel.id,
-                name: (values.name ?? "").trim(),
-                capacity,
-              });
-            } catch (cause) {
-              setError("No se pudo crear el grupo. Revisa que no exista ya con ese nombre.");
-              // Se RELANZA: el renglón necesita saber que no se guardó para
-              // conservar lo escrito. Tragarse el error aquí dejaba el mensaje
-              // hablando de un renglón que ya se había vaciado solo, y obligaba
-              // a reescribir todo.
-              throw cause;
-            }
-          }}
-        />
+        <InlineCreateRow addLabel="Nuevo grupo" defaults={row.defaults} rules={row.rules} columns={row.columns} onCreate={row.onCreate} />
       </div>
 
       <p style={{ fontSize: 13, color: "var(--text-faint)", marginTop: 10, lineHeight: 1.5 }}>
@@ -140,12 +71,13 @@ export function GroupsPanel({ cycle, gradeLevel, groups, onCreate, corrections }
         siguiente pasa a B, sin que nadie lo asigne a mano.
       </p>
 
-      {error !== undefined && <ErrorAlert message={error} />}
+      {row.error !== undefined && <ErrorAlert message={row.error} />}
     </Section>
   );
 }
 
-function GroupPill({ group }: { group: Group }): ReactElement {
+/** "A · 30 lugares": the group as both setup views show it. */
+export function GroupPill({ group }: { group: Group }): ReactElement {
   return (
     <span style={{ padding: "8px 14px", borderRadius: "var(--r-pill)", background: "var(--surface-2)", fontSize: 14, fontWeight: 600 }}>
       {group.name} · {group.capacity} lugares

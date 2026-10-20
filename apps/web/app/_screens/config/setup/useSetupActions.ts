@@ -2,10 +2,10 @@
 
 import { useMemo } from "react";
 
-import type { CopyTermMonthsInput, CreateCycleInput, CreateGradeLevelInput, CreateGroupInput, CreateLevelInput, CreateTermInput, Term } from "../../../config/api";
+import type { CopyTermMonthsInput, CreateCycleInput, CreateGradeLevelInput, CreateGroupInput, CreateLevelInput, CreateTermInput, GradeLevel, Group, Term } from "../../../config/api";
 import type { NameCorrections } from "../CorrectableName";
 import type { CatalogState } from "../useCatalogState";
-import type { RefreshKind } from "./useSetupStatus";
+import type { SetupStatus } from "./useSetupStatus";
 
 /**
  * The catalog's own handlers, each followed by the status read it invalidates
@@ -27,6 +27,42 @@ export interface SetupActions {
   /** T8 corrections, each re-reading the status it changes. Undefined without config:write. */
   gradeCorrections: NameCorrections | undefined;
   groupCorrections: NameCorrections | undefined;
+  /** What «Estructura de la escuela» writes with (PLAN-redesign-estructura). */
+  structure: StructureActions;
+}
+
+/**
+ * The tree's writes: the SAME handlers and calls, for any level or grade (never
+ * through the shared selection, M1), each applied to the status read at once
+ * (H1) and then confirmed by a refresh. A group rename refreshes even when
+ * refused: GROUP_RELABEL_PENDING renamed it in config already (H3).
+ */
+export interface StructureActions {
+  createGrade: (input: CreateGradeLevelInput) => Promise<void>;
+  createGroup: (input: CreateGroupInput) => Promise<void>;
+  gradeCorrections: NameCorrections | undefined;
+  groupCorrections: NameCorrections | undefined;
+}
+
+type Patch<T> = (change: (list: T[]) => T[]) => void;
+
+/** Corrections that patch the tree's read on success; `refreshOnRefusal` re-reads on a refusal too. */
+function patched<T extends { id: string; name: string }>(corrections: NameCorrections | undefined, patch: Patch<T>, refresh: () => void, refreshOnRefusal: boolean): NameCorrections | undefined {
+  if (corrections === undefined) return undefined;
+  const settle = async (work: Promise<void>, change: (list: T[]) => T[]): Promise<void> => {
+    try {
+      await work;
+    } catch (cause) {
+      if (refreshOnRefusal) refresh();
+      throw cause;
+    }
+    patch(change);
+    refresh();
+  };
+  return {
+    rename: (id, name) => settle(corrections.rename(id, name), (list) => list.map((x) => (x.id === id ? { ...x, name } : x))),
+    remove: (id) => settle(corrections.remove(id), (list) => list.filter((x) => x.id !== id)),
+  };
 }
 
 function withRefresh(corrections: NameCorrections | undefined, refresh: () => void): NameCorrections | undefined {
@@ -42,7 +78,8 @@ function thenRefresh<Args extends unknown[], Result>(action: (...args: Args) => 
     });
 }
 
-export function useSetupActions(state: CatalogState, refresh: (kind: RefreshKind) => void): SetupActions {
+export function useSetupActions(state: CatalogState, status: Pick<SetupStatus, "refresh" | "patchGrades" | "patchGroups">): SetupActions {
+  const { refresh, patchGrades, patchGroups } = status;
   const { cycles, grades, terms, groups } = state;
   const { create: createLevel, reload: reloadLevels } = state.levels;
   return useMemo(
@@ -63,12 +100,26 @@ export function useSetupActions(state: CatalogState, refresh: (kind: RefreshKind
       createGroup: thenRefresh(groups.create, () => refresh("groups")),
       gradeCorrections: withRefresh(grades.corrections, () => refresh("grades")),
       groupCorrections: withRefresh(groups.corrections, () => refresh("groups")),
+      structure: {
+        createGrade: async (input) => {
+          const created: GradeLevel = await grades.createIn(input);
+          patchGrades((list) => [...list, created]);
+          refresh("grades");
+        },
+        createGroup: async (input) => {
+          const created: Group = await groups.createIn(input);
+          patchGroups((list) => [...list, created]);
+          refresh("groups");
+        },
+        gradeCorrections: patched<GradeLevel>(grades.corrections, patchGrades, () => refresh("grades"), false),
+        groupCorrections: patched<Group>(groups.corrections, patchGroups, () => refresh("groups"), true),
+      },
       // A restore brings the level back with its grades, terms and groups: every read is stale.
       restoredLevel: () => {
         reloadLevels();
         refresh("all");
       },
     }),
-    [cycles.create, cycles.activate, createLevel, reloadLevels, grades.create, grades.corrections, terms.create, terms.setMonths, terms.copyMonths, groups.create, groups.corrections, refresh],
+    [cycles.create, cycles.activate, createLevel, reloadLevels, grades.create, grades.createIn, grades.corrections, terms.create, terms.setMonths, terms.copyMonths, groups.create, groups.createIn, groups.corrections, refresh, patchGrades, patchGroups],
   );
 }

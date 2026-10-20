@@ -9,6 +9,7 @@ vi.mock("../../config/api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../config/api")>()),
   listCycles: vi.fn(), listLevels: vi.fn(), listGradeLevels: vi.fn(), listGroups: vi.fn(), listTerms: vi.fn(),
   renameGroup: vi.fn(), deleteGroup: vi.fn(), renameGradeLevel: vi.fn(), deleteGradeLevel: vi.fn(),
+  createGradeLevel: vi.fn(), createGroup: vi.fn(),
 }));
 
 const mocked = vi.mocked(api);
@@ -64,5 +65,29 @@ describe("useCatalogState · a refused group rename", () => {
     await waitFor(() => expect(view.result.current.groups.list[0]?.name).toBe("B"));
     expect(mocked.listGroups).toHaveBeenCalledTimes(calls + 1);
     expect(mocked.listGroups).toHaveBeenLastCalledWith(expect.any(String), "c1", "g1");
+  });
+});
+
+// PLAN-redesign-estructura M1: the tree creates in any level or grade, never
+// through the selection the other steps share.
+describe("useCatalogState · creating outside the selection", () => {
+  it("a grade created in another level is returned and kept out of the selected level's list", async () => {
+    const view = await withGroups(true);
+    const other: GradeLevel = { id: "g9", levelId: "l2", name: "1° SECUNDARIA", ordinal: 1 };
+    mocked.createGradeLevel.mockResolvedValue(other);
+    const created = await act(() => view.result.current.grades.createIn({ levelId: "l2", name: "1° SECUNDARIA", ordinal: 1 }));
+    expect(created).toEqual(other);
+    expect(view.result.current.levels.selectedId).toBe("l1");
+    expect(view.result.current.grades.list.map((g) => g.id)).toEqual(["g1"]);
+  });
+
+  it("a group created in another grade is returned and kept out of the selected grade's list", async () => {
+    const view = await withGroups(true);
+    const other: Group = { id: "gr9", cycleId: "c1", gradeLevelId: "g2", name: "A", capacity: 30 };
+    mocked.createGroup.mockResolvedValue(other);
+    const created = await act(() => view.result.current.groups.createIn({ cycleId: "c1", gradeLevelId: "g2", name: "A", capacity: 30 }));
+    expect(created).toEqual(other);
+    expect(view.result.current.grades.selectedId).toBe("g1");
+    expect(view.result.current.groups.list.map((g) => g.id)).toEqual(["gr1"]);
   });
 });

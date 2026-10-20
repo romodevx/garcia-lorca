@@ -39,6 +39,25 @@ export const STEPS: readonly StepDef[] = [
   { id: "calendar", number: 8, title: "Calendario", purpose: "Días sin clases y actividades. Es opcional.", measurable: false, ownPrimary: "never" },
 ];
 
+/**
+ * «Estructura de la escuela» (PLAN-redesign-estructura, module_school_structure):
+ * the same list with levels, grades AND groups in step 3 — the chain a school
+ * builds in one go — and «Grupos» gone. Same ids, so nothing else moves.
+ */
+export const STRUCTURE_STEPS: readonly StepDef[] = STEPS.filter((s) => s.id !== "groups").map((s, i) =>
+  s.id === "levels"
+    ? { ...s, number: i + 1, title: "Estructura de la escuela", purpose: "Los niveles del colegio, sus grados y los grupos de cada grado.", ownPrimary: "whenEmpty" }
+    : { ...s, number: i + 1 },
+);
+
+/** The step list a view shows: the merged one with module_school_structure. */
+export function stepsFor(structureView: boolean): readonly StepDef[] {
+  return structureView ? STRUCTURE_STEPS : STEPS;
+}
+
+/** Whether a list merges groups into the levels step. */
+const mergesGroups = (steps: readonly StepDef[]): boolean => !steps.some((s) => s.id === "groups");
+
 /** The step that opens when nothing is pending: the one edited the most. */
 const FALLBACK_STEP: StepId = "levels";
 
@@ -210,6 +229,21 @@ function groupsMark(input: SetupInput): Mark {
   });
 }
 
+/**
+ * The merged step (STRUCTURE_STEPS): pending as soon as either half is, in the
+ * order a school builds it — levels, their grades, the cycle, then groups —
+ * and checking while either read is in flight.
+ */
+function structureMark(input: SetupInput): Mark {
+  const levels = levelsMark(input);
+  if (levels.status !== "done") return levels;
+  const groups = groupsMark(input);
+  if (groups.status !== "done" || input.grades.kind !== "ready" || input.groups.kind !== "ready") return groups;
+  const known = orderedGrades(input.levels, input.grades.value);
+  const grouped = input.groups.value.filter((g) => known.some(({ grade }) => grade.id === g.gradeLevelId)).length;
+  return done(`${levels.line ?? ""} · ${plural(grouped, "grupo", "grupos")}`);
+}
+
 /** A role without finance:read: the step says who sees it instead of "Revisando…" forever. */
 const TUITION_NOT_READABLE: Mark = { status: "unknown", line: "Lo ve quien administra Finanzas" };
 
@@ -265,14 +299,15 @@ const MARKS: Record<StepId, (input: SetupInput) => Mark> = {
 
 /** Whether the step's own lime ("Capturar datos", "Nuevo ciclo", "Crear trimestres") is showing. */
 function isEmptyHere(id: StepId, input: SetupInput): boolean {
+  if (id === "levels") return input.levels.length === 0;
   if (id === "profile") return input.profile.kind === "ready" && input.profile.value.name.trim() === "";
   if (id === "cycle") return input.cycles.length === 0;
   if (id !== "terms" || input.selectedLevelId === undefined || input.terms.kind !== "ready") return false;
   return !input.terms.value.some((t) => t.levelId === input.selectedLevelId);
 }
 
-function nextKind(def: StepDef, input: SetupInput): NextKind {
-  if (def.number === STEPS.length) return "none";
+function nextKind(def: StepDef, input: SetupInput, total: number): NextKind {
+  if (def.number === total) return "none";
   if (def.ownPrimary === "always") return "text";
   if (def.ownPrimary === "never") return "primary";
   return isEmptyHere(def.id, input) ? "text" : "primary";
@@ -320,24 +355,25 @@ function subtitle(input: SetupInput, steps: StepView[], ready: boolean): string 
   return [head, draft, gapsPhrase(gaps)].filter((part) => part !== undefined).join(" · ");
 }
 
-function isStepId(value: string | null): value is StepId {
-  return STEPS.some((s) => s.id === value);
-}
-
 function initialStep(steps: StepView[], stored: string | null): StepId {
-  if (isStepId(stored)) return stored;
+  // A session that last had «Grupos» open finds it inside the merged step.
+  if (stored === "groups" && !steps.some((s) => s.id === "groups")) return "levels";
+  const kept = steps.find((s) => s.id === stored);
+  if (kept !== undefined) return kept.id;
   return steps.find((s) => s.status === "pending")?.id ?? FALLBACK_STEP;
 }
 
 /**
  * Every step's status and line for the selected cycle, the header, and the
  * step that opens. `storedStepId` is this session's last open step
- * (sessionStorage), passed in so the function stays pure.
+ * (sessionStorage), passed in so the function stays pure. `list` is the step
+ * list the view shows (stepsFor).
  */
-export function deriveSteps(input: SetupInput, storedStepId: string | null): SetupView {
-  const steps = STEPS.map((def): StepView => {
-    const mark = MARKS[def.id](input);
-    return { ...def, status: mark.status, line: mark.line, next: nextKind(def, input) };
+export function deriveSteps(input: SetupInput, storedStepId: string | null, list: readonly StepDef[] = STEPS): SetupView {
+  const merged = mergesGroups(list);
+  const steps = list.map((def): StepView => {
+    const mark = merged && def.id === "levels" ? structureMark(input) : MARKS[def.id](input);
+    return { ...def, status: mark.status, line: mark.line, next: nextKind(def, input, list.length) };
   });
   const ready = steps.filter((s) => s.measurable).every((s) => s.status === "done");
   return {
