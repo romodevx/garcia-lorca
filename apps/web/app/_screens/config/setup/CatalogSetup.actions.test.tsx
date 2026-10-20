@@ -173,10 +173,10 @@ describe("Paso 3 · Niveles y grados (A33–A42)", () => {
     await waitFor(() => expect(config.updateLevelAttendanceMode).toHaveBeenCalledWith(API, "l1", "per_class"));
 
     await user.click(within(step).getByRole("button", { name: "Guardar calificación" }));
-    await waitFor(() => expect(config.updateLevelGrading).toHaveBeenCalledWith(API, "l1", { enabled: true, min: 5, max: 10, decimals: 0, passing: 6 }));
+    await waitFor(() => expect(config.updateLevelGrading).toHaveBeenCalledWith(API, "l1", { enabled: true, letters: false, min: 5, max: 10, decimals: 0, passing: 6 }));
 
     await user.click(within(step).getByRole("checkbox", { name: "Lleva calificación numérica" }));
-    await waitFor(() => expect(config.updateLevelGrading).toHaveBeenLastCalledWith(API, "l1", { enabled: false, min: 5, max: 10, decimals: 0, passing: 6 }));
+    await waitFor(() => expect(config.updateLevelGrading).toHaveBeenLastCalledWith(API, "l1", { enabled: false, letters: false, min: 5, max: 10, decimals: 0, passing: 6 }));
   });
 
   it("puts the level chips and Nuevo nivel first, then the grades, then the level's settings (N6)", async () => {

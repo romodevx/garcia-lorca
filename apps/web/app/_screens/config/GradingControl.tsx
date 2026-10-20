@@ -12,6 +12,8 @@ import { useSecondaryInSetup } from "./SetupPresentation";
 import { useSerialGrading } from "./useSerialGrading";
 
 const TOAST_MS = 2600;
+/** What each letter means, as the report card prints it. */
+export const LETTERS_LEGEND = "A Excelente · B Bien · C Suficiente · D Requiere apoyo";
 /** Grades already captured this cycle would not fit the new (or disabled) scale. */
 const SCALE_TIGHTENING = "SCALE_TIGHTENING";
 
@@ -24,8 +26,9 @@ export interface GradingControlProps {
 
 /**
  * How a level grades, under its attendance mode: whether it carries a numeric
- * grade at all (preescolar usually does not — the toggle saves at once), and
- * its scale. The scale saves with one button; min < passing ≤ max is checked
+ * grade at all (preescolar does not — the toggle saves at once), its scale,
+ * and — without numbers — whether it grades with letters A–D (preescolar) or
+ * not at all (maternal). The scale saves with one button; min < passing ≤ max is checked
  * on leaving each field and again on saving. The toggle and the scale save share
  * ONE queue (never two requests at once): the toggle sends the last SAVED scale
  * — never a half-typed one — and a failure goes back to what the server holds.
@@ -63,7 +66,7 @@ export function GradingControl({ level, onChange }: GradingControlProps): ReactE
     }
   }, [level.id, level.name, onChange]);
 
-  const { enabled, toggle, saveScale } = useSerialGrading(initial, persist);
+  const { enabled, toggle, letters, toggleLetters, saveScale } = useSerialGrading(initial, persist);
 
   const edit = (field: GradingField, value: string): void => {
     const next = { ...draft, [field]: value };
@@ -93,6 +96,16 @@ export function GradingControl({ level, onChange }: GradingControlProps): ReactE
         <input type="checkbox" checked={enabled} onChange={(e) => toggle(e.target.checked)} style={{ width: 20, height: 20, accentColor: "var(--forest)" }} />
         Lleva calificación numérica
       </label>
+      {!enabled && (
+        // Preescolar grades with letters; maternal takes no grades (owner, 20-oct).
+        <label style={{ display: "inline-flex", alignItems: "flex-start", gap: 10, minHeight: 44, fontSize: 15, fontWeight: 600, color: "var(--text)", cursor: "pointer" }}>
+          <input type="checkbox" checked={letters} onChange={(e) => toggleLetters(e.target.checked)} style={{ width: 20, height: 20, marginTop: 2, accentColor: "var(--forest)" }} />
+          <span>
+            Califica con letras
+            <span style={{ display: "block", fontSize: 13.5, fontWeight: 500, color: "var(--text-muted)" }}>{LETTERS_LEGEND}</span>
+          </span>
+        </label>
+      )}
       {enabled && (
         <form aria-label={`Calificación de ${level.name}`} onSubmit={submit} noValidate style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 12, maxWidth: 360 }}>
           <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 12 }}>

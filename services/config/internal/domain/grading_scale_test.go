@@ -57,15 +57,16 @@ func TestNewLevelDefaultsGradingByName(t *testing.T) {
 	tests := []struct {
 		name        string
 		wantEnabled bool
+		wantLetters bool
 	}{
-		{"Preescolar", false},
-		{" PREESCOLAR ", false},
-		{"Kinder", false},
-		{"Kínder", false},
-		{"Maternal", false},
-		{"Primaria", true},
-		{"Secundaria", true},
-		{"Preparatoria", true},
+		{"Preescolar", false, true},
+		{" PREESCOLAR ", false, true},
+		{"Kinder", false, true},
+		{"Kínder", false, true},
+		{"Maternal", false, false},
+		{"Primaria", true, false},
+		{"Secundaria", true, false},
+		{"Preparatoria", true, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -73,6 +74,7 @@ func TestNewLevelDefaultsGradingByName(t *testing.T) {
 			require.NoError(t, err)
 			g := l.Grading()
 			assert.Equal(t, tt.wantEnabled, g.Enabled())
+			assert.Equal(t, tt.wantLetters, g.Letters(), "preescolar grades with letters; maternal takes no grades")
 			assert.Equal(t, 500, g.MinHundredths())
 			assert.Equal(t, 1000, g.MaxHundredths())
 			assert.Equal(t, 600, g.PassingHundredths())
@@ -105,4 +107,24 @@ func TestRestoreGradingScaleKeepsAnOlderFractionalBound(t *testing.T) {
 
 	_, err = domain.RestoreGradingScale(true, 600, 1000, 600, 0)
 	assert.Equal(t, glerrors.KindInvalid, glerrors.KindOf(err))
+}
+
+// A level grades with numbers, with letters (A–D, preescolar) or not at all:
+// never numbers and letters at once.
+func TestGradingScaleWithLetters(t *testing.T) {
+	off, err := domain.NewGradingScale(false, 500, 1000, 600, 0)
+	require.NoError(t, err)
+	letters, err := off.WithLetters(true)
+	require.NoError(t, err)
+	assert.True(t, letters.Letters())
+	assert.False(t, off.Letters(), "the receiver must not change")
+
+	numeric, err := domain.NewGradingScale(true, 500, 1000, 600, 0)
+	require.NoError(t, err)
+	_, err = numeric.WithLetters(true)
+	assert.Equal(t, glerrors.KindInvalid, glerrors.KindOf(err), "numbers and letters at once")
+
+	back, err := letters.WithLetters(false)
+	require.NoError(t, err)
+	assert.False(t, back.Letters())
 }

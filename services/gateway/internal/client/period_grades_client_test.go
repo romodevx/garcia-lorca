@@ -67,6 +67,12 @@ func TestConfigClientGradingScaleRoundTrip(t *testing.T) {
 	assert.True(t, stub.got.GetGrading().GetEnabled())
 	assert.Nil(t, stub.got.AttendanceMode, "an absent mode stays absent on the wire")
 
+	letters := client.LevelGrading{Letters: true, Scale: client.GradeScale{MinHundredths: 500, MaxHundredths: 1000, PassingHundredths: 600}}
+	got, err = c.UpdateLevel(context.Background(), "lvl-1", client.LevelPatch{Grading: &letters})
+	require.NoError(t, err)
+	assert.True(t, stub.got.GetGrading().GetLetters(), "letters travel to config")
+	assert.True(t, got.Grading.Letters, "and come back on the level")
+
 	daily := "daily"
 	got, err = c.UpdateLevel(context.Background(), "lvl-1", client.LevelPatch{AttendanceMode: &daily, Grading: &want})
 	require.NoError(t, err)
@@ -91,6 +97,8 @@ type stubPeriodGrades struct {
 	gotSheet  *gradesv1.GetPeriodSheetRequest
 	gotCount  *gradesv1.CountScaleViolationsRequest
 	gotWith   *gradesv1.PeriodsWithGradesRequest
+	// letters makes the sheet and the enrollment's grades a letters level's.
+	letters bool
 }
 
 func (s *stubPeriodGrades) CountScaleViolations(_ context.Context, req *connect.Request[gradesv1.CountScaleViolationsRequest]) (*connect.Response[gradesv1.CountScaleViolationsResponse], error) {
@@ -128,7 +136,7 @@ func (s *stubPeriodGrades) GetPeriodSheet(_ context.Context, req *connect.Reques
 	return connect.NewResponse(&gradesv1.GetPeriodSheetResponse{
 		AssignmentId: "asg-1", PeriodId: "per-1", Periods: stubPeriodRefs, CurrentPeriodId: "per-1", Today: "2026-10-01",
 		Scale:          &gradesv1.GradingScale{MinHundredths: 500, MaxHundredths: 1000, Decimals: 1, PassingHundredths: 600},
-		GradingEnabled: true, Editable: false, ReadOnlyReason: "El periodo está cerrado", ClosedPeriodIds: []string{"per-1"},
+		GradingEnabled: !s.letters, GradingLetters: s.letters, Editable: false, ReadOnlyReason: "El periodo está cerrado", ClosedPeriodIds: []string{"per-1"},
 		Rows: []*gradesv1.PeriodSheetRow{
 			{EnrollmentId: "enr-1", StudentId: "stu-1", Value: "8", UpdatedAt: timestamppb.New(updated), Editable: true},
 			{EnrollmentId: "enr-2", StudentId: "stu-2", ReadOnlyReason: "Ese periodo corresponde al grupo anterior del alumno"},
@@ -140,7 +148,7 @@ func (s *stubPeriodGrades) GetEnrollmentPeriodGrades(_ context.Context, req *con
 	return connect.NewResponse(&gradesv1.GetEnrollmentPeriodGradesResponse{
 		CycleId: "cyc-1", CycleName: "2026-2027", Periods: stubPeriodRefs,
 		Scale:          &gradesv1.GradingScale{MinHundredths: 500, MaxHundredths: 1000, Decimals: 1, PassingHundredths: 600},
-		GradingEnabled: true, SubjectIds: []string{"sub-1"},
+		GradingEnabled: !s.letters, GradingLetters: s.letters, SubjectIds: []string{"sub-1"},
 		Grades: []*gradesv1.PeriodGrade{{EnrollmentId: req.Msg.GetEnrollmentId(), SubjectId: "sub-1", PeriodId: "per-1", Value: "9"}},
 	}), nil
 }
@@ -188,6 +196,9 @@ func TestGradesClientPeriodGradesRoundTrip(t *testing.T) {
 	assert.Equal(t, 3, n)
 	assert.Equal(t, "lvl-1", stub.gotCount.GetLevelId())
 	assert.Equal(t, int32(950), stub.gotCount.GetScale().GetMaxHundredths())
+	_, err = c.CountScaleViolations(ctx, "lvl-1", client.LevelGrading{Letters: true})
+	require.NoError(t, err)
+	assert.True(t, stub.gotCount.GetGradingLetters(), "a switch to letters counts every number")
 
 	fam, err := c.GetEnrollmentPeriodGrades(ctx, "enr-1")
 	require.NoError(t, err)
@@ -202,4 +213,23 @@ func TestGradesClientPeriodGradesRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []string{"per-1"}, with)
 	assert.Equal(t, []string{"per-1", "per-2"}, stub.gotWith.GetPeriodIds())
+}
+
+// gradingLetters travels through the client's explicit mapping.
+func TestGradesClientCarriesGradingLetters(t *testing.T) {
+	stub := &stubPeriodGrades{letters: true}
+	mux := http.NewServeMux()
+	path, h := gradesv1connect.NewGradesServiceHandler(stub)
+	mux.Handle(path, h)
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	c := client.NewGradesClient(srv.URL, srv.Client())
+
+	fam, err := c.GetEnrollmentPeriodGrades(context.Background(), "enr-1")
+	require.NoError(t, err)
+	assert.True(t, fam.GradingLetters)
+	assert.False(t, fam.GradingEnabled)
+	sheet, err := c.GetPeriodSheet(context.Background(), client.PeriodSheetQuery{AssignmentID: "asg-1"})
+	require.NoError(t, err)
+	assert.True(t, sheet.GradingLetters)
 }

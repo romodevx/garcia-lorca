@@ -175,7 +175,7 @@ func TestTermMonthsOfAClosedPeriodAre409(t *testing.T) {
 // composition root wires the scale guard): 409 SCALE_TIGHTENING when captured
 // grades would break, 200 otherwise.
 func TestPatchLevelGradingRouteChecksCapturedGrades(t *testing.T) {
-	const body = `{"grading":{"enabled":true,"min":5,"max":9,"decimals":0,"passing":6}}`
+	const body = `{"grading":{"enabled":true,"letters":false,"min":5,"max":9,"decimals":0,"passing":6}}`
 	gw := newTestGateway(t, map[string]bool{"module_config": true})
 
 	res := doGateway(t, gw, http.MethodPatch, "/api/v1/config/levels/lvl-busy", "config-writer", body)

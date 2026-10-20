@@ -7,10 +7,15 @@ import glerrors "github.com/garcia-lorca/pkg/errors"
 // scale means the level takes no numeric capture (early years); its numbers are
 // kept so re-enabling restores the school's configuration.
 //
+// A level that does not grade with numbers may grade with letters instead
+// (A Excelente, B Bien, C Suficiente, D Requiere apoyo — preescolar): letters
+// says so. Numbers and letters never hold at once.
+//
 // Invariant, enforced by NewGradingScale and mirrored by the levels CHECKs:
 // 0 <= min < passing <= max <= 100.00 and 0 <= decimals <= 2.
 type GradingScale struct {
 	enabled  bool
+	letters  bool
 	min      int
 	max      int
 	passing  int
@@ -61,6 +66,9 @@ func (s GradingScale) wholeBounds() bool {
 }
 
 func (s GradingScale) validate() error {
+	if s.enabled && s.letters {
+		return glerrors.New(glerrors.KindInvalid, "Un nivel califica con números o con letras, no con ambos")
+	}
 	if s.min < 0 || s.max > gradeCeiling {
 		return glerrors.New(glerrors.KindInvalid, "La escala debe estar entre 0 y 100")
 	}
@@ -76,20 +84,31 @@ func (s GradingScale) validate() error {
 	return nil
 }
 
-// earlyYearsLevelNames are the levels that take no numeric grades (qualitative
-// assessment comes later). Keys are folded names (see foldLevelName);
-// migrations/config/0009 applies the same list to existing rows.
+// earlyYearsLevelNames are the levels that take no numeric grades. Keys are
+// folded names (see foldLevelName); migrations/config/0009 applies the same
+// list to existing rows.
 var earlyYearsLevelNames = map[string]bool{
 	"preescolar": true,
 	"kinder":     true,
 	"maternal":   true,
 }
 
+// letterLevelNames are the early-years levels that grade with letters (owner,
+// 20-oct): preescolar does, maternal takes no grades. migrations/config/0024
+// applies the same list to existing rows.
+var letterLevelNames = map[string]bool{
+	"preescolar": true,
+	"kinder":     true,
+}
+
 // DefaultGradingScale is the scale a level of this name starts with: 5 to 10,
-// whole numbers, 6 to pass — disabled for the early-years levels.
+// whole numbers, 6 to pass — disabled for the early-years levels, which grade
+// with letters when they are preescolar.
 func DefaultGradingScale(levelName string) GradingScale {
+	folded := foldLevelName(levelName)
 	return GradingScale{
-		enabled:  !earlyYearsLevelNames[foldLevelName(levelName)],
+		enabled:  !earlyYearsLevelNames[folded],
+		letters:  letterLevelNames[folded],
 		min:      defaultGradeMin,
 		max:      defaultGradeMax,
 		passing:  defaultGradePassing,
@@ -99,6 +118,19 @@ func DefaultGradingScale(levelName string) GradingScale {
 
 // Enabled reports whether the level captures numeric grades at all.
 func (s GradingScale) Enabled() bool { return s.enabled }
+
+// Letters reports whether the level grades with letters (A–D) instead.
+func (s GradingScale) Letters() bool { return s.letters }
+
+// WithLetters returns a copy grading with letters, or not. Letters on a scale
+// that grades with numbers is KindInvalid; the receiver is never modified.
+func (s GradingScale) WithLetters(on bool) (GradingScale, error) {
+	s.letters = on
+	if err := s.validate(); err != nil {
+		return GradingScale{}, err
+	}
+	return s, nil
+}
 
 // MinHundredths is the lowest mark, in hundredths.
 func (s GradingScale) MinHundredths() int { return s.min }

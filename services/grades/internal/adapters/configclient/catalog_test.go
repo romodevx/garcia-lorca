@@ -385,3 +385,13 @@ func TestLevelCatalogGroupsCarryTheirGrade(t *testing.T) {
 	require.Len(t, got.Groups, 1)
 	assert.Equal(t, ports.GroupRef{ID: "grp-1", Label: "1° · A", GradeLevelID: "gl-1"}, got.Groups[0])
 }
+
+// A level that grades with letters says so, without a usable numeric scale.
+func TestLevelOfGroupCarriesLetters(t *testing.T) {
+	stub := catalogStub()
+	stub.levels["lvl-1"].Grading = &configv1.GradingScale{Letters: true}
+	got, err := newCatalogClient(t, stub).LevelOfGroup(context.Background(), "grp-1")
+	require.NoError(t, err)
+	assert.False(t, got.GradingEnabled)
+	assert.True(t, got.GradingLetters)
+}

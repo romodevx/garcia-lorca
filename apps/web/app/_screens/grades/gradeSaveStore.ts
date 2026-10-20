@@ -1,4 +1,4 @@
-import { isRejectedValue, refusalScope, type GradeSheetClient, type PeriodGradeKey, type PeriodSheet } from "../../grades/periodSheet";
+import { isRejectedValue, markOf, refusalScope, type GradeMark, type GradeSheetClient, type PeriodGradeKey, type PeriodSheet } from "../../grades/periodSheet";
 
 export type CellStatus =
   | { kind: "idle" }
@@ -14,7 +14,7 @@ export type CellStatus =
   /** The level or the period cannot take grades right now: a notice for the whole sheet. */
   | { kind: "sheetRefused"; message: string };
 
-type Grade = number | null;
+type Grade = GradeMark | null;
 
 /** A sheet (assignment + period) or a whole assignment. */
 export interface SaveScope {
@@ -182,7 +182,7 @@ export class GradeSaveStore {
       const cell = this.cells.get(id);
       if (cell === undefined || cell.sent !== undefined) continue;
       // A row the server says cannot change keeps no draft: there is nothing to save.
-      if (row.rowEditable && isUnsaved(cell)) cell.confirmed = row.value;
+      if (row.rowEditable && isUnsaved(cell)) cell.confirmed = markOf(row);
       else this.cells.delete(id);
     }
     this.notify();

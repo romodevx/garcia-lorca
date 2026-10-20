@@ -89,7 +89,7 @@ func TestFamilyPeriodGradesShape(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	assert.Equal(t, "enr-1", grades.got, "the child's ACTIVE enrollment")
 	assert.JSONEq(t, `{
-		"gradingEnabled": true, "cycleName": "2026-2027",
+		"gradingEnabled": true, "gradingLetters": false, "cycleName": "2026-2027",
 		"periods": [
 			{"id":"per-1","ordinal":1,"name":"1.er trimestre","startsOn":"2026-08-24","endsOn":"2026-11-30"},
 			{"id":"per-2","ordinal":2,"name":"2.º trimestre","startsOn":"2026-12-07","endsOn":"2027-03-26"}
@@ -110,7 +110,7 @@ func TestFamilyPeriodGradesPreescolar(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.PeriodGrades(rec, familyPeriodsReq("usr-9", "stu-1"))
 	require.Equal(t, http.StatusOK, rec.Code)
-	assert.JSONEq(t, `{"gradingEnabled":false,"cycleName":"2026-2027",
+	assert.JSONEq(t, `{"gradingEnabled":false,"gradingLetters":false,"cycleName":"2026-2027",
 		"periods":[{"id":"per-1","ordinal":1,"name":"1.er trimestre","startsOn":"2026-08-24","endsOn":"2026-11-30"}],"subjects":[]}`, rec.Body.String(),
 		"a level without numeric grading sends no scale (its current one is not the one to judge by)")
 }
@@ -185,6 +185,23 @@ func TestFamilyPeriodGradesKeepsCapturedGradesWhenGradingIsOff(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.PeriodGrades(rec, familyPeriodsReq("usr-9", "stu-1"))
 	require.Equal(t, http.StatusOK, rec.Code)
-	assert.JSONEq(t, `{"gradingEnabled":false,"cycleName":"2026-2027","periods":[],
+	assert.JSONEq(t, `{"gradingEnabled":false,"gradingLetters":false,"cycleName":"2026-2027","periods":[],
 		"subjects":[{"subjectId":"sub-mat","subjectName":"Matemáticas","grades":{"per-1":9}}]}`, rec.Body.String())
+}
+
+// Preescolar grades with letters: the family reads each subject's letters,
+// with no scale and no number.
+func TestFamilyPeriodGradesWithLetters(t *testing.T) {
+	grades := &fakeEnrollmentPeriods{res: client.EnrollmentPeriodGrades{
+		CycleName: "2026-2027", Periods: familyPeriods[:1], GradingLetters: true, SubjectIDs: []string{"sub-len"},
+		Grades: []client.PeriodGrade{{SubjectID: "sub-len", PeriodID: "per-1", Value: "A"}},
+	}}
+	subjects := fakeSubjectNames{subjects: []client.SubjectResult{{ID: "sub-len", Name: "Lenguajes"}}}
+	h := newFamilyPeriods(familyPeriodStudents(), grades, subjects)
+	rec := httptest.NewRecorder()
+	h.PeriodGrades(rec, familyPeriodsReq("usr-9", "stu-1"))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.JSONEq(t, `{"gradingEnabled":false,"gradingLetters":true,"cycleName":"2026-2027",
+		"periods":[{"id":"per-1","ordinal":1,"name":"1.er trimestre","startsOn":"2026-08-24","endsOn":"2026-11-30"}],
+		"subjects":[{"subjectId":"sub-len","subjectName":"Lenguajes","grades":{},"letters":{"per-1":"A"}}]}`, rec.Body.String())
 }

@@ -80,9 +80,11 @@ type PeriodSheet struct {
 	Today           string
 	Scale           GradeScale
 	GradingEnabled  bool
-	Editable        bool
-	ReadOnlyReason  string
-	Rows            []PeriodSheetRow
+	// GradingLetters: the level grades with A–D; row values are letters.
+	GradingLetters bool
+	Editable       bool
+	ReadOnlyReason string
+	Rows           []PeriodSheetRow
 	// ClosedPeriodIDs are the periods whose level term is CLOSED.
 	ClosedPeriodIDs []string
 }
@@ -94,6 +96,8 @@ type EnrollmentPeriodGrades struct {
 	Periods        []EvaluationPeriodRef
 	Scale          GradeScale
 	GradingEnabled bool
+	// GradingLetters: the level grades with A–D; grade values are letters.
+	GradingLetters bool
 	SubjectIDs     []string
 	Grades         []PeriodGrade
 }
@@ -139,7 +143,7 @@ func (c *GradesClient) GetPeriodSheet(ctx context.Context, q PeriodSheetQuery) (
 	return PeriodSheet{
 		AssignmentID: m.GetAssignmentId(), PeriodID: m.GetPeriodId(), Periods: toPeriodRefs(m.GetPeriods()),
 		CurrentPeriodID: m.GetCurrentPeriodId(), Today: m.GetToday(), Scale: toGradeScale(m.GetScale()),
-		GradingEnabled: m.GetGradingEnabled(), Editable: m.GetEditable(), ReadOnlyReason: m.GetReadOnlyReason(), Rows: rows,
+		GradingEnabled: m.GetGradingEnabled(), GradingLetters: m.GetGradingLetters(), Editable: m.GetEditable(), ReadOnlyReason: m.GetReadOnlyReason(), Rows: rows,
 		ClosedPeriodIDs: m.GetClosedPeriodIds(),
 	}, nil
 }
@@ -157,7 +161,7 @@ func (c *GradesClient) GetEnrollmentPeriodGrades(ctx context.Context, enrollment
 	}
 	return EnrollmentPeriodGrades{
 		CycleID: m.GetCycleId(), CycleName: m.GetCycleName(), Periods: toPeriodRefs(m.GetPeriods()), Scale: toGradeScale(m.GetScale()),
-		GradingEnabled: m.GetGradingEnabled(), SubjectIDs: m.GetSubjectIds(), Grades: grades,
+		GradingEnabled: m.GetGradingEnabled(), GradingLetters: m.GetGradingLetters(), SubjectIDs: m.GetSubjectIds(), Grades: grades,
 	}, nil
 }
 
@@ -176,7 +180,7 @@ func (c *GradesClient) PeriodsWithGrades(ctx context.Context, periodIDs []string
 // grading).
 func (c *GradesClient) CountScaleViolations(ctx context.Context, levelID string, g LevelGrading) (int, error) {
 	res, err := c.rpc.CountScaleViolations(ctx, connect.NewRequest(&gradesv1.CountScaleViolationsRequest{
-		LevelId: levelID, GradingEnabled: g.Enabled,
+		LevelId: levelID, GradingEnabled: g.Enabled, GradingLetters: g.Letters,
 		Scale: &gradesv1.GradingScale{
 			MinHundredths: int32(g.Scale.MinHundredths), MaxHundredths: int32(g.Scale.MaxHundredths),
 			Decimals: int32(g.Scale.Decimals), PassingHundredths: int32(g.Scale.PassingHundredths),

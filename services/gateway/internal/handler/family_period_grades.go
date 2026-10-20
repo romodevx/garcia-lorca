@@ -66,10 +66,13 @@ type familySubjectGradesResponse struct {
 	SubjectID   string                 `json:"subjectId"`
 	SubjectName string                 `json:"subjectName"`
 	Grades      map[string]json.Number `json:"grades"`
+	// Letters are the subject's grades on a level that grades with letters.
+	Letters map[string]string `json:"letters,omitempty"`
 }
 
 type familyPeriodGradesResponse struct {
 	GradingEnabled bool                `json:"gradingEnabled"`
+	GradingLetters bool                `json:"gradingLetters"`
 	CycleName      string              `json:"cycleName"`
 	Periods        []periodRefResponse `json:"periods"`
 	// Scale is absent when the level no longer grades numerically: grades do
@@ -186,7 +189,7 @@ func pickCurrentEnrollment(live []client.Enrollment, cycles []client.CycleResult
 
 func (h *FamilyPeriodGradesHandler) toResponse(ctx context.Context, g client.EnrollmentPeriodGrades) familyPeriodGradesResponse {
 	out := familyPeriodGradesResponse{
-		GradingEnabled: g.GradingEnabled, CycleName: g.CycleName, Periods: toPeriodRefResponses(g.Periods),
+		GradingEnabled: g.GradingEnabled, GradingLetters: g.GradingLetters, CycleName: g.CycleName, Periods: toPeriodRefResponses(g.Periods),
 		Subjects: []familySubjectGradesResponse{},
 	}
 	if g.GradingEnabled {
@@ -194,17 +197,27 @@ func (h *FamilyPeriodGradesHandler) toResponse(ctx context.Context, g client.Enr
 		out.Scale = &scale
 	}
 	names := h.subjectNames(ctx, len(g.SubjectIDs) > 0)
-	bySubject := make(map[string]map[string]json.Number, len(g.SubjectIDs))
+	bySubject := make(map[string]*familySubjectGradesResponse, len(g.SubjectIDs))
 	for _, id := range g.SubjectIDs {
-		bySubject[id] = map[string]json.Number{}
+		bySubject[id] = &familySubjectGradesResponse{SubjectID: id, SubjectName: names[id], Grades: map[string]json.Number{}}
 	}
 	for _, grade := range g.Grades {
-		if cells, ok := bySubject[grade.SubjectID]; ok {
-			cells[grade.PeriodID] = json.Number(grade.Value)
+		s, ok := bySubject[grade.SubjectID]
+		if !ok {
+			continue
 		}
+		number, letter := splitGrade(grade.Value)
+		if letter != nil {
+			if s.Letters == nil {
+				s.Letters = map[string]string{}
+			}
+			s.Letters[grade.PeriodID] = *letter
+			continue
+		}
+		s.Grades[grade.PeriodID] = *number
 	}
 	for _, id := range g.SubjectIDs {
-		out.Subjects = append(out.Subjects, familySubjectGradesResponse{SubjectID: id, SubjectName: names[id], Grades: bySubject[id]})
+		out.Subjects = append(out.Subjects, *bySubject[id])
 	}
 	col := collate.New(language.Spanish)
 	sort.SliceStable(out.Subjects, func(i, j int) bool {

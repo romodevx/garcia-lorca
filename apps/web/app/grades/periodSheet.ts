@@ -30,11 +30,19 @@ export interface EvaluationPeriodRef {
   endsOn: string;
 }
 
+/**
+ * A captured grade: a whole number, or — on a level that grades with letters
+ * (preescolar) — one of A–D. Letters are never averaged.
+ */
+export type GradeMark = number | string;
+
 export interface PeriodGradeRow {
   enrollmentId: string;
   studentId: string;
   name: string;
   value: number | null;
+  /** The grade on a letters level ("A"); absent or null otherwise. */
+  letter?: string | null;
   updatedAt: string | null;
   /** False for a period that belongs to the pupil's previous group (a transfer). */
   rowEditable: boolean;
@@ -57,6 +65,8 @@ export interface PeriodSheet {
   scale: GradeScale;
   /** False for a level without numeric grades (Kínder): its scale is meaningless. */
   gradingEnabled: boolean;
+  /** The level grades with letters A–D instead (preescolar). Absent from an older gateway. */
+  gradingLetters?: boolean;
   editable: boolean;
   readOnlyReason?: string;
   rows: PeriodGradeRow[];
@@ -75,14 +85,51 @@ export interface PeriodGradeKey {
 }
 
 export interface SavePeriodGradeInput extends PeriodGradeKey {
-  value: number;
+  value: GradeMark;
 }
 
 export interface SavedPeriodGrade {
   enrollmentId: string;
   periodId: string;
-  value: number;
+  value: number | null;
+  letter?: string | null;
   updatedAt: string | null;
+}
+
+/** A row's captured grade, number or letter; null when none. */
+export function markOf(row: Pick<PeriodGradeRow, "value" | "letter">): GradeMark | null {
+  return row.letter ?? row.value;
+}
+
+/** The four letters, best first, with what each says (owner, 20-oct). */
+export const GRADE_LETTERS: readonly { letter: string; meaning: string }[] = [
+  { letter: "A", meaning: "Excelente" },
+  { letter: "B", meaning: "Bien" },
+  { letter: "C", meaning: "Suficiente" },
+  { letter: "D", meaning: "Requiere apoyo" },
+];
+
+/** "A · Excelente"; the letter itself when it is not one of the four. */
+export function letterLabel(letter: string): string {
+  const known = GRADE_LETTERS.find((l) => l.letter === letter);
+  return known === undefined ? letter : `${known.letter} · ${known.meaning}`;
+}
+
+export interface LetterStats {
+  captured: number;
+  total: number;
+  /** How many pupils have each letter, in GRADE_LETTERS order. */
+  counts: { letter: string; count: number }[];
+}
+
+/** A letters sheet at a glance: no average, how many of each letter. */
+export function letterStats(marks: readonly (GradeMark | null)[]): LetterStats {
+  const captured = marks.filter((m): m is string => typeof m === "string");
+  return {
+    captured: captured.length,
+    total: marks.length,
+    counts: GRADE_LETTERS.map(({ letter }) => ({ letter, count: captured.filter((m) => m === letter).length })),
+  };
 }
 
 /** What a capture surface needs from its client — teacher or director. */
@@ -182,8 +229,8 @@ export interface SheetStats {
   failing: number;
 }
 
-export function sheetStats(values: readonly (number | null)[], passing: number): SheetStats {
-  const captured = values.filter((v): v is number => v !== null);
+export function sheetStats(values: readonly (GradeMark | null)[], passing: number): SheetStats {
+  const captured = values.filter((v): v is number => typeof v === "number");
   return {
     captured: captured.length,
     total: values.length,

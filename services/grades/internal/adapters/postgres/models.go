@@ -36,12 +36,14 @@ func (gradeEntryModel) TableName() string { return "grade_entries" }
 // numeric(5,2) column read and written as exact decimal TEXT ("9", "9.00"),
 // never through a float.
 type periodGradeModel struct {
-	ID             string    `gorm:"column:id;primaryKey"`
-	TenantID       string    `gorm:"column:tenant_id"`
-	EnrollmentID   string    `gorm:"column:enrollment_id"`
-	SubjectID      string    `gorm:"column:subject_id"`
-	PeriodID       string    `gorm:"column:period_id"`
-	Value          string    `gorm:"column:value;type:numeric"`
+	ID           string `gorm:"column:id;primaryKey"`
+	TenantID     string `gorm:"column:tenant_id"`
+	EnrollmentID string `gorm:"column:enrollment_id"`
+	SubjectID    string `gorm:"column:subject_id"`
+	PeriodID     string `gorm:"column:period_id"`
+	// Value or Letter: a cell holds exactly one (migration 0011).
+	Value          *string   `gorm:"column:value;type:numeric"`
+	Letter         *string   `gorm:"column:letter"`
 	CapturedBy     string    `gorm:"column:captured_by"`
 	CapturedByName string    `gorm:"column:captured_by_name"`
 	CreatedAt      time.Time `gorm:"column:created_at;->"`
@@ -105,6 +107,8 @@ type reportCardModel struct {
 	ScaleMaxHundredths     int            `gorm:"column:scale_max_hundredths"`
 	ScaleDecimals          int            `gorm:"column:scale_decimals"`
 	ScalePassingHundredths int            `gorm:"column:scale_passing_hundredths"`
+	// GradingLetters is NULL on cards issued (or archived) before 0011: numbers.
+	GradingLetters *bool `gorm:"column:grading_letters"`
 }
 
 func (reportCardModel) TableName() string { return "report_cards" }

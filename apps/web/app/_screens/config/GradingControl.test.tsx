@@ -53,7 +53,7 @@ describe("GradingControl", () => {
 
     await user.click(screen.getByRole("checkbox", { name: "Lleva calificación numérica" }));
 
-    expect(save).toHaveBeenCalledWith("l1", { enabled: false, min: 5, max: 10, decimals: 1, passing: 6 });
+    expect(save).toHaveBeenCalledWith("l1", { enabled: false, letters: false, min: 5, max: 10, decimals: 1, passing: 6 });
     expect(screen.queryByLabelText("Calificación máxima", CAMPO)).toBeNull();
   });
 
@@ -66,7 +66,7 @@ describe("GradingControl", () => {
     await user.click(screen.getByRole("button", { name: "Guardar calificación" }));
 
     // The stored "1 decimal" is ignored: saving the scale saves whole numbers.
-    expect(save).toHaveBeenCalledWith("l1", { enabled: true, min: 5, max: 10, decimals: 0, passing: 7 });
+    expect(save).toHaveBeenCalledWith("l1", { enabled: true, letters: false, min: 5, max: 10, decimals: 0, passing: 7 });
     expect(await screen.findByRole("status")).toHaveTextContent("PRIMARIA: calificación guardada");
   });
 
@@ -107,7 +107,7 @@ describe("GradingControl", () => {
     await user.click(screen.getByRole("checkbox", { name: "Lleva calificación numérica" }));
 
     expect(save).toHaveBeenCalledTimes(1);
-    expect(save).toHaveBeenCalledWith("l1", { enabled: false, min: 5, max: 10, decimals: 1, passing: 6 });
+    expect(save).toHaveBeenCalledWith("l1", { enabled: false, letters: false, min: 5, max: 10, decimals: 1, passing: 6 });
   });
 
   it("a toggle that fails to save goes back and says so", async () => {
@@ -138,7 +138,7 @@ describe("GradingControl", () => {
     await act(async () => release());
 
     await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
-    expect(save).toHaveBeenLastCalledWith("l1", { enabled: true, min: 5, max: 10, decimals: 1, passing: 6 });
+    expect(save).toHaveBeenLastCalledWith("l1", { enabled: true, letters: false, min: 5, max: 10, decimals: 1, passing: 6 });
   });
 
   it("toggles that end where the server already is send nothing more", async () => {
@@ -179,8 +179,8 @@ describe("GradingControl", () => {
       await act(async () => release());
 
       await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
-      expect(save).toHaveBeenNthCalledWith(1, "l1", { enabled: true, min: 5, max: 10, decimals: 1, passing: 6 });
-      expect(save).toHaveBeenNthCalledWith(2, "l1", { enabled: true, min: 5, max: 10, decimals: 0, passing: 7 });
+      expect(save).toHaveBeenNthCalledWith(1, "l1", { enabled: true, letters: false, min: 5, max: 10, decimals: 1, passing: 6 });
+      expect(save).toHaveBeenNthCalledWith(2, "l1", { enabled: true, letters: false, min: 5, max: 10, decimals: 0, passing: 7 });
     });
 
     it("a toggle made while the scale is saving waits, then sends the scale just saved", async () => {
@@ -197,7 +197,7 @@ describe("GradingControl", () => {
       await act(async () => release());
 
       await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
-      expect(save).toHaveBeenLastCalledWith("l1", { enabled: false, min: 5, max: 10, decimals: 0, passing: 8 });
+      expect(save).toHaveBeenLastCalledWith("l1", { enabled: false, letters: false, min: 5, max: 10, decimals: 0, passing: 8 });
     });
 
     it("a failed toggle drops the scale queued behind it and the switch goes back", async () => {
@@ -226,7 +226,7 @@ describe("GradingControl", () => {
       expect(screen.getByRole("checkbox", { name: "Lleva calificación numérica" })).toBeChecked();
 
       await user.click(screen.getByRole("checkbox", { name: "Lleva calificación numérica" }));
-      expect(save).toHaveBeenLastCalledWith("l1", { enabled: false, min: 5, max: 10, decimals: 1, passing: 6 });
+      expect(save).toHaveBeenLastCalledWith("l1", { enabled: false, letters: false, min: 5, max: 10, decimals: 1, passing: 6 });
     });
   });
 
@@ -266,6 +266,46 @@ describe("GradingControl", () => {
       await waitFor(() => expect(toggle).toBeChecked());
       expect(screen.getByRole("alert")).toHaveTextContent(TEXT);
       expect(screen.getByLabelText("Calificación máxima", CAMPO)).toHaveValue(10);
+    });
+  });
+
+  describe("letters (preescolar, owner 20-oct)", () => {
+    const preescolar: Level = { id: "l2", name: "PREESCOLAR", sepCode: "", enrollmentGranularity: "cycle",
+      grading: { enabled: false, letters: true, min: 5, max: 10, decimals: 0, passing: 6 } };
+
+    it("a level without numbers offers letters, with what each one means", () => {
+      renderControl(preescolar);
+      expect(screen.getByRole("checkbox", { name: "Lleva calificación numérica" })).not.toBeChecked();
+      expect(screen.getByRole("checkbox", { name: /Califica con letras/ })).toBeChecked();
+      expect(screen.getByText(/A Excelente · B Bien · C Suficiente · D Requiere apoyo/)).toBeInTheDocument();
+    });
+
+    it("a level with numbers does not offer letters", () => {
+      renderControl(primaria);
+      expect(screen.queryByRole("checkbox", { name: /Califica con letras/ })).toBeNull();
+    });
+
+    it("turning letters off saves at once: the level is left without grades (maternal)", async () => {
+      const user = userEvent.setup();
+      const save = renderControl(preescolar);
+      await user.click(screen.getByRole("checkbox", { name: /Califica con letras/ }));
+      expect(save).toHaveBeenCalledWith("l2", { enabled: false, letters: false, min: 5, max: 10, decimals: 0, passing: 6 });
+    });
+
+    it("turning numbers on turns letters off: never both", async () => {
+      const user = userEvent.setup();
+      const save = renderControl(preescolar);
+      await user.click(screen.getByRole("checkbox", { name: "Lleva calificación numérica" }));
+      expect(save).toHaveBeenCalledWith("l2", { enabled: true, letters: false, min: 5, max: 10, decimals: 0, passing: 6 });
+      expect(screen.queryByRole("checkbox", { name: /Califica con letras/ })).toBeNull();
+    });
+
+    it("a level without grades can start grading with letters", async () => {
+      const user = userEvent.setup();
+      const maternal: Level = { ...preescolar, id: "l4", name: "MATERNAL", grading: { enabled: false, letters: false, min: 5, max: 10, decimals: 0, passing: 6 } };
+      const save = renderControl(maternal);
+      await user.click(screen.getByRole("checkbox", { name: /Califica con letras/ }));
+      expect(save).toHaveBeenCalledWith("l4", { enabled: false, letters: true, min: 5, max: 10, decimals: 0, passing: 6 });
     });
   });
 });

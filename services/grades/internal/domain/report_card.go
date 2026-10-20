@@ -49,6 +49,9 @@ type ReportCardHeader struct {
 	// a T15 card has none. Kept so an issued card reads back as it was.
 	Months []Month
 	Scale  GradingScale
+	// Letters: the level grades with letters (preescolar). Its lines carry
+	// PeriodLetters and no average; the card has no general average.
+	Letters bool
 }
 
 // ReportCardPeriod is one column of a report card: an evaluation period of the
@@ -74,15 +77,21 @@ type ReportCardLine struct {
 	SubjectName  string
 	Position     int
 	PeriodValues map[string]GradeValue
-	MonthValues  map[Month]GradeValue
-	Average      Average
+	// PeriodLetters are the line's grades on a letters card, instead of values.
+	PeriodLetters map[string]Letter
+	MonthValues   map[Month]GradeValue
+	Average       Average
 }
 
-// PeriodValueStrings is PeriodValues valued by their text ({"<period id>": "9"}).
+// PeriodValueStrings is the line's grades by their text ({"<period id>": "9"},
+// or "B" on a letters card).
 func (l ReportCardLine) PeriodValueStrings() map[string]string {
-	out := make(map[string]string, len(l.PeriodValues))
+	out := make(map[string]string, len(l.PeriodValues)+len(l.PeriodLetters))
 	for id, v := range l.PeriodValues {
 		out[id] = v.String()
+	}
+	for id, v := range l.PeriodLetters {
+		out[id] = string(v)
 	}
 	return out
 }
@@ -110,10 +119,14 @@ type ReportCard struct {
 // (T15): for each subject (in the given order), its grade in each of the
 // header's periods and their exact mean; then the general average — the exact
 // mean of the subjects' exact averages, only subjects that have one. Grades of
-// other enrollments or periods are ignored. The card is issued published.
+// other enrollments or periods are ignored. The card is issued published. A
+// letters card (h.Letters) carries each subject's letters and no average.
 func BuildReportCard(h ReportCardHeader, subjects []ReportCardSubject, grades []PeriodGrade) (ReportCard, error) {
 	if err := validateHeader(h); err != nil {
 		return ReportCard{}, err
+	}
+	if h.Letters {
+		return buildLettersCard(h, subjects, grades), nil
 	}
 	inCard := make(map[string]bool, len(h.Periods))
 	for _, p := range h.Periods {
@@ -121,7 +134,7 @@ func BuildReportCard(h ReportCardHeader, subjects []ReportCardSubject, grades []
 	}
 	bySubject := map[string]map[string]GradeValue{}
 	for _, g := range grades {
-		if g.EnrollmentID() != h.EnrollmentID || !inCard[g.PeriodID()] {
+		if g.EnrollmentID() != h.EnrollmentID || !inCard[g.PeriodID()] || g.IsLetter() {
 			continue
 		}
 		if bySubject[g.SubjectID()] == nil {
@@ -143,6 +156,36 @@ func BuildReportCard(h ReportCardHeader, subjects []ReportCardSubject, grades []
 		})
 	}
 	return ReportCard{header: h, status: ReportCardPublished, generalAverage: GeneralAverage(averages), lines: lines}, nil
+}
+
+// buildLettersCard is BuildReportCard for a level that grades with letters.
+func buildLettersCard(h ReportCardHeader, subjects []ReportCardSubject, grades []PeriodGrade) ReportCard {
+	inCard := make(map[string]bool, len(h.Periods))
+	for _, p := range h.Periods {
+		inCard[p.ID] = true
+	}
+	bySubject := map[string]map[string]Letter{}
+	for _, g := range grades {
+		if g.EnrollmentID() != h.EnrollmentID || !inCard[g.PeriodID()] || !g.IsLetter() {
+			continue
+		}
+		if bySubject[g.SubjectID()] == nil {
+			bySubject[g.SubjectID()] = map[string]Letter{}
+		}
+		bySubject[g.SubjectID()][g.PeriodID()] = g.Letter()
+	}
+	lines := make([]ReportCardLine, 0, len(subjects))
+	for i, s := range subjects {
+		letters := bySubject[s.ID]
+		if letters == nil {
+			letters = map[string]Letter{}
+		}
+		lines = append(lines, ReportCardLine{
+			SubjectID: s.ID, SubjectName: s.Name, Position: i + 1,
+			PeriodValues: map[string]GradeValue{}, PeriodLetters: letters,
+		})
+	}
+	return ReportCard{header: h, status: ReportCardPublished, lines: lines}
 }
 
 // RestoreReportCard rebuilds a stored report card exactly as it was frozen.
@@ -185,7 +228,7 @@ func validateHeader(h ReportCardHeader) error {
 // count — a re-close that changes none of these has nothing new to tell the
 // family.
 func (r ReportCard) SameGradesAs(other ReportCard) bool {
-	if !r.generalAverage.SameAs(other.generalAverage) || len(r.lines) != len(other.lines) {
+	if r.header.Letters != other.header.Letters || !r.generalAverage.SameAs(other.generalAverage) || len(r.lines) != len(other.lines) {
 		return false
 	}
 	previous := make(map[string]ReportCardLine, len(other.lines))

@@ -104,9 +104,9 @@ func TestDirectorListsTheLatestReportCards(t *testing.T) {
 	assert.Equal(t, client.ReportCardFilter{TermID: pTerm, GroupID: rcGroup}, f.gotFilter)
 	assert.JSONEq(t, `{"reportCards":[
 		{"id":"`+rcID+`","termId":"`+pTerm+`","termName":"1.er trimestre","studentId":"`+rcStudent+`","studentName":"Ana López",
-		 "groupId":"`+rcGroup+`","groupLabel":"1° · A","version":2,"issuedAt":"2026-12-01T10:00:00Z","generalAverage":8.5,"hasGrades":true},
+		 "groupId":"`+rcGroup+`","groupLabel":"1° · A","version":2,"issuedAt":"2026-12-01T10:00:00Z","generalAverage":8.5,"hasGrades":true,"gradingLetters":false},
 		{"id":"rc-2","termId":"","termName":"","studentId":"stu-2","studentName":"Beto","groupId":"","groupLabel":"","version":1,
-		 "issuedAt":"2026-12-01T10:00:00Z","generalAverage":null,"hasGrades":false}
+		 "issuedAt":"2026-12-01T10:00:00Z","generalAverage":null,"hasGrades":false,"gradingLetters":false}
 	]}`, rec.Body.String())
 	assert.Equal(t, "no-store", rec.Header().Get("Cache-Control"))
 
@@ -149,7 +149,7 @@ func TestDirectorReadsAReportCard(t *testing.T) {
 		"id":"`+rcID+`","termId":"`+pTerm+`","termName":"1.er trimestre","termOrdinal":1,"cycleName":"2026-2027","levelName":"Primaria",
 		"groupId":"`+rcGroup+`","groupLabel":"1° · A","studentId":"`+rcStudent+`","studentName":"Ana López","enrollmentNumber":"2026-00001",
 		"version":2,"status":"published","issuedAt":"2026-12-01T10:00:00Z","periods":[],"months":["2026-09","2026-10"],
-		"scale":{"min":5,"max":10,"decimals":1,"passing":6},"generalAverage":8.5,"hasGrades":true,
+		"scale":{"min":5,"max":10,"decimals":1,"passing":6},"generalAverage":8.5,"hasGrades":true,"gradingLetters":false,
 		"lines":[
 			{"subjectId":"sub-1","subjectName":"Matemáticas","position":1,"periods":{},"months":{"2026-09":8.4,"2026-10":8.5},"average":8.5},
 			{"subjectId":"sub-2","subjectName":"Artes","position":2,"periods":{},"months":{},"average":null}
@@ -197,9 +197,9 @@ func TestFamilyListsOwnChildsReportCards(t *testing.T) {
 	assert.Equal(t, client.ReportCardFilter{StudentID: rcStudent}, f.gotFilter)
 	assert.JSONEq(t, `{"reportCards":[
 		{"id":"`+rcID+`","termId":"`+secondTerm+`","termName":"2.º trimestre","termOrdinal":2,"cycleName":"2026-2027","version":1,
-			"issuedAt":"2026-12-01T10:00:00Z","generalAverage":null,"hasGrades":false},
+			"issuedAt":"2026-12-01T10:00:00Z","generalAverage":null,"hasGrades":false,"gradingLetters":false},
 		{"id":"7c000000-0000-0000-0000-000000000002","termId":"`+pTerm+`","termName":"1.er trimestre","termOrdinal":1,"cycleName":"2026-2027","version":2,
-			"issuedAt":"2027-03-01T10:00:00Z","generalAverage":8.5,"hasGrades":true}
+			"issuedAt":"2027-03-01T10:00:00Z","generalAverage":8.5,"hasGrades":true,"gradingLetters":false}
 	]}`, rec.Body.String())
 }
 
@@ -302,4 +302,31 @@ func TestTheReportCardPDFPrintsTheSchoolsIssueDay(t *testing.T) {
 	text, err := io.ReadAll(plain)
 	require.NoError(t, err)
 	assert.Contains(t, string(text), "Emitida el 18 de octubre de 2026")
+}
+
+// Preescolar's card on the wire: letters per line, no averages, and the card
+// says it carries letters — in full and in both lists.
+func TestReportCardJSONOfALettersCard(t *testing.T) {
+	card := issuedCard()
+	card.Months, card.GeneralAverage, card.Letters, card.LevelName = nil, "", true, "Preescolar"
+	card.Periods = []client.ReportCardPeriod{{ID: "per-1", Ordinal: 1, Name: "1.er trimestre"}}
+	card.Lines = []client.ReportCardLine{{SubjectID: "sub-1", SubjectName: "Lenguajes", Position: 1, PeriodValues: map[string]string{"per-1": "A"}}}
+	f := &fakeReportCards{card: card}
+	req := closerReq(http.MethodGet, "/x", "")
+	req.SetPathValue("id", rcID)
+	rec := httptest.NewRecorder()
+	newReportCardsHandler(f).Get(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	body := rec.Body.String()
+	assert.Contains(t, body, `"periods":{},"letters":{"per-1":"A"},"months":{},"average":null`)
+	assert.Contains(t, body, `"generalAverage":null`)
+	assert.Contains(t, body, `"gradingLetters":true`)
+	assert.Contains(t, body, `"hasGrades":true`)
+
+	f.list = []client.ReportCardSummary{{ID: rcID, StudentID: rcStudent, StudentName: "Kim", Version: 1, IssuedAt: rcIssued, Letters: true}}
+	rec = httptest.NewRecorder()
+	newReportCardsHandler(f).List(rec, closerReq(http.MethodGet, "/api/v1/grades/report-cards?termId="+pTerm, ""))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Contains(t, rec.Body.String(), `"generalAverage":null,"hasGrades":true,"gradingLetters":true`,
+		"a letters card is issued only to a pupil with a letter")
 }

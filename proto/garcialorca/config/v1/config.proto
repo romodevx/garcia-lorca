@@ -408,6 +408,8 @@ message GradingScale {
   // decimals is how many decimal places a captured grade may carry.
   int32 decimals = 4;
   int32 passing_hundredths = 5;
+  // letters: the level grades with A–D instead (preescolar); never with enabled.
+  bool letters = 6;
 }
 
 // Cycle is a school-year umbrella (e.g. "2026-2027").

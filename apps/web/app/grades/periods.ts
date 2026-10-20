@@ -88,6 +88,8 @@ export interface ReportCard {
    * generalAverage, which is null exactly then).
    */
   hasGrades?: boolean;
+  /** The boleta carries letters (preescolar): it has no average. Absent from older gateways. */
+  gradingLetters?: boolean;
 }
 
 /** What a boleta without any grade says instead of a table of dashes. */
@@ -117,6 +119,9 @@ export const ALREADY_OPEN = "ALREADY_OPEN";
 export function generalAverageLabel(average: number | null): string {
   return average === null ? "—" : formatAverage(average);
 }
+
+/** What a letters boleta shows where a numeric one shows its average. */
+export const LETTERS_CARD_LABEL = "Con letras (A–D)";
 
 export interface PeriodsClient {
   list: (cycleId: string) => Promise<GradingPeriod[]>;

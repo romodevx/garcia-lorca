@@ -227,7 +227,9 @@ func TestCountScaleViolations(t *testing.T) {
 		_, err := repo.UpsertPeriodGrade(ctx, periodGrade(t, id, tenantA, c.enr, mSubject, c.period, mUser, c.value), ports.PeriodLock{})
 		require.NoError(t, err)
 	}
-	_, err := appRepo(t, tenantB).UpsertPeriodGrade(ctx, periodGrade(t, "a1000000-0000-0000-0000-000000000059", tenantB, enrV1, mSubject, mPeriodThree, mUser, "1"), ports.PeriodLock{})
+	_, err := repo.UpsertPeriodGrade(ctx, letterGrade(t, "a1000000-0000-0000-0000-00000000005a", enrV2, mSubjectTwo, mPeriodOne, domain.LetterA), ports.PeriodLock{})
+	require.NoError(t, err)
+	_, err = appRepo(t, tenantB).UpsertPeriodGrade(ctx, periodGrade(t, "a1000000-0000-0000-0000-000000000059", tenantB, enrV1, mSubject, mPeriodThree, mUser, "1"), ports.PeriodLock{})
 	require.NoError(t, err)
 
 	scale := func(minH, maxH, passH, dec int) domain.GradingScale {
@@ -242,12 +244,14 @@ func TestCountScaleViolations(t *testing.T) {
 		check ports.ScaleCheck
 		want  int
 	}{
-		{"loosen", both, ports.ScaleCheck{GradingEnabled: true, Scale: scale(0, 1000, 600, 2)}, 0},
-		{"max 9.5", both, ports.ScaleCheck{GradingEnabled: true, Scale: scale(500, 950, 600, 2)}, 1},
-		{"min 7", both, ports.ScaleCheck{GradingEnabled: true, Scale: scale(700, 1000, 800, 2)}, 1},
-		{"whole numbers never violate decimals", both, ports.ScaleCheck{GradingEnabled: true, Scale: scale(500, 1000, 600, 0)}, 0},
-		{"disable", both, ports.ScaleCheck{}, 4},
-		{"only the named", []string{enrV2}, ports.ScaleCheck{}, 2},
+		// One captured letter: a numeric scale refuses it whatever its bounds.
+		{"loosen", both, ports.ScaleCheck{GradingEnabled: true, Scale: scale(0, 1000, 600, 2)}, 1},
+		{"max 9.5", both, ports.ScaleCheck{GradingEnabled: true, Scale: scale(500, 950, 600, 2)}, 2},
+		{"min 7", both, ports.ScaleCheck{GradingEnabled: true, Scale: scale(700, 1000, 800, 2)}, 2},
+		{"whole numbers never violate decimals", both, ports.ScaleCheck{GradingEnabled: true, Scale: scale(500, 1000, 600, 0)}, 1},
+		{"switch to letters refuses every number", both, ports.ScaleCheck{GradingLetters: true}, 4},
+		{"disable", both, ports.ScaleCheck{}, 5},
+		{"only the named", []string{enrV2}, ports.ScaleCheck{}, 3},
 		{"none named", nil, ports.ScaleCheck{}, 0},
 	}
 	for _, tt := range tests {

@@ -1,23 +1,23 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { type GradeSheetClient, type PeriodSheet, type SavedPeriodGrade } from "../../grades/periodSheet";
+import { type GradeMark, type GradeSheetClient, type PeriodSheet, type SavedPeriodGrade } from "../../grades/periodSheet";
 import { GradeRequestError } from "../../grades/requestError";
 import { GradeSaveStore } from "./gradeSaveStore";
 
 interface Call {
   kind: "save" | "remove";
-  value: number | null;
+  value: GradeMark | null;
   settle: { resolve: () => void; reject: (e: unknown) => void };
 }
 
 /** A client whose every request waits until the test settles it. */
 function manualClient(): { client: GradeSheetClient; calls: Call[] } {
   const calls: Call[] = [];
-  const pending = <T,>(kind: Call["kind"], value: number | null, result: T): Promise<T> =>
+  const pending = <T,>(kind: Call["kind"], value: GradeMark | null, result: T): Promise<T> =>
     new Promise<T>((resolve, reject) => calls.push({ kind, value, settle: { resolve: () => resolve(result), reject } }));
   const client: GradeSheetClient = {
     load: vi.fn(),
-    save: (i) => pending<SavedPeriodGrade>("save", i.value, { ...i, updatedAt: "x" }),
+    save: (i) => pending<SavedPeriodGrade>("save", i.value, { ...i, value: typeof i.value === "number" ? i.value : null, updatedAt: "x" }),
     remove: () => pending<void>("remove", null, undefined),
   };
   return { client, calls };

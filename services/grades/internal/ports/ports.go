@@ -120,11 +120,19 @@ type LevelRef struct {
 	// GradeLevelID is the group's grade (whose evaluation periods it uses).
 	GradeLevelID   string
 	GradingEnabled bool
+	// GradingLetters: the level grades with letters (A–D) instead of numbers.
+	GradingLetters bool
 	Scale          domain.GradingScale
 	// Deleting is true while the level's deletion runs (ADR 0021): writes
 	// that resolve it are refused with levelarchive.LevelBeingDeleted.
 	Deleting bool
 }
+
+// Graded reports whether the level takes any grade: numbers or letters.
+func (l LevelRef) Graded() bool { return l.GradingEnabled || l.GradingLetters }
+
+// Graded reports whether the level takes any grade: numbers or letters.
+func (c LevelCatalog) Graded() bool { return c.GradingEnabled || c.GradingLetters }
 
 // LevelKey is a group's level identity without its scale: its id and whether
 // its deletion is running.
@@ -185,6 +193,8 @@ type EvaluationPeriodReader interface {
 type LevelCatalog struct {
 	LevelName      string
 	GradingEnabled bool
+	// GradingLetters: the level grades with letters (A–D) instead of numbers.
+	GradingLetters bool
 	Scale          domain.GradingScale
 	Groups         []GroupRef
 	Assignments    []AssignmentRef
@@ -243,8 +253,11 @@ type PeriodGradeRepository interface {
 
 // ScaleCheck is a proposed level scale to judge captured grades against.
 // GradingEnabled=false (disabling numeric grading) refuses every grade.
+// GradingLetters=true (switching to letters) refuses every numeric grade; a
+// numeric check refuses every captured letter.
 type ScaleCheck struct {
 	GradingEnabled bool
+	GradingLetters bool
 	Scale          domain.GradingScale
 }
 
