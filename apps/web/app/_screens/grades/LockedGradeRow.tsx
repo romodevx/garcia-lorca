@@ -2,9 +2,11 @@
 
 import type { ReactElement } from "react";
 
+import { letterLabel, type GradeMark } from "../../grades/periodSheet";
+
 export interface LockedGradeRowProps {
   name: string;
-  value: number | null;
+  value: GradeMark | null;
   /** Why this row cannot change, e.g. the period belongs to the pupil's previous group. */
   reason: string;
   failing: boolean;
@@ -43,8 +45,8 @@ export function LockedGradeRow({ name, value, reason, failing }: LockedGradeRowP
           aria-readonly="true"
           tabIndex={-1}
           aria-label={`Calificación de ${name}`}
-          value={value === null ? "" : String(value)}
-          style={fieldStyle}
+          value={value === null ? "" : typeof value === "string" ? letterLabel(value) : String(value)}
+          style={typeof value === "string" ? { ...fieldStyle, width: 180 } : fieldStyle}
         />
       </td>
     </tr>

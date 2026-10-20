@@ -5,7 +5,7 @@ import { type ReactElement } from "react";
 import { formatAverage } from "@garcia-lorca/domain/grade-average";
 
 import { Icon, type IconName } from "../../_design/Icon";
-import type { SheetStats } from "../../grades/periodSheet";
+import type { LetterStats, SheetStats } from "../../grades/periodSheet";
 
 export interface SheetCountersProps {
   stats: SheetStats;
@@ -42,19 +42,43 @@ export function SheetCounters({ stats, pending, unsaved, retryable, onRetryAll }
   ];
   return (
     <div style={{ marginBottom: 14 }}>
-      <div role="group" aria-label="Resumen del periodo" style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-        {counters.map((c) => (
-          <div key={c.label} style={{ flex: "1 1 140px", minWidth: 0, display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", borderRadius: "var(--r-lg)", background: "var(--surface)", border: "1px solid var(--border)", boxShadow: "var(--shadow-card)" }}>
-            <div aria-hidden style={{ width: 38, height: 38, borderRadius: 12, flexShrink: 0, display: "grid", placeItems: "center", background: `color-mix(in oklab, var(--${c.color}) 16%, var(--surface))`, color: `var(--${c.color})` }}>
-              <Icon name={c.icon} size={20} />
-            </div>
-            <div>
-              <div style={{ fontSize: 13, color: "var(--text-muted)", fontWeight: 600 }}>{c.label}</div>
-              <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 20, lineHeight: 1.1, color: c.tone ?? "var(--text)" }}>{c.value}</div>
-            </div>
+      <CounterCards counters={counters} />
+      <SaveSummary pending={pending} unsaved={unsaved} retryable={retryable} onRetryAll={onRetryAll} />
+    </div>
+  );
+}
+
+function CounterCards({ counters }: { counters: Counter[] }): ReactElement {
+  return (
+    <div role="group" aria-label="Resumen del periodo" style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+      {counters.map((c) => (
+        <div key={c.label} style={{ flex: "1 1 140px", minWidth: 0, display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", borderRadius: "var(--r-lg)", background: "var(--surface)", border: "1px solid var(--border)", boxShadow: "var(--shadow-card)" }}>
+          <div aria-hidden style={{ width: 38, height: 38, borderRadius: 12, flexShrink: 0, display: "grid", placeItems: "center", background: `color-mix(in oklab, var(--${c.color}) 16%, var(--surface))`, color: `var(--${c.color})` }}>
+            <Icon name={c.icon} size={20} />
           </div>
-        ))}
-      </div>
+          <div>
+            <div style={{ fontSize: 13, color: "var(--text-muted)", fontWeight: 600 }}>{c.label}</div>
+            <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 20, lineHeight: 1.1, color: c.tone ?? "var(--text)" }}>{c.value}</div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export interface LetterCountersProps extends Omit<SheetCountersProps, "stats"> {
+  stats: LetterStats;
+}
+
+/** A letters sheet at a glance: how many are in and how many of each letter — never an average. */
+export function LetterCounters({ stats, pending, unsaved, retryable, onRetryAll }: LetterCountersProps): ReactElement {
+  const counters: Counter[] = [
+    { icon: "check", color: "lime", label: "Capturadas", value: `${stats.captured} de ${stats.total}` },
+    { icon: "star", color: "purple", label: "Por letra", value: stats.counts.map((c) => `${c.letter} ${c.count}`).join(" · ") },
+  ];
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <CounterCards counters={counters} />
       <SaveSummary pending={pending} unsaved={unsaved} retryable={retryable} onRetryAll={onRetryAll} />
     </div>
   );

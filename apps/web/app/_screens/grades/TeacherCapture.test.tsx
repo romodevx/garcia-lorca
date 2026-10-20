@@ -44,7 +44,7 @@ beforeEach(() => {
   window.history.replaceState(null, "", "/calificaciones");
   teaching.listAssignments.mockResolvedValue([assignment]);
   sheetClient.load.mockImplementation(async (q) => sheetFor(q.assignmentId));
-  sheetClient.save.mockImplementation(async (i) => ({ enrollmentId: i.enrollmentId, periodId: i.periodId, value: i.value, updatedAt: "x" }));
+  sheetClient.save.mockImplementation(async (i) => ({ enrollmentId: i.enrollmentId, periodId: i.periodId, value: typeof i.value === "number" ? i.value : null, updatedAt: "x" }));
 });
 
 afterEach(() => vi.clearAllMocks());

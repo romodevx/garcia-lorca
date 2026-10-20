@@ -106,7 +106,7 @@ export function GradeSheetRow({ row, initialText, scale, status, failing, inputR
   );
 }
 
-function CellStatusLine({ status, onRetry }: { status: CellStatus; onRetry: () => void }): ReactElement {
+export function CellStatusLine({ status, onRetry }: { status: CellStatus; onRetry: () => void }): ReactElement {
   const line: React.CSSProperties = { display: "inline-flex", alignItems: "center", gap: 4, marginTop: 4, fontSize: 13.5, fontWeight: 600 };
   return (
     <div aria-live="polite" style={{ minHeight: 20 }}>
