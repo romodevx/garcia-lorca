@@ -1174,6 +1174,12 @@ message SchoolProfile {
   string address = 5;
   string phone = 6;
   string legend = 7;
+  // clabe is the account families transfer to: eighteen digits with a valid
+  // check digit, or empty while the school has not captured it.
+  string clabe = 8;
+  // clabe_bank names the CLABE's bank ("BBVA México"); output only, empty
+  // when the bank code is not one the school is likely to use.
+  string clabe_bank = 9;
 }
 
 message GetSchoolProfileRequest {}

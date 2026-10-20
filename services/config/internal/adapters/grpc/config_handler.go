@@ -803,7 +803,7 @@ func (h *ConfigHandler) SetSchoolProfile(ctx context.Context, req *connect.Reque
 	in := req.Msg.GetProfile()
 	p, err := h.catalog.SetSchoolProfile(ctx, domain.SchoolProfileInput{
 		Name: in.GetName(), LegalName: in.GetLegalName(), RFC: in.GetRfc(), CCT: in.GetCct(),
-		Address: in.GetAddress(), Phone: in.GetPhone(), Legend: in.GetLegend(),
+		Address: in.GetAddress(), Phone: in.GetPhone(), Legend: in.GetLegend(), CLABE: in.GetClabe(),
 	})
 	if err != nil {
 		return nil, connectErr(err)
@@ -815,6 +815,7 @@ func toProtoSchoolProfile(p domain.SchoolProfile) *configv1.SchoolProfile {
 	return &configv1.SchoolProfile{
 		Name: p.Name(), LegalName: p.LegalName(), Rfc: p.RFC(), Cct: p.CCT(),
 		Address: p.Address(), Phone: p.Phone(), Legend: p.Legend(),
+		Clabe: p.CLABE(), ClabeBank: domain.BankOfCLABE(p.CLABE()),
 	}
 }
 

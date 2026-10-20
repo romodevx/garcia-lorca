@@ -653,6 +653,12 @@ type SchoolProfile struct {
 	Address   string `json:"address"`
 	Phone     string `json:"phone"`
 	Legend    string `json:"legend"`
+	// CLABE is the account families transfer to; "" until captured. Not
+	// serialised here: a receipt, card or report card embeds this struct and
+	// has no business carrying it. The screens that do say so explicitly.
+	CLABE string `json:"-"`
+	// CLABEBank names the CLABE's bank; output only (config derives it).
+	CLABEBank string `json:"-"`
 }
 
 // GetSchoolProfile returns the school's details; found is false until somebody
@@ -670,7 +676,7 @@ func (c *ConfigClient) SetSchoolProfile(ctx context.Context, in SchoolProfile) (
 	res, err := c.rpc.SetSchoolProfile(ctx, connect.NewRequest(&configv1.SetSchoolProfileRequest{
 		Profile: &configv1.SchoolProfile{
 			Name: in.Name, LegalName: in.LegalName, Rfc: in.RFC, Cct: in.CCT,
-			Address: in.Address, Phone: in.Phone, Legend: in.Legend,
+			Address: in.Address, Phone: in.Phone, Legend: in.Legend, Clabe: in.CLABE,
 		},
 	}))
 	if err != nil {
@@ -683,6 +689,7 @@ func toSchoolProfile(p *configv1.SchoolProfile) SchoolProfile {
 	return SchoolProfile{
 		Name: p.GetName(), LegalName: p.GetLegalName(), RFC: p.GetRfc(), CCT: p.GetCct(),
 		Address: p.GetAddress(), Phone: p.GetPhone(), Legend: p.GetLegend(),
+		CLABE: p.GetClabe(), CLABEBank: p.GetClabeBank(),
 	}
 }
 

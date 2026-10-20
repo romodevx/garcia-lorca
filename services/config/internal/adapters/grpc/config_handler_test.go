@@ -1197,13 +1197,16 @@ func TestSchoolProfileRPCs(t *testing.T) {
 	}
 
 	set, err := h.SetSchoolProfile(ctx(), connect.NewRequest(&configv1.SetSchoolProfileRequest{
-		Profile: &configv1.SchoolProfile{Name: "Colegio García Lorca", Rfc: "egl150101ab1", Phone: "55 1234 5678"},
+		Profile: &configv1.SchoolProfile{Name: "Colegio García Lorca", Rfc: "egl150101ab1", Phone: "55 1234 5678", Clabe: "0121 8000 1234 5678 99"},
 	}))
 	if err != nil {
 		t.Fatalf("SetSchoolProfile: %v", err)
 	}
 	if set.Msg.GetProfile().GetRfc() != "EGL150101AB1" || set.Msg.GetProfile().GetPhone() != "5512345678" {
 		t.Errorf("saved = %+v; want RFC upper-cased and phone as digits", set.Msg.GetProfile())
+	}
+	if set.Msg.GetProfile().GetClabe() != "012180001234567899" || set.Msg.GetProfile().GetClabeBank() != "BBVA México" {
+		t.Errorf("saved CLABE %q bank %q; want the 18 digits and the bank it names", set.Msg.GetProfile().GetClabe(), set.Msg.GetProfile().GetClabeBank())
 	}
 	got, err = h.GetSchoolProfile(ctx(), connect.NewRequest(&configv1.GetSchoolProfileRequest{}))
 	if err != nil || !got.Msg.GetFound() || got.Msg.GetProfile().GetName() != "Colegio García Lorca" {

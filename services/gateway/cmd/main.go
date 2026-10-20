@@ -1076,6 +1076,11 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 		familyReadModules([]string{"finance", "students"}, familyH.Statement))
 	mux.Handle("GET /api/v1/family/students/{studentId}/statement/pdf",
 		familyReadModules([]string{"finance", "students"}, familyH.StatementPDF))
+	// How to pay by transfer: the school's CLABE and the child's own bank
+	// reference, beside the statement it pays.
+	familyPaymentH := handler.NewFamilyPaymentInfoHandler(studentsClient, studentsClient, configClient)
+	mux.Handle("GET /api/v1/family/students/{studentId}/payment-info",
+		familyReadModules([]string{"finance", "students"}, familyPaymentH.PaymentInfo))
 	// ISSUE-T14-107: the receipt of one of the child's payments, the office's
 	// receipt in the family's view. The handler checks the child is the
 	// caller's; the builder that the deposit is that child's (404 either way).

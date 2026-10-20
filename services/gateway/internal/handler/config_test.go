@@ -671,13 +671,16 @@ func TestConfigSchoolProfile(t *testing.T) {
 	}
 
 	rec = doReq(t, h.PutSchoolProfile, http.MethodPut, "/api/v1/config/school-profile",
-		`{"name":"Colegio García Lorca","legalName":"EGL S.C.","rfc":"EGL150101AB1","cct":"09PPR1234X","address":"Centro","phone":"5512345678","legend":"Gracias"}`)
+		`{"name":"Colegio García Lorca","legalName":"EGL S.C.","rfc":"EGL150101AB1","cct":"09PPR1234X","address":"Centro","phone":"5512345678","legend":"Gracias","clabe":"012180001234567899"}`)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("save: %d %s", rec.Code, rec.Body.String())
 	}
-	want := client.SchoolProfile{Name: "Colegio García Lorca", LegalName: "EGL S.C.", RFC: "EGL150101AB1", CCT: "09PPR1234X", Address: "Centro", Phone: "5512345678", Legend: "Gracias"}
+	want := client.SchoolProfile{Name: "Colegio García Lorca", LegalName: "EGL S.C.", RFC: "EGL150101AB1", CCT: "09PPR1234X", Address: "Centro", Phone: "5512345678", Legend: "Gracias", CLABE: "012180001234567899"}
 	if svc.profileIn != want {
 		t.Errorf("forwarded %+v, want %+v", svc.profileIn, want)
+	}
+	if !strings.Contains(rec.Body.String(), `"clabe":"012180001234567899"`) {
+		t.Errorf("the saved profile does not carry the CLABE back: %s", rec.Body.String())
 	}
 
 	rec = doReq(t, h.PutSchoolProfile, http.MethodPut, "/api/v1/config/school-profile", `{not json`)
