@@ -46,7 +46,14 @@ type Client struct {
 	// kept. The mutex is not contention — it is one lookup on a cold start.
 	mu        sync.Mutex
 	conceptID string
+	// refundCategoryID is the expense category refunds go under (C2-015),
+	// resolved once like the concept.
+	refundCategoryID string
 }
+
+// refundCategoryName is the expense category a later day's refund of a
+// returned sale is recorded under (C2-015).
+const refundCategoryName = "Devoluciones de uniformes"
 
 // New builds a Client targeting the finance base URL over httpClient.
 func New(baseURL string, httpClient connect.HTTPClient) *Client {
@@ -190,6 +197,76 @@ func (c *Client) CancelChargeIfUnpaid(ctx context.Context, chargeID string) erro
 		return mapErr(err, "cancelling the charge")
 	}
 	return nil
+}
+
+// VoidSalePayments voids a returned sale's payments and cancels its charge
+// (C2-015). Finance answers a done void with what it voided, so a retry is safe.
+func (c *Client) VoidSalePayments(ctx context.Context, chargeID, reason, actorUserID string) error {
+	_, err := c.rpc.VoidSalePayments(ctx, connect.NewRequest(&financev1.VoidSalePaymentsRequest{
+		ChargeId: chargeID, Reason: reason, ActorUserId: actorUserID,
+	}))
+	if err != nil {
+		return mapErr(err, "voiding the sale's payments")
+	}
+	return nil
+}
+
+// RecordRefund records the refund of a sale returned on a later day as an
+// expense of that day, under its own category (C2-015).
+func (c *Client) RecordRefund(ctx context.Context, in ports.RefundInput) (string, error) {
+	categoryID, err := c.refundCategory(ctx)
+	if err != nil {
+		return "", err
+	}
+	res, err := c.rpc.CreateExpense(ctx, connect.NewRequest(&financev1.CreateExpenseRequest{
+		SpentOn: in.SpentOn, CategoryId: categoryID, AmountCents: in.AmountCents, Method: in.Method,
+		Description: in.Description, ActorId: in.ActorUserID, ActorName: in.ActorName,
+	}))
+	if err != nil {
+		return "", mapErr(err, "recording the refund")
+	}
+	return res.Msg.GetExpense().GetId(), nil
+}
+
+// refundCategory returns the refunds category, creating it the first time.
+// A category with the same name made by the office is reused, not duplicated.
+func (c *Client) refundCategory(ctx context.Context) (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.refundCategoryID != "" {
+		return c.refundCategoryID, nil
+	}
+	if id, found, err := c.findRefundCategory(ctx); err != nil || found {
+		c.refundCategoryID = id
+		return id, err
+	}
+	res, err := c.rpc.CreateExpenseCategory(ctx, connect.NewRequest(&financev1.CreateExpenseCategoryRequest{Name: refundCategoryName}))
+	if err != nil {
+		if connect.CodeOf(err) != connect.CodeAlreadyExists {
+			return "", mapErr(err, "creating the refunds category")
+		}
+		id, found, findErr := c.findRefundCategory(ctx)
+		if findErr != nil || !found {
+			return "", mapErr(err, "creating the refunds category")
+		}
+		c.refundCategoryID = id
+		return id, nil
+	}
+	c.refundCategoryID = res.Msg.GetCategory().GetId()
+	return c.refundCategoryID, nil
+}
+
+func (c *Client) findRefundCategory(ctx context.Context) (string, bool, error) {
+	res, err := c.rpc.ListExpenseCategories(ctx, connect.NewRequest(&financev1.ListExpenseCategoriesRequest{}))
+	if err != nil {
+		return "", false, mapErr(err, "listing expense categories")
+	}
+	for _, cat := range res.Msg.GetCategories() {
+		if strings.EqualFold(strings.TrimSpace(cat.GetName()), refundCategoryName) {
+			return cat.GetId(), true, nil
+		}
+	}
+	return "", false, nil
 }
 
 // mapErr translates a Connect code back into the shared kinds the use case

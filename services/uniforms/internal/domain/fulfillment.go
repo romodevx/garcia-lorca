@@ -19,7 +19,8 @@ import (
 //	                   └──► expired          (nobody came; the hold is released)
 //
 //	Cancelled is reachable from picking and ready_for_pickup.
-//	SoldAtCounter is terminal from birth and reachable from nothing.
+//	SoldAtCounter is born so and reachable from nothing; the only thing that
+//	may follow it is Returned, which a person asks for (C2-015).
 type FulfillmentStatus string
 
 const (
@@ -41,6 +42,10 @@ const (
 	// and the reason it is its own state rather than a shortcut through the
 	// normal path: no sweep may ever "return" goods that physically left.
 	StatusSoldAtCounter FulfillmentStatus = "sold_at_counter"
+	// StatusReturned: a counter sale the family brought back whole, its money
+	// returned (C2-015). Terminal. Never reached by a sweep: only
+	// ReturnAtCounter, which staff call, leads here.
+	StatusReturned FulfillmentStatus = "returned"
 )
 
 // allowedTransitions is the single source of truth for what may follow what.
@@ -61,7 +66,8 @@ var allowedTransitions = map[FulfillmentStatus]map[FulfillmentStatus]bool{
 	StatusDispatched:    {},
 	StatusExpired:       {},
 	StatusCancelled:     {},
-	StatusSoldAtCounter: {},
+	StatusSoldAtCounter: {StatusReturned: true},
+	StatusReturned:      {},
 }
 
 // HoldsStock reports whether a delivery in this state is still keeping units
@@ -318,6 +324,18 @@ func (f Fulfillment) Cancel(reason string, at time.Time) (Fulfillment, error) {
 	next.cancelReason = trimmed
 	next.cancelledAt = at
 	return next, nil
+}
+
+// ReturnAtCounter records that a counter sale came back whole (C2-015). Only
+// a counter sale may be returned this way, and only once: a delivery picked
+// and collected follows its own path, and a second return would put the same
+// garments back on the shelf twice.
+func (f Fulfillment) ReturnAtCounter() (Fulfillment, error) {
+	if f.status != StatusSoldAtCounter {
+		return Fulfillment{}, glerrors.New(glerrors.KindConflict,
+			"only a counter sale that has not been returned can be returned")
+	}
+	return f.transition(StatusReturned)
 }
 
 // FlagForAttention marks a delivery no rule can settle on its own — money that

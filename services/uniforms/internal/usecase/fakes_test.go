@@ -35,6 +35,10 @@ type fakeRepo struct {
 	flagged         map[string]string
 
 	failCounterSale error
+
+	// C2-015
+	returned map[string]ports.ReturnCounterSaleCommand // by fulfillment id
+	settled  map[string]string                         // fulfillment id -> expense id
 }
 
 func newFakeRepo() *fakeRepo {
@@ -44,6 +48,8 @@ func newFakeRepo() *fakeRepo {
 		byKey:           map[string]ports.OrderAggregate{},
 		chargesRecorded: map[string]string{},
 		flagged:         map[string]string{},
+		returned:        map[string]ports.ReturnCounterSaleCommand{},
+		settled:         map[string]string{},
 	}
 }
 
@@ -221,7 +227,16 @@ func (r *fakeRepo) CounterSale(_ context.Context, cmd ports.CounterSaleCommand) 
 		}
 		r.stock[s.ID()] = next
 	}
-	agg := ports.OrderAggregate{Order: order, Lines: cmd.Lines, Fulfillments: []domain.Fulfillment{ful}}
+	// Lines join their delivery, as the real transaction does.
+	lines := make([]domain.OrderLine, 0, len(cmd.Lines))
+	for _, line := range cmd.Lines {
+		assigned, err := line.AssignTo(cmd.FulfillmentID)
+		if err != nil {
+			return ports.OrderAggregate{}, false, err
+		}
+		lines = append(lines, assigned)
+	}
+	agg := ports.OrderAggregate{Order: order, Lines: lines, Fulfillments: []domain.Fulfillment{ful}}
 	r.sales = append(r.sales, cmd)
 	if cmd.IdempotencyKey != "" {
 		r.byKey[cmd.IdempotencyKey] = agg
@@ -243,8 +258,68 @@ func (r *fakeRepo) ListOrders(_ context.Context, _ ports.ListOrdersFilter) ([]po
 	return nil, "", 0, nil
 }
 
-func (r *fakeRepo) GetOrder(_ context.Context, _ string, _ []string) (ports.OrderAggregate, error) {
+// GetOrder answers the sales the fake made, as the real read would: with the
+// finance charge linked, and any return applied.
+func (r *fakeRepo) GetOrder(_ context.Context, id string, _ []string) (ports.OrderAggregate, error) {
+	for _, agg := range r.byKey {
+		if agg.Order.ID() != id {
+			continue
+		}
+		return r.current(agg)
+	}
 	return ports.OrderAggregate{}, glerrors.ErrNotFound
+}
+
+func (r *fakeRepo) current(agg ports.OrderAggregate) (ports.OrderAggregate, error) {
+	f := agg.Fulfillments[0]
+	status := f.Status()
+	lines := agg.Lines
+	out := ports.OrderAggregate{Order: agg.Order}
+	if cmd, ok := r.returned[f.ID()]; ok {
+		status, lines = domain.StatusReturned, cmd.Lines
+		rec := cmd.Record
+		if exp, done := r.settled[f.ID()]; done {
+			rec.RefundStatus, rec.ExpenseID = ports.RefundDone, exp
+		}
+		out.Returns = map[string]ports.CounterSaleReturn{f.ID(): rec}
+	}
+	restored, err := domain.RestoreFulfillment(domain.FulfillmentSnapshot{
+		ID: f.ID(), TenantID: f.TenantID(), OrderID: f.OrderID(), Seq: f.Seq(), Status: status,
+		AmountCents: f.AmountCents(), FinanceChargeID: r.chargesRecorded[f.ID()],
+		RequiresAttention: r.flagged[f.ID()] != "", AttentionReason: r.flagged[f.ID()],
+		PaidAt: f.PaidAt(), DispatchedAt: f.DispatchedAt(),
+	})
+	if err != nil {
+		return ports.OrderAggregate{}, err
+	}
+	out.Lines, out.Fulfillments = lines, []domain.Fulfillment{restored}
+	return out, nil
+}
+
+func (r *fakeRepo) ReturnCounterSale(ctx context.Context, cmd ports.ReturnCounterSaleCommand) (ports.OrderAggregate, error) {
+	if _, done := r.returned[cmd.Fulfillment.ID()]; !done {
+		r.returned[cmd.Fulfillment.ID()] = cmd
+		for _, line := range cmd.Lines {
+			if cmd.Damaged[line.ID()] {
+				continue
+			}
+			s, ok := r.stockBySize(line.ItemID(), line.SizeLabel())
+			if !ok {
+				return ports.OrderAggregate{}, glerrors.ErrNotFound
+			}
+			back, err := s.Receive(line.Qty())
+			if err != nil {
+				return ports.OrderAggregate{}, err
+			}
+			r.stock[s.ID()] = back
+		}
+	}
+	return r.GetOrder(ctx, cmd.Record.OrderID, nil)
+}
+
+func (r *fakeRepo) SettleReturnRefund(_ context.Context, fulfillmentID, expenseID string) error {
+	r.settled[fulfillmentID] = expenseID
+	return nil
 }
 
 func (r *fakeRepo) GetSettings(_ context.Context) (domain.Settings, error) {
@@ -287,6 +362,28 @@ type fakeFinance struct {
 	failCharge  error
 	failPayment error
 	nextID      int
+
+	// C2-015
+	voided     []string // charge ids
+	refunds    []ports.RefundInput
+	failVoid   error
+	failRefund error
+}
+
+func (f *fakeFinance) VoidSalePayments(_ context.Context, chargeID, _, _ string) error {
+	if f.failVoid != nil {
+		return f.failVoid
+	}
+	f.voided = append(f.voided, chargeID)
+	return nil
+}
+
+func (f *fakeFinance) RecordRefund(_ context.Context, in ports.RefundInput) (string, error) {
+	if f.failRefund != nil {
+		return "", f.failRefund
+	}
+	f.refunds = append(f.refunds, in)
+	return fmt.Sprintf("exp-%d", len(f.refunds)), nil
 }
 
 func (f *fakeFinance) EnsureConcept(context.Context) (string, error) {

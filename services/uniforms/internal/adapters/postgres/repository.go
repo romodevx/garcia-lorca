@@ -847,7 +847,11 @@ func (r *Repository) loadAggregate(tx *gorm.DB, orderID string) (ports.OrderAggr
 		fulfillments = append(fulfillments, f)
 	}
 
-	return ports.OrderAggregate{Order: order, Lines: lines, Fulfillments: fulfillments}, nil
+	returns, err := returnsOf(tx, orderID)
+	if err != nil {
+		return ports.OrderAggregate{}, err
+	}
+	return ports.OrderAggregate{Order: order, Lines: lines, Fulfillments: fulfillments, Returns: returns}, nil
 }
 
 // --- settings ----------------------------------------------------------------

@@ -171,6 +171,27 @@ func (h *UniformsHandler) CounterSale(ctx context.Context, req *connect.Request[
 	return connect.NewResponse(&uniformsv1.CounterSaleResponse{Order: toProtoOrder(sale)}), nil
 }
 
+// ReturnCounterSale takes a counter sale back whole (C2-015).
+func (h *UniformsHandler) ReturnCounterSale(ctx context.Context, req *connect.Request[uniformsv1.ReturnCounterSaleRequest]) (*connect.Response[uniformsv1.ReturnCounterSaleResponse], error) {
+	m := req.Msg
+	got, err := h.shop.ReturnCounterSale(ctx, usecase.ReturnCounterSaleInput{
+		OrderID: m.GetOrderId(), Reason: m.GetReason(), DamagedLineIDs: m.GetDamagedLineIds(),
+		RefundMethod: m.GetRefundMethod(), ActorUserID: m.GetActorUserId(), ActorName: m.GetActorName(),
+	})
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&uniformsv1.ReturnCounterSaleResponse{Order: toProtoOrder(got)}), nil
+}
+
+func toProtoReturn(r ports.CounterSaleReturn) *uniformsv1.CounterSaleReturn {
+	return &uniformsv1.CounterSaleReturn{
+		Reason: r.Reason, RefundMode: r.RefundMode, RefundMethod: r.RefundMethod, RefundCents: r.RefundCents,
+		RefundStatus: r.RefundStatus, DamagedUnits: int32(r.DamagedUnits), ActorName: r.ActorName,
+		ReturnedAt: toProtoTime(r.ReturnedAt),
+	}
+}
+
 // ListOrders is the panel's page.
 func (h *UniformsHandler) ListOrders(ctx context.Context, req *connect.Request[uniformsv1.ListOrdersRequest]) (*connect.Response[uniformsv1.ListOrdersResponse], error) {
 	m := req.Msg
@@ -331,6 +352,7 @@ var statusToProto = map[domain.FulfillmentStatus]uniformsv1.FulfillmentStatus{
 	domain.StatusExpired:        uniformsv1.FulfillmentStatus_FULFILLMENT_STATUS_EXPIRED,
 	domain.StatusCancelled:      uniformsv1.FulfillmentStatus_FULFILLMENT_STATUS_CANCELLED,
 	domain.StatusSoldAtCounter:  uniformsv1.FulfillmentStatus_FULFILLMENT_STATUS_SOLD_AT_COUNTER,
+	domain.StatusReturned:       uniformsv1.FulfillmentStatus_FULFILLMENT_STATUS_RETURNED,
 }
 
 var statusFromProto = map[uniformsv1.FulfillmentStatus]domain.FulfillmentStatus{
@@ -341,6 +363,7 @@ var statusFromProto = map[uniformsv1.FulfillmentStatus]domain.FulfillmentStatus{
 	uniformsv1.FulfillmentStatus_FULFILLMENT_STATUS_EXPIRED:          domain.StatusExpired,
 	uniformsv1.FulfillmentStatus_FULFILLMENT_STATUS_CANCELLED:        domain.StatusCancelled,
 	uniformsv1.FulfillmentStatus_FULFILLMENT_STATUS_SOLD_AT_COUNTER:  domain.StatusSoldAtCounter,
+	uniformsv1.FulfillmentStatus_FULFILLMENT_STATUS_RETURNED:         domain.StatusReturned,
 }
 
 func fromProtoFulfillmentStatus(s uniformsv1.FulfillmentStatus) domain.FulfillmentStatus {
@@ -353,6 +376,7 @@ var lineStatusToProto = map[domain.LineStatus]uniformsv1.LineStatus{
 	domain.LineSold:          uniformsv1.LineStatus_LINE_STATUS_SOLD,
 	domain.LineReleased:      uniformsv1.LineStatus_LINE_STATUS_RELEASED,
 	domain.LineCancelled:     uniformsv1.LineStatus_LINE_STATUS_CANCELLED,
+	domain.LineReturned:      uniformsv1.LineStatus_LINE_STATUS_RETURNED,
 }
 
 var labelToProto = map[domain.OrderLabel]uniformsv1.OrderLabel{
@@ -361,6 +385,7 @@ var labelToProto = map[domain.OrderLabel]uniformsv1.OrderLabel{
 	domain.LabelInProgress:    uniformsv1.OrderLabel_ORDER_LABEL_IN_PROGRESS,
 	domain.LabelClosed:        uniformsv1.OrderLabel_ORDER_LABEL_CLOSED,
 	domain.LabelClosedPartial: uniformsv1.OrderLabel_ORDER_LABEL_CLOSED_PARTIAL,
+	domain.LabelReturned:      uniformsv1.OrderLabel_ORDER_LABEL_RETURNED,
 }
 
 func toProtoItem(i domain.Item, sizes []domain.StockLevel) *uniformsv1.Item {
@@ -428,7 +453,11 @@ func toProtoOrder(agg ports.OrderAggregate) *uniformsv1.Order {
 	fulfillments := make([]*uniformsv1.Fulfillment, 0, len(agg.Fulfillments))
 	live := false
 	for _, f := range agg.Fulfillments {
-		fulfillments = append(fulfillments, toProtoFulfillment(f, agg.Order.Folio()))
+		pf := toProtoFulfillment(f, agg.Order.Folio())
+		if rec, ok := agg.Returns[f.ID()]; ok {
+			pf.CounterSaleReturn = toProtoReturn(rec)
+		}
+		fulfillments = append(fulfillments, pf)
 		if f.HoldsStock() {
 			live = true
 		}

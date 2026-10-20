@@ -372,3 +372,17 @@ func TestUsefulMessagesStillReachTheCaller(t *testing.T) {
 		t.Errorf("the useful part was thrown away too: %s", err.Error())
 	}
 }
+
+// C2-015: a return without a reason is the caller's mistake, refused before
+// any money or garment moves.
+func TestReturnCounterSaleWithoutAReasonIsInvalid(t *testing.T) {
+	h := handlerWith(&stubRepo{})
+
+	_, err := h.ReturnCounterSale(context.Background(), connect.NewRequest(&uniformsv1.ReturnCounterSaleRequest{
+		OrderId: "0f000000-0000-4000-8000-000000000001",
+	}))
+
+	if got := connect.CodeOf(err); got != connect.CodeInvalidArgument {
+		t.Errorf("code = %v, want InvalidArgument", got)
+	}
+}

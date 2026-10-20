@@ -159,8 +159,10 @@ func TestCounterSaleIsTerminalFromBirth(t *testing.T) {
 	if f.Status() != domain.StatusSoldAtCounter {
 		t.Fatalf("status = %q, want sold_at_counter", f.Status())
 	}
-	if !f.IsTerminal() {
-		t.Error("a counter sale must be terminal the moment it exists")
+	// C2-015: the one thing that may follow is a return, and only a person
+	// asks for it (ReturnAtCounter); no sweep has a road to it.
+	if f.IsTerminal() {
+		t.Error("a counter sale may still be returned")
 	}
 	if f.HoldsStock() {
 		t.Error("a counter sale holds nothing: the goods already left")
@@ -181,6 +183,7 @@ func TestOnlyLiveStatesHoldStock(t *testing.T) {
 		{domain.StatusExpired, false},
 		{domain.StatusCancelled, false},
 		{domain.StatusSoldAtCounter, false},
+		{domain.StatusReturned, false},
 	}
 	for _, tc := range cases {
 		t.Run(string(tc.status), func(t *testing.T) {
@@ -421,7 +424,7 @@ func TestRestoreDoesNotReplayTheStateMachine(t *testing.T) {
 	for _, status := range []domain.FulfillmentStatus{
 		domain.StatusPicking, domain.StatusReadyForPickup, domain.StatusPaid,
 		domain.StatusDispatched, domain.StatusExpired, domain.StatusCancelled,
-		domain.StatusSoldAtCounter,
+		domain.StatusSoldAtCounter, domain.StatusReturned,
 	} {
 		t.Run(string(status), func(t *testing.T) {
 			got, err := domain.RestoreFulfillment(domain.FulfillmentSnapshot{
@@ -485,5 +488,23 @@ func TestRestoreCarriesEverythingBack(t *testing.T) {
 		!got.DeadlineEstimated() || got.ExtensionSeq() != 2 ||
 		!got.RequiresAttention() || got.AttentionReason() != "pago tardío" {
 		t.Errorf("a field was lost in rehydration: %+v", got)
+	}
+}
+
+// C2-015: a counter sale returned whole ends returned, terminal; nothing else
+// may be returned, and a return is not repeated.
+func TestReturnAtCounter(t *testing.T) {
+	returned, err := mustCounterSale(t).ReturnAtCounter()
+	if err != nil {
+		t.Fatalf("ReturnAtCounter: %v", err)
+	}
+	if returned.Status() != domain.StatusReturned || !returned.IsTerminal() {
+		t.Errorf("status = %q terminal=%v, want returned and terminal", returned.Status(), returned.IsTerminal())
+	}
+	if _, err := returned.ReturnAtCounter(); glerrors.KindOf(err) != glerrors.KindConflict {
+		t.Errorf("returning twice: want KindConflict, got %v", err)
+	}
+	if _, err := picking(t).ReturnAtCounter(); glerrors.KindOf(err) != glerrors.KindConflict {
+		t.Errorf("returning an order that was never sold at the counter: want KindConflict, got %v", err)
 	}
 }
