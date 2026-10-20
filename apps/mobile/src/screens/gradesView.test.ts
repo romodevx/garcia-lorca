@@ -18,7 +18,7 @@ const periods: EvaluationPeriod[] = [
   { id: "p3", ordinal: 3, name: "3.er trimestre", startsOn: "2027-03-16", endsOn: "2027-07-10" },
 ];
 
-const subject = (grades: Record<string, number>): PeriodSubject => ({ subjectId: "m", subjectName: "M", grades });
+const subject = (grades: Record<string, number>): PeriodSubject => ({ subjectId: "m", subjectName: "M", grades, letters: {} });
 
 describe("defaultPeriod", () => {
   it("picks the period that contains today, both ends inclusive", () => {

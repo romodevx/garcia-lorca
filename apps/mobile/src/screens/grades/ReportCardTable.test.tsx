@@ -4,7 +4,7 @@ import { ThemeProvider } from "../../theme";
 import { lineKey, ReportCardTable } from "./ReportCardTable";
 
 function line(subjectId: string, subjectName: string): ReportCardLine {
-  return { subjectId, subjectName, periods: {}, months: {}, average: null };
+  return { subjectId, subjectName, periods: {}, letters: {}, months: {}, average: null };
 }
 
 describe("lineKey", () => {
@@ -35,3 +35,26 @@ describe("ReportCardTable rows", () => {
     expect(view.getAllByText("Inglés")).toHaveLength(2);
   });
 });
+
+describe("ReportCardTable — letters (preescolar)", () => {
+  it("shows each period's letter and no average column", async () => {
+    const card = {
+      periods: [{ id: "p1", ordinal: 1, name: "1.er trimestre" }],
+      months: [],
+      gradingLetters: true,
+      lines: [{ subjectId: "sub-len", subjectName: "Lenguajes", periods: {}, letters: { p1: "B" }, months: {}, average: null }],
+      scale: null,
+    } as unknown as ReportCard;
+
+    const view = await render(
+      <ThemeProvider>
+        <ReportCardTable card={card} />
+      </ThemeProvider>,
+    );
+
+    expect(view.getByText("B")).toBeTruthy();
+    expect(view.queryByText("Prom.")).toBeNull();
+    expect(view.getByLabelText("Lenguajes: 1.er trimestre B, Bien")).toBeTruthy();
+  });
+});
+

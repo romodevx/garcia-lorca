@@ -1,6 +1,6 @@
-import { reportCardLabel, reportCardTitle, versionBadge } from "./reportCardView";
+import { averageText, reportCardLabel, reportCardTitle, versionBadge } from "./reportCardView";
 
-const card = { id: "rc2", termId: "t2", termName: "2.º trimestre", termOrdinal: 2, cycleName: "2026-2027", version: 2, issuedAt: "2027-03-20", generalAverage: 8.75, hasGrades: true };
+const card = { id: "rc2", termId: "t2", termName: "2.º trimestre", termOrdinal: 2, cycleName: "2026-2027", version: 2, issuedAt: "2027-03-20", generalAverage: 8.75, hasGrades: true, gradingLetters: false };
 
 describe("reportCardView", () => {
   it("titles a boleta with its term and cycle, or the term alone", () => {
@@ -18,5 +18,11 @@ describe("reportCardView", () => {
     expect(reportCardLabel({ ...card, version: 1, generalAverage: null, hasGrades: false, issuedAt: null })).toBe(
       "2.º trimestre 2026-2027, sin calificaciones",
     );
+  });
+
+  it("reads a letters boleta aloud as carrying letters, never an average", () => {
+    const letters = { ...card, version: 1, generalAverage: null, hasGrades: true, gradingLetters: true, issuedAt: null };
+    expect(reportCardLabel(letters)).toBe("2.º trimestre 2026-2027, calificada con letras");
+    expect(averageText(letters)).toBe("Con letras");
   });
 });

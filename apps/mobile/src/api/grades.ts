@@ -31,6 +31,8 @@ export interface PeriodSubject {
   subjectId: string;
   subjectName: string;
   grades: Record<string, number>;
+  /** Period id → letter on a level that grades with letters (preescolar); {} otherwise. */
+  letters: Record<string, string>;
 }
 
 export interface PeriodGrades {
@@ -45,6 +47,8 @@ export interface PeriodGrades {
   scale: GradeScale | null;
   /** False for levels without numeric grades (preescolar). */
   gradingEnabled: boolean;
+  /** The level grades with letters A–D instead (preescolar); false from an older gateway. */
+  gradingLetters: boolean;
   subjects: PeriodSubject[];
 }
 
@@ -61,6 +65,7 @@ interface WireSubject {
   subjectId?: string;
   subjectName?: string;
   grades?: Record<string, number> | null;
+  letters?: Record<string, string> | null;
 }
 
 interface WirePeriodGrades {
@@ -68,6 +73,7 @@ interface WirePeriodGrades {
   periods?: EvaluationPeriod[] | null;
   scale?: Partial<GradeScale> | null;
   gradingEnabled?: boolean | null;
+  gradingLetters?: boolean | null;
   subjects?: WireSubject[] | null;
 }
 
@@ -76,6 +82,7 @@ function normalizeSubject(subject: WireSubject): PeriodSubject {
     subjectId: subject.subjectId ?? "",
     subjectName: subject.subjectName ?? "",
     grades: subject.grades ?? {},
+    letters: subject.letters ?? {},
   };
 }
 
@@ -96,6 +103,7 @@ export async function getPeriodGrades(studentId: string): Promise<PeriodGrades> 
     periods: byOrdinal(data.periods ?? []),
     scale: normalizeScale(data.scale),
     gradingEnabled: data.gradingEnabled ?? true,
+    gradingLetters: data.gradingLetters ?? false,
     subjects: (data.subjects ?? []).map(normalizeSubject),
   };
 }

@@ -8,8 +8,8 @@ import { renderWithProviders } from "../test/renderWithProviders";
 import { GradesScreen } from "./GradesScreen";
 
 type Child = { id: string; firstName: string; lastName: string; level: string; levelId: string; gradeGroup: string };
-type Subject = { subjectId: string; subjectName: string; grades: Record<string, number> };
-type Reply = { status: number; subjects?: Subject[]; gradingEnabled?: boolean; scale?: typeof SCALE | null } | "hang";
+type Subject = { subjectId: string; subjectName: string; grades: Record<string, number>; letters?: Record<string, string> };
+type Reply = { status: number; subjects?: Subject[]; gradingEnabled?: boolean; gradingLetters?: boolean; scale?: typeof SCALE | null } | "hang";
 
 const PERIODS = [
   { id: "p1", ordinal: 1, name: "1.er trimestre", startsOn: "2026-08-24", endsOn: "2026-11-30" },
@@ -47,6 +47,7 @@ function mockGateway(replies: Record<string, Reply | (() => Reply)>, children: C
           periods: PERIODS,
           ...(reply.scale === null ? {} : { scale: reply.scale ?? SCALE }),
           gradingEnabled: reply.gradingEnabled ?? true,
+          gradingLetters: reply.gradingLetters ?? false,
           subjects: reply.subjects ?? [],
         }),
       };
@@ -145,6 +146,29 @@ describe("GradesScreen (grades per evaluation period)", () => {
 
     await waitFor(() => expect(screen.getByText("Próximamente")).toBeTruthy());
     expect(screen.queryByText(/Promedio/)).toBeNull();
+  });
+
+  // Preescolar grades with letters (owner, 20-oct): each subject's letter and
+  // what it means, never an average and never "Reprobada".
+  it("shows preescolar's letters with their meaning, without averages", async () => {
+    const lenguajes = { subjectId: "sub-len", subjectName: "Lenguajes", grades: {}, letters: { p2: "A", p1: "B" } };
+    const etica = { subjectId: "sub-eti", subjectName: "Ética", grades: {}, letters: {} };
+    mockGateway({ s1: { status: 200, gradingEnabled: false, gradingLetters: true, scale: null, subjects: [lenguajes, etica] } });
+    await render();
+
+    await waitFor(() => expect(screen.getByLabelText("Lenguajes, 2.º trimestre: A, Excelente")).toBeTruthy());
+    expect(screen.getByLabelText("Ética, 2.º trimestre: sin calificación aún")).toBeTruthy();
+    expect(screen.getByText(/A Excelente · B Bien · C Suficiente · D Requiere apoyo/)).toBeTruthy();
+    expect(screen.queryByText(/Promedio/)).toBeNull();
+    expect(screen.queryByText("Próximamente")).toBeNull();
+    expect(screen.queryByText("Reprobada")).toBeNull();
+  });
+
+  it("a letters level with nothing captured yet says so, not 'Próximamente'", async () => {
+    mockGateway({ s1: { status: 200, gradingEnabled: false, gradingLetters: true, scale: null, subjects: [{ subjectId: "sub-len", subjectName: "Lenguajes", grades: {}, letters: {} }] } });
+    await render();
+    await waitFor(() => expect(screen.getByLabelText("Lenguajes, 2.º trimestre: sin calificación aún")).toBeTruthy());
+    expect(screen.queryByText("Próximamente")).toBeNull();
   });
 
   it("shows grades captured before the level stopped grading, as stored, without a passing line", async () => {
