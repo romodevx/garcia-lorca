@@ -540,16 +540,23 @@ func (r *Repository) CounterSale(ctx context.Context, cmd ports.CounterSaleComma
 			return glerrors.Wrap(glerrors.KindInternal, "writing the delivery", err)
 		}
 
+		assigned := make([]domain.OrderLine, 0, len(cmd.Lines))
 		for _, line := range cmd.Lines {
-			assigned, err := line.AssignTo(cmd.FulfillmentID)
+			a, err := line.AssignTo(cmd.FulfillmentID)
 			if err != nil {
 				return err
 			}
-			lineRow := fromDomainLine(assigned)
+			lineRow := fromDomainLine(a)
 			if err := tx.Create(&lineRow).Error; err != nil {
 				return glerrors.Wrap(glerrors.KindInternal, "writing a sale line", err)
 			}
-			if err := r.sellFromShelf(tx, assigned, cmd.Note, cmd.ActorUserID); err != nil {
+			assigned = append(assigned, a)
+		}
+		// The shelf is taken in (item, size) order — the order a return takes
+		// it too (C2-015 review) — so two writers of the same sizes queue
+		// instead of deadlocking.
+		for _, a := range sortedBySize(assigned) {
+			if err := r.sellFromShelf(tx, a, cmd.Note, cmd.ActorUserID); err != nil {
 				return err
 			}
 		}

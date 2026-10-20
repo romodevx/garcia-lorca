@@ -37,8 +37,10 @@ type fakeRepo struct {
 	failCounterSale error
 
 	// C2-015
-	returned map[string]ports.ReturnCounterSaleCommand // by fulfillment id
-	settled  map[string]string                         // fulfillment id -> expense id
+	returned   map[string]ports.ReturnCounterSaleCommand // by fulfillment id
+	settled    map[string]string                         // fulfillment id -> expense id
+	intents    map[string]ports.CounterSaleReturn        // decisions recorded before money moved
+	failReturn error
 }
 
 func newFakeRepo() *fakeRepo {
@@ -49,6 +51,7 @@ func newFakeRepo() *fakeRepo {
 		chargesRecorded: map[string]string{},
 		flagged:         map[string]string{},
 		returned:        map[string]ports.ReturnCounterSaleCommand{},
+		intents:         map[string]ports.CounterSaleReturn{},
 		settled:         map[string]string{},
 	}
 }
@@ -275,6 +278,9 @@ func (r *fakeRepo) current(agg ports.OrderAggregate) (ports.OrderAggregate, erro
 	status := f.Status()
 	lines := agg.Lines
 	out := ports.OrderAggregate{Order: agg.Order}
+	if intent, ok := r.intents[f.ID()]; ok {
+		out.Returns = map[string]ports.CounterSaleReturn{f.ID(): intent}
+	}
 	if cmd, ok := r.returned[f.ID()]; ok {
 		status, lines = domain.StatusReturned, cmd.Lines
 		rec := cmd.Record
@@ -296,7 +302,25 @@ func (r *fakeRepo) current(agg ports.OrderAggregate) (ports.OrderAggregate, erro
 	return out, nil
 }
 
+func (r *fakeRepo) BeginReturn(_ context.Context, rec ports.CounterSaleReturn) (ports.CounterSaleReturn, error) {
+	if prior, ok := r.intents[rec.FulfillmentID]; ok {
+		return prior, nil
+	}
+	r.intents[rec.FulfillmentID] = rec
+	return rec, nil
+}
+
+func (r *fakeRepo) DropReturnIntent(_ context.Context, fulfillmentID string) error {
+	if _, done := r.returned[fulfillmentID]; !done {
+		delete(r.intents, fulfillmentID)
+	}
+	return nil
+}
+
 func (r *fakeRepo) ReturnCounterSale(ctx context.Context, cmd ports.ReturnCounterSaleCommand) (ports.OrderAggregate, error) {
+	if r.failReturn != nil {
+		return ports.OrderAggregate{}, r.failReturn
+	}
 	if _, done := r.returned[cmd.Fulfillment.ID()]; !done {
 		r.returned[cmd.Fulfillment.ID()] = cmd
 		for _, line := range cmd.Lines {

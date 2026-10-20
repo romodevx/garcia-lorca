@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"regexp"
 	"time"
 
@@ -138,6 +139,62 @@ func (r *Repository) CreateExpense(ctx context.Context, e domain.Expense, create
 		return domain.Expense{}, err
 	}
 	return out, nil
+}
+
+// CreateExpenseOnce records an expense keyed by another module's reference
+// (C2-015): when one with that reference exists it is returned and nothing is
+// written. Two racing calls meet at the unique index; the loser reads the
+// winner's row.
+func (r *Repository) CreateExpenseOnce(ctx context.Context, e domain.Expense, created domain.ExpenseEvent, externalRef string) (domain.Expense, error) {
+	if existing, found, err := r.expenseByRef(ctx, externalRef); err != nil || found {
+		return existing, err
+	}
+	var out domain.Expense
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		m := r.fromDomainExpense(e)
+		m.ExternalRef = &externalRef
+		if err := tx.Create(&m).Error; err != nil {
+			if isUniqueViolation(err) {
+				return errExpenseRefTaken
+			}
+			return glerrors.Wrap(glerrors.KindInternal, "recording an expense", err)
+		}
+		if err := r.insertExpenseEvent(tx, created); err != nil {
+			return err
+		}
+		var err error
+		out, err = readExpense(tx, e.ID(), false)
+		return err
+	})
+	if errors.Is(err, errExpenseRefTaken) {
+		existing, _, rerr := r.expenseByRef(ctx, externalRef)
+		return existing, rerr
+	}
+	if err != nil {
+		return domain.Expense{}, err
+	}
+	return out, nil
+}
+
+// errExpenseRefTaken marks the race CreateExpenseOnce lost at the index.
+var errExpenseRefTaken = errors.New("expense reference already recorded")
+
+func (r *Repository) expenseByRef(ctx context.Context, externalRef string) (domain.Expense, bool, error) {
+	var out domain.Expense
+	found := false
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		var ids []string
+		if err := tx.Model(&expenseModel{}).Where("external_ref = ?", externalRef).Limit(1).Pluck("id", &ids).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "looking an expense up by reference", err)
+		}
+		if len(ids) == 0 {
+			return nil
+		}
+		e, err := readExpense(tx, ids[0], false)
+		out, found = e, err == nil
+		return err
+	})
+	return out, found, err
 }
 
 // UpdateExpense locks the expense, runs change, and stores the result with

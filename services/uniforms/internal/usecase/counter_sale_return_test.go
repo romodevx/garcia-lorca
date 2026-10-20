@@ -196,3 +196,66 @@ func TestReturnWithAFailedExpenseIsPendingAndARetryFinishesIt(t *testing.T) {
 		t.Errorf("after retry %+v refunds %d, want done with one expense", again.Returns[fid], len(f.finance.refunds))
 	}
 }
+
+// Review (tech-lead, PR #162): the void went through but the shelf write
+// failed; a retry after midnight must keep the decision already acted on —
+// the money was voided — and never also record an expense.
+func TestARetryAfterMidnightKeepsTheVoidAlreadyMade(t *testing.T) {
+	f := newFixture(t)
+	sale, _ := soldToday(t, f)
+	f.repo.failReturn = glerrors.New(glerrors.KindInternal, "deadlock")
+
+	if _, err := f.svc.ReturnCounterSale(context.Background(), returnInput(sale.Order.ID())); err == nil {
+		t.Fatal("want the shelf failure surfaced")
+	}
+	f.repo.failReturn = nil
+	laterDay(f)
+	in := returnInput(sale.Order.ID())
+	in.RefundMethod = "cash"
+
+	got, err := f.svc.ReturnCounterSale(context.Background(), in)
+	if err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+
+	if len(f.finance.refunds) != 0 {
+		t.Errorf("the retry refunded again as an expense: %+v", f.finance.refunds)
+	}
+	if rec := got.Returns[sale.Fulfillments[0].ID()]; rec.RefundMode != ports.RefundVoid || got.Fulfillments[0].Status() != domain.StatusReturned {
+		t.Errorf("record %+v status %q, want the void kept and the sale returned", rec, got.Fulfillments[0].Status())
+	}
+}
+
+// Review: a refund expense is keyed by the delivery, so two clicks — or a
+// retry after a lost answer — ask finance for ONE expense.
+func TestTheRefundExpenseIsKeyedByTheDelivery(t *testing.T) {
+	f := newFixture(t)
+	sale, _ := soldToday(t, f)
+	laterDay(f)
+	in := returnInput(sale.Order.ID())
+	in.RefundMethod = "cash"
+
+	if _, err := f.svc.ReturnCounterSale(context.Background(), in); err != nil {
+		t.Fatalf("ReturnCounterSale: %v", err)
+	}
+
+	if len(f.finance.refunds) != 1 || f.finance.refunds[0].ExternalRef != "uniforms-return:"+sale.Fulfillments[0].ID() {
+		t.Errorf("refunds = %+v, want one keyed by the delivery", f.finance.refunds)
+	}
+}
+
+// Review: at 23:59 the panel decides "today" and finance, already in
+// tomorrow, refuses the void. Nothing moved, so the intent is dropped and the
+// next try asks how the money goes back.
+func TestAVoidRefusedAtMidnightLeavesNothingBehind(t *testing.T) {
+	f := newFixture(t)
+	sale, _ := soldToday(t, f)
+	f.finance.failVoid = glerrors.New(glerrors.KindConflict, "the sale was paid on an earlier day")
+
+	_, err := f.svc.ReturnCounterSale(context.Background(), returnInput(sale.Order.ID()))
+
+	requireKind(t, err, glerrors.KindConflict)
+	if len(f.repo.intents) != 0 || len(f.repo.returned) != 0 {
+		t.Errorf("intents %v returned %v, want nothing kept", f.repo.intents, f.repo.returned)
+	}
+}

@@ -296,7 +296,7 @@ func (b *Builder) Sale(ctx context.Context, orderID string) (Receipt, error) {
 	// CANCELADO with the reason — so a reprint is never taken for money still
 	// in the drawer.
 	for _, f := range order.Fulfillments {
-		if f.Return != nil {
+		if f.Status == "returned" && f.Return != nil {
 			r.Voided, r.VoidReason = true, "Devolución: "+f.Return.Reason
 		}
 	}

@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
@@ -87,6 +88,28 @@ func (s *ExpenseService) CreateExpense(ctx context.Context, d domain.ExpenseDraf
 		ID: s.newID(), ExpenseID: e.ID(), Kind: domain.ExpenseEventCreated, After: e, By: by, At: at,
 	}
 	return s.repo.CreateExpense(ctx, e, created)
+}
+
+// CreateExpenseOnce records an expense that another module asks for on its
+// own behalf, keyed by that module's reference (C2-015: a uniforms refund):
+// repeating it returns the expense already recorded, so a retry cannot pay
+// out twice. An empty reference is an ordinary expense.
+func (s *ExpenseService) CreateExpenseOnce(ctx context.Context, d domain.ExpenseDraft, by domain.Receiver, externalRef string) (domain.Expense, error) {
+	ref := strings.TrimSpace(externalRef)
+	if ref == "" {
+		return s.CreateExpense(ctx, d, by)
+	}
+	if err := s.requireActiveCategory(ctx, d.CategoryID); err != nil {
+		return domain.Expense{}, err
+	}
+	e, err := domain.NewExpense(s.newID(), d, s.clock.Today(), by)
+	if err != nil {
+		return domain.Expense{}, err
+	}
+	created := domain.ExpenseEvent{
+		ID: s.newID(), ExpenseID: e.ID(), Kind: domain.ExpenseEventCreated, After: e, By: by, At: s.clock.Now(),
+	}
+	return s.repo.CreateExpenseOnce(ctx, e, created, ref)
 }
 
 // requireActiveCategory refuses a category that does not exist (as bad input,

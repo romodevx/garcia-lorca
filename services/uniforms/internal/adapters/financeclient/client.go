@@ -221,6 +221,7 @@ func (c *Client) RecordRefund(ctx context.Context, in ports.RefundInput) (string
 	res, err := c.rpc.CreateExpense(ctx, connect.NewRequest(&financev1.CreateExpenseRequest{
 		SpentOn: in.SpentOn, CategoryId: categoryID, AmountCents: in.AmountCents, Method: in.Method,
 		Description: in.Description, ActorId: in.ActorUserID, ActorName: in.ActorName,
+		ExternalRef: in.ExternalRef,
 	}))
 	if err != nil {
 		return "", mapErr(err, "recording the refund")

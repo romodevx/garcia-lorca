@@ -2,7 +2,6 @@ package postgres
 
 import (
 	"context"
-	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -12,11 +11,6 @@ import (
 	"github.com/garcia-lorca/services/finance/internal/domain"
 	"github.com/garcia-lorca/services/finance/internal/ports"
 )
-
-// uniformsSaleRefPrefix is how a uniforms counter sale names its charge
-// (uniforms:<fulfillment id>, ADR 0008). Only such a charge may be voided by
-// VoidSalePayments: a tuition payment is corrected through its deposit.
-const uniformsSaleRefPrefix = "uniforms:"
 
 // voidedSalePaymentModel is a sale payment moved out of `payments` by a
 // same-day return (migration 0030).
@@ -54,9 +48,6 @@ func (r *Repository) VoidSalePayments(ctx context.Context, chargeID, reason, act
 			Where("id = ?", chargeID).First(&charge).Error; err != nil {
 			return translateFindErr(err)
 		}
-		if !strings.HasPrefix(charge.ExternalRef, uniformsSaleRefPrefix) {
-			return glerrors.New(glerrors.KindInvalid, "only a uniforms counter sale can be voided this way")
-		}
 		var rows []paymentModel
 		if err := tx.Where("charge_id = ?", chargeID).Find(&rows).Error; err != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "reading the sale's payments", err)
@@ -67,10 +58,14 @@ func (r *Repository) VoidSalePayments(ctx context.Context, chargeID, reason, act
 			out = done
 			return err
 		}
-		archive, err := voidableSalePayments(rows, reason, actorUserID, today)
-		if err != nil {
+		facts := make([]domain.SalePayment, 0, len(rows))
+		for _, p := range rows {
+			facts = append(facts, domain.SalePayment{InDeposit: p.DepositID != nil, PaidOn: p.PaidOn})
+		}
+		if err := domain.CheckSaleVoid(charge.ExternalRef, facts, today); err != nil {
 			return err
 		}
+		archive := archiveOf(rows, reason, actorUserID)
 		if len(archive) > 0 {
 			if err := tx.Omit("voided_at").Create(&archive).Error; err != nil {
 				return glerrors.Wrap(glerrors.KindInternal, "keeping the voided payments", err)
@@ -79,9 +74,19 @@ func (r *Repository) VoidSalePayments(ctx context.Context, chargeID, reason, act
 				return glerrors.Wrap(glerrors.KindInternal, "voiding the sale's payments", err)
 			}
 		}
+		// The money is gone now, so the domain's own guarded cancellation
+		// (C2-005: never with money on it) is what cancels the charge.
+		unpaid, err := toDomainCharge(charge, 0)
+		if err != nil {
+			return err
+		}
+		cancelled, err := unpaid.CancelIfUnpaidWithReason(0, "Devolución: "+reason)
+		if err != nil {
+			return err
+		}
 		if err := tx.Model(&chargeModel{}).Where("id = ?", chargeID).Updates(map[string]any{
-			"status":              domain.StatusCancelled,
-			"cancellation_reason": "Devolución: " + reason,
+			"status":              cancelled.Status(),
+			"cancellation_reason": cancelled.CancellationReason(),
 			"cancelled_at":        gorm.Expr("now()"),
 			"cancelled_by":        nullableUUID(actorUserID),
 			"updated_at":          gorm.Expr("now()"),
@@ -98,20 +103,10 @@ func (r *Repository) VoidSalePayments(ctx context.Context, chargeID, reason, act
 	return out, nil
 }
 
-// voidableSalePayments turns a sale's payments into their archive rows, or
-// says why they cannot be voided: a deposit's slice is never a sale's, and a
-// payment of an earlier day is already in a cash-up that may be closed — that
-// return is an expense of its own day (C2-015).
-func voidableSalePayments(rows []paymentModel, reason, actorUserID string, today time.Time) ([]voidedSalePaymentModel, error) {
-	day := domain.CalendarDay(today)
+// archiveOf turns a sale's payments into their archive rows.
+func archiveOf(rows []paymentModel, reason, actorUserID string) []voidedSalePaymentModel {
 	out := make([]voidedSalePaymentModel, 0, len(rows))
 	for _, p := range rows {
-		if p.DepositID != nil {
-			return nil, glerrors.New(glerrors.KindConflict, "this charge was paid through a deposit: cancel the deposit instead")
-		}
-		if domain.CalendarDay(p.PaidOn).Before(day) {
-			return nil, glerrors.New(glerrors.KindConflict, "the sale was paid on an earlier day: record the refund as an expense of today")
-		}
 		out = append(out, voidedSalePaymentModel{
 			ID: p.ID, TenantID: p.TenantID, ChargeID: p.ChargeID, AmountCents: p.AmountCents,
 			Method: p.Method, CardType: p.CardType, Reference: p.Reference, IdempotencyKey: p.IdempotencyKey,
@@ -119,7 +114,7 @@ func voidableSalePayments(rows []paymentModel, reason, actorUserID string, today
 			Reason: reason, VoidedBy: nullableUUID(actorUserID),
 		})
 	}
-	return out, nil
+	return out
 }
 
 // ListVoidedSalePaymentsOn returns the voided sale payments taken on day.

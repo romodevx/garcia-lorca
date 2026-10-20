@@ -2,6 +2,8 @@ package postgres
 
 import (
 	"context"
+	"slices"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -77,7 +79,10 @@ func (r *Repository) applyReturn(tx *gorm.DB, cmd ports.ReturnCounterSaleCommand
 		return glerrors.Wrap(glerrors.KindInternal, "returning the delivery", err)
 	}
 	note := "Devolución " + cmd.Folio + ": " + cmd.Record.Reason
-	for _, line := range cmd.Lines {
+	// Stock rows are locked in one order, (item, size), the order every
+	// writer of several sizes takes: two returns — or a return and a sale —
+	// sharing two sizes cannot each hold one the other waits for.
+	for _, line := range sortedBySize(cmd.Lines) {
 		if err := tx.Model(&orderLineModel{}).Where("id = ?", line.ID()).Updates(map[string]any{
 			"status":     string(domain.LineReturned),
 			"updated_at": gorm.Expr("now()"),
@@ -88,17 +93,75 @@ func (r *Repository) applyReturn(tx *gorm.DB, cmd ports.ReturnCounterSaleCommand
 			return err
 		}
 	}
-	rec := cmd.Record
-	row := returnModel{
-		FulfillmentID: rec.FulfillmentID, TenantID: r.tenantID, OrderID: rec.OrderID,
+	// The decision was stored by BeginReturn; what is learnt only now — how
+	// many units came back damaged — is written onto it.
+	row := returnRow(r.tenantID, cmd.Record)
+	if err := tx.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "fulfillment_id"}},
+		DoUpdates: clause.Assignments(map[string]any{"damaged_units": cmd.Record.DamagedUnits, "updated_at": gorm.Expr("now()")}),
+	}).Omit("returned_at", "updated_at").Create(&row).Error; err != nil {
+		return glerrors.Wrap(glerrors.KindInternal, "keeping the return", err)
+	}
+	return nil
+}
+
+func returnRow(tenantID string, rec ports.CounterSaleReturn) returnModel {
+	return returnModel{
+		FulfillmentID: rec.FulfillmentID, TenantID: tenantID, OrderID: rec.OrderID,
 		Reason: rec.Reason, RefundMode: rec.RefundMode, RefundMethod: rec.RefundMethod,
 		RefundCents: rec.RefundCents, RefundStatus: rec.RefundStatus, ExpenseID: nullable(rec.ExpenseID),
 		DamagedUnits: rec.DamagedUnits, ActorUserID: nullable(rec.ActorUserID), ActorName: rec.ActorName,
 	}
-	if err := tx.Omit("returned_at", "updated_at").Create(&row).Error; err != nil {
-		return glerrors.Wrap(glerrors.KindInternal, "keeping the return", err)
-	}
-	return nil
+}
+
+// sortedBySize is the lines in (item, size) order, the lock order.
+func sortedBySize(lines []domain.OrderLine) []domain.OrderLine {
+	out := slices.Clone(lines)
+	slices.SortFunc(out, func(a, b domain.OrderLine) int {
+		if c := strings.Compare(a.ItemID(), b.ItemID()); c != 0 {
+			return c
+		}
+		return strings.Compare(a.SizeLabel(), b.SizeLabel())
+	})
+	return out
+}
+
+// BeginReturn stores the decision about a return before finance moves money.
+// One already stored wins: the caller acts on what this returns.
+func (r *Repository) BeginReturn(ctx context.Context, rec ports.CounterSaleReturn) (ports.CounterSaleReturn, error) {
+	var out ports.CounterSaleReturn
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		row := returnRow(r.tenantID, rec)
+		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Omit("returned_at", "updated_at").Create(&row).Error; err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "recording the return's decision", err)
+		}
+		stored, err := returnsOf(tx, rec.OrderID)
+		if err != nil {
+			return err
+		}
+		got, ok := stored[rec.FulfillmentID]
+		if !ok {
+			return glerrors.New(glerrors.KindInternal, "the return's decision was not stored")
+		}
+		out = got
+		return nil
+	})
+	return out, err
+}
+
+// DropReturnIntent forgets a decision nothing acted on, only while the sale
+// is still sold: a returned sale keeps its record whatever happens.
+func (r *Repository) DropReturnIntent(ctx context.Context, fulfillmentID string) error {
+	return r.withTenant(ctx, func(tx *gorm.DB) error {
+		err := tx.Exec(`DELETE FROM uniform_returns
+			WHERE fulfillment_id = ?
+			  AND EXISTS (SELECT 1 FROM uniform_fulfillments f WHERE f.id = uniform_returns.fulfillment_id AND f.status = ?)`,
+			fulfillmentID, string(domain.StatusSoldAtCounter)).Error
+		if err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "dropping the return's decision", err)
+		}
+		return nil
+	})
 }
 
 // backToShelf puts a returned line's units back ('return'). A damaged one is
@@ -106,8 +169,7 @@ func (r *Repository) applyReturn(tx *gorm.DB, cmd ports.ReturnCounterSaleCommand
 // it came back, and it cannot be sold — and the count only rises for what can.
 func (r *Repository) backToShelf(tx *gorm.DB, line domain.OrderLine, damaged bool, note, actorUserID string) error {
 	var stock stockModel
-	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-		Where("item_id = ? AND size_label = ?", line.ItemID(), line.SizeLabel()).First(&stock).Error; err != nil {
+	if err := tx.Where("item_id = ? AND size_label = ?", line.ItemID(), line.SizeLabel()).First(&stock).Error; err != nil {
 		return translateFindErr(err)
 	}
 	if err := r.appendMove(tx, stock.ID, line.ID(), "return", line.Qty(), note, actorUserID); err != nil {
@@ -128,16 +190,16 @@ func (r *Repository) backToShelf(tx *gorm.DB, line domain.OrderLine, damaged boo
 // SettleReturnRefund marks a return's refund as recorded by its expense.
 func (r *Repository) SettleReturnRefund(ctx context.Context, fulfillmentID, expenseID string) error {
 	return r.withTenant(ctx, func(tx *gorm.DB) error {
-		res := tx.Model(&returnModel{}).Where("fulfillment_id = ?", fulfillmentID).Updates(map[string]any{
-			"refund_status": ports.RefundDone,
-			"expense_id":    nullable(expenseID),
-			"updated_at":    gorm.Expr("now()"),
-		})
+		// Only a pending refund is settled: a second click finishing the same
+		// refund finds it done and leaves the first expense in place.
+		res := tx.Model(&returnModel{}).Where("fulfillment_id = ? AND refund_status = ?", fulfillmentID, ports.RefundPending).
+			Updates(map[string]any{
+				"refund_status": ports.RefundDone,
+				"expense_id":    nullable(expenseID),
+				"updated_at":    gorm.Expr("now()"),
+			})
 		if res.Error != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "settling the refund", res.Error)
-		}
-		if res.RowsAffected == 0 {
-			return glerrors.ErrNotFound
 		}
 		return nil
 	})

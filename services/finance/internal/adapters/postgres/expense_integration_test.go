@@ -407,3 +407,39 @@ func TestDayChangedSinceSeesDepositChanges(t *testing.T) {
 		t.Fatalf("a void after the close must flag the day")
 	}
 }
+
+// C2-015: an expense another module records on its own behalf carries its
+// reference; the same reference twice is the same expense — a double click or
+// a lost response must not refund a family twice.
+func TestCreateExpenseOnceIsKeyedByItsReference(t *testing.T) {
+	ctx := context.Background()
+	repo := appRepo(t, tenantA)
+	cat := expCategory(t, tenantA, "c1000000-0000-0000-0000-0000000000c5", "Devoluciones c215")
+	draft := domain.ExpenseDraft{SpentOn: expDay, CategoryID: cat.ID(), AmountCents: 25000, Method: domain.MethodCash, Description: "Devolución U-2026-000002"}
+	mk := func(id, eventID string) (domain.Expense, domain.ExpenseEvent) {
+		e, err := domain.NewExpense(id, draft, expDay, expActor)
+		if err != nil {
+			t.Fatalf("NewExpense: %v", err)
+		}
+		return e, domain.ExpenseEvent{ID: eventID, ExpenseID: id, Kind: domain.ExpenseEventCreated, After: e, By: expActor, At: expDay}
+	}
+
+	e1, ev1 := mk("e1000000-0000-0000-0000-0000000000c5", "e2000000-0000-0000-0000-0000000000c5")
+	first, err := repo.CreateExpenseOnce(ctx, e1, ev1, "uniforms-return:f0000000-0000-0000-0000-0000000000c5")
+	if err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	e2, ev2 := mk("e1000000-0000-0000-0000-0000000000c6", "e2000000-0000-0000-0000-0000000000c6")
+	second, err := repo.CreateExpenseOnce(ctx, e2, ev2, "uniforms-return:f0000000-0000-0000-0000-0000000000c5")
+	if err != nil {
+		t.Fatalf("second: %v", err)
+	}
+
+	if second.ID() != first.ID() {
+		t.Errorf("second = %s, want the first expense %s", second.ID(), first.ID())
+	}
+	var n int
+	if err := superDB.Raw(`SELECT count(*) FROM expenses WHERE external_ref = ?`, "uniforms-return:f0000000-0000-0000-0000-0000000000c5").Scan(&n).Error; err != nil || n != 1 {
+		t.Errorf("rows = %d (%v), want 1", n, err)
+	}
+}

@@ -24,7 +24,11 @@
   - RPC `VoidSalePayments`: bajo el candado del cargo, solo para un cargo `uniforms:…` y solo si sus pagos son del día. **Mueve** los pagos a `voided_sale_payments` (migración 0030) en lugar de marcarlos. Así ningún lector de `payments` (saldo, corte, ingresos, comprobantes) tiene que aprender a ignorar una columna.
   - Cancela el cargo con «Devolución: <motivo>», `cancelled_at` y `cancelled_by`.
   - `DailyCashUp` devuelve `cancelled_sales`. `DayChangedSince` detecta la anulación, así que un corte cerrado se marca «modificado después del cierre».
-- **Orden e idempotencia:**
+- **Orden e idempotencia (revisión del tech-lead, PR #162):**
+  - **La decisión se guarda antes de mover dinero** (`BeginReturn`): una fila de `uniform_returns` con el modo (`void` o `expense`). Si ya existe una decisión, esa gana. Así, un reintento después de medianoche no convierte una anulación ya hecha en un egreso adicional. Si finanzas rechaza la anulación porque el día ya cambió, no se movió nada: la decisión se borra (`DropReturnIntent`) y el siguiente intento decide de nuevo.
+  - **El egreso lleva llave:** `CreateExpense.external_ref = uniforms-return:<entrega>` (finance, migración 0031, índice único). Dos clics o una respuesta perdida dan un solo egreso. `SettleReturnRefund` solo cierra un reembolso que siga `pending`.
+  - **Orden de los candados de inventario:** la devolución y la venta toman las tallas en orden (prenda, talla), para no bloquearse entre sí.
+  - Las reglas de la anulación viven en el dominio de finance (`domain.CheckSaleVoid`), y el cargo se cancela por `CancelIfUnpaidWithReason` (C2-005).
   - El mismo día, primero se anula en finanzas. Si finanzas rechaza, las prendas siguen vendidas. La anulación es idempotente: repetirla regresa lo que ya anuló.
   - Después va la transacción de uniformes, que bloquea la entrega. Un segundo clic encuentra la venta devuelta y no regresa las prendas dos veces.
   - Otro día, el egreso se registra al final. Si falla, la devolución queda con el reembolso `pending` y la entrega marcada «requiere atención»; volver a pulsar «Devolver» lo termina.
@@ -34,4 +38,7 @@
 
 - **Nota de crédito:** el egreso de otro día devuelve el total de la venta por el método elegido. Si la venta se pagó en parte con nota de crédito, el personal decide cuánto regresa en dinero. Hoy el sistema no separa esa parte; cuando pase, habrá que capturarlo a mano.
 - **Venta sin cobro en finanzas** (sin alumno, o marcada antes de crear el cargo): la devolución regresa las prendas y queda con modo `none`. No hay dinero que mover en el sistema.
+- **Venta con cargo pero sin pago registrado** (marcada «se cobró en caja pero el pago no quedó»): el efectivo sí entró, así que otro día se reembolsa completa como egreso. Así cuadra el cajón, aunque el ingreso nunca se contó.
+- Una venta marcada «requiere atención» antes de devolverse no se desmarca sola al devolverla. La resuelve una persona.
+- Mostrar la lista de pedidos cuesta una consulta más por pedido (`returnsOf`). Conviene cargarlo en lote cuando se trabaje esa lista.
 - No hay devolución parcial ni cambio de talla en un solo paso. Si el colegio los pide, se agregan aparte.

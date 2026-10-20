@@ -1523,6 +1523,10 @@ message CreateExpenseRequest {
   // The authenticated caller, set by the gateway — never by a client.
   string actor_id = 6;
   string actor_name = 7;
+  // Set by another module recording an expense on its own behalf (C2-015, a
+  // uniforms refund): the same reference twice is the same expense. Never
+  // set from the web.
+  string external_ref = 8;
 }
 
 message CreateExpenseResponse {

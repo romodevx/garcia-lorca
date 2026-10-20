@@ -25,6 +25,7 @@ type memExpenses struct {
 	events     []domain.ExpenseEvent
 	closures   []domain.CashCutClosure
 	changed    bool
+	refs       map[string]string // C2-015: external reference -> expense id
 }
 
 func newMemExpenses() *memExpenses {
@@ -70,6 +71,17 @@ func (m *memExpenses) CreateExpense(_ context.Context, e domain.Expense, ev doma
 	m.expenses[e.ID()] = e
 	m.events = append(m.events, ev)
 	return m.withName(e), nil
+}
+
+func (m *memExpenses) CreateExpenseOnce(ctx context.Context, e domain.Expense, ev domain.ExpenseEvent, externalRef string) (domain.Expense, error) {
+	if m.refs == nil {
+		m.refs = map[string]string{}
+	}
+	if id, ok := m.refs[externalRef]; ok {
+		return m.withName(m.expenses[id]), nil
+	}
+	m.refs[externalRef] = e.ID()
+	return m.CreateExpense(ctx, e, ev)
 }
 
 func (m *memExpenses) UpdateExpense(_ context.Context, id string, change ports.ExpenseChange) (domain.Expense, error) {

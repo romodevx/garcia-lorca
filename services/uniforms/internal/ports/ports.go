@@ -85,6 +85,9 @@ type RefundInput struct {
 	Description string
 	ActorUserID string
 	ActorName   string
+	// ExternalRef keys the expense in finance: the same refund asked for
+	// twice is one expense (C2-015 review).
+	ExternalRef string
 }
 
 // SizeSpec is one row of a size run being created or updated.
@@ -165,6 +168,13 @@ type Repository interface {
 	// damaged one is written off at once ('adjust'), and the record is kept.
 	// A delivery already returned is answered as it stands (C2-015).
 	ReturnCounterSale(ctx context.Context, cmd ReturnCounterSaleCommand) (OrderAggregate, error)
+	// BeginReturn records the decision about a return BEFORE finance is asked
+	// to move money, and answers the decision stored: one already there wins,
+	// so a retry — even after midnight — keeps what was acted on.
+	BeginReturn(ctx context.Context, rec CounterSaleReturn) (CounterSaleReturn, error)
+	// DropReturnIntent forgets a decision nothing acted on (finance refused
+	// the void), while the sale is still sold.
+	DropReturnIntent(ctx context.Context, fulfillmentID string) error
 	// SettleReturnRefund marks a pending refund as recorded by its expense.
 	SettleReturnRefund(ctx context.Context, fulfillmentID, expenseID string) error
 	ListOrders(ctx context.Context, f ListOrdersFilter) ([]OrderAggregate, string, int, error)

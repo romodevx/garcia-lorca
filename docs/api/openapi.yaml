@@ -1001,6 +1001,7 @@ paths:
                 reason: { type: string, minLength: 1, maxLength: 200 }
                 damagedLineIds:
                   type: array
+                  maxItems: 50
                   items: { type: string, format: uuid }
                   description: Lines of this sale that came back damaged.
                 refundMethod:

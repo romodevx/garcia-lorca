@@ -62,12 +62,28 @@ func (s *Service) ReturnCounterSale(ctx context.Context, in ReturnCounterSaleInp
 	if err != nil {
 		return ports.OrderAggregate{}, err
 	}
-	cmd, err := s.returnCommand(agg, returned, reason, in)
+	prior, decided := agg.Returns[ful.ID()]
+	cmd, err := s.returnCommand(agg, returned, reason, in, prior, decided)
 	if err != nil {
 		return ports.OrderAggregate{}, err
 	}
-	if cmd.Record.RefundMode == ports.RefundVoid {
-		if err := s.finance.VoidSalePayments(ctx, ful.FinanceChargeID(), reason, in.ActorUserID); err != nil {
+	// The decision is stored before any money moves; a decision already
+	// stored wins (C2-015 review: a retry after midnight must not switch
+	// a done void into an expense as well).
+	stored, err := s.repo.BeginReturn(ctx, cmd.Record)
+	if err != nil {
+		return ports.OrderAggregate{}, err
+	}
+	cmd.Record = stored
+	if stored.RefundMode == ports.RefundVoid {
+		if err := s.finance.VoidSalePayments(ctx, ful.FinanceChargeID(), stored.Reason, in.ActorUserID); err != nil {
+			if glerrors.KindOf(err) == glerrors.KindConflict {
+				// Finance moved nothing (the sale became yesterday's at midnight,
+				// say): forget the decision so the next try decides afresh.
+				_ = s.repo.DropReturnIntent(ctx, ful.ID())
+				return ports.OrderAggregate{}, glerrors.Wrap(glerrors.KindConflict,
+					"la venta ya no es de hoy: vuelve a abrir la devolución y elige cómo se regresa el dinero", err)
+			}
 			return ports.OrderAggregate{}, err
 		}
 	}
@@ -80,9 +96,11 @@ func (s *Service) ReturnCounterSale(ctx context.Context, in ReturnCounterSaleInp
 
 // returnCommand decides how the money goes back and which garments are
 // written off, before anything moves.
-func (s *Service) returnCommand(agg ports.OrderAggregate, returned domain.Fulfillment, reason string, in ReturnCounterSaleInput) (ports.ReturnCounterSaleCommand, error) {
+func (s *Service) returnCommand(agg ports.OrderAggregate, returned domain.Fulfillment, reason string, in ReturnCounterSaleInput, prior ports.CounterSaleReturn, decided bool) (ports.ReturnCounterSaleCommand, error) {
 	mode, method := s.refundModeOf(returned), ""
-	if mode == ports.RefundExpense {
+	if decided {
+		mode, method = prior.RefundMode, prior.RefundMethod
+	} else if mode == ports.RefundExpense {
 		method = strings.TrimSpace(in.RefundMethod)
 		if !refundMethods[method] {
 			return ports.ReturnCounterSaleCommand{}, glerrors.New(glerrors.KindInvalid,
@@ -166,6 +184,7 @@ func (s *Service) finishRefund(ctx context.Context, agg ports.OrderAggregate, fu
 		AmountCents: rec.RefundCents, Method: rec.RefundMethod, SpentOn: s.now().In(s.zone).Format(dayLayout),
 		Description: "Devolución " + agg.Order.Folio() + ": " + rec.Reason,
 		ActorUserID: rec.ActorUserID, ActorName: rec.ActorName,
+		ExternalRef: "uniforms-return:" + ful.ID(),
 	})
 	if err != nil {
 		s.flag(ctx, ful.ID(), "la devolución se hizo pero el reembolso no quedó como egreso en Finanzas")

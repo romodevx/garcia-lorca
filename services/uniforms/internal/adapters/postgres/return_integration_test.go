@@ -151,3 +151,77 @@ func TestSettleReturnRefundRecordsTheExpense(t *testing.T) {
 		t.Errorf("record = %+v, want done with the expense", rec)
 	}
 }
+
+// Review (PR #162): the decision is stored before money moves and the first
+// one wins; applying the return afterwards keeps it; a decision nothing acted
+// on can be dropped while the sale is still sold.
+func TestBeginReturnStoresTheFirstDecision(t *testing.T) {
+	ctx := context.Background()
+	repo := appRepo(t, tenantA)
+	item, _ := seedGarment(t, repo, "RET-INT", "8", 25000, 3)
+	sale, _, err := repo.CounterSale(ctx, saleCmd(t, item, "8", 1, "ret-int"))
+	if err != nil {
+		t.Fatalf("CounterSale: %v", err)
+	}
+	cmd := returnOf(t, sale, nil)
+
+	first, err := repo.BeginReturn(ctx, cmd.Record)
+	if err != nil || first.RefundMode != ports.RefundVoid {
+		t.Fatalf("BeginReturn = %+v, %v", first, err)
+	}
+	other := cmd.Record
+	other.RefundMode, other.RefundMethod, other.RefundStatus = ports.RefundExpense, "cash", ports.RefundPending
+	again, err := repo.BeginReturn(ctx, other)
+	if err != nil || again.RefundMode != ports.RefundVoid {
+		t.Fatalf("second BeginReturn = %+v, %v; the first decision must win", again, err)
+	}
+
+	if err := repo.DropReturnIntent(ctx, cmd.Fulfillment.ID()); err != nil {
+		t.Fatalf("DropReturnIntent: %v", err)
+	}
+	if got, _ := repo.GetOrder(ctx, sale.Order.ID(), nil); len(got.Returns) != 0 {
+		t.Fatalf("intent survived the drop: %+v", got.Returns)
+	}
+
+	if _, err := repo.BeginReturn(ctx, cmd.Record); err != nil {
+		t.Fatalf("BeginReturn again: %v", err)
+	}
+	if _, err := repo.ReturnCounterSale(ctx, cmd); err != nil {
+		t.Fatalf("ReturnCounterSale after the intent: %v", err)
+	}
+	if err := repo.DropReturnIntent(ctx, cmd.Fulfillment.ID()); err != nil {
+		t.Fatalf("DropReturnIntent on a returned sale: %v", err)
+	}
+	got, _ := repo.GetOrder(ctx, sale.Order.ID(), nil)
+	if _, kept := got.Returns[cmd.Fulfillment.ID()]; !kept {
+		t.Error("a returned sale lost its record to a drop")
+	}
+}
+
+// Settling a refund twice (two clicks both finishing it) is not an error and
+// keeps the first expense.
+func TestSettleReturnRefundTwiceKeepsTheFirstExpense(t *testing.T) {
+	ctx := context.Background()
+	repo := appRepo(t, tenantA)
+	item, _ := seedGarment(t, repo, "RET-SET2", "8", 25000, 2)
+	sale, _, err := repo.CounterSale(ctx, saleCmd(t, item, "8", 1, "ret-set2"))
+	if err != nil {
+		t.Fatalf("CounterSale: %v", err)
+	}
+	cmd := returnOf(t, sale, nil)
+	cmd.Record.RefundMode, cmd.Record.RefundMethod, cmd.Record.RefundStatus = ports.RefundExpense, "cash", ports.RefundPending
+	if _, err := repo.ReturnCounterSale(ctx, cmd); err != nil {
+		t.Fatalf("ReturnCounterSale: %v", err)
+	}
+
+	if err := repo.SettleReturnRefund(ctx, cmd.Fulfillment.ID(), "e0000000-0000-0000-0000-00000000c301"); err != nil {
+		t.Fatalf("first settle: %v", err)
+	}
+	if err := repo.SettleReturnRefund(ctx, cmd.Fulfillment.ID(), "e0000000-0000-0000-0000-00000000c302"); err != nil {
+		t.Fatalf("second settle: %v", err)
+	}
+	got, _ := repo.GetOrder(ctx, sale.Order.ID(), nil)
+	if rec := got.Returns[cmd.Fulfillment.ID()]; rec.ExpenseID != "e0000000-0000-0000-0000-00000000c301" {
+		t.Errorf("expense = %q, want the first", rec.ExpenseID)
+	}
+}

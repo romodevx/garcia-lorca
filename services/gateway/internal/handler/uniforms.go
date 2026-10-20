@@ -331,6 +331,10 @@ func (h *UniformsHandler) GetOrder(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, order)
 }
 
+// maxReturnDamagedLines bounds the damaged list: a sale has few lines, and the
+// edge refuses a body that could not be one (C2-015 review).
+const maxReturnDamagedLines = 50
+
 // returnSaleRequest is the body of a return. No actor field: who returned it
 // is the signed-in caller.
 type returnSaleRequest struct {
@@ -350,6 +354,10 @@ func (h *UniformsHandler) ReturnCounterSale(w http.ResponseWriter, r *http.Reque
 	}
 	var body returnSaleRequest
 	if !decodeBody(w, r, &body) {
+		return
+	}
+	if len(body.DamagedLineIDs) > maxReturnDamagedLines {
+		middleware.WriteError(w, http.StatusBadRequest, "invalid", "Demasiadas prendas marcadas", map[string]string{"field": "damagedLineIds"})
 		return
 	}
 	caller, _ := middleware.PrincipalFrom(r.Context())
