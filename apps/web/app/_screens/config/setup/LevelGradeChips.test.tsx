@@ -13,6 +13,14 @@ const GRADES: GradeLevel[] = [
 ];
 
 describe("LevelGradeChips", () => {
+  it("says under each level how far it goes, when the step knows it", () => {
+    render(<LevelGradeChips levels={[PRIMARIA, SECUNDARIA]} selectedLevelId="l1" onSelectLevel={() => {}} levelPill={(id) => (id === "l1" ? "3 periodos" : "Sin periodos")} />);
+
+    const levels = screen.getByRole("group", { name: "Nivel" });
+    expect(within(levels).getByRole("button", { name: "PRIMARIA, 3 periodos" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(levels).getByRole("button", { name: "SECUNDARIA, Sin periodos" })).toBeInTheDocument();
+  });
+
   it("picks a level from the shared selection", async () => {
     const onSelectLevel = vi.fn();
     const user = userEvent.setup();

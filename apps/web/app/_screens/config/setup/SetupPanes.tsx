@@ -57,7 +57,7 @@ export function SetupPanes({ steps, openId, onOpen, state, status, actions, canD
         <StepStructure slot={slot("levels")} cycle={cycle} levels={state.levels} grades={status.grades} groups={status.groups} refresh={status.refresh} actions={actions} canWrite={canWriteConfig} onDeleteLevel={canDeleteLevels ? onDeleteLevel : undefined} />
       )}
       {!pricing && !structureView && <StepLevels slot={slot("levels")} levels={state.levels} grades={state.grades} cycleGroups={status.groups} actions={actions} canWrite={canWriteConfig} onDeleteLevel={canDeleteLevels ? onDeleteLevel : undefined} />}
-      {!pricing && <StepTerms slot={slot("terms")} cycle={cycle} levels={state.levels} terms={state.terms} actions={actions} onOpenLevelPeriods={onOpenLevelPeriods} />}
+      {!pricing && <StepTerms slot={slot("terms")} cycle={cycle} levels={state.levels} terms={state.terms} actions={actions} onOpenLevelPeriods={onOpenLevelPeriods} cycleTerms={structureView ? status.terms : undefined} />}
       {!pricing && <StepSubjects slot={slot("subjects")} cycle={cycle} levels={state.levels} grades={state.grades} onSubjectsChanged={refreshSubjects} />}
       {!pricing && !structureView && <StepGroups slot={slot("groups")} cycle={cycle} levels={state.levels} grades={state.grades} groups={state.groups} cycleGroups={status.groups} actions={actions} />}
       <StepTuition slot={slot("tuition")} cycles={state.cycles} levels={state.levels.list} pricing={state.pricing} canRead={canReadTuition} onPlansLoaded={status.onPlansLoaded} />
