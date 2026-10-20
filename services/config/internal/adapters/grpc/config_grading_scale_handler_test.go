@@ -43,6 +43,7 @@ func TestSetLevelGradingScaleErrors(t *testing.T) {
 		{"missing scale", func(s string) string { return s }, nil, connect.CodeInvalidArgument},
 		{"passing above max", func(s string) string { return s }, &configv1.GradingScale{Enabled: true, MinHundredths: 500, MaxHundredths: 1000, Decimals: 1, PassingHundredths: 1100}, connect.CodeInvalidArgument},
 		{"unknown level", func(string) string { return "missing" }, valid, connect.CodeNotFound},
+		{"numbers and letters at once", func(s string) string { return s }, &configv1.GradingScale{Enabled: true, Letters: true, MinHundredths: 500, MaxHundredths: 1000, PassingHundredths: 600}, connect.CodeInvalidArgument},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -52,4 +53,14 @@ func TestSetLevelGradingScaleErrors(t *testing.T) {
 			assert.Equal(t, tt.wantCode, connect.CodeOf(err), "err = %v", err)
 		})
 	}
+}
+
+// A level switched to letters reads back with letters and without numbers.
+func TestSetLevelGradingScaleToLetters(t *testing.T) {
+	h, _ := newHandler(t)
+	id := seedLevel(t, h)
+	want := &configv1.GradingScale{Letters: true, MinHundredths: 500, MaxHundredths: 1000, PassingHundredths: 600}
+	res, err := h.SetLevelGradingScale(ctx(), connect.NewRequest(&configv1.SetLevelGradingScaleRequest{Id: id, Grading: want}))
+	require.NoError(t, err)
+	assert.Equal(t, want.String(), res.Msg.GetLevel().GetGrading().String())
 }

@@ -51,6 +51,7 @@ func fromDomainLevel(l domain.Level) levelModel {
 		EnrollmentGranularity: strings.ToUpper(l.Granularity().String()),
 		AttendanceMode:        l.AttendanceMode().String(), // lowercase, as the CHECK spells it
 		GradingEnabled:        l.Grading().Enabled(),
+		GradingLetters:        l.Grading().Letters(),
 		GradeMin:              fromHundredths(l.Grading().MinHundredths()),
 		GradeMax:              fromHundredths(l.Grading().MaxHundredths()),
 		GradeDecimals:         l.Grading().Decimals(),
@@ -77,6 +78,9 @@ func toDomainLevel(m levelModel) (domain.Level, error) {
 		return domain.Level{}, glerrors.Wrap(glerrors.KindInternal, "unknown attendance mode in db: "+m.AttendanceMode, err)
 	}
 	scale, err := domain.RestoreGradingScale(m.GradingEnabled, toHundredths(m.GradeMin), toHundredths(m.GradeMax), toHundredths(m.GradePassing), m.GradeDecimals)
+	if err == nil {
+		scale, err = scale.WithLetters(m.GradingLetters)
+	}
 	if err != nil {
 		return domain.Level{}, glerrors.Wrap(glerrors.KindInternal, "inconsistent grading scale in db", err)
 	}

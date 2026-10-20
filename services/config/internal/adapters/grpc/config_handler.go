@@ -100,7 +100,7 @@ func (h *ConfigHandler) SetLevelGradingScale(ctx context.Context, req *connect.R
 	if g == nil {
 		return nil, connectErr(glerrors.New(glerrors.KindInvalid, "grading scale is required"))
 	}
-	scale, err := domain.NewGradingScale(g.GetEnabled(), int(g.GetMinHundredths()), int(g.GetMaxHundredths()), int(g.GetPassingHundredths()), int(g.GetDecimals()))
+	scale, err := toDomainGradingScale(g)
 	if err != nil {
 		return nil, connectErr(err)
 	}
@@ -123,7 +123,7 @@ func (h *ConfigHandler) UpdateLevel(ctx context.Context, req *connect.Request[co
 		patch.AttendanceMode = &mode
 	}
 	if g := req.Msg.GetGrading(); g != nil {
-		scale, err := domain.NewGradingScale(g.GetEnabled(), int(g.GetMinHundredths()), int(g.GetMaxHundredths()), int(g.GetPassingHundredths()), int(g.GetDecimals()))
+		scale, err := toDomainGradingScale(g)
 		if err != nil {
 			return nil, connectErr(err)
 		}
@@ -422,6 +422,15 @@ func toProtoLevelStatus(deleting bool) configv1.LevelStatus {
 	return configv1.LevelStatus_LEVEL_STATUS_ACTIVE
 }
 
+// toDomainGradingScale validates a wire scale: its numbers, then letters.
+func toDomainGradingScale(g *configv1.GradingScale) (domain.GradingScale, error) {
+	scale, err := domain.NewGradingScale(g.GetEnabled(), int(g.GetMinHundredths()), int(g.GetMaxHundredths()), int(g.GetPassingHundredths()), int(g.GetDecimals()))
+	if err != nil {
+		return domain.GradingScale{}, err
+	}
+	return scale.WithLetters(g.GetLetters())
+}
+
 // toProtoGradingScale maps the domain scale to the wire message (hundredths).
 func toProtoGradingScale(g domain.GradingScale) *configv1.GradingScale {
 	return &configv1.GradingScale{
@@ -430,6 +439,7 @@ func toProtoGradingScale(g domain.GradingScale) *configv1.GradingScale {
 		MaxHundredths:     int32(g.MaxHundredths()),
 		Decimals:          int32(g.Decimals()),
 		PassingHundredths: int32(g.PassingHundredths()),
+		Letters:           g.Letters(),
 	}
 }
 

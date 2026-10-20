@@ -90,6 +90,14 @@ func TestLevelGradingRoundTrip(t *testing.T) {
 	gotKinder, err := repo.GetLevel(ctx, kinder.ID())
 	require.NoError(t, err)
 	assert.False(t, gotKinder.Grading().Enabled(), "updating one level must not touch another")
+	assert.True(t, gotKinder.Grading().Letters(), "a kínder grades with letters from creation")
+
+	off, err := gotKinder.Grading().WithLetters(false)
+	require.NoError(t, err)
+	require.NoError(t, repo.UpdateLevelGrading(ctx, kinder.ID(), off))
+	gotKinder, err = repo.GetLevel(ctx, kinder.ID())
+	require.NoError(t, err)
+	assert.False(t, gotKinder.Grading().Letters(), "letters switched off must persist")
 
 	err = repo.UpdateLevelGrading(ctx, "eeee0009-0000-0000-0000-00000000ffff", first)
 	assert.Equal(t, glerrors.KindNotFound, glerrors.KindOf(err))
@@ -99,6 +107,35 @@ func TestLevelGradingRoundTrip(t *testing.T) {
 	got, err = repo.GetLevel(ctx, prim.ID())
 	require.NoError(t, err)
 	assert.Equal(t, second, got.Grading())
+}
+
+// Migration 0024 turns letters on for the preescolar levels that already exist
+// and leaves maternal without grades; the table refuses numbers and letters at
+// once.
+func TestMigration0024BackfillsLettersForPreescolar(t *testing.T) {
+	db := migrateUpTo(t, "mig_cfg_letters", "0024")
+	levels := map[string]struct {
+		name        string
+		wantLetters bool
+	}{
+		"aaaa0024-0000-0000-0000-000000000001": {"PREESCOLAR", true},
+		"aaaa0024-0000-0000-0000-000000000002": {" Kínder ", true},
+		"aaaa0024-0000-0000-0000-000000000003": {"Maternal", false},
+		"aaaa0024-0000-0000-0000-000000000004": {"Primaria", false},
+	}
+	for id, l := range levels {
+		require.NoError(t, db.Exec(
+			"INSERT INTO levels (id, tenant_id, name, enrollment_granularity, grading_enabled) VALUES (?, ?, ?, 'CYCLE', ?)",
+			id, schoolTenant, l.name, l.name == "Primaria").Error)
+	}
+
+	applyMigration(t, db, "0024_level_grading_letters.sql")
+
+	for id, l := range levels {
+		assert.Equal(t, l.wantLetters, scalar[bool](t, db, "SELECT grading_letters FROM levels WHERE id = ?", id), l.name)
+	}
+	assert.Error(t, tryMigrationSQL(t, db, "UPDATE levels SET grading_letters = true WHERE id = 'aaaa0024-0000-0000-0000-000000000004'"),
+		"numbers and letters at once")
 }
 
 // tryMigrationSQL runs one statement on a dedicated connection and returns its

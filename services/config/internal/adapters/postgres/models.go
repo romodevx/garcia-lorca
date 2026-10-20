@@ -32,6 +32,7 @@ type levelModel struct {
 	EnrollmentGranularity string  `gorm:"column:enrollment_granularity"`
 	AttendanceMode        string  `gorm:"column:attendance_mode"`
 	GradingEnabled        bool    `gorm:"column:grading_enabled"`
+	GradingLetters        bool    `gorm:"column:grading_letters"`
 	GradeMin              float64 `gorm:"column:grade_min"`
 	GradeMax              float64 `gorm:"column:grade_max"`
 	GradeDecimals         int     `gorm:"column:grade_decimals"`

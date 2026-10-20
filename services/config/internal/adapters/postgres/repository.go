@@ -325,6 +325,7 @@ func (r *Repository) UpdateLevel(ctx context.Context, id string, patch ports.Lev
 	}
 	if g := patch.Grading; g != nil {
 		cols["grading_enabled"] = g.Enabled()
+		cols["grading_letters"] = g.Letters()
 		cols["grade_min"] = fromHundredths(g.MinHundredths())
 		cols["grade_max"] = fromHundredths(g.MaxHundredths())
 		cols["grade_decimals"] = g.Decimals()
@@ -342,7 +343,7 @@ func (r *Repository) UpdateLevel(ctx context.Context, id string, patch ports.Lev
 	})
 }
 
-// UpdateLevelGrading replaces one level's grading scale. It writes only the five
+// UpdateLevelGrading replaces one level's grading scale. It writes only the six
 // grading columns and updated_at; a level that does not exist — or that RLS
 // hides, i.e. another tenant's — is KindNotFound.
 func (r *Repository) UpdateLevelGrading(ctx context.Context, id string, scale domain.GradingScale) error {
@@ -352,6 +353,7 @@ func (r *Repository) UpdateLevelGrading(ctx context.Context, id string, scale do
 	return r.withTenant(ctx, func(tx *gorm.DB) error {
 		res := tx.Model(&levelModel{}).Where("id = ?", id).Updates(map[string]any{
 			"grading_enabled": scale.Enabled(),
+			"grading_letters": scale.Letters(),
 			"grade_min":       fromHundredths(scale.MinHundredths()),
 			"grade_max":       fromHundredths(scale.MaxHundredths()),
 			"grade_decimals":  scale.Decimals(),
