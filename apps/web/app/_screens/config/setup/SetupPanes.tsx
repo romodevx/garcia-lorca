@@ -11,6 +11,7 @@ import { StepCycle } from "./steps/StepCycle";
 import { StepGroups } from "./steps/StepGroups";
 import { StepLevels } from "./steps/StepLevels";
 import { StepProfile } from "./steps/StepProfile";
+import { StepStructure } from "./steps/structure/StepStructure";
 import { StepSubjects } from "./steps/StepSubjects";
 import { StepTerms } from "./steps/StepTerms";
 import { StepTuition } from "./steps/StepTuition";
@@ -52,7 +53,10 @@ export function SetupPanes({ steps, openId, onOpen, state, status, actions, canD
     <>
       {!pricing && <StepProfile slot={slot("profile")} onLoaded={status.onProfileLoaded} />}
       {!pricing && <StepCycle slot={slot("cycle")} cycles={state.cycles} actions={actions} />}
-      {!pricing && <StepLevels slot={slot("levels")} levels={state.levels} grades={state.grades} cycleGroups={status.groups} actions={actions} canWrite={canWriteConfig} onDeleteLevel={canDeleteLevels ? onDeleteLevel : undefined} />}
+      {!pricing && structureView && (
+        <StepStructure slot={slot("levels")} cycle={cycle} levels={state.levels} grades={status.grades} groups={status.groups} refresh={status.refresh} actions={actions} canWrite={canWriteConfig} onDeleteLevel={canDeleteLevels ? onDeleteLevel : undefined} />
+      )}
+      {!pricing && !structureView && <StepLevels slot={slot("levels")} levels={state.levels} grades={state.grades} cycleGroups={status.groups} actions={actions} canWrite={canWriteConfig} onDeleteLevel={canDeleteLevels ? onDeleteLevel : undefined} />}
       {!pricing && <StepTerms slot={slot("terms")} cycle={cycle} levels={state.levels} terms={state.terms} actions={actions} onOpenLevelPeriods={onOpenLevelPeriods} />}
       {!pricing && <StepSubjects slot={slot("subjects")} cycle={cycle} levels={state.levels} grades={state.grades} onSubjectsChanged={refreshSubjects} />}
       {!pricing && !structureView && <StepGroups slot={slot("groups")} cycle={cycle} levels={state.levels} grades={state.grades} groups={state.groups} cycleGroups={status.groups} actions={actions} />}
@@ -69,6 +73,6 @@ export function SetupPanes({ steps, openId, onOpen, state, status, actions, canD
 
 function stepOf(steps: readonly StepView[], id: StepId): StepView {
   const found = steps.find((s) => s.id === id);
-  if (found === undefined) throw new Error(`setup step "${id}" is not in STEPS`);
+  if (found === undefined) throw new Error(`setup step "${id}" is not in the step list`);
   return found;
 }
