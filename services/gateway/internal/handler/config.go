@@ -276,6 +276,8 @@ type levelResponse struct {
 // levelGradingResponse is a grading scale as a person reads it (5, 9.5).
 type levelGradingResponse struct {
 	Enabled bool `json:"enabled"`
+	// Letters: the level grades with A–D instead of numbers.
+	Letters bool `json:"letters"`
 	gradeScaleResponse
 }
 
@@ -303,7 +305,7 @@ func toLevelResponse(l client.LevelResult) levelResponse {
 		SEPCode:               l.SEPCode,
 		EnrollmentGranularity: l.Granularity,
 		AttendanceMode:        l.AttendanceMode,
-		Grading:               levelGradingResponse{Enabled: l.Grading.Enabled, gradeScaleResponse: toGradeScaleResponse(l.Grading.Scale)},
+		Grading:               levelGradingResponse{Enabled: l.Grading.Enabled, Letters: l.Grading.Letters, gradeScaleResponse: toGradeScaleResponse(l.Grading.Scale)},
 		SortOrder:             l.SortOrder,
 	}
 }
@@ -318,7 +320,9 @@ type patchLevelRequest struct {
 // levelGradingRequest is a whole grading scale in the units a person types (5,
 // 9.5). Every field is required; the marks stay raw so no float touches them.
 type levelGradingRequest struct {
-	Enabled  *bool           `json:"enabled"`
+	Enabled *bool `json:"enabled"`
+	// Letters is optional: absent is false (numbers or no grades).
+	Letters  bool            `json:"letters"`
 	Min      json.RawMessage `json:"min"`
 	Max      json.RawMessage `json:"max"`
 	Decimals *int            `json:"decimals"`
@@ -352,7 +356,7 @@ func (g levelGradingRequest) toLevelGrading() (client.LevelGrading, string) {
 		}
 		hundredths[i] = h
 	}
-	return client.LevelGrading{Enabled: *g.Enabled, Scale: client.GradeScale{
+	return client.LevelGrading{Enabled: *g.Enabled, Letters: g.Letters, Scale: client.GradeScale{
 		MinHundredths: hundredths[0], MaxHundredths: hundredths[1], PassingHundredths: hundredths[2], Decimals: *g.Decimals,
 	}}, ""
 }

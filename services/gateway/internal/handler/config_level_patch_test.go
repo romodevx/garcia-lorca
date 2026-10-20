@@ -31,7 +31,7 @@ func (f *fakeScaleGuard) CountScaleViolations(_ context.Context, levelID string,
 
 const (
 	validMode    = `"attendanceMode":"per_class"`
-	validGrading = `"grading":{"enabled":true,"min":5,"max":10,"decimals":1,"passing":6}`
+	validGrading = `"grading":{"enabled":true,"letters":false,"min":5,"max":10,"decimals":1,"passing":6}`
 )
 
 // PATCH /config/levels/{id} reaches config ONCE with every field, so mode and
@@ -44,7 +44,7 @@ func TestPatchLevelIsOneAtomicCall(t *testing.T) {
 		wantCalls int
 	}{
 		{"both fields in one call", `{` + validMode + `,` + validGrading + `}`, http.StatusOK, 1},
-		{"valid mode + broken grading changes nothing", `{` + validMode + `,"grading":{"enabled":true,"min":5,"max":10,"decimals":1}}`, http.StatusBadRequest, 0},
+		{"valid mode + broken grading changes nothing", `{` + validMode + `,"grading":{"enabled":true,"letters":false,"min":5,"max":10,"decimals":1}}`, http.StatusBadRequest, 0},
 		{"broken mode + valid grading changes nothing", `{"attendanceMode":"weekly",` + validGrading + `}`, http.StatusBadRequest, 0},
 	}
 	for _, tt := range tests {
@@ -78,7 +78,7 @@ func TestPatchLevelRefusesAScaleThatBreaksCapturedGrades(t *testing.T) {
 		wantGuard  int
 	}{
 		{"violations", `{` + validGrading + `}`, &fakeScaleGuard{violations: 2}, http.StatusConflict, "SCALE_TIGHTENING", 0, 1},
-		{"disable with grades", `{"grading":{"enabled":false,"min":5,"max":10,"decimals":1,"passing":6}}`, &fakeScaleGuard{violations: 1}, http.StatusConflict, "SCALE_TIGHTENING", 0, 1},
+		{"disable with grades", `{"grading":{"enabled":false,"letters":false,"min":5,"max":10,"decimals":1,"passing":6}}`, &fakeScaleGuard{violations: 1}, http.StatusConflict, "SCALE_TIGHTENING", 0, 1},
 		{"loosen", `{` + validGrading + `}`, &fakeScaleGuard{}, http.StatusOK, "", 1, 1},
 		{"mode only never asks grades", `{` + validMode + `}`, &fakeScaleGuard{violations: 9}, http.StatusOK, "", 1, 0},
 		{"grades unreachable fails closed", `{` + validGrading + `}`, &fakeScaleGuard{err: connect.NewError(connect.CodeUnavailable, errors.New("down"))}, http.StatusInternalServerError, "", 0, 1},

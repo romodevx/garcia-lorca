@@ -116,6 +116,7 @@ type periodSheetRowResponse struct {
 	StudentID         string       `json:"studentId"`
 	Name              string       `json:"name"`
 	Value             *json.Number `json:"value"`
+	Letter            *string      `json:"letter,omitempty"`
 	UpdatedAt         *string      `json:"updatedAt"`
 	RowEditable       bool         `json:"rowEditable"`
 	RowReadOnlyReason string       `json:"rowReadOnlyReason,omitempty"`
@@ -129,17 +130,21 @@ type periodSheetResponse struct {
 	Today           string                   `json:"today"`
 	Scale           gradeScaleResponse       `json:"scale"`
 	GradingEnabled  bool                     `json:"gradingEnabled"`
+	GradingLetters  bool                     `json:"gradingLetters"`
 	Editable        bool                     `json:"editable"`
 	ReadOnlyReason  string                   `json:"readOnlyReason,omitempty"`
 	ClosedPeriodIDs []string                 `json:"closedPeriodIds"`
 	Rows            []periodSheetRowResponse `json:"rows"`
 }
 
+// periodGradeResponse is a saved cell: a number in value, or — on a level
+// that grades with letters — value null and the letter.
 type periodGradeResponse struct {
-	EnrollmentID string      `json:"enrollmentId"`
-	PeriodID     string      `json:"periodId"`
-	Value        json.Number `json:"value"`
-	UpdatedAt    *string     `json:"updatedAt"`
+	EnrollmentID string       `json:"enrollmentId"`
+	PeriodID     string       `json:"periodId"`
+	Value        *json.Number `json:"value"`
+	Letter       *string      `json:"letter,omitempty"`
+	UpdatedAt    *string      `json:"updatedAt"`
 }
 
 // putPeriodGradeRequest is one autosaved cell. value stays raw: it must be a
@@ -191,7 +196,7 @@ func (h *PeriodGradesHandler) Put(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	value, ok := numberText(req.Value)
+	value, ok := gradeText(req.Value)
 	if !ok {
 		writeCodedError(w, http.StatusBadRequest, codeGradeNotNumber, msgValueNotNumber)
 		return
@@ -216,8 +221,9 @@ func (h *PeriodGradesHandler) Put(w http.ResponseWriter, r *http.Request) {
 		writeConnectError(w, err)
 		return
 	}
+	number, letter := splitGrade(g.Value)
 	writeJSON(w, http.StatusOK, periodGradeResponse{
-		EnrollmentID: g.EnrollmentID, PeriodID: g.PeriodID, Value: json.Number(g.Value), UpdatedAt: rfc3339OrNil(g.UpdatedAt),
+		EnrollmentID: g.EnrollmentID, PeriodID: g.PeriodID, Value: number, Letter: letter, UpdatedAt: rfc3339OrNil(g.UpdatedAt),
 	})
 }
 
@@ -310,8 +316,8 @@ func (h *PeriodGradesHandler) toSheetResponse(ctx context.Context, s client.Peri
 			RowEditable: row.Editable, RowReadOnlyReason: row.ReadOnlyReason,
 		}
 		if row.Value != "" {
-			v := json.Number(row.Value)
-			out.Value, out.UpdatedAt = &v, rfc3339OrNil(row.UpdatedAt)
+			out.Value, out.Letter = splitGrade(row.Value)
+			out.UpdatedAt = rfc3339OrNil(row.UpdatedAt)
 		}
 		rows = append(rows, out)
 	}
@@ -323,7 +329,7 @@ func (h *PeriodGradesHandler) toSheetResponse(ctx context.Context, s client.Peri
 	return periodSheetResponse{
 		AssignmentID: s.AssignmentID, PeriodID: stringOrNil(s.PeriodID), Periods: toPeriodRefResponses(s.Periods),
 		CurrentPeriodID: stringOrNil(s.CurrentPeriodID), Today: s.Today, Scale: toGradeScaleResponse(s.Scale),
-		GradingEnabled: s.GradingEnabled, Editable: s.Editable, ReadOnlyReason: s.ReadOnlyReason,
+		GradingEnabled: s.GradingEnabled, GradingLetters: s.GradingLetters, Editable: s.Editable, ReadOnlyReason: s.ReadOnlyReason,
 		ClosedPeriodIDs: closed, Rows: rows,
 	}
 }
@@ -334,6 +340,34 @@ func toPeriodRefResponses(ps []client.EvaluationPeriodRef) []periodRefResponse {
 		out = append(out, periodRefResponse{ID: p.ID, Ordinal: p.Ordinal, Name: p.Name, StartsOn: p.StartsOn, EndsOn: p.EndsOn})
 	}
 	return out
+}
+
+// gradeLetters are the letters a cell may carry (preescolar).
+var gradeLetters = map[string]bool{"A": true, "B": true, "C": true, "D": true}
+
+// gradeText reads a cell's value as the grades service judges it: a JSON
+// number's exact text, or a JSON string holding one letter A–D (trimmed,
+// upper-cased). Whether the level takes numbers or letters is grades' call.
+func gradeText(raw json.RawMessage) (string, bool) {
+	if text, ok := numberText(raw); ok {
+		return text, true
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return "", false
+	}
+	letter := strings.ToUpper(strings.TrimSpace(s))
+	return letter, gradeLetters[letter]
+}
+
+// splitGrade puts a grade's text where the JSON carries it: a letter in
+// "letter" (value null), a number in "value".
+func splitGrade(text string) (*json.Number, *string) {
+	if gradeLetters[text] {
+		return nil, &text
+	}
+	n := json.Number(text)
+	return &n, nil
 }
 
 // stringOrNil is s, or JSON null when empty.

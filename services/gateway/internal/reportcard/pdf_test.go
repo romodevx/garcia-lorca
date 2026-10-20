@@ -245,3 +245,25 @@ func TestTheIssueDateIsTheSchoolsDayNotUTCs(t *testing.T) {
 	assert.Contains(t, text, "Emitida el 18 de octubre de 2026")
 	assert.NotContains(t, text, "19 de octubre")
 }
+
+// Preescolar's card: each subject's letter per period, what the letters mean,
+// and no average anywhere — letters are never averaged.
+func TestALettersCardPrintsLettersAndTheirMeaning(t *testing.T) {
+	card := sampleCard()
+	card.LevelName, card.GroupLabel, card.Months, card.GeneralAverage, card.Letters = "Preescolar", "2° PREESCOLAR · A", nil, "", true
+	card.Scale = client.GradeScale{}
+	card.Periods = []client.ReportCardPeriod{{ID: "p1", Ordinal: 1, Name: "1.er trimestre"}}
+	card.Lines = []client.ReportCardLine{
+		{SubjectName: "Lenguajes", Position: 1, PeriodValues: map[string]string{"p1": "A"}},
+		{SubjectName: "Ética, naturaleza y sociedades", Position: 2, PeriodValues: map[string]string{"p1": "C"}},
+	}
+	doc, err := reportcard.PDF(reportcard.Document{School: school, Card: card})
+	require.NoError(t, err)
+	text := textOf(t, doc)
+	for _, want := range []string{"Lenguajes", "A", "C", "A Excelente", "B Bien", "C Suficiente", "D Requiere apoyo"} {
+		assert.Contains(t, text, want)
+	}
+	assert.NotContains(t, text, "Promedio")
+	assert.NotContains(t, text, "aprobatoria", "a letters card prints no numeric scale")
+	assert.True(t, reportcard.HasGrades(card))
+}

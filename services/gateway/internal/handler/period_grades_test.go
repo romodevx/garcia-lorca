@@ -147,7 +147,7 @@ func TestPeriodSheetShapeAndSpanishOrder(t *testing.T) {
 		"assignmentId": "`+mAsg+`", "periodId": "`+mPer+`", "currentPeriodId": "`+mPer+`", "today": "2026-10-01",
 		"periods": [{"id":"`+mPer+`","ordinal":1,"name":"1.er trimestre","startsOn":"2026-08-24","endsOn":"2026-11-30"}],
 		"scale": {"min":5,"max":10,"decimals":1,"passing":6},
-		"gradingEnabled": true, "editable": true, "closedPeriodIds": [],
+		"gradingEnabled": true, "gradingLetters": false, "editable": true, "closedPeriodIds": [],
 		"rows": [
 			{"enrollmentId":"enr-a","studentId":"stu-a","name":"Ávila Ana","value":9,"updatedAt":"2026-10-03T15:04:05Z","rowEditable":true},
 			{"enrollmentId":"enr-n","studentId":"stu-n","name":"Núñez Nico","value":null,"updatedAt":null,"rowEditable":false,

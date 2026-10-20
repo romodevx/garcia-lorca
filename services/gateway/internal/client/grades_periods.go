@@ -102,6 +102,8 @@ type ReportCardSummary struct {
 	TermOrdinal    int
 	CycleID        string
 	CycleName      string
+	// Letters: the card carries letters (preescolar), so it has no average.
+	Letters bool
 }
 
 // ReportCardLine is one subject of a report card: period id → exact grade
@@ -150,6 +152,8 @@ type ReportCard struct {
 	GeneralAverage string
 	Scale          GradeScale
 	Lines          []ReportCardLine
+	// Letters: the line values are letters A–D and there are no averages.
+	Letters bool
 }
 
 // ListPeriods lists a cycle's terms with their closure and progress.
@@ -250,7 +254,7 @@ func (c *GradesClient) ListReportCards(ctx context.Context, f ReportCardFilter) 
 		out = append(out, ReportCardSummary{
 			ID: s.GetId(), TermID: s.GetTermId(), TermName: s.GetTermName(), StudentID: s.GetStudentId(), StudentName: s.GetStudentName(),
 			GroupID: s.GetGroupId(), GroupLabel: s.GetGroupLabel(), Version: int(s.GetVersion()), IssuedAt: timeOrZero(s.GetIssuedAt()),
-			GeneralAverage: s.GetGeneralAverage(), EnrollmentID: s.GetEnrollmentId(),
+			GeneralAverage: s.GetGeneralAverage(), EnrollmentID: s.GetEnrollmentId(), Letters: s.GetLetters(),
 			TermOrdinal: int(s.GetTermOrdinal()), CycleID: s.GetCycleId(), CycleName: s.GetCycleName(),
 		})
 	}
@@ -280,7 +284,7 @@ func (c *GradesClient) GetReportCard(ctx context.Context, id string) (ReportCard
 		EnrollmentID: rc.GetEnrollmentId(), StudentID: rc.GetStudentId(), Version: int(rc.GetVersion()), Status: rc.GetStatus(),
 		IssuedAt: timeOrZero(rc.GetIssuedAt()), IssuedBy: rc.GetIssuedBy(), StudentName: rc.GetStudentName(),
 		EnrollmentNumber: rc.GetEnrollmentNumber(), GroupLabel: rc.GetGroupLabel(), LevelName: rc.GetLevelName(),
-		CycleName: rc.GetCycleName(), TermName: rc.GetTermName(), TermOrdinal: int(rc.GetTermOrdinal()), Periods: periods, Months: rc.GetMonths(), GeneralAverage: rc.GetGeneralAverage(),
+		CycleName: rc.GetCycleName(), TermName: rc.GetTermName(), TermOrdinal: int(rc.GetTermOrdinal()), Periods: periods, Months: rc.GetMonths(), GeneralAverage: rc.GetGeneralAverage(), Letters: rc.GetLetters(),
 		Scale: toGradeScale(rc.GetScale()), Lines: lines,
 	}, nil
 }

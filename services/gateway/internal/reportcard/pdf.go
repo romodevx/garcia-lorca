@@ -123,6 +123,9 @@ func PDF(d Document) ([]byte, error) {
 	return out.Bytes(), nil
 }
 
+// lettersLegend is what a letters card's letters mean (owner, 20-oct).
+const lettersLegend = "A Excelente · B Bien · C Suficiente · D Requiere apoyo"
+
 // HasGrades reports whether any subject of the card has a grade in the term: a
 // period (or month) value or an average. A card without one is still issued, but
 // says NoGradesNotice instead of a table of dashes.
@@ -235,10 +238,15 @@ func (w *writer) student(c client.ReportCard) {
 
 // table prints subject × column (period, or month before T15) and the
 // subject's average, then the general average. A page break inside the body
-// repeats the header row on top.
+// repeats the header row on top. A letters card (preescolar) has no average
+// column and no general average: letters are never averaged.
 func (w *writer) table(c client.ReportCard) {
 	cols := columnsOf(c)
-	w.tableHeader = func() { w.row(pdffont.Bold, "Materia", cols.labels, "Promedio") }
+	averageLabel := "Promedio"
+	if c.Letters {
+		averageLabel = ""
+	}
+	w.tableHeader = func() { w.row(pdffont.Bold, "Materia", cols.labels, averageLabel) }
 	w.breakPage(2 * rowHeight)
 	w.tableHeader()
 	for _, l := range c.Lines {
@@ -247,10 +255,17 @@ func (w *writer) table(c client.ReportCard) {
 		for _, k := range cols.keys {
 			values = append(values, orDash(lineValues[k]))
 		}
-		w.bodyRow(pdffont.Regular, l.SubjectName, values, orDash(l.TermAverage))
+		average := orDash(l.TermAverage)
+		if c.Letters {
+			average = ""
+		}
+		w.bodyRow(pdffont.Regular, l.SubjectName, values, average)
 	}
 	w.tableHeader = nil
 	w.rule()
+	if c.Letters {
+		return
+	}
 	averageX := pageMargin + w.l.contentWidth - averageWidth
 	w.breakPage(titleSize + lineGap)
 	w.cell(pdffont.Bold, titleSize-1, "Promedio general", pageMargin, w.l.contentWidth-averageWidth, gopdf.Left)
@@ -305,9 +320,13 @@ func (w *writer) row(family, subject string, values []string, average string) {
 // receipt's footer ("Gracias por su pago…"), so it never prints here.
 func (w *writer) foot(c client.ReportCard, zone *time.Location) {
 	w.y += lineGap
-	s := c.Scale
-	w.text(pdffont.Regular, smallSize, fmt.Sprintf("Calificación mínima aprobatoria: %s · Escala de %s a %s",
-		decimal(s.PassingHundredths), decimal(s.MinHundredths), decimal(s.MaxHundredths)))
+	if c.Letters {
+		w.text(pdffont.Regular, smallSize, lettersLegend)
+	} else {
+		s := c.Scale
+		w.text(pdffont.Regular, smallSize, fmt.Sprintf("Calificación mínima aprobatoria: %s · Escala de %s a %s",
+			decimal(s.PassingHundredths), decimal(s.MinHundredths), decimal(s.MaxHundredths)))
+	}
 	w.text(pdffont.Regular, smallSize, prefixed("Emitida el ", spanishDate(c.IssuedAt, zone)))
 }
 

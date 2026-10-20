@@ -88,6 +88,8 @@ type GradeScale struct {
 // grades at all (Enabled) and on which scale.
 type LevelGrading struct {
 	Enabled bool
+	// Letters: the level grades with A–D instead (preescolar); never with Enabled.
+	Letters bool
 	Scale   GradeScale
 }
 
@@ -308,6 +310,7 @@ func (c *ConfigClient) UpdateLevel(ctx context.Context, id string, p LevelPatch)
 	if g := p.Grading; g != nil {
 		req.Grading = &configv1.GradingScale{
 			Enabled:           g.Enabled,
+			Letters:           g.Letters,
 			MinHundredths:     int32(g.Scale.MinHundredths),
 			MaxHundredths:     int32(g.Scale.MaxHundredths),
 			Decimals:          int32(g.Scale.Decimals),
@@ -788,7 +791,7 @@ func toLevelGrading(g *configv1.GradingScale) LevelGrading {
 	if g == nil {
 		return LevelGrading{}
 	}
-	return LevelGrading{Enabled: g.GetEnabled(), Scale: GradeScale{
+	return LevelGrading{Enabled: g.GetEnabled(), Letters: g.GetLetters(), Scale: GradeScale{
 		MinHundredths:     int(g.GetMinHundredths()),
 		MaxHundredths:     int(g.GetMaxHundredths()),
 		Decimals:          int(g.GetDecimals()),

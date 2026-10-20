@@ -8029,11 +8029,18 @@ components:
               periodId: { type: string, format: uuid, description: An evaluation period of the group's grade in the assignment's cycle. }
               enrollmentId: { type: string, format: uuid }
               value:
-                type: integer
+                oneOf:
+                  - type: integer
+                  - type: string
+                    enum: [A, B, C, D, a, b, c, d]
                 description: >
-                  A JSON number (never a string) holding a WHOLE number inside
-                  the level's range. Its exact text is judged: 9.5 is refused
-                  (GRADE_NOT_INTEGER), never rounded.
+                  On a numeric level, a JSON number holding a WHOLE number
+                  inside the level's range; its exact text is judged: 9.5 is
+                  refused (GRADE_NOT_INTEGER), never rounded. On a level that
+                  grades with letters (preescolar), a JSON string with one
+                  letter A–D, trimmed and upper-cased (GRADE_NOT_LETTER for a
+                  number there, GRADE_NOT_NUMBER for a letter on a numeric
+                  level). Any other string is GRADE_NOT_NUMBER.
           example:
             assignmentId: 9c3d1e2f-0000-4000-8000-000000000003
             periodId: 0e000000-0000-4000-8000-000000000001
@@ -8264,7 +8271,8 @@ components:
             properties:
               enrollmentId: { type: string, format: uuid }
               periodId: { type: string, format: uuid }
-              value: { type: integer, example: 9 }
+              value: { type: [integer, 'null'], description: The number; null when the cell is a letter., example: 9 }
+              letter: { type: string, enum: [A, B, C, D], description: 'A Excelente, B Bien, C Suficiente, D Requiere apoyo.' }
               updatedAt: { type: [string, 'null'], format: date-time }
           example: { enrollmentId: 3f2504e0-4f89-41d3-9a0c-0305e82c3301, periodId: 0e000000-0000-4000-8000-000000000001, value: 9, updatedAt: '2026-10-03T15:04:05Z' }
     PeriodGradeRefused:
@@ -9009,7 +9017,7 @@ components:
           - { groupId: 4a000000-0000-4000-8000-000000000001, groupLabel: 1° PRIMARIA · A, subjectId: 5a000000-0000-4000-8000-000000000001, subjectName: Matemáticas, teacherName: Gabriela Rojas, missingCount: 18 }
     ReportCardSummary:
       type: object
-      required: [id, termId, termName, studentId, studentName, groupId, groupLabel, version, issuedAt, generalAverage, hasGrades]
+      required: [id, termId, termName, studentId, studentName, groupId, groupLabel, version, issuedAt, generalAverage, hasGrades, gradingLetters]
       properties:
         id: { type: string, format: uuid }
         termId: { type: string, format: uuid }
@@ -9028,9 +9036,13 @@ components:
           type: boolean
           description: False when no subject has a grade in the term (only cards issued before T10, since a close now skips a pupil without a grade in the term's period); consumers show "Sin calificaciones capturadas en este periodo" instead of a table.
           example: true
+        gradingLetters:
+          type: boolean
+          description: The card carries letters (preescolar), so it has no averages.
+          example: false
     FamilyReportCardSummary:
       type: object
-      required: [id, termId, termName, termOrdinal, cycleName, version, issuedAt, generalAverage, hasGrades]
+      required: [id, termId, termName, termOrdinal, cycleName, version, issuedAt, generalAverage, hasGrades, gradingLetters]
       properties:
         id: { type: string, format: uuid }
         termId: { type: string, format: uuid }
@@ -9048,6 +9060,10 @@ components:
           type: boolean
           description: False when no subject has a grade in the term (only cards issued before T10, since a close now skips a pupil without a grade in the term's period); consumers show "Sin calificaciones capturadas en este periodo" instead of a table.
           example: true
+        gradingLetters:
+          type: boolean
+          description: The card carries letters (preescolar), so it has no averages.
+          example: false
     ReportCard:
       type: object
       description: >
@@ -9062,7 +9078,7 @@ components:
         (`months`, line `months`; `periods` is []) and its one-decimal,
         half-up averages, exactly as issued. A column without a grade is
         absent from the line; `average` is null for a subject without grades.
-      required: [id, termId, termName, termOrdinal, cycleName, levelName, groupId, groupLabel, studentId, studentName, enrollmentNumber, version, status, issuedAt, periods, months, scale, generalAverage, hasGrades, lines, school]
+      required: [id, termId, termName, termOrdinal, cycleName, levelName, groupId, groupLabel, studentId, studentName, enrollmentNumber, version, status, issuedAt, periods, months, scale, generalAverage, hasGrades, gradingLetters, lines, school]
       properties:
         id: { type: string, format: uuid }
         termId: { type: string, format: uuid }
@@ -9098,6 +9114,10 @@ components:
           type: boolean
           description: False when no subject has a grade in the term (only cards issued before T10, since a close now skips a pupil without a grade in the term's period); consumers show "Sin calificaciones capturadas en este periodo" instead of a table.
           example: true
+        gradingLetters:
+          type: boolean
+          description: The card carries letters (preescolar), so it has no averages.
+          example: false
         lines:
           type: array
           items:
@@ -9109,9 +9129,13 @@ components:
               position: { type: integer, minimum: 1 }
               periods:
                 type: object
-                description: Period id → the captured grade (T15); {} on a card issued before T15.
+                description: Period id → the captured grade (T15); {} on a card issued before T15, and on a letters card.
                 additionalProperties: { type: number }
                 example: { 0e000000-0000-4000-8000-000000000001: 9, 0e000000-0000-4000-8000-000000000002: 8 }
+              letters:
+                type: object
+                description: Period id → letter, only on a letters card (`gradingLetters`).
+                additionalProperties: { type: string, enum: [A, B, C, D], description: 'A Excelente, B Bien, C Suficiente, D Requiere apoyo.' }
               months:
                 type: object
                 description: '"YYYY-MM" → the captured grade, on a card issued before T15; {} since T15.'
@@ -9151,6 +9175,7 @@ components:
         scale: { min: 5, max: 10, decimals: 1, passing: 6 }
         generalAverage: 8.75
         hasGrades: true
+        gradingLetters: false
         lines:
           - { subjectId: 5a000000-0000-4000-8000-000000000002, subjectName: Español, position: 1, periods: { 0e000000-0000-4000-8000-000000000001: 9, 0e000000-0000-4000-8000-000000000002: 8 }, months: {}, average: 8.5 }
           - { subjectId: 5a000000-0000-4000-8000-000000000001, subjectName: Matemáticas, position: 2, periods: { 0e000000-0000-4000-8000-000000000001: 9, 0e000000-0000-4000-8000-000000000002: 9 }, months: {}, average: 9 }
@@ -10757,7 +10782,15 @@ components:
           required: [enabled]
           properties:
             enabled: { type: boolean }
-      example: { enabled: true, min: 5, max: 10, decimals: 1, passing: 6 }
+            letters:
+              type: boolean
+              description: >
+                The level grades with letters (A Excelente, B Bien, C
+                Suficiente, D Requiere apoyo) instead of numbers. Never true
+                together with `enabled`. Preescolar and Kínder start with
+                letters; Maternal takes no grades. Optional on input (absent
+                is false); always present on output.
+      example: { enabled: true, letters: false, min: 5, max: 10, decimals: 1, passing: 6 }
     TermList:
       type: object
       required: [terms]
@@ -10833,7 +10866,7 @@ components:
         endsOn: { type: string, format: date, example: '2026-11-30' }
     PeriodSheet:
       type: object
-      required: [assignmentId, periodId, periods, currentPeriodId, today, scale, gradingEnabled, editable, closedPeriodIds, rows]
+      required: [assignmentId, periodId, periods, currentPeriodId, today, scale, gradingEnabled, gradingLetters, editable, closedPeriodIds, rows]
       properties:
         assignmentId: { type: string, format: uuid }
         periodId:
@@ -10865,6 +10898,7 @@ components:
           items: { type: string, format: uuid }
         scale: { $ref: '#/components/schemas/GradingScale' }
         gradingEnabled: { type: boolean }
+        gradingLetters: { type: boolean, description: 'The level grades with letters: captured cells carry `letter`, never `value`, and are never averaged.' }
         editable: { type: boolean }
         readOnlyReason:
           type: string
@@ -10880,6 +10914,7 @@ components:
               studentId: { type: string, format: uuid }
               name: { type: string, example: Ana Ávila }
               value: { type: [integer, 'null'], example: 9 }
+              letter: { type: string, enum: [A, B, C, D], description: 'A Excelente, B Bien, C Suficiente, D Requiere apoyo.' }
               updatedAt: { type: [string, 'null'], format: date-time }
               rowEditable:
                 type: boolean
@@ -10904,15 +10939,17 @@ components:
         closedPeriodIds: []
         scale: { min: 5, max: 10, decimals: 1, passing: 6 }
         gradingEnabled: true
+        gradingLetters: false
         editable: true
         rows:
           - { enrollmentId: 3f2504e0-4f89-41d3-9a0c-0305e82c3301, studentId: 6e1d2c3b-0000-4000-8000-000000000042, name: Ana Ávila, value: 9, updatedAt: '2026-10-01T15:04:05Z', rowEditable: true }
           - { enrollmentId: 3f2504e0-4f89-41d3-9a0c-0305e82c3302, studentId: 6e1d2c3b-0000-4000-8000-000000000043, name: Nico Núñez, value: null, updatedAt: null, rowEditable: true }
     FamilyPeriodGrades:
       type: object
-      required: [gradingEnabled, cycleName, periods, subjects]
+      required: [gradingEnabled, gradingLetters, cycleName, periods, subjects]
       properties:
         gradingEnabled: { type: boolean }
+        gradingLetters: { type: boolean, description: "The child's level grades with letters: each subject carries `letters`." }
         cycleName: { type: string, example: 2026-2027 }
         periods:
           type: array
@@ -10937,6 +10974,11 @@ components:
                 description: Period id → grade (a whole number); `{}` when nothing is captured.
                 additionalProperties: { type: number }
                 example: { 0e000000-0000-4000-8000-000000000001: 9 }
+              letters:
+                type: object
+                description: Period id → letter, on a level that grades with letters; absent otherwise.
+                additionalProperties: { type: string, enum: [A, B, C, D], description: 'A Excelente, B Bien, C Suficiente, D Requiere apoyo.' }
+                example: { 0e000000-0000-4000-8000-000000000001: A }
     AttendanceStatus:
       type: string
       enum: [present, absent, late, excused]
