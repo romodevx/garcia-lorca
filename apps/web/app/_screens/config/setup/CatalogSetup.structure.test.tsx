@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as configApi from "../../../config/api";
 import { OPEN_STEP_KEY } from "./useOpenStep";
-import { G1, G2, G9, PRIMARIA, SECUNDARIA, freshSchool, installSchool, openStep, renderSetup, settled, stepsNav, type User } from "./testHarness";
+import { G1, G2, G9, PRIMARIA, SECUNDARIA, T1, freshSchool, installSchool, openStep, renderSetup, settled, stepsNav, type User } from "./testHarness";
 
 const config = vi.mocked(configApi);
 
@@ -70,6 +70,27 @@ describe("CatalogSetup — Estructura de la escuela (flag ON)", () => {
     renderSetup({ structureView: true });
     await settled();
     expect(await screen.findByRole("heading", { level: 2, name: "Estructura de la escuela" })).toBeVisible();
+  });
+});
+
+describe("Periodos (flag ON) — never an empty view", () => {
+  it("opens on the first level still without periods and says how each level goes", async () => {
+    installSchool(freshSchool({ terms: [T1] }));
+    const { user } = renderSetup({ structureView: true });
+    await settled();
+    const step = await openStep(user, "Periodos");
+    const levels = within(step).getByRole("group", { name: "Nivel" });
+    await waitFor(() => expect(within(levels).getByRole("button", { name: "SECUNDARIA, Sin periodos" })).toHaveAttribute("aria-pressed", "true"));
+    expect(within(levels).getByRole("button", { name: "PRIMARIA, 1 periodo" })).toHaveAttribute("aria-pressed", "false");
+    expect(within(step).queryByText("Elige un nivel para ver sus periodos.")).toBeNull();
+  });
+
+  it("opens on the first level when every level is complete", async () => {
+    const { user } = renderSetup({ structureView: true });
+    await settled();
+    const step = await openStep(user, "Periodos");
+    const levels = within(step).getByRole("group", { name: "Nivel" });
+    await waitFor(() => expect(within(levels).getByRole("button", { name: "PRIMARIA, 1 periodo" })).toHaveAttribute("aria-pressed", "true"));
   });
 });
 

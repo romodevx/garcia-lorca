@@ -15,6 +15,8 @@ export interface LevelGradeChipsProps {
   levels: readonly Level[];
   selectedLevelId: string | undefined;
   onSelectLevel: (id: string) => void;
+  /** A short line beside each level ("3 periodos"), when the step knows it. */
+  levelPill?: (levelId: string) => string | undefined;
   /** The selected level's grades. Absent: the step picks a level only. */
   grades?: readonly GradeLevel[];
   selectedGradeId?: string | undefined;
@@ -35,12 +37,15 @@ const pillStyle: CSSProperties = {
   fontWeight: 600,
 };
 
-export function LevelGradeChips({ levels, selectedLevelId, onSelectLevel, grades, selectedGradeId, onSelectGrade, gradePill }: LevelGradeChipsProps): ReactElement {
+export function LevelGradeChips({ levels, selectedLevelId, onSelectLevel, levelPill, grades, selectedGradeId, onSelectGrade, gradePill }: LevelGradeChipsProps): ReactElement {
   return (
     <div style={{ display: "grid", gap: 14, marginBottom: 20 }}>
       <ChipGroup label="Nivel">
         {levels.map((l) => (
-          <SelectChip key={l.id} selected={l.id === selectedLevelId} onClick={() => onSelectLevel(l.id)}>{l.name}</SelectChip>
+          <SelectChip key={l.id} selected={l.id === selectedLevelId} onClick={() => onSelectLevel(l.id)}>
+            {l.name}
+            <Pill text={levelPill?.(l.id)} />
+          </SelectChip>
         ))}
       </ChipGroup>
       {grades !== undefined && grades.length > 0 && onSelectGrade !== undefined && (

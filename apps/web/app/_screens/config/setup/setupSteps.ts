@@ -1,6 +1,7 @@
 import type { Cycle, GradeLevel, Group, Level, SchoolProfile, Subject, Term } from "../../../config/api";
 import { cycleMonths } from "../../../config/termMonths";
 import type { TuitionPlan } from "../../../finance/api";
+import { leavesMonthsOut } from "./steps/termsCoverage";
 
 /*
  * The "Puesta en marcha" step list of Configuración académica
@@ -188,16 +189,6 @@ function prerequisite(input: SetupInput): Mark | undefined {
   if (input.selectedCycleId === undefined) return NO_CYCLE;
   if (input.levels.length === 0) return NO_LEVELS;
   return undefined;
-}
-
-/**
- * Whether the level's terms leave a month of the cycle ungraded — what the
- * panel flags in amber as "Sin periodo: …". A term from an older gateway
- * carries no months and counts as none.
- */
-function leavesMonthsOut(levelTerms: Term[], months: readonly string[]): boolean {
-  const taken = new Set(levelTerms.flatMap((t) => t.months ?? []));
-  return months.some((m) => !taken.has(m));
 }
 
 /** Done means what the panel calls complete: every level has terms, and they cover every month. */
