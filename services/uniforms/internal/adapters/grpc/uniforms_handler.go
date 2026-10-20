@@ -454,7 +454,9 @@ func toProtoOrder(agg ports.OrderAggregate) *uniformsv1.Order {
 	live := false
 	for _, f := range agg.Fulfillments {
 		pf := toProtoFulfillment(f, agg.Order.Folio())
-		if rec, ok := agg.Returns[f.ID()]; ok {
+		// Only a returned delivery carries its return: a decision stored
+		// before the money moved is internal until the return happens.
+		if rec, ok := agg.Returns[f.ID()]; ok && f.Status() == domain.StatusReturned {
 			pf.CounterSaleReturn = toProtoReturn(rec)
 		}
 		fulfillments = append(fulfillments, pf)

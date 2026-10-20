@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
@@ -79,10 +80,12 @@ func (s *Service) ReturnCounterSale(ctx context.Context, in ReturnCounterSaleInp
 		if err := s.finance.VoidSalePayments(ctx, ful.FinanceChargeID(), stored.Reason, in.ActorUserID); err != nil {
 			if glerrors.KindOf(err) == glerrors.KindConflict {
 				// Finance moved nothing (the sale became yesterday's at midnight,
-				// say): forget the decision so the next try decides afresh.
-				_ = s.repo.DropReturnIntent(ctx, ful.ID())
-				return ports.OrderAggregate{}, glerrors.Wrap(glerrors.KindConflict,
-					"la venta ya no es de hoy: vuelve a abrir la devolución y elige cómo se regresa el dinero", err)
+				// or it was paid through a deposit): forget the decision so the
+				// next try decides afresh, and say what finance said.
+				if dropErr := s.repo.DropReturnIntent(ctx, ful.ID()); dropErr != nil {
+					slog.WarnContext(ctx, "could not drop a return decision finance refused", "fulfillment_id", ful.ID(), "error", dropErr)
+				}
+				return ports.OrderAggregate{}, err
 			}
 			return ports.OrderAggregate{}, err
 		}

@@ -386,3 +386,38 @@ func TestReturnCounterSaleWithoutAReasonIsInvalid(t *testing.T) {
 		t.Errorf("code = %v, want InvalidArgument", got)
 	}
 }
+
+// C2-015 review: a return's decision is stored before the money moves; the
+// wire shows a return only once the delivery is returned.
+func TestOnlyAReturnedDeliveryCarriesItsReturn(t *testing.T) {
+	order, err := domain.NewOrder("ord-1", tenant, "U-2026-000002", domain.OrderStudent{}, domain.SourceCounter, "usr-1", now)
+	if err != nil {
+		t.Fatalf("NewOrder: %v", err)
+	}
+	sold, err := domain.NewCounterSaleFulfillment("ful-1", tenant, "ord-1", 1, 25000, now)
+	if err != nil {
+		t.Fatalf("fulfillment: %v", err)
+	}
+	returned, err := sold.ReturnAtCounter()
+	if err != nil {
+		t.Fatalf("ReturnAtCounter: %v", err)
+	}
+	rec := map[string]ports.CounterSaleReturn{"ful-1": {Reason: "Talla", RefundMode: ports.RefundVoid, RefundStatus: ports.RefundDone}}
+
+	for _, tc := range []struct {
+		name string
+		f    domain.Fulfillment
+		want bool
+	}{{"decision only", sold, false}, {"returned", returned, true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := handlerWith(&stubRepo{order: ports.OrderAggregate{Order: order, Fulfillments: []domain.Fulfillment{tc.f}, Returns: rec}})
+			got, err := h.GetOrder(context.Background(), connect.NewRequest(&uniformsv1.GetOrderRequest{Id: "ord-1"}))
+			if err != nil {
+				t.Fatalf("GetOrder: %v", err)
+			}
+			if has := got.Msg.GetOrder().GetFulfillments()[0].GetCounterSaleReturn() != nil; has != tc.want {
+				t.Errorf("carries a return = %v, want %v", has, tc.want)
+			}
+		})
+	}
+}

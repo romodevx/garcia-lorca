@@ -90,6 +90,9 @@ func (s *ExpenseService) CreateExpense(ctx context.Context, d domain.ExpenseDraf
 	return s.repo.CreateExpense(ctx, e, created)
 }
 
+// maxExpenseExternalRefLen mirrors the column's CHECK (finance/0031).
+const maxExpenseExternalRefLen = 120
+
 // CreateExpenseOnce records an expense that another module asks for on its
 // own behalf, keyed by that module's reference (C2-015: a uniforms refund):
 // repeating it returns the expense already recorded, so a retry cannot pay
@@ -98,6 +101,9 @@ func (s *ExpenseService) CreateExpenseOnce(ctx context.Context, d domain.Expense
 	ref := strings.TrimSpace(externalRef)
 	if ref == "" {
 		return s.CreateExpense(ctx, d, by)
+	}
+	if len(ref) > maxExpenseExternalRefLen {
+		return domain.Expense{}, glerrors.New(glerrors.KindInvalid, "the expense reference is too long")
 	}
 	if err := s.requireActiveCategory(ctx, d.CategoryID); err != nil {
 		return domain.Expense{}, err
