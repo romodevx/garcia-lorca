@@ -1,6 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   getGrades,
+  getPaymentInfo,
   getStatement,
   statementPdfPath,
   getProfile,
@@ -174,6 +175,26 @@ describe("family API client", () => {
     it("throws an ApiError on a non-2xx response", async () => {
       globalThis.fetch = jest.fn().mockResolvedValue(notOk(404)) as unknown as typeof fetch;
       await expect(markNotificationRead("n1")).rejects.toMatchObject({ status: 404 });
+    });
+  });
+
+  describe("getPaymentInfo", () => {
+    it("reads how to pay for the child from its own route", async () => {
+      const fetchMock = jest.fn().mockResolvedValue(
+        jsonOk({ clabe: "012180001234567899", bank: "BBVA México", beneficiary: "Educación García Lorca, S.C.", reference: "1234567" }),
+      );
+      globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+      const info = await getPaymentInfo("s1");
+
+      expect(lastUrl(fetchMock)).toContain("/api/v1/family/students/s1/payment-info");
+      expect(info).toEqual({ clabe: "012180001234567899", bank: "BBVA México", beneficiary: "Educación García Lorca, S.C.", reference: "1234567" });
+    });
+
+    it("fills what an older gateway leaves out with empty text", async () => {
+      globalThis.fetch = jest.fn().mockResolvedValue(jsonOk({})) as unknown as typeof fetch;
+
+      expect(await getPaymentInfo("s1")).toEqual({ clabe: "", bank: "", beneficiary: "", reference: "" });
     });
   });
 });
