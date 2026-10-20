@@ -812,6 +812,21 @@ export interface CashUp {
   reopened?: CashCutClosure[];
   /** The day this cut is (aaaa-mm-dd), the server's when none was asked for. */
   day?: string;
+  /** C2-015 — counter sales returned that same day: listed, never counted. */
+  cancelledSales?: CancelledSale[];
+}
+
+/** A counter-sale payment voided because the sale came back the same day (C2-015). */
+export interface CancelledSale {
+  paymentId: string;
+  chargeId: string;
+  /** What it paid for: "Uniformes · U-2026-000002". */
+  description: string;
+  amountCents: number;
+  method: string;
+  paidOn: string;
+  reason: string;
+  voidedAt?: string;
 }
 
 /** A payment taken outside a deposit, with what it paid for. */
@@ -847,10 +862,12 @@ export async function getCashUp(baseURL: string, day: string): Promise<CashUp> {
     modifiedAfterClose?: boolean;
     reopened?: CashCutClosure[];
     day?: string;
+    cancelledSales?: CancelledSale[];
   }>(baseURL, day === "" ? "/cash-up" : `/cash-up?day=${encodeURIComponent(day)}`);
   return {
     deposits: (res.deposits ?? []).map(toDeposit),
     cancelled: (res.cancelled ?? []).map(toDeposit),
+    cancelledSales: res.cancelledSales ?? [],
     superseded: (res.superseded ?? []).map(toDeposit),
     payments: (res.payments ?? []).map((p) => ({ ...p, method: oneOf(PAYMENT_METHODS, p.method, "cash") })),
     cashCents: res.cashCents ?? 0,

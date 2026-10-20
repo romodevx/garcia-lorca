@@ -54,6 +54,25 @@ describe("CashUpPanel", () => {
     expect(screen.getByText(/importe capturado mal/)).toBeInTheDocument();
   });
 
+  // C2-015: a counter sale returned the same day is not takings, and the cut
+  // still says it happened and why — or the drawer is short a sale nobody sees.
+  it("lists a sale returned the same day among what was cancelled", async () => {
+    finance.getCashUp.mockResolvedValue({
+      deposits: [], cancelled: [], superseded: [], payments: [],
+      cancelledSales: [{
+        paymentId: "p9", chargeId: "c9", description: "Uniformes · U-2026-000002", amountCents: 25000,
+        method: "cash", paidOn: "2026-10-10", reason: "Talla equivocada", voidedAt: "2026-10-10T19:00:00Z",
+      }],
+      cashCents: 0, cardCents: 0, transferCents: 0, totalCents: 0, creditNoteCents: 0,
+    });
+
+    render(<CashUpPanel day="2026-10-10" />);
+
+    expect(await screen.findByText(/Cancelados · no cuentan/)).toBeInTheDocument();
+    expect(screen.getByText(/U-2026-000002/)).toBeInTheDocument();
+    expect(screen.getByText(/Devolución: Talla equivocada/)).toBeInTheDocument();
+  });
+
   // QA 2026-09-25, ISSUE-010: a counter sale is paid outside a deposit. The cut
   // lists it with what it paid for; the total the server sends already counts it.
   it("lists the payments taken outside a deposit, with what they paid for", async () => {
