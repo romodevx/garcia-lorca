@@ -3,18 +3,23 @@
 import { useCallback, useState } from "react";
 
 import type { OpenTarget } from "./SetupStepList";
-import { STEPS, type StepId } from "./setupSteps";
+import { STEPS, type StepDef, type StepId } from "./setupSteps";
 
 /** sessionStorage key of the step this session last had open (§1.4). */
 export const OPEN_STEP_KEY = "config-setup-step";
 
-const isStepId = (value: string | null): value is StepId => STEPS.some((s) => s.id === value);
+const isStepId = (steps: readonly StepDef[], value: string | null): value is StepId => steps.some((s) => s.id === value);
 
-/** The step this session last had open, if any. Storage may be missing or refuse: then there is none. */
-export function readStoredStep(): StepId | undefined {
+/**
+ * The step this session last had open, if any, in `steps`. A stored «Grupos»
+ * opens the merged «Estructura de la escuela» (module_school_structure).
+ * Storage may be missing or refuse: then there is none.
+ */
+export function readStoredStep(steps: readonly StepDef[] = STEPS): StepId | undefined {
   try {
     const stored = window.sessionStorage.getItem(OPEN_STEP_KEY);
-    return isStepId(stored) ? stored : undefined;
+    if (stored === "groups" && !isStepId(steps, stored)) return "levels";
+    return isStepId(steps, stored) ? stored : undefined;
   } catch {
     return undefined;
   }
@@ -30,9 +35,9 @@ function storeStep(id: OpenTarget): void {
 }
 
 /** What the live region says when a step opens (§1.7). */
-function announcementFor(id: OpenTarget): string {
-  const step = STEPS.find((s) => s.id === id);
-  return step === undefined ? "Papelera" : `Paso ${step.number} de ${STEPS.length}, ${step.title}`;
+function announcementFor(steps: readonly StepDef[], id: OpenTarget): string {
+  const step = steps.find((s) => s.id === id);
+  return step === undefined ? "Papelera" : `Paso ${step.number} de ${steps.length}, ${step.title}`;
 }
 
 export interface OpenStep {
@@ -49,7 +54,7 @@ export interface OpenStep {
  * otherwise the step is decided ONCE, when the status reads have settled, and
  * never moves on its own after that or after the user picked one (§1.4).
  */
-export function useOpenStep(initialStepId: StepId, settled: boolean, storedStepId: StepId | undefined): OpenStep {
+export function useOpenStep(initialStepId: StepId, settled: boolean, storedStepId: StepId | undefined, steps: readonly StepDef[] = STEPS): OpenStep {
   const [openId, setOpenId] = useState<OpenTarget | undefined>(storedStepId);
   const [focusRequest, setFocusRequest] = useState(0);
   const [announcement, setAnnouncement] = useState("");
@@ -59,12 +64,14 @@ export function useOpenStep(initialStepId: StepId, settled: boolean, storedStepI
   // Not stored: until the user picks one, the next visit recomputes it.
   if (openId === undefined && settled) setOpenId(initialStepId);
 
-  const open = useCallback((id: OpenTarget): void => {
+  const open = useCallback((wanted: OpenTarget): void => {
+    // «Grupos» lives inside «Estructura de la escuela» when the list merges them.
+    const id = wanted === "groups" && !isStepId(steps, wanted) ? "levels" : wanted;
     setOpenId(id);
     storeStep(id);
     setFocusRequest((n) => n + 1);
-    setAnnouncement(announcementFor(id));
-  }, []);
+    setAnnouncement(announcementFor(steps, id));
+  }, [steps]);
 
   return { openId, open, focusRequest, announcement };
 }

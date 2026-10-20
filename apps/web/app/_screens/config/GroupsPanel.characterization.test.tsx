@@ -99,4 +99,14 @@ describe("GroupsPanel", () => {
 
     expect(screen.getByText(/decide a qué grupo entra un alumno nuevo/)).toBeInTheDocument();
   });
+
+  // behavior.md gap #7: the proposed letter stops at Z (it counts groups, not the letters taken).
+  it("never proposes a letter past Z", async () => {
+    const user = userEvent.setup();
+    const many = Array.from({ length: 27 }, (_, i) => group(`gr${i}`, `G${i}`, 30));
+    setup({ groups: many });
+    await user.click(screen.getByRole("button", { name: /Nuevo grupo/ }));
+    expect(screen.getByRole("textbox", { name: /Nombre del grupo/ })).toHaveValue("Z");
+  });
 });
+

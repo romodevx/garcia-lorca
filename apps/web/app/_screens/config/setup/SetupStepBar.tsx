@@ -3,7 +3,8 @@
 import { useId, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactElement, type ReactNode } from "react";
 
 import { Icon } from "../../../_design/Icon";
-import { STEPS } from "./setupSteps";
+import { useSetupSteps } from "./stepsContext";
+import type { StepDef } from "./setupSteps";
 import type { OpenTarget, SetupStepListProps } from "./SetupStepList";
 
 /*
@@ -44,13 +45,14 @@ const panelStyle: CSSProperties = {
   boxShadow: "var(--shadow-pop)",
 };
 
-function barLabel(openId: OpenTarget | undefined, cardTitle: string): string {
+function barLabel(steps: readonly StepDef[], openId: OpenTarget | undefined, cardTitle: string): string {
   if (openId === "trash") return "Papelera";
-  const step = STEPS.find((s) => s.id === openId);
-  return step === undefined ? cardTitle : `Paso ${step.number} de ${STEPS.length} · ${step.title}`;
+  const step = steps.find((s) => s.id === openId);
+  return step === undefined ? cardTitle : `Paso ${step.number} de ${steps.length} · ${step.title}`;
 }
 
 export function SetupStepBar({ openId, cardTitle, list }: SetupStepBarProps): ReactElement {
+  const steps = useSetupSteps();
   const [expanded, setExpanded] = useState(false);
   const toggle = useRef<HTMLButtonElement>(null);
   const panelId = useId();
@@ -72,7 +74,7 @@ export function SetupStepBar({ openId, cardTitle, list }: SetupStepBarProps): Re
   return (
     <div className="setup-mobilebar" onKeyDown={onKeyDown}>
       <button ref={toggle} type="button" aria-expanded={expanded} aria-controls={panelId} onClick={() => setExpanded((v) => !v)} style={barStyle}>
-        {barLabel(openId, cardTitle)}
+        {barLabel(steps, openId, cardTitle)}
         <Icon name="chevron" size={18} style={{ transform: expanded ? "rotate(-90deg)" : "rotate(90deg)" }} />
       </button>
       {expanded && (

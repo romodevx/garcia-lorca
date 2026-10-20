@@ -13,7 +13,7 @@ export interface LevelOrderProps {
   onReorder: (levelIds: string[]) => Promise<void>;
 }
 
-type Direction = "up" | "down";
+export type Direction = "up" | "down";
 
 /** The ids with the level at `index` swapped with its neighbour above or below. */
 function moved(levels: readonly Level[], index: number, direction: Direction): string[] {
@@ -37,29 +37,8 @@ function refusalMessage(cause: unknown): string {
  * Subir and the last no Bajar — absent, since a disabled arrow only says "no".
  */
 export function LevelOrder({ levels, onReorder }: LevelOrderProps): ReactElement {
-  const [error, setError] = useState<string | undefined>(undefined);
+  const { move, error } = useLevelMoves(levels, onReorder);
   const titleId = useId();
-  // The arrow to focus once the list has re-rendered: the moved level's same
-  // arrow, or its other one when it reached an edge and the first went away.
-  const [focusAfterMove, setFocusAfterMove] = useState<{ levelId: string; direction: Direction } | undefined>(undefined);
-
-  useEffect(() => {
-    if (focusAfterMove === undefined) return;
-    const { levelId, direction } = focusAfterMove;
-    const other: Direction = direction === "up" ? "down" : "up";
-    const find = (d: Direction) => document.querySelector<HTMLButtonElement>(`[data-level-move="${levelId}:${d}"]`);
-    (find(direction) ?? find(other))?.focus();
-  }, [focusAfterMove, levels]);
-
-  const move = async (level: Level, index: number, direction: Direction): Promise<void> => {
-    setError(undefined);
-    setFocusAfterMove({ levelId: level.id, direction });
-    try {
-      await onReorder(moved(levels, index, direction));
-    } catch (cause) {
-      setError(refusalMessage(cause));
-    }
-  };
 
   return (
     <div style={{ marginBottom: 16 }}>
@@ -82,7 +61,44 @@ export function LevelOrder({ levels, onReorder }: LevelOrderProps): ReactElement
   );
 }
 
-function MoveButton({ level, direction, onClick }: { level: Level; direction: Direction; onClick: () => void }): ReactElement {
+/**
+ * Subir / Bajar for a list of levels: the whole new order sent each move, the
+ * server's refusal said in its words, and the focus kept on the moved level's
+ * arrow (or its other one at an edge). Shared by LevelOrder and the
+ * «Estructura de la escuela» cards.
+ */
+export function useLevelMoves(levels: readonly Level[], onReorder: (levelIds: string[]) => Promise<void>): { move: (level: Level, index: number, direction: Direction) => Promise<void>; error: string | undefined } {
+  const [error, setError] = useState<string | undefined>(undefined);
+  // The arrow to focus once the list has re-rendered: the moved level's same
+  // arrow, or its other one when it reached an edge and the first went away.
+  const [focusAfterMove, setFocusAfterMove] = useState<{ levelId: string; direction: Direction } | undefined>(undefined);
+
+  useEffect(() => {
+    if (focusAfterMove === undefined) return;
+    const { levelId, direction } = focusAfterMove;
+    const other: Direction = direction === "up" ? "down" : "up";
+    const find = (d: Direction) => document.querySelector<HTMLButtonElement>(`[data-level-move="${levelId}:${d}"]`);
+    const target = find(direction) ?? find(other);
+    if (target === null) return;
+    target.focus();
+    // Used once: a later change to the list (a new level, a rename) must not pull the focus back here.
+    setFocusAfterMove(undefined);
+  }, [focusAfterMove, levels]);
+
+  const move = async (level: Level, index: number, direction: Direction): Promise<void> => {
+    setError(undefined);
+    setFocusAfterMove({ levelId: level.id, direction });
+    try {
+      await onReorder(moved(levels, index, direction));
+    } catch (cause) {
+      setError(refusalMessage(cause));
+    }
+  };
+
+  return { move, error };
+}
+
+export function MoveButton({ level, direction, onClick }: { level: Level; direction: Direction; onClick: () => void }): ReactElement {
   const word = direction === "up" ? "Subir" : "Bajar";
   return (
     <button type="button" aria-label={`${word} ${level.name}`} data-level-move={`${level.id}:${direction}`} onClick={onClick} style={moveStyle}>

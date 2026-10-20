@@ -62,13 +62,47 @@ function levelChipLabel(level: Level, inSetup: boolean): string {
  */
 export function LevelsPanel({ levels, selectedLevelId, onSelect, onCreate, onSetAttendanceMode, onSetGrading, onDelete, showLevelSettings = true, onReorder }: LevelsPanelProps): ReactElement {
   const [creating, setCreating] = useState(false);
+  const selectedLevel = levels.find((l) => l.id === selectedLevelId);
+  const { inSetup } = useSetupPresentation();
+
+  return (
+    <Section title="Niveles educativos" subtitle="Elige uno para ver sus grados, o agrega otro.">
+      {levels.length > 0 ? (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
+          {levels.map((l) => (
+            <SelectChip key={l.id} selected={l.id === selectedLevelId} onClick={() => onSelect(l.id)}>
+              {levelChipLabel(l, inSetup)}
+            </SelectChip>
+          ))}
+        </div>
+      ) : (
+        <EmptyHint>Aún no hay niveles. Agrega el primero.</EmptyHint>
+      )}
+
+      {onReorder !== undefined && levels.length > 1 && <LevelOrder levels={levels} onReorder={onReorder} />}
+
+      {showLevelSettings && selectedLevel !== undefined && (
+        <LevelSettings level={selectedLevel} onSetAttendanceMode={onSetAttendanceMode} onSetGrading={onSetGrading} onDelete={onDelete} />
+      )}
+
+      {onCreate !== undefined && <Btn icon="plus" onClick={() => setCreating(true)}>Nuevo nivel</Btn>}
+
+      {creating && onCreate !== undefined && <NewLevelDrawer onCreate={onCreate} onClose={() => setCreating(false)} />}
+    </Section>
+  );
+}
+
+/**
+ * «Nuevo nivel educativo»: the drawer that creates a level, «Guardar y crear
+ * otro» keeping it open with the focus on its first field. Shared by
+ * LevelsPanel and the «Estructura de la escuela» step.
+ */
+export function NewLevelDrawer({ onCreate, onClose }: { onCreate: (input: CreateLevelInput) => Promise<void>; onClose: () => void }): ReactElement {
   const [name, setName] = useState("");
   const [sepCode, setSepCode] = useState("");
   const [granularity, setGranularity] = useState("cycle");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
-  const selectedLevel = levels.find((l) => l.id === selectedLevelId);
-  const { inSetup } = useSetupPresentation();
 
   /**
    * `andNew` deja el cajón abierto y listo para el siguiente.
@@ -80,7 +114,6 @@ export function LevelsPanel({ levels, selectedLevelId, onSelect, onCreate, onSet
    * necesita el párrafo que la explica.
    */
   const submit = async (andNew: boolean): Promise<void> => {
-    if (onCreate === undefined) return;
     // Sólo el nombre es obligatorio. La clave SEP es opcional, como dice su
     // ayuda y como siempre lo permitió el servidor: exigirla dejaba fuera a
     // preescolar y a cualquier nivel que la escuela nombre a su manera.
@@ -104,7 +137,7 @@ export function LevelsPanel({ levels, selectedLevelId, onSelect, onCreate, onSet
         // vuelve a él para que el siguiente nivel se escriba sin tocar el ratón.
         document.querySelector<HTMLInputElement>('[role="dialog"] input')?.focus();
       } else {
-        setCreating(false);
+        onClose();
       }
     } catch {
       setError("No se pudo crear el nivel. Revisa que no exista ya con ese nombre.");
@@ -114,51 +147,27 @@ export function LevelsPanel({ levels, selectedLevelId, onSelect, onCreate, onSet
   };
 
   return (
-    <Section title="Niveles educativos" subtitle="Elige uno para ver sus grados, o agrega otro.">
-      {levels.length > 0 ? (
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
-          {levels.map((l) => (
-            <SelectChip key={l.id} selected={l.id === selectedLevelId} onClick={() => onSelect(l.id)}>
-              {levelChipLabel(l, inSetup)}
-            </SelectChip>
-          ))}
-        </div>
-      ) : (
-        <EmptyHint>Aún no hay niveles. Agrega el primero.</EmptyHint>
-      )}
-
-      {onReorder !== undefined && levels.length > 1 && <LevelOrder levels={levels} onReorder={onReorder} />}
-
-      {showLevelSettings && selectedLevel !== undefined && (
-        <LevelSettings level={selectedLevel} onSetAttendanceMode={onSetAttendanceMode} onSetGrading={onSetGrading} onDelete={onDelete} />
-      )}
-
-      {onCreate !== undefined && <Btn icon="plus" onClick={() => { setError(undefined); setCreating(true); }}>Nuevo nivel</Btn>}
-
-      {creating && onCreate !== undefined && (
-        <SlideOver
-          title="Nuevo nivel educativo"
-          subtitle="Maternal, kínder, primaria…"
-          icon="students"
-          submitLabel="Crear nivel"
-          pending={pending}
-          error={error}
-          onClose={() => { setCreating(false); setError(undefined); }}
-          onSubmit={() => void submit(false)}
-          onSubmitAndNew={() => void submit(true)}
-        >
-          <TextField label="Nombre del nivel" value={name} onChange={setName} uppercase required help="El nivel educativo: preescolar, primaria, secundaria." />
-          <TextField label="Clave SEP" value={sepCode} onChange={setSepCode} uppercase help="La clave corta con la que la SEP identifica este nivel. Puede quedar vacía y ponerse después." />
-          <RadioGroup legend="Inscripción" options={GRANULARITY_OPTIONS} value={granularity} onChange={setGranularity} />
-          <div style={{ display: "flex", gap: 11, padding: "14px 16px", borderRadius: "var(--r-md)", background: "var(--surface-3)", border: "1px solid var(--border)" }}>
-            <p style={{ fontSize: 13.5, color: "var(--text-muted)", lineHeight: 1.5, margin: 0 }}>
-              <strong>Por ciclo</strong> es lo normal: el alumno se inscribe una vez al año.
-              <strong> Por periodo</strong> es para niveles que se cursan por cuatrimestre o semestre.
-            </p>
-          </div>
-        </SlideOver>
-      )}
-    </Section>
+    <SlideOver
+      title="Nuevo nivel educativo"
+      subtitle="Maternal, kínder, primaria…"
+      icon="students"
+      submitLabel="Crear nivel"
+      pending={pending}
+      error={error}
+      onClose={onClose}
+      onSubmit={() => void submit(false)}
+      onSubmitAndNew={() => void submit(true)}
+    >
+      <TextField label="Nombre del nivel" value={name} onChange={setName} uppercase required help="El nivel educativo: preescolar, primaria, secundaria." />
+      <TextField label="Clave SEP" value={sepCode} onChange={setSepCode} uppercase help="La clave corta con la que la SEP identifica este nivel. Puede quedar vacía y ponerse después." />
+      <RadioGroup legend="Inscripción" options={GRANULARITY_OPTIONS} value={granularity} onChange={setGranularity} />
+      <div style={{ display: "flex", gap: 11, padding: "14px 16px", borderRadius: "var(--r-md)", background: "var(--surface-3)", border: "1px solid var(--border)" }}>
+        <p style={{ fontSize: 13.5, color: "var(--text-muted)", lineHeight: 1.5, margin: 0 }}>
+          <strong>Por ciclo</strong> es lo normal: el alumno se inscribe una vez al año.
+          <strong> Por periodo</strong> es para niveles que se cursan por cuatrimestre o semestre.
+        </p>
+      </div>
+    </SlideOver>
   );
 }
 

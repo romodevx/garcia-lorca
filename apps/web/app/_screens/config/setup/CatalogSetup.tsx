@@ -10,7 +10,8 @@ import { SetupPanes } from "./SetupPanes";
 import { SetupPresentationProvider } from "../SetupPresentation";
 import { SetupStepList } from "./SetupStepList";
 import { COMPACT_MAX_PX, NARROW_MAX_PX, useMaxWidth } from "./layout";
-import { deriveSteps, type SetupInput } from "./setupSteps";
+import { deriveSteps, stepsFor, type SetupInput } from "./setupSteps";
+import { SetupStepsProvider } from "./stepsContext";
 import { useCatalogState, type CatalogState } from "../useCatalogState";
 import { readStoredStep, useOpenStep } from "./useOpenStep";
 import { useSetupActions } from "./useSetupActions";
@@ -42,14 +43,15 @@ function setupInput(state: CatalogState, status: SetupStatus, access: { canWrite
  * the right. The same state, panels, calls and arguments as `Catalog` — only
  * order, grouping and hierarchy change. The gateway is the security boundary.
  */
-export function CatalogSetup({ onBack, canDeleteLevels = false, onDeleteLevel, notice, onOpenLevelPeriods, onOpenStudentImport, canWriteConfig = false, canReadTuition = false }: CatalogProps): ReactElement {
+export function CatalogSetup({ onBack, canDeleteLevels = false, onDeleteLevel, notice, onOpenLevelPeriods, onOpenStudentImport, canWriteConfig = false, canReadTuition = false, structureView = false }: CatalogProps): ReactElement {
+  const steps = stepsFor(structureView);
   const state = useCatalogState(notice, canWriteConfig);
   const status = useSetupStatus(state.cycles.selectedId);
-  const actions = useSetupActions(state, status.refresh);
-  const [stored] = useState(readStoredStep);
-  const view = deriveSteps(setupInput(state, status, { canWrite: canWriteConfig, tuitionReadable: canReadTuition }), stored ?? null);
+  const actions = useSetupActions(state, status);
+  const [stored] = useState(() => readStoredStep(steps));
+  const view = deriveSteps(setupInput(state, status, { canWrite: canWriteConfig, tuitionReadable: canReadTuition }), stored ?? null, steps);
   const loaded = !state.load.loading && state.load.error === undefined;
-  const nav = useOpenStep(view.initialStepId, loaded && view.settled, stored);
+  const nav = useOpenStep(view.initialStepId, loaded && view.settled, stored, steps);
   const narrow = useMaxWidth(NARROW_MAX_PX);
   const compact = useMaxWidth(COMPACT_MAX_PX);
   const pricing = state.pricing.active;
@@ -67,6 +69,7 @@ export function CatalogSetup({ onBack, canDeleteLevels = false, onDeleteLevel, n
       {state.load.loading && <p className="fade-up" style={{ color: "var(--text-muted)", fontSize: 15 }}>Cargando catálogo…</p>}
       {state.load.error !== undefined && <p role="alert" className="fade-up" style={{ color: "var(--bad-fg)", fontSize: 15 }}>{state.load.error}</p>}
       {loaded && (
+        <SetupStepsProvider value={steps}>
         <SetupPresentationProvider compact={compact}>
           <div className={pricing ? "setup-layout setup-layout-solo" : "setup-layout"}>
             {!pricing && (
@@ -85,10 +88,12 @@ export function CatalogSetup({ onBack, canDeleteLevels = false, onDeleteLevel, n
                 canReadTuition={canReadTuition}
                 onDeleteLevel={onDeleteLevel}
                 onOpenLevelPeriods={onOpenLevelPeriods}
+                structureView={structureView}
               />
             </div>
           </div>
         </SetupPresentationProvider>
+        </SetupStepsProvider>
       )}
       <p aria-live="polite" style={visuallyHidden}>{nav.announcement}</p>
       {state.notice.shown && notice !== undefined && <Toast>{notice}</Toast>}

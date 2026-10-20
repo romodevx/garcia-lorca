@@ -35,6 +35,7 @@ import {
   type Term,
 } from "../../config/api";
 import type { NameCorrections } from "./CorrectableName";
+import { useLatest } from "./useLatest";
 import { useLevelReorder } from "./useLevelReorder";
 import { useLevelTerms, type LevelTerms } from "./useLevelTerms";
 
@@ -80,6 +81,12 @@ export interface GradesSlice {
   select: (id: string) => void;
   create: (input: CreateGradeLevelInput) => Promise<void>;
   /**
+   * The same create, for a level that may not be the selected one («Estructura
+   * de la escuela»): it returns the grade and adds it to `list` only when it
+   * belongs to the selected level. The selection is never touched.
+   */
+  createIn: (input: CreateGradeLevelInput) => Promise<GradeLevel>;
+  /**
    * Rename + delete (a GRADE_LEVEL_IN_USE refusal rejects and keeps the grade).
    * Undefined without config:write: the panel then shows read-only chips.
    */
@@ -90,6 +97,8 @@ export interface GroupsSlice {
   /** The groups of the selected (cycle, grade) only. */
   list: Group[];
   create: (input: CreateGroupInput) => Promise<void>;
+  /** As `grades.createIn`, for a grade that may not be the selected one. */
+  createIn: (input: CreateGroupInput) => Promise<Group>;
   /**
    * Rename + delete (a GROUP_IN_USE refusal rejects and keeps the group; any
    * refused rename re-reads the list first). Undefined without config:write.
@@ -236,15 +245,30 @@ export function useCatalogState(notice: string | undefined, canWriteConfig = fal
     setLevels((prev) => prev.map((l) => (l.id === levelId ? { ...l, ...updated, grading: updated.grading ?? grading } : l)));
   }, []);
 
-  const handleCreateGradeLevel = useCallback(async (input: CreateGradeLevelInput): Promise<void> => {
+  // The lists hold the SELECTED level's grades and the selected grade's groups:
+  // a record created elsewhere (the structure tree) is returned, not added.
+  const selectedLevelRef = useLatest(selectedLevelId);
+  const selectedGradeRef = useLatest(selectedGradeLevelId);
+
+  const handleCreateGradeLevelIn = useCallback(async (input: CreateGradeLevelInput): Promise<GradeLevel> => {
     const created = await createGradeLevel(API_URL, input);
-    setGradeLevels((prev) => [...prev, created]);
-  }, []);
+    if (created.levelId === selectedLevelRef.current) setGradeLevels((prev) => [...prev, created]);
+    return created;
+  }, [selectedLevelRef]);
+
+  const handleCreateGradeLevel = useCallback(async (input: CreateGradeLevelInput): Promise<void> => {
+    await handleCreateGradeLevelIn(input);
+  }, [handleCreateGradeLevelIn]);
+
+  const handleCreateGroupIn = useCallback(async (input: CreateGroupInput): Promise<Group> => {
+    const created = await createGroup(API_URL, input);
+    if (created.gradeLevelId === selectedGradeRef.current) setGroups((prev) => [...prev, created]);
+    return created;
+  }, [selectedGradeRef]);
 
   const handleCreateGroup = useCallback(async (input: CreateGroupInput): Promise<void> => {
-    const created = await createGroup(API_URL, input);
-    setGroups((prev) => [...prev, created]);
-  }, []);
+    await handleCreateGroupIn(input);
+  }, [handleCreateGroupIn]);
 
   const handleRenameGradeLevel = useCallback(async (id: string, name: string): Promise<void> => {
     const renamed = await renameGradeLevel(API_URL, id, name);
@@ -359,9 +383,10 @@ export function useCatalogState(notice: string | undefined, canWriteConfig = fal
       selected: selectedGradeLevel,
       select: setSelectedGradeLevelId,
       create: handleCreateGradeLevel,
+      createIn: handleCreateGradeLevelIn,
       corrections: gradeCorrections,
     },
-    groups: { list: groups, create: handleCreateGroup, corrections: groupCorrections },
+    groups: { list: groups, create: handleCreateGroup, createIn: handleCreateGroupIn, corrections: groupCorrections },
     terms: { ...levelTerms, copyMonths: handleCopyTermMonths },
     pricing: {
       levelId: pricingLevelId,

@@ -39,6 +39,25 @@ export const STEPS: readonly StepDef[] = [
   { id: "calendar", number: 8, title: "Calendario", purpose: "Días sin clases y actividades. Es opcional.", measurable: false, ownPrimary: "never" },
 ];
 
+/**
+ * «Estructura de la escuela» (PLAN-redesign-estructura, module_school_structure):
+ * the same list with levels, grades AND groups in step 3 — the chain a school
+ * builds in one go — and «Grupos» gone. Same ids, so nothing else moves.
+ */
+export const STRUCTURE_STEPS: readonly StepDef[] = STEPS.filter((s) => s.id !== "groups").map((s, i) =>
+  s.id === "levels"
+    ? { ...s, number: i + 1, title: "Estructura de la escuela", purpose: "Los niveles del colegio, sus grados y los grupos de cada grado.", ownPrimary: "whenEmpty" }
+    : { ...s, number: i + 1 },
+);
+
+/** The step list a view shows: the merged one with module_school_structure. */
+export function stepsFor(structureView: boolean): readonly StepDef[] {
+  return structureView ? STRUCTURE_STEPS : STEPS;
+}
+
+/** Whether a list merges groups into the levels step. */
+const mergesGroups = (steps: readonly StepDef[]): boolean => !steps.some((s) => s.id === "groups");
+
 /** The step that opens when nothing is pending: the one edited the most. */
 const FALLBACK_STEP: StepId = "levels";
 
@@ -46,7 +65,15 @@ const FALLBACK_STEP: StepId = "levels";
 const MAX_NAMED_GAPS = 2;
 
 /** One status read: in flight, failed, or its value. */
-export type StatusRead<T> = { kind: "loading" } | { kind: "failed" } | { kind: "ready"; value: T };
+/**
+ * One status read: in flight, failed, or its value. `stale` marks a value kept
+ * after a refresh failed (the tree keeps painting it and offers Reintentar);
+ * every step mark reads a stale value as a failed read, as it always did.
+ */
+export type StatusRead<T> = { kind: "loading" } | { kind: "failed" } | { kind: "ready"; value: T; stale?: boolean };
+
+/** A read the marks may trust: ready and not left over from a failed refresh. */
+const fresh = <T,>(read: StatusRead<T>): read is { kind: "ready"; value: T } => read.kind === "ready" && read.stale !== true;
 
 /**
  * "unknown" is a failed read: no mark and no line — the status helps, it is
@@ -128,7 +155,7 @@ function missingLine(prefix: string, names: string[]): string {
 /** Folds a read into a mark: in flight and failed are the same for every step. */
 function fromRead<T>(read: StatusRead<T>, decide: (value: T) => Mark): Mark {
   if (read.kind === "loading") return LOADING_MARK;
-  if (read.kind === "failed") return UNKNOWN_MARK;
+  if (!fresh(read)) return UNKNOWN_MARK;
   return decide(read.value);
 }
 
@@ -210,6 +237,21 @@ function groupsMark(input: SetupInput): Mark {
   });
 }
 
+/**
+ * The merged step (STRUCTURE_STEPS): pending as soon as either half is, in the
+ * order a school builds it — levels, their grades, the cycle, then groups —
+ * and checking while either read is in flight.
+ */
+function structureMark(input: SetupInput): Mark {
+  const levels = levelsMark(input);
+  if (levels.status !== "done") return levels;
+  const groups = groupsMark(input);
+  if (groups.status !== "done" || !fresh(input.grades) || !fresh(input.groups)) return groups;
+  const known = orderedGrades(input.levels, input.grades.value);
+  const grouped = input.groups.value.filter((g) => known.some(({ grade }) => grade.id === g.gradeLevelId)).length;
+  return done([levels.line, plural(grouped, "grupo", "grupos")].filter((part) => part !== undefined).join(" · "));
+}
+
 /** A role without finance:read: the step says who sees it instead of "Revisando…" forever. */
 const TUITION_NOT_READABLE: Mark = { status: "unknown", line: "Lo ve quien administra Finanzas" };
 
@@ -240,7 +282,7 @@ const REVIEW_MARK: Mark = { status: "review", line: "Revisar" };
  */
 function subjectsMark(input: SetupInput): Mark {
   if (input.grades.kind === "loading" || input.subjects.kind === "loading") return LOADING_MARK;
-  if (input.grades.kind === "failed" || input.subjects.kind === "failed") return REVIEW_MARK;
+  if (!fresh(input.grades) || !fresh(input.subjects)) return REVIEW_MARK;
   const known = orderedGrades(input.levels, input.grades.value);
   if (known.length === 0) return REVIEW_MARK;
   const subjects = input.subjects.value;
@@ -265,14 +307,15 @@ const MARKS: Record<StepId, (input: SetupInput) => Mark> = {
 
 /** Whether the step's own lime ("Capturar datos", "Nuevo ciclo", "Crear trimestres") is showing. */
 function isEmptyHere(id: StepId, input: SetupInput): boolean {
+  if (id === "levels") return input.levels.length === 0;
   if (id === "profile") return input.profile.kind === "ready" && input.profile.value.name.trim() === "";
   if (id === "cycle") return input.cycles.length === 0;
   if (id !== "terms" || input.selectedLevelId === undefined || input.terms.kind !== "ready") return false;
   return !input.terms.value.some((t) => t.levelId === input.selectedLevelId);
 }
 
-function nextKind(def: StepDef, input: SetupInput): NextKind {
-  if (def.number === STEPS.length) return "none";
+function nextKind(def: StepDef, input: SetupInput, total: number): NextKind {
+  if (def.number === total) return "none";
   if (def.ownPrimary === "always") return "text";
   if (def.ownPrimary === "never") return "primary";
   return isEmptyHere(def.id, input) ? "text" : "primary";
@@ -290,11 +333,11 @@ const IMPORT_CREATES_GROUPS = "Crea los grupos que falten.";
  */
 function importHint(input: SetupInput): string | undefined {
   if (input.levels.length === 0) return IMPORT_CREATES_ALL;
-  if (input.grades.kind !== "ready") return undefined;
+  if (!fresh(input.grades)) return undefined;
   const grades = input.grades.value;
   if (input.levels.some((l) => !grades.some((g) => g.levelId === l.id))) return IMPORT_CREATES_GRADES;
   if (input.selectedCycleId === undefined) return IMPORT_CREATES_GROUPS;
-  if (input.groups.kind !== "ready") return undefined;
+  if (!fresh(input.groups)) return undefined;
   const groups = input.groups.value;
   const known = orderedGrades(input.levels, grades);
   return known.some(({ grade }) => !groups.some((g) => g.gradeLevelId === grade.id)) ? IMPORT_CREATES_GROUPS : undefined;
@@ -320,24 +363,25 @@ function subtitle(input: SetupInput, steps: StepView[], ready: boolean): string 
   return [head, draft, gapsPhrase(gaps)].filter((part) => part !== undefined).join(" · ");
 }
 
-function isStepId(value: string | null): value is StepId {
-  return STEPS.some((s) => s.id === value);
-}
-
 function initialStep(steps: StepView[], stored: string | null): StepId {
-  if (isStepId(stored)) return stored;
+  // A session that last had «Grupos» open finds it inside the merged step.
+  if (stored === "groups" && !steps.some((s) => s.id === "groups")) return "levels";
+  const kept = steps.find((s) => s.id === stored);
+  if (kept !== undefined) return kept.id;
   return steps.find((s) => s.status === "pending")?.id ?? FALLBACK_STEP;
 }
 
 /**
  * Every step's status and line for the selected cycle, the header, and the
  * step that opens. `storedStepId` is this session's last open step
- * (sessionStorage), passed in so the function stays pure.
+ * (sessionStorage), passed in so the function stays pure. `list` is the step
+ * list the view shows (stepsFor).
  */
-export function deriveSteps(input: SetupInput, storedStepId: string | null): SetupView {
-  const steps = STEPS.map((def): StepView => {
-    const mark = MARKS[def.id](input);
-    return { ...def, status: mark.status, line: mark.line, next: nextKind(def, input) };
+export function deriveSteps(input: SetupInput, storedStepId: string | null, list: readonly StepDef[] = STEPS): SetupView {
+  const merged = mergesGroups(list);
+  const steps = list.map((def): StepView => {
+    const mark = merged && def.id === "levels" ? structureMark(input) : MARKS[def.id](input);
+    return { ...def, status: mark.status, line: mark.line, next: nextKind(def, input, list.length) };
   });
   const ready = steps.filter((s) => s.measurable).every((s) => s.status === "done");
   return {

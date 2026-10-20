@@ -195,6 +195,7 @@ const STEP_IDS: Record<string, string> = {
   "Datos del colegio": "profile",
   "Ciclo escolar": "cycle",
   "Niveles y grados": "levels",
+  "Estructura de la escuela": "levels",
   Periodos: "terms",
   Materias: "subjects",
   Grupos: "groups",

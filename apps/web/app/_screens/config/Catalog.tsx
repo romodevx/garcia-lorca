@@ -24,6 +24,12 @@ import { ModuleHeaderIcon } from "../../_design/ModuleHeaderIcon";
 
 export interface CatalogProps {
   onBack: () => void;
+  /**
+   * module_school_structure: the setup view merges levels, grades and groups
+   * into «Estructura de la escuela» (PLAN-redesign-estructura). Only
+   * CatalogSetup reads it; the old Catalog ignores it.
+   */
+  structureView?: boolean;
   /** Owner-only (levels:delete): the delete action on a level and the Papelera. */
   canDeleteLevels?: boolean;
   /** Opens the three-step deletion page of one level. */

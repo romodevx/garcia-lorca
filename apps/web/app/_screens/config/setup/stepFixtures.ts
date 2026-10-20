@@ -1,12 +1,12 @@
-import { STEPS, type StepId, type StepStatus, type StepView } from "./setupSteps";
+import { STEPS, type StepDef, type StepId, type StepStatus, type StepView } from "./setupSteps";
 
 /** Test-only: the eight steps, all pending unless a step says otherwise. */
-export function stepViews(overrides: Partial<Record<StepId, Partial<StepView>>> = {}): StepView[] {
-  return STEPS.map((def): StepView => ({
+export function stepViews(overrides: Partial<Record<StepId, Partial<StepView>>> = {}, list: readonly StepDef[] = STEPS): StepView[] {
+  return list.map((def): StepView => ({
     ...def,
     status: "pending" as StepStatus,
     line: `Falta ${def.title}`,
-    next: def.number === STEPS.length ? "none" : "text",
+    next: def.number === list.length ? "none" : "text",
     ...overrides[def.id],
   }));
 }

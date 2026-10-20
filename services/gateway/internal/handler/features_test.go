@@ -61,6 +61,7 @@ func TestFeaturesReportsPresentationViewsOff(t *testing.T) {
 	}{
 		{key: "module_config_setup", modules: "config"},
 		{key: "module_announcements_view", modules: "comms"},
+		{key: "module_school_structure", modules: "config,config_setup"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.key, func(t *testing.T) {
