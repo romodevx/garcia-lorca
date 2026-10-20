@@ -114,7 +114,7 @@ func (h *FinanceHandler) CreateExpense(ctx context.Context, req *connect.Request
 	if err != nil {
 		return nil, connectErr(err)
 	}
-	e, err := h.expenses.CreateExpense(ctx, d, actorOf(m.GetActorId(), m.GetActorName()))
+	e, err := h.expenses.CreateExpenseOnce(ctx, d, actorOf(m.GetActorId(), m.GetActorName()), m.GetExternalRef())
 	if err != nil {
 		return nil, connectErr(err)
 	}

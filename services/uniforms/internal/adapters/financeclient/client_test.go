@@ -33,6 +33,41 @@ type stubFinance struct {
 	cancelErr error
 
 	createConceptCalls int
+
+	// C2-015
+	voidedSales     []*financev1.VoidSalePaymentsRequest
+	categories      []*financev1.ExpenseCategory
+	createdCategory []string
+	createdExpenses []*financev1.CreateExpenseRequest
+}
+
+func (s *stubFinance) VoidSalePayments(_ context.Context, req *connect.Request[financev1.VoidSalePaymentsRequest]) (*connect.Response[financev1.VoidSalePaymentsResponse], error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.voidedSales = append(s.voidedSales, req.Msg)
+	return connect.NewResponse(&financev1.VoidSalePaymentsResponse{}), nil
+}
+
+func (s *stubFinance) ListExpenseCategories(context.Context, *connect.Request[financev1.ListExpenseCategoriesRequest]) (*connect.Response[financev1.ListExpenseCategoriesResponse], error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return connect.NewResponse(&financev1.ListExpenseCategoriesResponse{Categories: s.categories}), nil
+}
+
+func (s *stubFinance) CreateExpenseCategory(_ context.Context, req *connect.Request[financev1.CreateExpenseCategoryRequest]) (*connect.Response[financev1.CreateExpenseCategoryResponse], error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cat := &financev1.ExpenseCategory{Id: "cat-ret", Name: req.Msg.GetName(), Active: true}
+	s.categories = append(s.categories, cat)
+	s.createdCategory = append(s.createdCategory, req.Msg.GetName())
+	return connect.NewResponse(&financev1.CreateExpenseCategoryResponse{Category: cat}), nil
+}
+
+func (s *stubFinance) CreateExpense(_ context.Context, req *connect.Request[financev1.CreateExpenseRequest]) (*connect.Response[financev1.CreateExpenseResponse], error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.createdExpenses = append(s.createdExpenses, req.Msg)
+	return connect.NewResponse(&financev1.CreateExpenseResponse{Expense: &financev1.Expense{Id: "exp-1"}}), nil
 }
 
 func (s *stubFinance) ListConcepts(context.Context, *connect.Request[financev1.ListConceptsRequest]) (*connect.Response[financev1.ListConceptsResponse], error) {
@@ -308,4 +343,41 @@ func serverURL(t *testing.T, stub *stubFinance) string {
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	return srv.URL
+}
+
+// C2-015: the same-day return voids the sale's payments, naming who and why.
+func TestVoidSalePaymentsForwardsReasonAndActor(t *testing.T) {
+	stub := &stubFinance{}
+	c := clientFor(t, stub)
+
+	if err := c.VoidSalePayments(context.Background(), "chg-1", "Talla equivocada", "usr-1"); err != nil {
+		t.Fatalf("VoidSalePayments: %v", err)
+	}
+	if len(stub.voidedSales) != 1 || stub.voidedSales[0].GetReason() != "Talla equivocada" || stub.voidedSales[0].GetActorUserId() != "usr-1" {
+		t.Errorf("forwarded %+v", stub.voidedSales)
+	}
+}
+
+// C2-015: a later day's refund is an expense in its own category, created the
+// first time and reused after.
+func TestRecordRefundIsAnExpenseOfItsOwnCategory(t *testing.T) {
+	stub := &stubFinance{}
+	c := clientFor(t, stub)
+	in := ports.RefundInput{AmountCents: 25000, Method: "cash", SpentOn: "2026-10-20", Description: "Devolución U-2026-000002", ActorUserID: "usr-1", ActorName: "Director"}
+
+	id, err := c.RecordRefund(context.Background(), in)
+	if err != nil || id != "exp-1" {
+		t.Fatalf("RecordRefund = %q, %v", id, err)
+	}
+	if _, err := c.RecordRefund(context.Background(), in); err != nil {
+		t.Fatalf("second RecordRefund: %v", err)
+	}
+
+	if len(stub.createdCategory) != 1 || stub.createdCategory[0] != "Devoluciones de uniformes" {
+		t.Errorf("categories created %v, want one \"Devoluciones de uniformes\"", stub.createdCategory)
+	}
+	got := stub.createdExpenses[0]
+	if got.GetCategoryId() != "cat-ret" || got.GetAmountCents() != 25000 || got.GetMethod() != "cash" || got.GetSpentOn() != "2026-10-20" || got.GetActorId() != "usr-1" {
+		t.Errorf("expense = %+v", got)
+	}
 }

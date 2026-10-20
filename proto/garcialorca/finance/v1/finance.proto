@@ -126,6 +126,11 @@ service FinanceService {
   // VoidDeposit cancels a deposit and releases what it settled. The row stays,
   // with its reason: a school that deletes money rows cannot explain its ledger.
   rpc VoidDeposit(VoidDepositRequest) returns (VoidDepositResponse);
+  // VoidSalePayments voids the payments of a uniforms counter sale returned on
+  // the day it was sold and cancels its charge (C2-015). A sale of an earlier
+  // day is a conflict (AlreadyExists): that refund is an expense of its own
+  // day. Repeating a done void returns what it voided.
+  rpc VoidSalePayments(VoidSalePaymentsRequest) returns (VoidSalePaymentsResponse);
   // GetDepositReceipt returns a deposit and what it paid, concept by concept,
   // for its receipt (task 12). A voided deposit comes back with no lines.
   rpc GetDepositReceipt(GetDepositReceiptRequest) returns (GetDepositReceiptResponse);
@@ -1075,6 +1080,32 @@ message VoidDepositRequest {
 
 message VoidDepositResponse {}
 
+message VoidSalePaymentsRequest {
+  string charge_id = 1;
+  // Required: why the sale was returned.
+  string reason = 2;
+  // The authenticated caller, set by the service that asks — never a client.
+  string actor_user_id = 3;
+}
+
+message VoidSalePaymentsResponse {
+  repeated VoidedSalePayment voided = 1;
+}
+
+// VoidedSalePayment is one payment of a returned counter sale, voided on the
+// day it was taken (C2-015). It counts for nothing; it is kept and listed.
+message VoidedSalePayment {
+  string payment_id = 1;
+  string charge_id = 2;
+  string description = 3;
+  int64 amount_cents = 4;
+  string method = 5;
+  // YYYY-MM-DD, the school day it was taken.
+  string paid_on = 6;
+  string reason = 7;
+  google.protobuf.Timestamp voided_at = 8;
+}
+
 // PreviewDepositRequest asks what an amount would cover. It carries no
 // idempotency key: nothing is written, so there is nothing to deduplicate.
 message PreviewDepositRequest {
@@ -1132,6 +1163,9 @@ message DailyCashUpResponse {
   // The day this cut is (YYYY-MM-DD) — the server's day when none was asked
   // for — so closing it closes THIS day, not whatever day it is at the POST.
   string day = 16;
+  // Counter-sale payments of the day voided by a same-day return (C2-015).
+  // They count for nothing and are listed, like `cancelled`.
+  repeated VoidedSalePayment cancelled_sales = 17;
 }
 
 // CashUpPayment is a payment taken outside a deposit, with what it paid for.
@@ -1489,6 +1523,10 @@ message CreateExpenseRequest {
   // The authenticated caller, set by the gateway — never by a client.
   string actor_id = 6;
   string actor_name = 7;
+  // Set by another module recording an expense on its own behalf (C2-015, a
+  // uniforms refund): the same reference twice is the same expense. Never
+  // set from the web.
+  string external_ref = 8;
 }
 
 message CreateExpenseResponse {

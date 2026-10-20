@@ -509,6 +509,8 @@ func takingsResponse(cut usecase.CashUp) *financev1.DailyCashUpResponse {
 		TransferCents: cut.ByMethod[domain.MethodTransfer],
 		TotalCents:    cut.TotalCents,
 		Payments:      toProtoCashUpPayments(cut.Payments),
+		// C2-015: voided by a same-day return; listed, never counted.
+		CancelledSales: toProtoVoidedSales(cut.CancelledSales),
 		// Not money (T8): reported on its own line, outside the totals.
 		CreditNoteCents: cut.CreditNoteCents,
 	}
@@ -595,6 +597,28 @@ func (h *FinanceHandler) VoidDeposit(ctx context.Context, req *connect.Request[f
 		return nil, connectErr(err)
 	}
 	return connect.NewResponse(&financev1.VoidDepositResponse{}), nil
+}
+
+// VoidSalePayments voids a counter sale returned on its own day (C2-015).
+func (h *FinanceHandler) VoidSalePayments(ctx context.Context, req *connect.Request[financev1.VoidSalePaymentsRequest]) (*connect.Response[financev1.VoidSalePaymentsResponse], error) {
+	m := req.Msg
+	voided, err := h.finance.VoidSalePayments(ctx, m.GetChargeId(), m.GetReason(), m.GetActorUserId())
+	if err != nil {
+		return nil, connectErr(err)
+	}
+	return connect.NewResponse(&financev1.VoidSalePaymentsResponse{Voided: toProtoVoidedSales(voided)}), nil
+}
+
+func toProtoVoidedSales(vs []ports.VoidedSalePayment) []*financev1.VoidedSalePayment {
+	out := make([]*financev1.VoidedSalePayment, 0, len(vs))
+	for _, v := range vs {
+		out = append(out, &financev1.VoidedSalePayment{
+			PaymentId: v.PaymentID, ChargeId: v.ChargeID, Description: v.Description,
+			AmountCents: v.AmountCents, Method: v.Method, PaidOn: v.PaidOn.Format(dayLayout),
+			Reason: v.Reason, VoidedAt: timestamppb.New(v.VoidedAt),
+		})
+	}
+	return out
 }
 
 func toProtoDeposit(d domain.Deposit) *financev1.Deposit {

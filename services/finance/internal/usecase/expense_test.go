@@ -532,3 +532,27 @@ func TestUpdateExpenseRefusesAnExpenseReFiledMeanwhile(t *testing.T) {
 		t.Fatalf("want KindConflict, got %v", err)
 	}
 }
+
+// C2-015: a refund another module records twice under one reference is one
+// expense, and still validates its category like any other.
+func TestCreateExpenseOnceIsOneExpensePerReference(t *testing.T) {
+	f := newExpenseFixture()
+	c := f.category(t, "Devoluciones de uniformes")
+	draft := domain.ExpenseDraft{SpentOn: expNow, CategoryID: c.ID(), AmountCents: 25000, Method: domain.MethodCash, Description: "Devolución U-2026-000002"}
+
+	first, err := f.svc.CreateExpenseOnce(context.Background(), draft, cashier, "uniforms-return:f1")
+	if err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	second, err := f.svc.CreateExpenseOnce(context.Background(), draft, cashier, "uniforms-return:f1")
+	if err != nil {
+		t.Fatalf("second: %v", err)
+	}
+
+	if second.ID() != first.ID() || len(f.repo.expenses) != 1 {
+		t.Errorf("got %s then %s with %d expenses, want one", first.ID(), second.ID(), len(f.repo.expenses))
+	}
+	if _, err := f.svc.CreateExpenseOnce(context.Background(), domain.ExpenseDraft{SpentOn: expNow, CategoryID: "nope", AmountCents: 1, Method: domain.MethodCash}, cashier, "uniforms-return:f2"); glerrors.KindOf(err) != glerrors.KindInvalid {
+		t.Errorf("unknown category: want KindInvalid, got %v", err)
+	}
+}

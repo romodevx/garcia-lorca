@@ -158,6 +158,8 @@ func TestDeriveOrderLabel(t *testing.T) {
 		{"everything delivered", []domain.LineStatus{domain.LineSold, domain.LineSold}, false, domain.LabelClosed},
 		{"nothing delivered, all called off", []domain.LineStatus{domain.LineCancelled, domain.LineCancelled}, false, domain.LabelClosedPartial},
 		{"delivered some, lost the rest", []domain.LineStatus{domain.LineSold, domain.LineReleased}, false, domain.LabelClosedPartial},
+		// C2-015: a sale returned whole is its own ending, not a partial one.
+		{"returned whole", []domain.LineStatus{domain.LineReturned, domain.LineReturned}, false, domain.LabelReturned},
 		{"delivered some, cancelled the rest", []domain.LineStatus{domain.LineSold, domain.LineCancelled}, false, domain.LabelClosedPartial},
 	}
 	for _, tc := range cases {
@@ -201,5 +203,21 @@ func TestOrderLineSubtotal(t *testing.T) {
 	}
 	if got := l.SubtotalCents(); got != 96000 {
 		t.Errorf("subtotal = %d, want 96000", got)
+	}
+}
+
+// C2-015: only a sold line comes back, and once back it is over.
+func TestLineReturnOnlyWhenSold(t *testing.T) {
+	back, err := line(t, domain.LineSold).Return()
+	if err != nil {
+		t.Fatalf("Return: %v", err)
+	}
+	if back.Status() != domain.LineReturned || !back.Status().IsTerminal() || back.Status().HoldsStock() {
+		t.Errorf("status = %q, want returned, terminal, holding nothing", back.Status())
+	}
+	for _, st := range []domain.LineStatus{domain.LineReserved, domain.LineAwaitingStock, domain.LineReturned} {
+		if _, err := line(t, st).Return(); glerrors.KindOf(err) != glerrors.KindConflict {
+			t.Errorf("returning a %s line: want KindConflict, got %v", st, err)
+		}
 	}
 }

@@ -190,6 +190,14 @@ func (f *fakeRepo) ListDepositsOn(_ context.Context, _ time.Time) ([]domain.Depo
 	return f.deposits, nil
 }
 
+func (f *fakeRepo) VoidSalePayments(_ context.Context, _, _, _ string, _ time.Time) ([]ports.VoidedSalePayment, error) {
+	return nil, nil
+}
+
+func (f *fakeRepo) ListVoidedSalePaymentsOn(_ context.Context, _ time.Time) ([]ports.VoidedSalePayment, error) {
+	return nil, nil
+}
+
 func (f *fakeRepo) ListLoosePaymentsOn(_ context.Context, _ time.Time) ([]ports.LoosePayment, error) {
 	return f.loose, nil
 }
@@ -1300,5 +1308,19 @@ func TestPreviewWithdrawalReturnsProjectedChargesAndDebt(t *testing.T) {
 	}
 	if f.repo.charges[future.ID()].Status() != domain.StatusPending {
 		t.Error("PreviewWithdrawal wrote to the ledger")
+	}
+}
+
+// C2-015: a returned sale's void needs its reason; the refusal is the
+// caller's, never a server fault.
+func TestVoidSalePaymentsWithoutAReasonIsInvalid(t *testing.T) {
+	f := newFixture(t)
+
+	_, err := f.h.VoidSalePayments(context.Background(), connect.NewRequest(&financev1.VoidSalePaymentsRequest{
+		ChargeId: "d0000000-0000-4000-8000-000000000001",
+	}))
+
+	if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("code = %v, want InvalidArgument", connect.CodeOf(err))
 	}
 }

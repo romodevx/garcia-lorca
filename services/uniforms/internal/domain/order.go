@@ -43,6 +43,8 @@ const (
 	LineSold          LineStatus = "sold"
 	LineReleased      LineStatus = "released"
 	LineCancelled     LineStatus = "cancelled"
+	// LineReturned: sold, then brought back with the whole sale (C2-015).
+	LineReturned LineStatus = "returned"
 )
 
 // HoldsStock reports whether this line is keeping a unit committed. Only
@@ -51,7 +53,7 @@ func (s LineStatus) HoldsStock() bool { return s == LineReserved }
 
 // IsTerminal reports whether the line's story is over.
 func (s LineStatus) IsTerminal() bool {
-	return s == LineSold || s == LineReleased || s == LineCancelled
+	return s == LineSold || s == LineReleased || s == LineCancelled || s == LineReturned
 }
 
 // delivered reports whether the family actually received this line.
@@ -169,6 +171,16 @@ func (l OrderLine) Sell() (OrderLine, error) {
 	return l, nil
 }
 
+// Return records that a sold line came back with its sale (C2-015).
+func (l OrderLine) Return() (OrderLine, error) {
+	if l.status != LineSold {
+		return OrderLine{}, glerrors.New(glerrors.KindConflict,
+			"a line that is "+string(l.status)+" cannot be returned")
+	}
+	l.status = LineReturned
+	return l, nil
+}
+
 // AssignTo puts the line into a delivery.
 func (l OrderLine) AssignTo(fulfillmentID string) (OrderLine, error) {
 	if strings.TrimSpace(fulfillmentID) == "" {
@@ -213,14 +225,18 @@ const (
 	// the module can produce — a family that ordered three garments, received
 	// one, and had the rest lapse — reads exactly like the best one.
 	LabelClosedPartial OrderLabel = "closed_partial"
+	// LabelReturned: every line came back (C2-015) — not a partial delivery.
+	LabelReturned OrderLabel = "returned"
 )
 
 // DeriveOrderLabel computes an order's state from its lines and whether any of
 // its deliveries is still holding goods.
 func DeriveOrderLabel(lines []LineStatus, hasLiveFulfillment bool) OrderLabel {
-	var waiting, open, delivered, lost int
+	var waiting, open, delivered, lost, returned int
 	for _, s := range lines {
 		switch {
+		case s == LineReturned:
+			returned++
 		case s == LineAwaitingStock:
 			waiting++
 		case !s.IsTerminal():
@@ -241,7 +257,10 @@ func DeriveOrderLabel(lines []LineStatus, hasLiveFulfillment bool) OrderLabel {
 	if open > 0 || hasLiveFulfillment {
 		return LabelInProgress
 	}
-	if lost > 0 {
+	if returned > 0 && returned == len(lines) {
+		return LabelReturned
+	}
+	if lost > 0 || returned > 0 {
 		return LabelClosedPartial
 	}
 	return LabelClosed

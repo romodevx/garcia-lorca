@@ -26,6 +26,7 @@ type UniformsService interface {
 	ReceiveStock(ctx context.Context, lines []client.UniformReceiveLine, note, actorUserID string) (client.ReceiveStockResult, error)
 	AdjustStock(ctx context.Context, stockID string, delta int32, note, actorUserID string) (client.UniformSize, error)
 	CounterSale(ctx context.Context, in client.CounterSaleInput) (client.UniformOrder, error)
+	ReturnCounterSale(ctx context.Context, in client.ReturnSaleInput) (client.UniformOrder, error)
 	ListOrders(ctx context.Context, f client.ListOrdersFilter) (client.UniformOrdersPage, error)
 	GetOrder(ctx context.Context, id string, studentIDs []string) (client.UniformOrder, error)
 	GetSettings(ctx context.Context) (client.UniformSettings, error)
@@ -48,6 +49,9 @@ type UniformsService interface {
 type UniformsHandler struct {
 	svc    UniformsService
 	levels LevelReader
+	// names resolves the caller's display name for a return's record
+	// (C2-015); nil falls back to the token's email.
+	names UserNamer
 }
 
 // LevelReader reads one config level, with its deletion status.
@@ -66,6 +70,12 @@ func NewUniformsHandler(svc UniformsService) *UniformsHandler {
 // caller that writes garments, makes the one lookup.
 func (h *UniformsHandler) WithLevelGuard(levels LevelReader) *UniformsHandler {
 	h.levels = levels
+	return h
+}
+
+// WithNames lets a return record who did it by name, as the receipt prints it.
+func (h *UniformsHandler) WithNames(names UserNamer) *UniformsHandler {
+	h.names = names
 	return h
 }
 
@@ -314,6 +324,47 @@ func (h *UniformsHandler) ListOrders(w http.ResponseWriter, r *http.Request) {
 // GetOrder: GET /api/v1/uniforms/orders/{id}
 func (h *UniformsHandler) GetOrder(w http.ResponseWriter, r *http.Request) {
 	order, err := h.svc.GetOrder(r.Context(), r.PathValue("id"), nil)
+	if err != nil {
+		writeUniformsError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, order)
+}
+
+// maxReturnDamagedLines bounds the damaged list: a sale has few lines, and the
+// edge refuses a body that could not be one (C2-015 review).
+const maxReturnDamagedLines = 50
+
+// returnSaleRequest is the body of a return. No actor field: who returned it
+// is the signed-in caller.
+type returnSaleRequest struct {
+	Reason         string   `json:"reason"`
+	DamagedLineIDs []string `json:"damagedLineIds"`
+	RefundMethod   string   `json:"refundMethod"`
+}
+
+// ReturnCounterSale: POST /api/v1/uniforms/orders/{id}/return (C2-015). A
+// counter sale comes back whole: same day its payments are voided, another day
+// the refund is an expense of that day. Needs what a sale needs.
+func (h *UniformsHandler) ReturnCounterSale(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !uuidShape.MatchString(id) {
+		middleware.WriteError(w, http.StatusNotFound, "not_found", "Esa venta no existe", nil)
+		return
+	}
+	var body returnSaleRequest
+	if !decodeBody(w, r, &body) {
+		return
+	}
+	if len(body.DamagedLineIDs) > maxReturnDamagedLines {
+		middleware.WriteError(w, http.StatusBadRequest, "invalid", "Demasiadas prendas marcadas", map[string]string{"field": "damagedLineIds"})
+		return
+	}
+	caller, _ := middleware.PrincipalFrom(r.Context())
+	order, err := h.svc.ReturnCounterSale(r.Context(), client.ReturnSaleInput{
+		OrderID: id, Reason: body.Reason, DamagedLineIDs: body.DamagedLineIDs, RefundMethod: body.RefundMethod,
+		ActorUserID: caller.UserID, ActorName: callerName(r.Context(), h.names, caller),
+	})
 	if err != nil {
 		writeUniformsError(w, err)
 		return

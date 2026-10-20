@@ -165,11 +165,18 @@ const testActor = "a0000000-0000-4000-8000-0000000000ac"
 type fakeRepo struct {
 	// cancelledBy records who cancelled each charge (C2-005).
 	cancelledBy map[string]string
-	concepts    map[string]domain.ChargeConcept
-	charges     map[string]domain.Charge
-	payments    map[string][]domain.Payment // keyed by charge id
-	plans       map[string]domain.TuitionPlan
-	deposits    []domain.Deposit
+	// voidedSales is what ListVoidedSalePaymentsOn answers; voidSale* record
+	// the last VoidSalePayments call (C2-015).
+	voidedSales    []ports.VoidedSalePayment
+	voidSaleCalls  int
+	voidSaleReason string
+	voidSaleActor  string
+	voidSaleToday  time.Time
+	concepts       map[string]domain.ChargeConcept
+	charges        map[string]domain.Charge
+	payments       map[string][]domain.Payment // keyed by charge id
+	plans          map[string]domain.TuitionPlan
+	deposits       []domain.Deposit
 	// depositOfPayment stands in for payments.deposit_id: which deposit an
 	// allocation came from, so voiding can find and release exactly those.
 	depositOfPayment map[string]string
@@ -698,6 +705,22 @@ func (f *fakeRepo) ListDepositsOn(_ context.Context, day time.Time) ([]domain.De
 	for _, d := range f.deposits {
 		if d.PaidOn().Equal(domain.CalendarDay(day)) {
 			out = append(out, d)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeRepo) VoidSalePayments(_ context.Context, _, reason, actorUserID string, today time.Time) ([]ports.VoidedSalePayment, error) {
+	f.voidSaleCalls++
+	f.voidSaleReason, f.voidSaleActor, f.voidSaleToday = reason, actorUserID, today
+	return f.voidedSales, nil
+}
+
+func (f *fakeRepo) ListVoidedSalePaymentsOn(_ context.Context, day time.Time) ([]ports.VoidedSalePayment, error) {
+	var out []ports.VoidedSalePayment
+	for _, v := range f.voidedSales {
+		if v.PaidOn.Equal(domain.CalendarDay(day)) {
+			out = append(out, v)
 		}
 	}
 	return out, nil

@@ -28,6 +28,66 @@ type OrderAggregate struct {
 	Order        domain.Order
 	Lines        []domain.OrderLine
 	Fulfillments []domain.Fulfillment
+	// Returns are the counter sales of this order that came back, by
+	// fulfillment id (C2-015).
+	Returns map[string]CounterSaleReturn
+}
+
+// How a returned counter sale's money went back (C2-015).
+const (
+	// RefundVoid: returned the day it was sold; its payments were voided.
+	RefundVoid = "void"
+	// RefundExpense: returned another day; refunded as an expense of that day.
+	RefundExpense = "expense"
+	// RefundNone: no money had reached finance (anonymous or flagged sale).
+	RefundNone = "none"
+)
+
+// Where a return's refund stands (C2-015).
+const (
+	RefundDone    = "done"
+	RefundPending = "pending"
+)
+
+// CounterSaleReturn is the record of a counter sale taken back (C2-015).
+type CounterSaleReturn struct {
+	FulfillmentID string
+	OrderID       string
+	Reason        string
+	RefundMode    string
+	RefundMethod  string
+	RefundCents   int64
+	RefundStatus  string
+	ExpenseID     string
+	DamagedUnits  int
+	ActorUserID   string
+	ActorName     string
+	ReturnedAt    time.Time
+}
+
+// ReturnCounterSaleCommand is one return, already decided by the use case:
+// the returned delivery and lines, which lines are written off, and the record.
+type ReturnCounterSaleCommand struct {
+	Fulfillment domain.Fulfillment
+	Lines       []domain.OrderLine
+	// Damaged are the line ids written off instead of put back on sale.
+	Damaged map[string]bool
+	Record  CounterSaleReturn
+	// Folio names the sale in the ledger notes.
+	Folio string
+}
+
+// RefundInput is the expense a return of an earlier day is refunded as.
+type RefundInput struct {
+	AmountCents int64
+	Method      string
+	SpentOn     string
+	Description string
+	ActorUserID string
+	ActorName   string
+	// ExternalRef keys the expense in finance: the same refund asked for
+	// twice is one expense (C2-015 review).
+	ExternalRef string
 }
 
 // SizeSpec is one row of a size run being created or updated.
@@ -103,6 +163,20 @@ type Repository interface {
 	// a completed sale could not be recorded: the goods are gone, so the answer
 	// is never to pretend, and never to unwind.
 	FlagFulfillment(ctx context.Context, fulfillmentID, reason string) error
+	// ReturnCounterSale applies a return in one transaction: the delivery and
+	// lines become returned, every unit comes back to the shelf ('return'), a
+	// damaged one is written off at once ('adjust'), and the record is kept.
+	// A delivery already returned is answered as it stands (C2-015).
+	ReturnCounterSale(ctx context.Context, cmd ReturnCounterSaleCommand) (OrderAggregate, error)
+	// BeginReturn records the decision about a return BEFORE finance is asked
+	// to move money, and answers the decision stored: one already there wins,
+	// so a retry — even after midnight — keeps what was acted on.
+	BeginReturn(ctx context.Context, rec CounterSaleReturn) (CounterSaleReturn, error)
+	// DropReturnIntent forgets a decision nothing acted on (finance refused
+	// the void), while the sale is still sold.
+	DropReturnIntent(ctx context.Context, fulfillmentID string) error
+	// SettleReturnRefund marks a pending refund as recorded by its expense.
+	SettleReturnRefund(ctx context.Context, fulfillmentID, expenseID string) error
 	ListOrders(ctx context.Context, f ListOrdersFilter) ([]OrderAggregate, string, int, error)
 	GetOrder(ctx context.Context, id string, studentIDs []string) (OrderAggregate, error)
 
@@ -196,6 +270,12 @@ type FinanceWriter interface {
 	// under the charge's row lock. It is what makes the expiry sweep safe to run
 	// while a cashier is collecting.
 	CancelChargeIfUnpaid(ctx context.Context, chargeID string) error
+	// VoidSalePayments voids a counter sale's payments and cancels its charge,
+	// for a sale returned the day it was sold (C2-015). Idempotent.
+	VoidSalePayments(ctx context.Context, chargeID, reason, actorUserID string) error
+	// RecordRefund records the refund of a sale returned on a later day as an
+	// expense of that day, and returns the expense id (C2-015).
+	RecordRefund(ctx context.Context, in RefundInput) (string, error)
 }
 
 // CreateChargeInput is one charge the shop raises against a family.

@@ -30,6 +30,21 @@ type LoosePayment struct {
 	Description string
 }
 
+// VoidedSalePayment is one payment of a uniforms counter sale voided because
+// the sale was returned on its own day (C2-015). It no longer counts as money;
+// the cash-up lists it as cancelled on the day it was taken.
+type VoidedSalePayment struct {
+	PaymentID   string
+	ChargeID    string
+	Description string
+	AmountCents int64
+	Method      string
+	PaidOn      time.Time
+	Reason      string
+	VoidedBy    string
+	VoidedAt    time.Time
+}
+
 type ChargeWithPaid struct {
 	Charge    domain.Charge
 	PaidCents int64
@@ -504,6 +519,15 @@ type FinanceRepository interface {
 	// deposit — a counter sale's, paid straight against its charge — with what
 	// each one paid for. They are in the drawer as much as a deposit is.
 	ListLoosePaymentsOn(ctx context.Context, day time.Time) ([]LoosePayment, error)
+	// VoidSalePayments voids the payments of a uniforms counter sale returned
+	// on the day it was sold, and cancels its charge, in one transaction under
+	// the charge's row lock. A payment dated before today is a conflict (that
+	// return is an expense of its own day); a charge that is not a uniforms
+	// sale is invalid; repeating a done void returns what it voided (C2-015).
+	VoidSalePayments(ctx context.Context, chargeID, reason, actorUserID string, today time.Time) ([]VoidedSalePayment, error)
+	// ListVoidedSalePaymentsOn returns the sale payments voided that were
+	// taken on day, for the cash-up's cancelled list.
+	ListVoidedSalePaymentsOn(ctx context.Context, day time.Time) ([]VoidedSalePayment, error)
 
 	// VoidDeposit cancels a deposit and releases its allocations, in one
 	// transaction. The deposit row survives with its reason; the payments it

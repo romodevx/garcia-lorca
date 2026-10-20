@@ -48,6 +48,9 @@ type ExpenseRepository interface {
 	// CreateExpense stores a new expense and its "created" event in one
 	// transaction, and returns it as read back (category name, timestamps).
 	CreateExpense(ctx context.Context, e domain.Expense, created domain.ExpenseEvent) (domain.Expense, error)
+	// CreateExpenseOnce records an expense keyed by another module's
+	// reference; an existing one with that reference is returned instead.
+	CreateExpenseOnce(ctx context.Context, e domain.Expense, created domain.ExpenseEvent, externalRef string) (domain.Expense, error)
 	// UpdateExpense locks the expense, runs change on it and stores the result
 	// with its event, in one transaction. KindNotFound when there is none.
 	UpdateExpense(ctx context.Context, id string, change ExpenseChange) (domain.Expense, error)

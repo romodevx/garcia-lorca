@@ -28,6 +28,8 @@ type fakeExpenseRepo struct {
 	closures   []domain.CashCutClosure
 	income     domain.MethodTotals
 	creditNote int64
+	// byRef: external reference -> expense id (C2-015).
+	byRef map[string]string
 	// changedDays forces DayChangedSince to answer true for a day.
 	changedDays map[string]bool
 	// beforeUpdate runs inside UpdateExpense before the row is read: another
@@ -84,6 +86,17 @@ func (r *fakeExpenseRepo) CreateExpense(_ context.Context, e domain.Expense, ev 
 	r.expenses[e.ID()] = e
 	r.events = append(r.events, ev)
 	return e, nil
+}
+
+func (r *fakeExpenseRepo) CreateExpenseOnce(ctx context.Context, e domain.Expense, ev domain.ExpenseEvent, externalRef string) (domain.Expense, error) {
+	if r.byRef == nil {
+		r.byRef = map[string]string{}
+	}
+	if id, ok := r.byRef[externalRef]; ok {
+		return r.expenses[id], nil
+	}
+	r.byRef[externalRef] = e.ID()
+	return r.CreateExpense(ctx, e, ev)
 }
 
 func (r *fakeExpenseRepo) UpdateExpense(_ context.Context, id string, change ports.ExpenseChange) (domain.Expense, error) {

@@ -268,6 +268,9 @@ type expenseModel struct {
 	CreatedByName      string     `gorm:"column:created_by_name"`
 	CreatedAt          time.Time  `gorm:"column:created_at;default:now()"`
 	UpdatedAt          time.Time  `gorm:"column:updated_at;default:now()"`
+	// ExternalRef is the reference of the module that recorded it (C2-015);
+	// nil for an expense typed by a person.
+	ExternalRef *string `gorm:"column:external_ref"`
 	// CategoryName is read with the expense (a join), never written.
 	CategoryName string `gorm:"column:category_name;->"`
 }

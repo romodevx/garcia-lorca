@@ -29,6 +29,7 @@ type fakeUniforms struct {
 	lastItemsFilter  client.ListItemsFilter
 	lastOrdersFilter client.ListOrdersFilter
 	lastSale         client.CounterSaleInput
+	lastReturn       client.ReturnSaleInput
 	lastAdjustActor  string
 	lastReceiveActor string
 	lastSizes        []client.UniformSizeSpec
@@ -71,6 +72,11 @@ func (f *fakeUniforms) AdjustStock(_ context.Context, _ string, _ int32, _, acto
 
 func (f *fakeUniforms) CounterSale(_ context.Context, in client.CounterSaleInput) (client.UniformOrder, error) {
 	f.lastSale = in
+	return f.order, f.err
+}
+
+func (f *fakeUniforms) ReturnCounterSale(_ context.Context, in client.ReturnSaleInput) (client.UniformOrder, error) {
+	f.lastReturn = in
 	return f.order, f.err
 }
 
@@ -396,5 +402,42 @@ func TestCreateItemTakesNoCode(t *testing.T) {
 	h.ListItems(rec, uniformsRequest(http.MethodGet, "/api/v1/uniforms/items", "", nil))
 	if strings.Contains(rec.Body.String(), `"code"`) {
 		t.Errorf("catalogue carries a code: %s", rec.Body.String())
+	}
+}
+
+// C2-015: a return names the order in the path, the reason and the damaged
+// lines in the body, and who returned it is the signed-in caller.
+func TestReturnCounterSaleForwardsTheBodyAndTheCaller(t *testing.T) {
+	fake := &fakeUniforms{order: client.UniformOrder{ID: "0f000000-0000-4000-8000-000000000001"}}
+	h := handler.NewUniformsHandler(fake)
+	rec := httptest.NewRecorder()
+	r := uniformsRequest(http.MethodPost, "/api/v1/uniforms/orders/0f000000-0000-4000-8000-000000000001/return",
+		`{"reason":"Talla equivocada","damagedLineIds":["ln-1"],"refundMethod":"cash","actorUserId":"usr-forged"}`, nil)
+	r.SetPathValue("id", "0f000000-0000-4000-8000-000000000001")
+
+	h.ReturnCounterSale(rec, r)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d (%s)", rec.Code, rec.Body.String())
+	}
+	got := fake.lastReturn
+	if got.OrderID != "0f000000-0000-4000-8000-000000000001" || got.Reason != "Talla equivocada" ||
+		len(got.DamagedLineIDs) != 1 || got.RefundMethod != "cash" || got.ActorUserID != "usr-7" {
+		t.Errorf("forwarded %+v", got)
+	}
+}
+
+// An id that cannot be an order's is 404 at the edge, never a database error.
+func TestReturnCounterSaleWithAMalformedIDIs404(t *testing.T) {
+	fake := &fakeUniforms{}
+	h := handler.NewUniformsHandler(fake)
+	rec := httptest.NewRecorder()
+	r := uniformsRequest(http.MethodPost, "/api/v1/uniforms/orders/nope/return", `{"reason":"x"}`, nil)
+	r.SetPathValue("id", "nope")
+
+	h.ReturnCounterSale(rec, r)
+
+	if rec.Code != http.StatusNotFound || fake.lastReturn.OrderID != "" {
+		t.Errorf("status = %d, forwarded %+v", rec.Code, fake.lastReturn)
 	}
 }
