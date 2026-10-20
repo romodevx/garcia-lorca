@@ -953,7 +953,7 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	// goods and takes money in one act. RequireAllPermissions names the missing
 	// one so the panel can disable the entry point and SAY WHY -- otherwise a
 	// cashier keys in six lines with a parent waiting and eats a bare 403.
-	uniformsH := handler.NewUniformsHandler(uniformsClient).WithLevelGuard(configClient)
+	uniformsH := handler.NewUniformsHandler(uniformsClient).WithLevelGuard(configClient).WithNames(authClient)
 	uniformsStock := func(h http.HandlerFunc) http.Handler {
 		return guard.Protect("uniforms", requireAuthChanged(middleware.RequirePermission("uniforms:stock")(http.HandlerFunc(h))))
 	}
@@ -984,6 +984,8 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("POST /api/v1/uniforms/counter-sale", uniformsSell(uniformsH.CounterSale))
 	mux.Handle("GET /api/v1/uniforms/orders", uniformsOrders(uniformsH.ListOrders))
 	mux.Handle("GET /api/v1/uniforms/orders/{id}", uniformsOrders(uniformsH.GetOrder))
+	// C2-015: a return undoes a sale, so it takes what a sale takes.
+	mux.Handle("POST /api/v1/uniforms/orders/{id}/return", uniformsSell(uniformsH.ReturnCounterSale))
 
 	// Receipts (task 12): proof of what a deposit or a sale took, as JSON for the
 	// 80 mm ticket the browser prints and as a PDF. A payment's answers to whoever

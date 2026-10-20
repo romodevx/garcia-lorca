@@ -292,6 +292,14 @@ func (b *Builder) Sale(ctx context.Context, orderID string) (Receipt, error) {
 		Tenders:    []TenderLine{},
 		ReceivedBy: b.sellerOf(ctx, order.CreatedByUserID),
 	}
+	// C2-015: a returned sale reads like a voided payment — the ticket says
+	// CANCELADO with the reason — so a reprint is never taken for money still
+	// in the drawer.
+	for _, f := range order.Fulfillments {
+		if f.Return != nil {
+			r.Voided, r.VoidReason = true, "Devolución: "+f.Return.Reason
+		}
+	}
 	for _, l := range order.Lines {
 		r.Lines = append(r.Lines, Line{
 			Description: fmt.Sprintf("%s · talla %s × %d", l.ItemName, l.SizeLabel, l.Qty),

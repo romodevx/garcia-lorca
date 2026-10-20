@@ -687,6 +687,9 @@ type CashUp struct {
 	// Payments taken outside a deposit (a counter sale's). The totals count
 	// them: the money is in the drawer.
 	Payments []CashUpPayment `json:"payments"`
+	// CancelledSales are counter-sale payments of the day voided by a
+	// same-day return (C2-015): listed, never counted.
+	CancelledSales []CancelledSale `json:"cancelledSales"`
 	// T10: the day's expenses (cancelled ones listed, not counted), what they
 	// took out by method, and the cash the drawer should hold.
 	Expenses          []Expense    `json:"expenses"`
@@ -716,6 +719,18 @@ type CashUpPayment struct {
 	CardType    string `json:"cardType,omitempty"`
 }
 
+// CancelledSale is a counter-sale payment voided by a same-day return (C2-015).
+type CancelledSale struct {
+	PaymentID   string `json:"paymentId"`
+	ChargeID    string `json:"chargeId"`
+	Description string `json:"description"`
+	AmountCents int64  `json:"amountCents"`
+	Method      string `json:"method"`
+	PaidOn      string `json:"paidOn"`
+	Reason      string `json:"reason"`
+	VoidedAt    string `json:"voidedAt,omitempty"`
+}
+
 // DailyCashUp returns what came in on one day, and in what form.
 func (c *FinanceClient) DailyCashUp(ctx context.Context, day string) (CashUp, error) {
 	res, err := c.rpc.DailyCashUp(ctx, connect.NewRequest(&financev1.DailyCashUpRequest{Day: day}))
@@ -734,7 +749,20 @@ func toCashUp(m *financev1.DailyCashUpResponse) CashUp {
 			Reference: paid.Reference, PaidAt: paid.PaidAt, PaidOn: paid.PaidOn, Description: p.GetDescription(), CardType: paid.CardType,
 		})
 	}
+	cancelledSales := make([]CancelledSale, 0, len(m.GetCancelledSales()))
+	for _, v := range m.GetCancelledSales() {
+		at := ""
+		if ts := v.GetVoidedAt(); ts != nil {
+			at = ts.AsTime().UTC().Format(time.RFC3339)
+		}
+		cancelledSales = append(cancelledSales, CancelledSale{
+			PaymentID: v.GetPaymentId(), ChargeID: v.GetChargeId(), Description: v.GetDescription(),
+			AmountCents: v.GetAmountCents(), Method: v.GetMethod(), PaidOn: v.GetPaidOn(),
+			Reason: v.GetReason(), VoidedAt: at,
+		})
+	}
 	return CashUp{
+		CancelledSales:  cancelledSales,
 		Deposits:        toDeposits(m.GetDeposits()),
 		Cancelled:       toDeposits(m.GetCancelled()),
 		Superseded:      toDeposits(m.GetSuperseded()),

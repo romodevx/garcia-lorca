@@ -185,3 +185,20 @@ func TestTendersCrossTheWireBothWays(t *testing.T) {
 		t.Errorf("cash-up credit notes = %d, total = %d", cut.CreditNoteCents, cut.TotalCents)
 	}
 }
+
+// C2-015: a sale returned the day it was sold is on the cut as cancelled, with
+// its reason, and counts for nothing.
+func TestToCashUpListsCancelledSales(t *testing.T) {
+	cut := toCashUp(&financev1.DailyCashUpResponse{CancelledSales: []*financev1.VoidedSalePayment{{
+		PaymentId: "p1", ChargeId: "c1", Description: "Uniformes · U-2026-000002", AmountCents: 25000,
+		Method: "cash", PaidOn: "2026-10-19", Reason: "Talla equivocada",
+	}}})
+
+	if len(cut.CancelledSales) != 1 {
+		t.Fatalf("cancelled sales = %+v", cut.CancelledSales)
+	}
+	got := cut.CancelledSales[0]
+	if got.Description != "Uniformes · U-2026-000002" || got.AmountCents != 25000 || got.Reason != "Talla equivocada" || got.PaidOn != "2026-10-19" {
+		t.Errorf("cancelled sale = %+v", got)
+	}
+}

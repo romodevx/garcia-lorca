@@ -84,6 +84,34 @@ type UniformFulfillment struct {
 	DeadlineEstimated bool   `json:"deadlineEstimated"`
 	RequiresAttention bool   `json:"requiresAttention"`
 	AttentionReason   string `json:"attentionReason,omitempty"`
+	// Return is how a returned counter sale was undone (C2-015).
+	Return *UniformReturn `json:"return,omitempty"`
+}
+
+// UniformReturn is a counter sale taken back whole (C2-015). RefundMode: void
+// (the day of the sale, its payments voided) | expense (another day, refunded
+// as an expense of that day) | none (no money reached finance).
+type UniformReturn struct {
+	Reason       string `json:"reason"`
+	RefundMode   string `json:"refundMode"`
+	RefundMethod string `json:"refundMethod,omitempty"`
+	RefundCents  int64  `json:"refundCents"`
+	// RefundStatus is done or pending: the expense is still to be recorded.
+	RefundStatus string `json:"refundStatus"`
+	DamagedUnits int32  `json:"damagedUnits"`
+	ActorName    string `json:"actorName,omitempty"`
+	ReturnedAt   string `json:"returnedAt,omitempty"`
+}
+
+// ReturnSaleInput is a counter sale coming back (C2-015). The actor is the
+// signed-in caller, set by the handler.
+type ReturnSaleInput struct {
+	OrderID        string
+	Reason         string
+	DamagedLineIDs []string
+	RefundMethod   string
+	ActorUserID    string
+	ActorName      string
 }
 
 // UniformOrder is what a family asked for, with everything hanging off it. Label
@@ -328,6 +356,33 @@ func (c *UniformsClient) CounterSale(ctx context.Context, in CounterSaleInput) (
 	return toUniformOrder(res.Msg.GetOrder()), nil
 }
 
+// ReturnCounterSale takes a counter sale back whole (C2-015).
+func (c *UniformsClient) ReturnCounterSale(ctx context.Context, in ReturnSaleInput) (UniformOrder, error) {
+	res, err := c.rpc.ReturnCounterSale(ctx, connect.NewRequest(&uniformsv1.ReturnCounterSaleRequest{
+		OrderId: in.OrderID, Reason: in.Reason, DamagedLineIds: in.DamagedLineIDs,
+		RefundMethod: in.RefundMethod, ActorUserId: in.ActorUserID, ActorName: in.ActorName,
+	}))
+	if err != nil {
+		return UniformOrder{}, err
+	}
+	return toUniformOrder(res.Msg.GetOrder()), nil
+}
+
+func toUniformReturn(r *uniformsv1.CounterSaleReturn) *UniformReturn {
+	if r == nil {
+		return nil
+	}
+	at := ""
+	if ts := r.GetReturnedAt(); ts != nil {
+		at = ts.AsTime().UTC().Format("2006-01-02T15:04:05Z")
+	}
+	return &UniformReturn{
+		Reason: r.GetReason(), RefundMode: r.GetRefundMode(), RefundMethod: r.GetRefundMethod(),
+		RefundCents: r.GetRefundCents(), RefundStatus: r.GetRefundStatus(), DamagedUnits: r.GetDamagedUnits(),
+		ActorName: r.GetActorName(), ReturnedAt: at,
+	}
+}
+
 // ListOrdersFilter is the panel's query. StudentIDs is security-bearing: when set,
 // the SERVICE restricts the read to those pupils, so a caller cannot reach
 // another family's order by id.
@@ -418,6 +473,7 @@ var fulfillmentStatuses = map[string]uniformsv1.FulfillmentStatus{
 	"expired":          uniformsv1.FulfillmentStatus_FULFILLMENT_STATUS_EXPIRED,
 	"cancelled":        uniformsv1.FulfillmentStatus_FULFILLMENT_STATUS_CANCELLED,
 	"sold_at_counter":  uniformsv1.FulfillmentStatus_FULFILLMENT_STATUS_SOLD_AT_COUNTER,
+	"returned":         uniformsv1.FulfillmentStatus_FULFILLMENT_STATUS_RETURNED,
 }
 
 var fulfillmentStatusNames = map[uniformsv1.FulfillmentStatus]string{
@@ -428,6 +484,7 @@ var fulfillmentStatusNames = map[uniformsv1.FulfillmentStatus]string{
 	uniformsv1.FulfillmentStatus_FULFILLMENT_STATUS_EXPIRED:          "expired",
 	uniformsv1.FulfillmentStatus_FULFILLMENT_STATUS_CANCELLED:        "cancelled",
 	uniformsv1.FulfillmentStatus_FULFILLMENT_STATUS_SOLD_AT_COUNTER:  "sold_at_counter",
+	uniformsv1.FulfillmentStatus_FULFILLMENT_STATUS_RETURNED:         "returned",
 }
 
 func fulfillmentStatusFromString(s string) uniformsv1.FulfillmentStatus {
@@ -440,6 +497,7 @@ var lineStatusNames = map[uniformsv1.LineStatus]string{
 	uniformsv1.LineStatus_LINE_STATUS_SOLD:           "sold",
 	uniformsv1.LineStatus_LINE_STATUS_RELEASED:       "released",
 	uniformsv1.LineStatus_LINE_STATUS_CANCELLED:      "cancelled",
+	uniformsv1.LineStatus_LINE_STATUS_RETURNED:       "returned",
 }
 
 var orderLabelNames = map[uniformsv1.OrderLabel]string{
@@ -448,6 +506,7 @@ var orderLabelNames = map[uniformsv1.OrderLabel]string{
 	uniformsv1.OrderLabel_ORDER_LABEL_IN_PROGRESS:    "in_progress",
 	uniformsv1.OrderLabel_ORDER_LABEL_CLOSED:         "closed",
 	uniformsv1.OrderLabel_ORDER_LABEL_CLOSED_PARTIAL: "closed_partial",
+	uniformsv1.OrderLabel_ORDER_LABEL_RETURNED:       "returned",
 }
 
 func toUniformSize(s *uniformsv1.StockLevel) UniformSize {
@@ -492,6 +551,7 @@ func toUniformOrder(o *uniformsv1.Order) UniformOrder {
 			FinanceChargeID: f.GetFinanceChargeId(), PickupDeadline: f.GetPickupDeadline(),
 			DeadlineEstimated: f.GetDeadlineEstimated(),
 			RequiresAttention: f.GetRequiresAttention(), AttentionReason: f.GetAttentionReason(),
+			Return: toUniformReturn(f.GetCounterSaleReturn()),
 		})
 	}
 	created := ""
