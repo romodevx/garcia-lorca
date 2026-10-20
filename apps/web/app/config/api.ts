@@ -51,9 +51,14 @@ export interface Level {
   sortOrder?: number;
 }
 
-/** A level's numeric grading: preescolar usually has none (`enabled:false`). */
+/**
+ * A level's grading: with numbers (`enabled`), with letters A–D instead
+ * (`letters`, preescolar) or none (maternal). Never numbers and letters at once.
+ */
 export interface LevelGrading {
   enabled: boolean;
+  /** Absent from an older gateway: read as false. */
+  letters?: boolean;
   min: number;
   max: number;
   /** 0, 1 or 2. */
