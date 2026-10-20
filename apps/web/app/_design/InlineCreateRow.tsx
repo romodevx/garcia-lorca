@@ -278,7 +278,7 @@ export function InlineCreateRow({
         padding: "10px 16px",
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10 }}>
         {columns.map((c, i) => {
           const invalid = missing[c.key] === true || format.errors[c.key] !== undefined;
           const describedBy = [
@@ -357,16 +357,46 @@ export function InlineCreateRow({
             </div>
           );
         })}
-        <span style={{ fontSize: 12, color: "var(--text-faint)", whiteSpace: "nowrap" }}>
-          {saving ? "Guardando…" : "Enter guarda"}
-        </span>
+        {/*
+          A visible way to save (owner, 20-oct): Enter alone was not obvious.
+          Never disabled (house rule): while saving it says so and a repeat
+          click is ignored by `save` itself.
+        */}
+        <button
+          type="button"
+          onClick={() => void save()}
+          aria-busy={saving || undefined}
+          style={{
+            alignSelf: "flex-end",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            minHeight: 44,
+            padding: "0 14px",
+            borderRadius: "var(--r-md)",
+            border: "none",
+            background: "var(--primary)",
+            color: "var(--primary-ink)",
+            fontWeight: 700,
+            fontSize: 14.5,
+            whiteSpace: "nowrap",
+            cursor: "pointer",
+          }}
+        >
+          <Icon name="check" size={18} stroke={2.6} />
+          {saving ? "Guardando…" : "Guardar"}
+        </button>
         <button
           type="button"
           onClick={cancel}
           aria-label="Cancelar"
           style={{
+            alignSelf: "flex-end",
+            minWidth: 44,
+            minHeight: 44,
+            borderRadius: "var(--r-md)",
             background: "transparent",
-            border: "none",
+            border: "1px solid var(--border)",
             color: "var(--text-muted)",
             cursor: "pointer",
             display: "grid",
@@ -376,6 +406,7 @@ export function InlineCreateRow({
           <Icon name="close" size={18} />
         </button>
       </div>
+      <p style={{ margin: "6px 0 0", fontSize: 12.5, color: "var(--text-faint)" }}>También puedes presionar Enter.</p>
 
       {columns.map((c) => {
         const message = format.errors[c.key] ?? (missing[c.key] === true ? missingMessage(c) : undefined);

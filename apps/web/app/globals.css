@@ -76,6 +76,12 @@
   --primary:     var(--lime);
   --primary-press: var(--lime-deep);
   --primary-ink: #0C3318;   /* text/icon on lime */
+  /* «Estructura de la escuela» (owner, option 1): one colour per kind, everywhere —
+     level green, grade blue, group amber. Text stays on each chip (never colour alone). */
+  --tier-level:      #16A34A;
+  --tier-level-bg:   #DCFCE7;  --tier-level-fg: #14532D;
+  --tier-grade-bg:   #E0EAFF;  --tier-grade-fg: #1E3A8A;  --tier-grade-border: #93C5FD;
+  --tier-group-bg:   #FEF3C7;  --tier-group-fg: #78350F;  --tier-group-border: #FCD34D;
   --on-color-ink:#FFFFFF;
 
   --shadow-card: 0 1px 2px rgba(16,40,24,.04), 0 6px 18px rgba(16,40,24,.05);
@@ -107,6 +113,10 @@
   --primary:     var(--lime);
   --primary-press: #88D40A;
   --primary-ink: #06270F;
+  --tier-level:      #4ADE80;
+  --tier-level-bg:   #14532D;  --tier-level-fg: #BBF7D0;
+  --tier-grade-bg:   #172554;  --tier-grade-fg: #BFDBFE;  --tier-grade-border: #1E40AF;
+  --tier-group-bg:   #3B2A07;  --tier-group-fg: #FDE68A;  --tier-group-border: #92400E;
   --on-color-ink:#06270F;
 
   --shadow-card: 0 1px 2px rgba(0,0,0,.4), 0 8px 22px rgba(0,0,0,.35);
