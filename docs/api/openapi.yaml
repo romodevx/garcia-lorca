@@ -972,6 +972,64 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /api/v1/uniforms/orders/{id}/return:
+    post:
+      tags: [uniforms-orders]
+      summary: Return a counter sale, whole
+      description: >
+        C2-015. The garments come back to the shelf, or are written off when
+        they came back damaged (`damagedLineIds`). The money: the day of the
+        sale its payments are voided and the cash-up lists them as cancelled;
+        another day nothing of that day is rewritten and the refund is an
+        expense of today, by `refundMethod` (required then). Returning again a
+        returned sale changes nothing; one whose refund is pending finishes it.
+        Who returned it is the signed-in caller. Requires `uniforms:write` and
+        `finance:write`, as a sale does.
+      operationId: returnUniformCounterSale
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 1, maxLength: 200 }
+                damagedLineIds:
+                  type: array
+                  items: { type: string, format: uuid }
+                  description: Lines of this sale that came back damaged.
+                refundMethod:
+                  type: string
+                  enum: [cash, card, transfer]
+                  description: How the money goes back when the sale is of an earlier day.
+            examples:
+              sameDay:
+                summary: The wrong size, returned the same day
+                value: { reason: Talla equivocada }
+              laterDay:
+                summary: Returned the next day, refunded in cash, one garment damaged
+                value: { reason: Venía descosida, refundMethod: cash, damagedLineIds: [3f2504e0-4f89-41d3-9a0c-0305e82c3301] }
+      responses:
+        '200':
+          description: The order, its delivery now `returned` with the `return` record.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Order' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Not a counter sale, or finance refused the void.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
   /api/v1/uniforms/settings:
     get:
       tags: [uniforms-settings]
@@ -10059,6 +10117,12 @@ components:
           type: array
           description: T10 — earlier closures of the day that were reopened, newest first.
           items: { $ref: '#/components/schemas/CashCutClosure' }
+        cancelledSales:
+          type: array
+          description: >
+            C2-015 — counter-sale payments of the day voided by a same-day
+            return. Listed, never counted.
+          items: { $ref: '#/components/schemas/CancelledSale' }
 
     CashUpPayment:
       type: object
@@ -10974,8 +11038,9 @@ components:
 
     LineStatus:
       type: string
-      enum: [awaiting_stock, reserved, sold, released, cancelled]
+      enum: [awaiting_stock, reserved, sold, released, cancelled, returned]
       description: |
+        `returned`: sold, then brought back with the whole sale (C2-015).
         `reserved` is the only status that holds stock. `released` and `cancelled`
         are terminal: a line let go is not re-picked, because the school has
         reclaimed the goods and may already have sold them to someone else. The
@@ -10983,15 +11048,17 @@ components:
 
     FulfillmentStatus:
       type: string
-      enum: [picking, ready_for_pickup, paid, dispatched, expired, cancelled, sold_at_counter]
+      enum: [picking, ready_for_pickup, paid, dispatched, expired, cancelled, sold_at_counter, returned]
       description: |
-        `sold_at_counter` is terminal from birth: the goods were handed over as
-        they were sold, so no sweep may ever return them to stock.
+        `sold_at_counter` is born so: the goods were handed over as they were
+        sold, so no sweep may ever return them to stock. The one thing that may
+        follow is `returned`, which staff ask for (C2-015); it is terminal.
 
     OrderLabel:
       type: string
-      enum: [awaiting_stock, partial, in_progress, closed, closed_partial]
+      enum: [awaiting_stock, partial, in_progress, closed, closed_partial, returned]
       description: |
+        `returned`: every line came back (C2-015).
         The order's DERIVED state, for display only, recomputed on every read so
         it cannot drift. `closed_partial` is the honest ending for an order that
         finished having delivered only some of what was asked for.
@@ -11055,6 +11122,46 @@ components:
             No rule could settle this one — a payment that arrived after expiry,
             say. It surfaces in its own filter; silence is not an option.
         attentionReason: { type: string }
+        return: { $ref: '#/components/schemas/UniformReturn' }
+
+    UniformReturn:
+      type: object
+      description: >
+        A counter sale taken back whole (C2-015). Present only on a returned
+        delivery.
+      required: [reason, refundMode, refundCents, refundStatus, damagedUnits]
+      properties:
+        reason: { type: string, maxLength: 200, example: Talla equivocada }
+        refundMode:
+          type: string
+          enum: [void, expense, none]
+          description: >
+            void: returned the day it was sold, its payments voided (the cash-up
+            lists them as cancelled). expense: another day, refunded as an
+            expense of that day. none: no money had reached finance.
+        refundMethod: { type: string, enum: [cash, card, transfer] }
+        refundCents: { type: integer, format: int64 }
+        refundStatus:
+          type: string
+          enum: [done, pending]
+          description: pending — the expense is still to be recorded; returning again finishes it.
+        damagedUnits: { type: integer, description: Units written off instead of put back on sale. }
+        actorName: { type: string }
+        returnedAt: { type: string, format: date-time }
+
+    CancelledSale:
+      type: object
+      description: A counter-sale payment voided by a same-day return (C2-015).
+      required: [paymentId, chargeId, description, amountCents, method, paidOn, reason]
+      properties:
+        paymentId: { type: string, format: uuid }
+        chargeId: { type: string, format: uuid }
+        description: { type: string, example: "Uniformes · U-2026-000002" }
+        amountCents: { type: integer, format: int64 }
+        method: { type: string, enum: [cash, card, transfer, credit_note] }
+        paidOn: { type: string, format: date }
+        reason: { type: string }
+        voidedAt: { type: string, format: date-time }
 
     Order:
       type: object

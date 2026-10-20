@@ -60,6 +60,12 @@ service UniformsService {
   // are sold, handed over, and charged, and the delivery is born terminal so no
   // sweep can ever release stock that has physically left.
   rpc CounterSale(CounterSaleRequest) returns (CounterSaleResponse);
+  // ReturnCounterSale takes a counter sale back whole (C2-015). The garments
+  // return to the shelf, or are written off when they came back damaged. The
+  // money: the day of the sale its payments are voided; another day the refund
+  // is an expense of that day. Repeating a finished return changes nothing;
+  // repeating one whose refund is pending finishes it.
+  rpc ReturnCounterSale(ReturnCounterSaleRequest) returns (ReturnCounterSaleResponse);
   // CreateOrder places an order that will be collected later. Lines whose size
   // is in stock are reserved; the rest wait for the school to restock.
   rpc CreateOrder(CreateOrderRequest) returns (CreateOrderResponse);
@@ -199,6 +205,8 @@ enum FulfillmentStatus {
   FULFILLMENT_STATUS_EXPIRED = 5;
   FULFILLMENT_STATUS_CANCELLED = 6;
   FULFILLMENT_STATUS_SOLD_AT_COUNTER = 7;
+  // A counter sale brought back whole (C2-015). Terminal.
+  FULFILLMENT_STATUS_RETURNED = 8;
 }
 
 // LineStatus is what one garment in one size is doing. reserved is the only
@@ -212,6 +220,8 @@ enum LineStatus {
   LINE_STATUS_SOLD = 3;
   LINE_STATUS_RELEASED = 4;
   LINE_STATUS_CANCELLED = 5;
+  // Sold, then brought back with its sale (C2-015). Terminal.
+  LINE_STATUS_RETURNED = 6;
 }
 
 // OrderLabel is the order's DERIVED state, for display only. It is computed from
@@ -225,6 +235,8 @@ enum OrderLabel {
   ORDER_LABEL_IN_PROGRESS = 3;
   ORDER_LABEL_CLOSED = 4;
   ORDER_LABEL_CLOSED_PARTIAL = 5;
+  // Every line came back (C2-015).
+  ORDER_LABEL_RETURNED = 6;
 }
 
 message OrderLine {
@@ -269,6 +281,26 @@ message Fulfillment {
   google.protobuf.Timestamp paid_at = 16;
   google.protobuf.Timestamp dispatched_at = 17;
   string cancel_reason = 18;
+  // Present when the counter sale was returned (C2-015).
+  CounterSaleReturn counter_sale_return = 19;
+}
+
+// CounterSaleReturn is how a returned counter sale was undone (C2-015).
+message CounterSaleReturn {
+  string reason = 1;
+  // void: returned the day it was sold, its payments voided in finance.
+  // expense: returned another day, refunded as an expense of that day.
+  // none: no money had reached finance (an anonymous sale, or one flagged).
+  string refund_mode = 2;
+  // cash | card | transfer, for an expense refund; empty otherwise.
+  string refund_method = 3;
+  int64 refund_cents = 4;
+  // done | pending. pending: the expense is still to be recorded; retrying
+  // the return finishes it.
+  string refund_status = 5;
+  int32 damaged_units = 6;
+  string actor_name = 7;
+  google.protobuf.Timestamp returned_at = 8;
 }
 
 message Order {
@@ -452,6 +484,24 @@ message SaleTender {
 message CounterSaleResponse {
   Order order = 1;
   bool replayed = 2;
+}
+
+message ReturnCounterSaleRequest {
+  string order_id = 1;
+  // Required: why the sale came back.
+  string reason = 2;
+  // The order lines that came back damaged: written off, not put on sale.
+  repeated string damaged_line_ids = 3;
+  // How the money goes back when the sale is of an earlier day: cash | card |
+  // transfer. Ignored the day of the sale (its payments are voided).
+  string refund_method = 4;
+  // The authenticated caller, set by the gateway — never by a client.
+  string actor_user_id = 5;
+  string actor_name = 6;
+}
+
+message ReturnCounterSaleResponse {
+  Order order = 1;
 }
 
 message OrderLineRequest {
