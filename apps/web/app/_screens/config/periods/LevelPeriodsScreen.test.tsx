@@ -24,6 +24,7 @@ vi.mock("../../../config/api", () => {
     listLevels: vi.fn(),
     listGradeLevels: vi.fn(),
     listEvaluationPeriods: vi.fn(),
+    listTerms: vi.fn(),
     saveGradeEvaluationPeriods: vi.fn(),
     copyEvaluationPeriods: vi.fn(),
   };
@@ -53,6 +54,7 @@ beforeEach(() => {
   mocked.listCycles.mockResolvedValue([OLD, CYCLE]);
   mocked.listLevels.mockResolvedValue([LEVEL]);
   mocked.listGradeLevels.mockResolvedValue([G3, G1, G2]);
+  mocked.listTerms.mockResolvedValue([]);
   mocked.listEvaluationPeriods.mockImplementation(async (_b, scope) => store.filter((p) => p.cycleId === scope.cycleId));
   mocked.saveGradeEvaluationPeriods.mockImplementation(async (_b, grade, cycleId, inputs) =>
     inputs.map((p, i) => period(`s${i}`, grade, p.ordinal, p.name, p.startsOn, p.endsOn)).map((p) => ({ ...p, cycleId })),
@@ -74,6 +76,32 @@ const gradeBlock = (name: string): HTMLElement => screen.getByRole("region", { n
 const row = (grade: string, n: number): HTMLElement => within(gradeBlock(grade)).getByRole("group", { name: `Periodo ${n}` });
 const field = (grade: string, n: number, label: "Nombre" | "Inicio" | "Fin"): HTMLInputElement =>
   within(row(grade, n)).getByLabelText(label) as HTMLInputElement;
+
+describe("LevelPeriodsScreen — a new row proposes the level's own periods", () => {
+  it("offers the level's semesters, not trimesters, for a grade with no periods", async () => {
+    mocked.listTerms.mockResolvedValue([
+      { id: "t1", cycleId: "c1", levelId: "l1", name: "1.ER SEMESTRE", ordinal: 1, startsOn: "2026-08-24", endsOn: "2027-01-22", months: [] },
+      { id: "t2", cycleId: "c1", levelId: "l1", name: "2.º SEMESTRE", ordinal: 2, startsOn: "2027-01-25", endsOn: "2027-07-09", months: [] },
+    ]);
+    renderScreen();
+    await screen.findByRole("region", { name: "Periodos de 3° PRIMARIA" });
+    await waitFor(() => expect(mocked.listTerms).toHaveBeenCalledWith(expect.anything(), "c1", "l1"));
+    const add = within(gradeBlock("3° PRIMARIA")).getByRole("button", { name: "Agregar periodo" });
+    await userEvent.click(add);
+    await userEvent.click(add);
+    expect([field("3° PRIMARIA", 1, "Nombre").value, field("3° PRIMARIA", 1, "Fin").value]).toEqual(["1.ER SEMESTRE", "2027-01-22"]);
+    expect([field("3° PRIMARIA", 2, "Nombre").value, field("3° PRIMARIA", 2, "Inicio").value]).toEqual(["2.º SEMESTRE", "2027-01-25"]);
+  });
+
+  it("still offers trimesters when the level's periods cannot be read", async () => {
+    mocked.listTerms.mockRejectedValue(new Error("down"));
+    renderScreen();
+    await screen.findByRole("region", { name: "Periodos de 3° PRIMARIA" });
+    await userEvent.click(within(gradeBlock("3° PRIMARIA")).getByRole("button", { name: "Agregar periodo" }));
+    expect(field("3° PRIMARIA", 1, "Nombre").value).toBe("1.er trimestre");
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+});
 
 describe("LevelPeriodsScreen — a level's grades with their evaluation periods (T14)", () => {
   it("shows every grade of the level in school order with its own periods, for the active cycle", async () => {

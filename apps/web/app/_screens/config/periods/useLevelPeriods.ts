@@ -10,6 +10,7 @@ import {
   listEvaluationPeriods,
   listGradeLevels,
   listLevels,
+  listTerms,
   saveGradeEvaluationPeriods,
   type Cycle,
   type EvaluationPeriod,
@@ -25,6 +26,7 @@ import {
   type PeriodDraft,
   type PeriodField,
   type PeriodProblem,
+  type PeriodTemplate,
 } from "../../../config/evaluationPeriods";
 
 /** How long a plain notice stays. "Deshacer" has no clock: the person closes it (ISSUE-CC-105). */
@@ -124,6 +126,7 @@ export function useLevelPeriods(levelId: string): LevelPeriods {
   const [busy, setBusy] = useState<ByGrade<boolean>>({});
   const [notice, setNotice] = useState<string | undefined>(undefined);
   const [undo, setUndo] = useState<PendingUndo | undefined>(undefined);
+  const [levelTerms, setLevelTerms] = useState<PeriodTemplate[]>([]);
   const newKeys = useRef(0);
   const [attempt, setAttempt] = useState(0);
   // The cycle on screen right now: an answer for another cycle is dropped.
@@ -192,6 +195,23 @@ export function useLevelPeriods(levelId: string): LevelPeriods {
     };
   }, [cycleId, levelId, grades, adopt, attempt]);
 
+  // The level's own periods (step 4) in this cycle: what a new row proposes.
+  // Only a suggestion — when they cannot be read, rows fall back to trimesters.
+  useEffect(() => {
+    setLevelTerms([]);
+    if (cycleId === undefined) return;
+    let live = true;
+    listTerms(API_URL, cycleId, levelId)
+      .then((ts) => {
+        if (!live) return;
+        setLevelTerms([...ts].sort((a, b) => a.startsOn.localeCompare(b.startsOn)).map(({ name, startsOn, endsOn }) => ({ name, startsOn, endsOn })));
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [cycleId, levelId]);
+
   useEffect(() => {
     if (notice === undefined) return;
     const timer = setTimeout(() => setNotice(undefined), NOTICE_MS);
@@ -232,10 +252,10 @@ export function useLevelPeriods(levelId: string): LevelPeriods {
       newKeys.current += 1;
       const key = `new-${newKeys.current}`;
       const span = cycle ?? { startsOn: "", endsOn: "" };
-      setDrafts((prev) => ({ ...prev, [gradeId]: [...(prev[gradeId] ?? []), nextDraft(prev[gradeId] ?? [], span, key)] }));
+      setDrafts((prev) => ({ ...prev, [gradeId]: [...(prev[gradeId] ?? []), nextDraft(prev[gradeId] ?? [], span, key, levelTerms)] }));
       return key;
     },
-    [cycle],
+    [cycle, levelTerms],
   );
 
   const remove = useCallback((gradeId: string, key: string): void => {

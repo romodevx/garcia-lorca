@@ -55,6 +55,31 @@ describe("periodProblems — the whole set, checked on save", () => {
 });
 
 describe("nextDraft — the defaults of a new row", () => {
+  const SEMESTERS = [
+    { name: "1.ER SEMESTRE", startsOn: "2026-08-24", endsOn: "2027-01-22" },
+    { name: "2.º SEMESTRE", startsOn: "2027-01-25", endsOn: "2027-07-09" },
+  ];
+
+  it("proposes the level's own periods, in order, when the level has them", () => {
+    const first = nextDraft([], cycle, "n1", SEMESTERS);
+    const second = nextDraft([first], cycle, "n2", SEMESTERS);
+    expect([first, second]).toEqual([
+      { key: "n1", id: "", name: "1.ER SEMESTRE", startsOn: "2026-08-24", endsOn: "2027-01-22" },
+      { key: "n2", id: "", name: "2.º SEMESTRE", startsOn: "2027-01-25", endsOn: "2027-07-09" },
+    ]);
+  });
+
+  it("proposes the level's next period that starts after the rows already there", () => {
+    expect(nextDraft([draft("a", "2026-08-24", "2026-12-31")], cycle, "n2", SEMESTERS)).toEqual({
+      key: "n2", id: "", name: "2.º SEMESTRE", startsOn: "2027-01-25", endsOn: "2027-07-09",
+    });
+  });
+
+  it("past the level's periods, never names a row after a trimester", () => {
+    const set = [draft("a", "2026-08-24", "2026-12-31")];
+    expect(nextDraft(set, cycle, "n2", SEMESTERS.slice(0, 1)).name).toBe("2.º periodo");
+  });
+
   it("names the first three rows after the trimesters and splits the cycle in contiguous thirds, the last ending with the cycle", () => {
     const first = nextDraft([], cycle, "n1");
     const second = nextDraft([first], cycle, "n2");
