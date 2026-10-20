@@ -425,3 +425,24 @@ describe("Esc limpia también lo que estaba mal escrito", () => {
     expect(screen.getByLabelText("Al día")).not.toHaveAttribute("aria-invalid", "true");
   });
 });
+
+// The owner, 20-oct: saving only with Enter is not obvious; the open row says how to save.
+describe("InlineCreateRow — el botón Guardar", () => {
+  it("con el renglón abierto ofrece «Guardar», que guarda lo escrito", async () => {
+    const user = userEvent.setup();
+    const onCreate = setup();
+    await user.click(screen.getByRole("button", { name: "Agregar día cerrado" }));
+    await user.type(screen.getByRole("textbox", { name: /^Nombre/ }), "Patria");
+    await user.type(screen.getByLabelText(/^Del día/, { selector: "input" }), "2026-09-16");
+    await user.click(screen.getByRole("button", { name: "Guardar" }));
+    expect(onCreate).toHaveBeenCalledWith({ label: "PATRIA", startsOn: "2026-09-16", endsOn: "" });
+  });
+
+  it("dice que Enter también guarda", async () => {
+    const user = userEvent.setup();
+    setup();
+    await user.click(screen.getByRole("button", { name: "Agregar día cerrado" }));
+    expect(screen.getByText("También puedes presionar Enter.")).toBeInTheDocument();
+  });
+});
+

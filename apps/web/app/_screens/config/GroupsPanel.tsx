@@ -76,8 +76,18 @@ export function GroupsPanel({ cycle, gradeLevel, groups, onCreate, corrections }
   );
 }
 
-/** "A · 30 lugares": the group as both setup views show it. */
-export function GroupPill({ group }: { group: Group }): ReactElement {
+/**
+ * "A · 30 lugares": the group as both setup views show it. `tier` paints it in
+ * the group colour of «Estructura de la escuela» (owner, option 1).
+ */
+export function GroupPill({ group, tier = false }: { group: Group; tier?: boolean }): ReactElement {
+  if (tier) {
+    return (
+      <span data-tier="group" style={{ display: "inline-flex", alignItems: "center", minHeight: 36, padding: "0 14px", borderRadius: "var(--r-pill)", background: "var(--tier-group-bg)", color: "var(--tier-group-fg)", border: "1px solid var(--tier-group-border)", fontSize: 14, fontWeight: 700 }}>
+        {group.name} · {group.capacity} lugares
+      </span>
+    );
+  }
   return (
     <span style={{ padding: "8px 14px", borderRadius: "var(--r-pill)", background: "var(--surface-2)", fontSize: 14, fontWeight: 600 }}>
       {group.name} · {group.capacity} lugares

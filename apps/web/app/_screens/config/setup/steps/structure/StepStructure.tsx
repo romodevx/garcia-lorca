@@ -54,6 +54,7 @@ export function StepStructure({ slot, cycle, levels, grades, groups, refresh, ac
   return (
     <StepFrame {...slot} ownHeading>
       <div style={{ display: "grid", gap: 14 }}>
+        <TierLegend />
         {canWrite && list.length > 0 && (
           <div><Btn kind="outline" icon="plus" onClick={() => setCreating(true)}>Nuevo nivel</Btn></div>
         )}
@@ -115,6 +116,26 @@ function groupBy<T>(items: readonly T[], keyOf: (item: T) => string): Map<string
     else list.push(item);
   }
   return out;
+}
+
+const LEGEND: readonly { label: string; colour: string }[] = [
+  { label: "Nivel", colour: "var(--tier-level)" },
+  { label: "Grado", colour: "var(--tier-grade-border)" },
+  { label: "Grupo", colour: "var(--tier-group-border)" },
+];
+
+/** What each colour means: the same three everywhere in the step. */
+function TierLegend(): ReactElement {
+  return (
+    <ul aria-label="Colores" style={{ display: "flex", flexWrap: "wrap", gap: 14, listStyle: "none", padding: 0, margin: 0, fontSize: 13.5, color: "var(--text-muted)" }}>
+      {LEGEND.map((l) => (
+        <li key={l.label} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <span aria-hidden="true" style={{ width: 12, height: 12, borderRadius: 4, background: l.colour }} />
+          {l.label}
+        </li>
+      ))}
+    </ul>
+  );
 }
 
 function Failed({ message, onRetry }: { message: string; onRetry: () => void }): ReactElement {

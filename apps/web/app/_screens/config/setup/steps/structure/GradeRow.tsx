@@ -101,14 +101,14 @@ export function GradeRow({ grade, levelName, groups, cycle, createGroup, gradeCo
                 onDeleted={(next) => feedback.deleted(`Grupo ${g.name} borrado`, next)}
                 deleteDescription={`Se borra el grupo ${g.name} de ${grade.name}${cycle === undefined ? "" : ` en ${cycle.name}`}.`}
               >
-                <GroupPill group={g} />
+                <GroupPill group={g} tier />
               </CorrectableName>
             ))}
           </ul>
         )}
         {known.length > 0 && groupCorrections === undefined && (
           <ul aria-label={`Grupos de ${where}`} style={inlineList}>
-            {known.map((g) => <li key={g.id}><GroupPill group={g} /></li>)}
+            {known.map((g) => <li key={g.id}><GroupPill group={g} tier /></li>)}
           </ul>
         )}
         <DeletionStatus message={feedback.message} />
@@ -127,6 +127,11 @@ export function GradeRow({ grade, levelName, groups, cycle, createGroup, gradeCo
 /** Stable identity: the create row's proposed letter is memoized on it. */
 const NO_GROUPS: readonly Group[] = [];
 
+/** The grade in the grade colour of «Estructura de la escuela» (owner, option 1). */
 function GradeName({ id, name }: { id: string; name: string }): ReactElement {
-  return <span id={id} style={{ fontSize: 16.5, fontWeight: 700, color: "var(--text)" }}>{name}</span>;
+  return (
+    <span data-tier="grade" style={{ display: "inline-flex", alignItems: "center", minHeight: 40, padding: "0 12px", borderRadius: "var(--r-md)", background: "var(--tier-grade-bg)", color: "var(--tier-grade-fg)", border: "1px solid var(--tier-grade-border)", fontSize: 16.5, fontWeight: 800 }}>
+      <span id={id}>{name}</span>
+    </span>
+  );
 }

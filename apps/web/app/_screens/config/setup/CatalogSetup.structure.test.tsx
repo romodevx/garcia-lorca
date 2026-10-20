@@ -191,5 +191,16 @@ describe("Estructura de la escuela — the tree", () => {
     expect(await within(step).findByRole("button", { name: "Reintentar" })).toBeInTheDocument();
     expect(within(second).getByText("A · 30 lugares")).toBeInTheDocument();
   });
+
+  // Owner, 20-oct (option 1): one colour per kind, the same everywhere, with a legend.
+  it("paints every level, grade and group in its kind's colour, and says which is which", async () => {
+    const { step } = await openStructure();
+    const legend = within(step).getByRole("list", { name: "Colores" });
+    expect(within(legend).getAllByRole("listitem").map((li) => li.textContent)).toEqual(["Nivel", "Grado", "Grupo"]);
+    const prim = card(step, "PRIMARIA");
+    expect(prim).toHaveAttribute("data-tier", "level");
+    expect(within(row(prim, G1.name)).getByText(G1.name).closest("[data-tier]")).toHaveAttribute("data-tier", "grade");
+    expect(within(row(prim, G1.name)).getByText("A · 30 lugares").closest("[data-tier]")).toHaveAttribute("data-tier", "group");
+  });
 });
 

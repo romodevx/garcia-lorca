@@ -40,7 +40,22 @@ const cardStyle: CSSProperties = {
   borderRadius: "var(--r-xl)",
   background: "var(--surface)",
   border: "1px solid var(--border)",
+  // The level colour of «Estructura de la escuela» (owner, option 1).
+  borderLeft: "6px solid var(--tier-level)",
   boxShadow: "var(--shadow-card)",
+};
+
+const tagStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  minHeight: 26,
+  padding: "0 10px",
+  borderRadius: "var(--r-pill)",
+  background: "var(--tier-level-bg)",
+  color: "var(--tier-level-fg)",
+  fontSize: 12,
+  fontWeight: 800,
+  letterSpacing: ".06em",
 };
 
 const settingsButton: CSSProperties = {
@@ -67,10 +82,13 @@ export function LevelCard({ level, grades, groupsByGrade, cycle, createGrade, cr
   const groupsOf = (gradeId: string): readonly Group[] | undefined => (groupsByGrade === undefined ? undefined : groupsByGrade.get(gradeId) ?? NO_GROUPS);
 
   return (
-    <section aria-labelledby={titleId} style={cardStyle}>
+    <section aria-labelledby={titleId} data-tier="level" style={cardStyle}>
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "6px 10px" }}>
         <div style={{ flex: "1 1 240px", minWidth: 0 }}>
-          <h3 id={titleId} style={{ fontSize: 18, fontWeight: 800, color: "var(--text)", margin: 0 }}>{level.name}</h3>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span aria-hidden="true" style={tagStyle}>NIVEL</span>
+            <h3 id={titleId} style={{ fontSize: 18, fontWeight: 800, color: "var(--text)", margin: 0 }}>{level.name}</h3>
+          </div>
           <p style={{ margin: "2px 0 0", fontSize: 14, color: "var(--text-muted)" }}>{levelSummary(grades, groupsByGrade)}</p>
           <p style={{ margin: "2px 0 0", fontSize: 13.5, color: "var(--text-faint)" }}>{settingsSummary(level)}</p>
         </div>
