@@ -136,6 +136,22 @@ describe("getCashUp · who took the money (tarea 7)", () => {
   });
 });
 
+// C2-015: a sale returned the same day reaches the screen. The panel test
+// mocked this function and passed while the live cut never listed it.
+describe("getCashUp · ventas devueltas (C2-015)", () => {
+  it("keeps the counter sales voided by a same-day return", async () => {
+    const sale = {
+      paymentId: "p9", chargeId: "c9", description: "Uniformes · U-2026-000002", amountCents: 25000,
+      method: "cash", paidOn: "2026-10-19", reason: "Talla equivocada", voidedAt: "2026-10-20T02:06:37Z",
+    };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ deposits: [], cancelled: [], payments: [], cancelledSales: [sale] })));
+
+    const cut = await getCashUp(BASE, "2026-10-19");
+
+    expect(cut.cancelledSales).toEqual([sale]);
+  });
+});
+
 // Task 8: the debt by concept survives the client's mapping, and the chosen
 // charges reach the server.
 describe("the counter's choice of charges (tarea 8)", () => {

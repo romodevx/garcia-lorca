@@ -862,10 +862,12 @@ export async function getCashUp(baseURL: string, day: string): Promise<CashUp> {
     modifiedAfterClose?: boolean;
     reopened?: CashCutClosure[];
     day?: string;
+    cancelledSales?: CancelledSale[];
   }>(baseURL, day === "" ? "/cash-up" : `/cash-up?day=${encodeURIComponent(day)}`);
   return {
     deposits: (res.deposits ?? []).map(toDeposit),
     cancelled: (res.cancelled ?? []).map(toDeposit),
+    cancelledSales: res.cancelledSales ?? [],
     superseded: (res.superseded ?? []).map(toDeposit),
     payments: (res.payments ?? []).map((p) => ({ ...p, method: oneOf(PAYMENT_METHODS, p.method, "cash") })),
     cashCents: res.cashCents ?? 0,

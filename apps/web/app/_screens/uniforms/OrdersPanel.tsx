@@ -303,6 +303,9 @@ const STATUS_LABELS: Record<string, string> = {
   returned: "Devuelta",
 };
 
+/** A counter sale, sold or returned, is one act filed under its receipt's folio. */
+const COUNTER_STATUSES: ReadonlySet<string> = new Set(["sold_at_counter", "returned"]);
+
 /** A returned sale says so even when it also needs attention (C2-015). */
 function statusLabelOf(f: UniformFulfillment): string {
   if (f.status === "returned") {
@@ -339,7 +342,7 @@ export function toRows(orders: UniformOrder[], roomLabels: ReadonlyMap<string, s
       folioStem: order.folio,
       // A counter sale is one act, filed under the folio its receipt prints
       // (T14-019); the letter names one delivery of an order handed over in parts.
-      folioSuffix: f.status !== "sold_at_counter" && f.folio.startsWith(order.folio) ? f.folio.slice(order.folio.length) : "",
+      folioSuffix: !COUNTER_STATUSES.has(f.status) && f.folio.startsWith(order.folio) ? f.folio.slice(order.folio.length) : "",
       who,
       levelLabel,
       itemsLabel: itemsLabel(order, f),
