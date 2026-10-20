@@ -128,6 +128,10 @@ func TestMigration0024BackfillsLettersForPreescolar(t *testing.T) {
 			"INSERT INTO levels (id, tenant_id, name, enrollment_granularity, grading_enabled) VALUES (?, ?, ?, 'CYCLE', ?)",
 			id, schoolTenant, l.name, l.name == "Primaria").Error)
 	}
+	// A preescolar mid-deletion is frozen: the migration must not trip on it.
+	require.NoError(t, db.Exec(
+		"INSERT INTO levels (id, tenant_id, name, enrollment_granularity, grading_enabled, status, deleting_batch_id) VALUES (?, ?, 'Preescolar', 'CYCLE', false, 'deleting', gen_random_uuid())",
+		"aaaa0024-0000-0000-0000-000000000005", tenantB).Error)
 
 	applyMigration(t, db, "0024_level_grading_letters.sql")
 
@@ -136,6 +140,30 @@ func TestMigration0024BackfillsLettersForPreescolar(t *testing.T) {
 	}
 	assert.Error(t, tryMigrationSQL(t, db, "UPDATE levels SET grading_letters = true WHERE id = 'aaaa0024-0000-0000-0000-000000000004'"),
 		"numbers and letters at once")
+}
+
+// A level trashed before 0024 has no grading_letters key in its archive:
+// restoring it would put NULL in a NOT NULL column and roll the restore back.
+// 0024 gives every archived level the key, with the same rule as live rows.
+func TestMigration0024GivesArchivedLevelsLetters(t *testing.T) {
+	db := migrateUpTo(t, "mig_cfg_letters_archive", "0024")
+	require.NoError(t, db.Exec(`INSERT INTO config_deletion_archive (tenant_id, batch_id, table_name, "row", "position")
+		VALUES (?, gen_random_uuid(), 'levels', '{"id":"24000000-0000-0000-0000-000000000001","name":"Preescolar","grading_enabled":false}', 1),
+		       (?, gen_random_uuid(), 'levels', '{"id":"24000000-0000-0000-0000-000000000002","name":"Maternal","grading_enabled":false}', 2),
+		       (?, gen_random_uuid(), 'levels', '{"id":"24000000-0000-0000-0000-000000000003","name":"Primaria","grading_enabled":true}', 3),
+		       (?, gen_random_uuid(), 'grade_levels', '{"id":"24000000-0000-0000-0000-000000000004"}', 4)`,
+		schoolTenant, schoolTenant, schoolTenant, schoolTenant).Error)
+
+	applyMigration(t, db, "0024_level_grading_letters.sql")
+
+	letters := func(id string) bool {
+		return scalar[bool](t, db, `SELECT ("row"->>'grading_letters')::bool FROM config_deletion_archive WHERE "row"->>'id' = ?`, id)
+	}
+	assert.True(t, letters("24000000-0000-0000-0000-000000000001"), "an archived preescolar grades with letters")
+	assert.False(t, letters("24000000-0000-0000-0000-000000000002"), "an archived maternal takes no grades")
+	assert.False(t, letters("24000000-0000-0000-0000-000000000003"))
+	assert.Equal(t, int64(0), scalar[int64](t, db,
+		`SELECT count(*) FROM config_deletion_archive WHERE table_name <> 'levels' AND "row" ? 'grading_letters'`), "only archived levels change")
 }
 
 // tryMigrationSQL runs one statement on a dedicated connection and returns its

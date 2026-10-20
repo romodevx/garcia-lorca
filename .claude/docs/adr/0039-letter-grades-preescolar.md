@@ -16,7 +16,11 @@
 
 - **config:**
   - `GradingScale.letters` sigue el patrón `With…` (`WithLetters`). Nunca va junto con `enabled`; el dominio y un CHECK lo exigen.
-  - Migración 0024: `levels.grading_letters` y el backfill de los niveles preescolar y kínder.
+  - Migración 0024:
+    - `levels.grading_letters` y el backfill de los niveles preescolar y kínder, con `config_fold_name`.
+    - El backfill también completa la papelera de niveles (`config_deletion_archive`). Sin él, un nivel borrado antes de la migración no podría restaurarse: `jsonb_populate_record` daría NULL en una columna NOT NULL. Es la misma solución que usó la 0020.
+    - Salta un nivel que se esté borrando, porque el trigger que congela el nivel lo rechazaría.
+  - **gateway:** un PATCH sin `letters` conserva el modo guardado del nivel. Así, una pantalla vieja que guarda la escala no le quita las letras a Preescolar.
   - Proto: `GradingScale.letters = 6`.
 - **grades:**
   - `domain.Letter` (A–D) con `Meaning()`. `PeriodGrade` lleva un número **o** una letra. `Text()` da "9" o "B", y así la letra viaja en el mismo campo de texto del proto (`value`).
@@ -34,11 +38,13 @@
     - `letter` en la celda y en la fila de la hoja;
     - `gradingLetters` en la hoja, la familia y las boletas;
     - `letters` en las materias de la familia y en las líneas de la boleta.
-  - El PUT acepta una cadena con una letra A–D. Cualquier otra cadena sigue siendo `GRADE_NOT_NUMBER`.
+  - El PUT pasa a grades cualquier cadena de una sola letra, y grades decide. En Preescolar, una «E» responde `GRADE_NOT_LETTER`. Cualquier otra cadena sigue siendo `GRADE_NOT_NUMBER`.
   - El PDF imprime las letras, la leyenda de su significado y ninguna columna de promedio.
 
 ## Consecuencias
 
 - Las letras no se promedian en ninguna parte. La hoja muestra cuántos alumnos tienen cada letra en lugar del promedio (web).
 - Para cambiar un nivel de números a letras, o al revés, con calificaciones ya capturadas en el ciclo activo, la respuesta es 409 `SCALE_TIGHTENING`. Es la misma regla que cuando se aprieta una escala.
+- **Despliegue:** el backend se fusiona junto con la web. Sola, la API dejaría Preescolar editable en una pantalla que todavía no sabe capturar letras.
+- La boleta con letras todavía manda `scale` con ceros en el JSON. La web y la app nuevas lo ignoran cuando `gradingLetters` es true.
 - No hay observaciones escritas por alumno ni letras distintas por nivel. Si el colegio las pide, se agregan aparte.

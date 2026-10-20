@@ -102,3 +102,22 @@ func TestNumericReportCardIgnoresLetters(t *testing.T) {
 	assert.Equal(t, map[string]string{"p1": "9"}, rc.Lines()[0].PeriodValueStrings())
 	assert.Equal(t, "9", rc.GeneralAverage().String())
 }
+
+// The domain never holds a letter that is not A–D.
+func TestNewPeriodGradeRefusesAnUnknownLetter(t *testing.T) {
+	_, err := domain.NewPeriodGrade(domain.PeriodGradeFields{
+		ID: "g1", TenantID: "t1", EnrollmentID: "e1", SubjectID: "s1", PeriodID: "p1", CapturedBy: "u1", Letter: "E",
+	})
+	assert.Error(t, err)
+}
+
+// An empty numbers card and an empty letters card are not the same card.
+func TestSameGradesAsComparesTheGradingKind(t *testing.T) {
+	numbers, err := domain.BuildReportCard(header(t), nil, nil)
+	require.NoError(t, err)
+	h := header(t)
+	h.Letters = true
+	letters, err := domain.BuildReportCard(h, nil, nil)
+	require.NoError(t, err)
+	assert.False(t, numbers.SameGradesAs(letters))
+}

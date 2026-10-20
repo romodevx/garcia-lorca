@@ -228,7 +228,7 @@ func validateHeader(h ReportCardHeader) error {
 // count — a re-close that changes none of these has nothing new to tell the
 // family.
 func (r ReportCard) SameGradesAs(other ReportCard) bool {
-	if !r.generalAverage.SameAs(other.generalAverage) || len(r.lines) != len(other.lines) {
+	if r.header.Letters != other.header.Letters || !r.generalAverage.SameAs(other.generalAverage) || len(r.lines) != len(other.lines) {
 		return false
 	}
 	previous := make(map[string]ReportCardLine, len(other.lines))

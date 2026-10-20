@@ -104,3 +104,22 @@ func TestLettersReportCardRoundTrips(t *testing.T) {
 	assert.False(t, got.GeneralAverage().Present())
 	assert.True(t, card("a7000000-0000-0000-0000-0000000000ca", 2).SameGradesAs(got), "a stored letters card reads back with its letters")
 }
+
+// A cell that was a number and becomes a letter keeps one row, with the
+// number gone: the upsert writes both columns, so the CHECK holds.
+func TestPeriodGradeSwitchesFromANumberToALetter(t *testing.T) {
+	repo := appRepo(t, tenantA)
+	ctx := context.Background()
+	const enr = "e1000000-0000-0000-0000-0000000000a3"
+	_, err := repo.UpsertPeriodGrade(ctx, periodGrade(t, "a1000000-0000-0000-0000-0000000000e3", tenantA, enr, mSubject, mPeriodOne, mUser, "9"), ports.PeriodLock{})
+	require.NoError(t, err)
+	got, err := repo.UpsertPeriodGrade(ctx, letterGrade(t, "a1000000-0000-0000-0000-0000000000e4", enr, mSubject, mPeriodOne, domain.LetterB), ports.PeriodLock{})
+	require.NoError(t, err)
+	assert.Equal(t, "B", got.Text())
+
+	back, err := repo.UpsertPeriodGrade(ctx, periodGrade(t, "a1000000-0000-0000-0000-0000000000e5", tenantA, enr, mSubject, mPeriodOne, mUser, "8"), ports.PeriodLock{})
+	require.NoError(t, err)
+	assert.Equal(t, "8", back.Text())
+	assert.False(t, back.IsLetter())
+	assert.Equal(t, int64(1), countPeriodGrades(t, tenantA, enr))
+}

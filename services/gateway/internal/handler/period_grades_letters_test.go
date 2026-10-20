@@ -33,8 +33,18 @@ func TestPeriodPutTakesALetter(t *testing.T) {
 	assert.JSONEq(t, `{"enrollmentId":"`+mEnr+`","periodId":"`+mPer+`","value":null,"letter":"B","updatedAt":"2026-10-03T15:04:05Z"}`, rec.Body.String())
 }
 
+// Any single letter goes to grades, which answers GRADE_NOT_LETTER on a
+// letters level (so preescolar reads "A, B, C o D", not "must be a number").
+func TestPeriodPutPassesAnyLetterToGrades(t *testing.T) {
+	grades := &fakePeriodGrades{}
+	rec := httptest.NewRecorder()
+	directorHandler(grades).Put(rec, principalReq(http.MethodPut, "/api/v1/grades/period-grades", putBody(`"e"`)))
+	assert.Equal(t, 1, grades.upsertCalls)
+	assert.Equal(t, "E", grades.upsertIn.Value)
+}
+
 func TestPeriodPutRefusesAStringThatIsNotALetter(t *testing.T) {
-	for _, body := range []string{`"9"`, `"E"`, `"AB"`, `""`} {
+	for _, body := range []string{`"9"`, `"AB"`, `""`, `"ñ"`} {
 		grades := &fakePeriodGrades{}
 		rec := httptest.NewRecorder()
 		directorHandler(grades).Put(rec, principalReq(http.MethodPut, "/api/v1/grades/period-grades", putBody(body)))

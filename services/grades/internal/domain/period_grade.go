@@ -61,6 +61,11 @@ func NewPeriodGrade(f PeriodGradeFields) (PeriodGrade, error) {
 			return PeriodGrade{}, glerrors.New(glerrors.KindInvalid, r.what+" is required")
 		}
 	}
+	if f.Letter != "" {
+		if _, err := ParseLetter(string(f.Letter)); err != nil || f.Value.Hundredths() != 0 {
+			return PeriodGrade{}, glerrors.New(glerrors.KindInvalid, "a period grade is a number or a letter A–D")
+		}
+	}
 	return PeriodGrade{
 		id: f.ID, tenantID: f.TenantID, enrollmentID: f.EnrollmentID, subjectID: f.SubjectID,
 		periodID: f.PeriodID, capturedBy: f.CapturedBy, capturedByName: f.CapturedByName,

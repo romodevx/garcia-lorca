@@ -74,3 +74,20 @@ func TestConfigPatchLevelGradingRefusalCarriesConfigSentence(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Contains(t, rec.Body.String(), "La calificación mínima debe ser menor que la aprobatoria")
 }
+
+// A PATCH that leaves "letters" out keeps what the level holds: an older
+// screen saving the scale must not quietly drop preescolar's letters.
+func TestConfigPatchLevelWithoutLettersKeepsThem(t *testing.T) {
+	svc := &fakeConfig{levels: []client.LevelResult{{ID: "lvl-1", Name: "PREESCOLAR", Grading: client.LevelGrading{Letters: true}}}}
+	rec := patchLevel(handler.NewConfigHandler(svc), "lvl-1", `{"grading":{"enabled":false,"min":5,"max":10,"decimals":0,"passing":6}}`)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.True(t, svc.gradingIn.Letters, "absent keeps the stored letters")
+
+	rec = patchLevel(handler.NewConfigHandler(svc), "lvl-1", `{"grading":{"enabled":true,"min":5,"max":10,"decimals":0,"passing":6}}`)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.False(t, svc.gradingIn.Letters, "numbers on: never letters too")
+
+	rec = patchLevel(handler.NewConfigHandler(svc), "lvl-1", `{"grading":{"enabled":false,"letters":false,"min":5,"max":10,"decimals":0,"passing":6}}`)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.False(t, svc.gradingIn.Letters, "an explicit false turns letters off")
+}

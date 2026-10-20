@@ -346,8 +346,9 @@ func toPeriodRefResponses(ps []client.EvaluationPeriodRef) []periodRefResponse {
 var gradeLetters = map[string]bool{"A": true, "B": true, "C": true, "D": true}
 
 // gradeText reads a cell's value as the grades service judges it: a JSON
-// number's exact text, or a JSON string holding one letter A–D (trimmed,
-// upper-cased). Whether the level takes numbers or letters is grades' call.
+// number's exact text, or a JSON string holding one ASCII letter (trimmed,
+// upper-cased). Which letters, and whether the level takes letters at all, is
+// grades' call: "E" there reads GRADE_NOT_LETTER, the sentence preescolar needs.
 func gradeText(raw json.RawMessage) (string, bool) {
 	if text, ok := numberText(raw); ok {
 		return text, true
@@ -357,7 +358,7 @@ func gradeText(raw json.RawMessage) (string, bool) {
 		return "", false
 	}
 	letter := strings.ToUpper(strings.TrimSpace(s))
-	return letter, gradeLetters[letter]
+	return letter, len(letter) == 1 && letter[0] >= 'A' && letter[0] <= 'Z'
 }
 
 // splitGrade puts a grade's text where the JSON carries it: a letter in

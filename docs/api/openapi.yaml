@@ -8032,15 +8032,16 @@ components:
                 oneOf:
                   - type: integer
                   - type: string
-                    enum: [A, B, C, D, a, b, c, d]
+                    pattern: '^\s*[A-Za-z]\s*$'
                 description: >
                   On a numeric level, a JSON number holding a WHOLE number
                   inside the level's range; its exact text is judged: 9.5 is
                   refused (GRADE_NOT_INTEGER), never rounded. On a level that
                   grades with letters (preescolar), a JSON string with one
-                  letter A–D, trimmed and upper-cased (GRADE_NOT_LETTER for a
-                  number there, GRADE_NOT_NUMBER for a letter on a numeric
-                  level). Any other string is GRADE_NOT_NUMBER.
+                  letter, trimmed and upper-cased: A–D are taken, any other
+                  letter is GRADE_NOT_LETTER, and so is a number there. A
+                  letter on a numeric level is GRADE_NOT_NUMBER, and so is any
+                  string that is not one letter.
           example:
             assignmentId: 9c3d1e2f-0000-4000-8000-000000000003
             periodId: 0e000000-0000-4000-8000-000000000001
