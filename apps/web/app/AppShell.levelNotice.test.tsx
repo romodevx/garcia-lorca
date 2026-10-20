@@ -34,7 +34,7 @@ vi.mock("./config/api", async (importOriginal) => ({
   listLabelledGroups: vi.fn().mockResolvedValue([]),
   listLevels: vi.fn().mockResolvedValue([]),
   listGradeLevels: vi.fn().mockResolvedValue([]),
-  getSchoolProfile: vi.fn().mockResolvedValue({ profile: { name: "", legalName: "", rfc: "", cct: "", address: "", phone: "", legend: "" }, found: false }),
+  getSchoolProfile: vi.fn().mockResolvedValue({ profile: { name: "", legalName: "", rfc: "", cct: "", address: "", phone: "", legend: "", clabe: "" }, found: false }),
   listLevelTrash: vi.fn().mockResolvedValue([]),
   getLevelDeletionPreview: vi.fn().mockResolvedValue({
     levelId: "l1", levelName: "PRIMARIA", empty: true, confirmToken: "tok", expiresAt: "2026-09-28T18:00:00Z",

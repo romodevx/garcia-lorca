@@ -35,7 +35,7 @@ beforeEach(() => {
   mocked.listLevels.mockResolvedValue([PRIMARIA, SECUNDARIA]);
   mocked.listGradeLevels.mockImplementation(async (_, levelId) => [G1, G2].filter((g) => levelId === undefined || g.levelId === levelId));
   mocked.listSubjects.mockResolvedValue([]);
-  mocked.getSchoolProfile.mockResolvedValue({ profile: { name: "", legalName: "", rfc: "", cct: "", address: "", phone: "", legend: "" }, found: false });
+  mocked.getSchoolProfile.mockResolvedValue({ profile: { name: "", legalName: "", rfc: "", cct: "", address: "", phone: "", legend: "", clabe: "" }, found: false });
   mocked.listLevelTrash.mockResolvedValue([]);
   mocked.reorderLevels.mockImplementation(async (_, ids) => ids.map((id) => (id === "l1" ? PRIMARIA : SECUNDARIA)));
   vi.mocked(financeApi).listTuitionPlans.mockResolvedValue([]);

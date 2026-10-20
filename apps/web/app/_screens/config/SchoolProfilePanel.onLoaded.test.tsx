@@ -14,7 +14,7 @@ vi.mock("../../config/api", async (importOriginal) => ({
   saveSchoolProfile: api.saveSchoolProfile,
 }));
 
-const EMPTY = { name: "", legalName: "", rfc: "", cct: "", address: "", phone: "", legend: "" };
+const EMPTY = { name: "", legalName: "", rfc: "", cct: "", address: "", phone: "", legend: "", clabe: "" };
 const FILLED = { ...EMPTY, name: "Colegio García Lorca" };
 
 beforeEach(() => {

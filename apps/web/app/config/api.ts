@@ -820,6 +820,10 @@ export interface SchoolProfile {
   address: string;
   phone: string;
   legend: string;
+  /** The account families transfer to (18 digits), shown in the family app; "" when none. */
+  clabe: string;
+  /** The CLABE's bank as the server names it; output only. */
+  clabeBank?: string;
 }
 
 /** The details, and whether the school has filled them yet. */
@@ -834,7 +838,12 @@ export async function getSchoolProfile(baseURL: string): Promise<SchoolProfileRe
   if (!res.ok) {
     throw await configFailure(res);
   }
-  return (await res.json()) as SchoolProfileRead;
+  return withClabe((await res.json()) as SchoolProfileRead);
+}
+
+/** A gateway older than the CLABE answers without it: the form needs "". */
+function withClabe(read: SchoolProfileRead): SchoolProfileRead {
+  return { ...read, profile: { ...read.profile, clabe: read.profile.clabe ?? "" } };
 }
 
 /** PUT /api/v1/config/school-profile: every field is replaced. */

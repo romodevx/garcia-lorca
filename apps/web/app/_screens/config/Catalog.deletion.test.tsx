@@ -30,7 +30,7 @@ beforeEach(() => {
   mocked.listLevels.mockResolvedValue([PRIMARIA]);
   mocked.listGradeLevels.mockResolvedValue([]);
   mocked.listSubjects.mockResolvedValue([]);
-  mocked.getSchoolProfile.mockResolvedValue({ profile: { name: "", legalName: "", rfc: "", cct: "", address: "", phone: "", legend: "" }, found: false });
+  mocked.getSchoolProfile.mockResolvedValue({ profile: { name: "", legalName: "", rfc: "", cct: "", address: "", phone: "", legend: "", clabe: "" }, found: false });
   mocked.listLevelTrash.mockResolvedValue([]);
   vi.mocked(financeApi).listTuitionPlans.mockResolvedValue([]);
 });
