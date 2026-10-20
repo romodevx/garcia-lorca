@@ -457,7 +457,8 @@ const moneyEvent = `(kind IN ('created', 'cancelled') OR (kind = 'edited' AND (
 //
 //   - a deposit dated that day captured, voided or superseded after it (a late
 //     capture, a void, a T9 correction — whose new deposit is captured then);
-//   - a payment taken outside a deposit (a counter sale) captured after it;
+//   - a payment taken outside a deposit (a counter sale) captured after it,
+//     or voided after it by a same-day return (C2-015);
 //   - an expense event after it that touches the day's money (moneyEvent):
 //     dated it, or moved off it.
 func (r *Repository) DayChangedSince(ctx context.Context, day, since time.Time) (bool, error) {
@@ -474,12 +475,15 @@ SELECT EXISTS (
     SELECT 1 FROM payments
      WHERE deposit_id IS NULL AND paid_on = ? AND created_at > ?
 ) OR EXISTS (
+    SELECT 1 FROM voided_sale_payments
+     WHERE paid_on = ? AND voided_at > ?
+) OR EXISTS (
     SELECT 1 FROM expense_events
      WHERE spent_on = ? AND at > ? AND `+moneyEvent+`
 ) OR EXISTS (
     SELECT 1 FROM expense_events
      WHERE previous_spent_on = ? AND at > ? AND `+moneyEvent+`
-)`, on, since, since, since, on, since,
+)`, on, since, since, since, on, since, on, since,
 			on, since, on, since).
 			Scan(&changed).Error
 		if err != nil {

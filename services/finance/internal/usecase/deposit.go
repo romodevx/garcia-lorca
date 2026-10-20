@@ -718,6 +718,9 @@ type CashUp struct {
 	// count for nothing — their correction counts on the day it is dated — and
 	// are listed so the day's receipts still add up.
 	Superseded []domain.Deposit
+	// CancelledSales are the day's counter-sale payments voided by a same-day
+	// return (C2-015). Like Cancelled, they count for nothing and are listed.
+	CancelledSales []ports.VoidedSalePayment
 	// CreditNoteCents is what credit notes settled that day (T8). Not money:
 	// it is in neither ByMethod nor TotalCents, and is reported on its own line.
 	CreditNoteCents int64
@@ -775,6 +778,11 @@ func (s *FinanceService) DailyCashUp(ctx context.Context, day time.Time) (CashUp
 		cut.Payments = append(cut.Payments, p)
 		cut.count(p.Payment.Method(), p.Payment.Amount().Int64())
 	}
+	voided, err := s.repo.ListVoidedSalePaymentsOn(ctx, day)
+	if err != nil {
+		return CashUp{}, err
+	}
+	cut.CancelledSales = voided
 	return cut, nil
 }
 
