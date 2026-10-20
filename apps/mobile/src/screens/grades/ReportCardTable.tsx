@@ -2,7 +2,7 @@ import { type ReactElement } from "react";
 import { ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import type { ReportCard, ReportCardLine } from "../../api/reportCards";
 import { useTheme } from "../../theme";
-import { formatAverage, formatGrade, isFailing } from "../gradesView";
+import { formatAverage, formatGrade, isFailing, letterMeaning } from "../gradesView";
 import { reportCardColumns, type ReportCardColumn } from "./reportCardView";
 
 const MISSING = "—";
@@ -11,7 +11,14 @@ const SUBJECT_COL_BASE_WIDTH = 128;
 const FAILED = "Reprobada";
 
 /** "Matemáticas: 1.er trimestre 9, 2.º trimestre 8, 3.er trimestre sin calificación, promedio 8.5, reprobada". */
-export function lineLabel(line: ReportCardLine, columns: ReportCardColumn[], card: Pick<ReportCard, "scale">): string {
+export function lineLabel(line: ReportCardLine, columns: ReportCardColumn[], card: Pick<ReportCard, "scale"> & { gradingLetters?: boolean }): string {
+  if (card.gradingLetters === true) {
+    const letters = columns.map((c) => {
+      const letter = c.letterOf(line);
+      return `${c.spoken} ${letter === undefined ? "sin calificación" : [letter, letterMeaning(letter)].filter(Boolean).join(", ")}`;
+    });
+    return `${line.subjectName}: ${letters.join("; ")}`;
+  }
   const perColumn = columns.map((c) => {
     const value = c.valueOf(line);
     return `${c.spoken} ${value === undefined ? "sin calificación" : formatGrade(value)}`;
@@ -39,6 +46,8 @@ export function ReportCardTable({ card }: { card: ReportCard }): ReactElement {
   const subjectCol = { width: SUBJECT_COL_BASE_WIDTH * Math.max(1, fontScale), textAlign: "left" as const };
   const head = [styles.head, { color: theme.colors.text2, fontFamily: theme.fonts.uiExtra }];
   const columns = reportCardColumns(card);
+  // A letters boleta (preescolar) has no average column: letters are never averaged.
+  const letters = card.gradingLetters === true;
   return (
     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.scroll}>
       <View style={[styles.table, { borderColor: theme.colors.line, backgroundColor: theme.colors.surface }]}>
@@ -47,7 +56,7 @@ export function ReportCardTable({ card }: { card: ReportCard }): ReactElement {
           {columns.map((c) => (
             <Text key={c.key} style={[head, styles.valueCol]}>{c.header}</Text>
           ))}
-          <Text style={[head, styles.valueCol]}>Prom.</Text>
+          {letters ? null : <Text style={[head, styles.valueCol]}>Prom.</Text>}
         </View>
         {card.lines.map((line, index) => {
           const failed = line.average !== null && isFailing(line.average, card.scale);
@@ -63,15 +72,16 @@ export function ReportCardTable({ card }: { card: ReportCard }): ReactElement {
                 {line.subjectName}
               </Text>
               {columns.map((c) => {
+                if (letters) return <Text key={c.key} style={cell}>{c.letterOf(line) ?? MISSING}</Text>;
                 const value = c.valueOf(line);
                 return <Text key={c.key} style={cell}>{value === undefined ? MISSING : formatGrade(value)}</Text>;
               })}
-              <View style={styles.valueCol}>
+              {letters ? null : <View style={styles.valueCol}>
                 <Text style={[styles.cell, styles.average, { color: failed ? theme.colors.bad : theme.colors.text, fontFamily: theme.fonts.uiExtra }]}>
                   {line.average === null ? MISSING : formatAverage(line.average)}
                 </Text>
                 {failed ? <Text style={[styles.failed, { color: theme.colors.bad, fontFamily: theme.fonts.uiExtra }]}>{FAILED}</Text> : null}
-              </View>
+              </View>}
             </View>
           );
         })}

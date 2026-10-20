@@ -88,3 +88,14 @@ export function gradeLabel(subjectName: string, periodName: string, value: numbe
   }
   return `${head}: ${formatGrade(value)}${isFailing(value, scale) ? `, ${FAILED_SPOKEN}` : ""}`;
 }
+
+/** What each letter means on a level that grades with letters (owner, 20-oct). */
+const LETTER_MEANINGS: Readonly<Record<string, string>> = { A: "Excelente", B: "Bien", C: "Suficiente", D: "Requiere apoyo" };
+
+/** The legend a letters boleta and screen show. */
+export const LETTERS_LEGEND = "A Excelente · B Bien · C Suficiente · D Requiere apoyo";
+
+/** "Excelente" for "A"; undefined for a letter the school does not use. */
+export function letterMeaning(letter: string): string | undefined {
+  return LETTER_MEANINGS[letter];
+}

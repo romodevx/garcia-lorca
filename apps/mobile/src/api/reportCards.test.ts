@@ -29,8 +29,8 @@ describe("report cards API", () => {
 
     expect(String(fetchMock.mock.calls[0][0])).toContain("/api/v1/family/students/s%201/report-cards");
     expect(cards).toEqual([
-      { id: "rc2", termId: "t2", termName: "2.º trimestre", termOrdinal: 2, cycleName: "", version: 2, issuedAt: "2026-12-10T18:00:00Z", generalAverage: 8.75, hasGrades: true },
-      { id: "rc1", termId: "t1", termName: "1.er trimestre", termOrdinal: 0, cycleName: "2026-2027", version: 1, issuedAt: null, generalAverage: null, hasGrades: false },
+      { id: "rc2", termId: "t2", termName: "2.º trimestre", termOrdinal: 2, cycleName: "", version: 2, issuedAt: "2026-12-10T18:00:00Z", generalAverage: 8.75, hasGrades: true, gradingLetters: false },
+      { id: "rc1", termId: "t1", termName: "1.er trimestre", termOrdinal: 0, cycleName: "2026-2027", version: 1, issuedAt: null, generalAverage: null, hasGrades: false, gradingLetters: false },
     ]);
   });
 
@@ -67,7 +67,7 @@ describe("report cards API", () => {
     expect(String(fetchMock.mock.calls[0][0])).toContain("/api/v1/family/students/s1/report-cards/rc%201");
     expect(card.termOrdinal).toBe(1);
     expect(card.periods).toEqual([]);
-    expect(card.lines[0]).toEqual({ subjectId: "sub-math", subjectName: "Matemáticas", periods: {}, months: { "2026-09": 9.5, "2026-10": 8 }, average: 8.75 });
+    expect(card.lines[0]).toEqual({ subjectId: "sub-math", subjectName: "Matemáticas", periods: {}, letters: {}, months: { "2026-09": 9.5, "2026-10": 8 }, average: 8.75 });
     expect(card.scale?.passing).toBe(6);
     expect(card.hasGrades).toBe(true);
   });
@@ -97,6 +97,31 @@ describe("report cards API", () => {
     expect(card.months).toEqual([]);
   });
 
+  // Preescolar's boleta carries letters (owner, 20-oct): per line, no average.
+  it("reads a letters card: each line's letter per period, and says it carries letters", async () => {
+    globalThis.fetch = jest.fn().mockResolvedValue(
+      respond(200, {
+        id: "rc1", periods: [{ id: "p1", ordinal: 1, name: "1.er trimestre" }], months: [], gradingLetters: true, hasGrades: true,
+        generalAverage: null,
+        lines: [{ subjectId: "sub-len", subjectName: "Lenguajes", periods: {}, letters: { p1: "A" }, months: {}, average: null }],
+      }),
+    ) as unknown as typeof fetch;
+
+    const card = await getReportCard("s1", "rc1");
+
+    expect(card.gradingLetters).toBe(true);
+    expect(card.lines[0]?.letters).toEqual({ p1: "A" });
+    expect(card.lines[0]?.periods).toEqual({});
+  });
+
+  it("lists a letters card as carrying letters", async () => {
+    globalThis.fetch = jest.fn().mockResolvedValue(
+      respond(200, { reportCards: [{ id: "rc1", termName: "1.er trimestre", version: 1, generalAverage: null, hasGrades: true, gradingLetters: true }] }),
+    ) as unknown as typeof fetch;
+    const [card] = await listReportCards("s1");
+    expect(card?.gradingLetters).toBe(true);
+  });
+
   it("fills a sparse report card with safe defaults", async () => {
     globalThis.fetch = jest.fn().mockResolvedValue(respond(200, { id: "rc1", lines: null, months: null })) as unknown as typeof fetch;
 
@@ -115,6 +140,7 @@ describe("report cards API", () => {
       generalAverage: null,
       scale: null,
       hasGrades: false,
+      gradingLetters: false,
     });
   });
 

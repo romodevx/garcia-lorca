@@ -17,9 +17,13 @@ export function versionBadge(version: number): string | null {
 }
 
 /** The average as the server sent it (already truncated), or null when nothing was captured. */
-export function averageText(card: Pick<ReportCardSummary, "generalAverage" | "hasGrades">): string | null {
+export function averageText(card: Pick<ReportCardSummary, "generalAverage" | "hasGrades"> & { gradingLetters?: boolean }): string | null {
+  if (card.gradingLetters === true) return LETTERS_CARD;
   return card.hasGrades && card.generalAverage !== null ? formatAverage(card.generalAverage) : null;
 }
+
+/** What a letters boleta (preescolar) says where a numeric one says its average. */
+export const LETTERS_CARD = "Con letras";
 
 /** One column of the boleta table: what it shows, what is read aloud, and which grades fill it. */
 export interface ReportCardColumn {
@@ -27,6 +31,8 @@ export interface ReportCardColumn {
   header: string;
   spoken: string;
   valueOf: (line: ReportCardLine) => number | undefined;
+  /** The column's letter on a letters boleta. */
+  letterOf: (line: ReportCardLine) => string | undefined;
 }
 
 /**
@@ -35,9 +41,9 @@ export interface ReportCardColumn {
  */
 export function reportCardColumns(card: Pick<ReportCard, "periods" | "months">): ReportCardColumn[] {
   if (card.periods.length > 0) {
-    return card.periods.map((p) => ({ key: p.id, header: p.name, spoken: p.name, valueOf: (line) => line.periods[p.id] }));
+    return card.periods.map((p) => ({ key: p.id, header: p.name, spoken: p.name, valueOf: (line) => line.periods[p.id], letterOf: (line) => line.letters[p.id] }));
   }
-  return card.months.map((m) => ({ key: m, header: shortMonthLabel(m), spoken: monthName(m), valueOf: (line) => line.months[m] }));
+  return card.months.map((m) => ({ key: m, header: shortMonthLabel(m), spoken: monthName(m), valueOf: (line) => line.months[m], letterOf: () => undefined }));
 }
 
 /** What a screen reader says for one boleta row. */
@@ -47,7 +53,8 @@ export function reportCardLabel(card: ReportCardSummary): string {
     parts.push(`versión ${card.version}`, "actualizada");
   }
   const average = averageText(card);
-  parts.push(average === null ? "sin calificaciones" : `promedio general ${average}`);
+  if (card.gradingLetters) parts.push("calificada con letras");
+  else parts.push(average === null ? "sin calificaciones" : `promedio general ${average}`);
   const issued = card.issuedAt ? formatDate(card.issuedAt, "long") : "";
   if (issued) {
     parts.push(`emitida el ${issued}`);

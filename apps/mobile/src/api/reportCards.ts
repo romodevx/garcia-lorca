@@ -25,6 +25,8 @@ export interface ReportCardSummary {
   generalAverage: number | null;
   /** False when the term closed with nothing captured. */
   hasGrades: boolean;
+  /** The boleta carries letters (preescolar): no average. False from an older gateway. */
+  gradingLetters: boolean;
 }
 
 /** One column of a T15 boleta: an evaluation period of the pupil's grade. */
@@ -44,6 +46,8 @@ export interface ReportCardLine {
   subjectId: string;
   subjectName: string;
   periods: Record<string, number>;
+  /** Period id → letter on a letters boleta; {} otherwise. */
+  letters: Record<string, string>;
   months: Record<string, number>;
   average: number | null;
 }
@@ -65,6 +69,8 @@ export interface ReportCard {
   scale: GradeScale | null;
   /** False when the term closed with nothing captured. */
   hasGrades: boolean;
+  /** Lines carry letters, there are no averages (preescolar). */
+  gradingLetters: boolean;
 }
 
 /** The gateway emits exact decimals as JSON numbers; a string is tolerated. */
@@ -80,12 +86,14 @@ interface WireSummary {
   issuedAt?: string | null;
   generalAverage?: WireNumber;
   hasGrades?: boolean;
+  gradingLetters?: boolean;
 }
 
 interface WireLine {
   subjectId?: string;
   subjectName?: string;
   periods?: Record<string, WireNumber> | null;
+  letters?: Record<string, string> | null;
   months?: Record<string, WireNumber> | null;
   average?: WireNumber;
 }
@@ -103,6 +111,7 @@ interface WireReportCard {
   generalAverage?: WireNumber;
   scale?: Partial<GradeScale> | null;
   hasGrades?: boolean;
+  gradingLetters?: boolean;
 }
 
 const FIRST_VERSION = 1;
@@ -154,6 +163,7 @@ export async function listReportCards(studentId: string): Promise<ReportCardSumm
     issuedAt: c.issuedAt ?? null,
     generalAverage: toNumber(c.generalAverage),
     hasGrades: c.hasGrades ?? toNumber(c.generalAverage) !== null,
+    gradingLetters: c.gradingLetters ?? false,
   }));
 }
 
@@ -177,11 +187,13 @@ export async function getReportCard(studentId: string, reportCardId: string): Pr
       subjectId: l.subjectId ?? "",
       subjectName: l.subjectName ?? "",
       periods: toValues(l.periods),
+      letters: l.letters ?? {},
       months: toValues(l.months),
       average: toNumber(l.average),
     })),
     generalAverage: toNumber(data.generalAverage),
     scale: normalizeScale(data.scale),
     hasGrades: data.hasGrades ?? false,
+    gradingLetters: data.gradingLetters ?? false,
   };
 }

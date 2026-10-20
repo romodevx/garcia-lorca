@@ -7,6 +7,7 @@ import { Card, EmptyState } from "../../ui";
 import { AsyncErrorState, AsyncLoading, StaleNotice } from "../AsyncStates";
 import { defaultPeriod, deviceDay, hasCapturedGrades } from "../gradesView";
 import { PeriodChips } from "./PeriodChips";
+import { LetterGrades } from "./LetterGrades";
 import { PeriodGrades } from "./PeriodGrades";
 
 const HTTP_NOT_FOUND = 404;
@@ -30,7 +31,8 @@ interface PickedPeriod {
  * failing grade says "Reprobada" in words, never by colour alone; tapping a
  * subject opens its grade in every period. A level without numeric grades shows what was captured before it
  * stopped (as stored, judged by no scale); only with nothing captured does it
- * keep the qualitative "Próximamente" placeholder. Reloads on pull and on
+ * keep the qualitative "Próximamente" placeholder. A level that grades with
+ * letters (preescolar) shows each subject's letter and its meaning instead. Reloads on pull and on
  * foreground.
  */
 export function PeriodGradesView({ today }: PeriodGradesViewProps): ReactElement | null {
@@ -39,7 +41,11 @@ export function PeriodGradesView({ today }: PeriodGradesViewProps): ReactElement
   const [picked, setPicked] = useState<PickedPeriod | null>(null);
   useRefreshHandler(reload);
 
-  const withoutNumericGrades = toChildView(child).qualitative || data?.gradingEnabled === false;
+  const letters = data?.gradingLetters === true;
+  // A preescolar child's letters are known only once the grades load: until
+  // then it is loading, not "Próximamente".
+  const qualitativeChild = toChildView(child).qualitative && !(error && data === null);
+  const withoutNumericGrades = !letters && ((qualitativeChild && !loading) || data?.gradingEnabled === false);
   if (withoutNumericGrades && (data === null || !hasCapturedGrades(data.subjects))) {
     return <QualitativePending />;
   }
@@ -73,7 +79,11 @@ export function PeriodGradesView({ today }: PeriodGradesViewProps): ReactElement
             selected={period.id}
             onSelect={(id) => setPicked({ childId: selectedChildId, periodId: id })}
           />
-          <PeriodGrades subjects={data.subjects} period={period} periods={data.periods} scale={data.scale} />
+          {letters ? (
+            <LetterGrades subjects={data.subjects} period={period} />
+          ) : (
+            <PeriodGrades subjects={data.subjects} period={period} periods={data.periods} scale={data.scale} />
+          )}
         </>
       )}
     </>

@@ -7,7 +7,7 @@ import { useChildReportCard } from "../state/familyData";
 import { useTheme } from "../theme";
 import { Button, Card, EmptyState, ScreenTitle } from "../ui";
 import { AsyncErrorState, AsyncLoading } from "./AsyncStates";
-import { formatAverage } from "./gradesView";
+import { formatAverage, LETTERS_LEGEND } from "./gradesView";
 import { ReportCardTable } from "./grades/ReportCardTable";
 import { reportCardTitle, versionBadge } from "./grades/reportCardView";
 import { usePdfDownload, type PdfDownloadState } from "./grades/usePdfDownload";
@@ -70,6 +70,12 @@ export function ReportCardScreen({ id, studentId }: ReportCardScreenProps): Reac
       {data.hasGrades ? (
         <>
           <ReportCardTable card={data} />
+          {data.gradingLetters ? (
+            // Letters are never averaged: the legend says what each one means.
+            <Card style={styles.average}>
+              <Text style={[styles.averageLabel, { color: theme.colors.text2, fontFamily: theme.fonts.uiSemi }]}>{LETTERS_LEGEND}</Text>
+            </Card>
+          ) : (
           <Card style={styles.average}>
             <View accessible accessibilityLabel={`Promedio general: ${data.generalAverage === null ? "sin calificación" : formatAverage(data.generalAverage)}`} style={styles.averageRow}>
               <Text style={[styles.averageLabel, { color: theme.colors.text2, fontFamily: theme.fonts.uiSemi }]}>Promedio general</Text>
@@ -78,6 +84,7 @@ export function ReportCardScreen({ id, studentId }: ReportCardScreenProps): Reac
               </Text>
             </View>
           </Card>
+          )}
         </>
       ) : (
         <Card padded style={styles.average}>

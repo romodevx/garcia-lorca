@@ -95,6 +95,22 @@ describe("ReportCardScreen", () => {
     expect(screen.getByLabelText("Promedio general: 7.08")).toBeTruthy();
   });
 
+  // Preescolar's boleta: letters per period with their meaning, no average.
+  it("renders a letters boleta with what each letter means and no average", async () => {
+    mockGateway({
+      status: 200,
+      body: {
+        ...card, months: [], periods: [{ id: "p1", ordinal: 1, name: "1.er trimestre" }], gradingLetters: true, generalAverage: null,
+        lines: [{ subjectName: "Lenguajes", periods: {}, letters: { p1: "A" }, months: {}, average: null }],
+      },
+    });
+    await renderWithProviders(<ReportCardScreen id="rc1" studentId="s1" />);
+
+    await waitFor(() => expect(screen.getByLabelText("Lenguajes: 1.er trimestre A, Excelente")).toBeTruthy());
+    expect(screen.getByText("A Excelente · B Bien · C Suficiente · D Requiere apoyo")).toBeTruthy();
+    expect(screen.queryByText("Promedio general")).toBeNull();
+  });
+
   it("says so when the term closed without grades", async () => {
     mockGateway({ status: 200, body: { ...card, lines: [], generalAverage: null, hasGrades: false } });
     await renderWithProviders(<ReportCardScreen id="rc1" studentId="s1" />);

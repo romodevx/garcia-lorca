@@ -84,8 +84,8 @@ function ReportCardRow({ card }: { card: ReportCardSummary }): ReactElement {
           </View>
         )}
         <Text style={[styles.sub, sub]}>
-          {average === null ? "Sin calificaciones" : "Promedio general "}
-          {average === null ? null : <Text style={{ color: theme.colors.text, fontFamily: theme.fonts.uiExtra }}>{average}</Text>}
+          {card.gradingLetters ? "Calificada con letras" : average === null ? "Sin calificaciones" : "Promedio general "}
+          {average === null || card.gradingLetters ? null : <Text style={{ color: theme.colors.text, fontFamily: theme.fonts.uiExtra }}>{average}</Text>}
         </Text>
         {issued ? <Text style={[styles.sub, sub]}>{`Emitida el ${issued}`}</Text> : null}
       </View>
