@@ -1,7 +1,7 @@
 # PLAN — Avisos de importación y borradores sin CURP
 
 - **Origen:** validación de `importaciones/` contra la base local (21-oct-2026). 567 de 570 filas entraron bien, pero el importador **descarta o cambia datos en silencio**: solo avisa en la pantalla de importación, el aviso no se guarda y el valor original del Excel se pierde.
-- **Estado:** BORRADOR — pendiente de aprobación del dueño.
+- **Estado:** APROBADO por el dueño (21-oct-2026). Avance por PR abajo.
 - **Ya resuelto aparte:** siglo de la fecha de nacimiento (PR #171) y Go 1.26.10 (PR #172).
 
 ## Decisiones del dueño (21-oct-2026)
