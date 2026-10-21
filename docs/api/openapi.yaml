@@ -1575,12 +1575,21 @@ paths:
                 firstName: { type: string, minLength: 1, example: "ADA" }
                 lastName: { type: string, minLength: 1, example: "LOVELACE", description: "Paternal surname." }
                 maternalLastName: { type: string, example: "BYRON", description: "Maternal surname; optional (empty = not captured)." }
-                curp: { type: string, minLength: 18, maxLength: 18, example: "LOAA190312MDFVDA01" }
+                curp:
+                  type: string
+                  pattern: '^(|.{18})$'
+                  example: "LOAA190312MDFVDA01"
+                  description: >
+                    Eighteen characters. Empty only while the pupil is a draft
+                    (imported without a CURP); a valid CURP saved on a draft
+                    makes it pending (`promotedFromDraft`).
                 profile: { $ref: '#/components/schemas/StudentProfile' }
                 bankReference: { type: string, pattern: '^[0-9]{0,20}$', example: "231076", description: "BBVA payment reference (ADR 0033), unique per school. Absent keeps the stored one; empty clears it." }
       responses:
         '200':
-          description: The corrected pupil, profile included.
+          description: >
+            The corrected pupil, profile included. Every open import issue of a
+            field the save changed is closed as `corrected`.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/StudentWithProfile' }
@@ -1934,6 +1943,68 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/students/{id}/import-issues:
+    get:
+      tags: [students]
+      summary: A pupil's import issues
+      description: >
+        What the import could not keep as the file wrote it (the original value
+        and what was stored), open ones first. Behind module_import_review;
+        reading them is reading the pupil (students:read).
+      operationId: listStudentImportIssues
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/StudentIdPath'
+        - { name: includeResolved, in: query, required: false, schema: { type: boolean, default: false } }
+      responses:
+        '200':
+          description: The issues.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [issues]
+                properties:
+                  issues:
+                    type: array
+                    items: { $ref: '#/components/schemas/StudentImportIssue' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/students/{id}/import-issues/{issueId}/accept:
+    post:
+      tags: [students]
+      summary: Keep a value as stored ("Está bien así")
+      description: >
+        Closes an open import issue without changing the file (resolution
+        `accepted`, by the signed-in caller). Needs students:update. An issue
+        already resolved is answered as it stands. A draft's curp issue is
+        closed only by saving a valid CURP (409, `X-Error-Code: STUDENT_DRAFT`).
+      operationId: acceptStudentImportIssue
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+        - $ref: '#/components/parameters/StudentIdPath'
+        - { name: issueId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The resolved issue.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StudentImportIssue' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: 'A draft''s curp issue (`X-Error-Code: STUDENT_DRAFT`).'
+          headers:
+            X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
+          content:
+            text/plain:
+              schema: { type: string }
+              example: "ese alumno es un borrador sin CURP: captura su CURP"
 
   /api/v1/comms/announcements:
     post:
@@ -8005,6 +8076,9 @@ components:
         its links or identity-provider account are not yet closed; repeat the
         DELETE). Withdrawn pupil (T14): STUDENT_WITHDRAWN (409, the pupil's
         identity, medical record and photo no longer change; contacts do).
+        Draft pupil (import without a CURP): STUDENT_DRAFT (409, on enrolling,
+        transferring, linking a family account, or accepting the draft's curp
+        issue).
         Absent on a refusal without a code.
       schema:
         type: string
@@ -8573,6 +8647,34 @@ components:
           additionalProperties: { type: integer, minimum: 1 }
           example: { "Primaria|01|A": 30 }
         planHash: { type: string, description: The preview's planHash; required by the commit. }
+        rows:
+          type: array
+          maxItems: 1000
+          description: >
+            The school's choice per spreadsheet row in the preview (only rows
+            that differ from a plain import need to be sent). `draft` stores a
+            row without a valid CURP as a draft pupil; `omit` leaves it out.
+            Overrides correct a value before it is judged, and are validated on
+            the server like the file's own.
+          items:
+            type: object
+            required: [row]
+            properties:
+              row: { type: integer, minimum: 2, description: The spreadsheet row (the header is 1). }
+              action: { type: string, enum: [import, omit, draft], default: import }
+              overrides:
+                type: object
+                additionalProperties: false
+                properties:
+                  curp: { type: string, maxLength: 18 }
+                  birthDate: { type: string, format: date }
+                  homePhone: { type: string, maxLength: 30 }
+                  mobilePhone: { type: string, maxLength: 30 }
+                  email: { type: string, maxLength: 254 }
+                  postalCode: { type: string, maxLength: 10 }
+                  state: { type: string, maxLength: 60 }
+                  bankReference: { type: string, maxLength: 20 }
+          example: [{ row: 14, action: draft }, { row: 20, overrides: { mobilePhone: "5512345678" } }]
     StudentImportResult:
       type: object
       required: [cycle, levels, placements, rows, summary, unresolved, planHash]
@@ -8625,6 +8727,7 @@ components:
               reason: { type: string, example: status_withdrawn }
               warnings: { type: array, items: { type: string }, example: [bank_reference_invalid] }
               enrollmentNumber: { type: string, example: 2026-00042 }
+              draft: { type: boolean, description: The row is (or would be) stored as a draft pupil without a CURP. }
         summary:
           type: object
           required: [total, new, warnings, already, skipped, pending, movedToCycleStart]
@@ -9474,9 +9577,13 @@ components:
         levelId: { $ref: '#/components/schemas/LevelId' }
         gradeGroup: { type: string, example: "4° A" }
         guardianName: { type: string }
-        admissionStatus: { type: string, enum: [pending, accepted, enrolled, rejected, withdrawn] }
+        admissionStatus: { type: string, enum: [pending, accepted, enrolled, rejected, withdrawn, draft] }
         bankReference: { type: string, example: "231076", description: "BBVA payment reference (ADR 0033); empty when the pupil has none." }
         hasPhoto: { type: boolean, example: false, description: "Only on GET /api/v1/students/{id}: whether the pupil has a photo (T13). Absent means unknown; a client then asks for the photo." }
+        openIssues: { type: integer, minimum: 0, example: 2, description: "Import issues of the pupil nobody resolved yet." }
+        draft: { type: boolean, example: false, description: "Imported without a valid CURP (admissionStatus draft): cannot be enrolled, moved, linked to a family or invited." }
+        promotedFromDraft: { type: boolean, example: true, description: "Only on PUT: the save gave a draft its CURP, so the pupil is now pending." }
+        intendedGroupId: { type: string, format: uuid, description: "Only on PUT, with promotedFromDraft: the group the import meant the pupil for, to offer the enrollment there." }
         profile: { $ref: '#/components/schemas/StudentProfile' }
 
     StudentSummary:
@@ -9497,9 +9604,42 @@ components:
           example: "3° PRIMARIA · B"
           description: Only with include=groupLabel. The classroom in the current cycle, grade included (CC-211). Absent when unknown.
         guardianName: { type: string, example: "AUGUSTA BYRON" }
-        admissionStatus: { type: string, enum: [pending, accepted, enrolled, rejected, withdrawn] }
+        admissionStatus: { type: string, enum: [pending, accepted, enrolled, rejected, withdrawn, draft] }
         enrollmentNumber: { type: string, example: "2026-00042", description: "The matrícula; absent when none." }
         bankReference: { type: string, example: "231076", description: "BBVA payment reference (ADR 0033); empty when the pupil has none." }
+        openIssues: { type: integer, minimum: 0, example: 0, description: "Import issues of the pupil nobody resolved yet." }
+        draft: { type: boolean, example: false, description: "Imported without a valid CURP (admissionStatus draft)." }
+
+    StudentImportIssue:
+      type: object
+      description: >
+        A value the import could not keep as the file wrote it, stored with the
+        pupil (PLAN-import-avisos). Open until the file is corrected (saving a
+        changed field closes it as `corrected`) or someone says it is fine
+        (`accepted`).
+      required: [id, studentId, field, code, originalValue, storedValue, createdAt, resolution]
+      properties:
+        id: { type: string, format: uuid }
+        studentId: { type: string, format: uuid }
+        field:
+          type: string
+          enum: [birth_date, phone_home, phone_mobile, email, postal_code, state, bank_reference, surnames, first_name, address, curp]
+        code: { type: string, example: phone_invalid, description: "The import's stable warning code." }
+        originalValue: { type: string, example: "55 1234", description: "What the file said." }
+        storedValue: { type: string, example: "", description: "What was stored; empty when the value was dropped." }
+        createdAt: { type: string, format: date-time }
+        resolvedAt: { type: string, format: date-time, description: "Present once resolved." }
+        resolution: { type: string, enum: ['', corrected, accepted], description: "Empty while open." }
+        intendedGroupId: { type: string, format: uuid, description: "On a draft's curp issue: the group the import meant the pupil for." }
+      example:
+        id: 7d1e0c4e-0000-4000-8000-000000000001
+        studentId: e3b0c442-98fc-1c14-9afb-000000000003
+        field: phone_mobile
+        code: phone_invalid
+        originalValue: "55 1234"
+        storedValue: ""
+        createdAt: "2026-10-21T15:00:00Z"
+        resolution: ""
 
     Enrollment:
       type: object

@@ -98,6 +98,18 @@ service StudentsService {
   // so the preview and the commit walk the same path.
   rpc ImportStudents(ImportStudentsRequest) returns (ImportStudentsResponse);
 
+  // ListImportIssues lists what the import could not keep as the file wrote it
+  // for one pupil (open first; resolved ones only with include_resolved). An
+  // unknown pupil is NotFound.
+  rpc ListImportIssues(ListImportIssuesRequest) returns (ListImportIssuesResponse);
+
+  // AcceptImportIssue closes an open issue without changing the file ("está
+  // bien así"): resolution = accepted, resolved_by = the caller. An issue that
+  // is already resolved is answered as it stands. A draft's curp issue is not
+  // accepted (AlreadyExists, X-Error-Code STUDENT_DRAFT): only a valid CURP
+  // closes it. An issue of another pupil is NotFound.
+  rpc AcceptImportIssue(AcceptImportIssueRequest) returns (AcceptImportIssueResponse);
+
   // GetEnrollment fetches a single enrollment by id.
   rpc GetEnrollment(GetEnrollmentRequest) returns (GetEnrollmentResponse);
 
@@ -227,6 +239,9 @@ enum AdmissionStatus {
   ADMISSION_STATUS_ENROLLED = 3;   // enrolled into a cycle
   ADMISSION_STATUS_REJECTED = 4;   // terminal (from pending)
   ADMISSION_STATUS_WITHDRAWN = 5;  // terminal (from accepted/enrolled)
+  // An imported pupil without a valid CURP: no enrollment, no family link,
+  // no group change. A valid CURP saved on the file makes them pending.
+  ADMISSION_STATUS_DRAFT = 6;
 }
 
 // Student is the core entity. `curp` (Clave Única de Registro de Población) is
@@ -261,6 +276,11 @@ message Student {
   // bank_reference is the pupil's BBVA payment reference — the "matrícula" of
   // the previous system. Unique per school; empty when the pupil has none.
   string bank_reference = 17;
+  // open_issues counts the import issues of the pupil nobody resolved yet.
+  int32 open_issues = 18;
+  // draft is admission_status == DRAFT: imported without a valid CURP (curp is
+  // then empty).
+  bool draft = 19;
 }
 
 // StudentProfile is what the office keeps up to date by hand.
@@ -297,10 +317,18 @@ message UpdateStudentRequest {
   // bank_reference: unset keeps the stored one (a client that does not know the
   // field must not wipe it); "" clears it; any other value replaces it.
   optional string bank_reference = 7;
+  // The authenticated caller, set by the gateway — never by a client. It is
+  // recorded as resolved_by on the import issues this correction closes.
+  string actor_user_id = 8;
 }
 
 message UpdateStudentResponse {
   Student student = 1;
+  // promoted_from_draft: the save gave a draft its CURP, so the pupil is now
+  // pending. intended_group_id is the group the import meant them for (empty
+  // when unknown), so the caller can offer to enroll them there.
+  bool promoted_from_draft = 2;
+  string intended_group_id = 3;
 }
 
 message StudentMedical {
@@ -909,6 +937,50 @@ message ImportStudentRow {
   string group_id = 6;
   string bank_reference = 7;      // optional; digits only once trimmed
   StudentProfile profile = 8;     // lenient: bad sub-fields become warnings
+  // action is what the school chose in the preview. UNSPECIFIED is IMPORT.
+  ImportRowAction action = 9;
+  // issues are what the gateway itself changed or dropped while reading the
+  // file (e.g. birth_date_from_curp). Each one is stored with the pupil.
+  repeated ImportIssue issues = 10;
+  // original is what the spreadsheet said, before the gateway normalized it.
+  // An issue students raises on a field reports this value when it is set,
+  // else the value received in the row.
+  ImportOriginalValues original = 11;
+}
+
+// ImportRowAction is the school's choice for one row of the preview. Omitted
+// rows are simply not sent.
+enum ImportRowAction {
+  IMPORT_ROW_ACTION_UNSPECIFIED = 0;  // treated as IMPORT
+  IMPORT_ROW_ACTION_IMPORT = 1;
+  // DRAFT stores a row whose CURP is missing or invalid as a draft pupil: no
+  // enrollment; the group is kept on its curp issue (intended_group_id). A row
+  // with a valid CURP imports normally whatever the action.
+  IMPORT_ROW_ACTION_DRAFT = 2;
+}
+
+// ImportIssue is one value an import could not keep as the file wrote it.
+message ImportIssue {
+  // field is one of: birth_date, phone_home, phone_mobile, email, postal_code,
+  // state, bank_reference, surnames, first_name, address, curp.
+  string field = 1;
+  string code = 2;            // a stable warning code, e.g. "phone_invalid"
+  string original_value = 3;  // what the file said
+  string stored_value = 4;    // what was stored ("" when dropped)
+}
+
+// ImportOriginalValues is the spreadsheet's raw text per field. Every field is
+// optional.
+message ImportOriginalValues {
+  string curp = 1;
+  string birth_date = 2;
+  string phone_home = 3;
+  string phone_mobile = 4;
+  string email = 5;
+  string postal_code = 6;
+  string state = 7;
+  string bank_reference = 8;
+  string address = 9;
 }
 
 message ImportStudentsRequest {
@@ -946,10 +1018,53 @@ message ImportRowResult {
   // Imported pupils are enrolled from the start of the cycle (owner decision
   // 2026-10-17); only enrolled_at changes, never a withdrawal's date.
   bool moved_to_cycle_start = 7;
+  // draft: the row was (or, validating, would be) stored as a draft pupil.
+  bool draft = 8;
 }
 
 message ImportStudentsResponse {
   repeated ImportRowResult results = 1;  // one per row, in request order
+}
+
+// --- import issues (PLAN-import-avisos) --------------------------------------
+
+// StudentImportIssue is an import issue as stored with the pupil.
+message StudentImportIssue {
+  string id = 1;
+  string student_id = 2;
+  string field = 3;           // see ImportIssue.field
+  string code = 4;
+  string original_value = 5;
+  string stored_value = 6;
+  string import_batch_id = 7;
+  google.protobuf.Timestamp created_at = 8;
+  // Unset while the issue is open.
+  google.protobuf.Timestamp resolved_at = 9;
+  string resolved_by = 10;    // the user who resolved it; empty if unknown
+  string resolution = 11;     // "" (open) | "corrected" | "accepted"
+  // intended_group_id is set on a draft's curp issue: the group the import
+  // meant the pupil for.
+  string intended_group_id = 12;
+}
+
+message ListImportIssuesRequest {
+  string student_id = 1;
+  bool include_resolved = 2;
+}
+
+message ListImportIssuesResponse {
+  repeated StudentImportIssue issues = 1;
+}
+
+message AcceptImportIssueRequest {
+  string student_id = 1;
+  string issue_id = 2;
+  // The authenticated caller, set by the gateway — never by a client.
+  string user_id = 3;
+}
+
+message AcceptImportIssueResponse {
+  StudentImportIssue issue = 1;
 }
 
 // --- group corrections (T8) -------------------------------------------------
