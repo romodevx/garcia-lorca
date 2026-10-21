@@ -72,6 +72,20 @@ func TestPlanFallsBackToTheCURPForTheBirthDate(t *testing.T) {
 	}
 }
 
+// Position 17 is only a convention: RENAPO has issued digits to pupils born
+// after 2000. A column whose day, month and two-digit year are the CURP's
+// agrees with it, whatever century the CURP's position 17 suggests.
+func TestPlanKeepsTheColumnWhenOnlyTheCURPCenturyDiffers(t *testing.T) {
+	c := Plan([]Row{row(2, "A B, C", "Primaria", "2", "A", "Activo", "12/03/2019", "AAGJ190312MJCRRH09")}).Candidates[0]
+
+	if c.BirthDate != "2019-03-12" {
+		t.Errorf("birth = %q, want 2019-03-12 (the column, not 1919)", c.BirthDate)
+	}
+	if slices.Contains(c.Warnings, WarnBirthDateFromCURP) {
+		t.Errorf("warnings = %v: the column agrees with the CURP", c.Warnings)
+	}
+}
+
 // Placements are counted per (level, grade, group) among the rows that will
 // be imported, so a new group can be sized for the pupils it receives.
 func TestPlanCountsThePupilsOfEachPlacement(t *testing.T) {

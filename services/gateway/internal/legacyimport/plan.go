@@ -143,13 +143,20 @@ func birthDate(raw, curp string, warnings []string) (string, []string) {
 	fromCURP := curpBirthDate(curp)
 	typed, err := time.Parse("02/01/2006", strings.TrimSpace(raw))
 	switch {
-	case err == nil && (fromCURP.IsZero() || typed.Equal(fromCURP)):
+	case err == nil && (fromCURP.IsZero() || sameYYMMDD(typed, fromCURP)):
 		return typed.Format(time.DateOnly), warnings
 	case !fromCURP.IsZero():
 		return fromCURP.Format(time.DateOnly), append(warnings, WarnBirthDateFromCURP)
 	default:
 		return "", append(warnings, WarnBirthDateInvalid)
 	}
+}
+
+// sameYYMMDD compares what the CURP really encodes: its century (position 17)
+// is a convention RENAPO has not always kept, so the column's century wins.
+func sameYYMMDD(typed, fromCURP time.Time) bool {
+	const yymmdd = "060102"
+	return typed.Format(yymmdd) == fromCURP.Format(yymmdd)
 }
 
 // curpBirthDate reads positions 5–10 (YYMMDD); position 17 is a digit for
