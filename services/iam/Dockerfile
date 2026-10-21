@@ -3,7 +3,7 @@
 #   docker build -f services/iam/Dockerfile -t iam .
 
 # ---- builder --------------------------------------------------------------
-FROM golang:1.26.9-bookworm AS builder
+FROM golang:1.26.10-bookworm AS builder
 
 ENV CGO_ENABLED=0 GOOS=linux
 
