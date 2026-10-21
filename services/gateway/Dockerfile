@@ -9,7 +9,7 @@
 # minimal attack surface. CGO disabled, symbols stripped.
 
 # ---- builder --------------------------------------------------------------
-FROM golang:1.26.9-bookworm AS builder
+FROM golang:1.26.10-bookworm AS builder
 
 ENV CGO_ENABLED=0 GOOS=linux
 
