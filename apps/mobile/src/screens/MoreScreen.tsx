@@ -1,4 +1,4 @@
-import { useFlag, type FlagKey } from "@garcia-lorca/ui/flags";
+import { useFlags, type FlagKey } from "@garcia-lorca/ui/flags";
 import { router } from "expo-router";
 import { type ReactElement } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
@@ -44,14 +44,7 @@ export function MoreScreen({ onLogout }: { onLogout: () => void }): ReactElement
         {view.present ? <Chip kind="lime">{view.short}</Chip> : null}
       </Card>
 
-      <SectionLabel>Módulos</SectionLabel>
-      <View style={styles.grid}>
-        {modules
-          .filter((m) => !m.hidden)
-          .map((m) => (
-            <ModuleCard key={m.id} module={m} />
-          ))}
-      </View>
+      <ModuleGrid />
 
       <SectionLabel>Cuenta</SectionLabel>
       <Card>
@@ -89,13 +82,31 @@ export function MoreScreen({ onLogout }: { onLogout: () => void }): ReactElement
   );
 }
 
-function ModuleCard({ module }: { module: ModuleTile }): ReactElement | null {
-  const theme = useTheme();
-  const enabled = useFlag(MODULE_FLAGS[module.id]);
-  // Flag OFF (no backend yet) → don't render the tile at all.
-  if (!enabled) {
+/**
+ * The flag-gated module tiles under their "Módulos" label. With no tile visible
+ * the whole section is absent — a label over an empty grid reads as a broken
+ * screen (QA 21-oct).
+ */
+function ModuleGrid(): ReactElement | null {
+  const flags = useFlags();
+  const visible = modules.filter((m) => !m.hidden && flags[MODULE_FLAGS[m.id]] === true);
+  if (visible.length === 0) {
     return null;
   }
+  return (
+    <>
+      <SectionLabel>Módulos</SectionLabel>
+      <View style={styles.grid}>
+        {visible.map((m) => (
+          <ModuleCard key={m.id} module={m} />
+        ))}
+      </View>
+    </>
+  );
+}
+
+function ModuleCard({ module }: { module: ModuleTile }): ReactElement {
+  const theme = useTheme();
   return (
     <Pressable
       accessibilityRole="button"

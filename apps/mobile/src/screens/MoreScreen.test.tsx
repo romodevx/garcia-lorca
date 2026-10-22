@@ -41,12 +41,20 @@ describe("MoreScreen module grid (flag-gated)", () => {
     expect(screen.queryByText("Becas")).toBeNull();
   });
 
+  // QA 21-oct: with every tile's flag OFF the "Módulos" label sat over an empty grid.
+  it("hides the Módulos section when no tile is visible", async () => {
+    await renderWithProviders(<MoreScreen onLogout={() => undefined} />);
+
+    expect(screen.queryByText("Módulos")).toBeNull();
+  });
+
   it("renders a module tile when its flag is turned ON", async () => {
     await renderWithProviders(<MoreScreen onLogout={() => undefined} />, {
       flags: { module_uniforms: true },
     });
 
     expect(screen.getByText("Uniformes")).toBeTruthy();
+    expect(screen.getByText("Módulos")).toBeTruthy();
     // A sibling tile whose flag stays OFF is still hidden.
     expect(screen.queryByText("Becas")).toBeNull();
   });
