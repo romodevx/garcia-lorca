@@ -66,24 +66,15 @@ describe("LoginScreen", () => {
     expect(screen.getByText(/No pudimos iniciar sesión/)).toBeTruthy();
   });
 
-  it("shows fingerprint wording on Android", async () => {
-    setPlatform("android");
+  // QA 21-oct: "Entrar con huella" looked like a way in and only said
+  // "disponible pronto". No biometric sign-in exists, so neither does the button.
+  it.each(["android", "ios"] as const)("offers no biometric sign-in on %s", async (platform) => {
+    setPlatform(platform);
     await renderWithProviders(<LoginScreen onSubmit={async () => undefined} />);
     await drainMount();
 
-    expect(screen.getByRole("button", { name: "Entrar con huella" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Entrar con Face ID" })).toBeNull();
-  });
-
-  it("does not submit credentials via Face ID (out of scope, not a silent login)", async () => {
-    setPlatform("ios");
-    const onSubmit = jest.fn().mockResolvedValue(undefined);
-    await renderWithProviders(<LoginScreen onSubmit={onSubmit} />);
-    await drainMount();
-
-    fireEvent.press(screen.getByRole("button", { name: "Entrar con Face ID" }));
-
-    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: /huella|Face ID/ })).toBeNull();
+    expect(screen.queryByText("o")).toBeNull();
   });
 
   // Not on every keystroke: rewriting a controlled TextInput mid-composition

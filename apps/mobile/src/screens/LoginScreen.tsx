@@ -1,5 +1,5 @@
 import { useState, type ReactElement } from "react";
-import { Image, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Image, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { ApiError, requestPasswordReset } from "../api";
 import { Icon } from "../icons";
 import { useTheme } from "../theme";
@@ -40,13 +40,6 @@ function Brandmark({ height = 64 }: { height?: number }): ReactElement {
 // the credential was wrong — the gateway equalizes login timing for the same
 // reason.
 const SIGN_IN_ERROR = "No pudimos iniciar sesión. Verifica tu correo y contraseña.";
-
-// Face ID / biometric unlock is out of scope for this pass. The button stays for
-// design fidelity but MUST NOT fake a login: it explains it is not yet available
-// instead of silently authenticating.
-// TODO(pendiente-mobile: biometric-unlock) — gate biometric sign-in on
-// expo-local-authentication + a stored refresh token.
-const BIOMETRIC_PENDING = "El acceso biométrico estará disponible pronto.";
 
 // The answers to "¿Olvidaste tu contraseña?". The sent one is the same sentence
 // whether or not the address has an account (the gateway answers 204 either
@@ -206,19 +199,6 @@ export function LoginScreen({ onSubmit, notice }: LoginScreenProps): ReactElemen
 
       <Button label="Ingresar" icon="arrow-right" onPress={submit} loading={submitting} />
 
-      <View style={styles.divider}>
-        <View style={[styles.line, { backgroundColor: theme.colors.line }]} />
-        <Text style={{ fontSize: 12, fontWeight: "700", color: theme.colors.text3, fontFamily: theme.fonts.ui }}>o</Text>
-        <View style={[styles.line, { backgroundColor: theme.colors.line }]} />
-      </View>
-
-      <Button
-        label={Platform.OS === "ios" ? "Entrar con Face ID" : "Entrar con huella"}
-        variant="outline"
-        icon="lock"
-        onPress={() => setError(BIOMETRIC_PENDING)}
-      />
-
       <Text style={[styles.help, { color: theme.colors.text3, fontFamily: theme.fonts.uiExtra }]}>
         ¿Problemas para entrar? Contacta a la escuela
       </Text>
@@ -251,7 +231,5 @@ const styles = StyleSheet.create({
   forgot: { alignSelf: "flex-end", marginVertical: 12, marginRight: 4 },
   error: { textAlign: "center", fontSize: 13, fontWeight: "700", marginBottom: 12, marginHorizontal: 4 },
   notice: { textAlign: "center", fontSize: 16, fontWeight: "600", borderRadius: 12, padding: 12, marginBottom: 16 },
-  divider: { flexDirection: "row", alignItems: "center", gap: 12, marginVertical: 18 },
-  line: { flex: 1, height: 1 },
   help: { textAlign: "center", fontSize: 12.5, fontWeight: "700", marginTop: 22 },
 });
