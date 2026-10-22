@@ -1,9 +1,10 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react-native";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react-native";
 import { router } from "expo-router";
 import { demoFlags } from "../flags/bootstrap";
 import { clearTokens, saveTokens } from "../api";
 import { downloadPdf, PdfError, sharePdf } from "../files/reportCardPdf";
 import { AccountScreen } from "./AccountScreen";
+import { announceVoucherSent } from "../state/familyData";
 import { renderWithProviders } from "../test/renderWithProviders";
 
 jest.mock("../files/reportCardPdf", () => {
@@ -428,5 +429,105 @@ describe("AccountScreen (the backend's ledger, T7)", () => {
 
     expect(await screen.findByText("Colegiatura septiembre")).toBeTruthy();
     expect(screen.queryByText("Cómo pagar por transferencia")).toBeNull();
+  });
+});
+
+// ADR 0040: right below "Cómo pagar", the way to send a voucher — only with
+// module_payment_vouchers on, and gone when the gateway answers 404.
+describe("AccountScreen voucher entry (¿Ya pagaste?)", () => {
+  const SETTLED = { movements: [], totals: ZERO, dueTodayCents: 0, asOf: "2026-10-01" };
+  const pending = { id: "v1", status: "pending", createdAt: "2026-10-21T15:00:00Z" };
+
+  /** The Account reads, plus the vouchers list answering `status` with `vouchers`. */
+  function mockWithVouchers(status: number, vouchers: unknown[]): jest.Mock {
+    const base = mockFetch(SETTLED);
+    const fetchMock = jest.fn(async (url: string, init?: RequestInit) =>
+      String(url).endsWith("/payment-vouchers")
+        ? { ok: status === 200, status, json: async () => ({ vouchers }) }
+        : base(url, init),
+    );
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    return fetchMock;
+  }
+
+  beforeEach(async () => {
+    await saveTokens({ accessToken: "a1", refreshToken: "r1" });
+  });
+  afterEach(async () => {
+    await clearTokens();
+    jest.clearAllMocks();
+  });
+
+  it("leads to the voucher screen and says how many wait for the school", async () => {
+    mockWithVouchers(200, [pending]);
+    await renderWithProviders(<AccountScreen />, { flags: { ...demoFlags, module_payment_vouchers: true } });
+
+    expect(await screen.findByText("1 comprobante por revisar")).toBeTruthy();
+    await fireEvent.press(screen.getByLabelText("¿Ya pagaste? Sube tu comprobante"));
+    expect(router.push).toHaveBeenCalledWith("/comprobante");
+  });
+
+  it("stays hidden while the list is loading, so a gateway with it off never flashes it", async () => {
+    const base = mockFetch(SETTLED);
+    globalThis.fetch = jest.fn((url: string, init?: RequestInit) =>
+      String(url).endsWith("/payment-vouchers") ? new Promise(() => undefined) : base(url, init),
+    ) as unknown as typeof fetch;
+    await renderWithProviders(<AccountScreen />, { flags: { ...demoFlags, module_payment_vouchers: true } });
+
+    await waitFor(() => expect(screen.getByText("Al corriente")).toBeTruthy());
+    expect(screen.queryByLabelText("¿Ya pagaste? Sube tu comprobante")).toBeNull();
+  });
+
+  it("recounts what waits once a voucher is sent from its screen", async () => {
+    let listed: unknown[] = [];
+    const base = mockFetch(SETTLED);
+    globalThis.fetch = jest.fn(async (url: string, init?: RequestInit) =>
+      String(url).endsWith("/payment-vouchers")
+        ? { ok: true, status: 200, json: async () => ({ vouchers: listed }) }
+        : base(url, init),
+    ) as unknown as typeof fetch;
+    await renderWithProviders(<AccountScreen />, { flags: { ...demoFlags, module_payment_vouchers: true } });
+    expect(await screen.findByText("Envía la foto o el PDF de tu transferencia.")).toBeTruthy();
+
+    listed = [pending];
+    await act(async () => announceVoucherSent());
+
+    expect(await screen.findByText("1 comprobante por revisar")).toBeTruthy();
+  });
+
+  it.each([[500], [503]])("keeps the entry, without a count, when the list fails with %d", async (status) => {
+    mockWithVouchers(status, []);
+    await renderWithProviders(<AccountScreen />, { flags: { ...demoFlags, module_payment_vouchers: true } });
+
+    expect(await screen.findByLabelText("¿Ya pagaste? Sube tu comprobante")).toBeTruthy();
+    expect(screen.getByText("Envía la foto o el PDF de tu transferencia.")).toBeTruthy();
+  });
+
+  it("keeps the entry when the list cannot be reached at all", async () => {
+    const base = mockFetch(SETTLED);
+    globalThis.fetch = jest.fn(async (url: string, init?: RequestInit) => {
+      if (String(url).endsWith("/payment-vouchers")) throw new TypeError("Network request failed");
+      return base(url, init);
+    }) as unknown as typeof fetch;
+    await renderWithProviders(<AccountScreen />, { flags: { ...demoFlags, module_payment_vouchers: true } });
+
+    expect(await screen.findByLabelText("¿Ya pagaste? Sube tu comprobante")).toBeTruthy();
+  });
+
+  it("is absent, and asks nothing, with the flag off", async () => {
+    const fetchMock = mockWithVouchers(200, []);
+    await renderWithProviders(<AccountScreen />, { flags: { ...demoFlags, module_payment_vouchers: false } });
+
+    await waitFor(() => expect(screen.getByText("Al corriente")).toBeTruthy());
+    expect(screen.queryByLabelText("¿Ya pagaste? Sube tu comprobante")).toBeNull();
+    expect(fetchMock.mock.calls.some(([u]) => String(u).endsWith("/payment-vouchers"))).toBe(false);
+  });
+
+  it("is absent when the gateway has the module off (404)", async () => {
+    mockWithVouchers(404, []);
+    await renderWithProviders(<AccountScreen />, { flags: { ...demoFlags, module_payment_vouchers: true } });
+
+    await waitFor(() => expect(screen.getByText("Al corriente")).toBeTruthy());
+    await waitFor(() => expect(screen.queryByLabelText("¿Ya pagaste? Sube tu comprobante")).toBeNull());
   });
 });

@@ -27,5 +27,8 @@ export const demoFlags: FlagSet = {
   // The virtual card (task 13): ON since its gates passed (2026-10-21). Cuenta
   // offers "Credencial" and the floating button opens it from every tab.
   module_student_card: true,
+  // Payment vouchers (ADR 0040): ON in this build, which carries the native
+  // pickers; the gateway's flag still decides (OFF ⇒ 404 ⇒ Cuenta hides it).
+  module_payment_vouchers: true,
   // module_billing stays OFF (out of MVP) → "Facturas" tile hidden.
 };
