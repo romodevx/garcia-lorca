@@ -2,9 +2,7 @@ import { render, screen } from "@testing-library/react-native";
 import { type ReactNode } from "react";
 import { I18nextProvider, useTranslation } from "react-i18next";
 import { Text } from "react-native";
-import { renderWithProviders } from "../test/renderWithProviders";
 import i18n from "./i18n";
-import { LanguageToggle } from "./LanguageToggle";
 
 /**
  * Proves the mobile binding contract: flat catalog → toNested → i18next-icu
@@ -61,10 +59,5 @@ describe("mobile react-i18next + i18next-icu binding", () => {
   it("serves a second namespace (auth) from the same instance", async () => {
     await render(<Wrap><LoginTitle /></Wrap>);
     expect(screen.getByText("Bienvenido de vuelta")).toBeTruthy();
-  });
-
-  it("language toggle shows the target locale code (full provider stack)", async () => {
-    await renderWithProviders(<LanguageToggle />);
-    expect(screen.getByText("EN")).toBeTruthy();
   });
 });

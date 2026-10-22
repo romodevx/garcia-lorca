@@ -31,9 +31,6 @@ export function AppHeader(): ReactElement {
       <ChildIdentity />
 
       <View style={styles.actions}>
-        {/* The language toggle (src/i18n/LanguageToggle) comes back here once the
-            screens are translated: today their copy is hardcoded Spanish, so
-            switching changed nothing but the toggle's own label (QA 21-oct). */}
         <IconButton
           label="Cambiar tema"
           onPress={toggleTheme}
