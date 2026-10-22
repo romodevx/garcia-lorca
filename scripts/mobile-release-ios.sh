@@ -13,11 +13,13 @@
 #
 # Two deliberate local-only deviations, both applied to the GENERATED ios/
 # folder or the build environment, never to the app's source:
-#   * EXPO_PUBLIC_API_URL=http://localhost:18080 — the simulator shares the
-#     host's loopback, where prod-local publishes the gateway.
+#   * EXPO_PUBLIC_API_URL=http://127.0.0.1:18080 — the simulator shares the
+#     host's loopback, where prod-local publishes the gateway on IPv4 only.
+#     Not "localhost": it resolves to ::1 first and the connection is refused.
 #   * NSAppTransportSecurity/NSAllowsLocalNetworking=true — ATS blocks plain
-#     http; the local gateway has no TLS. It only relaxes local addresses, and
-#     production talks https and does not need it.
+#     http; the local gateway has no TLS. It only relaxes unqualified and .local
+#     names and IP literals (127.0.0.1 included; Apple's NSAllowsLocalNetworking
+#     docs), and production talks https and does not need it.
 #
 # Requirements on this machine (checked below, fails loudly):
 #   Xcode with the iOS Simulator SDK, CocoaPods, pnpm.
@@ -26,7 +28,7 @@ set -euo pipefail
 REPO_ROOT=$(CDPATH='' cd -- "$(dirname "$0")/.." && pwd)
 readonly REPO_ROOT
 readonly MOBILE_DIR="$REPO_ROOT/apps/mobile"
-readonly DEFAULT_API_URL="http://localhost:18080"
+readonly DEFAULT_API_URL="http://127.0.0.1:18080"
 # LOCAL-ONLY bundle id (".local" suffix): the store id is the owner's call and
 # is not fixed in app.json yet. app.config.ts reads IOS_BUNDLE_ID.
 readonly DEFAULT_IOS_BUNDLE_ID="mx.edu.garcialorca.familias.local"
