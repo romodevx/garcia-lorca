@@ -20,7 +20,8 @@
           "microphonePermission": false
         }
       ],
-      "./plugins/withSceneDelegate.ts"
+      "./plugins/withSceneDelegate.ts",
+      "./plugins/withPodsDeploymentTarget.ts"
     ],
     "ios": {
       "supportsTablet": true,
