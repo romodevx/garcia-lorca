@@ -21,31 +21,63 @@ const TEMPLATE_WINDOW_BLOCK =
 const SCENE_DELEGATE = `
 ${MARKER}
 // Launch builds only the React Native factory; the scene creates the window
-// and starts React Native in it.
+// and starts React Native in it. Links go through the AppDelegate so Expo's
+// AppDelegate subscribers see them, as they did without scenes.
 class SceneDelegate: UIResponder, UIWindowSceneDelegate {
   var window: UIWindow?
 
+  private var appDelegate: AppDelegate? {
+    UIApplication.shared.delegate as? AppDelegate
+  }
+
+  // UIKit calls this for every connection, including a reconnect after the
+  // system discarded the scene to reclaim memory: each one gets a fresh window.
   func scene(
     _ scene: UIScene,
     willConnectTo session: UISceneSession,
     options connectionOptions: UIScene.ConnectionOptions
   ) {
-    guard let windowScene = scene as? UIWindowScene,
-          let appDelegate = UIApplication.shared.delegate as? AppDelegate,
-          let factory = appDelegate.reactNativeFactory else { return }
+    guard let windowScene = scene as? UIWindowScene else { return }
+    guard let factory = appDelegate?.reactNativeFactory else {
+      NSLog("SceneDelegate: AppDelegate built no React Native factory; the scene stays empty")
+      assertionFailure("SceneDelegate: AppDelegate built no React Native factory")
+      return
+    }
     let window = UIWindow(windowScene: windowScene)
     self.window = window
-    appDelegate.window = window
-    factory.startReactNative(withModuleName: "main", in: window, launchOptions: nil)
-    if let url = connectionOptions.urlContexts.first?.url {
-      RCTLinkingManager.application(UIApplication.shared, open: url, options: [:])
+    appDelegate?.window = window
+    // A cold-start link travels in the launch options, where Linking.getInitialURL
+    // reads it; an event posted now would fire before JS subscribes and be lost.
+    factory.startReactNative(withModuleName: "main", in: window, launchOptions: launchOptions(from: connectionOptions))
+    connectionOptions.userActivities.forEach { userActivity in
+      _ = appDelegate?.application(UIApplication.shared, continue: userActivity, restorationHandler: { _ in })
     }
   }
 
   // With scenes, deep links arrive here instead of application(_:open:options:).
   func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {
     guard let url = URLContexts.first?.url else { return }
-    RCTLinkingManager.application(UIApplication.shared, open: url, options: [:])
+    _ = appDelegate?.application(UIApplication.shared, open: url, options: [:])
+  }
+
+  // With scenes, universal links arrive here instead of application(_:continue:restorationHandler:).
+  func scene(_ scene: UIScene, continue userActivity: NSUserActivity) {
+    _ = appDelegate?.application(UIApplication.shared, continue: userActivity, restorationHandler: { _ in })
+  }
+
+  // The launch-option keys React Native's Linking.getInitialURL reads.
+  private func launchOptions(from connectionOptions: UIScene.ConnectionOptions) -> [UIApplication.LaunchOptionsKey: Any] {
+    var options: [UIApplication.LaunchOptionsKey: Any] = [:]
+    if let url = connectionOptions.urlContexts.first?.url {
+      options[.url] = url
+    }
+    if let userActivity = connectionOptions.userActivities.first {
+      options[.userActivityDictionary] = [
+        UIApplication.LaunchOptionsKey.userActivityType.rawValue: userActivity.activityType,
+        "UIApplicationLaunchOptionsUserActivityKey": userActivity,
+      ]
+    }
+    return options
   }
 }
 `;
