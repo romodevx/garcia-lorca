@@ -1129,7 +1129,8 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	// The virtual card (task 13), behind module_student_card (default OFF): the
 	// family reads its own child's card and photo; staff verify a scanned code
 	// (students:read) and revoke a card (students:update).
-	cardH := handler.NewCardHandler(studentsClient, studentsClient, studentsClient, configClient, configClient)
+	cardH := handler.NewCardHandler(studentsClient, studentsClient, studentsClient, configClient, configClient,
+		handler.WithCardImportReview(importReviewOn))
 	mux.Handle("GET /api/v1/family/students/{studentId}/card",
 		familyReadModules([]string{"student_card", "students"}, cardH.FamilyCard))
 	mux.Handle("GET /api/v1/family/students/{studentId}/photo",

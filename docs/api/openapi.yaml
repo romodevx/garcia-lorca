@@ -8679,10 +8679,11 @@ components:
             of the file before the row is judged and are validated on the
             server (422 `IMPORT_ROWS_INVALID` names each row and field); an
             empty string clears an optional value (not `curp` nor `fullName`).
-            A corrected field carries no import issue. The decisions are not
-            hashed themselves, but what they do to each row is (its status,
-            reason and destination): send the same `rows` to the preview whose
-            `planHash` the commit carries.
+            A corrected field carries no import issue. What the decisions do
+            to each row is hashed (its status,
+            reason and destination), and so are the decisions themselves
+            (canonical: by row, overrides normalized): send the same `rows` to
+            the preview whose `planHash` the commit carries.
           items:
             type: object
             required: [row]
@@ -9696,7 +9697,11 @@ components:
                           bank_reference_invalid, bank_reference_taken,
                           address_too_long, name_unreadable, curp_duplicated,
                           action_unknown, draft_has_curp, row_unknown,
-                          row_repeated.
+                          row_repeated, row_malformed, override_unknown (a key
+                          the contract does not have; field is that key),
+                          override_malformed, too_many_rows (more than 1000
+                          decisions; field `rows`, row 0). At most 100 are
+                          listed.
       example:
         error:
           code: invalid

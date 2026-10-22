@@ -1,10 +1,14 @@
 package handler
 
 import (
+	"cmp"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"maps"
 	"net/http"
 	"slices"
-	"strings"
 
 	"github.com/garcia-lorca/services/gateway/internal/client"
 	"github.com/garcia-lorca/services/gateway/internal/legacyimport"
@@ -18,11 +22,13 @@ import (
 // parsed rows BEFORE they are planned, so a corrected row is judged — by Plan,
 // config and students — exactly as if the file had said it.
 //
-// The plan hash does not cover the decisions themselves but what they do to
-// each row (its status, reason and destination are already in it): the screen
-// re-previews with its decisions and commits with the same ones, and a commit
-// whose decisions change any row's fate is PREVIEW_STALE — the office approved
-// that result, not another.
+// The plan hash covers what the decisions do to each row (its status, reason
+// and destination) AND the decisions themselves, canonical (decisionsDigest):
+// the screen re-previews with its decisions and commits with the same ones,
+// and a commit with other decisions — even a phone corrected to another
+// number, which moves no row's fate — is PREVIEW_STALE: the office approved
+// that result, not another. Without decisions the hash is the one it always
+// was.
 //
 // With the flag off the decisions are ignored and nothing new is sent or
 // answered: the import behaves as it did before the review existed.
@@ -44,6 +50,20 @@ const (
 	codeActionUnknown  = "action_unknown"
 	codeDraftHasCURP   = "draft_has_curp"
 	codeCURPDuplicated = "curp_duplicated"
+	// codeOverrideUnknown is a key the contract does not have (a decision and
+	// its overrides are closed: additionalProperties false).
+	codeOverrideUnknown   = "override_unknown"
+	codeOverrideMalformed = "override_malformed"
+	codeRowMalformed      = "row_malformed"
+	codeTooManyDecisions  = "too_many_rows"
+)
+
+// maxRowDecisions is the contract's maxItems, a file's row limit; checked
+// before any decision is read. maxRowErrors bounds the refusal's size.
+const (
+	maxRowDecisions = 1000
+	maxRowErrors    = 100
+	fieldRows       = "rows"
 )
 
 // Where a refusal points when it is not an override.
@@ -52,11 +72,69 @@ const (
 	fieldAction = "action"
 )
 
-// rowDecision is the office's choice for one spreadsheet row.
+// rowDecision is the office's choice for one spreadsheet row. Decoding never
+// fails: what does not fit the contract is kept in problems and refused only
+// when the review is on — off, the decisions are not read at all.
 type rowDecision struct {
 	Row       int                    `json:"row"`
 	Action    string                 `json:"action,omitempty"`
 	Overrides legacyimport.Overrides `json:"overrides"`
+	problems  []rowProblem
+}
+
+// rowProblem is a key of a decision the contract refuses.
+type rowProblem struct{ field, code string }
+
+// UnmarshalJSON reads a decision strictly: an unknown key (of the decision or
+// of its overrides) or a value of the wrong type is a problem, by its key.
+func (d *rowDecision) UnmarshalJSON(raw []byte) error {
+	*d = rowDecision{}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(raw, &fields) != nil {
+		d.problems = append(d.problems, rowProblem{fieldRow, codeRowMalformed})
+		return nil
+	}
+	for _, key := range slices.Sorted(maps.Keys(fields)) {
+		value := fields[key]
+		switch key {
+		case "row":
+			if json.Unmarshal(value, &d.Row) != nil {
+				d.problems = append(d.problems, rowProblem{fieldRow, codeRowMalformed})
+			}
+		case "action":
+			if json.Unmarshal(value, &d.Action) != nil {
+				d.problems = append(d.problems, rowProblem{fieldAction, codeActionUnknown})
+			}
+		case "overrides":
+			d.decodeOverrides(value)
+		default:
+			d.problems = append(d.problems, rowProblem{key, codeOverrideUnknown})
+		}
+	}
+	return nil
+}
+
+func (d *rowDecision) decodeOverrides(raw json.RawMessage) {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(raw, &fields) != nil {
+		d.problems = append(d.problems, rowProblem{"overrides", codeOverrideMalformed})
+		return
+	}
+	known := map[string]json.RawMessage{}
+	for _, key := range slices.Sorted(maps.Keys(fields)) {
+		var text *string
+		switch {
+		case !legacyimport.KnownOverride(key):
+			d.problems = append(d.problems, rowProblem{key, codeOverrideUnknown})
+		case json.Unmarshal(fields[key], &text) != nil:
+			d.problems = append(d.problems, rowProblem{key, codeOverrideMalformed})
+		default:
+			known[key] = fields[key]
+		}
+	}
+	// Every value left is a string or null: re-reading them cannot fail.
+	encoded, _ := json.Marshal(known)
+	_ = json.Unmarshal(encoded, &d.Overrides)
 }
 
 // rowError is one refused decision: the row, the override (or "row" /
@@ -85,6 +163,10 @@ type review struct {
 	drafts map[int]bool
 	// corrected names, per row, the override that settled each issue field.
 	corrected map[int]map[legacyimport.IssueField]string
+	// digest is the decisions as approved, canonical (by row, normalized): the
+	// plan hash covers it, so a commit with other corrections is stale. "" when
+	// nothing differs from a plain import.
+	digest string
 }
 
 // reviewOn reports whether module_import_review is on for this request.
@@ -103,11 +185,21 @@ func applyDecisions(rows []legacyimport.Row, decisions []rowDecision) (review, [
 	for i, r := range rows {
 		rv.files[r.Number], at[r.Number] = r, i
 	}
+	if len(decisions) > maxRowDecisions {
+		return rv, []rowError{{0, fieldRows, codeTooManyDecisions}}
+	}
 	seen := make(map[int]bool, len(decisions))
 	var errs []rowError
 	for _, d := range decisions {
+		if len(errs) >= maxRowErrors {
+			return rv, errs[:maxRowErrors]
+		}
 		i, known := at[d.Row]
 		switch {
+		case len(d.problems) > 0:
+			for _, p := range d.problems {
+				errs = append(errs, rowError{d.Row, p.field, p.code})
+			}
 		case !known:
 			errs = append(errs, rowError{d.Row, fieldRow, codeRowUnknown})
 		case seen[d.Row]:
@@ -117,7 +209,38 @@ func applyDecisions(rows []legacyimport.Row, decisions []rowDecision) (review, [
 			errs = append(errs, rv.decide(&rows[i], d)...)
 		}
 	}
+	if len(errs) > maxRowErrors {
+		errs = errs[:maxRowErrors]
+	}
+	rv.digest = decisionsDigest(decisions)
 	return rv, errs
+}
+
+// decisionsDigest is the decisions in a canonical form: sorted by row, the
+// action named, the overrides normalized; a plain import (no action, no
+// override) is left out, so sending it or not is the same plan.
+func decisionsDigest(decisions []rowDecision) string {
+	type canonical struct {
+		Row       int
+		Action    string
+		Overrides string
+	}
+	var out []canonical
+	for _, d := range decisions {
+		action := cmp.Or(d.Action, actionImport)
+		overrides := d.Overrides.Canonical()
+		if action == actionImport && overrides == "" {
+			continue
+		}
+		out = append(out, canonical{d.Row, action, overrides})
+	}
+	if len(out) == 0 {
+		return ""
+	}
+	slices.SortFunc(out, func(a, b canonical) int { return cmp.Compare(a.Row, b.Row) })
+	raw, _ := json.Marshal(out) // strings and ints only
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
 }
 
 // decide applies one decision to its row, or answers why it cannot be.
@@ -219,7 +342,7 @@ func (rv review) dress(row *importRow, c legacyimport.Candidate, sendable bool, 
 	issues := legacyimport.IssuesOf(c, file)
 	issues = append(issues, legacyimport.StudentIssues(res.Warnings, file, c.Row)...)
 	if row.CanDraft {
-		issues = append(issues, legacyimport.Issue{Field: legacyimport.FieldCURP, Code: curpIssueCode(c.Row.CURP), Original: file.CURP})
+		issues = append(issues, legacyimport.Issue{Field: legacyimport.FieldCURP, Code: legacyimport.DraftCURPCode(c.Row.CURP), Original: file.CURP})
 	}
 	for _, i := range issues {
 		shown := importIssue{Field: string(i.Field), Code: i.Code, Original: i.Original, Stored: i.Stored}
@@ -227,14 +350,6 @@ func (rv review) dress(row *importRow, c legacyimport.Candidate, sendable bool, 
 			row.Issues = append(row.Issues, shown)
 		}
 	}
-}
-
-// curpIssueCode is students' code for a draft's CURP (domain.IssueCURP*).
-func curpIssueCode(curp string) string {
-	if strings.TrimSpace(curp) == "" {
-		return "curp_missing"
-	}
-	return "curp_invalid"
 }
 
 // writeRowErrors answers refused decisions with the shared envelope.

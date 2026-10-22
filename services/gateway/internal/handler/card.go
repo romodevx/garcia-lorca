@@ -38,11 +38,26 @@ type CardHandler struct {
 	photos   StudentPhotoReader
 	profiles SchoolProfileReader
 	cycles   CycleLister
+	// review is module_import_review: a draft's status is named only with it.
+	review importReview
+}
+
+// CardOption configures optional behavior of the card endpoints.
+type CardOption func(*CardHandler)
+
+// WithCardImportReview names a draft pupil's status on the card check only
+// when module_import_review is on (PLAN-import-avisos); unwired is off.
+func WithCardImportReview(enabled func(context.Context) bool) CardOption {
+	return func(h *CardHandler) { h.review = enabled }
 }
 
 // NewCardHandler wires the handler.
-func NewCardHandler(links GuardianLinkReader, students CardStudents, photos StudentPhotoReader, profiles SchoolProfileReader, cycles CycleLister) *CardHandler {
-	return &CardHandler{links: links, students: students, photos: photos, profiles: profiles, cycles: cycles}
+func NewCardHandler(links GuardianLinkReader, students CardStudents, photos StudentPhotoReader, profiles SchoolProfileReader, cycles CycleLister, opts ...CardOption) *CardHandler {
+	h := &CardHandler{links: links, students: students, photos: photos, profiles: profiles, cycles: cycles}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h
 }
 
 // cardResponse is the card as the parents' app draws it. The QR carries only
@@ -143,7 +158,7 @@ func (h *CardHandler) Verify(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, verifiedCardResponse{
 		Valid: valid, StudentID: pupil.ID, Name: fullName(pupil), Level: pupil.Level, GradeGroup: pupil.GradeGroup,
-		EnrollmentNumber: pupil.EnrollmentNumber, AdmissionStatus: pupil.AdmissionStatus,
+		EnrollmentNumber: pupil.EnrollmentNumber, AdmissionStatus: h.review.visibleAdmission(r.Context(), pupil.AdmissionStatus),
 	})
 }
 

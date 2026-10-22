@@ -40,7 +40,10 @@ const SkipOmitted = "omitted"
 
 // Codes of a refused correction, as the screen words them.
 const (
-	CodeCURPInvalid          = "curp_invalid"
+	CodeCURPInvalid = "curp_invalid"
+	// CodeCURPMissing is a draft without any CURP; CodeCURPInvalid, with one
+	// students refuses. Both are students' codes (domain.IssueCURP*).
+	CodeCURPMissing          = "curp_missing"
 	CodeBirthDateInvalid     = "birth_date_invalid"
 	CodePhoneInvalid         = "phone_invalid"
 	CodeEmailInvalid         = "email_invalid"
@@ -154,6 +157,42 @@ func (o Overrides) corrections() []correction {
 		{"street", o.Street, []IssueField{FieldAddress}, cleanAddress, func(r *Row, v string) { r.Street = v }},
 		{"fullName", o.FullName, []IssueField{FieldSurnames, FieldFirstName}, cleanFullName, func(r *Row, v string) { r.FullName = v }},
 	}
+}
+
+// KnownOverride reports whether name is an override of the contract.
+func KnownOverride(name string) bool {
+	for _, c := range (Overrides{}).corrections() {
+		if c.name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// Canonical is the corrections as the office approved them, normalized (two
+// spellings of one phone are one), in a fixed order; "" when there are none.
+// It is what the plan hash covers of a row's overrides.
+func (o Overrides) Canonical() string {
+	var parts []string
+	for _, c := range o.corrections() {
+		if c.value == nil {
+			continue
+		}
+		value, code := c.clean(*c.value)
+		if code != "" {
+			value = strings.TrimSpace(*c.value)
+		}
+		parts = append(parts, c.name+"="+value)
+	}
+	return strings.Join(parts, "\x1f")
+}
+
+// DraftCURPCode is why a draft has no CURP: missing or invalid.
+func DraftCURPCode(curp string) string {
+	if strings.TrimSpace(curp) == "" {
+		return CodeCURPMissing
+	}
+	return CodeCURPInvalid
 }
 
 // Fields maps an override's name to the issue fields it settles.

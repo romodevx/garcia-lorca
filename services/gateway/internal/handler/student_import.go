@@ -361,7 +361,7 @@ func (h *StudentImportHandler) plan(w http.ResponseWriter, ctx context.Context, 
 		return importRun{}, false
 	}
 	run.resp.Rows, run.resp.Summary = h.rows(&run, results)
-	run.resp.PlanHash = planHash(run.resp, run.fileDigest)
+	run.resp.PlanHash = planHash(run.resp, run.fileDigest, run.review.digest)
 	return run, true
 }
 
@@ -781,7 +781,12 @@ func (run *importRun) adoptRealPlacements(keys []legacyimport.PlacementKey, resu
 // fate. Warnings and the tuition advice are left out — they do not change what
 // is written, and finance answering at preview but not at commit must not read
 // as a changed plan.
-func planHash(r importResponse, fileDigest string) string {
+//
+// decisions is the import review's canonical digest of the office's row
+// decisions ("" without the review or without decisions); it is left out of
+// the hashed value when empty, so a plan without decisions hashes as it always
+// did.
+func planHash(r importResponse, fileDigest, decisions string) string {
 	type rowFate struct {
 		Row                 int
 		Status, Reason, Dst string
@@ -802,7 +807,8 @@ func planHash(r importResponse, fileDigest string) string {
 		Levels     []importLevel
 		Placements []importPlacement
 		Rows       []rowFate
-	}{fileDigest, r.Cycle.ID, levels, r.Placements, fates})
+		Decisions  string `json:",omitempty"`
+	}{fileDigest, r.Cycle.ID, levels, r.Placements, fates, decisions})
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:])
 }

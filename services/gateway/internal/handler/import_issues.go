@@ -81,7 +81,11 @@ func (h *ImportIssuesHandler) List(w http.ResponseWriter, r *http.Request) {
 // "está bien así", by the signed-in caller. A draft's curp issue is refused by
 // students (409 STUDENT_DRAFT, relayed).
 func (h *ImportIssuesHandler) Accept(w http.ResponseWriter, r *http.Request) {
-	who, _ := middleware.PrincipalFrom(r.Context())
+	who, ok := middleware.PrincipalFrom(r.Context())
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
 	issue, err := h.svc.AcceptImportIssue(r.Context(), r.PathValue("id"), r.PathValue("issueId"), who.UserID)
 	if err != nil {
 		writeConnectError(w, err)
