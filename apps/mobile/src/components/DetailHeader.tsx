@@ -3,10 +3,24 @@ import { type ReactElement } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Icon } from "../icons";
+import { HOME_ROUTE } from "../navigation/routes";
 import { useTheme } from "../theme";
 
 export interface DetailHeaderProps {
   title: string;
+}
+
+/**
+ * Back: to the previous screen, or to Inicio when there is none — a deep link
+ * opened cold on a detail screen has nothing behind it, and router.back()
+ * would do nothing.
+ */
+function goBack(): void {
+  if (router.canGoBack()) {
+    router.back();
+    return;
+  }
+  router.replace(HOME_ROUTE);
 }
 
 /** Back-chevron header for pushed detail screens (aviso, módulo, eventos). */
@@ -18,7 +32,7 @@ export function DetailHeader({ title }: DetailHeaderProps): ReactElement {
       <Pressable
         accessibilityRole="button"
         accessibilityLabel="Atrás"
-        onPress={() => router.back()}
+        onPress={goBack}
         style={({ pressed }) => [
           styles.iconBtn,
           { backgroundColor: theme.colors.surface2, transform: [{ scale: pressed ? 0.92 : 1 }] },
