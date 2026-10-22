@@ -4,7 +4,6 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ChildSheet } from "./ChildSheet";
 import { Icon } from "../icons";
-import { LanguageToggle } from "../i18n/LanguageToggle";
 import { useAppState } from "../state/AppState";
 import { toChildView } from "../state/childView";
 import { useTheme, useThemeControls } from "../theme";
@@ -32,7 +31,9 @@ export function AppHeader(): ReactElement {
       <ChildIdentity />
 
       <View style={styles.actions}>
-        <LanguageToggle />
+        {/* The language toggle (src/i18n/LanguageToggle) comes back here once the
+            screens are translated: today their copy is hardcoded Spanish, so
+            switching changed nothing but the toggle's own label (QA 21-oct). */}
         <IconButton
           label="Cambiar tema"
           onPress={toggleTheme}

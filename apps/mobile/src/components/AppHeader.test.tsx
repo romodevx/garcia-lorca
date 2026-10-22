@@ -64,3 +64,24 @@ describe("AppHeader child switcher", () => {
     expect(screen.queryByRole("button", { name: /Cambiar de hijo/ })).toBeNull();
   });
 });
+
+// QA 21-oct: switching to EN changed only the toggle's own label — every screen
+// is still written in Spanish. A control that does nothing visible is a defect.
+describe("AppHeader language", () => {
+  beforeEach(async () => {
+    await saveTokens({ accessToken: "a1", refreshToken: "r1" });
+  });
+  afterEach(async () => {
+    await clearTokens();
+    await AsyncStorage.clear();
+  });
+
+  it("offers no language switch until the screens are translated", async () => {
+    mockChildren([CUATRO]);
+    await renderWithProviders(<AppHeader />);
+
+    await waitFor(() => expect(screen.getByText("Alumna Cuatro")).toBeTruthy());
+    expect(screen.queryByText("EN")).toBeNull();
+    expect(screen.getAllByRole("button").map((b) => b.props.accessibilityLabel)).toEqual(["Cambiar tema", "Avisos"]);
+  });
+});
