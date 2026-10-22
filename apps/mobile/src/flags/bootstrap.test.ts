@@ -7,6 +7,6 @@ describe("demoFlags", () => {
 
   it("keeps modules without a backend off", () => {
     expect(demoFlags.module_docs).toBe(false);
-    expect(demoFlags.module_billing ?? false).toBe(false);
+    expect(demoFlags.module_uniforms).toBe(false);
   });
 });
