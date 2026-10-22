@@ -15,6 +15,10 @@ import {
   toMoveText,
   reasonText,
   rowReasons,
+  issueLine,
+  issueOutcome,
+  issueText,
+  rowErrorText,
 } from "./copy";
 
 describe("reasonText", () => {
@@ -133,5 +137,38 @@ describe("earlier imports moved to the cycle start (T14)", () => {
   it("says how many moved once it is done", () => {
     expect(movedText(12)).toBe("12 inscripciones movidas al inicio del ciclo.");
     expect(movedText(1)).toBe("1 inscripción movida al inicio del ciclo.");
+  });
+});
+
+describe("the import review's words (module_import_review)", () => {
+  it.each([
+    ["birth_date_from_curp", "La fecha no coincide con la CURP; se usará la de la CURP"],
+    ["phone_invalid", "Teléfono incompleto"],
+    ["curp_missing", "Sin CURP"],
+    ["curp_invalid", "CURP inválida"],
+    ["a_new_code", "Revisa este dato"],
+  ])("issue %s → %s", (code, text) => {
+    expect(issueText(code)).toBe(text);
+  });
+
+  it("names the file's value beside the issue when there is one", () => {
+    expect(issueLine({ field: "phone_mobile", code: "phone_invalid", original: "55 12", stored: "" })).toBe("Celular: Teléfono incompleto (en el Excel: «55 12»)");
+    expect(issueLine({ field: "curp", code: "curp_missing", original: "", stored: "" })).toBe("CURP: Sin CURP");
+  });
+
+  it("says what happened to the file's value on the pupil's file", () => {
+    expect(issueOutcome("31/02/2021", "2021-02-19")).toBe("En el Excel decía «31/02/2021»; se guardó «2021-02-19».");
+    expect(issueOutcome("55 12", "")).toBe("En el Excel decía «55 12»; no se guardó.");
+    expect(issueOutcome("", "")).toBe("");
+  });
+
+  it("words a refused correction with its field", () => {
+    expect(rowErrorText({ row: 20, field: "mobilePhone", code: "phone_invalid" })).toBe("Celular: el teléfono lleva 10 dígitos");
+    expect(rowErrorText({ row: 20, field: "action", code: "draft_has_curp" })).toBe("Con una CURP válida no puede ir como borrador");
+    expect(rowErrorText({ row: 20, field: "curp", code: "who_knows" })).toBe("CURP: revisa este dato");
+  });
+
+  it("explains a row the office left out", () => {
+    expect(reasonText("omitted")).toBe("Omitida en la revisión");
   });
 });
