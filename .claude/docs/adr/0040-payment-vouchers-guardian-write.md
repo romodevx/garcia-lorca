@@ -39,6 +39,10 @@ El diseño pedía vincular aunque el flag estuviera apagado, para que al volver 
 
 El diseño fijaba la llave en `voucher:<id>`. Eso rompe la anulación: el depósito anulado **conserva** su llave (es la fila que explica el hueco del día), así que el comprobante liberado nunca podría volver a aplicarse — cada intento sería el replay del dinero anulado. Por eso `payment_vouchers.release_count` cuenta las anulaciones y la llave es `voucher:<id>` la primera vez y `voucher:<id>:<n>` después. El usecase lee el comprobante para derivarla; dentro de la transacción, si la llave ya no es la vigente (alguien anuló en medio) la respuesta es un 409 "ábrelo de nuevo", y el replay de un depósito anulado por comprobante también se rechaza en vez de contestarse.
 
+## El flag en la app móvil viene encendido
+
+La semilla de flags de la app (`apps/mobile/src/flags/bootstrap.ts`) trae `module_payment_vouchers` en **ON**. La frontera es el gateway, no el teléfono: con el flag del gateway apagado las rutas de familia responden 404, la tarjeta de Cuenta no aparece (sólo se muestra cuando la lista respondió bien) y la pantalla dice que no está disponible. Así encender o apagar la función para las familias es sólo el `ENABLED_MODULES` del gateway, sin publicar otra app; el build nuevo hace falta una vez, por los pickers nativos. Un seed apagado obligaría a otro build para encenderla, que es justo lo que pasó con `module_student_card`.
+
 ## Consecuencias
 
 - Doble pago cubierto por llave derivada + `FOR UPDATE` + dos índices únicos + 409 en ambigüedad. Residual: la encargada declina un vínculo correcto y luego aplica el comprobante; lo cubre la guardia humana del diseño (§4 D, web), no el servidor.
