@@ -60,6 +60,14 @@ type fakeGranter struct {
 	granted        client.GuardianLink
 	grantErr       error
 	listErr        error
+	// student is the pupil GetStudent answers (a non-draft by default).
+	student client.StudentResult
+}
+
+func (f *fakeGranter) GetStudent(_ context.Context, id string) (client.StudentResult, error) {
+	out := f.student
+	out.ID = id
+	return out, nil
 }
 
 func (f *fakeGranter) ListGuardiansForStudent(_ context.Context, studentID string) ([]client.GuardianLink, error) {
