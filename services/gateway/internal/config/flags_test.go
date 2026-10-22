@@ -43,15 +43,16 @@ func TestParseEnabledModulesAcceptsFullKeys(t *testing.T) {
 }
 
 func TestAllModuleFlagsCoversRegistry(t *testing.T) {
-	// FLAGS.md registers 23 module flags; the enumeration must match so
+	// FLAGS.md registers 24 module flags; the enumeration must match so
 	// GET /features reports every module. (M14 added module_teachers; task 13,
 	// module_student_card; T10, module_expenses; T16, module_schedule; T17,
 	// module_activities; the legacy student import, module_student_import; the
 	// Configuración setup view, module_config_setup; the app-wide look refresh,
 	// module_ui_refresh; the Avisos view, module_announcements_view; the
-	// «Estructura de la escuela» step, module_school_structure.)
-	if len(config.AllModuleFlags) != 23 {
-		t.Errorf("AllModuleFlags has %d entries, want 23", len(config.AllModuleFlags))
+	// «Estructura de la escuela» step, module_school_structure; the import
+	// review, module_import_review.)
+	if len(config.AllModuleFlags) != 24 {
+		t.Errorf("AllModuleFlags has %d entries, want 24", len(config.AllModuleFlags))
 	}
 	seen := map[string]bool{}
 	for _, k := range config.AllModuleFlags {
@@ -78,6 +79,25 @@ func TestStudentImportFlagIsRegisteredAndDefaultOff(t *testing.T) {
 	}
 	if !config.ParseEnabledModules("students,config,student_import")[key] {
 		t.Errorf("listing student_import must enable %q", key)
+	}
+}
+
+// The import review (PLAN-import-avisos) ships behind its own flag, default
+// OFF: enabling students, config and the import does not enable it, and the
+// local compose default list does not carry it.
+func TestImportReviewFlagIsRegisteredAndDefaultOff(t *testing.T) {
+	const key = "module_import_review"
+	if !slices.Contains(config.AllModuleFlags, key) {
+		t.Fatalf("AllModuleFlags does not report %q: /features would hide the review", key)
+	}
+	if config.ParseEnabledModules("students,config,student_import")[key] {
+		t.Errorf("%q must stay OFF unless listed explicitly", key)
+	}
+	if config.ParseEnabledModules(composeDefaultModules(t))[key] {
+		t.Errorf("%q must stay OFF in the local compose default list until its gates pass", key)
+	}
+	if !config.ParseEnabledModules("students,config,student_import,import_review")[key] {
+		t.Errorf("listing import_review must enable %q", key)
 	}
 }
 
