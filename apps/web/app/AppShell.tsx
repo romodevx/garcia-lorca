@@ -279,6 +279,8 @@ export function AppShell(): ReactElement {
   const scheduleEnabled = useFlag("module_schedule") && configEnabled;
   // T17: Actividades. Its charges live in finance, so both flags must be on.
   const activitiesEnabled = useFlag("module_activities") && financeEnabled;
+  // ADR 0040: the families' payment vouchers live in finance, so both flags must be on.
+  const paymentVouchersEnabled = useFlag("module_payment_vouchers") && financeEnabled;
   // T18: Becas. Finance computes them on every charge, so both flags must be on.
   const scholarshipsEnabled = useFlag("module_scholarships") && financeEnabled;
   // ADR 0033: Migrar alumnos writes the catalog (config) and the pupils
@@ -683,7 +685,7 @@ export function AppShell(): ReactElement {
         ))}
       {view.screen === "payments" &&
         (financeEnabled ? (
-          <PaymentsScreen onBack={home} canGrantDiscounts={principal?.permissions?.includes("finance:write") === true} notes={notesAccess} canCorrectPayments={canCorrectPayments} cutAccess={cutAccess} />
+          <PaymentsScreen onBack={home} canGrantDiscounts={principal?.permissions?.includes("finance:write") === true} notes={notesAccess} canCorrectPayments={canCorrectPayments} cutAccess={cutAccess} paymentVouchers={paymentVouchersEnabled} />
         ) : (
           <ModulePlaceholder m={MODULES.find((m) => m.id === "payments") as ModuleDef} onBack={home} />
         ))}
