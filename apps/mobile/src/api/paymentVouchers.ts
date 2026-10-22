@@ -121,7 +121,7 @@ export async function sendPaymentVoucher(studentId: string, upload: VoucherUploa
   return (await res.json()) as FamilyPaymentVoucherResult;
 }
 
-/** Reads the child's vouchers, oldest first. Throws an {@link ApiError} on any non-2xx. */
+/** Reads the child's vouchers, newest first (as the API orders them). Throws an {@link ApiError} on any non-2xx. */
 export async function listPaymentVouchers(studentId: string): Promise<FamilyPaymentVoucher[]> {
   const res = await apiFetch(vouchersPath(studentId));
   if (!res.ok) throw new ApiError(res.status, "failed to load payment vouchers");

@@ -11,13 +11,13 @@ const sent = (extra: Partial<FamilyPaymentVoucher>): FamilyPaymentVoucher => ({
 });
 
 describe("VoucherList (Mis comprobantes)", () => {
-  it("shows each voucher's status, newest first", async () => {
+  it("shows each voucher's status in the API's order, newest first", async () => {
     await renderWithProviders(
       <VoucherList
         vouchers={[
-          sent({ id: "v1", status: "applied", depositFolio: "P-2026-000042", createdAt: "2026-10-01T15:00:00Z" }),
-          sent({ id: "v2", status: "rejected", rejectionReason: "La foto no se lee", createdAt: "2026-10-10T15:00:00Z" }),
           sent({ id: "v3", status: "pending", claimedAmountCents: 250000, claimedPaidOn: "2026-10-20" }),
+          sent({ id: "v2", status: "rejected", rejectionReason: "La foto no se lee", createdAt: "2026-10-10T15:00:00Z" }),
+          sent({ id: "v1", status: "applied", depositFolio: "P-2026-000042", createdAt: "2026-10-01T15:00:00Z" }),
         ]}
       />,
     );

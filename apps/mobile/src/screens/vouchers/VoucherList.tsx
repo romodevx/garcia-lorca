@@ -56,16 +56,17 @@ function VoucherRow({ voucher }: { voucher: FamilyPaymentVoucher }): ReactElemen
   );
 }
 
-/** "Mis comprobantes": what the family sent and what the office did, newest first. */
+/**
+ * "Mis comprobantes": what the family sent and what the office did, in the
+ * API's order — newest first, so the one just sent leads.
+ */
 export function VoucherList({ vouchers }: { vouchers: FamilyPaymentVoucher[] }): ReactElement {
   if (vouchers.length === 0) {
     return <EmptyState icon="receipt" title="Aún no has enviado comprobantes" subtitle="Aquí verás si la escuela ya aplicó tu pago." />;
   }
-  // The API answers oldest first; the family looks for the one it just sent.
-  const newestFirst = [...vouchers].reverse();
   return (
     <View style={styles.list}>
-      {newestFirst.map((v) => (
+      {vouchers.map((v) => (
         <VoucherRow key={v.id} voucher={v} />
       ))}
     </View>
