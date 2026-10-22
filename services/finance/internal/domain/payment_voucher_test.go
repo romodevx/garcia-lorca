@@ -288,4 +288,7 @@ func TestDepositVoucherChoice(t *testing.T) {
 	if !d.WithVoucherChoice(domain.VoucherChoice{VoucherID: "v-1"}).VoucherChoice().Any() {
 		t.Fatal("a chosen voucher is a choice")
 	}
+	if !d.WithVoucherChoice(domain.VoucherChoice{Aware: true}).VoucherChoice().Any() {
+		t.Fatal("a counter that knows about vouchers is a choice: it links the only pending one")
+	}
 }

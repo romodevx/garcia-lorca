@@ -283,9 +283,10 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 	svc.WithScholarships(repo)
 	scholarships := usecase.NewScholarshipService(repo, svc, repo, repo, studentsClient, tenantID, newID, clock)
 	// ADR 0040: a deposit may be registered by a family's payment voucher, and
-	// one registered by hand links the pupil's only pending voucher. Always on
-	// in finance (finance reads no flags): the link is what keeps a voucher
-	// from being paid twice while the gateway hides the module.
+	// one registered by hand at a voucher-aware counter (voucher_aware, set by
+	// the gateway while module_payment_vouchers is on) links the pupil's only
+	// pending voucher. Finance reads no flag; the request says whether the
+	// counter can see vouchers.
 	svc.WithPaymentVouchers(repo)
 	// The vouchers themselves share the expense receipts' private bucket
 	// (prefix vouchers/); with no bucket, uploads answer NotFound.

@@ -27,11 +27,13 @@ func TestRegisterDepositVoucherFieldsReachTheUseCase(t *testing.T) {
 		StudentId: "st-1", AmountCents: 1000, Method: domain.MethodTransfer,
 		VoucherId:          "v-1",
 		DeclinedVoucherIds: []string{"v-2", "v-3"},
+		VoucherAware:       true,
 		ReceivedBy:         "u-1", ReceivedByName: "Caja",
 		PaidAt: timestamppb.New(time.Date(2026, 10, 21, 0, 0, 0, 0, time.UTC)),
 	})
 	assert.Equal(t, "v-1", in.VoucherID)
 	assert.Equal(t, []string{"v-2", "v-3"}, in.DeclinedVoucherIDs)
+	assert.True(t, in.VoucherAware)
 	assert.Equal(t, "st-1", in.StudentID)
 	assert.Equal(t, domain.Receiver{UserID: "u-1", Name: "Caja"}, in.Receiver)
 }

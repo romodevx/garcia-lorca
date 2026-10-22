@@ -38,11 +38,18 @@ func (s *FinanceService) voucherChoice(ctx context.Context, in DepositInput) (De
 			return DepositInput{}, domain.VoucherChoice{}, glerrors.New(glerrors.KindInvalid,
 				"that idempotency key is reserved for payments by voucher")
 		}
+		if !in.VoucherAware {
+			if len(in.DeclinedVoucherIDs) > 0 {
+				return DepositInput{}, domain.VoucherChoice{}, glerrors.New(glerrors.KindInvalid,
+					"declined vouchers come only from a counter that shows them")
+			}
+			return in, domain.VoucherChoice{}, nil
+		}
 		declined, err := canonicalVoucherIDs(in.DeclinedVoucherIDs)
 		if err != nil {
 			return DepositInput{}, domain.VoucherChoice{}, err
 		}
-		return in, domain.VoucherChoice{Declined: declined}, nil
+		return in, domain.VoucherChoice{Declined: declined, Aware: true}, nil
 	}
 	if len(in.DeclinedVoucherIDs) > 0 {
 		return DepositInput{}, domain.VoucherChoice{}, glerrors.New(glerrors.KindInvalid,
@@ -64,7 +71,7 @@ func (s *FinanceService) voucherChoice(ctx context.Context, in DepositInput) (De
 	if in.Method == "" && len(in.Tenders) == 0 {
 		in.Method = domain.MethodTransfer
 	}
-	return in, domain.VoucherChoice{VoucherID: v.ID()}, nil
+	return in, domain.VoucherChoice{VoucherID: v.ID(), Aware: true}, nil
 }
 
 // ownVoucher reads a voucher that must belong to studentID; anything else is

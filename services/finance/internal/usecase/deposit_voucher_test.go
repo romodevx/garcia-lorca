@@ -201,12 +201,12 @@ func TestRegisterDepositByHandCarriesTheDeclinedVouchers(t *testing.T) {
 	f, _ := voucherFixture(t)
 	if _, err := f.svc.RegisterDeposit(context.Background(), usecase.DepositInput{
 		StudentID: testStudent, AmountCents: 320000, Method: domain.MethodCash, PaidAt: f.clock,
-		IdempotencyKey: "attempt-9", DeclinedVoucherIDs: []string{voucherTwo},
+		IdempotencyKey: "attempt-9", DeclinedVoucherIDs: []string{voucherTwo}, VoucherAware: true,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	d := lastDeposit(t, f)
-	if c := d.VoucherChoice(); c.VoucherID != "" || len(c.Declined) != 1 || c.Declined[0] != voucherTwo {
+	if c := d.VoucherChoice(); c.VoucherID != "" || len(c.Declined) != 1 || c.Declined[0] != voucherTwo || !c.Aware {
 		t.Fatalf("choice = %+v", c)
 	}
 	if d.IdempotencyKey() != "attempt-9" {
@@ -222,5 +222,35 @@ func TestRegisterDepositByVoucherWithoutTheModule(t *testing.T) {
 	})
 	if glerrors.KindOf(err) != glerrors.KindNotFound {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+// Review (MEDIUM): only a counter that knows about vouchers (the gateway with
+// module_payment_vouchers on) may link one by hand; any other payment carries
+// no choice at all. A payment BY voucher is voucher-aware by definition.
+func TestOnlyAVoucherAwareCounterLinksByHand(t *testing.T) {
+	f, vouchers := voucherFixture(t)
+	if _, err := f.svc.RegisterDeposit(context.Background(), usecase.DepositInput{
+		StudentID: testStudent, AmountCents: 1000, Method: domain.MethodCash, PaidAt: f.clock,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if c := lastDeposit(t, f).VoucherChoice(); c.Any() {
+		t.Fatalf("an unaware counter carries a choice: %+v", c)
+	}
+	if _, err := f.svc.RegisterDeposit(context.Background(), usecase.DepositInput{
+		StudentID: testStudent, AmountCents: 1000, Method: domain.MethodCash, PaidAt: f.clock,
+		DeclinedVoucherIDs: []string{voucherTwo},
+	}); glerrors.KindOf(err) != glerrors.KindInvalid {
+		t.Fatalf("declined vouchers from an unaware counter: %v", err)
+	}
+	pendingVoucher(t, vouchers, voucherOne, testStudent)
+	if _, err := f.svc.RegisterDeposit(context.Background(), usecase.DepositInput{
+		StudentID: testStudent, AmountCents: 1000, PaidAt: f.clock, VoucherID: voucherOne,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if c := lastDeposit(t, f).VoucherChoice(); !c.Aware || c.VoucherID != voucherOne {
+		t.Fatalf("by voucher: %+v", c)
 	}
 }

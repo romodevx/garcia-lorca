@@ -51,8 +51,12 @@ type DepositInput struct {
 	// voucher by itself.
 	VoucherID string
 	// DeclinedVoucherIDs are pending vouchers the office says this payment by
-	// hand is NOT. Only without VoucherID.
+	// hand is NOT. Only without VoucherID, and only with VoucherAware.
 	DeclinedVoucherIDs []string
+	// VoucherAware says the counter shows the pupil's vouchers (the gateway
+	// with module_payment_vouchers on). Only then does a payment by hand link
+	// the only pending one, or stop at VOUCHER_CHOICE_REQUIRED.
+	VoucherAware bool
 }
 
 // TenderInput is one method of a combined payment as the counter reports it.

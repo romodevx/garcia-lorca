@@ -32,14 +32,20 @@ type voucherClaim struct {
 // claimVoucher decides which voucher, if any, the deposit d pays, locking it.
 //
 // A payment by voucher (case A) names it: it must be the pupil's, pending, and
-// carry the key derived from its current release count. A payment by hand
-// (case B) takes the pupil's pending vouchers the office did not decline: none
+// carry the key derived from its current release count. A payment by hand at a
+// voucher-aware counter (case B) takes the pupil's pending vouchers the office
+// did not decline (any other payment by hand links nothing): none
 // is nothing, one links itself, more than one is ErrVoucherChoiceRequired and
 // nothing is taken. Never another pupil's; never matched by amount or name.
 func claimVoucher(tx *gorm.DB, d domain.Deposit) (voucherClaim, error) {
 	choice := d.VoucherChoice()
 	if choice.VoucherID != "" {
 		return claimChosenVoucher(tx, d, choice.VoucherID)
+	}
+	if !choice.Aware {
+		// A counter that does not show vouchers cannot decline them: linking
+		// (or refusing) on its behalf would block payments it cannot unblock.
+		return voucherClaim{}, nil
 	}
 	q := voucherQuery(tx).
 		Where("v.student_id = ? AND v.status = ?", d.StudentID(), domain.VoucherPending).

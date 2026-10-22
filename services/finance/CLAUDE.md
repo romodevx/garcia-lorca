@@ -225,9 +225,10 @@ ledger operations run in a single transaction (Unit of Work).
   (`release_count`+1), a correction moves it to the corrected deposit.
 - Linking lives INSIDE `RegisterDeposit`/`VoidDeposit`/`CorrectDeposit`
   (`adapters/postgres/voucher_link.go`), always charges `FOR UPDATE` first,
-  then voucher rows. By voucher: key `voucher:<id>[:<releases>]` is forced.
-  By hand: the pupil's single pending voucher (minus declined) links itself;
-  two or more is `VOUCHER_CHOICE_REQUIRED` and nothing is taken.
+  then voucher rows. By voucher: key `voucher:<id>[:<releases>]` is forced,
+  and no other payment may use a `voucher:` key. By hand AND `voucher_aware`:
+  the pupil's single pending voucher (minus declined) links itself; two or
+  more is `VOUCHER_CHOICE_REQUIRED` and nothing is taken. Not aware: nothing.
 - `uq_payment_vouchers_deposit` + the single `deposit_id` column = one voucher
   per deposit and one deposit per voucher. Reads take a `VoucherScope`; an
   empty list of pupils is refused, only `school_queue` reads everybody's.

@@ -1076,10 +1076,18 @@ message RegisterDepositRequest {
   // call is its replay), a rejected one VOUCHER_REJECTED.
   string voucher_id = 13;
   // declined_voucher_ids are pending vouchers this payment registered by hand
-  // is NOT. Without voucher_id, the pupil's only other pending voucher links
-  // itself to the deposit; two or more are AlreadyExists with X-Error-Code
-  // VOUCHER_CHOICE_REQUIRED and nothing is taken.
+  // is NOT. Without voucher_id and with voucher_aware, the pupil's only other
+  // pending voucher links itself to the deposit; two or more are
+  // AlreadyExists with X-Error-Code VOUCHER_CHOICE_REQUIRED and nothing is
+  // taken.
   repeated string declined_voucher_ids = 14;
+  // voucher_aware says the counter knows about payment vouchers (the gateway
+  // sets it while module_payment_vouchers is on). Only then does a payment
+  // by hand link the pupil's only pending voucher, or stop at
+  // VOUCHER_CHOICE_REQUIRED; otherwise vouchers are left alone, so vouchers a
+  // family left waiting never block a counter that cannot decline them.
+  // declined_voucher_ids without it is InvalidArgument; voucher_id implies it.
+  bool voucher_aware = 15;
 }
 
 message RegisterDepositResponse {

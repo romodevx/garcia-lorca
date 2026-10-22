@@ -192,7 +192,7 @@ func TestApplyVoucherReplayUnderDerivedKey(t *testing.T) {
 func TestManualDepositAutoLinksTheOnlyPendingVoucher(t *testing.T) {
 	f := newVLFamily(t, 3)
 	v := f.voucher(t, 3)
-	manual, _, err := f.register(t, f.deposit(t, vlID("68200000", 30), 100000, "manual-3", domain.VoucherChoice{}))
+	manual, _, err := f.register(t, f.deposit(t, vlID("68200000", 30), 100000, "manual-3", domain.VoucherChoice{Aware: true}))
 	if err != nil {
 		t.Fatalf("manual: %v", err)
 	}
@@ -220,7 +220,7 @@ func TestManualDepositWithTwoPendingVouchers(t *testing.T) {
 	a := f.voucher(t, 41)
 	b := f.voucher(t, 42)
 
-	_, _, err := f.register(t, f.deposit(t, vlID("68200000", 40), 100000, "", domain.VoucherChoice{}))
+	_, _, err := f.register(t, f.deposit(t, vlID("68200000", 40), 100000, "", domain.VoucherChoice{Aware: true}))
 	if !errors.Is(err, domain.ErrVoucherChoiceRequired) {
 		t.Fatalf("two pending: want ErrVoucherChoiceRequired, got %v", err)
 	}
@@ -228,7 +228,7 @@ func TestManualDepositWithTwoPendingVouchers(t *testing.T) {
 		t.Fatalf("nothing is taken while the office has to choose: %d deposits", n)
 	}
 
-	record, _, err := f.register(t, f.deposit(t, vlID("68200000", 41), 100000, "", domain.VoucherChoice{Declined: []string{a.ID()}}))
+	record, _, err := f.register(t, f.deposit(t, vlID("68200000", 41), 100000, "", domain.VoucherChoice{Aware: true, Declined: []string{a.ID()}}))
 	if err != nil || record.LinkedVoucher == nil || record.LinkedVoucher.ID() != b.ID() {
 		t.Fatalf("declined a: err=%v linked=%+v", err, record.LinkedVoucher)
 	}
@@ -237,7 +237,7 @@ func TestManualDepositWithTwoPendingVouchers(t *testing.T) {
 	}
 
 	// Declining the last one links nothing.
-	record, _, err = f.register(t, f.deposit(t, vlID("68200000", 42), 100000, "", domain.VoucherChoice{Declined: []string{a.ID()}}))
+	record, _, err = f.register(t, f.deposit(t, vlID("68200000", 42), 100000, "", domain.VoucherChoice{Aware: true, Declined: []string{a.ID()}}))
 	if err != nil || record.LinkedVoucher != nil {
 		t.Fatalf("declined the only pending: err=%v linked=%+v", err, record.LinkedVoucher)
 	}
@@ -263,7 +263,7 @@ func TestVoucherNeverCrossesPupils(t *testing.T) {
 			t.Fatalf("voucher %q: want NotFound, got %v", bad, err)
 		}
 	}
-	record, _, err := mine.register(t, mine.deposit(t, vlID("68200000", 52), 100000, "", domain.VoucherChoice{}))
+	record, _, err := mine.register(t, mine.deposit(t, vlID("68200000", 52), 100000, "", domain.VoucherChoice{Aware: true}))
 	if err != nil || record.LinkedVoucher != nil {
 		t.Fatalf("manual deposit for another pupil: err=%v linked=%+v", err, record.LinkedVoucher)
 	}
@@ -444,5 +444,33 @@ func TestApplyVoucherAfterCorrectionNamesTheLiveDeposit(t *testing.T) {
 	_, replayed, err := f.register(t, f.deposit(t, vlID("68200000", 152), 40000, v.IdempotencyKey(), domain.VoucherChoice{VoucherID: v.ID()}))
 	if replayed || !errors.Is(err, domain.ErrVoucherAlreadyApplied) || !strings.Contains(glerrors.SafeMessage(err), record.Corrected.Deposit.Folio()) {
 		t.Fatalf("replayed=%v err=%v, want ErrVoucherAlreadyApplied naming %s", replayed, err, record.Corrected.Deposit.Folio())
+	}
+}
+
+// Review (MEDIUM): a counter that does not know about vouchers (the module
+// off, an older screen) links nothing and is never stopped by them: two
+// vouchers a family left waiting must not block every payment at a counter
+// that cannot decline them.
+func TestADepositUnawareOfVouchersLinksNothing(t *testing.T) {
+	f := newVLFamily(t, 16)
+	a := f.voucher(t, 161)
+	b := f.voucher(t, 162)
+	record, _, err := f.register(t, f.deposit(t, vlID("68200000", 160), 100000, "", domain.VoucherChoice{}))
+	if err != nil || record.LinkedVoucher != nil {
+		t.Fatalf("err=%v linked=%+v, want a plain deposit", err, record.LinkedVoucher)
+	}
+	for _, v := range []domain.PaymentVoucher{a, b} {
+		if got := f.reread(t, v.ID()); got.Status() != domain.VoucherPending {
+			t.Fatalf("voucher %s = %s, want pending", v.ID(), got.Status())
+		}
+	}
+	// One pending is not linked either.
+	g := newVLFamily(t, 17)
+	only := g.voucher(t, 17)
+	if record, _, err := g.register(t, g.deposit(t, vlID("68200000", 170), 100000, "", domain.VoucherChoice{})); err != nil || record.LinkedVoucher != nil {
+		t.Fatalf("err=%v linked=%+v", err, record.LinkedVoucher)
+	}
+	if got := g.reread(t, only.ID()); got.Status() != domain.VoucherPending {
+		t.Fatalf("voucher = %s", got.Status())
 	}
 }

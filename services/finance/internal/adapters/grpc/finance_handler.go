@@ -395,6 +395,7 @@ func depositInputFrom(m *financev1.RegisterDepositRequest) usecase.DepositInput 
 		Tenders:            fromProtoTenders(m.GetTenders()),
 		VoucherID:          m.GetVoucherId(),
 		DeclinedVoucherIDs: m.GetDeclinedVoucherIds(),
+		VoucherAware:       m.GetVoucherAware(),
 	}
 }
 
