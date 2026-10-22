@@ -9,6 +9,7 @@ import { router } from "expo-router";
 import { renderRouter } from "expo-router/testing-library";
 import { resolve } from "node:path";
 import { clearTokens, getRefreshToken, saveTokens } from "@/src/api";
+import { RETURN_TO_PARAM } from "@/src/navigation/routes";
 
 const APP_DIR = resolve(__dirname, "../../app");
 const SESSION_ENDED = "Tu sesión terminó. Vuelve a entrar.";
@@ -73,6 +74,25 @@ describe("root navigation when the stored session dies (ISSUE-T14-102)", () => {
     await waitFor(() => expect(screen.getByText(SESSION_ENDED)).toBeTruthy());
     expect(screen.getByRole("button", { name: "Ingresar" })).toBeTruthy();
     expect(getRefreshToken()).toBeNull();
+  });
+
+  it("does not remember the dead session's route, so the next guardian starts clean (bug_006)", async () => {
+    await saveTokens({ accessToken: "a1", refreshToken: "r1" });
+    globalThis.fetch = healthyGateway() as unknown as typeof fetch;
+    // With RNTL 14 render is async, so renderRouter's route getters hang off the
+    // promise it returns, not off the awaited result.
+    const app = renderRouter(APP_DIR, { initialUrl: "/cuenta" });
+    await app;
+    await waitFor(() => expect(screen.getAllByText("Cuenta").length).toBeGreaterThan(0));
+
+    globalThis.fetch = revokedGateway() as unknown as typeof fetch;
+    await act(async () => {
+      router.navigate("/asistencia");
+    });
+
+    await waitFor(() => expect(screen.getByText(SESSION_ENDED)).toBeTruthy());
+    expect(app.getPathname()).toBe("/");
+    expect(app.getSearchParams()).not.toHaveProperty(RETURN_TO_PARAM);
   });
 
   it("opens on Entrar with the notice when a cold start finds a dead stored session", async () => {
