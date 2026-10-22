@@ -1246,7 +1246,12 @@ paths:
             The address belongs to a staff account and the request did not
             confirm it (`that email belongs to a staff account; confirm it is
             the same person`). Nothing was written; resend with
-            `confirmStaffAccount: true` once the director confirms.
+            `confirmStaffAccount: true` once the director confirms. Or the
+            pupil is a draft without a CURP (`X-Error-Code: STUDENT_DRAFT`):
+            the gateway refuses it before iam is asked, so no account is
+            created and no invitation is sent.
+          headers:
+            X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -3997,6 +4002,13 @@ paths:
               schema: { type: string }
               example: there is no active school cycle
         '413': { $ref: '#/components/responses/StudentImportTooLarge' }
+        '422':
+          description: "`IMPORT_ROWS_INVALID` (module_import_review): a decision of `rows` was refused."
+          headers:
+            X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StudentImportRowsInvalid' }
 
   /api/v1/imports/students/commit:
     post:
@@ -4037,11 +4049,18 @@ paths:
               example: the preview changed; review it again
         '413': { $ref: '#/components/responses/StudentImportTooLarge' }
         '422':
-          description: "`LEVELS_UNRESOLVED`: names the levels still without a destination."
+          description: >
+            `LEVELS_UNRESOLVED` (text): names the levels still without a
+            destination; or `IMPORT_ROWS_INVALID` (module_import_review, the
+            JSON envelope): a decision of `rows` was refused.
+          headers:
+            X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
           content:
             text/plain:
               schema: { type: string }
               example: "choose where these levels go: Preparatoria"
+            application/json:
+              schema: { $ref: '#/components/schemas/StudentImportRowsInvalid' }
 
   /api/v1/config/evaluation-periods:
     get:
@@ -8651,11 +8670,19 @@ components:
           type: array
           maxItems: 1000
           description: >
-            The school's choice per spreadsheet row in the preview (only rows
-            that differ from a plain import need to be sent). `draft` stores a
-            row without a valid CURP as a draft pupil; `omit` leaves it out.
-            Overrides correct a value before it is judged, and are validated on
-            the server like the file's own.
+            Behind module_import_review (ignored while it is off). The school's
+            choice per spreadsheet row in the preview (only rows that differ
+            from a plain import need to be sent; one entry per row). `draft`
+            stores a row whose CURP is missing or invalid as a draft pupil (a
+            row with a valid CURP cannot be drafted: 422); `omit` leaves it out
+            (reported as skipped, reason `omitted`). Overrides correct a value
+            of the file before the row is judged and are validated on the
+            server (422 `IMPORT_ROWS_INVALID` names each row and field); an
+            empty string clears an optional value (not `curp` nor `fullName`).
+            A corrected field carries no import issue. The decisions are not
+            hashed themselves, but what they do to each row is (its status,
+            reason and destination): send the same `rows` to the preview whose
+            `planHash` the commit carries.
           items:
             type: object
             required: [row]
@@ -8666,14 +8693,17 @@ components:
                 type: object
                 additionalProperties: false
                 properties:
-                  curp: { type: string, maxLength: 18 }
-                  birthDate: { type: string, format: date }
-                  homePhone: { type: string, maxLength: 30 }
-                  mobilePhone: { type: string, maxLength: 30 }
+                  curp: { type: string, maxLength: 18, description: A valid CURP (the same shape students accepts). }
+                  birthDate: { type: string, maxLength: 10, example: "19/02/2021", description: "dd/mm/yyyy or yyyy-mm-dd; not in the future." }
+                  homePhone: { type: string, maxLength: 30, description: 'Ten digits once spaces, dashes, dots and parentheses are removed.' }
+                  mobilePhone: { type: string, maxLength: 30, description: 'Ten digits once spaces, dashes, dots and parentheses are removed.' }
                   email: { type: string, maxLength: 254 }
-                  postalCode: { type: string, maxLength: 10 }
-                  state: { type: string, maxLength: 60 }
-                  bankReference: { type: string, maxLength: 20 }
+                  postalCode: { type: string, maxLength: 10, description: Five digits. }
+                  state: { type: string, maxLength: 60, description: 'A Mexican state, as students recognizes it.' }
+                  bankReference: { type: string, maxLength: 20, description: "Digits only; not another pupil's." }
+                  municipality: { type: string, maxLength: 120 }
+                  street: { type: string, maxLength: 120 }
+                  fullName: { type: string, maxLength: 200, description: '"APELLIDOS, NOMBRES", as the previous system writes it.' }
           example: [{ row: 14, action: draft }, { row: 20, overrides: { mobilePhone: "5512345678" } }]
     StudentImportResult:
       type: object
@@ -8727,7 +8757,15 @@ components:
               reason: { type: string, example: status_withdrawn }
               warnings: { type: array, items: { type: string }, example: [bank_reference_invalid] }
               enrollmentNumber: { type: string, example: 2026-00042 }
-              draft: { type: boolean, description: The row is (or would be) stored as a draft pupil without a CURP. }
+              draft: { type: boolean, description: "Behind module_import_review: the row is (or would be) stored as a draft pupil without a CURP." }
+              canDraft: { type: boolean, description: "Behind module_import_review: the row's CURP is missing or invalid and it could be imported as a draft." }
+              issues:
+                type: array
+                description: >
+                  Behind module_import_review: per field, what the import changes
+                  or drops (the screen edits the row in place). The commit stores
+                  each one with the pupil.
+                items: { $ref: '#/components/schemas/StudentImportRowIssue' }
         summary:
           type: object
           required: [total, new, warnings, already, skipped, pending, movedToCycleStart]
@@ -9580,8 +9618,8 @@ components:
         admissionStatus: { type: string, enum: [pending, accepted, enrolled, rejected, withdrawn, draft] }
         bankReference: { type: string, example: "231076", description: "BBVA payment reference (ADR 0033); empty when the pupil has none." }
         hasPhoto: { type: boolean, example: false, description: "Only on GET /api/v1/students/{id}: whether the pupil has a photo (T13). Absent means unknown; a client then asks for the photo." }
-        openIssues: { type: integer, minimum: 0, example: 2, description: "Import issues of the pupil nobody resolved yet." }
-        draft: { type: boolean, example: false, description: "Imported without a valid CURP (admissionStatus draft): cannot be enrolled, moved, linked to a family or invited." }
+        openIssues: { type: integer, minimum: 0, example: 2, description: "Behind module_import_review (absent while off): import issues of the pupil nobody resolved yet." }
+        draft: { type: boolean, example: false, description: "Behind module_import_review (absent while off): imported without a valid CURP (admissionStatus draft): cannot be enrolled, moved, linked to a family or invited." }
         promotedFromDraft: { type: boolean, example: true, description: "Only on PUT: the save gave a draft its CURP, so the pupil is now pending." }
         intendedGroupId: { type: string, format: uuid, description: "Only on PUT, with promotedFromDraft: the group the import meant the pupil for, to offer the enrollment there." }
         profile: { $ref: '#/components/schemas/StudentProfile' }
@@ -9607,8 +9645,63 @@ components:
         admissionStatus: { type: string, enum: [pending, accepted, enrolled, rejected, withdrawn, draft] }
         enrollmentNumber: { type: string, example: "2026-00042", description: "The matrícula; absent when none." }
         bankReference: { type: string, example: "231076", description: "BBVA payment reference (ADR 0033); empty when the pupil has none." }
-        openIssues: { type: integer, minimum: 0, example: 0, description: "Import issues of the pupil nobody resolved yet." }
-        draft: { type: boolean, example: false, description: "Imported without a valid CURP (admissionStatus draft)." }
+        openIssues: { type: integer, minimum: 0, example: 0, description: "Behind module_import_review (absent while off): import issues of the pupil nobody resolved yet." }
+        draft: { type: boolean, example: false, description: "Behind module_import_review (absent while off): imported without a valid CURP (admissionStatus draft)." }
+
+    StudentImportRowIssue:
+      type: object
+      description: One value of a preview row the import changes or drops (PLAN-import-avisos).
+      required: [field, code, original, stored]
+      properties:
+        field:
+          type: string
+          enum: [birth_date, phone_home, phone_mobile, email, postal_code, state, bank_reference, surnames, first_name, address, curp]
+        code: { type: string, example: birth_date_from_curp }
+        original: { type: string, example: "31/02/2021", description: What the file said. }
+        stored: { type: string, example: "2021-02-19", description: What would be stored; empty when dropped. }
+
+    StudentImportRowsInvalid:
+      type: object
+      required: [error]
+      description: >
+        The shared error envelope (code `invalid`) for decisions the server
+        refused; `X-Error-Code: IMPORT_ROWS_INVALID`. details.rows names each.
+      properties:
+        error:
+          type: object
+          required: [code, message, details]
+          properties:
+            code: { type: string, enum: [invalid] }
+            message: { type: string }
+            details:
+              type: object
+              required: [rows]
+              properties:
+                rows:
+                  type: array
+                  items:
+                    type: object
+                    required: [row, field, code]
+                    properties:
+                      row: { type: integer }
+                      field:
+                        type: string
+                        description: "The override (curp, birthDate, homePhone, …), or `action` / `row`."
+                      code:
+                        type: string
+                        example: phone_invalid
+                        description: >
+                          curp_invalid, birth_date_invalid, phone_invalid,
+                          postal_code_invalid, email_invalid, state_unknown,
+                          bank_reference_invalid, bank_reference_taken,
+                          address_too_long, name_unreadable, curp_duplicated,
+                          action_unknown, draft_has_curp, row_unknown,
+                          row_repeated.
+      example:
+        error:
+          code: invalid
+          message: Revisa las correcciones de la importación
+          details: { rows: [{ row: 20, field: mobilePhone, code: phone_invalid }] }
 
     StudentImportIssue:
       type: object
