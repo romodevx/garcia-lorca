@@ -54,7 +54,8 @@ interface StatusMeta {
   dot: string;
   bg: string;
   fg: string;
-  tab: "active" | "pending" | "inactive";
+  /** "drafts": a draft cannot be enrolled, so it is not an application in progress (Trámite). */
+  tab: "active" | "pending" | "inactive" | "drafts";
 }
 const STATUS: Record<AdmissionStatus, StatusMeta> = {
   enrolled: { label: "Inscrito", dot: "var(--forest)", bg: "var(--ok-bg)", fg: "var(--ok-fg)", tab: "active" },
@@ -63,7 +64,7 @@ const STATUS: Record<AdmissionStatus, StatusMeta> = {
   rejected: { label: "Rechazado", dot: "var(--red)", bg: "var(--bad-bg)", fg: "var(--bad-fg)", tab: "inactive" },
   withdrawn: { label: "Baja", dot: "var(--red)", bg: "var(--bad-bg)", fg: "var(--bad-fg)", tab: "inactive" },
   // module_import_review only: the gateway names no draft while it is off.
-  draft: { label: "Borrador · falta CURP", dot: "var(--text-faint)", bg: "var(--surface-3)", fg: "var(--text-muted)", tab: "pending" },
+  draft: { label: "Borrador · falta CURP", dot: "var(--text-faint)", bg: "var(--surface-3)", fg: "var(--text-muted)", tab: "drafts" },
 };
 const FALLBACK_STATUS: StatusMeta = { label: "—", dot: "var(--text-faint)", bg: "var(--surface-3)", fg: "var(--text-muted)", tab: "pending" };
 const statusOf = (s: AdmissionStatus): StatusMeta => STATUS[s] ?? FALLBACK_STATUS;
