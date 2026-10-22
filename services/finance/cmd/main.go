@@ -287,8 +287,11 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 	// in finance (finance reads no flags): the link is what keeps a voucher
 	// from being paid twice while the gateway hides the module.
 	svc.WithPaymentVouchers(repo)
+	// The vouchers themselves share the expense receipts' private bucket
+	// (prefix vouchers/); with no bucket, uploads answer NotFound.
+	vouchers := usecase.NewPaymentVoucherService(repo, studentsClient, receipts, newID, clock)
 	handler := grpcadapter.NewFinanceHandler(svc, health).WithLevelArchive(levels).WithExpenses(expenses).
-		WithActivities(activities).WithScholarships(scholarships)
+		WithActivities(activities).WithScholarships(scholarships).WithPaymentVouchers(vouchers)
 	consumer := pubsubadapter.NewConsumer(svc, log)
 
 	mux := http.NewServeMux()

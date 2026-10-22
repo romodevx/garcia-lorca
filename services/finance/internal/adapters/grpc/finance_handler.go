@@ -41,6 +41,8 @@ type FinanceHandler struct {
 	activities *usecase.ActivityService
 	// scholarships is T18's (WithScholarships); nil leaves those RPCs Unimplemented.
 	scholarships *usecase.ScholarshipService
+	// vouchers is ADR 0040's (WithPaymentVouchers); nil leaves those RPCs Unimplemented.
+	vouchers *usecase.PaymentVoucherService
 }
 
 // NewFinanceHandler wires the handler to the finance + health use cases.

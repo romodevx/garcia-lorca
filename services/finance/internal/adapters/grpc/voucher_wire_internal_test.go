@@ -2,6 +2,7 @@ package grpcadapter
 
 import (
 	"bytes"
+	"context"
 	"testing"
 	"time"
 
@@ -11,7 +12,12 @@ import (
 
 	financev1 "github.com/garcia-lorca/gen/go/garcialorca/finance/v1"
 	"github.com/garcia-lorca/services/finance/internal/domain"
+	"github.com/garcia-lorca/services/finance/internal/usecase"
 )
+
+func usecaseScope(ids []string, school bool) usecase.VoucherScope {
+	return usecase.VoucherScope{StudentIDs: ids, School: school}
+}
 
 // ADR 0040 on the wire, both directions: what the counter sends about
 // vouchers reaches the use case, and every field of a voucher reaches the
@@ -86,4 +92,43 @@ func TestVoucherRefusalsCarryTheirCode(t *testing.T) {
 		assert.Equal(t, c.meta, ce.Meta().Get(errorCodeMeta), c.err.Error())
 	}
 	assert.Contains(t, connectErr(domain.VoucherAlreadyApplied("P-2026-000001")).Message(), "P-2026-000001")
+}
+
+func TestCreatePaymentVoucherRequestReachesTheUseCase(t *testing.T) {
+	in, err := voucherUploadFrom(&financev1.CreatePaymentVoucherRequest{
+		StudentId: "st-1", Data: []byte("%PDF-"), ClaimedAmountCents: 320000, ClaimedPaidOn: "2026-10-20",
+		UploaderId: "g-1", UploaderName: "Rosa",
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, "st-1", in.StudentID)
+	assert.Equal(t, []byte("%PDF-"), in.Data)
+	assert.Equal(t, int64(320000), in.ClaimedAmountCents)
+	assert.Equal(t, time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC), in.ClaimedPaidOn)
+	assert.Equal(t, domain.Receiver{UserID: "g-1", Name: "Rosa"}, in.By)
+
+	none, err := voucherUploadFrom(&financev1.CreatePaymentVoucherRequest{StudentId: "st-1"})
+	assert.NoError(t, err)
+	assert.True(t, none.ClaimedPaidOn.IsZero(), "no claimed day is the zero time")
+
+	_, err = voucherUploadFrom(&financev1.CreatePaymentVoucherRequest{ClaimedPaidOn: "20/10/2026"})
+	assert.Equal(t, connect.CodeInvalidArgument, connectErr(err).Code())
+}
+
+func TestVoucherScopeFromTheWire(t *testing.T) {
+	assert.Equal(t, usecaseScope([]string{"a", "b"}, false), voucherScopeFrom(&financev1.VoucherScope{StudentIds: []string{"a", "b"}}))
+	assert.Equal(t, usecaseScope(nil, true), voucherScopeFrom(&financev1.VoucherScope{SchoolQueue: true}))
+	assert.Equal(t, usecaseScope(nil, false), voucherScopeFrom(nil), "no scope on the wire is no scope, which the use case refuses")
+}
+
+func TestVoucherRPCsUnwired(t *testing.T) {
+	h := &FinanceHandler{}
+	ctx := context.Background()
+	_, err := h.CreatePaymentVoucher(ctx, connect.NewRequest(&financev1.CreatePaymentVoucherRequest{}))
+	assert.Equal(t, connect.CodeUnimplemented, connect.CodeOf(err))
+	_, err = h.ListPaymentVouchers(ctx, connect.NewRequest(&financev1.ListPaymentVouchersRequest{}))
+	assert.Equal(t, connect.CodeUnimplemented, connect.CodeOf(err))
+	_, err = h.GetPaymentVoucherFile(ctx, connect.NewRequest(&financev1.GetPaymentVoucherFileRequest{}))
+	assert.Equal(t, connect.CodeUnimplemented, connect.CodeOf(err))
+	_, err = h.RejectPaymentVoucher(ctx, connect.NewRequest(&financev1.RejectPaymentVoucherRequest{}))
+	assert.Equal(t, connect.CodeUnimplemented, connect.CodeOf(err))
 }
