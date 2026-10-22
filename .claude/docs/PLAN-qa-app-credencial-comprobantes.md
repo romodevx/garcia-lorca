@@ -26,6 +26,6 @@ squash a `dev`.
 | T4d | Comprobantes: app (subir, ver estado; build nuevo por dependencias nativas) | #180 | en dev |
 | T4e | Encender `module_payment_vouchers` en dev | — | ON en dev (gateway-00099-9d8) |
 | T7 | Build de iOS para simulador + plugin UIScene (iOS 27 cerraba la app) | #179 | en dev |
-| T8 | Deep link en frío se pierde en el JS | `bugfix/deep-link-en-frio` | en curso |
+| T8 | Deep link en frío (iOS + sin sesión) y «Atrás» en detalle | #181 | en dev |
 | T6 | Calendario/eventos de la escuela en la app | — | espera decisión del dueño |
-| T5 | Reporte final y todo en `dev` | — | en curso |
+| T5 | Reporte final y todo en `dev` | este PR | hecho |
