@@ -284,6 +284,10 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 		return requireAuth(middleware.RequirePasswordChanged(h))
 	}
 	guard := middleware.NewModuleGuard(flags)
+	// module_import_review (PLAN-import-avisos) changes what some handlers
+	// read and answer, not only which routes exist: the import's row
+	// decisions and the students JSON's openIssues/draft.
+	importReviewOn := func(ctx context.Context) bool { return flags.Enabled(ctx, featureflag.Key("import_review")) }
 
 	mux.Handle("POST /api/v1/auth/login", loginLimiter.Middleware(http.HandlerFunc(authH.Login)))
 	mux.HandleFunc("POST /api/v1/auth/refresh", authH.Refresh)
@@ -516,6 +520,7 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	studentImportH := handler.NewStudentImportHandler(handler.StudentImportDeps{
 		Catalog: configClient, Roster: studentsClient, Pricing: financeClient,
 		NewID: handler.NewBatchID, WriteBudget: studentImportWriteBudget,
+		ReviewEnabled: importReviewOn,
 	})
 	studentImport := func(h http.Handler) http.Handler {
 		return guard.Protect("students", guard.Protect("config", guard.Protect("student_import",
