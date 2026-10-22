@@ -7,7 +7,7 @@
  */
 import { emailShapeError } from "../_design/form/emailShape";
 import { isCurpShape } from "../students/curpCheck";
-import { bankReferenceError, birthDateError, postalCodeError } from "../students/profileRules";
+import { MEXICAN_STATES, bankReferenceError, birthDateError, postalCodeError } from "../students/profileRules";
 import type { ImportRow, IssueField, OverrideName, RowAction, RowDecision, RowOverrides } from "./api";
 import { OVERRIDE_LABEL } from "./copy";
 
@@ -85,6 +85,9 @@ export function editableFields(row: ImportRow, decision?: RowDecision): Editable
     let initial = corrected ?? issue.original;
     if (corrected === undefined && name === "birthDate") initial = ISO_DAY.test(issue.stored) ? issue.stored : "";
     if (corrected === undefined && name === "fullName" && initial === "") initial = row.name;
+    // A state the list does not have would show as a blank choice and send the
+    // file's unknown name back: start blank, so the office has to pick one.
+    if (name === "state" && !(MEXICAN_STATES as readonly string[]).includes(initial)) initial = "";
     out.push({ name, label: OVERRIDE_LABEL[name], kind: kindOf(name), initial });
   }
   return out;

@@ -57,8 +57,8 @@ const warningStyle: CSSProperties = {
 /** The warning on its own, for a value that has no single field (a dropped phone). */
 export function FieldWarning({ id, text, action }: { id?: string; text: string; action?: ReactNode }): ReactElement {
   return (
-    <div role="status" aria-live="polite" style={{ display: "grid", gap: 6, marginTop: 6 }}>
-      <p id={id} style={warningStyle}>
+    <div style={{ display: "grid", gap: 6, marginTop: 6 }}>
+      <p id={id} role="status" aria-live="polite" style={warningStyle}>
         <span aria-hidden="true" style={{ flexShrink: 0, display: "inline-flex", paddingTop: 1 }}>
           <Icon name="warning" size={14} stroke={2.4} />
         </span>

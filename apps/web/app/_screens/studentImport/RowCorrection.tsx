@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactElement } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent, type ReactElement } from "react";
 
 import { Btn } from "../../_design/Controls";
 import { DateField, SelectField, TextField } from "../../_design/form";
@@ -34,6 +34,7 @@ export function RowCorrection({ row, decision, errors, today, onSave, onCancel }
   const fields = editableFields(row, decision);
   const [values, setValues] = useState<Partial<Record<OverrideName, string>>>(() => Object.fromEntries(fields.map((f) => [f.name, f.initial])));
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<OverrideName, string>>>(() => serverErrors(errors));
+  const [confirmingDiscard, setConfirmingDiscard] = useState(false);
   const form = useRef<HTMLFormElement>(null);
 
   useEffect(() => {
@@ -65,10 +66,16 @@ export function RowCorrection({ row, decision, errors, today, onSave, onCancel }
     onSave(overrides);
   };
 
+  // Esc with nothing typed just closes; with changes it asks first, inline.
   const escape = (e: KeyboardEvent): void => {
     if (e.key !== "Escape") return;
     e.preventDefault();
-    onCancel();
+    if (Object.keys(changedOverrides(fields, values)).length === 0) onCancel();
+    else setConfirmingDiscard(true);
+  };
+  const keepEditing = (): void => {
+    setConfirmingDiscard(false);
+    queueMicrotask(() => form.current?.querySelector<HTMLElement>("input, select")?.focus());
   };
 
   return (
@@ -76,11 +83,26 @@ export function RowCorrection({ row, decision, errors, today, onSave, onCancel }
       {fields.map((f) => (
         <CorrectionField key={f.name} field={f} value={values[f.name] ?? ""} error={fieldErrors[f.name]} today={today} onChange={(v) => change(f.name, v)} onBlur={() => blur(f.name)} />
       ))}
+      {confirmingDiscard && <DiscardChoice onDiscard={onCancel} onKeep={keepEditing} />}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
         <Btn type="submit" icon="check" style={{ height: 44, fontSize: 14.5 }}>Guardar corrección</Btn>
         <button type="button" onClick={onCancel} style={{ minHeight: 44, padding: "0 12px", color: "var(--text-muted)", fontWeight: 600 }}>Cancelar</button>
       </div>
     </form>
+  );
+}
+
+/** The inline «¿Descartar cambios?» an Esc over changed values asks. */
+function DiscardChoice({ onDiscard, onKeep }: { onDiscard: () => void; onKeep: () => void }): ReactElement {
+  const keep = useRef<HTMLButtonElement>(null);
+  const questionId = useId();
+  useEffect(() => keep.current?.focus(), []);
+  return (
+    <div role="group" aria-labelledby={questionId} style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", padding: "10px 12px", borderRadius: "var(--r-md)", background: "var(--warn-bg)", color: "var(--warn-fg)" }}>
+      <span id={questionId} role="status" style={{ fontWeight: 700 }}>¿Descartar cambios?</span>
+      <Btn ref={keep} kind="ghost" onClick={onKeep} style={{ height: 44, fontSize: 14 }}>Seguir corrigiendo</Btn>
+      <Btn kind="ghost" onClick={onDiscard} style={{ height: 44, fontSize: 14 }}>Descartar</Btn>
+    </div>
   );
 }
 

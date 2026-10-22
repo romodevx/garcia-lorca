@@ -79,6 +79,9 @@ export function useStudentImport(baseURL: string, onNoCycle: () => void, review 
   // screen, or an older answer arriving last would show a plan the office has
   // already changed (and its stale hash would fail the commit).
   const latest = useRef(0);
+  // While a commit runs no preview may repaint the screen: it would bring the
+  // «Importar» button back over an import already on its way.
+  const committing = useRef(false);
 
   const runPreview = useCallback(async (): Promise<void> => {
     const body = request();
@@ -86,15 +89,15 @@ export function useStudentImport(baseURL: string, onNoCycle: () => void, review 
     const mine = ++latest.current;
     try {
       const answer = await previewStudentImport(baseURL, body);
-      if (mine !== latest.current) return;
+      if (mine !== latest.current || committing.current) return;
       setPreview(answer);
       setPhase("preview");
       setRowErrors(NO_ROW_ERRORS);
       setError((shown) => (shown === ROWS_INVALID ? undefined : shown));
     } catch (err) {
-      if (mine === latest.current) refused(err);
+      if (mine === latest.current && !committing.current) refused(err);
     }
-  }, [baseURL, refused]);
+  }, [baseURL, refused, review]);
 
   const chooseFiles = useCallback(async (files: readonly File[]): Promise<void> => {
     const picked = pickFile(files);
@@ -142,16 +145,20 @@ export function useStudentImport(baseURL: string, onNoCycle: () => void, review 
     if (body === undefined || preview === undefined) return;
     setError(undefined);
     setPhase("committing");
+    latest.current++;
+    committing.current = true;
     try {
       const done = await commitStudentImport(baseURL, { ...body, planHash: preview.planHash });
+      committing.current = false;
       const missing = notAnsweredCount(done.rows);
       setCut(missing > 0 ? cutWithCount(done.summary.new, done.summary.new + missing) : undefined);
       setResult(done);
       setPhase("result");
     } catch (err) {
+      committing.current = false;
       afterFailedCommit(err);
     }
-  }, [baseURL, preview]);
+  }, [baseURL, preview, review]);
 
   const afterFailedCommit = (err: unknown): void => {
     if (!(err instanceof StudentImportError)) {

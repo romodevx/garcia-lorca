@@ -53,7 +53,8 @@ export function useImportIssues(studentId: string, enabled: boolean): ImportIssu
     const results = await Promise.allSettled(closing.map((i) => acceptImportIssue(API_URL, studentId, i.id)));
     const failed = closing.filter((_, at) => results[at]?.status === "rejected");
     if (failed.length === 0) return;
-    setIssues((all) => [...all, ...failed]);
+    // A reload may have brought some back already: merge by id, never twice.
+    setIssues((all) => [...all, ...failed.filter((f) => !all.some((i) => i.id === f.id))]);
     setAcceptError(ACCEPT_FAILED);
   }, [issues, studentId]);
 

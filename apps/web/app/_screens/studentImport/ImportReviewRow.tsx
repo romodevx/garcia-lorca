@@ -28,28 +28,34 @@ const refusalStyle: CSSProperties = { color: "var(--bad-fg)", fontWeight: 600 };
 /** One row of the file; with the review on, its issues, its actions and its inline correction. */
 export function ImportTableRow({ row, review, reasons }: { row: ImportRow; review?: PreviewReview; reasons: ReactElement }): ReactElement {
   const [editing, setEditing] = useState(false);
+  const [corrected, setCorrected] = useState(false);
   const editButton = useRef<HTMLButtonElement>(null);
+  const rowHeader = useRef<HTMLTableCellElement>(null);
   const decision = review?.decisions[row.row];
   const errors = review?.rowErrors.filter((e) => e.row === row.row) ?? [];
   const reviewed = review !== undefined && needsReview(row, decision);
 
-  const close = (): void => {
+  const close = (target: RefObject<HTMLElement | null>): void => {
     setEditing(false);
-    // After the editor unmounts, so the button is there to take focus.
-    queueMicrotask(() => editButton.current?.focus());
+    // After the editor unmounts, so the target is there to take focus.
+    queueMicrotask(() => target.current?.focus());
   };
 
   return (
     <>
       <tr>
         <td data-label="Fila" style={cellStyle}>{row.row}</td>
-        <th scope="row" style={{ ...cellStyle, fontWeight: 600, textAlign: "left" }}>{row.name}</th>
+        {/* The focus target after a save: the re-preview may replace the row's buttons, never its header. */}
+        <th ref={rowHeader} tabIndex={-1} scope="row" style={{ ...cellStyle, fontWeight: 600, textAlign: "left" }}>{row.name}</th>
         <td data-label="CURP" style={cellStyle}>{row.curp}</td>
         <td data-label="Destino" style={cellStyle}>{row.destination}</td>
         <td style={cellStyle}><StatusPill status={row.status} /></td>
-        <td style={cellStyle}>{reviewed ? <ReviewNotes row={row} errors={errors} /> : reasons}</td>
+        <td style={cellStyle}>
+          {reviewed ? <ReviewNotes row={row} errors={errors} /> : reasons}
+          {corrected && <span role="status" style={{ display: "block", marginTop: 4, color: "var(--ok-fg)", fontWeight: 600 }}>{`Fila ${row.row} corregida`}</span>}
+        </td>
         {review !== undefined && (
-          <td style={cellStyle}>
+          <td data-label="Acciones" style={cellStyle}>
             {reviewed && <ReviewActions row={row} decision={decision} onAction={review.onAction} onEdit={() => setEditing(true)} editButton={editButton} />}
           </td>
         )}
@@ -63,10 +69,12 @@ export function ImportTableRow({ row, review, reasons }: { row: ImportRow; revie
               errors={errors}
               today={review.today}
               onSave={(overrides) => {
-                if (Object.keys(overrides).length > 0) review.onCorrect(row.row, overrides);
-                close();
+                const changed = Object.keys(overrides).length > 0;
+                if (changed) review.onCorrect(row.row, overrides);
+                setCorrected(changed);
+                close(changed ? rowHeader : editButton);
               }}
-              onCancel={close}
+              onCancel={() => close(editButton)}
             />
           </td>
         </tr>
@@ -77,12 +85,15 @@ export function ImportTableRow({ row, review, reasons }: { row: ImportRow; revie
 
 /** Why the row is as it is: the skip reason, each issue with the file's value, and the server's refusals. */
 function ReviewNotes({ row, errors }: { row: ImportRow; errors: readonly RowFieldError[] }): ReactElement {
-  const lines = [...(row.reason !== undefined && row.reason !== "" ? [reasonText(row.reason)] : []), ...(row.issues ?? []).map(issueLine)];
-  const shown = lines.length > 0 ? lines : rowReasons(row);
+  const lines = [
+    ...(row.reason !== undefined && row.reason !== "" ? [{ key: `reason-${row.reason}`, text: reasonText(row.reason) }] : []),
+    ...(row.issues ?? []).map((i) => ({ key: `${i.field}-${i.code}`, text: issueLine(i) })),
+  ];
+  const shown = lines.length > 0 ? lines : rowReasons(row).map((text, at) => ({ key: `warning-${at}`, text }));
   return (
     <div style={{ display: "grid", gap: 4 }}>
-      {shown.map((line) => <span key={line}>{line}</span>)}
-      {errors.map((e) => <span key={`${e.field}-${e.code}`} style={refusalStyle}>{rowErrorText(e)}</span>)}
+      {shown.map((line) => <span key={line.key}>{line.text}</span>)}
+      {errors.map((e) => <span key={`${e.row}-${e.field}-${e.code}`} style={refusalStyle}>{rowErrorText(e)}</span>)}
     </div>
   );
 }
