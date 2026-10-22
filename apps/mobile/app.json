@@ -19,7 +19,9 @@
           "cameraPermission": "García Lorca usa la cámara para que tomes una foto del comprobante de pago que envías a la escuela.",
           "microphonePermission": false
         }
-      ]
+      ],
+      "./plugins/withSceneDelegate.ts",
+      "./plugins/withPodsDeploymentTarget.ts"
     ],
     "ios": {
       "supportsTablet": true,
