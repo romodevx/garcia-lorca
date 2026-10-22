@@ -17,7 +17,8 @@
 --     rejected (with the reason the family reads). A void hands an applied
 --     voucher back to pending and counts it in release_count, so its next
 --     application derives an idempotency key of its own.
---   * payment_voucher_events: the append-only history (money audit).
+--   * payment_voucher_events: the append-only history (money audit): read
+--     and insert policies only, UPDATE/DELETE revoked from the app role.
 --
 -- THE INVARIANT. Never a double payment: a voucher pays at most one deposit
 -- (its single deposit_id column) and a deposit is paid by at most one voucher
@@ -25,7 +26,8 @@
 -- then the voucher rows, so both writers serialise on the same rows.
 --
 -- Schema only, additive; reversible by dropping the two tables.
--- RLS: ENABLE + FORCE + tenant_isolation on both tables.
+-- RLS: ENABLE + FORCE on both tables; tenant_isolation on the vouchers,
+-- tenant_read + tenant_append on the history.
 BEGIN;
 
 SET LOCAL lock_timeout = '5s';
@@ -78,7 +80,7 @@ CREATE TABLE payment_voucher_events (
     voucher_id  uuid NOT NULL REFERENCES payment_vouchers (id),
     kind        text NOT NULL CHECK (kind IN ('uploaded', 'applied', 'auto_linked', 'rejected',
                                               'released_by_void', 'moved_by_correction')),
-    deposit_id  uuid NULL,
+    deposit_id  uuid NULL REFERENCES deposits (id),
     actor_id    uuid NULL,
     actor_name  text NULL,
     reason      text NULL,
@@ -95,10 +97,23 @@ CREATE POLICY tenant_isolation ON payment_vouchers
     USING (tenant_id = current_setting('app.current_tenant', true)::uuid)
     WITH CHECK (tenant_id = current_setting('app.current_tenant', true)::uuid);
 
+-- The history is append-only: a policy to read and one to add, none to
+-- change or remove (FORCE RLS makes an UPDATE or DELETE touch no row), and the
+-- privileges revoked too where the app role already exists.
 ALTER TABLE payment_voucher_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE payment_voucher_events FORCE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation ON payment_voucher_events
-    USING (tenant_id = current_setting('app.current_tenant', true)::uuid)
+CREATE POLICY tenant_read ON payment_voucher_events FOR SELECT
+    USING (tenant_id = current_setting('app.current_tenant', true)::uuid);
+CREATE POLICY tenant_append ON payment_voucher_events FOR INSERT
     WITH CHECK (tenant_id = current_setting('app.current_tenant', true)::uuid);
+-- Guarded on the role existing: a local database or a CI run may apply the
+-- migrations before (or without) the role from setup_app_role.sql.
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app') THEN
+        REVOKE UPDATE, DELETE ON payment_voucher_events FROM app;
+    END IF;
+END
+$$;
 
 COMMIT;

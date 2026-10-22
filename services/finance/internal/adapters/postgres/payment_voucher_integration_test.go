@@ -460,3 +460,49 @@ func TestRLSIsolatesPaymentVouchers(t *testing.T) {
 		t.Fatalf("tenant B updated A's voucher: %d rows, %v", changed, err)
 	}
 }
+
+// Review (LOW): the history is append-only for the app role — it reads and
+// adds its own tenant's events and can neither rewrite nor erase one — and an
+// event's deposit is a real deposit.
+func TestPaymentVoucherHistoryIsAppendOnly(t *testing.T) {
+	v, _ := vchCreate(t, appRepo(t, tenantA), vchNew(t, vchVoucherID(95), vchStudent(11), "append-only", 0))
+	db, err := open(appDSN)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if sqlDB, err := db.DB(); err == nil {
+			_ = sqlDB.Close()
+		}
+	})
+	asA := func(stmt string, args ...any) (int64, error) {
+		var n int64
+		err := db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Exec("SELECT set_config('app.current_tenant', ?, true)", tenantA).Error; err != nil {
+				return err
+			}
+			res := tx.Exec(stmt, args...)
+			n = res.RowsAffected
+			return res.Error
+		})
+		return n, err
+	}
+	for _, stmt := range []string{
+		"UPDATE payment_voucher_events SET reason = 'reescrito' WHERE voucher_id = ?",
+		"DELETE FROM payment_voucher_events WHERE voucher_id = ?",
+	} {
+		if n, err := asA(stmt, v.ID()); err == nil && n != 0 {
+			t.Errorf("%q changed %d rows of the history", stmt, n)
+		}
+	}
+	if n, err := asA("INSERT INTO payment_voucher_events (tenant_id, voucher_id, kind) VALUES (?, ?, 'rejected')", tenantA, v.ID()); err != nil || n != 1 {
+		t.Fatalf("the app role must still append: %d, %v", n, err)
+	}
+	if events, _ := appRepo(t, tenantA).ListPaymentVoucherEvents(context.Background(), v.ID()); len(events) != 2 {
+		t.Fatalf("history = %d events, want 2", len(events))
+	}
+	if err := superDB.Exec("INSERT INTO payment_voucher_events (tenant_id, voucher_id, kind, deposit_id) VALUES (?, ?, 'applied', gen_random_uuid())",
+		tenantA, v.ID()).Error; err == nil {
+		t.Fatal("an event named a deposit that does not exist")
+	}
+}
