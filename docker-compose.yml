@@ -125,6 +125,8 @@ services:
       # Overridable from the shell for local QA of an OFF flag, e.g.
       # ENABLED_MODULES=<this list>,config_setup docker compose up -d gateway
       # (school_structure needs config_setup too: <this list>,config_setup,school_structure)
+      # import_review (PLAN-import-avisos) is OFF until its tech-lead + security
+      # gates pass; it needs student_import too: <this list>,import_review
       ENABLED_MODULES: "${ENABLED_MODULES:-iam,gateway,students,config,teachers,grades,finance,attendance,comms,uniforms,expenses,schedule,activities,scholarships,student_import}"
       # Browser origin(s) allowed to call the gateway cross-origin with cookies.
       # Tracks WEB_HOST_PORT so a remapped web port stays permitted.

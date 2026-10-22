@@ -53,6 +53,11 @@ var AllModuleFlags = []string{
 	// setup view (module_config_setup); the boundary stays module_config +
 	// config:read/write.
 	featureflag.Key("school_structure"),
+	// The import review (PLAN-import-avisos): per-row decisions in the legacy
+	// import's preview and commit, the import issues stored with each pupil,
+	// and draft pupils without a CURP. It guards the import-issue routes (with
+	// module_students); off, the import and the students JSON behave as before.
+	featureflag.Key("import_review"),
 }
 
 // ParseEnabledModules turns a comma-separated list of module names (or full
