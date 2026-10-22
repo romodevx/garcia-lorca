@@ -34,11 +34,11 @@ type fakeImportRepo struct {
 	moveErr  error
 	// issues are the import issues stored with the pupils.
 	issues []domain.ImportIssue
-	// drafts are the open drafts, as OpenDrafts reads them back.
+	// drafts are the pupils stored as drafts, as DraftedPupils reads them back.
 	drafts []ports.ExistingDraft
 }
 
-func (r *fakeImportRepo) OpenDrafts(context.Context) ([]ports.ExistingDraft, error) {
+func (r *fakeImportRepo) DraftedPupils(context.Context) ([]ports.ExistingDraft, error) {
 	return r.drafts, nil
 }
 
@@ -48,7 +48,7 @@ func draftOf(cmd ports.ImportCommand) ports.ExistingDraft {
 	s := cmd.Student
 	d := ports.ExistingDraft{
 		StudentID: s.ID(), FirstName: s.FirstName(), LastName: s.LastName(), MaternalLastName: s.MaternalLastName(),
-		BirthDate: s.Profile().BirthDate(), BankReference: s.BankReference().String(),
+		BirthDate: s.Profile().BirthDate(), BankReference: s.BankReference().String(), StillDraft: true,
 	}
 	for _, i := range cmd.Issues {
 		if i.Field() == domain.FieldCURP {

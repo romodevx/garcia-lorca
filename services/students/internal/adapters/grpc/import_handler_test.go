@@ -32,7 +32,7 @@ func (r *fakeImportRepo) MoveImportedToCycleStart(_ context.Context, move ports.
 	return move.StudentIDs, nil
 }
 
-func (r *fakeImportRepo) OpenDrafts(context.Context) ([]ports.ExistingDraft, error) { return nil, nil }
+func (r *fakeImportRepo) DraftedPupils(context.Context) ([]ports.ExistingDraft, error) { return nil, nil }
 
 func (r *fakeImportRepo) BankReferencesTaken(_ context.Context, _ []string) (map[string]bool, error) {
 	return map[string]bool{}, nil

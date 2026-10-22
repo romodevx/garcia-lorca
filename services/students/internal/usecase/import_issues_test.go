@@ -282,3 +282,32 @@ func TestImportATakenReferenceWithoutAPreparedIssueDoesNotPanic(t *testing.T) {
 		t.Fatalf("result = %+v; want IMPORTED", got)
 	}
 }
+
+// A draft the office already promoted (its CURP captured) is still the pupil
+// that row was: a re-upload reports it, never drafts it again.
+func TestImportRecognizesADraftAlreadyPromoted(t *testing.T) {
+	f := newImportFixture(t)
+	r := draftRow(1, "")
+	r.Profile.BirthDate = "2015-03-12"
+	stored := f.run(t, false, r)[0]
+	f.repo.drafts[0].StillDraft = false // promoted since
+
+	got := f.run(t, false, r)[0]
+	if got.Outcome != usecase.ImportAlreadyImported || got.StudentID != stored.StudentID || got.Draft {
+		t.Fatalf("result = %+v; want ALREADY_IMPORTED of %s, no longer a draft", got, stored.StudentID)
+	}
+	if len(f.repo.imported) != 1 {
+		t.Fatalf("stored %d pupils; want 1", len(f.repo.imported))
+	}
+}
+
+// Without a birth date, a name and a group are not enough to say two rows are
+// one child: the row is drafted anew.
+func TestImportDoesNotMatchADraftWithoutBirthDate(t *testing.T) {
+	f := newImportFixture(t)
+	f.run(t, false, draftRow(1, ""))
+	got := f.run(t, false, draftRow(1, ""))[0]
+	if got.Outcome != usecase.ImportImported || len(f.repo.imported) != 2 {
+		t.Fatalf("result = %+v (stored %d); want a new draft", got, len(f.repo.imported))
+	}
+}

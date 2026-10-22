@@ -98,3 +98,41 @@ func TestAnIssueCannotPointAtAnotherTenantsPupil(t *testing.T) {
 		t.Fatalf("cross-tenant issue: err = %v; want 23503 (foreign key violation)", err)
 	}
 }
+
+// import a draft → the office saves its CURP → the same row is uploaded
+// again: it is that pupil (ALREADY_IMPORTED), not a new draft beside them.
+func TestReuploadingAPromotedDraftCreatesNoNewPupil(t *testing.T) {
+	ctx := context.Background()
+	repo := appRepo(t, tenantA)
+	ids := 100
+	svc := usecase.NewImportService(repo, oneGroupCatalog{}, oneGroupCatalog{}, tenantA,
+		func() string { ids++; return fmt.Sprintf("22b00000-0000-0000-0000-%012d", ids) },
+		func() time.Time { return time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC) })
+	row := []usecase.ImportRow{{RowNumber: 2, FirstName: "Ona", LastName: "Promoted", GroupID: twiceGroup,
+		Action: usecase.ImportActionDraft, Profile: domain.ProfileInput{BirthDate: "2015-05-05"}}}
+	first, err := svc.ImportStudents(ctx, row, false, "ba000000-0000-0000-0000-0000000022c1")
+	if err != nil || !first[0].Draft {
+		t.Fatalf("first upload = %+v, %v; want a draft", first, err)
+	}
+	s, err := repo.FindByID(ctx, first[0].StudentID)
+	if err != nil {
+		t.Fatalf("FindByID: %v", err)
+	}
+	if err := s.UpdateDetails(s.FirstName(), s.LastName(), "", mustCURP(t, "IIAG100312MDFRNN07"), s.Profile()); err != nil {
+		t.Fatalf("promote: %v", err)
+	}
+	if _, err := repo.UpdateDetails(ctx, s, ports.DetailsCorrection{Fields: []domain.IssueField{domain.FieldCURP}}); err != nil {
+		t.Fatalf("UpdateDetails: %v", err)
+	}
+
+	again, err := svc.ImportStudents(ctx, row, false, "ba000000-0000-0000-0000-0000000022c2")
+	if err != nil {
+		t.Fatalf("second upload: %v", err)
+	}
+	if again[0].Outcome != usecase.ImportAlreadyImported || again[0].StudentID != first[0].StudentID || again[0].Draft {
+		t.Fatalf("second upload = %+v; want ALREADY_IMPORTED of the promoted pupil %s", again[0], first[0].StudentID)
+	}
+	if n, _ := repo.CountAsTenant(ctx, "SELECT count(*) FROM students WHERE last_name = 'Promoted'"); n != 1 {
+		t.Fatalf("pupils = %d; want 1", n)
+	}
+}
