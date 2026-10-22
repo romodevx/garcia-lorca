@@ -6,20 +6,23 @@ import { Btn } from "../../_design/Controls";
 import { inputStyle } from "../../_design/form";
 import type { ImportRow } from "../../studentImport/api";
 import { rowReasons } from "../../studentImport/copy";
-import { PAGE_SIZE, TABS, pageOf, tabCounts, visibleRows, type ImportTab } from "../../studentImport/view";
-import { StatusPill, cardStyle } from "./parts";
+import { PAGE_SIZE, REVIEW_TABS, TABS, pageOf, tabCounts, visibleRows, type ImportTab } from "../../studentImport/view";
+import { ImportTableRow, type PreviewReview } from "./ImportReviewRow";
+import { cardStyle } from "./parts";
 
 export interface ImportTableProps {
   rows: readonly ImportRow[];
   tab: ImportTab;
   onTab: (tab: ImportTab) => void;
+  /** module_import_review: per-row decisions; absent, the table is read-only as before. */
+  review?: PreviewReview;
 }
 
 const th = { textAlign: "left", padding: "10px 12px", fontSize: 12.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", color: "var(--text-faint)" } as const;
-const td = { padding: "10px 12px", borderTop: "1px solid var(--border)", fontSize: 14.5, color: "var(--text)", verticalAlign: "top", overflowWrap: "anywhere" } as const;
+const HEADERS = ["# fila", "Alumno", "CURP", "Destino", "Estado", "Motivo"];
 
 /** Every row of the file: tabs by fate, search by name or CURP, 50 per page; cards under 640 px. */
-export function ImportTable({ rows, tab, onTab }: ImportTableProps): ReactElement {
+export function ImportTable({ rows, tab, onTab, review }: ImportTableProps): ReactElement {
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(0);
   const searchId = useId();
@@ -29,11 +32,13 @@ export function ImportTable({ rows, tab, onTab }: ImportTableProps): ReactElemen
   const current = Math.min(page, pages - 1);
   const first = shown.length === 0 ? 0 : current * PAGE_SIZE + 1;
   const last = Math.min((current + 1) * PAGE_SIZE, shown.length);
+  const tabs = review === undefined ? TABS : [...TABS, ...REVIEW_TABS];
+  const headers = review === undefined ? HEADERS : [...HEADERS, "Acciones"];
 
   return (
     <section aria-label="Filas del archivo" style={cardStyle}>
       <div role="tablist" aria-label="Filtrar filas" style={{ display: "flex", flexWrap: "wrap", gap: 4, padding: 4, borderRadius: "var(--r-pill)", background: "var(--surface-3)", justifySelf: "start" }}>
-        {TABS.map((t) => (
+        {tabs.map((t) => (
           <button
             key={t.id}
             role="tab"
@@ -52,18 +57,11 @@ export function ImportTable({ rows, tab, onTab }: ImportTableProps): ReactElemen
       </div>
       <table className="import-table" style={{ width: "100%", borderCollapse: "collapse" }}>
         <thead>
-          <tr>{["# fila", "Alumno", "CURP", "Destino", "Estado", "Motivo"].map((h) => <th key={h} scope="col" style={th}>{h}</th>)}</tr>
+          <tr>{headers.map((h) => <th key={h} scope="col" style={th}>{h}</th>)}</tr>
         </thead>
         <tbody>
           {pageOf(shown, current).map((r) => (
-            <tr key={r.row}>
-              <td data-label="Fila" style={td}>{r.row}</td>
-              <th scope="row" style={{ ...td, fontWeight: 600, textAlign: "left" }}>{r.name}</th>
-              <td data-label="CURP" style={td}>{r.curp}</td>
-              <td data-label="Destino" style={td}>{r.destination}</td>
-              <td style={td}><StatusPill status={r.status} /></td>
-              <td style={td}><Reasons reasons={rowReasons(r)} /></td>
-            </tr>
+            <ImportTableRow key={r.row} row={r} review={review} reasons={<Reasons reasons={rowReasons(r)} />} />
           ))}
         </tbody>
       </table>

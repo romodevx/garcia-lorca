@@ -8,8 +8,9 @@ import { toCsv, type CsvColumn } from "../_lib/csv";
 import { matchesSearch } from "../_design/textSearch";
 import type { ImportPlacement, ImportRow, RowStatus, StudentImportResult } from "./api";
 import { rowReasons } from "./copy";
+import { inReviewTab } from "./review";
 
-export type ImportTab = "all" | "new" | "warning" | "already" | "skipped" | "pending";
+export type ImportTab = "all" | "new" | "warning" | "already" | "skipped" | "pending" | "draft" | "omitted";
 
 /** In the order the tabs read. */
 export const TABS: readonly { id: ImportTab; label: string }[] = [
@@ -19,6 +20,12 @@ export const TABS: readonly { id: ImportTab; label: string }[] = [
   { id: "already", label: "Ya estaban" },
   { id: "skipped", label: "No se importan" },
   { id: "pending", label: "Pendientes" },
+];
+
+/** The tabs the import review adds (module_import_review). */
+export const REVIEW_TABS: readonly { id: ImportTab; label: string }[] = [
+  { id: "draft", label: "Borradores" },
+  { id: "omitted", label: "Omitidas" },
 ];
 
 export const STATUS_LABEL: Record<RowStatus, string> = {
@@ -35,12 +42,13 @@ function inTab(r: ImportRow, tab: ImportTab): boolean {
   if (tab === "all") return true;
   // "Nuevos" is everything that goes in; "Con avisos" is a subset of it.
   if (tab === "new") return r.status === "new" || r.status === "warning";
+  if (tab === "draft" || tab === "omitted") return inReviewTab(r, tab);
   return r.status === tab;
 }
 
 export function tabCounts(rows: readonly ImportRow[]): Record<ImportTab, number> {
-  const counts = { all: 0, new: 0, warning: 0, already: 0, skipped: 0, pending: 0 };
-  for (const tab of TABS) counts[tab.id] = rows.filter((r) => inTab(r, tab.id)).length;
+  const counts = { all: 0, new: 0, warning: 0, already: 0, skipped: 0, pending: 0, draft: 0, omitted: 0 };
+  for (const tab of [...TABS, ...REVIEW_TABS]) counts[tab.id] = rows.filter((r) => inTab(r, tab.id)).length;
   return counts;
 }
 

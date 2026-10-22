@@ -37,6 +37,8 @@ export interface StudentImportScreenProps {
   onViewStudents: (levelId: string | undefined) => void;
   /** Today, YYYY-MM-DD; injected by tests. */
   today?: string;
+  /** module_import_review: correct, omit or draft each flagged row before importing. */
+  importReview?: boolean;
 }
 
 /**
@@ -44,9 +46,10 @@ export interface StudentImportScreenProps {
  * stepper in forest/lime, focus on each step's heading. The gateway
  * (students:import + three flags) is the boundary; this screen is UX.
  */
-export function StudentImportScreen({ onBack, onOpenTuition, onViewStudents, today = localISODate() }: StudentImportScreenProps): ReactElement {
+export function StudentImportScreen({ onBack, onOpenTuition, onViewStudents, today = localISODate(), importReview = false }: StudentImportScreenProps): ReactElement {
   const cycle = useImportCycle(API_URL);
-  const flow = useStudentImport(API_URL, cycle.reload);
+  const flow = useStudentImport(API_URL, cycle.reload, importReview);
+  const review = importReview ? { decisions: flow.decisions, rowErrors: flow.rowErrors, onAction: flow.decide, onCorrect: flow.correct, today } : undefined;
   const levels = useSchoolLevels(flow.preview);
   const heading = useRef<HTMLHeadingElement | null>(null);
   const step: StepId = cycle.state === "ready" && cycle.active === undefined ? "cycle" : STEP_OF_PHASE[flow.phase];
@@ -76,7 +79,7 @@ export function StudentImportScreen({ onBack, onOpenTuition, onViewStudents, tod
         {step === "preview" && flow.preview !== undefined && (
           <>
             {flow.error !== undefined && <p role="alert" style={alertStyle}>{flow.error}</p>}
-            <PreviewStep result={flow.preview} levels={levels} onChoose={flow.choose} onCapacity={flow.setCapacity} onImport={() => void flow.commit()} onBack={flow.startOver} onCancel={onBack} onOpenTuition={onOpenTuition} focusUnresolved={flow.focusUnresolved} />
+            <PreviewStep result={flow.preview} levels={levels} onChoose={flow.choose} onCapacity={flow.setCapacity} onImport={() => void flow.commit()} onBack={flow.startOver} onCancel={onBack} onOpenTuition={onOpenTuition} focusUnresolved={flow.focusUnresolved} review={review} />
           </>
         )}
         {committing && <p role="status" style={{ fontSize: 16, fontWeight: 700, color: "var(--text)" }}>{busyText((flow.preview?.summary.new ?? 0) + (flow.preview?.summary.pending ?? 0), flow.preview?.summary.movedToCycleStart ?? 0)}</p>}

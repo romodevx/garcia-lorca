@@ -11,13 +11,24 @@ import type { ImportTab } from "../../studentImport/view";
  * (+ Pendientes) = the rows. "Con avisos" is a subset of Nuevos, and says so.
  * A click on a card opens that tab of the table.
  */
-export function ImportSummary({ summary, onPick }: { summary: Summary; onPick: (tab: ImportTab) => void }): ReactElement {
+export function ImportSummary({ summary, onPick, review }: {
+  summary: Summary;
+  onPick: (tab: ImportTab) => void;
+  /** module_import_review: the rows kept as drafts and the ones left out. */
+  review?: { drafts: number; omitted: number };
+}): ReactElement {
   const cards: StatCardDef[] = [
     { icon: "plus", color: "forest", label: "Nuevos", value: String(summary.new), sub: `se importan · ${summary.warnings} con avisos`, onClick: () => onPick("new") },
     { icon: "warning", color: "yellow", label: "Con avisos", value: String(summary.warnings), sub: "incluidos en Nuevos", onClick: () => onPick("warning") },
     { icon: "user", color: "neutral", label: "Ya estaban", value: String(summary.already), sub: "misma CURP, no se tocan", onClick: () => onPick("already") },
     { icon: "close", color: "red", label: "No se importan", value: String(summary.skipped), sub: "ver motivo en la tabla", onClick: () => onPick("skipped") },
   ];
+  if (review !== undefined) {
+    cards.push(
+      { icon: "documents", color: "neutral", label: "Borradores", value: String(review.drafts), sub: "sin CURP, incluidos en Nuevos", onClick: () => onPick("draft") },
+      { icon: "close", color: "neutral", label: "Omitidas", value: String(review.omitted), sub: "las dejaste fuera", onClick: () => onPick("omitted") },
+    );
+  }
   if (summary.pending > 0) {
     cards.push({ icon: "clock", color: "orange", label: "Pendientes", value: String(summary.pending), sub: "falta elegir su nivel", onClick: () => onPick("pending") });
   }
