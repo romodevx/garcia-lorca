@@ -156,6 +156,14 @@ func TestRegisterDepositByVoucherRefusals(t *testing.T) {
 			kind:  glerrors.KindInvalid,
 		},
 		{
+			// Review (HIGH): a payment by hand under a voucher's key would be
+			// what the voucher's own application later replays.
+			name:  "a payment by hand under a voucher's key",
+			setup: func(t *testing.T, r *fakeVoucherRepo) { pendingVoucher(t, r, voucherOne, testStudent) },
+			in:    usecase.DepositInput{Method: domain.MethodCash, IdempotencyKey: "voucher:" + voucherOne},
+			kind:  glerrors.KindInvalid,
+		},
+		{
 			name:  "a malformed declined id",
 			setup: func(*testing.T, *fakeVoucherRepo) {},
 			in:    usecase.DepositInput{DeclinedVoucherIDs: []string{"nope"}},
@@ -168,6 +176,11 @@ func TestRegisterDepositByVoucherRefusals(t *testing.T) {
 			tc.setup(t, vouchers)
 			in := tc.in
 			in.StudentID, in.AmountCents, in.PaidAt = testStudent, 320000, f.clock
+			if in.VoucherID == "" && in.Method == "" {
+				// A valid payment by hand otherwise: the refusal must be the
+				// voucher rule's, not a missing method's.
+				in.Method = domain.MethodCash
+			}
 			_, err := f.svc.RegisterDeposit(context.Background(), in)
 			if tc.wantErr != nil && !errors.Is(err, tc.wantErr) {
 				t.Fatalf("err = %v, want %v", err, tc.wantErr)

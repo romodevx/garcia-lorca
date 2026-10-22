@@ -107,19 +107,46 @@ func (r *Repository) linkVoucher(tx *gorm.DB, claim voucherClaim, deposit domain
 	return linkedVoucherOf(tx, deposit.ID())
 }
 
-// replayedVoucher completes a replayed deposit with the voucher it paid. A
-// payment by voucher whose replay is VOIDED money is refused: the voucher was
-// handed back by that void and its next application has a key of its own.
+// replayedVoucher completes a replayed deposit with the voucher it paid.
+//
+// A payment BY voucher is answered as a replay only when the stored deposit is
+// that voucher's application: the same pupil, and the voucher still linked to
+// it. Anything else under its key is not its replay — a payment by hand that
+// took the key, the voided money a release handed back (its next application
+// has a key of its own), or the superseded original of a correction. Then the
+// voucher's CURRENT state answers: applied to another deposit is
+// VOUCHER_ALREADY_APPLIED naming that deposit's folio; otherwise the screen
+// read a voucher that has since changed.
 func replayedVoucher(tx *gorm.DB, d domain.Deposit, record *ports.DepositRecord) error {
-	if d.VoucherChoice().VoucherID != "" && record.Deposit.Voided() {
-		return errVoucherChanged
-	}
 	linked, err := linkedVoucherOf(tx, record.Deposit.ID())
 	if err != nil {
 		return err
 	}
+	if chosen := d.VoucherChoice().VoucherID; chosen != "" {
+		ownReplay := record.Deposit.StudentID() == d.StudentID() && !record.Deposit.Voided() &&
+			linked != nil && linked.ID() == chosen
+		if !ownReplay {
+			return notTheVouchersReplay(tx, chosen)
+		}
+	}
 	record.LinkedVoucher = linked
 	return nil
+}
+
+// notTheVouchersReplay is the refusal of a voucher application whose key
+// found some other deposit (see replayedVoucher).
+func notTheVouchersReplay(tx *gorm.DB, voucherID string) error {
+	if !uuidShaped.MatchString(voucherID) {
+		return domain.ErrVoucherNotOwned
+	}
+	v, err := readVoucher(tx, voucherID, false)
+	if err != nil {
+		return errVoucherChanged
+	}
+	if v.Status() == domain.VoucherApplied {
+		return domain.VoucherAlreadyApplied(v.DepositFolio())
+	}
+	return errVoucherChanged
 }
 
 // linkedVoucherOf is the voucher a deposit paid, or nil.

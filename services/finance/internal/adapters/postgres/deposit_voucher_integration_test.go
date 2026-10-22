@@ -403,3 +403,46 @@ func TestVoidWithoutVoucher(t *testing.T) {
 		t.Fatalf("VoidDeposit: %v", err)
 	}
 }
+
+// Review (HIGH): a deposit stored under a voucher's key that is not that
+// voucher's application — another pupil's, or a payment by hand that bypassed
+// the use case — must never be answered as the voucher's replay.
+func TestApplyVoucherNeverReplaysAnotherDeposit(t *testing.T) {
+	thief := newVLFamily(t, 13)
+	owner := newVLFamily(t, 14)
+	v := owner.voucher(t, 14)
+	if _, _, err := thief.register(t, thief.deposit(t, vlID("68200000", 130), 100000, v.IdempotencyKey(), domain.VoucherChoice{})); err != nil {
+		t.Fatalf("the squatting deposit: %v", err)
+	}
+	_, replayed, err := owner.register(t, owner.deposit(t, vlID("68200000", 140), 100000, v.IdempotencyKey(), domain.VoucherChoice{VoucherID: v.ID()}))
+	if replayed || glerrors.KindOf(err) != glerrors.KindConflict {
+		t.Fatalf("replayed=%v err=%v, want a conflict and no replay", replayed, err)
+	}
+	if got := owner.reread(t, v.ID()); got.Status() != domain.VoucherPending {
+		t.Fatalf("the voucher must stay pending: %+v", got)
+	}
+}
+
+// Review (finding 3): after a correction moved the voucher D1 → D2, applying
+// it again under its key is VOUCHER_ALREADY_APPLIED naming D2's folio — not
+// the replay of the superseded D1.
+func TestApplyVoucherAfterCorrectionNamesTheLiveDeposit(t *testing.T) {
+	f := newVLFamily(t, 15)
+	v := f.voucher(t, 15)
+	original, _, err := f.register(t, f.deposit(t, vlID("68200000", 150), 40000, v.IdempotencyKey(), domain.VoucherChoice{VoucherID: v.ID()}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	corrected := f.deposit(t, vlID("68200000", 151), 100000, "corr-vl-15", domain.VoucherChoice{}).WithCorrects(original.Deposit.ID(), "")
+	record, _, err := f.repo.CorrectDeposit(context.Background(), ports.DepositCorrectionWrite{
+		OriginalID: original.Deposit.ID(), Corrected: corrected, CorrectionID: vlID("68300000", 151),
+		Reason: "Se capturó $400 y fueron $1,000", By: vchCashier, At: vchDay.Add(13 * time.Hour),
+	}, vlSplit(t, 100000), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, replayed, err := f.register(t, f.deposit(t, vlID("68200000", 152), 40000, v.IdempotencyKey(), domain.VoucherChoice{VoucherID: v.ID()}))
+	if replayed || !errors.Is(err, domain.ErrVoucherAlreadyApplied) || !strings.Contains(glerrors.SafeMessage(err), record.Corrected.Deposit.Folio()) {
+		t.Fatalf("replayed=%v err=%v, want ErrVoucherAlreadyApplied naming %s", replayed, err, record.Corrected.Deposit.Folio())
+	}
+}

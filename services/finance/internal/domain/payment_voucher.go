@@ -28,11 +28,13 @@ const (
 	// characters, what the office tells a family when it refuses a voucher.
 	MinVoucherRejectionReason = 3
 	MaxVoucherRejectionReason = 300
-	// voucherKeyPrefix starts every idempotency key derived from a voucher.
-	voucherKeyPrefix = "voucher:"
 	// sha256Bytes is the length of a file digest.
 	sha256Bytes = 32
 )
+
+// VoucherKeyPrefix starts every idempotency key derived from a voucher; no
+// other payment may use a key that starts with it.
+const VoucherKeyPrefix = "voucher:"
 
 // Machine codes of the voucher refusals, sent as X-Error-Code so a screen can
 // react to them without parsing Spanish.
@@ -97,9 +99,9 @@ func VoucherCodeOf(err error) string {
 // application needs a key of its own or it would replay the voided money.
 func VoucherIdempotencyKey(voucherID string, releases int) string {
 	if releases == 0 {
-		return voucherKeyPrefix + voucherID
+		return VoucherKeyPrefix + voucherID
 	}
-	return voucherKeyPrefix + voucherID + ":" + strconv.Itoa(releases)
+	return VoucherKeyPrefix + voucherID + ":" + strconv.Itoa(releases)
 }
 
 // VoucherDraft is what a family says about a voucher. Both claims are
