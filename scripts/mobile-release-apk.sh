@@ -67,7 +67,9 @@ say "EXPO_PUBLIC_API_URL=$EXPO_PUBLIC_API_URL"
 
 # ---- native project ---------------------------------------------------------
 cd "$REPO_ROOT"
-pnpm install --frozen-lockfile --filter @garcia-lorca/mobile...
+# --prod=false: NODE_ENV=production (exported above for the bundle) makes pnpm
+# skip devDependencies, babel-preset-expo among them, and Metro then cannot build.
+pnpm install --frozen-lockfile --prod=false --filter @garcia-lorca/mobile...
 
 mkdir -p "$OUT_DIR"
 cd "$MOBILE_DIR"
