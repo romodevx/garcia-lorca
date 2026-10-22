@@ -98,6 +98,10 @@ func candidate(r Row) Candidate {
 	r.GroupName = strings.ToUpper(strings.TrimSpace(r.GroupName))
 	r.LevelName = collapse(r.LevelName)
 	c := Candidate{Row: r, BankRef: strings.TrimSpace(r.LegacyRef)}
+	if r.Omitted {
+		c.Skip = SkipOmitted
+		return c
+	}
 	switch strings.ToLower(Fold(r.Status)) {
 	case statusActive:
 	case statusWithdrawn:
@@ -131,10 +135,26 @@ func candidate(r Row) Candidate {
 		return c
 	}
 	c.Name = name
-	c.Warnings = append(c.Warnings, name.Warnings...)
+	if !r.Corrected.Has(FieldSurnames) {
+		c.Warnings = append(c.Warnings, name.Warnings...)
+	}
 	c.Sex = sexFromCURP(r.CURP)
+	if r.Corrected.Has(FieldBirthDate) {
+		c.BirthDate = correctedBirthDate(r.BirthDate)
+		return c
+	}
 	c.BirthDate, c.Warnings = birthDate(r.BirthDate, r.CURP, c.Warnings)
 	return c
+}
+
+// correctedBirthDate is the office's own date (checked by Overrides.Apply):
+// typed on purpose, it wins over the CURP's, and empty means none.
+func correctedBirthDate(raw string) string {
+	typed, err := time.Parse(fileDateLayout, strings.TrimSpace(raw))
+	if err != nil {
+		return ""
+	}
+	return typed.Format(time.DateOnly)
 }
 
 // birthDate keeps the column's date when it reads and agrees with the CURP,

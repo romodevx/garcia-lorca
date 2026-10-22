@@ -1,7 +1,6 @@
 package legacyimport
 
 import (
-	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -72,8 +71,8 @@ func TestOverridesApplyNormalizesEveryField(t *testing.T) {
 		GroupName: "A", Status: "Activo", BirthDate: "01/01/2012", CURP: "SOXA120101MJCRRNA1", Email: "ana@example.mx",
 		HomePhone: "3314626871", MobilePhone: "", Street: "Lerdo 35", State: "Jalisco", Municipality: "Tlajomulco de Zúñiga",
 		PostalCode: "45640"}
-	got.Corrected = nil
-	if !reflect.DeepEqual(got, want) {
+	got.Corrected = 0
+	if got != want {
 		t.Errorf("row =\n%+v\nwant\n%+v", got, want)
 	}
 }
@@ -81,14 +80,14 @@ func TestOverridesApplyNormalizesEveryField(t *testing.T) {
 func TestOverridesApplyMarksOnlyTheCorrectedFields(t *testing.T) {
 	got, _ := Overrides{BirthDate: ptr("19/02/2021"), FullName: ptr("A B, C")}.Apply(Row{})
 	for _, f := range []IssueField{FieldBirthDate, FieldSurnames, FieldFirstName} {
-		if !got.Corrected[f] {
+		if !got.Corrected.Has(f) {
 			t.Errorf("%s not marked corrected: %v", f, got.Corrected)
 		}
 	}
-	if got.Corrected[FieldCURP] || got.Corrected[FieldPhoneHome] {
+	if got.Corrected.Has(FieldCURP) || got.Corrected.Has(FieldPhoneHome) {
 		t.Errorf("untouched fields marked: %v", got.Corrected)
 	}
-	if untouched, _ := (Overrides{}).Apply(Row{CURP: "X"}); untouched.CURP != "X" || len(untouched.Corrected) != 0 {
+	if untouched, _ := (Overrides{}).Apply(Row{CURP: "X"}); untouched.CURP != "X" || untouched.Corrected != 0 {
 		t.Errorf("no overrides changed the row: %+v", untouched)
 	}
 }
