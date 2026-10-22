@@ -53,6 +53,10 @@ type Deposit struct {
 	// link is the deposit's place in a correction (T9): the one it corrects,
 	// and the one that replaced it.
 	link correctionLink
+	// vouchers is what the office said about the pupil's payment vouchers
+	// when taking this money (ADR 0040). Read by the deposit transaction only;
+	// never stored on the deposit row.
+	vouchers VoucherChoice
 }
 
 // Tenders are the methods the money came in by, in the order given. A deposit

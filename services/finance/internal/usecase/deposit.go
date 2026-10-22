@@ -45,6 +45,18 @@ type DepositInput struct {
 	// note completed with cash, say. They must add up to AmountCents, and they
 	// replace Method, Reference and CardType. Empty keeps the single method.
 	Tenders []TenderInput
+	// VoucherID, when given, is the payment voucher this money is (ADR 0040):
+	// the idempotency key is derived from it, so the voucher can be applied
+	// once. Empty is a payment by hand, which links the pupil's only pending
+	// voucher by itself.
+	VoucherID string
+	// DeclinedVoucherIDs are pending vouchers the office says this payment by
+	// hand is NOT. Only without VoucherID, and only with VoucherAware.
+	DeclinedVoucherIDs []string
+	// VoucherAware says the counter shows the pupil's vouchers (the gateway
+	// with module_payment_vouchers on). Only then does a payment by hand link
+	// the only pending one, or stop at VOUCHER_CHOICE_REQUIRED.
+	VoucherAware bool
 }
 
 // TenderInput is one method of a combined payment as the counter reports it.
@@ -83,6 +95,8 @@ type DepositResult struct {
 	// Replayed says the deposit already existed under this idempotency key and
 	// nothing was collected a second time.
 	Replayed bool
+	// LinkedVoucher is the payment voucher this deposit paid, or nil.
+	LinkedVoucher *domain.PaymentVoucher
 }
 
 // RegisterDeposit takes money without being told what it pays for.
@@ -106,10 +120,15 @@ func (s *FinanceService) RegisterDeposit(ctx context.Context, in DepositInput) (
 	if err != nil {
 		return DepositResult{}, err
 	}
+	in, choice, err := s.voucherChoice(ctx, in)
+	if err != nil {
+		return DepositResult{}, err
+	}
 	deposit, planner, err := s.prepareDeposit(ctx, in, when)
 	if err != nil {
 		return DepositResult{}, err
 	}
+	deposit = deposit.WithVoucherChoice(choice)
 
 	record, replayed, err := s.repo.RegisterDeposit(ctx, deposit, planner.plan, s.depositEvents)
 	if err != nil {
@@ -126,6 +145,7 @@ func (s *FinanceService) RegisterDeposit(ctx context.Context, in DepositInput) (
 		Allocations:      record.Allocations,
 		UnallocatedCents: record.UnallocatedCents,
 		Replayed:         replayed,
+		LinkedVoucher:    record.LinkedVoucher,
 	}, nil
 }
 

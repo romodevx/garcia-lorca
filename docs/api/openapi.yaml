@@ -393,6 +393,106 @@ paths:
         '403': { $ref: '#/components/responses/PlainForbidden' }
         '404': { $ref: '#/components/responses/PlainNotFound' }
 
+  /api/v1/family/students/{studentId}/payment-vouchers:
+    post:
+      tags: [family]
+      summary: Send a payment voucher (comprobante) for a child
+      description: >
+        A photo or PDF of the transfer the family made, for the office to
+        apply (ADR 0040). Never money: the amount and the day are optional and
+        only prefill what the office confirms. The file is judged by its bytes
+        (JPEG, PNG or PDF, never by its name or the part's Content-Type), at
+        most 5 MB. The same file again for the same child returns the voucher
+        already sent (200, `replayed: true`). A child that is not the caller's
+        is 404. At most three vouchers wait per child (409 `VOUCHER_LIMIT`).
+        Limited per guardian, not per IP (429). Behind `module_payment_vouchers`,
+        `module_finance` AND `module_students`. Requires `vouchers_own:write`.
+      operationId: createFamilyPaymentVoucher
+      security: [{ familyBearer: [] }]
+      parameters: [{ $ref: '#/components/parameters/FamilyStudentIdPath' }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: The voucher itself, at most 5 MB.
+                amountCents:
+                  type: integer
+                  format: int64
+                  minimum: 1
+                  description: What the family says it paid, in cents. Optional.
+                paidOn:
+                  type: string
+                  format: date
+                  description: The day the family says it paid. Optional; not after the school's today (Morelia, ADR 0035).
+            encoding:
+              file:
+                contentType: image/jpeg, image/png, application/pdf
+      responses:
+        '201':
+          description: Sent.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FamilyPaymentVoucherResult' }
+        '200':
+          description: This file was already sent for the child; nothing was stored.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FamilyPaymentVoucherResult' }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409': { $ref: '#/components/responses/PaymentVoucherConflict' }
+        '413':
+          description: The file is larger than 5 MB.
+          content:
+            text/plain:
+              schema: { type: string }
+              example: the voucher is larger than 5 MB
+        '429':
+          description: Too many vouchers sent in a short time; wait before trying again.
+          headers:
+            Retry-After: { schema: { type: integer, minimum: 1 } }
+          content:
+            text/plain:
+              schema: { type: string }
+              example: Too Many Requests
+    get:
+      tags: [family]
+      summary: A child's payment vouchers, newest first
+      description: >
+        What the family sent and what the office did with it: pending,
+        applied (with the receipt's folio) or rejected (with the reason). A
+        child that is not the caller's is 404. Behind `module_payment_vouchers`,
+        `module_finance` AND `module_students`. Requires `family:read`.
+      operationId: listFamilyPaymentVouchers
+      security: [{ familyBearer: [] }]
+      parameters: [{ $ref: '#/components/parameters/FamilyStudentIdPath' }]
+      responses:
+        '200':
+          description: The child's vouchers.
+          headers:
+            Cache-Control: { $ref: '#/components/headers/NoStore' }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [vouchers]
+                properties:
+                  vouchers:
+                    type: array
+                    items: { $ref: '#/components/schemas/FamilyPaymentVoucher' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
   /api/v1/family/students/{studentId}/statement/pdf:
     get:
       tags: [family]
@@ -5250,6 +5350,29 @@ paths:
                     oldest first, each month with its surcharge; money past them
                     is refused (409). Empty or absent means every charge,
                     oldest first. A charge that is not the student's is refused.
+                voucherId:
+                  type: string
+                  format: uuid
+                  description: >
+                    This money IS that payment voucher (ADR 0040). The
+                    idempotency key is derived from the voucher, so leave
+                    idempotencyKey out (another one is 400); method defaults to
+                    transfer. Another pupil's voucher is 404; an applied one 409
+                    `VOUCHER_ALREADY_APPLIED` (unless this is its retry), a
+                    rejected one 409 `VOUCHER_REJECTED`. With
+                    `module_payment_vouchers` off, sending it is 404.
+                declinedVoucherIds:
+                  type: array
+                  maxItems: 3
+                  items: { type: string, format: uuid }
+                  description: >
+                    Pending vouchers this payment registered by hand is NOT.
+                    While `module_payment_vouchers` is on (and only then), a
+                    payment without voucherId links the pupil's only other
+                    pending voucher to itself (`linkedVoucher`); two or more
+                    are 409 `VOUCHER_CHOICE_REQUIRED` and nothing is taken.
+                    Only without voucherId (400 otherwise). With
+                    `module_payment_vouchers` off, sending it is 404.
             examples:
               creditNoteAndCash:
                 summary: A credit note completed with cash (T8)
@@ -5269,7 +5392,22 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/ModuleDisabled' }
-        '409': { $ref: '#/components/responses/DepositNotApplicable' }
+        '409':
+          description: >
+            The money does not land in full on the charges (CC-202, no code),
+            or the voucher's state refuses it (ADR 0040, `X-Error-Code`
+            VOUCHER_ALREADY_APPLIED, VOUCHER_REJECTED, VOUCHER_CHOICE_REQUIRED).
+            Nothing was stored.
+          headers:
+            X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
+          content:
+            text/plain:
+              schema: { type: string }
+              examples:
+                alreadyPaid:
+                  value: 'lo elegido ya está pagado: actualiza la cuenta del alumno antes de cobrar'
+                choose:
+                  value: 'este alumno tiene varios comprobantes por revisar: elige cuál corresponde a este pago'
     get:
       tags: [finance-payments]
       summary: A family's deposits, newest first
@@ -5395,6 +5533,120 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/ModuleDisabled' }
 
+  /api/v1/finance/payment-vouchers:
+    get:
+      tags: [finance-payments]
+      summary: The school's payment vouchers, newest first
+      description: >
+        The office's queue (ADR 0040): what families sent from the app, for one
+        pupil or the whole school. A school-wide read of financial data, on
+        purpose under `collections:read` like the overdue list (ADR 0015).
+        Behind `module_payment_vouchers` AND `module_finance`. Requires
+        `finance:read` or `collections:read`.
+      operationId: listPaymentVouchers
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: status
+          in: query
+          description: Empty is every status.
+          schema: { type: string, enum: [pending, applied, rejected] }
+        - name: studentId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 500, default: 500 }
+      responses:
+        '200':
+          description: The vouchers.
+          headers:
+            Cache-Control: { $ref: '#/components/headers/NoStore' }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [vouchers]
+                properties:
+                  vouchers:
+                    type: array
+                    items: { $ref: '#/components/schemas/PaymentVoucher' }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+  /api/v1/finance/payment-vouchers/{id}/file:
+    get:
+      tags: [finance-payments]
+      summary: A payment voucher's file
+      description: >
+        The file's bytes, read from the private bucket and served only after
+        the permission check. Served with the type its bytes proved to be,
+        nosniff, `private, no-store`, a sandboxing Content-Security-Policy and
+        `Content-Disposition: attachment`: it is a family's upload and is never
+        rendered as a page of the app's origin (the web previews the Blob it
+        fetched). Behind
+        `module_payment_vouchers` AND `module_finance`. Requires `finance:read`
+        or `collections:read`.
+      operationId: getPaymentVoucherFile
+      security: [{ sessionCookie: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses:
+        '200':
+          description: The voucher's file.
+          headers:
+            Cache-Control: { schema: { type: string, const: 'private, no-store' } }
+            X-Content-Type-Options: { schema: { type: string, const: nosniff } }
+            Content-Security-Policy: { schema: { type: string } }
+            Content-Disposition: { schema: { type: string, example: 'attachment; filename="comprobante-pago.pdf"' } }
+          content:
+            image/jpeg: { schema: { type: string, format: binary } }
+            image/png: { schema: { type: string, format: binary } }
+            application/pdf: { schema: { type: string, format: binary } }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+  /api/v1/finance/payment-vouchers/{id}/reject:
+    post:
+      tags: [finance-payments]
+      summary: Reject a payment voucher
+      description: >
+        Refuses a pending voucher with the reason the family reads (3 to 300
+        characters). Rejecting it again answers it as it stands, first reason
+        kept (`replayed: true`). An applied voucher is 409
+        `VOUCHER_ALREADY_APPLIED`: its money is undone by cancelling the
+        deposit. Behind `module_payment_vouchers` AND `module_finance`.
+        Requires `finance:write` or `payments:write`.
+      operationId: rejectPaymentVoucher
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/CsrfToken' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 3, maxLength: 300 }
+            example: { reason: La transferencia no se alcanza a leer; envía otra foto }
+      responses:
+        '200':
+          description: Rejected (or already rejected).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [voucher, replayed]
+                properties:
+                  voucher: { $ref: '#/components/schemas/PaymentVoucher' }
+                  replayed: { type: boolean }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409': { $ref: '#/components/responses/PaymentVoucherConflict' }
   /api/v1/finance/deposits/preview:
     post:
       tags: [finance-payments]
@@ -8157,6 +8409,8 @@ components:
         Draft pupil (import without a CURP): STUDENT_DRAFT (409, on enrolling,
         transferring, linking a family account, or accepting the draft's curp
         issue).
+        Payment vouchers (ADR 0040, 409): VOUCHER_ALREADY_APPLIED,
+        VOUCHER_REJECTED, VOUCHER_CHOICE_REQUIRED, VOUCHER_LIMIT.
         Absent on a refusal without a code.
       schema:
         type: string
@@ -8659,6 +8913,23 @@ components:
         text/plain:
           schema: { type: string }
           example: forbidden
+    PaymentVoucherConflict:
+      description: >
+        The voucher's state refuses the request (ADR 0040); the sentence is
+        shown as is and the code rides in `X-Error-Code`:
+        VOUCHER_ALREADY_APPLIED (it already paid a deposit — the sentence names
+        the receipt's folio), VOUCHER_REJECTED, VOUCHER_CHOICE_REQUIRED (a
+        payment by hand for a pupil with two or more vouchers waiting: choose
+        one, or decline the others), VOUCHER_LIMIT (three already waiting for
+        the child).
+      headers:
+        X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
+      content:
+        text/plain:
+          schema: { type: string }
+          examples:
+            applied: { value: este comprobante ya se aplicó al pago P-2026-000042 }
+            choose: { value: 'este alumno tiene varios comprobantes por revisar: elige cuál corresponde a este pago' }
     PlainNotFound:
       description: |
         No such row, or the route's module flag is off — a disabled module is
@@ -10253,6 +10524,71 @@ components:
           description: >
             The deposit already existed under this idempotency key and nothing
             was collected a second time.
+        linkedVoucher:
+          allOf: [{ $ref: '#/components/schemas/PaymentVoucher' }]
+          description: >
+            The payment voucher this deposit paid (ADR 0040): the one it was
+            registered by, or the pupil's only pending one, linked by itself.
+            Absent when none.
+
+    PaymentVoucher:
+      type: object
+      description: >
+        A family's proof of a transfer for one pupil, as the office reads it
+        (ADR 0040). Never money: claimedAmountCents and claimedPaidOn only
+        prefill what the office confirms.
+      required: [id, studentId, status, fileContentType, fileSizeBytes, uploadedByName, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        studentId: { type: string, format: uuid }
+        status: { type: string, enum: [pending, applied, rejected] }
+        claimedAmountCents: { type: integer, format: int64, minimum: 1, description: Absent when the family did not say. }
+        claimedPaidOn: { type: string, format: date, description: Absent when the family did not say. }
+        fileContentType: { type: string, enum: [image/jpeg, image/png, application/pdf] }
+        fileSizeBytes: { type: integer, minimum: 1, maximum: 5242880 }
+        uploadedByName: { type: string, description: The guardian who sent it. }
+        depositId: { type: string, format: uuid, description: The deposit it paid; only when applied. }
+        depositFolio: { type: string, example: P-2026-000042, description: That deposit's receipt number; only when applied. }
+        decidedByName: { type: string, description: Who applied or rejected it. }
+        decidedAt: { type: string, format: date-time }
+        rejectionReason: { type: string, description: Only when rejected. }
+        createdAt: { type: string, format: date-time }
+      example:
+        id: 3d5f8a10-0000-4000-8000-0000000000a1
+        studentId: 3d5f8a10-0000-4000-8000-000000000042
+        status: pending
+        claimedAmountCents: 320000
+        claimedPaidOn: '2026-10-20'
+        fileContentType: image/jpeg
+        fileSizeBytes: 482113
+        uploadedByName: Rosa Pérez
+        createdAt: '2026-10-20T18:04:00Z'
+
+    FamilyPaymentVoucher:
+      type: object
+      description: >
+        A voucher as the family sees it: what it sent and what the office did
+        with it. Who in the office decided is not shown.
+      required: [id, status, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [pending, applied, rejected] }
+        claimedAmountCents: { type: integer, format: int64, minimum: 1 }
+        claimedPaidOn: { type: string, format: date }
+        fileContentType: { type: string, enum: [image/jpeg, image/png, application/pdf] }
+        depositFolio: { type: string, description: The receipt's number; only when applied. }
+        rejectionReason: { type: string, description: Only when rejected. }
+        createdAt: { type: string, format: date-time }
+        decidedAt: { type: string, format: date-time }
+
+    FamilyPaymentVoucherResult:
+      type: object
+      required: [voucher, replayed]
+      properties:
+        voucher: { $ref: '#/components/schemas/FamilyPaymentVoucher' }
+        replayed:
+          type: boolean
+          description: This file was already sent for the child; nothing was stored.
 
     DepositPreview:
       type: object

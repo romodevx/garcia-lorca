@@ -528,42 +528,79 @@ type DepositResult struct {
 	Surcharges       []Charge  `json:"surcharges"`
 	UnallocatedCents int64     `json:"unallocatedCents"`
 	Replayed         bool      `json:"replayed"`
+	// LinkedVoucher is the payment voucher the deposit paid (ADR 0040); nil
+	// when none.
+	LinkedVoucher *PaymentVoucher `json:"linkedVoucher,omitempty"`
+}
+
+// DepositRequest is a deposit as the counter sends it.
+type DepositRequest struct {
+	StudentID         string
+	AmountCents       int64
+	Method            string
+	Reference         string
+	IdempotencyKey    string
+	PaidAt            time.Time
+	GrantEarlyPayment bool
+	CardType          string
+	Receiver          Receiver
+	ChargeIDs         []string
+	Tenders           []Tender
+	// Vouchers is what the counter says about the pupil's payment vouchers
+	// (ADR 0040).
+	Vouchers VoucherChoice
 }
 
 // RegisterDeposit takes money without being told what it pays for and splits it
 // across what the family owes, oldest first.
-func (c *FinanceClient) RegisterDeposit(ctx context.Context, studentID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time, grantEarlyPayment bool, cardType string, receiver Receiver, chargeIDs []string, tenders []Tender) (DepositResult, error) {
-	req := &financev1.RegisterDepositRequest{
-		StudentId:         studentID,
-		AmountCents:       amountCents,
-		Method:            method,
-		Reference:         reference,
-		IdempotencyKey:    idempotencyKey,
-		GrantEarlyPayment: grantEarlyPayment,
-		CardType:          cardType,
-		ReceivedBy:        receiver.UserID,
-		ReceivedByName:    receiver.Name,
-		ChargeIds:         chargeIDs,
-		Tenders:           toProtoTenders(tenders),
-	}
-	if !paidAt.IsZero() {
-		req.PaidAt = timestamppb.New(paidAt)
-	}
-	res, err := c.rpc.RegisterDeposit(ctx, connect.NewRequest(req))
+func (c *FinanceClient) RegisterDeposit(ctx context.Context, in DepositRequest) (DepositResult, error) {
+	res, err := c.rpc.RegisterDeposit(ctx, connect.NewRequest(toRegisterDepositRequest(in)))
 	if err != nil {
 		return DepositResult{}, err
 	}
-	allocations := make([]Payment, 0, len(res.Msg.GetAllocations()))
-	for _, p := range res.Msg.GetAllocations() {
+	return toDepositResult(res.Msg), nil
+}
+
+func toRegisterDepositRequest(in DepositRequest) *financev1.RegisterDepositRequest {
+	req := &financev1.RegisterDepositRequest{
+		StudentId:          in.StudentID,
+		AmountCents:        in.AmountCents,
+		Method:             in.Method,
+		Reference:          in.Reference,
+		IdempotencyKey:     in.IdempotencyKey,
+		GrantEarlyPayment:  in.GrantEarlyPayment,
+		CardType:           in.CardType,
+		ReceivedBy:         in.Receiver.UserID,
+		ReceivedByName:     in.Receiver.Name,
+		ChargeIds:          in.ChargeIDs,
+		Tenders:            toProtoTenders(in.Tenders),
+		VoucherId:          in.Vouchers.VoucherID,
+		DeclinedVoucherIds: in.Vouchers.Declined,
+		VoucherAware:       in.Vouchers.Aware,
+	}
+	if !in.PaidAt.IsZero() {
+		req.PaidAt = timestamppb.New(in.PaidAt)
+	}
+	return req
+}
+
+func toDepositResult(m *financev1.RegisterDepositResponse) DepositResult {
+	allocations := make([]Payment, 0, len(m.GetAllocations()))
+	for _, p := range m.GetAllocations() {
 		allocations = append(allocations, toPayment(p))
 	}
-	return DepositResult{
-		Deposit:          toDeposit(res.Msg.GetDeposit()),
+	out := DepositResult{
+		Deposit:          toDeposit(m.GetDeposit()),
 		Allocations:      allocations,
-		Surcharges:       toCharges(res.Msg.GetSurcharges()),
-		UnallocatedCents: res.Msg.GetUnallocatedCents(),
-		Replayed:         res.Msg.GetReplayed(),
-	}, nil
+		Surcharges:       toCharges(m.GetSurcharges()),
+		UnallocatedCents: m.GetUnallocatedCents(),
+		Replayed:         m.GetReplayed(),
+	}
+	if v := m.GetLinkedVoucher(); v != nil {
+		linked := toPaymentVoucher(v)
+		out.LinkedVoucher = &linked
+	}
+	return out
 }
 
 // PreviewDeposit says what an amount would cover, without taking it.

@@ -43,16 +43,17 @@ func TestParseEnabledModulesAcceptsFullKeys(t *testing.T) {
 }
 
 func TestAllModuleFlagsCoversRegistry(t *testing.T) {
-	// FLAGS.md registers 24 module flags; the enumeration must match so
+	// FLAGS.md registers 25 module flags; the enumeration must match so
 	// GET /features reports every module. (M14 added module_teachers; task 13,
 	// module_student_card; T10, module_expenses; T16, module_schedule; T17,
 	// module_activities; the legacy student import, module_student_import; the
 	// Configuración setup view, module_config_setup; the app-wide look refresh,
 	// module_ui_refresh; the Avisos view, module_announcements_view; the
 	// «Estructura de la escuela» step, module_school_structure; the import
-	// review, module_import_review.)
-	if len(config.AllModuleFlags) != 24 {
-		t.Errorf("AllModuleFlags has %d entries, want 24", len(config.AllModuleFlags))
+	// review, module_import_review; payment vouchers from the family app,
+	// module_payment_vouchers.)
+	if len(config.AllModuleFlags) != 25 {
+		t.Errorf("AllModuleFlags has %d entries, want 25", len(config.AllModuleFlags))
 	}
 	seen := map[string]bool{}
 	for _, k := range config.AllModuleFlags {
@@ -160,5 +161,17 @@ func TestPresentationFlagsAreRegisteredAndDefaultOff(t *testing.T) {
 				t.Errorf("listing it must enable %q", tt.key)
 			}
 		})
+	}
+}
+
+// Payment vouchers (ADR 0040) ship behind their own flag, default-deny:
+// enabling finance and students does NOT enable the vouchers.
+func TestPaymentVouchersFlagIsRegisteredAndDefaultOff(t *testing.T) {
+	const key = "module_payment_vouchers"
+	if !slices.Contains(config.AllModuleFlags, key) {
+		t.Fatalf("AllModuleFlags does not report %q", key)
+	}
+	if config.ParseEnabledModules("finance,students")[key] {
+		t.Errorf("%q must stay OFF unless listed explicitly", key)
 	}
 }

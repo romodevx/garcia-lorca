@@ -8,6 +8,8 @@ import { groupByCharge } from "../../finance/allocations";
 import type { Charge, DepositPreview, DepositResult, Tender } from "../../finance/api";
 import { formatCents } from "../../_lib/money";
 import { ReceiptActions } from "../receipts/ReceiptActions";
+import { shortDayLabel } from "../../_lib/localDate";
+import { uploadedOn } from "./vouchers/labels";
 
 const lineRow: CSSProperties = { display: "flex", justifyContent: "space-between", padding: "12px 16px", borderTop: "1px solid var(--border)" };
 
@@ -128,6 +130,13 @@ export function DepositReceipt({ result, describe, onClose }: DepositReceiptProp
         {result.unallocatedCents > 0 && (
           <p style={{ fontSize: 14, color: "var(--text-muted)", margin: 0 }}>
             Quedan {formatCents(result.unallocatedCents)} a favor de la familia.
+          </p>
+        )}
+        {result.linkedVoucher !== undefined && (
+          // ADR 0040: said on the receipt, so a link the cashier did not mean
+          // is seen now, and undone by a correction (§8 risks).
+          <p data-testid="receipt-voucher" style={{ fontSize: 14, color: "var(--text-muted)", margin: 0 }}>
+            {`Comprobante de la familia ligado a este pago (enviado por ${result.linkedVoucher.uploadedByName} el ${shortDayLabel(uploadedOn(result.linkedVoucher))}).`}
           </p>
         )}
       </div>

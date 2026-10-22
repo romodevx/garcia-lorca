@@ -17,6 +17,10 @@ import { studentRoomLabel } from "../../_design/students/studentRoom";
 import { matchesSearch } from "../../_design/textSearch";
 import { formatStudentName, sortStudents, studentNameSearchKeys } from "../../_design/students/studentName";
 import { ModuleHeaderIcon } from "../../_design/ModuleHeaderIcon";
+import type { PaymentVoucher } from "../../finance/vouchers";
+import { useVoucherQueue } from "./useVoucherQueue";
+import { VoucherQueue } from "./VoucherQueue";
+import { VoucherReviewDrawer } from "./VoucherReviewDrawer";
 
 const search: CSSProperties = {
   width: "100%", height: 60, paddingLeft: 52, paddingRight: 18,
@@ -37,6 +41,8 @@ export interface PaymentsScreenProps {
   canCorrectPayments?: boolean;
   /** T10: expenses and closing the day in the cut. Absent: module_expenses is off. */
   cutAccess?: CutAccess;
+  /** ADR 0040: the families' payment vouchers. False (the default): module_payment_vouchers is off. */
+  paymentVouchers?: boolean;
 }
 
 /**
@@ -50,7 +56,7 @@ export interface PaymentsScreenProps {
  * The whole flow is one question: which pupil? Everything else happens in the
  * drawer.
  */
-export function PaymentsScreen({ onBack, canGrantDiscounts = false, notes, canCorrectPayments = false, cutAccess }: PaymentsScreenProps): ReactElement {
+export function PaymentsScreen({ onBack, canGrantDiscounts = false, notes, canCorrectPayments = false, cutAccess, paymentVouchers = false }: PaymentsScreenProps): ReactElement {
   const [students, setStudents] = useState<Student[]>([]);
   // Three states, not two. "Empty" and "we could not ask" look the same on
   // screen and mean opposite things: one says the pupil is not registered, the
@@ -60,6 +66,12 @@ export function PaymentsScreen({ onBack, canGrantDiscounts = false, notes, canCo
   const [roll, setRoll] = useState<"loading" | "ready" | "failed">("loading");
   const [q, setQ] = useState("");
   const [collecting, setCollecting] = useState<CollectStudent | null>(null);
+  // The voucher the counter was opened on, when it was opened from the queue.
+  const [byVoucher, setByVoucher] = useState<PaymentVoucher | undefined>(undefined);
+  // A voucher whose pupil is not on the roll: reviewed apart, never collected.
+  const [reviewing, setReviewing] = useState<PaymentVoucher | null>(null);
+  const queue = useVoucherQueue(paymentVouchers);
+  const rollById = useMemo(() => new Map(students.map((s) => [s.id, s])), [students]);
   const [cashUp, setCashUp] = useState(false);
   const [owed, setOwed] = useState<Map<string, number>>(new Map());
   const [toast, setToast] = useState<string | null>(null);
@@ -112,6 +124,10 @@ export function PaymentsScreen({ onBack, canGrantDiscounts = false, notes, canCo
   }, [matches]);
 
   const say = (m: string): void => { setToast(m); setTimeout(() => setToast(null), 2600); };
+  const collectFor = (s: Student, voucher?: PaymentVoucher): void => {
+    setByVoucher(voucher);
+    setCollecting({ id: s.id, firstName: s.firstName, lastName: s.lastName, maternalLastName: s.maternalLastName, gradeGroup: roomOf(s) });
+  };
 
   return (
     <Page variant="reading">
@@ -129,6 +145,8 @@ export function PaymentsScreen({ onBack, canGrantDiscounts = false, notes, canCo
             not open Finanzas, where the cut also lives. */}
         <Btn kind="ghost" icon="finance" onClick={() => setCashUp(true)}>Corte de caja</Btn>
       </div>
+
+      <VoucherQueue queue={queue} rollById={rollById} roll={roll} onRetryRoll={loadRoll} roomOf={roomOf} onOpen={(v, s) => collectFor(s, v)} onReview={setReviewing} />
 
       <div className="fade-up" style={{ position: "relative", marginBottom: 18 }}>
         <span style={{ position: "absolute", left: 20, top: "50%", transform: "translateY(-50%)", color: "var(--text-faint)" }}>
@@ -167,13 +185,14 @@ export function PaymentsScreen({ onBack, canGrantDiscounts = false, notes, canCo
           return (
             <button
               key={s.id}
-              onClick={() => setCollecting({ id: s.id, firstName: s.firstName, lastName: s.lastName, maternalLastName: s.maternalLastName, gradeGroup: roomOf(s) })}
+              onClick={() => collectFor(s)}
               style={{ display: "flex", width: "100%", alignItems: "center", gap: 14, padding: "14px 20px", background: "transparent", border: "none", borderTop: "1px solid var(--border)", cursor: "pointer", textAlign: "left" }}>
               <Avatar name={formatStudentName(s)} color="forest" size={42} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 15.5, fontWeight: 600, color: "var(--text)" }}>{formatStudentName(s)}</div>
                 <div style={{ fontSize: 13.5, color: "var(--text-muted)" }}>{roomOf(s)}</div>
               </div>
+              {queue.pendingStudents.has(s.id) && <VoucherChip />}
               <div style={{ textAlign: "right" }}>
                 <div style={{ fontSize: 12.5, color: "var(--text-faint)" }}>Debe hoy</div>
                 <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 16, color: due !== undefined && due > 0 ? "var(--text)" : "var(--text-faint)" }}>
@@ -190,6 +209,9 @@ export function PaymentsScreen({ onBack, canGrantDiscounts = false, notes, canCo
           student={collecting}
           canGrantDiscounts={canGrantDiscounts}
           notes={notes}
+          vouchers={paymentVouchers
+            ? { byVoucher, onChanged: queue.reload, onRejected: () => { setCollecting(null); say("Comprobante rechazado"); } }
+            : undefined}
           onClose={() => setCollecting(null)}
           onCollected={() => {
             // The figure this screen shows is now stale for that pupil.
@@ -198,6 +220,10 @@ export function PaymentsScreen({ onBack, canGrantDiscounts = false, notes, canCo
           }}
         />
       )}
+      {reviewing !== null && (
+        <VoucherReviewDrawer voucher={reviewing} onClose={() => setReviewing(null)} onChanged={queue.reload}
+          onRejected={() => { setReviewing(null); say("Comprobante rechazado"); }} />
+      )}
       {toast !== null && (
         <div role="status" style={{ position: "fixed", bottom: 28, left: "50%", transform: "translateX(-50%)", zIndex: 80, display: "flex", alignItems: "center", gap: 11, padding: "14px 22px", borderRadius: "var(--r-pill)", background: "var(--forest)", color: "#fff", fontWeight: 600, fontSize: 15, boxShadow: "var(--shadow-pop)" }}>
           <Icon name="check" size={20} stroke={2.6} />{toast}
@@ -205,5 +231,14 @@ export function PaymentsScreen({ onBack, canGrantDiscounts = false, notes, canCo
       )}
       {cashUp && <CashUpDrawer canCorrect={canCorrectPayments} cutAccess={cutAccess} onClose={() => setCashUp(false)} />}
     </Page>
+  );
+}
+
+/** A searched pupil with a voucher waiting in the queue above. */
+function VoucherChip(): ReactElement {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 10px", borderRadius: "var(--r-pill)", background: "var(--warn-bg)", color: "var(--warn-fg)", fontSize: 12.5, fontWeight: 700 }}>
+      <Icon name="documents" size={14} />Comprobante
+    </span>
   );
 }

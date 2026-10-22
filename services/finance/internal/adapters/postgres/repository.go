@@ -1201,9 +1201,12 @@ func (r *Repository) RegisterDeposit(
 	)
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
 		stored, found, err := replayOf(tx, d.IdempotencyKey())
-		if err != nil || found {
-			record, replayed = stored, found
+		if err != nil {
 			return err
+		}
+		if found {
+			record, replayed = stored, true
+			return replayedVoucher(tx, d, &record)
 		}
 		// A double click sends the same key twice at once: both miss the
 		// lookup above and queue on the charges' lock. Looked up again under
@@ -1211,18 +1214,31 @@ func (r *Repository) RegisterDeposit(
 		// replay — not the CC-202 refusal for a month the first just paid,
 		// nor the unique index's conflict. storeDeposit takes the same locks
 		// again, which a transaction already holding them does at no cost.
+		//
+		// The charges are locked even without a key: the pupil's payment
+		// vouchers are locked after them (ADR 0040), in every path.
+		if _, err := lockedChargesOf(tx, d.StudentID()); err != nil {
+			return err
+		}
 		if d.IdempotencyKey() != "" {
-			if _, err := lockedChargesOf(tx, d.StudentID()); err != nil {
+			if stored, found, err = replayOf(tx, d.IdempotencyKey()); err != nil {
 				return err
 			}
-			if stored, found, err = replayOf(tx, d.IdempotencyKey()); err != nil || found {
-				record, replayed = stored, found
-				return err
+			if found {
+				record, replayed = stored, true
+				return replayedVoucher(tx, d, &record)
 			}
+		}
+		claim, err := claimVoucher(tx, d)
+		if err != nil {
+			return err
 		}
 
 		stored, err = r.storeDeposit(tx, d, plan)
 		if err != nil {
+			return err
+		}
+		if stored.LinkedVoucher, err = r.linkVoucher(tx, claim, stored.Deposit); err != nil {
 			return err
 		}
 		record = stored
@@ -1281,7 +1297,8 @@ func (r *Repository) storeDeposit(
 	if err != nil {
 		return ports.DepositRecord{}, err
 	}
-	d = d.WithFolio(folio)
+	// The record carries the capture instant too, as a re-read would.
+	d = d.WithFolio(folio).WithCapturedAt(capturedAt)
 	row, err := fromDomainDeposit(d)
 	if err != nil {
 		return ports.DepositRecord{}, err
@@ -2010,7 +2027,9 @@ func (r *Repository) VoidDeposit(ctx context.Context, d domain.Deposit) error {
 			// each is a conflict, not a silent success.
 			return glerrors.New(glerrors.KindConflict, "this deposit is already cancelled or corrected")
 		}
-		return nil
+		// Last, after the charges: the voucher it paid goes back to the
+		// office's queue (ADR 0040 §4 C).
+		return r.releaseVoucherOf(tx, d)
 	})
 }
 
@@ -2169,6 +2188,11 @@ func (r *Repository) CorrectDeposit(
 
 		stored, err := r.storeDeposit(tx, w.Corrected.WithCorrects(original.ID(), original.Folio()), plan)
 		if err != nil {
+			return err
+		}
+		// The voucher the original paid now pays its correction, so it always
+		// points at live money (ADR 0040 §4 C). After the charges, as always.
+		if stored.LinkedVoucher, err = r.moveVoucher(tx, original.ID(), stored.Deposit, w.By, w.At); err != nil {
 			return err
 		}
 		if err := tx.Model(&depositModel{}).Where("id = ?", original.ID()).Updates(map[string]any{

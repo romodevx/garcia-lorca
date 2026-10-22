@@ -41,6 +41,8 @@ type FinanceHandler struct {
 	activities *usecase.ActivityService
 	// scholarships is T18's (WithScholarships); nil leaves those RPCs Unimplemented.
 	scholarships *usecase.ScholarshipService
+	// vouchers is ADR 0040's (WithPaymentVouchers); nil leaves those RPCs Unimplemented.
+	vouchers *usecase.PaymentVoucherService
 }
 
 // NewFinanceHandler wires the handler to the finance + health use cases.
@@ -343,27 +345,7 @@ func (h *FinanceHandler) ListOverdue(ctx context.Context, req *connect.Request[f
 
 // RegisterDeposit takes money without being told what it pays for.
 func (h *FinanceHandler) RegisterDeposit(ctx context.Context, req *connect.Request[financev1.RegisterDepositRequest]) (*connect.Response[financev1.RegisterDepositResponse], error) {
-	m := req.Msg
-	// An unset paid_at becomes the zero time, which the use case reads as "now".
-	var paidAt time.Time
-	if ts := m.GetPaidAt(); ts != nil {
-		paidAt = ts.AsTime()
-	}
-	got, err := h.finance.RegisterDeposit(ctx, usecase.DepositInput{
-		StudentID:      m.GetStudentId(),
-		AmountCents:    m.GetAmountCents(),
-		Method:         m.GetMethod(),
-		Reference:      m.GetReference(),
-		PaidAt:         paidAt,
-		IdempotencyKey: m.GetIdempotencyKey(),
-		// The school honouring the reward late is a decision it makes at the
-		// counter; the use case records it as one.
-		GrantEarlyPayment: m.GetGrantEarlyPayment(),
-		CardType:          m.GetCardType(),
-		Receiver:          domain.Receiver{UserID: m.GetReceivedBy(), Name: m.GetReceivedByName()},
-		ChargeIDs:         m.GetChargeIds(),
-		Tenders:           fromProtoTenders(m.GetTenders()),
-	})
+	got, err := h.finance.RegisterDeposit(ctx, depositInputFrom(req.Msg))
 	if err != nil {
 		return nil, connectErr(err)
 	}
@@ -377,13 +359,44 @@ func (h *FinanceHandler) RegisterDeposit(ctx context.Context, req *connect.Reque
 		// definition: it did not exist a moment ago.
 		surcharges = append(surcharges, toProtoCharge(ports.ChargeWithPaid{Charge: c}))
 	}
-	return connect.NewResponse(&financev1.RegisterDepositResponse{
+	res := &financev1.RegisterDepositResponse{
 		Deposit:          toProtoDeposit(got.Deposit),
 		Allocations:      allocations,
 		Surcharges:       surcharges,
 		UnallocatedCents: got.UnallocatedCents,
 		Replayed:         got.Replayed,
-	}), nil
+	}
+	if got.LinkedVoucher != nil {
+		res.LinkedVoucher = toProtoPaymentVoucher(*got.LinkedVoucher)
+	}
+	return connect.NewResponse(res), nil
+}
+
+// depositInputFrom is the deposit the counter sent, as the use case takes it.
+func depositInputFrom(m *financev1.RegisterDepositRequest) usecase.DepositInput {
+	// An unset paid_at becomes the zero time, which the use case reads as "now".
+	var paidAt time.Time
+	if ts := m.GetPaidAt(); ts != nil {
+		paidAt = ts.AsTime()
+	}
+	return usecase.DepositInput{
+		StudentID:      m.GetStudentId(),
+		AmountCents:    m.GetAmountCents(),
+		Method:         m.GetMethod(),
+		Reference:      m.GetReference(),
+		PaidAt:         paidAt,
+		IdempotencyKey: m.GetIdempotencyKey(),
+		// The school honouring the reward late is a decision it makes at the
+		// counter; the use case records it as one.
+		GrantEarlyPayment:  m.GetGrantEarlyPayment(),
+		CardType:           m.GetCardType(),
+		Receiver:           domain.Receiver{UserID: m.GetReceivedBy(), Name: m.GetReceivedByName()},
+		ChargeIDs:          m.GetChargeIds(),
+		Tenders:            fromProtoTenders(m.GetTenders()),
+		VoucherID:          m.GetVoucherId(),
+		DeclinedVoucherIDs: m.GetDeclinedVoucherIds(),
+		VoucherAware:       m.GetVoucherAware(),
+	}
 }
 
 // PreviewDeposit says what an amount would cover, without taking it.
@@ -858,6 +871,9 @@ func toProtoPayment(p domain.Payment) *financev1.Payment {
 func connectErr(err error) *connect.Error {
 	ce := connectErrForKind(err)
 	if code := levelarchive.CodeOf(err); code != "" {
+		ce.Meta().Set(errorCodeMeta, code)
+	}
+	if code := domain.VoucherCodeOf(err); code != "" {
 		ce.Meta().Set(errorCodeMeta, code)
 	}
 	return ce

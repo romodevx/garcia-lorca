@@ -34,6 +34,7 @@ import {
   type MethodTotals,
   type WireExpense,
 } from "../expenses/api";
+import { toVoucher, type PaymentVoucher, type WirePaymentVoucher } from "./voucherWire";
 
 export type Recurrence = "once" | "monthly";
 
@@ -193,6 +194,8 @@ export interface DepositResult {
   unallocatedCents: number;
   /** The deposit already existed under this key; nothing was collected again. */
   replayed: boolean;
+  /** The family's voucher this deposit paid: the one it was registered by, or the pupil's only pending one. */
+  linkedVoucher?: PaymentVoucher;
 }
 
 /** What an amount WOULD cover. No deposit, because nothing was taken. */
@@ -224,6 +227,13 @@ export interface RegisterDepositInput {
   chargeIds?: string[];
   /** The payment split by method (T8); when present the server ignores method/reference/cardType. */
   tenders?: Tender[];
+  /**
+   * This money IS that family's payment voucher (ADR 0040). The server derives
+   * the idempotency key from it, so `idempotencyKey` is not sent alongside.
+   */
+  voucherId?: string;
+  /** Pending vouchers a payment registered by hand is NOT (ADR 0040). */
+  declinedVoucherIds?: string[];
 }
 
 /** What a family must hand over today to be current. */
@@ -427,18 +437,23 @@ function url(baseURL: string, path: string): string {
  */
 /** A non-2xx answer from the finance gateway, with its HTTP status (409 vs 403…). */
 export class FinanceError extends HttpError {
-  constructor(status: number, message: string, detail: { serverText?: string } = {}) {
+  constructor(status: number, message: string, detail: { serverText?: string; errorCode?: string } = {}) {
     super(status, message, detail);
     this.name = "FinanceError";
   }
 }
 
-async function failure(res: Response): Promise<Error> {
+export async function failure(res: Response): Promise<FinanceError> {
   const body = await res.text().catch(() => "");
   const detail = body.trim();
   // The status travels with the sentence: a 409 (CC-202, another cashier got
-  // there first) is a state to reload, not just a message to show.
-  return new FinanceError(res.status, detail !== "" ? detail : `HTTP ${res.status}`, detail !== "" ? { serverText: detail } : {});
+  // there first) is a state to reload, not just a message to show. The code
+  // tells it from a voucher's refusal (ADR 0040), which is not.
+  const errorCode = res.headers.get("X-Error-Code") ?? undefined;
+  return new FinanceError(res.status, detail !== "" ? detail : `HTTP ${res.status}`, {
+    ...(detail !== "" ? { serverText: detail } : {}),
+    ...(errorCode !== undefined && errorCode !== "" ? { errorCode } : {}),
+  });
 }
 
 /** Send a JSON body (POST/PUT) and return the parsed entity. Throws on non-2xx. */
@@ -704,6 +719,7 @@ export async function registerDeposit(baseURL: string, input: RegisterDepositInp
     surcharges?: Wire<Charge, "status">[];
     unallocatedCents?: number;
     replayed?: boolean;
+    linkedVoucher?: WirePaymentVoucher;
   }>(baseURL, "/deposits", "POST", depositBody(input));
   return {
     deposit: toDeposit(res.deposit),
@@ -711,6 +727,7 @@ export async function registerDeposit(baseURL: string, input: RegisterDepositInp
     surcharges: (res.surcharges ?? []).map(toCharge),
     unallocatedCents: res.unallocatedCents ?? 0,
     replayed: res.replayed ?? false,
+    ...(res.linkedVoucher !== undefined ? { linkedVoucher: toVoucher(res.linkedVoucher) } : {}),
   };
 }
 
@@ -925,9 +942,15 @@ function depositBody(input: RegisterDepositInput): Record<string, unknown> {
     // Omitted when the money is captured the day it arrived: the gateway reads
     // an absent paidAt as "today".
     ...(input.paidAt !== undefined && input.paidAt !== "" ? { paidAt: input.paidAt } : {}),
-    ...(input.idempotencyKey !== undefined && input.idempotencyKey !== ""
-      ? { idempotencyKey: input.idempotencyKey }
-      : {}),
+    // A payment by voucher carries no key of its own: the gateway refuses
+    // both (400) and derives one from the voucher.
+    ...(input.voucherId !== undefined && input.voucherId !== ""
+      ? { voucherId: input.voucherId }
+      : input.idempotencyKey !== undefined && input.idempotencyKey !== ""
+        ? { idempotencyKey: input.idempotencyKey }
+        : {}),
+    // Never sent empty: a gateway with module_payment_vouchers off answers 404 to the field.
+    ...(input.declinedVoucherIds !== undefined && input.declinedVoucherIds.length > 0 ? { declinedVoucherIds: input.declinedVoucherIds } : {}),
     ...(input.grantEarlyPayment === true ? { grantEarlyPayment: true } : {}),
     // Sent only on a card: the server refuses a card type on cash, and rightly.
     ...(input.method === "card" && input.cardType !== undefined ? { cardType: input.cardType } : {}),

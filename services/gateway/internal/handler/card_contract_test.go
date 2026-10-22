@@ -9,13 +9,16 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// jsonFields lists the JSON names of a response struct's fields.
+// jsonFields lists the JSON names of a response struct's fields, skipping
+// untagged and "-" fields.
 func jsonFields(v any) []string {
 	t := reflect.TypeOf(v)
 	names := make([]string, 0, t.NumField())
 	for i := range t.NumField() {
 		name, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ",")
-		names = append(names, name)
+		if name != "" && name != "-" {
+			names = append(names, name)
+		}
 	}
 	slices.Sort(names)
 	return names

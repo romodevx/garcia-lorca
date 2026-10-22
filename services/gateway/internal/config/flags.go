@@ -58,6 +58,11 @@ var AllModuleFlags = []string{
 	// and draft pupils without a CURP. It guards the import-issue routes (with
 	// module_students); off, the import and the students JSON behave as before.
 	featureflag.Key("import_review"),
+	// Payment vouchers sent from the family app (ADR 0040): the family's
+	// upload and list, the office's queue, file and rejection, and voucherId /
+	// declinedVoucherIds on the counter's deposit. Its routes also need
+	// module_finance (and module_students on the family side).
+	featureflag.Key("payment_vouchers"),
 }
 
 // ParseEnabledModules turns a comma-separated list of module names (or full

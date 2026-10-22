@@ -163,6 +163,10 @@ func (s *spyPublisher) PublishPaymentRegistered(_ context.Context, e ports.Payme
 const testActor = "a0000000-0000-4000-8000-0000000000ac"
 
 type fakeRepo struct {
+	// linkedVoucher is what RegisterDeposit answers as the voucher it paid:
+	// the real link is decided in the transaction (ADR 0040), so a use-case
+	// test only checks that the result carries it.
+	linkedVoucher *domain.PaymentVoucher
 	// cancelledBy records who cancelled each charge (C2-005).
 	cancelledBy map[string]string
 	// voidedSales is what ListVoidedSalePaymentsOn answers; voidSale* record
@@ -577,6 +581,7 @@ func (f *fakeRepo) RegisterDeposit(
 		Allocations:      write.Allocations,
 		UnallocatedCents: write.UnallocatedCents,
 		Settled:          settled,
+		LinkedVoucher:    f.linkedVoucher,
 	}
 	if outbox != nil {
 		f.outbox = append(f.outbox, outbox(record)...)

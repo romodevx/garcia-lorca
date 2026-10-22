@@ -145,6 +145,26 @@ service FinanceService {
   // correction in its chain, oldest first.
   rpc ListDepositCorrections(ListDepositCorrectionsRequest) returns (ListDepositCorrectionsResponse);
 
+  // --- payment vouchers (ADR 0040) ---
+  // A family's proof of a transfer, sent from the app for one pupil. Not
+  // money: the office applies it with RegisterDeposit(voucher_id), or rejects
+  // it. The file is a JPEG, PNG or PDF judged by its bytes, at most 5 MB, in
+  // the private receipts bucket; with no bucket these answer NotFound.
+  // CreatePaymentVoucher is idempotent by the file's SHA-256 for the pupil
+  // (replayed = true); a fourth pending voucher is AlreadyExists with
+  // X-Error-Code VOUCHER_LIMIT.
+  rpc CreatePaymentVoucher(CreatePaymentVoucherRequest) returns (CreatePaymentVoucherResponse);
+  // ListPaymentVouchers reads vouchers newest first within a scope the
+  // SERVICE enforces: the family's children, or the school's queue.
+  rpc ListPaymentVouchers(ListPaymentVouchersRequest) returns (ListPaymentVouchersResponse);
+  // GetPaymentVoucherFile returns a voucher's bytes within the same scope; a
+  // voucher outside it is NotFound, never PermissionDenied.
+  rpc GetPaymentVoucherFile(GetPaymentVoucherFileRequest) returns (GetPaymentVoucherFileResponse);
+  // RejectPaymentVoucher refuses a pending voucher with a reason (3 to 300
+  // characters) the family reads. Again on a rejected one is idempotent; an
+  // applied one is AlreadyExists with X-Error-Code VOUCHER_ALREADY_APPLIED.
+  rpc RejectPaymentVoucher(RejectPaymentVoucherRequest) returns (RejectPaymentVoucherResponse);
+
   // --- expenses and the cash cut (T10, ADR 0027) ---
   // The categories an expense is filed under. Configurable; deactivated, never
   // deleted, because recorded expenses keep pointing at them.
@@ -1048,6 +1068,26 @@ message RegisterDepositRequest {
   // tenders, when given, combine methods (T8): they must add up exactly to
   // amount_cents and replace method, reference and card_type.
   repeated Tender tenders = 12;
+  // voucher_id, when given, says this money IS that payment voucher (ADR
+  // 0040). The idempotency key is derived from the voucher — another key is
+  // InvalidArgument — so a voucher is applied once; method defaults to
+  // transfer. Another pupil's or a missing voucher is NotFound; an applied
+  // one is AlreadyExists with X-Error-Code VOUCHER_ALREADY_APPLIED (unless the
+  // call is its replay), a rejected one VOUCHER_REJECTED.
+  string voucher_id = 13;
+  // declined_voucher_ids are pending vouchers this payment registered by hand
+  // is NOT. Without voucher_id and with voucher_aware, the pupil's only other
+  // pending voucher links itself to the deposit; two or more are
+  // AlreadyExists with X-Error-Code VOUCHER_CHOICE_REQUIRED and nothing is
+  // taken.
+  repeated string declined_voucher_ids = 14;
+  // voucher_aware says the counter knows about payment vouchers (the gateway
+  // sets it while module_payment_vouchers is on). Only then does a payment
+  // by hand link the pupil's only pending voucher, or stop at
+  // VOUCHER_CHOICE_REQUIRED; otherwise vouchers are left alone, so vouchers a
+  // family left waiting never block a counter that cannot decline them.
+  // declined_voucher_ids without it is InvalidArgument; voucher_id implies it.
+  bool voucher_aware = 15;
 }
 
 message RegisterDepositResponse {
@@ -1061,6 +1101,37 @@ message RegisterDepositResponse {
   int64 unallocated_cents = 4;
   // replayed says the deposit already existed under this idempotency key.
   bool replayed = 5;
+  // linked_voucher is the payment voucher this deposit paid; absent when none.
+  PaymentVoucher linked_voucher = 6;
+}
+
+// PaymentVoucher is a family's proof of a transfer sent from the app for one
+// pupil (ADR 0040): what they say they paid and the office's decision. Never
+// the file's bytes, and never money: the claimed figures only prefill.
+message PaymentVoucher {
+  string id = 1;
+  string student_id = 2;
+  // pending | applied | rejected
+  string status = 3;
+  // What the family says it paid; 0 when it did not say.
+  int64 claimed_amount_cents = 4;
+  // The day the family says it paid, YYYY-MM-DD; empty when it did not say.
+  string claimed_paid_on = 5;
+  // image/jpeg | image/png | application/pdf, as the bytes proved.
+  string file_content_type = 6;
+  int64 file_size_bytes = 7;
+  string uploaded_by = 8;
+  string uploaded_by_name = 9;
+  // The deposit it paid and its receipt number; empty unless applied.
+  string deposit_id = 10;
+  string deposit_folio = 11;
+  // Who applied or rejected it, and when; empty while pending.
+  string decided_by = 12;
+  string decided_by_name = 13;
+  google.protobuf.Timestamp decided_at = 14;
+  // What the office told the family; empty unless rejected.
+  string rejection_reason = 15;
+  google.protobuf.Timestamp created_at = 16;
 }
 
 message ListDepositsRequest {
@@ -1921,4 +1992,69 @@ message UnassignScholarshipRequest {
 
 message UnassignScholarshipResponse {
   int32 removed = 1;
+}
+
+// --- payment vouchers (ADR 0040) ----------------------------------------------
+
+message CreatePaymentVoucherRequest {
+  string student_id = 1;
+  bytes data = 2;
+  // Optional: what the family says it paid (0 = did not say) and when
+  // (YYYY-MM-DD, not after the school's today; empty = did not say).
+  int64 claimed_amount_cents = 3;
+  string claimed_paid_on = 4;
+  // The authenticated guardian, set by the gateway — never by a client.
+  string uploader_id = 5;
+  string uploader_name = 6;
+}
+
+message CreatePaymentVoucherResponse {
+  PaymentVoucher voucher = 1;
+  // replayed says this file was already sent for the pupil; nothing was stored.
+  bool replayed = 2;
+}
+
+// VoucherScope is whose vouchers a read may see. A family read sets
+// student_ids to the guardian's children; only the office sets school_queue.
+// Neither is InvalidArgument: an empty list of children is never "everybody".
+message VoucherScope {
+  repeated string student_ids = 1;
+  // The school's queue: every pupil; student_ids then only filter.
+  bool school_queue = 2;
+}
+
+message ListPaymentVouchersRequest {
+  VoucherScope scope = 1;
+  // pending | applied | rejected; empty = any.
+  string status = 2;
+  // At most 500; 0 = 500.
+  int32 limit = 3;
+}
+
+message ListPaymentVouchersResponse {
+  repeated PaymentVoucher vouchers = 1;
+}
+
+message GetPaymentVoucherFileRequest {
+  string id = 1;
+  VoucherScope scope = 2;
+}
+
+message GetPaymentVoucherFileResponse {
+  bytes data = 1;
+  string content_type = 2;
+}
+
+message RejectPaymentVoucherRequest {
+  string id = 1;
+  string reason = 2;
+  // The authenticated caller, set by the gateway — never by a client.
+  string actor_id = 3;
+  string actor_name = 4;
+}
+
+message RejectPaymentVoucherResponse {
+  PaymentVoucher voucher = 1;
+  // replayed says it was already rejected; the first reason stands.
+  bool replayed = 2;
 }

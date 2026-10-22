@@ -311,6 +311,10 @@ type DepositRecord struct {
 	// and only them: a consumer that releases goods on ChargeSettled must never
 	// act on a partial payment.
 	Settled []ChargeWithPaid
+	// LinkedVoucher is the payment voucher this deposit paid (ADR 0040): the
+	// one it was registered by, or the pupil's single pending one it linked
+	// itself to. Nil when none.
+	LinkedVoucher *domain.PaymentVoucher
 }
 
 // DepositCorrectionWrite is a correction as the use case hands it over: the
