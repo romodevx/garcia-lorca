@@ -3,6 +3,7 @@ package usecase_test
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
@@ -191,5 +192,93 @@ func TestImportRefusesAGatewayIssueOfAnUnknownField(t *testing.T) {
 	_, err := f.svc.ImportStudents(context.Background(), []usecase.ImportRow{r}, false, importBatch)
 	if glerrors.KindOf(err) != glerrors.KindInvalid || len(f.repo.imported) != 0 {
 		t.Fatalf("err = %v (stored %d); want KindInvalid before anything is stored", err, len(f.repo.imported))
+	}
+}
+
+// Uploading the same file twice must not duplicate its drafts: a draft has no
+// CURP, so it is matched by name, birth date, intended group and reference.
+func TestImportASecondUploadFindsItsDrafts(t *testing.T) {
+	withBirth := func(r usecase.ImportRow, born, ref string) usecase.ImportRow {
+		r.Profile.BirthDate, r.BankReference = born, ref
+		return r
+	}
+	first := withBirth(draftRow(1, ""), "2015-03-12", "4401")
+	cases := []struct {
+		name    string
+		again   func() usecase.ImportRow
+		already bool
+	}{
+		{"the same row", func() usecase.ImportRow { return first }, true},
+		{"the same row typed with other spacing and case", func() usecase.ImportRow {
+			r := first
+			r.FirstName, r.LastName = "  ana ", "HERNÁNDEZ"
+			return r
+		}, true},
+		{"another birth date", func() usecase.ImportRow { return withBirth(first, "2015-03-13", "4401") }, false},
+		{"another group", func() usecase.ImportRow { r := first; r.GroupID = importGroupB; return r }, false},
+		{"another bank reference", func() usecase.ImportRow { return withBirth(first, "2015-03-12", "4402") }, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newImportFixture(t)
+			stored := f.run(t, false, first)[0]
+			for _, validateOnly := range []bool{true, false} {
+				got := f.run(t, validateOnly, tc.again())[0]
+				if tc.already {
+					if got.Outcome != usecase.ImportAlreadyImported || !got.Draft || got.StudentID != stored.StudentID {
+						t.Fatalf("validate=%v: result = %+v; want ALREADY_IMPORTED of draft %s", validateOnly, got, stored.StudentID)
+					}
+					continue
+				}
+				if got.Outcome != usecase.ImportImported {
+					t.Fatalf("validate=%v: result = %+v; want a new draft", validateOnly, got)
+				}
+			}
+			want := 1
+			if !tc.already {
+				want = 2
+			}
+			if len(f.repo.imported) != want {
+				t.Fatalf("stored %d pupils; want %d", len(f.repo.imported), want)
+			}
+		})
+	}
+}
+
+// A gateway issue the store would refuse rejects the whole request before
+// any pupil is stored — never a half import.
+func TestImportRefusesABadGatewayIssueBeforeStoringAnyone(t *testing.T) {
+	cases := map[string]usecase.ImportIssueInput{
+		"a code past 60 characters": {Field: "email", Code: strings.Repeat("c", 61)},
+		"an empty code":             {Field: "email", Code: " "},
+	}
+	for name, bad := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := newImportFixture(t)
+			later := row(2, importCURPTwo)
+			later.Issues = []usecase.ImportIssueInput{bad}
+			_, err := f.svc.ImportStudents(context.Background(), []usecase.ImportRow{row(1, importCURP), later}, false, importBatch)
+			if glerrors.KindOf(err) != glerrors.KindInvalid || len(f.repo.imported) != 0 {
+				t.Fatalf("err = %v (stored %d); want KindInvalid and nobody stored", err, len(f.repo.imported))
+			}
+		})
+	}
+	t.Run("an original too long to store is cut, not refused", func(t *testing.T) {
+		f := newImportFixture(t)
+		r := row(1, importCURP)
+		r.Issues = []usecase.ImportIssueInput{{Field: "address", Code: "address_truncated", OriginalValue: strings.Repeat("x", 600)}}
+		if got := f.run(t, false, r)[0]; got.Outcome != usecase.ImportImported {
+			t.Fatalf("result = %+v; want IMPORTED", got)
+		}
+	})
+}
+
+// The store may report a reference taken even for a row the import judged to
+// have none; the retry must not dereference a missing issue.
+func TestImportATakenReferenceWithoutAPreparedIssueDoesNotPanic(t *testing.T) {
+	f := newImportFixture(t)
+	f.repo.interrupt[importCURP] = func() error { return fmt.Errorf("%w: race", domain.ErrBankReferenceTaken) }
+	if got := f.run(t, false, row(1, importCURP))[0]; got.Outcome != usecase.ImportImported {
+		t.Fatalf("result = %+v; want IMPORTED", got)
 	}
 }

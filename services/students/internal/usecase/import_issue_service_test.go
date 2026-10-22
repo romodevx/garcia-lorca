@@ -155,3 +155,19 @@ func TestAcceptImportIssue(t *testing.T) {
 		})
 	}
 }
+
+// A withdrawn pupil's file is read-only (T14): its issues are not closed either.
+func TestAcceptImportIssueOfAWithdrawnPupilIsRefused(t *testing.T) {
+	svc, students, issues := newIssueService(t)
+	students.byID["stu-w"] = domain.Rehydrate(domain.NewApplicantParams{
+		ID: "stu-w", TenantID: tenant, FirstName: "Ana", LastName: "H",
+		Level: domain.RestoreLevel("e1000000-0000-0000-0000-000000000001", "Primaria"),
+	}, domain.AdmissionWithdrawn)
+	seedIssue(t, issues, issueOne, "stu-w", domain.FieldPhoneHome)
+	if _, err := svc.AcceptImportIssue(context.Background(), "stu-w", issueOne, actorUser); !errors.Is(err, domain.ErrWithdrawnReadOnly) {
+		t.Fatalf("err = %v; want ErrWithdrawnReadOnly", err)
+	}
+	if len(issues.accepted) != 0 {
+		t.Fatal("a withdrawn pupil's issue was closed")
+	}
+}

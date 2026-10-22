@@ -192,3 +192,45 @@ func TestUpdateDetailsADuplicateCURPOnADraftIsCURPTaken(t *testing.T) {
 		t.Fatalf("err = %v; want ErrCURPTaken", err)
 	}
 }
+
+// A payment can never make a draft inscrito: the ChargeSettled consumer must
+// ack it (nil), or it would be redelivered forever.
+func TestAnInscriptionPaymentForADraftIsIgnored(t *testing.T) {
+	svc, students, _, _, pub := newEnrollService(t)
+	seedDraft(t, students, "stu-d")
+	if err := svc.MarkInscriptionPaid(context.Background(), "stu-d"); err != nil {
+		t.Fatalf("MarkInscriptionPaid: %v; want nil (ignored)", err)
+	}
+	if students.byID["stu-d"].Status() != domain.AdmissionDraft || len(students.updated) != 0 || len(pub.changed) != 0 {
+		t.Fatalf("a draft moved on a payment: status %v, %d updates, %d events",
+			students.byID["stu-d"].Status(), len(students.updated), len(pub.changed))
+	}
+}
+
+// The promotion is an admission transition like any other: it is announced.
+func TestUpdateDetailsPublishesTheDraftsPromotion(t *testing.T) {
+	svc, repo, pub := newService(t)
+	seedDraft(t, repo, "stu-d")
+	got, err := svc.UpdateDetails(context.Background(), detailsOf("stu-d", draftCURP))
+	if err != nil {
+		t.Fatalf("UpdateDetails: %v", err)
+	}
+	want := domain.AdmissionChangedEvent{StudentID: "stu-d", TenantID: tenant, Previous: domain.AdmissionDraft, New: domain.AdmissionPending}
+	if got.Promotion == nil || *got.Promotion != want {
+		t.Fatalf("promotion = %+v; want %+v", got.Promotion, want)
+	}
+	if len(pub.changed) != 1 || pub.changed[0] != want {
+		t.Fatalf("published = %+v; want the promotion", pub.changed)
+	}
+}
+
+func TestUpdateDetailsWithoutAPromotionPublishesNothing(t *testing.T) {
+	svc, _, pub := newService(t)
+	s := seedApplicant(t, svc)
+	in := detailsOf(s.ID(), s.CURP().String())
+	in.LastName, in.MaternalLastName = s.LastName(), s.MaternalLastName()
+	got, err := svc.UpdateDetails(context.Background(), in)
+	if err != nil || got.Promotion != nil || len(pub.changed) != 0 {
+		t.Fatalf("got %+v, %v, published %d; want no promotion, nothing published", got.Promotion, err, len(pub.changed))
+	}
+}

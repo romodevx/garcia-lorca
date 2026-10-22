@@ -34,6 +34,28 @@ type fakeImportRepo struct {
 	moveErr  error
 	// issues are the import issues stored with the pupils.
 	issues []domain.ImportIssue
+	// drafts are the open drafts, as OpenDrafts reads them back.
+	drafts []ports.ExistingDraft
+}
+
+func (r *fakeImportRepo) OpenDrafts(context.Context) ([]ports.ExistingDraft, error) {
+	return r.drafts, nil
+}
+
+// draftOf is a stored draft as the store reads it: its names, birth date,
+// reference and the group its open curp issue names.
+func draftOf(cmd ports.ImportCommand) ports.ExistingDraft {
+	s := cmd.Student
+	d := ports.ExistingDraft{
+		StudentID: s.ID(), FirstName: s.FirstName(), LastName: s.LastName(), MaternalLastName: s.MaternalLastName(),
+		BirthDate: s.Profile().BirthDate(), BankReference: s.BankReference().String(),
+	}
+	for _, i := range cmd.Issues {
+		if i.Field() == domain.FieldCURP {
+			d.IntendedGroupID = i.IntendedGroupID()
+		}
+	}
+	return d
 }
 
 func newImportRepo() *fakeImportRepo {
@@ -102,6 +124,8 @@ func (r *fakeImportRepo) ImportStudent(_ context.Context, cmd ports.ImportComman
 	cmd.Student.AssignEnrollmentNumber(out.EnrollmentNumber)
 	if !cmd.Student.IsDraft() {
 		r.existing[curp] = ports.ExistingPupil{StudentID: cmd.Student.ID(), ActiveGroupIDs: []string{cmd.Enrollment.GroupID()}}
+	} else {
+		r.drafts = append(r.drafts, draftOf(cmd))
 	}
 	// The issues go in with the pupil, in the same transaction: the taken
 	// reference's only when the store dropped it.
