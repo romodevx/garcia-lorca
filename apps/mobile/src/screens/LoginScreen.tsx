@@ -1,5 +1,6 @@
-import { useState, type ReactElement } from "react";
-import { Image, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { useEffect, useRef, useState, type ReactElement } from "react";
+import { AccessibilityInfo, Image, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { ApiError, requestPasswordReset } from "../api";
 import { Icon } from "../icons";
 import { useTheme } from "../theme";
 import { Button } from "../ui";
@@ -40,12 +41,27 @@ function Brandmark({ height = 64 }: { height?: number }): ReactElement {
 // reason.
 const SIGN_IN_ERROR = "No pudimos iniciar sesión. Verifica tu correo y contraseña.";
 
-// Face ID / biometric unlock is out of scope for this pass. The button stays for
-// design fidelity but MUST NOT fake a login: it explains it is not yet available
-// instead of silently authenticating.
-// TODO(pendiente-mobile: biometric-unlock) — gate biometric sign-in on
-// expo-local-authentication + a stored refresh token.
-const BIOMETRIC_PENDING = "El acceso biométrico estará disponible pronto.";
+// The answers to "¿Olvidaste tu contraseña?". The sent one is the same sentence
+// whether or not the address has an account (the gateway answers 204 either
+// way): the screen must not become a way to read who is registered.
+const RESET_SENT = "Si el correo está registrado, te enviamos un enlace para crear una contraseña nueva.";
+const RESET_NEEDS_EMAIL = "Escribe tu correo para enviarte el enlace.";
+const RESET_RATE_LIMITED = "Intenta de nuevo en unos minutos.";
+const RESET_FAILED = "No pudimos enviar el enlace. Revisa tu conexión e inténtalo de nuevo.";
+const HTTP_TOO_MANY_REQUESTS = 429;
+
+type ResetMessage = { kind: "sent" | "error"; text: string };
+
+/** Asks for a reset link for a typed address; the message to show for it. */
+async function askForResetLink(email: string): Promise<ResetMessage> {
+  try {
+    await requestPasswordReset(email);
+    return { kind: "sent", text: RESET_SENT };
+  } catch (failure) {
+    const limited = failure instanceof ApiError && failure.status === HTTP_TOO_MANY_REQUESTS;
+    return { kind: "error", text: limited ? RESET_RATE_LIMITED : RESET_FAILED };
+  }
+}
 
 /**
  * The one spelling an address is sent under: trimmed and lowercase. Applied
@@ -65,6 +81,12 @@ export function LoginScreen({ onSubmit, notice }: LoginScreenProps): ReactElemen
   const [show, setShow] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [reset, setReset] = useState<ResetMessage | null>(null);
+  const [resetting, setResetting] = useState(false);
+  const emailInput = useRef<TextInput>(null);
+  // What the field holds now, normalized, so a late reset answer can tell it
+  // is about an address the parent has since edited away.
+  const currentAddress = useRef("");
 
   const submit = async (): Promise<void> => {
     if (submitting) {
@@ -78,6 +100,33 @@ export function LoginScreen({ onSubmit, notice }: LoginScreenProps): ReactElemen
       setError(SIGN_IN_ERROR);
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  // Said aloud on both platforms: accessibilityLiveRegion only exists on
+  // Android, so on iOS the answer appeared in silence. One announcement, no
+  // live region as well, or Android reads it twice.
+  useEffect(() => {
+    if (reset !== null) {
+      AccessibilityInfo.announceForAccessibility(reset.text);
+    }
+  }, [reset]);
+
+  const forgotPassword = async (): Promise<void> => {
+    if (resetting) {
+      return;
+    }
+    const address = normalizeEmail(email);
+    if (address === "") {
+      setReset({ kind: "error", text: RESET_NEEDS_EMAIL });
+      emailInput.current?.focus();
+      return;
+    }
+    setResetting(true);
+    const answer = await askForResetLink(address);
+    setResetting(false);
+    if (currentAddress.current === address) {
+      setReset(answer);
     }
   };
 
@@ -107,9 +156,15 @@ export function LoginScreen({ onSubmit, notice }: LoginScreenProps): ReactElemen
       <View style={fieldStyle}>
         <Icon name="user" size={20} color={theme.colors.text3} />
         <TextInput
+          ref={emailInput}
           accessibilityLabel="Correo electrónico"
           value={email}
-          onChangeText={setEmail}
+          onChangeText={(typed) => {
+            setEmail(typed);
+            currentAddress.current = normalizeEmail(typed);
+            // The answer was about the previous address.
+            setReset(null);
+          }}
           onBlur={() => setEmail(normalizeEmail)}
           placeholderTextColor={theme.colors.text3}
           autoCapitalize="none"
@@ -137,11 +192,25 @@ export function LoginScreen({ onSubmit, notice }: LoginScreenProps): ReactElemen
         </Pressable>
       </View>
 
-      <Pressable accessibilityRole="button" style={styles.forgot}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ busy: resetting }}
+        onPress={() => void forgotPassword()}
+        style={styles.forgot}
+      >
         <Text style={{ fontSize: 13, fontWeight: "800", color: theme.colors.primaryInk, fontFamily: theme.fonts.uiExtra }}>
           ¿Olvidaste tu contraseña?
         </Text>
       </Pressable>
+
+      {reset ? (
+        <Text
+          accessibilityRole={reset.kind === "error" ? "alert" : undefined}
+          style={[styles.error, { color: reset.kind === "error" ? theme.colors.bad : theme.colors.text2, fontFamily: theme.fonts.uiSemi }]}
+        >
+          {reset.text}
+        </Text>
+      ) : null}
 
       {error ? (
         <Text
@@ -153,19 +222,6 @@ export function LoginScreen({ onSubmit, notice }: LoginScreenProps): ReactElemen
       ) : null}
 
       <Button label="Ingresar" icon="arrow-right" onPress={submit} loading={submitting} />
-
-      <View style={styles.divider}>
-        <View style={[styles.line, { backgroundColor: theme.colors.line }]} />
-        <Text style={{ fontSize: 12, fontWeight: "700", color: theme.colors.text3, fontFamily: theme.fonts.ui }}>o</Text>
-        <View style={[styles.line, { backgroundColor: theme.colors.line }]} />
-      </View>
-
-      <Button
-        label={Platform.OS === "ios" ? "Entrar con Face ID" : "Entrar con huella"}
-        variant="outline"
-        icon="lock"
-        onPress={() => setError(BIOMETRIC_PENDING)}
-      />
 
       <Text style={[styles.help, { color: theme.colors.text3, fontFamily: theme.fonts.uiExtra }]}>
         ¿Problemas para entrar? Contacta a la escuela
@@ -199,7 +255,5 @@ const styles = StyleSheet.create({
   forgot: { alignSelf: "flex-end", marginVertical: 12, marginRight: 4 },
   error: { textAlign: "center", fontSize: 13, fontWeight: "700", marginBottom: 12, marginHorizontal: 4 },
   notice: { textAlign: "center", fontSize: 16, fontWeight: "600", borderRadius: 12, padding: 12, marginBottom: 16 },
-  divider: { flexDirection: "row", alignItems: "center", gap: 12, marginVertical: 18 },
-  line: { flex: 1, height: 1 },
   help: { textAlign: "center", fontSize: 12.5, fontWeight: "700", marginTop: 22 },
 });

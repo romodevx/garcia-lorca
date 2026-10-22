@@ -12,7 +12,7 @@ global.fetch = jest.fn(async () => ({
 
 // expo-router: stub the imperative router + hooks used by screens.
 jest.mock("expo-router", () => ({
-  router: { push: jest.fn(), replace: jest.fn(), back: jest.fn(), navigate: jest.fn() },
+  router: { push: jest.fn(), replace: jest.fn(), back: jest.fn(), navigate: jest.fn(), dismissTo: jest.fn() },
   useLocalSearchParams: () => ({}),
 }));
 

@@ -17,8 +17,6 @@ import {
  * parity-checked source of truth.
  */
 
-export const LOCALE_STORAGE_KEY = "gl-locale";
-
 export type I18nResources = Record<Locale, Record<Namespace, NestedMessages>>;
 
 /** Build the nested i18next resource tree for every locale + namespace. */

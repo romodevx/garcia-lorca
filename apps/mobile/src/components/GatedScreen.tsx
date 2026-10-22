@@ -1,6 +1,6 @@
 import { FeatureGate, type FlagKey } from "@garcia-lorca/ui/flags";
 import { type ReactElement, type ReactNode } from "react";
-import { ScreenScroll } from "./ScreenScroll";
+import { ChildScreenScroll } from "./ChildScreenScroll";
 import { EmptyState } from "../ui";
 
 export interface GatedScreenProps {
@@ -10,13 +10,13 @@ export interface GatedScreenProps {
 }
 
 /**
- * Wraps a tab screen body in the standard scroll container and a UX-only flag
+ * Wraps a tab screen body in the standard (per-child) scroll container and a UX-only flag
  * gate. When the module flag is OFF the screen shows a neutral "unavailable"
  * state instead of the content (the backend gateway is the real boundary).
  */
 export function GatedScreen({ flag, children, refreshable = true }: GatedScreenProps): ReactElement {
   return (
-    <ScreenScroll refreshable={refreshable}>
+    <ChildScreenScroll refreshable={refreshable}>
       <FeatureGate
         flag={flag}
         fallback={
@@ -29,6 +29,6 @@ export function GatedScreen({ flag, children, refreshable = true }: GatedScreenP
       >
         {children}
       </FeatureGate>
-    </ScreenScroll>
+    </ChildScreenScroll>
   );
 }

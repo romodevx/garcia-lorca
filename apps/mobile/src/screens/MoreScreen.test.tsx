@@ -1,4 +1,5 @@
-import { screen } from "@testing-library/react-native";
+import { fireEvent, screen } from "@testing-library/react-native";
+import { router } from "expo-router";
 import { MoreScreen } from "./MoreScreen";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { useAppState } from "../state/AppState";
@@ -41,13 +42,57 @@ describe("MoreScreen module grid (flag-gated)", () => {
     expect(screen.queryByText("Becas")).toBeNull();
   });
 
+  // QA 21-oct: with every tile's flag OFF the "Módulos" label sat over an empty grid.
+  it("hides the Módulos section when no tile is visible", async () => {
+    await renderWithProviders(<MoreScreen onLogout={() => undefined} />);
+
+    expect(screen.queryByText("Módulos")).toBeNull();
+  });
+
   it("renders a module tile when its flag is turned ON", async () => {
     await renderWithProviders(<MoreScreen onLogout={() => undefined} />, {
       flags: { module_uniforms: true },
     });
 
     expect(screen.getByText("Uniformes")).toBeTruthy();
+    expect(screen.getByText("Módulos")).toBeTruthy();
     // A sibling tile whose flag stays OFF is still hidden.
     expect(screen.queryByText("Becas")).toBeNull();
+  });
+});
+
+// QA 21-oct: the account rows answered a tap with nothing.
+describe("MoreScreen account rows", () => {
+  beforeEach(() => {
+    (router.push as jest.Mock).mockClear();
+  });
+
+  it("opens the child's profile from Perfil del alumno", async () => {
+    await renderWithProviders(<MoreScreen onLogout={() => undefined} />);
+    fireEvent.press(screen.getByLabelText("Perfil del alumno"));
+    expect(router.push).toHaveBeenCalledWith("/perfil");
+  });
+
+  // Más is a root-stack screen over the tabs: pushing a tab route stacked a
+  // SECOND tabs navigator (Back → a duplicate Inicio). It pops back to the tabs.
+  it("returns to the Avisos tab from Notificaciones, without stacking a second set of tabs", async () => {
+    await renderWithProviders(<MoreScreen onLogout={() => undefined} />);
+    fireEvent.press(screen.getByLabelText("Notificaciones"));
+    expect(router.dismissTo).toHaveBeenCalledWith("/(tabs)/avisos");
+    expect(router.push).not.toHaveBeenCalled();
+  });
+
+  // Avisos is the module_comms tab: with it OFF the row led to "Módulo no disponible".
+  it("hides Notificaciones when the avisos module is off", async () => {
+    await renderWithProviders(<MoreScreen onLogout={() => undefined} />, { flags: { module_comms: false } });
+    expect(screen.queryByLabelText("Notificaciones")).toBeNull();
+    expect(screen.getByLabelText("Perfil del alumno")).toBeTruthy();
+  });
+
+  // No family read carries a school contact outside the flag-gated card, so a
+  // help row would have nowhere real to go.
+  it("does not show a dead Ayuda y soporte row", async () => {
+    await renderWithProviders(<MoreScreen onLogout={() => undefined} />);
+    expect(screen.queryByLabelText("Ayuda y soporte")).toBeNull();
   });
 });

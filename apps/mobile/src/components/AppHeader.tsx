@@ -4,7 +4,6 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ChildSheet } from "./ChildSheet";
 import { Icon } from "../icons";
-import { LanguageToggle } from "../i18n/LanguageToggle";
 import { useAppState } from "../state/AppState";
 import { toChildView } from "../state/childView";
 import { useTheme, useThemeControls } from "../theme";
@@ -32,7 +31,6 @@ export function AppHeader(): ReactElement {
       <ChildIdentity />
 
       <View style={styles.actions}>
-        <LanguageToggle />
         <IconButton
           label="Cambiar tema"
           onPress={toggleTheme}

@@ -1,4 +1,4 @@
-import { useFlag, type FlagKey } from "@garcia-lorca/ui/flags";
+import { useFlag, useFlags, type FlagKey } from "@garcia-lorca/ui/flags";
 import { router } from "expo-router";
 import { type ReactElement } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
@@ -28,6 +28,8 @@ export function MoreScreen({ onLogout }: { onLogout: () => void }): ReactElement
   const theme = useTheme();
   const { child } = useAppState();
   const view = toChildView(child);
+  // Notificaciones opens the Avisos tab, which is the module_comms module.
+  const commsEnabled = useFlag("module_comms");
 
   return (
     <>
@@ -44,38 +46,26 @@ export function MoreScreen({ onLogout }: { onLogout: () => void }): ReactElement
         {view.present ? <Chip kind="lime">{view.short}</Chip> : null}
       </Card>
 
-      <SectionLabel>Módulos</SectionLabel>
-      <View style={styles.grid}>
-        {modules
-          .filter((m) => !m.hidden)
-          .map((m) => (
-            <ModuleCard key={m.id} module={m} />
-          ))}
-      </View>
+      <ModuleGrid />
 
       <SectionLabel>Cuenta</SectionLabel>
       <Card>
-        <ListRow onPress={() => undefined} accessibilityLabel="Perfil del alumno">
+        <ListRow onPress={() => router.push("/perfil")} accessibilityLabel="Perfil del alumno">
           <TintIcon name="user" tint="forest" />
           <View style={{ flex: 1 }}>
             <Text style={[styles.itemText, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]}>Perfil del alumno</Text>
           </View>
           <Icon name="chevron-right" size={20} stroke={2.4} color={theme.colors.text3} />
         </ListRow>
-        <ListRow divider onPress={() => undefined} accessibilityLabel="Notificaciones">
-          <TintIcon name="bell" tint="forest" />
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.itemText, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]}>Notificaciones</Text>
-          </View>
-          <Icon name="chevron-right" size={20} stroke={2.4} color={theme.colors.text3} />
-        </ListRow>
-        <ListRow divider onPress={() => undefined} accessibilityLabel="Ayuda y soporte">
-          <TintIcon name="phone" tint="forest" />
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.itemText, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]}>Ayuda y soporte</Text>
-          </View>
-          <Icon name="chevron-right" size={20} stroke={2.4} color={theme.colors.text3} />
-        </ListRow>
+        {commsEnabled && (
+          <ListRow divider onPress={() => router.dismissTo("/(tabs)/avisos")} accessibilityLabel="Notificaciones">
+            <TintIcon name="bell" tint="forest" />
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.itemText, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]}>Notificaciones</Text>
+            </View>
+            <Icon name="chevron-right" size={20} stroke={2.4} color={theme.colors.text3} />
+          </ListRow>
+        )}
         <ListRow divider onPress={onLogout} accessibilityLabel="Cerrar sesión">
           <View style={[styles.logoutIcon, { backgroundColor: theme.colors.redSoft }]}>
             <Icon name="lock" size={20} color={theme.colors.tintRedInk} />
@@ -89,13 +79,31 @@ export function MoreScreen({ onLogout }: { onLogout: () => void }): ReactElement
   );
 }
 
-function ModuleCard({ module }: { module: ModuleTile }): ReactElement | null {
-  const theme = useTheme();
-  const enabled = useFlag(MODULE_FLAGS[module.id]);
-  // Flag OFF (no backend yet) → don't render the tile at all.
-  if (!enabled) {
+/**
+ * The flag-gated module tiles under their "Módulos" label. With no tile visible
+ * the whole section is absent — a label over an empty grid reads as a broken
+ * screen (QA 21-oct).
+ */
+function ModuleGrid(): ReactElement | null {
+  const flags = useFlags();
+  const visible = modules.filter((m) => !m.hidden && flags[MODULE_FLAGS[m.id]] === true);
+  if (visible.length === 0) {
     return null;
   }
+  return (
+    <>
+      <SectionLabel>Módulos</SectionLabel>
+      <View style={styles.grid}>
+        {visible.map((m) => (
+          <ModuleCard key={m.id} module={m} />
+        ))}
+      </View>
+    </>
+  );
+}
+
+function ModuleCard({ module }: { module: ModuleTile }): ReactElement {
+  const theme = useTheme();
   return (
     <Pressable
       accessibilityRole="button"

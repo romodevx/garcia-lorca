@@ -139,11 +139,51 @@ describe("HomeScreen summary cards", () => {
 
     await renderWithProviders(<HomeScreen />);
 
-    await waitFor(() => expect(screen.getByText("Saldo a favor")).toBeTruthy());
-    expect(screen.getByText("$500.00")).toBeTruthy();
+    await waitFor(() => expect(screen.getByText("Saldo a favor $500.00")).toBeTruthy());
     expect(screen.getByText("Al corriente")).toBeTruthy();
     expect(screen.queryByText("Saldo por pagar")).toBeNull();
     expect(screen.queryByText("Pendiente")).toBeNull();
+  });
+
+  // QA 21-oct: Inicio said "Saldo por pagar $28,000.00 · Pendiente" for a child
+  // Cuenta called "Al corriente": Home judged the whole cycle's balance, Cuenta
+  // what is due today. Both now read the same figure.
+  function gatewayWithStatement(dueTodayCents: number, balanceCents: number): void {
+    const kid = { id: "s1", firstName: "Mateo", lastName: "Herrera", level: "Primaria", levelId: "l1", gradeGroup: "3° A" };
+    globalThis.fetch = jest.fn(async (url: string) => {
+      const u = String(url);
+      if (u.includes("/family/students/s1/statement")) {
+        const totals = { chargedCents: balanceCents, discountCents: 0, paidCents: 0, balanceCents, notYetDueCents: balanceCents - dueTodayCents };
+        return { ok: true, status: 200, json: async () => ({ movements: [], totals, dueTodayCents, asOf: "2026-10-21" }) };
+      }
+      if (u.endsWith("/family/students")) return { ok: true, status: 200, json: async () => ({ students: [kid] }) };
+      return { ok: true, status: 200, json: async () => ({ notifications: [] }) };
+    }) as unknown as typeof fetch;
+  }
+
+  it("calls a child with only future charges up to date, the total on a second line", async () => {
+    await saveTokens({ accessToken: "a1", refreshToken: "r1" });
+    gatewayWithStatement(0, 2800000);
+
+    await renderWithProviders(<HomeScreen />);
+
+    await waitFor(() => expect(screen.getByText("Saldo total $28,000.00")).toBeTruthy());
+    expect(screen.getByText("Para estar al corriente")).toBeTruthy();
+    expect(screen.getByText("$0.00")).toBeTruthy();
+    expect(screen.getByText("Al corriente")).toBeTruthy();
+    expect(screen.queryByText("Pendiente")).toBeNull();
+  });
+
+  it("shows what is due today as pending when the child owes it", async () => {
+    await saveTokens({ accessToken: "a1", refreshToken: "r1" });
+    gatewayWithStatement(350000, 2800000);
+
+    await renderWithProviders(<HomeScreen />);
+
+    await waitFor(() => expect(screen.getByText("$3,500.00")).toBeTruthy());
+    expect(screen.getByText("Para estar al corriente")).toBeTruthy();
+    expect(screen.getByText("Saldo total $28,000.00")).toBeTruthy();
+    expect(screen.getByText("Pendiente")).toBeTruthy();
   });
 
   it("does not render fake agenda events (next-event tile + list hidden)", async () => {
