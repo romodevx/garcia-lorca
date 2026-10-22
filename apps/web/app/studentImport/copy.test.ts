@@ -142,7 +142,7 @@ describe("earlier imports moved to the cycle start (T14)", () => {
 
 describe("the import review's words (module_import_review)", () => {
   it.each([
-    ["birth_date_from_curp", "La fecha no coincide con la CURP; se usará la de la CURP"],
+    ["birth_date_from_curp", "La fecha no coincide con la CURP; se toma la de la CURP"],
     ["phone_invalid", "Teléfono incompleto"],
     ["curp_missing", "Sin CURP"],
     ["curp_invalid", "CURP inválida"],

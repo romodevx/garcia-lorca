@@ -69,7 +69,7 @@ function renderScreen(importReview: boolean) {
   return userEvent.setup();
 }
 
-const BIRTH_WARNING = "La fecha no coincide con la CURP; se usará la de la CURP. En el Excel decía «31/02/2019»; se guardó «2019-03-12».";
+const BIRTH_WARNING = "La fecha no coincide con la CURP; se toma la de la CURP. En el Excel decía «31/02/2019»; se guardó «2019-03-12».";
 const PHONE_WARNING = "Celular: Teléfono incompleto. En el Excel decía «55 12»; no se guardó.";
 
 describe("flag OFF", () => {
