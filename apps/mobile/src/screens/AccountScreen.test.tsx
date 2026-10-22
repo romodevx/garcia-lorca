@@ -342,7 +342,7 @@ describe("AccountScreen (the backend's ledger, T7)", () => {
 
   it("hides the card while its flag is off", async () => {
     mockFetch({ movements: [], totals: ZERO, dueTodayCents: 0, asOf: "2026-10-01" });
-    await renderWithProviders(<AccountScreen />);
+    await renderWithProviders(<AccountScreen />, { flags: { ...demoFlags, module_student_card: false } });
 
     await waitFor(() => expect(screen.getByText("Al corriente")).toBeTruthy());
     expect(screen.queryByLabelText("Credencial")).toBeNull();
