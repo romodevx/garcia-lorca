@@ -163,7 +163,7 @@ export function migratedText(levelNames: readonly string[]): string {
 
 /** What the import changes or drops in a value, per issue code. */
 export const ISSUE_TEXT: Readonly<Record<string, string>> = {
-  birth_date_from_curp: "La fecha no coincide con la CURP; se usará la de la CURP",
+  birth_date_from_curp: "La fecha no coincide con la CURP; se toma la de la CURP",
   birth_date_invalid: "Fecha de nacimiento ilegible",
   phone_invalid: "Teléfono incompleto",
   curp_missing: "Sin CURP",
