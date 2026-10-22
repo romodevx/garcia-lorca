@@ -157,6 +157,12 @@ func TestPaymentVoucherRejectReasonBounds(t *testing.T) {
 		{"empty", "", false},
 		{"two letters", " ab ", false},
 		{"301 characters", strings.Repeat("a", 301), false},
+		{"a line break is text", "no se lee\nenvía otra", true},
+		{"a control character", "no se\x00 lee", false},
+		{"an escape sequence", "no se \x1b[31mlee", false},
+		{"a right-to-left override", "no se ‮lee", false},
+		{"a bidi isolate", "no se ⁦lee⁩", false},
+		{"a left-to-right embedding", "‪no se lee", false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

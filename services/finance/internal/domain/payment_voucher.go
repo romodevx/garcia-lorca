@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
@@ -226,7 +227,27 @@ func ValidateVoucherRejectionReason(reason string) (string, error) {
 	if n < MinVoucherRejectionReason || n > MaxVoucherRejectionReason {
 		return "", glerrors.New(glerrors.KindInvalid, "el motivo del rechazo debe tener entre 3 y 300 caracteres")
 	}
+	if strings.IndexFunc(trimmed, unprintableInReason) >= 0 {
+		return "", glerrors.New(glerrors.KindInvalid, "el motivo del rechazo tiene caracteres que no se pueden mostrar")
+	}
 	return trimmed, nil
+}
+
+// unprintableInReason is a rune a family's screen must never be handed in a
+// reason: a control character (a line break excepted) or a bidirectional
+// embedding, override or isolate, which can make the text read as something
+// else than what was written.
+func unprintableInReason(r rune) bool {
+	switch {
+	case r == '\n':
+		return false
+	case unicode.IsControl(r):
+		return true
+	case r >= '‪' && r <= '‮', r >= '⁦' && r <= '⁩':
+		return true
+	default:
+		return false
+	}
 }
 
 // Reject refuses the pending voucher with the reason the family will read.
