@@ -51,6 +51,22 @@ describe("CardScreen (tarea 13)", () => {
     expect(screen.getByTestId("card-qr")).toHaveTextContent("GLCARD:AQAAAAAAAAAAAAAAAAAAAA");
   });
 
+  // ISSUE: the card said "PRIMARIA · A" while the header said "1º PRIMARIA · A".
+  it("names the group as the header does", async () => {
+    mockFetch({ ...card, level: "PRIMARIA", gradeGroup: "A", groupLabel: "1º PRIMARIA · A" });
+    await renderWithProviders(<CardScreen />);
+
+    expect(await screen.findByText("1º PRIMARIA · A")).toBeTruthy();
+    expect(screen.queryByText("PRIMARIA · A")).toBeNull();
+  });
+
+  it("falls back to level and letter when the gateway sends no group label", async () => {
+    mockFetch({ ...card, level: "PRIMARIA", gradeGroup: "A", groupLabel: "" });
+    await renderWithProviders(<CardScreen />);
+
+    expect(await screen.findByText("PRIMARIA · A")).toBeTruthy();
+  });
+
   it("shows the initials when the child has no photo", async () => {
     mockFetch(card);
     await renderWithProviders(<CardScreen />);

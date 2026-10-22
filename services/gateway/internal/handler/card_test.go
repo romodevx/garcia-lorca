@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"connectrpc.com/connect"
 
@@ -240,5 +241,50 @@ func TestTheCardCarriesOnlyTheSchoolsPublicDetails(t *testing.T) {
 		if got.School[key] != value {
 			t.Errorf("school.%s = %v, want %q", key, got.School[key], value)
 		}
+	}
+}
+
+// The card names the group as the header and receipts do ("1º PRIMARIA · A"),
+// not the bare level and letter; with no labeler it is the stored letter.
+func TestTheCardNamesTheGroupInFull(t *testing.T) {
+	zone, err := time.LoadLocation("America/Mexico_City")
+	if err != nil {
+		t.Fatalf("zone: %v", err)
+	}
+	for name, tc := range map[string]struct {
+		labeler *fakeGroupLabeler
+		want    string
+	}{
+		"labeled":    {labeler: &fakeGroupLabeler{label: "1º PRIMARIA · A", found: true}, want: "1º PRIMARIA · A"},
+		"no label":   {labeler: &fakeGroupLabeler{}, want: "A"},
+		"no labeler": {want: "A"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := &fakeCards{
+				links:   []client.GuardianLink{{StudentID: "stu-1"}},
+				student: client.StudentResult{ID: "stu-1", FirstName: "Zoe", LastName: "Villalobos", Level: "PRIMARIA", GradeGroup: "A"},
+				code:    "GLCARD:x",
+			}
+			opts := []handler.CardOption{handler.WithCardClock(func() time.Time { return lateEveningInMorelia })}
+			if tc.labeler != nil {
+				opts = append(opts, handler.WithCardGroupLabeler(tc.labeler, zone))
+			}
+			rec := httptest.NewRecorder()
+			handler.NewCardHandler(f, f, f, f, f, opts...).
+				FamilyCard(rec, asGuardian(httptest.NewRequest(http.MethodGet, "/api/v1/family/students/stu-1/card", nil), "stu-1"))
+
+			var got struct {
+				GroupLabel string `json:"groupLabel"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+				t.Fatalf("decode %s: %v", rec.Body.String(), err)
+			}
+			if got.GroupLabel != tc.want {
+				t.Errorf("groupLabel = %q, want %q", got.GroupLabel, tc.want)
+			}
+			if tc.labeler != nil && tc.labeler.day != "2026-10-16" {
+				t.Errorf("labeled for %q, want the school's day 2026-10-16", tc.labeler.day)
+			}
+		})
 	}
 }

@@ -455,11 +455,18 @@ func (h *FamilyHandler) familyStudent(ctx context.Context, s client.StudentResul
 // labeler the receipts use. It is a name, not a reason to fail the read: with
 // no labeler, no label, or a lookup that failed, it is the stored letter.
 func (h *FamilyHandler) groupLabel(ctx context.Context, s client.StudentResult) string {
-	if h.groups == nil {
+	return labelGroupToday(ctx, h.groups, h.now(), h.zone, s)
+}
+
+// labelGroupToday names s's group on the school's day of now in zone, falling
+// back to the stored letter. The family list and the card share it, so a child
+// reads the same group on the header and on the card.
+func labelGroupToday(ctx context.Context, groups FamilyGroupLabeler, now time.Time, zone *time.Location, s client.StudentResult) string {
+	if groups == nil {
 		return s.GradeGroup
 	}
-	today := schoolcal.Date(h.now(), h.zone).Format(time.DateOnly)
-	label, found, err := h.groups.StudentGroupLabel(ctx, s.ID, today)
+	today := schoolcal.Date(now, zone).Format(time.DateOnly)
+	label, found, err := groups.StudentGroupLabel(ctx, s.ID, today)
 	if err != nil {
 		slog.WarnContext(ctx, "group lookup failed; the family reads the stored group", "student_id", s.ID, "error", err)
 		return s.GradeGroup

@@ -61,7 +61,7 @@ function StudentCard({ card }: { card: FamilyCard }): ReactElement {
       )}
       <Photo key={card.studentId} studentId={card.studentId} name={card.name} />
       <Text style={[styles.name, { color: theme.colors.text, fontFamily: theme.fonts.display }]}>{card.name}</Text>
-      <Text style={[styles.line, muted]}>{[card.level, card.gradeGroup].filter((x) => x !== "").join(" · ")}</Text>
+      <Text style={[styles.line, muted]}>{groupLineOf(card)}</Text>
       {card.cycle !== "" && <Text style={[styles.line, muted]}>Ciclo {card.cycle}</Text>}
       <Text style={[styles.label, muted]}>Matrícula</Text>
       <Text style={[styles.number, { color: theme.colors.text, fontFamily: theme.fonts.display }]}>{card.enrollmentNumber}</Text>
@@ -126,6 +126,12 @@ function Photo({ studentId, name }: { studentId: string; name: string }): ReactE
       style={styles.photo}
     />
   );
+}
+
+/** The group in full when the gateway names it, else "PRIMARIA · A". */
+function groupLineOf(card: FamilyCard): string {
+  if (card.groupLabel !== undefined && card.groupLabel !== "") return card.groupLabel;
+  return [card.level, card.gradeGroup].filter((x) => x !== "").join(" · ");
 }
 
 /** "Zoe Villalobos" → "ZV". */

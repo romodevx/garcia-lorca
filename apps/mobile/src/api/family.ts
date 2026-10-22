@@ -249,6 +249,8 @@ export interface FamilyCard {
   name: string;
   level: string;
   gradeGroup: string;
+  /** The group as the header names it ("1º PRIMARIA · A"); absent from older gateways. */
+  groupLabel?: string;
   cycle: string;
   enrollmentNumber: string;
   school: CardSchool;
