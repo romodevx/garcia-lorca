@@ -8,8 +8,11 @@
 # What "release" means here: `expo prebuild` (Continuous Native Generation, the
 # ios/ folder is generated and gitignored) + `xcodebuild -configuration Release`
 # for the iphonesimulator SDK: Hermes bytecode, minified bundle, no dev menu, no
-# Metro. A simulator build needs no code signing; a device or store build goes
-# through EAS with the real certificates.
+# Metro. A simulator build needs no certificate: it is signed ad hoc ("Sign to
+# Run Locally"), which embeds the entitlements the Keychain needs. Unsigned
+# (CODE_SIGNING_ALLOWED=NO), every Keychain call fails with -34018, so
+# expo-secure-store cannot keep the session and login fails after a 200. A
+# device or store build goes through EAS with the real certificates.
 #
 # Two deliberate local-only deviations, both applied to the GENERATED ios/
 # folder or the build environment, never to the app's source:
@@ -117,7 +120,10 @@ say "xcodebuild Release ($scheme, iphonesimulator, iOS >= $deployment_target)"
   -sdk iphonesimulator \
   -destination 'generic/platform=iOS Simulator' \
   -derivedDataPath build \
-  CODE_SIGNING_ALLOWED=NO \
+  CODE_SIGN_IDENTITY=- \
+  CODE_SIGN_STYLE=Manual \
+  DEVELOPMENT_TEAM= \
+  PROVISIONING_PROFILE_SPECIFIER= \
   build)
 
 app="ios/build/Build/Products/Release-iphonesimulator/$scheme.app"
@@ -131,6 +137,8 @@ bundle="$app/main.jsbundle"
 if grep -aq 'sourceMappingURL' "$bundle"; then
   die "the release JS bundle references a source map"
 fi
+otool -s __TEXT __entitlements "$app/$scheme" | grep -q 'Contents of' \
+  || die "the .app has no embedded entitlements: the Keychain (expo-secure-store) would fail with -34018"
 rm -rf "$APP_OUT"
 cp -R "$app" "$APP_OUT"
 say "APP: $APP_OUT ($(du -sh "$APP_OUT" | cut -f1)), no source maps inside"
