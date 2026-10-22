@@ -21,7 +21,7 @@
  *     (Field `help` + HelpTip).
  */
 
-export { Field, inputStyle, type FieldProps } from "./Field";
+export { Field, FieldWarning, inputStyle, type FieldProps } from "./Field";
 export { HelpTip, type HelpTipProps } from "./HelpTip";
 export { useRequired, FALTA, type RequiredState } from "./useRequired";
 export { useFocusFirstInvalid } from "./useFocusFirstInvalid";
