@@ -82,6 +82,13 @@ describe("MoreScreen account rows", () => {
     expect(router.push).not.toHaveBeenCalled();
   });
 
+  // Avisos is the module_comms tab: with it OFF the row led to "Módulo no disponible".
+  it("hides Notificaciones when the avisos module is off", async () => {
+    await renderWithProviders(<MoreScreen onLogout={() => undefined} />, { flags: { module_comms: false } });
+    expect(screen.queryByLabelText("Notificaciones")).toBeNull();
+    expect(screen.getByLabelText("Perfil del alumno")).toBeTruthy();
+  });
+
   // No family read carries a school contact outside the flag-gated card, so a
   // help row would have nowhere real to go.
   it("does not show a dead Ayuda y soporte row", async () => {

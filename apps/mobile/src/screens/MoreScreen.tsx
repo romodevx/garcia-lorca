@@ -1,4 +1,4 @@
-import { useFlags, type FlagKey } from "@garcia-lorca/ui/flags";
+import { useFlag, useFlags, type FlagKey } from "@garcia-lorca/ui/flags";
 import { router } from "expo-router";
 import { type ReactElement } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
@@ -28,6 +28,8 @@ export function MoreScreen({ onLogout }: { onLogout: () => void }): ReactElement
   const theme = useTheme();
   const { child } = useAppState();
   const view = toChildView(child);
+  // Notificaciones opens the Avisos tab, which is the module_comms module.
+  const commsEnabled = useFlag("module_comms");
 
   return (
     <>
@@ -55,13 +57,15 @@ export function MoreScreen({ onLogout }: { onLogout: () => void }): ReactElement
           </View>
           <Icon name="chevron-right" size={20} stroke={2.4} color={theme.colors.text3} />
         </ListRow>
-        <ListRow divider onPress={() => router.dismissTo("/(tabs)/avisos")} accessibilityLabel="Notificaciones">
-          <TintIcon name="bell" tint="forest" />
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.itemText, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]}>Notificaciones</Text>
-          </View>
-          <Icon name="chevron-right" size={20} stroke={2.4} color={theme.colors.text3} />
-        </ListRow>
+        {commsEnabled && (
+          <ListRow divider onPress={() => router.dismissTo("/(tabs)/avisos")} accessibilityLabel="Notificaciones">
+            <TintIcon name="bell" tint="forest" />
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.itemText, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]}>Notificaciones</Text>
+            </View>
+            <Icon name="chevron-right" size={20} stroke={2.4} color={theme.colors.text3} />
+          </ListRow>
+        )}
         <ListRow divider onPress={onLogout} accessibilityLabel="Cerrar sesión">
           <View style={[styles.logoutIcon, { backgroundColor: theme.colors.redSoft }]}>
             <Icon name="lock" size={20} color={theme.colors.tintRedInk} />
