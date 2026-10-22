@@ -1,4 +1,4 @@
-import { Platform } from "react-native";
+import { Platform, TextInput } from "react-native";
 import { act, fireEvent, screen } from "@testing-library/react-native";
 import { LoginScreen } from "./LoginScreen";
 import { renderWithProviders } from "../test/renderWithProviders";
@@ -139,15 +139,34 @@ describe("LoginScreen", () => {
       });
     }
 
-    it("asks for the address first when the field is empty, and sends nothing", async () => {
+    it("asks for the address first when the field is empty, sends nothing, and puts the cursor there", async () => {
       const fetchMock = gatewayAnswers(204);
+      const focus = jest.spyOn(TextInput.prototype as unknown as { focus: () => void }, "focus");
       await renderWithProviders(<LoginScreen onSubmit={async () => undefined} />);
       await drainMount();
+      focus.mockClear();
 
       await typeEmailAndAsk("  ");
 
-      expect(screen.getByText("Escribe tu correo para enviarte el enlace")).toBeTruthy();
+      expect(screen.getByText("Escribe tu correo para enviarte el enlace.")).toBeTruthy();
       expect(resetCalls(fetchMock)).toHaveLength(0);
+      expect(focus).toHaveBeenCalledTimes(1);
+      focus.mockRestore();
+    });
+
+    // An answer about one address must not stay under a different one.
+    it("clears the reset answer once the address changes", async () => {
+      gatewayAnswers(204);
+      await renderWithProviders(<LoginScreen onSubmit={async () => undefined} />);
+      await drainMount();
+      await typeEmailAndAsk("laura@correo.com");
+      expect(screen.getByText(NEUTRAL)).toBeTruthy();
+
+      await act(async () => {
+        fireEvent.changeText(screen.getByLabelText("Correo electrónico"), "laura@correo.co");
+      });
+
+      expect(screen.queryByText(NEUTRAL)).toBeNull();
     });
 
     it("sends the typed address, lowercase, and answers with the same neutral sentence", async () => {

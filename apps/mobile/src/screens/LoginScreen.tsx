@@ -1,4 +1,4 @@
-import { useState, type ReactElement } from "react";
+import { useRef, useState, type ReactElement } from "react";
 import { Image, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { ApiError, requestPasswordReset } from "../api";
 import { Icon } from "../icons";
@@ -45,18 +45,15 @@ const SIGN_IN_ERROR = "No pudimos iniciar sesión. Verifica tu correo y contrase
 // whether or not the address has an account (the gateway answers 204 either
 // way): the screen must not become a way to read who is registered.
 const RESET_SENT = "Si el correo está registrado, te enviamos un enlace para crear una contraseña nueva.";
-const RESET_NEEDS_EMAIL = "Escribe tu correo para enviarte el enlace";
+const RESET_NEEDS_EMAIL = "Escribe tu correo para enviarte el enlace.";
 const RESET_RATE_LIMITED = "Intenta de nuevo en unos minutos.";
 const RESET_FAILED = "No pudimos enviar el enlace. Revisa tu conexión e inténtalo de nuevo.";
 const HTTP_TOO_MANY_REQUESTS = 429;
 
 type ResetMessage = { kind: "sent" | "error"; text: string };
 
-/** Asks for a reset link for the typed address; the message to show for it. */
+/** Asks for a reset link for a typed address; the message to show for it. */
 async function askForResetLink(email: string): Promise<ResetMessage> {
-  if (email === "") {
-    return { kind: "error", text: RESET_NEEDS_EMAIL };
-  }
   try {
     await requestPasswordReset(email);
     return { kind: "sent", text: RESET_SENT };
@@ -86,6 +83,7 @@ export function LoginScreen({ onSubmit, notice }: LoginScreenProps): ReactElemen
   const [submitting, setSubmitting] = useState(false);
   const [reset, setReset] = useState<ResetMessage | null>(null);
   const [resetting, setResetting] = useState(false);
+  const emailInput = useRef<TextInput>(null);
 
   const submit = async (): Promise<void> => {
     if (submitting) {
@@ -106,8 +104,14 @@ export function LoginScreen({ onSubmit, notice }: LoginScreenProps): ReactElemen
     if (resetting) {
       return;
     }
+    const address = normalizeEmail(email);
+    if (address === "") {
+      setReset({ kind: "error", text: RESET_NEEDS_EMAIL });
+      emailInput.current?.focus();
+      return;
+    }
     setResetting(true);
-    setReset(await askForResetLink(normalizeEmail(email)));
+    setReset(await askForResetLink(address));
     setResetting(false);
   };
 
@@ -137,9 +141,14 @@ export function LoginScreen({ onSubmit, notice }: LoginScreenProps): ReactElemen
       <View style={fieldStyle}>
         <Icon name="user" size={20} color={theme.colors.text3} />
         <TextInput
+          ref={emailInput}
           accessibilityLabel="Correo electrónico"
           value={email}
-          onChangeText={setEmail}
+          onChangeText={(typed) => {
+            setEmail(typed);
+            // The answer was about the previous address.
+            setReset(null);
+          }}
           onBlur={() => setEmail(normalizeEmail)}
           placeholderTextColor={theme.colors.text3}
           autoCapitalize="none"
