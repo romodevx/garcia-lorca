@@ -2,6 +2,7 @@ import { Stack } from "expo-router";
 import { type ReactNode } from "react";
 import { ActivityIndicator, View } from "react-native";
 import { Providers } from "@/src/Providers";
+import { useRequireSession } from "@/src/boot/useRequireSession";
 import { useSessionLostRedirect } from "@/src/boot/useSessionLostRedirect";
 import { useTokenBootstrap } from "@/src/boot/useTokenBootstrap";
 import { usePushNotifications } from "@/src/push/usePushNotifications";
@@ -31,6 +32,8 @@ function RootNavigator(): ReactNode {
   // Runs inside the provider + router context: on a dead session it forces the
   // user back to Login instead of leaving a zombie signed-in state (bug_007).
   useSessionLostRedirect();
+  // A deep link without a session goes through the login screen first.
+  useRequireSession();
   // Attendance freshness: reload on returning to the foreground, register for
   // attendance pushes, and open Asistencia when one is tapped.
   useForegroundRefresh();
