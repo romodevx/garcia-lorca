@@ -118,6 +118,24 @@ describe("flag ON", () => {
     expect(lastPreviewBody()).toMatchObject({ rows: [{ row: 3, action: "omit" }] });
   });
 
+  it("a preview answered after Importar was pressed never takes the screen back", async () => {
+    const user = renderScreen(true);
+    await upload(user);
+    let answer: (r: StudentImportResult) => void = () => undefined;
+    api.previewStudentImport.mockReturnValueOnce(new Promise((resolve) => { answer = resolve; }));
+    api.commitStudentImport.mockReturnValue(new Promise(() => undefined));
+    await user.click(screen.getByRole("tab", { name: /^Todos/ }));
+    await user.click(screen.getByRole("button", { name: "Omitir fila 3" }));
+    await user.click(screen.getByRole("button", { name: /^Importar/ }));
+    expect(await screen.findByText(/Importando .* no cierres esta ventana/)).toBeInTheDocument();
+
+    answer(FLAGGED);
+
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.getByText(/Importando .* no cierres esta ventana/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Importar/ })).not.toBeInTheDocument();
+  });
+
   it("forgets the decisions when another file is chosen", async () => {
     const user = renderScreen(true);
     await upload(user);

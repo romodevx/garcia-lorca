@@ -110,7 +110,46 @@ describe("flag ON: each flagged row says why and what can be done", () => {
     await user.type(phone, "55 1234 5678{Enter}");
     expect(onCorrect).toHaveBeenCalledWith(3, { mobilePhone: "55 1234 5678" });
     expect(screen.queryByRole("form", { name: "Corregir fila 3" })).not.toBeInTheDocument();
+    // A stable target: the row's header, which the re-preview keeps, and a polite line.
+    expect(screen.getByRole("rowheader", { name: "RUIZ, BETO" })).toHaveFocus();
+    expect(screen.getByText("Fila 3 corregida")).toBeInTheDocument();
+  });
+
+  it("returns focus to Corregir when the correction is cancelled", async () => {
+    const { user } = renderPreview(REVIEWED, {});
+    await openAll(user);
+    await user.click(screen.getByRole("button", { name: "Corregir fila 3" }));
+    await user.click(within(screen.getByRole("form", { name: "Corregir fila 3" })).getByRole("button", { name: "Cancelar" }));
     expect(screen.getByRole("button", { name: "Corregir fila 3" })).toHaveFocus();
+  });
+
+  it("makes the office choose a state the file named wrong, and keeps one it named right", async () => {
+    const rows = [
+      importRow({ row: 7, status: "warning", name: "SOTO, CIRO", issues: [{ field: "state", code: "state_unknown", original: "Atlántida", stored: "" }] }),
+      importRow({ row: 8, status: "warning", name: "VEGA, EVA", issues: [{ field: "state", code: "state_unknown", original: "Jalisco", stored: "" }] }),
+    ];
+    const { user } = renderPreview({ ...REVIEWED, rows }, {});
+    await openAll(user);
+    await user.click(screen.getByRole("button", { name: "Corregir fila 7" }));
+    expect(within(screen.getByRole("form", { name: "Corregir fila 7" })).getByLabelText("Estado")).toHaveValue("");
+    await user.click(within(screen.getByRole("form", { name: "Corregir fila 7" })).getByRole("button", { name: "Cancelar" }));
+    await user.click(screen.getByRole("button", { name: "Corregir fila 8" }));
+    expect(within(screen.getByRole("form", { name: "Corregir fila 8" })).getByLabelText("Estado")).toHaveValue("Jalisco");
+  });
+
+  it("asks before Esc throws away a changed value", async () => {
+    const { user, onCorrect } = renderPreview(REVIEWED, {});
+    await openAll(user);
+    await user.click(screen.getByRole("button", { name: "Corregir fila 3" }));
+    await user.type(screen.getByLabelText("Celular"), "9{Escape}");
+    expect(screen.getByRole("form", { name: "Corregir fila 3" })).toBeInTheDocument();
+    expect(screen.getByText("¿Descartar cambios?")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Seguir corrigiendo" }));
+    expect(screen.getByLabelText("Celular")).toHaveValue("55 129");
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: "Descartar" }));
+    expect(onCorrect).not.toHaveBeenCalled();
+    expect(screen.queryByRole("form", { name: "Corregir fila 3" })).not.toBeInTheDocument();
   });
 
   it("checks the format on blur once there is a value, and refuses to save it", async () => {
@@ -128,11 +167,11 @@ describe("flag ON: each flagged row says why and what can be done", () => {
     expect(onCorrect).not.toHaveBeenCalled();
   });
 
-  it("Esc cancels without saving", async () => {
+  it("Esc cancels without saving when nothing changed", async () => {
     const { user, onCorrect } = renderPreview(REVIEWED, {});
     await openAll(user);
     await user.click(screen.getByRole("button", { name: "Corregir fila 3" }));
-    await user.type(screen.getByLabelText("Celular"), "9{Escape}");
+    await user.keyboard("{Escape}");
     expect(onCorrect).not.toHaveBeenCalled();
     expect(screen.queryByRole("form", { name: "Corregir fila 3" })).not.toBeInTheDocument();
   });
