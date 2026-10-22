@@ -1,5 +1,6 @@
 import { useState, type ReactElement } from "react";
 import { Image, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { ApiError, requestPasswordReset } from "../api";
 import { Icon } from "../icons";
 import { useTheme } from "../theme";
 import { Button } from "../ui";
@@ -47,6 +48,31 @@ const SIGN_IN_ERROR = "No pudimos iniciar sesión. Verifica tu correo y contrase
 // expo-local-authentication + a stored refresh token.
 const BIOMETRIC_PENDING = "El acceso biométrico estará disponible pronto.";
 
+// The answers to "¿Olvidaste tu contraseña?". The sent one is the same sentence
+// whether or not the address has an account (the gateway answers 204 either
+// way): the screen must not become a way to read who is registered.
+const RESET_SENT = "Si el correo está registrado, te enviamos un enlace para crear una contraseña nueva.";
+const RESET_NEEDS_EMAIL = "Escribe tu correo para enviarte el enlace";
+const RESET_RATE_LIMITED = "Intenta de nuevo en unos minutos.";
+const RESET_FAILED = "No pudimos enviar el enlace. Revisa tu conexión e inténtalo de nuevo.";
+const HTTP_TOO_MANY_REQUESTS = 429;
+
+type ResetMessage = { kind: "sent" | "error"; text: string };
+
+/** Asks for a reset link for the typed address; the message to show for it. */
+async function askForResetLink(email: string): Promise<ResetMessage> {
+  if (email === "") {
+    return { kind: "error", text: RESET_NEEDS_EMAIL };
+  }
+  try {
+    await requestPasswordReset(email);
+    return { kind: "sent", text: RESET_SENT };
+  } catch (failure) {
+    const limited = failure instanceof ApiError && failure.status === HTTP_TOO_MANY_REQUESTS;
+    return { kind: "error", text: limited ? RESET_RATE_LIMITED : RESET_FAILED };
+  }
+}
+
 /**
  * The one spelling an address is sent under: trimmed and lowercase. Applied
  * when the parent leaves the field and at submit — never per keystroke, because
@@ -65,6 +91,8 @@ export function LoginScreen({ onSubmit, notice }: LoginScreenProps): ReactElemen
   const [show, setShow] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [reset, setReset] = useState<ResetMessage | null>(null);
+  const [resetting, setResetting] = useState(false);
 
   const submit = async (): Promise<void> => {
     if (submitting) {
@@ -79,6 +107,15 @@ export function LoginScreen({ onSubmit, notice }: LoginScreenProps): ReactElemen
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const forgotPassword = async (): Promise<void> => {
+    if (resetting) {
+      return;
+    }
+    setResetting(true);
+    setReset(await askForResetLink(normalizeEmail(email)));
+    setResetting(false);
   };
 
   const fieldStyle = [styles.field, { backgroundColor: theme.colors.surface2 }];
@@ -137,11 +174,26 @@ export function LoginScreen({ onSubmit, notice }: LoginScreenProps): ReactElemen
         </Pressable>
       </View>
 
-      <Pressable accessibilityRole="button" style={styles.forgot}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ busy: resetting }}
+        onPress={() => void forgotPassword()}
+        style={styles.forgot}
+      >
         <Text style={{ fontSize: 13, fontWeight: "800", color: theme.colors.primaryInk, fontFamily: theme.fonts.uiExtra }}>
           ¿Olvidaste tu contraseña?
         </Text>
       </Pressable>
+
+      {reset ? (
+        <Text
+          accessibilityLiveRegion="polite"
+          accessibilityRole={reset.kind === "error" ? "alert" : undefined}
+          style={[styles.error, { color: reset.kind === "error" ? theme.colors.bad : theme.colors.text2, fontFamily: theme.fonts.uiSemi }]}
+        >
+          {reset.text}
+        </Text>
+      ) : null}
 
       {error ? (
         <Text

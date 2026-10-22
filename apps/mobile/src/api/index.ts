@@ -6,6 +6,7 @@ export { API_BASE_URL, apiUrl } from "./config";
 export { ApiError } from "./errors";
 export { login, logout, refresh, type LoginResult } from "./auth";
 export { signIn } from "./signIn";
+export { requestPasswordReset } from "./passwordReset";
 export { signOut, endSession } from "./endSession";
 export { providerLoginEnabled } from "./providerFlag";
 export { apiFetch } from "./client";

@@ -122,4 +122,64 @@ describe("LoginScreen", () => {
 
     expect(onSubmit).toHaveBeenCalledWith("laura@correo.com", "secret123");
   });
+
+  // QA 21-oct: "¿Olvidaste tu contraseña?" had no onPress.
+  describe("forgotten password", () => {
+    const NEUTRAL = "Si el correo está registrado, te enviamos un enlace para crear una contraseña nueva.";
+
+    function gatewayAnswers(status: number): jest.Mock {
+      const fetchMock = jest.fn(async (url: string) =>
+        String(url).includes("/auth/password-reset")
+          ? { ok: status < 300, status, json: async () => ({}) }
+          : { ok: true, status: 200, json: async () => ({ notifications: [] }) },
+      );
+      globalThis.fetch = fetchMock as unknown as typeof fetch;
+      return fetchMock;
+    }
+    const resetCalls = (fetchMock: jest.Mock): unknown[][] =>
+      fetchMock.mock.calls.filter(([u]) => String(u).includes("/auth/password-reset"));
+
+    async function typeEmailAndAsk(email: string): Promise<void> {
+      await act(async () => {
+        fireEvent.changeText(screen.getByLabelText("Correo electrónico"), email);
+      });
+      await act(async () => {
+        fireEvent.press(screen.getByRole("button", { name: "¿Olvidaste tu contraseña?" }));
+      });
+    }
+
+    it("asks for the address first when the field is empty, and sends nothing", async () => {
+      const fetchMock = gatewayAnswers(204);
+      await renderWithProviders(<LoginScreen onSubmit={async () => undefined} />);
+      await drainMount();
+
+      await typeEmailAndAsk("  ");
+
+      expect(screen.getByText("Escribe tu correo para enviarte el enlace")).toBeTruthy();
+      expect(resetCalls(fetchMock)).toHaveLength(0);
+    });
+
+    it("sends the typed address, lowercase, and answers with the same neutral sentence", async () => {
+      const fetchMock = gatewayAnswers(204);
+      await renderWithProviders(<LoginScreen onSubmit={async () => undefined} />);
+      await drainMount();
+
+      await typeEmailAndAsk(" Laura@Correo.COM ");
+
+      const [, init] = resetCalls(fetchMock)[0] as [string, RequestInit];
+      expect(JSON.parse(String(init.body))).toEqual({ email: "laura@correo.com" });
+      expect(screen.getByText(NEUTRAL)).toBeTruthy();
+    });
+
+    it("says to wait a few minutes when the gateway rate-limits", async () => {
+      gatewayAnswers(429);
+      await renderWithProviders(<LoginScreen onSubmit={async () => undefined} />);
+      await drainMount();
+
+      await typeEmailAndAsk("laura@correo.com");
+
+      expect(screen.getByText("Intenta de nuevo en unos minutos.")).toBeTruthy();
+      expect(screen.queryByText(NEUTRAL)).toBeNull();
+    });
+  });
 });
