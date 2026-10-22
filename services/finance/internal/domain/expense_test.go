@@ -1,7 +1,6 @@
 package domain_test
 
 import (
-	"bytes"
 	"strings"
 	"testing"
 	"time"
@@ -192,41 +191,5 @@ func TestExpenseReceiptRef(t *testing.T) {
 	}
 	if _, has := with.WithoutReceipt().Receipt(); has {
 		t.Fatalf("WithoutReceipt keeps nothing")
-	}
-}
-
-func TestNewReceiptFile(t *testing.T) {
-	jpeg := append([]byte{0xFF, 0xD8, 0xFF, 0xE0}, bytes.Repeat([]byte{1}, 10)...)
-	png := append([]byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n'}, 1, 2)
-	pdf := []byte("%PDF-1.7\n%âãÏÓ\n")
-	tests := []struct {
-		name    string
-		data    []byte
-		want    string
-		wantErr bool
-	}{
-		{"jpeg", jpeg, "image/jpeg", false},
-		{"png", png, "image/png", false},
-		{"pdf", pdf, "application/pdf", false},
-		{"empty", nil, "", true},
-		{"html renamed", []byte("<html><script>"), "", true},
-		{"too large", append(append([]byte{}, pdf...), make([]byte, domain.MaxReceiptBytes)...), "", true},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			f, err := domain.NewReceiptFile(tc.data)
-			if tc.wantErr {
-				if glerrors.KindOf(err) != glerrors.KindInvalid {
-					t.Fatalf("want KindInvalid, got %v", err)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected: %v", err)
-			}
-			if f.ContentType() != tc.want || len(f.Data()) != len(tc.data) {
-				t.Fatalf("got %q (%d bytes)", f.ContentType(), len(f.Data()))
-			}
-		})
 	}
 }

@@ -1,7 +1,6 @@
 package domain
 
 import (
-	"bytes"
 	"strings"
 	"time"
 
@@ -22,9 +21,6 @@ const (
 	MaxExpenseDescription = 500
 	// MaxExpenseReason bounds the reason of an edit or a cancel.
 	MaxExpenseReason = 500
-	// MaxReceiptBytes is the largest receipt (comprobante) an expense keeps: a
-	// phone photo of a ticket or a supplier's PDF invoice fits with room.
-	MaxReceiptBytes = 5 << 20
 )
 
 // ExpenseCategory is a drawer of the school's filing cabinet: Papelería,
@@ -315,44 +311,3 @@ type ExpenseEvent struct {
 	By     Receiver
 	At     time.Time
 }
-
-// ReceiptFile is an expense's receipt: a JPEG, PNG or PDF, judged by its
-// bytes, at most MaxReceiptBytes.
-type ReceiptFile struct {
-	contentType string
-	data        []byte
-}
-
-var (
-	receiptJPEG = []byte{0xFF, 0xD8, 0xFF}
-	receiptPNG  = []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n'}
-	receiptPDF  = []byte("%PDF-")
-)
-
-// NewReceiptFile accepts a JPEG, PNG or PDF by the file's own leading bytes —
-// never by a name or a client-supplied content type, so a page or a script
-// renamed to .pdf is refused — and at most MaxReceiptBytes.
-func NewReceiptFile(data []byte) (ReceiptFile, error) {
-	if len(data) == 0 {
-		return ReceiptFile{}, glerrors.New(glerrors.KindInvalid, "el comprobante está vacío")
-	}
-	if len(data) > MaxReceiptBytes {
-		return ReceiptFile{}, glerrors.New(glerrors.KindInvalid, "el comprobante pesa más de 5 MB")
-	}
-	switch {
-	case bytes.HasPrefix(data, receiptJPEG):
-		return ReceiptFile{contentType: "image/jpeg", data: data}, nil
-	case bytes.HasPrefix(data, receiptPNG):
-		return ReceiptFile{contentType: "image/png", data: data}, nil
-	case bytes.HasPrefix(data, receiptPDF):
-		return ReceiptFile{contentType: "application/pdf", data: data}, nil
-	default:
-		return ReceiptFile{}, glerrors.New(glerrors.KindInvalid, "el comprobante debe ser una imagen JPG o PNG, o un PDF")
-	}
-}
-
-// ContentType is image/jpeg, image/png or application/pdf, as the bytes say.
-func (f ReceiptFile) ContentType() string { return f.contentType }
-
-// Data is the file itself.
-func (f ReceiptFile) Data() []byte { return f.data }
