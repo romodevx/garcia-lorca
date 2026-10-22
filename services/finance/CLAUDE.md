@@ -219,7 +219,19 @@ ledger operations run in a single transaction (Unit of Work).
 - `ListCharges`, `ListOverdue`, the monthly late-fee run, the statement
   (`scholarship` movement) and receipts (`ScholarshipCents/Name`) all price it.
 
-## Events
+## ADR 0040 — comprobantes de pago (`payment_vouchers`, migration 0032)
+- A guardian's proof of a transfer for one pupil; never money. `PaymentVoucher`
+  `pending → applied | rejected`; a void releases it back to `pending`
+  (`release_count`+1), a correction moves it to the corrected deposit.
+- Linking lives INSIDE `RegisterDeposit`/`VoidDeposit`/`CorrectDeposit`
+  (`adapters/postgres/voucher_link.go`), always charges `FOR UPDATE` first,
+  then voucher rows. By voucher: key `voucher:<id>[:<releases>]` is forced.
+  By hand: the pupil's single pending voucher (minus declined) links itself;
+  two or more is `VOUCHER_CHOICE_REQUIRED` and nothing is taken.
+- `uq_payment_vouchers_deposit` + the single `deposit_id` column = one voucher
+  per deposit and one deposit per voucher. Reads take a `VoucherScope`; an
+  empty list of pupils is refused, only `school_queue` reads everybody's.
+
 - **Consumed: `StudentEnrolled` and `StudentWithdrawn`**
   (student-events → `finance-student-events`). Enrolment charges the inscription
   through its unique `external_ref`; withdrawal cancels future unpaid charges
@@ -232,7 +244,8 @@ ledger operations run in a single transaction (Unit of Work).
   phase. Consumers will include comms (notifications) and scholarships.
 
 ## RLS-sensitive tables
-`charge_concepts`, `charges`, `payments`, `tuition_plans` — each `ENABLE + FORCE ROW LEVEL
+`charge_concepts`, `charges`, `payments`, `tuition_plans`, `payment_vouchers`,
+`payment_voucher_events` — each `ENABLE + FORCE ROW LEVEL
 SECURITY` from the first migration with a `tenant_isolation` policy. All access
 goes through `pkg/authctx.WithTenantContext`, which binds `app.current_tenant`
 via `set_config(..., true)` (SET LOCAL semantics) inside the transaction.
