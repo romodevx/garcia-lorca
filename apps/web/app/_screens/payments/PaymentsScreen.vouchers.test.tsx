@@ -102,6 +102,62 @@ describe("PaymentsScreen · comprobantes por revisar (ADR 0040)", () => {
     await waitFor(() => expect(screen.queryByRole("region", { name: /Comprobantes por revisar/ })).not.toBeInTheDocument());
   });
 
+  // The API answers newest first (the family's list); the counter clears the
+  // oldest first (design §6, FIFO).
+  it("lists the oldest voucher first, whatever order the API sent", async () => {
+    vouchers.listPendingVouchers.mockResolvedValue([
+      voucher("new", "s1", { createdAt: "2026-10-19T15:00:00.5Z" }),
+      voucher("old", "s2", { createdAt: "2026-10-19T15:00:00Z" }),
+    ]);
+    render(<PaymentsScreen onBack={() => {}} paymentVouchers />);
+
+    const queue = await screen.findByRole("region", { name: /Comprobantes por revisar \(2\)/ });
+    const rows = within(queue).getAllByRole("button");
+    expect(rows[0]).toHaveTextContent("Sánchez Mateo");
+    expect(rows[1]).toHaveTextContent("Cruz Valentina");
+  });
+
+  it("waits for the roll before naming anyone", async () => {
+    students.listStudentsWithRooms.mockReturnValue(new Promise(() => {}));
+    render(<PaymentsScreen onBack={() => {}} paymentVouchers />);
+    await waitFor(() => expect(vouchers.listPendingVouchers).toHaveBeenCalled());
+
+    expect(screen.queryByRole("region", { name: /Comprobantes por revisar/ })).not.toBeInTheDocument();
+    expect(screen.queryByText(/ya no está en la lista/)).not.toBeInTheDocument();
+  });
+
+  it("when the roll failed, says so instead of calling every pupil missing, and retries it", async () => {
+    const user = userEvent.setup();
+    students.listStudentsWithRooms.mockRejectedValueOnce(new Error("down"));
+    render(<PaymentsScreen onBack={() => {}} paymentVouchers />);
+
+    expect(await screen.findByText(/Hay comprobantes por revisar, pero no pudimos leer la lista de alumnos/)).toBeInTheDocument();
+    expect(screen.queryByText(/ya no está en la lista/)).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Reintentar lista de alumnos/ }));
+
+    expect(await screen.findByRole("region", { name: /Comprobantes por revisar \(1\)/ })).toBeInTheDocument();
+  });
+
+  it("a voucher whose pupil is not on the roll can be seen and rejected, without opening the counter", async () => {
+    const user = userEvent.setup();
+    vouchers.listPendingVouchers.mockResolvedValue([voucher("v9", "gone")]);
+    vouchers.rejectVoucher.mockResolvedValue(voucher("v9", "gone", { status: "rejected" }));
+    render(<PaymentsScreen onBack={() => {}} paymentVouchers />);
+    const queue = await screen.findByRole("region", { name: /Comprobantes por revisar/ });
+
+    await user.click(within(queue).getByRole("button", { name: /Alumno que ya no está en la lista/ }));
+
+    const dialog = await screen.findByRole("dialog", { name: /Revisar comprobante/ });
+    expect(await within(dialog).findByRole("img", { name: /Comprobante enviado por Rosa Pérez/ })).toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: /Registrar pago|Cobrar/ })).not.toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Rechazar comprobante" }));
+    await user.type(within(dialog).getByRole("textbox", { name: /Motivo del rechazo/ }), "Alumno dado de baja{Enter}");
+
+    await waitFor(() => expect(vouchers.rejectVoucher).toHaveBeenCalledWith(expect.any(String), "v9", "Alumno dado de baja"));
+    expect(await screen.findByText("Comprobante rechazado")).toBeInTheDocument();
+    expect(finance.registerDeposit).not.toHaveBeenCalled();
+  });
+
   it("marks a searched pupil who sent a voucher, from the queue already read", async () => {
     const user = userEvent.setup();
     render(<PaymentsScreen onBack={() => {}} paymentVouchers />);

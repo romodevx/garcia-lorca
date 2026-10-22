@@ -16,9 +16,16 @@ export interface VoucherQueueProps {
   queue: Queue;
   /** The roll the screen already read, by id: the queue carries no names. */
   rollById: ReadonlyMap<string, Student>;
+  /** Whether that roll is read: until it is, nobody can be named (nor called missing). */
+  roll: "loading" | "ready" | "failed";
+  onRetryRoll: () => void;
   roomOf: (s: Student) => string;
   onOpen: (voucher: PaymentVoucher, student: Student) => void;
+  /** A voucher whose pupil is not on the roll: seen and rejected, never collected. */
+  onReview: (voucher: PaymentVoucher) => void;
 }
+
+const alertBox = { display: "flex", alignItems: "center", gap: 12, padding: "14px 18px", marginBottom: 18, borderRadius: "var(--r-lg)", background: "var(--warn-bg)", border: "1px solid var(--border)" };
 
 const TITLE_ID = "voucher-queue-title";
 
@@ -34,17 +41,25 @@ function whenLabel(v: PaymentVoucher): string {
  * above the search (ADR 0040). The front desk clears it before anything else.
  * Nothing at all while none is waiting.
  */
-export function VoucherQueue({ queue, rollById, roomOf, onOpen }: VoucherQueueProps): ReactElement | null {
+export function VoucherQueue({ queue, rollById, roll, onRetryRoll, roomOf, onOpen, onReview }: VoucherQueueProps): ReactElement | null {
   if (queue.status === "failed") {
     return (
-      <div role="alert" style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 18px", marginBottom: 18, borderRadius: "var(--r-lg)", background: "var(--warn-bg)", border: "1px solid var(--border)" }}>
+      <div role="alert" style={alertBox}>
         <p style={{ flex: 1, color: "var(--warn-fg)", fontSize: 14.5, margin: 0 }}>No pudimos leer los comprobantes que enviaron las familias.</p>
         <Btn kind="ghost" onClick={queue.reload} aria-label="Reintentar comprobantes">Reintentar</Btn>
       </div>
     );
   }
-  if (queue.status !== "ready" || queue.vouchers.length === 0) {
+  if (queue.status !== "ready" || queue.vouchers.length === 0 || roll === "loading") {
     return null;
+  }
+  if (roll === "failed") {
+    return (
+      <div role="alert" style={alertBox}>
+        <p style={{ flex: 1, color: "var(--warn-fg)", fontSize: 14.5, margin: 0 }}>Hay comprobantes por revisar, pero no pudimos leer la lista de alumnos.</p>
+        <Btn kind="ghost" onClick={onRetryRoll} aria-label="Reintentar lista de alumnos">Reintentar</Btn>
+      </div>
+    );
   }
   return (
     <section aria-labelledby={TITLE_ID} className="fade-up" style={{ marginBottom: 22 }}>
@@ -57,7 +72,7 @@ export function VoucherQueue({ queue, rollById, roomOf, onOpen }: VoucherQueuePr
           const pupil = rollById.get(v.studentId);
           return (
             <VoucherRow key={v.id} voucher={v} name={pupil === undefined ? undefined : formatStudentName(pupil)} room={pupil === undefined ? "" : roomOf(pupil)}
-              onOpen={pupil === undefined ? undefined : () => onOpen(v, pupil)} />
+              onOpen={pupil === undefined ? () => onReview(v) : () => onOpen(v, pupil)} />
           );
         })}
       </div>
@@ -67,10 +82,10 @@ export function VoucherQueue({ queue, rollById, roomOf, onOpen }: VoucherQueuePr
 
 interface VoucherRowProps {
   voucher: PaymentVoucher;
-  /** Undefined when the pupil is not on the roll (withdrawn): nothing to open. */
+  /** Undefined when the pupil is not on the roll (withdrawn): reviewed, not collected. */
   name: string | undefined;
   room: string;
-  onOpen: (() => void) | undefined;
+  onOpen: () => void;
 }
 
 const rowStyle = {
@@ -94,8 +109,5 @@ function VoucherRow({ voucher, name, room, onOpen }: VoucherRowProps): ReactElem
       </div>
     </>
   );
-  if (onOpen === undefined) {
-    return <div style={rowStyle}>{body}</div>;
-  }
   return <button type="button" onClick={onOpen} style={{ ...rowStyle, cursor: "pointer" }}>{body}</button>;
 }

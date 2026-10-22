@@ -34,7 +34,8 @@ async function ok(res: Response): Promise<Response> {
 }
 
 /**
- * The vouchers still waiting for the office, oldest first: the whole school's,
+ * The vouchers still waiting for the office, newest first (the API's order;
+ * the queue turns it into oldest first): the whole school's,
  * or one pupil's. One request either way — the queue never asks per row.
  */
 export async function listPendingVouchers(baseURL: string, studentId?: string): Promise<PaymentVoucher[]> {

@@ -20,6 +20,7 @@ import { ModuleHeaderIcon } from "../../_design/ModuleHeaderIcon";
 import type { PaymentVoucher } from "../../finance/vouchers";
 import { useVoucherQueue } from "./useVoucherQueue";
 import { VoucherQueue } from "./VoucherQueue";
+import { VoucherReviewDrawer } from "./VoucherReviewDrawer";
 
 const search: CSSProperties = {
   width: "100%", height: 60, paddingLeft: 52, paddingRight: 18,
@@ -67,6 +68,8 @@ export function PaymentsScreen({ onBack, canGrantDiscounts = false, notes, canCo
   const [collecting, setCollecting] = useState<CollectStudent | null>(null);
   // The voucher the counter was opened on, when it was opened from the queue.
   const [byVoucher, setByVoucher] = useState<PaymentVoucher | undefined>(undefined);
+  // A voucher whose pupil is not on the roll: reviewed apart, never collected.
+  const [reviewing, setReviewing] = useState<PaymentVoucher | null>(null);
   const queue = useVoucherQueue(paymentVouchers);
   const rollById = useMemo(() => new Map(students.map((s) => [s.id, s])), [students]);
   const [cashUp, setCashUp] = useState(false);
@@ -143,7 +146,7 @@ export function PaymentsScreen({ onBack, canGrantDiscounts = false, notes, canCo
         <Btn kind="ghost" icon="finance" onClick={() => setCashUp(true)}>Corte de caja</Btn>
       </div>
 
-      <VoucherQueue queue={queue} rollById={rollById} roomOf={roomOf} onOpen={(v, s) => collectFor(s, v)} />
+      <VoucherQueue queue={queue} rollById={rollById} roll={roll} onRetryRoll={loadRoll} roomOf={roomOf} onOpen={(v, s) => collectFor(s, v)} onReview={setReviewing} />
 
       <div className="fade-up" style={{ position: "relative", marginBottom: 18 }}>
         <span style={{ position: "absolute", left: 20, top: "50%", transform: "translateY(-50%)", color: "var(--text-faint)" }}>
@@ -216,6 +219,10 @@ export function PaymentsScreen({ onBack, canGrantDiscounts = false, notes, canCo
             say("Pago registrado");
           }}
         />
+      )}
+      {reviewing !== null && (
+        <VoucherReviewDrawer voucher={reviewing} onClose={() => setReviewing(null)} onChanged={queue.reload}
+          onRejected={() => { setReviewing(null); say("Comprobante rechazado"); }} />
       )}
       {toast !== null && (
         <div role="status" style={{ position: "fixed", bottom: 28, left: "50%", transform: "translateX(-50%)", zIndex: 80, display: "flex", alignItems: "center", gap: 11, padding: "14px 22px", borderRadius: "var(--r-pill)", background: "var(--forest)", color: "#fff", fontWeight: 600, fontSize: 15, boxShadow: "var(--shadow-pop)" }}>
