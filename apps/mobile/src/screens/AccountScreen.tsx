@@ -4,19 +4,22 @@ import { useMemo, type ReactElement } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { statementPdfPath } from "../api";
 import { useAppState } from "../state/AppState";
-import { useChildPaymentInfo, useChildStatement } from "../state/familyData";
+import { useChildPaymentInfo, useChildPaymentVouchers, useChildStatement } from "../state/familyData";
 import { useRefreshHandler } from "../components/refresh";
 import { useTheme } from "../theme";
 import { Button, Card, Chip, EmptyState, ListRow, ScreenTitle, SectionLabel, TintIcon } from "../ui";
 import { accountHeadline } from "./account/accountHeadline";
 import { HowToPayCard } from "./account/HowToPayCard";
 import { MovementList } from "./account/MovementList";
+import { VoucherEntryCard } from "./account/VoucherEntryCard";
 import { splitLedger } from "./account/ledgerView";
 import { useReceiptDownload } from "./account/useReceiptDownload";
 import { AsyncErrorState, AsyncLoading, StaleNotice } from "./AsyncStates";
 import { usePdfDownload } from "./grades/usePdfDownload";
 import { PdfStatus } from "./account/PdfStatus";
 import { formatDayWithYear, pesos, totalBalanceLine } from "./format";
+
+const NOT_FOUND = 404;
 
 const PDF_MESSAGES = {
   network: "No pudimos descargar el estado de cuenta. Revisa tu conexión e inténtalo de nuevo.",
@@ -46,8 +49,11 @@ export function AccountScreen(): ReactElement {
   // How to pay is a companion read: when it fails the card is simply absent,
   // never a reason to hide the account.
   const payment = useChildPaymentInfo(selectedChildId);
+  // Vouchers (ADR 0040): the flag is UX; the gateway's 404 hides the entry too.
+  const vouchersEnabled = useFlag("module_payment_vouchers");
+  const vouchers = useChildPaymentVouchers(selectedChildId, vouchersEnabled);
   useRefreshHandler(async () => {
-    await Promise.all([reload(), payment.reload()]);
+    await Promise.all([reload(), payment.reload(), vouchers.reload()]);
   });
   const cardEnabled = useFlag("module_student_card");
   const theme = useTheme();
@@ -154,6 +160,9 @@ export function AccountScreen(): ReactElement {
       </Card>
 
       {payment.data !== null ? <HowToPayCard info={payment.data} /> : null}
+      {vouchersEnabled && vouchers.errorStatus !== NOT_FOUND ? (
+        <VoucherEntryCard pending={(vouchers.data ?? []).filter((v) => v.status === "pending").length} />
+      ) : null}
 
       {cardEnabled && (
         // The child's virtual card (task 13), behind module_student_card.

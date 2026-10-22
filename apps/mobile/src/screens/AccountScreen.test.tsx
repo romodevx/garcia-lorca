@@ -430,3 +430,56 @@ describe("AccountScreen (the backend's ledger, T7)", () => {
     expect(screen.queryByText("Cómo pagar por transferencia")).toBeNull();
   });
 });
+
+// ADR 0040: right below "Cómo pagar", the way to send a voucher — only with
+// module_payment_vouchers on, and gone when the gateway answers 404.
+describe("AccountScreen voucher entry (¿Ya pagaste?)", () => {
+  const SETTLED = { movements: [], totals: ZERO, dueTodayCents: 0, asOf: "2026-10-01" };
+  const pending = { id: "v1", status: "pending", createdAt: "2026-10-21T15:00:00Z" };
+
+  /** The Account reads, plus the vouchers list answering `status` with `vouchers`. */
+  function mockWithVouchers(status: number, vouchers: unknown[]): jest.Mock {
+    const base = mockFetch(SETTLED);
+    const fetchMock = jest.fn(async (url: string, init?: RequestInit) =>
+      String(url).endsWith("/payment-vouchers")
+        ? { ok: status === 200, status, json: async () => ({ vouchers }) }
+        : base(url, init),
+    );
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    return fetchMock;
+  }
+
+  beforeEach(async () => {
+    await saveTokens({ accessToken: "a1", refreshToken: "r1" });
+  });
+  afterEach(async () => {
+    await clearTokens();
+    jest.clearAllMocks();
+  });
+
+  it("leads to the voucher screen and says how many wait for the school", async () => {
+    mockWithVouchers(200, [pending]);
+    await renderWithProviders(<AccountScreen />, { flags: { ...demoFlags, module_payment_vouchers: true } });
+
+    expect(await screen.findByText("1 comprobante por revisar")).toBeTruthy();
+    await fireEvent.press(screen.getByLabelText("¿Ya pagaste? Sube tu comprobante"));
+    expect(router.push).toHaveBeenCalledWith("/comprobante");
+  });
+
+  it("is absent, and asks nothing, with the flag off", async () => {
+    const fetchMock = mockWithVouchers(200, []);
+    await renderWithProviders(<AccountScreen />, { flags: { ...demoFlags, module_payment_vouchers: false } });
+
+    await waitFor(() => expect(screen.getByText("Al corriente")).toBeTruthy());
+    expect(screen.queryByLabelText("¿Ya pagaste? Sube tu comprobante")).toBeNull();
+    expect(fetchMock.mock.calls.some(([u]) => String(u).endsWith("/payment-vouchers"))).toBe(false);
+  });
+
+  it("is absent when the gateway has the module off (404)", async () => {
+    mockWithVouchers(404, []);
+    await renderWithProviders(<AccountScreen />, { flags: { ...demoFlags, module_payment_vouchers: true } });
+
+    await waitFor(() => expect(screen.getByText("Al corriente")).toBeTruthy());
+    await waitFor(() => expect(screen.queryByLabelText("¿Ya pagaste? Sube tu comprobante")).toBeNull());
+  });
+});
