@@ -23,10 +23,15 @@ BEGIN;
 
 SET LOCAL lock_timeout = '5s';
 
+-- The issue's pupil is named by (tenant_id, student_id), so an issue can never
+-- point at another school's pupil — not even from a writer that bypasses RLS.
+-- A composite FK needs a unique key on the pair; id alone is the PK.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_students_tenant_id ON students (tenant_id, id);
+
 CREATE TABLE IF NOT EXISTS student_import_issues (
     id                uuid PRIMARY KEY,
     tenant_id         uuid NOT NULL,
-    student_id        uuid NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+    student_id        uuid NOT NULL,
     field             text NOT NULL CHECK (field IN (
                           'birth_date', 'phone_home', 'phone_mobile', 'email', 'postal_code', 'state',
                           'bank_reference', 'surnames', 'first_name', 'address', 'curp')),
@@ -43,13 +48,19 @@ CREATE TABLE IF NOT EXISTS student_import_issues (
         CHECK ((resolved_at IS NULL) = (resolution IS NULL) AND (resolved_by IS NULL OR resolved_at IS NOT NULL))
 );
 
+-- Outside CREATE TABLE so a re-run converges on the composite FK.
+ALTER TABLE student_import_issues DROP CONSTRAINT IF EXISTS student_import_issues_student_id_fkey;
+ALTER TABLE student_import_issues DROP CONSTRAINT IF EXISTS student_import_issues_student_fk;
+ALTER TABLE student_import_issues ADD CONSTRAINT student_import_issues_student_fk
+    FOREIGN KEY (tenant_id, student_id) REFERENCES students (tenant_id, id) ON DELETE CASCADE;
+
 -- The open issues of a pupil: the list's count and the file's alerts.
 CREATE INDEX IF NOT EXISTS idx_student_import_issues_open
     ON student_import_issues (tenant_id, student_id)
     WHERE resolved_at IS NULL;
 -- Every issue of a pupil (include_resolved), and the ON DELETE CASCADE.
 CREATE INDEX IF NOT EXISTS idx_student_import_issues_student
-    ON student_import_issues (student_id);
+    ON student_import_issues (tenant_id, student_id);
 
 ALTER TABLE student_import_issues ENABLE ROW LEVEL SECURITY;
 ALTER TABLE student_import_issues FORCE ROW LEVEL SECURITY;

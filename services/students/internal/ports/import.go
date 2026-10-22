@@ -14,6 +14,19 @@ type ExistingPupil struct {
 	ActiveGroupIDs []string
 }
 
+// ExistingDraft is an open draft as a later upload needs to recognize it: a
+// draft has no CURP, so it is told apart by its names, birth date, bank
+// reference and the group its open curp issue names.
+type ExistingDraft struct {
+	StudentID        string
+	FirstName        string
+	LastName         string
+	MaternalLastName string
+	BirthDate        time.Time // zero when none was stored
+	BankReference    string
+	IntendedGroupID  string
+}
+
 // ImportCommand is one pupil of the legacy import (ADR 0033): the pupil,
 // already enrolled and placed, and their enrollment (origin import) — or a
 // draft without a CURP, which has none (Enrollment is then the zero value and
@@ -58,6 +71,8 @@ type CycleStartMove struct {
 //   - StudentsByCURP returns the school's pupils holding any of the CURPs,
 //     keyed by CURP (absent = new to the school).
 //   - BankReferencesTaken returns which of the references a pupil already holds.
+//   - OpenDrafts returns the school's drafts whose curp issue is still open,
+//     so a second upload of the same file does not draft them again.
 //   - ImportStudent stores ONE pupil in ONE transaction: the reference is
 //     checked first and dropped if taken (so the insert never aborts on it), the
 //     matrícula is allocated, the pupil and the enrollment are inserted. A CURP
@@ -69,6 +84,7 @@ type CycleStartMove struct {
 type ImportRepository interface {
 	StudentsByCURP(ctx context.Context, curps []string) (map[string]ExistingPupil, error)
 	BankReferencesTaken(ctx context.Context, refs []string) (map[string]bool, error)
+	OpenDrafts(ctx context.Context) ([]ExistingDraft, error)
 	ImportStudent(ctx context.Context, cmd ImportCommand) (ImportedPupil, error)
 	MoveImportedToCycleStart(ctx context.Context, move CycleStartMove) ([]string, error)
 }

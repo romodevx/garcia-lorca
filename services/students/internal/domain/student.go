@@ -275,24 +275,34 @@ func (s *Student) ChangeBankReference(ref BankReference) { s.bankReference = ref
 // them (the import's intended group rides on the draft's curp issue). Whether
 // the CURP is another pupil's is the store's to say (ErrCURPTaken).
 func (s *Student) UpdateDetails(firstName, lastName, maternalLastName string, curp CURP, profile Profile) error {
+	_, err := s.CorrectDetails(firstName, lastName, maternalLastName, curp, profile)
+	return err
+}
+
+// CorrectDetails is UpdateDetails returning the admission change a draft's
+// promotion made (nil when the status did not move), to publish once stored.
+func (s *Student) CorrectDetails(firstName, lastName, maternalLastName string, curp CURP, profile Profile) (*AdmissionChangedEvent, error) {
 	if err := s.RequireEditable(); err != nil {
-		return err
+		return nil, err
 	}
 	first, last := strings.TrimSpace(firstName), strings.TrimSpace(lastName)
 	if first == "" || last == "" {
-		return glerrors.New(glerrors.KindInvalid, "first and last name are required")
+		return nil, glerrors.New(glerrors.KindInvalid, "first and last name are required")
 	}
 	if curp.IsZero() && !s.IsDraft() {
-		return glerrors.New(glerrors.KindInvalid, "a CURP is required")
+		return nil, glerrors.New(glerrors.KindInvalid, "a CURP is required")
 	}
+	var promoted *AdmissionChangedEvent
 	if s.IsDraft() && !curp.IsZero() {
-		if _, err := s.transition(AdmissionPending, ""); err != nil {
-			return err
+		ev, err := s.transition(AdmissionPending, "")
+		if err != nil {
+			return nil, err
 		}
+		promoted = &ev
 	}
 	s.firstName, s.lastName, s.curp, s.profile = first, last, curp, profile
 	s.maternalLastName = strings.TrimSpace(maternalLastName)
-	return nil
+	return promoted, nil
 }
 
 // CodeStudentWithdrawn is the machine code of ErrWithdrawnReadOnly (the

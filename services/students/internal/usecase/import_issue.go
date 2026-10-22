@@ -39,7 +39,8 @@ func (s *ImportIssueService) ListImportIssues(ctx context.Context, studentID str
 // AcceptImportIssue closes an open issue as fine as stored, by userID. An
 // issue already resolved is answered as it stands, with nothing written. A
 // draft's curp issue is refused (domain.ErrDraftNotPlaceable): only saving a
-// valid CURP closes it. Another pupil's issue — or an id that is not one — is
+// valid CURP closes it; a withdrawn pupil's issues are domain.ErrWithdrawnReadOnly.
+// Another pupil's issue — or an id that is not one — is
 // KindNotFound, so the answer never confirms an issue exists elsewhere.
 func (s *ImportIssueService) AcceptImportIssue(ctx context.Context, studentID, issueID, userID string) (domain.ImportIssue, error) {
 	if uuid.Validate(userID) != nil {
@@ -50,6 +51,10 @@ func (s *ImportIssueService) AcceptImportIssue(ctx context.Context, studentID, i
 	}
 	student, err := s.students.FindByID(ctx, studentID)
 	if err != nil {
+		return domain.ImportIssue{}, err
+	}
+	// A withdrawn pupil's file is read-only (T14), its issues included.
+	if err := student.RequireEditable(); err != nil {
 		return domain.ImportIssue{}, err
 	}
 	issue, err := s.issues.ImportIssueByID(ctx, studentID, issueID)

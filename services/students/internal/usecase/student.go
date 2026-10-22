@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -222,6 +223,9 @@ type DetailsResult struct {
 	Student           *domain.Student
 	PromotedFromDraft bool
 	IntendedGroupID   string
+	// Promotion is the draft → pending change, published once stored; nil
+	// when the save did not move the status.
+	Promotion *domain.AdmissionChangedEvent
 }
 
 // UpdateDetails validates and persists a correction of the pupil's file. A CURP
@@ -253,8 +257,9 @@ func (s *StudentService) UpdateDetails(ctx context.Context, in UpdateDetailsInpu
 		ref = &parsed
 	}
 
-	before, wasDraft := student.Clone(), student.IsDraft()
-	if err := student.UpdateDetails(in.FirstName, in.LastName, in.MaternalLastName, curp, profile); err != nil {
+	before := student.Clone()
+	promotion, err := student.CorrectDetails(in.FirstName, in.LastName, in.MaternalLastName, curp, profile)
+	if err != nil {
 		return DetailsResult{}, err
 	}
 	if ref != nil {
@@ -267,9 +272,14 @@ func (s *StudentService) UpdateDetails(ctx context.Context, in UpdateDetailsInpu
 		return DetailsResult{}, err
 	}
 	student.AssignOpenIssues(max(0, student.OpenIssues()-corrected.Corrected))
-	out := DetailsResult{Student: student, PromotedFromDraft: wasDraft && !student.IsDraft()}
-	if out.PromotedFromDraft {
+	out := DetailsResult{Student: student, Promotion: promotion, PromotedFromDraft: promotion != nil}
+	if promotion != nil {
 		out.IntendedGroupID = corrected.IntendedGroupID
+		// Best-effort, like the enrolment's events: the promotion is already
+		// stored, and failing the save now would only make the office repeat it.
+		if err := s.pub.PublishAdmissionChanged(ctx, *promotion); err != nil {
+			slog.WarnContext(ctx, "draft promotion not published", "student_id", student.ID(), "error", err)
+		}
 	}
 	return out, nil
 }

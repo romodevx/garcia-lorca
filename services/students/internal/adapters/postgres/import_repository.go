@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -64,6 +65,51 @@ func (r *Repository) BankReferencesTaken(ctx context.Context, refs []string) (ma
 		}
 		for _, ref := range taken {
 			out[ref] = true
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// OpenDrafts returns the tenant's drafts whose curp issue is still open, with
+// what a later upload recognizes them by — one query for a whole import.
+func (r *Repository) OpenDrafts(ctx context.Context) ([]ports.ExistingDraft, error) {
+	var out []ports.ExistingDraft
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		var rows []struct {
+			ID               string
+			FirstName        string
+			LastName         string
+			MaternalLastName *string
+			BirthDate        *time.Time
+			BankReference    *string
+			IntendedGroupID  *string
+		}
+		err := tx.Raw(`SELECT s.id, s.first_name, s.last_name, s.maternal_last_name, s.birth_date, s.bank_reference,
+		                      i.intended_group_id
+		                 FROM students s
+		                 JOIN student_import_issues i
+		                   ON i.tenant_id = s.tenant_id AND i.student_id = s.id
+		                  AND i.field = ? AND i.resolved_at IS NULL
+		                WHERE s.admission_status = ?`,
+			string(domain.FieldCURP), domain.AdmissionDraft.String()).Scan(&rows).Error
+		if err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "reading the open drafts", err)
+		}
+		out = make([]ports.ExistingDraft, 0, len(rows))
+		for _, row := range rows {
+			d := ports.ExistingDraft{
+				StudentID: row.ID, FirstName: row.FirstName, LastName: row.LastName,
+				MaternalLastName: derefOrEmpty(row.MaternalLastName), BankReference: derefOrEmpty(row.BankReference),
+				IntendedGroupID: derefOrEmpty(row.IntendedGroupID),
+			}
+			if row.BirthDate != nil {
+				d.BirthDate = *row.BirthDate
+			}
+			out = append(out, d)
 		}
 		return nil
 	})

@@ -192,6 +192,12 @@ func (s *EnrollmentService) MarkInscriptionPaid(ctx context.Context, studentID s
 		slog.InfoContext(ctx, "ignoring inscription payment for terminal admission")
 		return nil
 	}
+	// A draft has no enrollment, so no inscription can be paid for it; one that
+	// arrives anyway is acked like a terminal file's, never redelivered forever.
+	if student.IsDraft() {
+		slog.InfoContext(ctx, "ignoring inscription payment for a draft", "student_id", student.ID())
+		return nil
+	}
 	changes, err := admitAndEnroll(student, "")
 	if err != nil {
 		return err

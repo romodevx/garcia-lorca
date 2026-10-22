@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
@@ -225,6 +226,9 @@ func (s *ImportService) ImportStudents(ctx context.Context, rows []ImportRow, va
 		return nil, err
 	}
 	pending = markExisting(rows, pending, existing, results)
+	if pending, err = s.markExistingDrafts(ctx, rows, pending, results); err != nil {
+		return nil, err
+	}
 
 	placements, err := s.resolveGroups(ctx, rows, pending, results)
 	if err != nil {
@@ -245,16 +249,21 @@ func (s *ImportService) ImportStudents(ctx context.Context, rows []ImportRow, va
 	return results, nil
 }
 
-// checkGatewayIssues refuses a request carrying an issue students cannot
-// store: the gateway's bug, never the school's row.
+// checkGatewayIssues refuses, before anything is stored, a request carrying
+// an issue students could not store — the gateway's bug, never the school's
+// row. It applies every rule NewImportIssue will (field, code, sizes after the
+// same clipping attachIssues does), so the commit can never stop half way on
+// one.
 func checkGatewayIssues(rows []ImportRow) error {
 	for _, r := range rows {
 		for _, in := range r.Issues {
-			if _, err := domain.ParseIssueField(in.Field); err != nil {
+			_, err := domain.NewImportIssue(domain.ImportIssueParams{
+				ID: "check", StudentID: "check", Field: in.Field, Code: in.Code,
+				OriginalValue: domain.ClipIssueValue(in.OriginalValue), StoredValue: domain.ClipIssueValue(in.StoredValue),
+				CreatedAt: time.Unix(0, 0),
+			})
+			if err != nil {
 				return fmt.Errorf("row %d: %w", r.RowNumber, err)
-			}
-			if strings.TrimSpace(in.Code) == "" {
-				return glerrors.New(glerrors.KindInvalid, fmt.Sprintf("row %d: an issue needs its code", r.RowNumber))
 			}
 		}
 	}
@@ -333,6 +342,69 @@ func settleExisting(result *ImportResult, pupil ports.ExistingPupil, groupID str
 			return
 		}
 	}
+}
+
+// draftKey recognizes a draft without a CURP: its names (case and spacing
+// folded), birth date and intended group. The bank reference is compared
+// apart, only when both sides have one.
+type draftKey struct {
+	name, born, group string
+}
+
+func newDraftKey(first, last, maternal string, born time.Time, group string) draftKey {
+	name := strings.ToUpper(strings.Join(strings.Fields(last+" "+maternal+" "+first), " "))
+	day := ""
+	if !born.IsZero() {
+		day = born.Format(time.DateOnly)
+	}
+	return draftKey{name: name, born: day, group: group}
+}
+
+// markExistingDrafts settles the draft rows a previous upload already stored
+// (same names, birth date, intended group and — when both have one — bank
+// reference) as ALREADY_IMPORTED: re-uploading a file never duplicates its
+// drafts. Read once per request, and only when the request has a draft row.
+func (s *ImportService) markExistingDrafts(ctx context.Context, rows []ImportRow, pending []pendingRow, results []ImportResult) ([]pendingRow, error) {
+	if !slices.ContainsFunc(pending, func(p pendingRow) bool { return p.draft }) {
+		return pending, nil
+	}
+	drafts, err := s.repo.OpenDrafts(ctx)
+	if err != nil {
+		return nil, err
+	}
+	byKey := make(map[draftKey][]ports.ExistingDraft, len(drafts))
+	for _, d := range drafts {
+		k := newDraftKey(d.FirstName, d.LastName, d.MaternalLastName, d.BirthDate, d.IntendedGroupID)
+		byKey[k] = append(byKey[k], d)
+	}
+	left := pending[:0]
+	for _, p := range pending {
+		match, ok := s.draftOf(rows[p.index], p, byKey)
+		if !ok {
+			left = append(left, p)
+			continue
+		}
+		results[p.index].Outcome = ImportAlreadyImported
+		results[p.index].StudentID = match.StudentID
+		results[p.index].Draft = true
+		results[p.index].Warnings = nil
+	}
+	return left, nil
+}
+
+// draftOf finds the stored draft a draft row is, if any.
+func (s *ImportService) draftOf(r ImportRow, p pendingRow, byKey map[draftKey][]ports.ExistingDraft) (ports.ExistingDraft, bool) {
+	if !p.draft {
+		return ports.ExistingDraft{}, false
+	}
+	profile, _ := domain.NewProfileLenient(r.Profile, s.now())
+	k := newDraftKey(r.FirstName, r.LastName, r.MaternalLastName, profile.BirthDate(), r.GroupID)
+	for _, d := range byKey[k] {
+		if p.ref.IsZero() || d.BankReference == "" || d.BankReference == p.ref.String() {
+			return d, true
+		}
+	}
+	return ports.ExistingDraft{}, false
 }
 
 // resolveGroups asks config about each distinct group ONCE (an import of 570
@@ -448,7 +520,7 @@ func (s *ImportService) moveToCycleStart(ctx context.Context, rows []ImportRow, 
 	moves := map[string]*ports.CycleStartMove{}
 	for i, r := range results {
 		where := placements[rows[i].GroupID]
-		if !isExisting(r) || !where.ok {
+		if !isExisting(r) || r.Draft || !where.ok {
 			continue
 		}
 		move, ok := moves[where.group.CycleID]
@@ -552,8 +624,10 @@ func (s *ImportService) importOne(ctx context.Context, r ImportRow, p pendingRow
 	stored, err := s.repo.ImportStudent(ctx, cmd)
 	if errors.Is(err, domain.ErrBankReferenceTaken) {
 		cmd.Student.ChangeBankReference("")
-		cmd.Issues = append(cmd.Issues, *cmd.ReferenceTakenIssue)
-		cmd.ReferenceTakenIssue = nil
+		if cmd.ReferenceTakenIssue != nil {
+			cmd.Issues = append(cmd.Issues, *cmd.ReferenceTakenIssue)
+			cmd.ReferenceTakenIssue = nil
+		}
 		stored, err = s.repo.ImportStudent(ctx, cmd)
 		stored.BankReferenceDropped = true
 	}
