@@ -33,7 +33,7 @@ export {
   type FamilyCard,
   type FamilyPaymentInfo,
   getCard,
-  cardPhotoPath,
+  getCardPhoto,
 } from "./family";
 export {
   getAttendanceMonth,

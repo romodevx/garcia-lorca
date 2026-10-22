@@ -19,9 +19,17 @@ const card = {
   qr: "GLCARD:AQAAAAAAAAAAAAAAAAAAAA",
 };
 
-function mockFetch(cardBody: unknown | null): void {
+const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0]);
+
+function mockFetch(cardBody: unknown | null, photoStatus = 200): void {
   globalThis.fetch = jest.fn(async (url: string) => {
     const u = String(url);
+    if (u.includes("/family/students/s1/photo")) {
+      return {
+        ok: photoStatus === 200, status: photoStatus,
+        headers: { get: () => "image/jpeg" }, arrayBuffer: async () => JPEG.buffer, json: async () => ({}),
+      };
+    }
     if (u.includes("/family/students/s1/card")) {
       if (cardBody === null) return { ok: false, status: 500, json: async () => ({}) };
       return { ok: true, status: 200, json: async () => cardBody };
@@ -67,12 +75,27 @@ describe("CardScreen (tarea 13)", () => {
     expect(await screen.findByText("PRIMARIA · A")).toBeTruthy();
   });
 
-  it("shows the initials when the child has no photo", async () => {
+  it("draws the photo the app downloaded with its session", async () => {
     mockFetch(card);
     await renderWithProviders(<CardScreen />);
 
     const photo = await screen.findByTestId("card-photo");
-    fireEvent(photo, "error");
+    expect(photo.props.source).toEqual({ uri: "data:image/jpeg;base64,/9j/4A==" });
+  });
+
+  it("shows the initials when the child has no photo", async () => {
+    mockFetch(card, 404);
+    await renderWithProviders(<CardScreen />);
+
+    expect(await screen.findByText("ZV")).toBeTruthy();
+    expect(screen.queryByTestId("card-photo")).toBeNull();
+  });
+
+  it("shows the initials when the photo cannot be drawn", async () => {
+    mockFetch(card);
+    await renderWithProviders(<CardScreen />);
+
+    fireEvent(await screen.findByTestId("card-photo"), "error");
     await waitFor(() => expect(screen.queryByTestId("card-photo")).toBeNull());
     expect(screen.getByText("ZV")).toBeTruthy();
   });

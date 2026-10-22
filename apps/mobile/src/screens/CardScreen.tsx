@@ -1,9 +1,10 @@
 import { useState, type ReactElement } from "react";
 import { Image, StyleSheet, Text, View } from "react-native";
 import QRCode from "react-native-qrcode-svg";
-import { apiUrl, cardPhotoPath, getAccessToken, type FamilyCard } from "../api";
+import { type FamilyCard } from "../api";
 import { useAppState } from "../state/AppState";
 import { useChildCard } from "../state/familyData";
+import { useStudentPhoto } from "../state/useStudentPhoto";
 import { useTheme } from "../theme";
 import { Card } from "../ui";
 import { AsyncErrorState, AsyncLoading } from "./AsyncStates";
@@ -105,12 +106,12 @@ function SchoolFooter({ school }: { school: FamilyCard["school"] }): ReactElemen
   );
 }
 
-/** The child's photo, or their initials when there is none (a 404) or it fails. */
+/** The child's photo, or their initials when there is none (a 404), it fails or is still loading. */
 function Photo({ studentId, name }: { studentId: string; name: string }): ReactElement {
   const theme = useTheme();
+  const { data: uri } = useStudentPhoto(studentId);
   const [failed, setFailed] = useState(false);
-  const token = getAccessToken();
-  if (failed || token === null) {
+  if (failed || uri === null) {
     return (
       <View style={[styles.photo, styles.initials, { backgroundColor: theme.colors.primarySoft }]}>
         <Text style={[styles.initialsText, { color: theme.colors.primaryInk, fontFamily: theme.fonts.display }]}>{initialsOf(name)}</Text>
@@ -121,7 +122,7 @@ function Photo({ studentId, name }: { studentId: string; name: string }): ReactE
     <Image
       testID="card-photo"
       accessibilityLabel={`Foto de ${name}`}
-      source={{ uri: apiUrl(cardPhotoPath(studentId)), headers: { Authorization: `Bearer ${token}` } }}
+      source={{ uri }}
       onError={() => setFailed(true)}
       style={styles.photo}
     />
