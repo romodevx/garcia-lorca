@@ -45,7 +45,11 @@ import {
 } from "../../students/api";
 import { resizeToJpeg } from "../../students/photoResize";
 import { bankReferenceError, birthDateError, MEXICAN_STATES, phoneDigits, phoneError, postalCodeError } from "../../students/profileRules";
+import { isDraft } from "../../students/importIssues";
 import { ContactsPanel } from "./ContactsPanel";
+import { DRAFT_CURP_WARNING, StandaloneWarnings, fieldWarning } from "./ImportIssueWarnings";
+import { PromotedNotice } from "./PromotedNotice";
+import { useImportIssues, type ImportIssuesState } from "./useImportIssues";
 import { CurpNotices } from "./CurpNotices";
 import { StudentNotesPanel } from "../../_design/students/StudentNotesPanel";
 import { useStudentNotes } from "../../_design/students/useStudentNotes";
@@ -72,10 +76,15 @@ export interface StudentEditScreenProps {
   onWithdrawn?: () => void;
   /** The school's date (aaaa-mm-dd); injected by tests. Defaults to the local day. */
   today?: string;
+  /** module_import_review: the import's warnings under each field, and a draft's missing CURP. */
+  importReview?: boolean;
 }
 
 const MAX_PHONES = 3;
 const REQUIRED = ["lastName", "firstName", "curp"] as const;
+/** A draft is saved without its CURP: it stays a draft until one is captured. */
+const REQUIRED_OF_DRAFT = ["lastName", "firstName"] as const;
+const PHONE_ISSUE_FIELDS = ["phone_home", "phone_mobile"] as const;
 const ACCEPTED_PHOTO_TYPES = ["image/jpeg", "image/png"];
 const BLOOD_TYPES = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"] as const;
 
@@ -152,7 +161,7 @@ function failureMessage(cause: unknown): string {
   return "No se pudo guardar la ficha. Intenta de nuevo.";
 }
 
-export function StudentEditScreen({ studentId, userId, permissions, onBack, onWithdrawn, today }: StudentEditScreenProps): ReactElement {
+export function StudentEditScreen({ studentId, userId, permissions, onBack, onWithdrawn, today, importReview = false }: StudentEditScreenProps): ReactElement {
   const day = today ?? localToday();
   const canReadMedical = permissions?.includes("medical:read") === true;
   const canWriteMedical = canReadMedical && permissions?.includes("medical:write") === true;
@@ -186,7 +195,12 @@ export function StudentEditScreen({ studentId, userId, permissions, onBack, onWi
   const [saved, setSaved] = useState(false);
   const [failure, setFailure] = useState<string | undefined>(undefined);
 
-  const required = useRequired(REQUIRED);
+  const issues = useImportIssues(studentId, importReview);
+  const review: ImportIssuesState | undefined = importReview ? issues : undefined;
+  const draft = importReview && student !== undefined && isDraft(student);
+  // The group a draft's import meant it for, once a save gave it its CURP.
+  const [promoted, setPromoted] = useState<{ groupId: string | undefined } | undefined>(undefined);
+  const required = useRequired(draft ? REQUIRED_OF_DRAFT : REQUIRED);
   const emailShape = useEmailShapeOnSave();
   const focusFirstInvalid = useFocusFirstInvalid();
   const rules = useMemo(
@@ -262,7 +276,7 @@ export function StudentEditScreen({ studentId, userId, permissions, onBack, onWi
   const submit = async (): Promise<void> => {
     if (saving || student === undefined) return;
     // Every check runs, so everything wrong is marked at once.
-    const complete = required.check({ firstName, lastName, curp });
+    const complete = required.check(draft ? { firstName, lastName } : { firstName, lastName, curp });
     const shaped = emailShape.check(email);
     const formatted = format.checkAll(formatValues());
     if (!complete || !shaped || !formatted) {
@@ -291,6 +305,9 @@ export function StudentEditScreen({ studentId, userId, permissions, onBack, onWi
         ...(bankReference !== (student.bankReference ?? "") ? { bankReference } : {}),
       });
       setStudent(updated);
+      if (importReview && updated.promotedFromDraft === true) setPromoted({ groupId: updated.intendedGroupId ?? issues.intendedGroupId });
+      // The save closed the issues of the fields it changed, server-side.
+      review?.reload();
       await savePhoto();
       if (canWriteMedical && medicalChanged) {
         setSavedMedical(await updateMedical(API_URL, studentId, medical));
@@ -372,16 +389,18 @@ export function StudentEditScreen({ studentId, userId, permissions, onBack, onWi
         onChange={touched}
         style={{ display: "flex", flexDirection: "column", gap: 16 }}
       >
+        {promoted !== undefined && <PromotedNotice studentId={studentId} groupId={promoted.groupId} />}
         <Section id="ficha-generales" title="Datos generales">
           {/* Surnames first, as the school reads its lists (T3). A pupil
               captured before the maternal field existed may carry both
               surnames in "Apellido paterno": move the second one down here. */}
-          <TextField label="Apellido paterno" value={lastName} onChange={setLastName} uppercase required error={required.errors.lastName} onClearError={() => required.clear("lastName")} help="El primer apellido, el del padre. Si aquí aparecen los dos, deja sólo el paterno y pasa el otro a «Apellido materno»." />
+          <TextField {...fieldWarning(review, "surnames", "Apellido paterno")} label="Apellido paterno" value={lastName} onChange={setLastName} uppercase required error={required.errors.lastName} onClearError={() => required.clear("lastName")} help="El primer apellido, el del padre. Si aquí aparecen los dos, deja sólo el paterno y pasa el otro a «Apellido materno»." />
           <TextField label="Apellido materno" value={maternalLastName} onChange={setMaternalLastName} uppercase help="El segundo apellido, el de la madre. Déjalo vacío si el acta no lo trae." />
-          <TextField label="Nombre(s)" value={firstName} onChange={setFirstName} uppercase required error={required.errors.firstName} onClearError={() => required.clear("firstName")} />
-          <TextField label="CURP" value={curp} onChange={setCurp} uppercase required error={required.errors.curp} onClearError={() => required.clear("curp")} help="Los 18 caracteres de la CURP del alumno." />
+          <TextField {...fieldWarning(review, "first_name", "Nombre(s)")} label="Nombre(s)" value={firstName} onChange={setFirstName} uppercase required error={required.errors.firstName} onClearError={() => required.clear("firstName")} />
+          <TextField {...(draft ? { warning: DRAFT_CURP_WARNING } : fieldWarning(review, "curp", "CURP"))} label="CURP" value={curp} onChange={setCurp} uppercase required={!draft} error={required.errors.curp} onClearError={() => required.clear("curp")} help="Los 18 caracteres de la CURP del alumno." />
           <CurpNotices curp={curp} birthDate={birthDate} sex={sex} />
           <DateField
+            {...fieldWarning(review, "birth_date", "Fecha de nacimiento")}
             label="Fecha de nacimiento"
             value={birthDate}
             max={day}
@@ -394,6 +413,7 @@ export function StudentEditScreen({ studentId, userId, permissions, onBack, onWi
           />
           <SelectField label="Sexo" value={sex} onChange={(v) => setSex(v as Sex)} options={SEX_OPTIONS} />
           <TextField
+            {...fieldWarning(review, "bank_reference", "Referencia BBVA")}
             label="Referencia BBVA"
             value={bankReference}
             onChange={(v) => {
@@ -429,7 +449,8 @@ export function StudentEditScreen({ studentId, userId, permissions, onBack, onWi
         </Section>
 
         <Section id="ficha-contacto" title="Contacto y domicilio">
-          <EmailField label="Correo del alumno" value={email} onChange={(v) => { setEmail(v); emailShape.forgive(v); }} error={emailShape.error} help="Puede quedar vacío." />
+          <EmailField {...fieldWarning(review, "email", "Correo del alumno")} label="Correo del alumno" value={email} onChange={(v) => { setEmail(v); emailShape.forgive(v); }} error={emailShape.error} help="Puede quedar vacío." />
+          <StandaloneWarnings review={review} fields={PHONE_ISSUE_FIELDS} />
           <PhoneList
             phones={phones}
             errors={format.errors}
@@ -451,6 +472,7 @@ export function StudentEditScreen({ studentId, userId, permissions, onBack, onWi
               format.onChange("postalCode", next.postalCode, {});
             }}
             onPostalCodeBlur={() => format.onBlur("postalCode", address.postalCode, {})}
+            review={review}
           />
         </Section>
 
@@ -481,6 +503,9 @@ export function StudentEditScreen({ studentId, userId, permissions, onBack, onWi
         />
       </Section>
 
+      {issues.acceptError !== undefined && importReview && (
+        <p role="alert" style={{ color: "var(--bad-fg)", fontSize: 14.5, fontWeight: 600 }}>{issues.acceptError}</p>
+      )}
       {failure !== undefined && (
         <p role="alert" style={{ color: "var(--bad-fg)", fontSize: 14.5, fontWeight: 600 }}>{failure}</p>
       )}
@@ -570,16 +595,18 @@ function AddressFields({
   postalCodeError: cpError,
   onChange,
   onPostalCodeBlur,
+  review,
 }: {
   address: StudentAddress;
   postalCodeError: string | undefined;
   onChange: (next: StudentAddress) => void;
   onPostalCodeBlur: () => void;
+  review?: ImportIssuesState;
 }): ReactElement {
   const field = (key: keyof StudentAddress) => (value: string) => onChange({ ...address, [key]: value });
   return (
     <>
-      <TextField label="Calle" value={address.street} onChange={field("street")} />
+      <TextField {...fieldWarning(review, "address", "Calle")} label="Calle" value={address.street} onChange={field("street")} />
       {/* One logical entity: the number of a street address. */}
       <div style={{ display: "flex", gap: 10 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -590,9 +617,9 @@ function AddressFields({
         </div>
       </div>
       <TextField label="Colonia" value={address.neighborhood} onChange={field("neighborhood")} />
-      <TextField label="Código postal" value={address.postalCode} onChange={field("postalCode")} onBlur={onPostalCodeBlur} error={cpError} help="Cinco dígitos." />
+      <TextField {...fieldWarning(review, "postal_code", "Código postal")} label="Código postal" value={address.postalCode} onChange={field("postalCode")} onBlur={onPostalCodeBlur} error={cpError} help="Cinco dígitos." />
       <TextField label="Municipio o alcaldía" value={address.municipality} onChange={field("municipality")} />
-      <SelectField label="Estado" value={address.state} onChange={field("state")} options={MEXICAN_STATES.map((s) => ({ value: s, label: s }))} />
+      <SelectField {...fieldWarning(review, "state", "Estado")} label="Estado" value={address.state} onChange={field("state")} options={MEXICAN_STATES.map((s) => ({ value: s, label: s }))} />
     </>
   );
 }
