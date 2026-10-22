@@ -29,6 +29,7 @@ type fakeFinance struct {
 	historyOf        string
 
 	depositChargeIDs []string
+	depositVouchers  client.VoucherChoice
 	depositReceiver  client.Receiver
 	payReceiver      client.Receiver
 	planIn           client.TuitionPlanInput
@@ -120,14 +121,15 @@ func (f *fakeFinance) ExpectedToday(_ context.Context, studentID, on string, wit
 	return f.expected, f.err
 }
 
-func (f *fakeFinance) RegisterDeposit(_ context.Context, studentID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time, grantEarlyPayment bool, cardType string, receiver client.Receiver, chargeIDs []string, tenders []client.Tender) (client.DepositResult, error) {
-	f.depositCardType = cardType
-	f.depositTenders = tenders
-	f.depositChargeIDs = chargeIDs
-	f.depositReceiver = receiver
-	f.depositStudent, f.depositAmount, f.depositMethod = studentID, amountCents, method
-	f.depositKey, f.depositPaidAt = idempotencyKey, paidAt
-	f.depositGranted = grantEarlyPayment
+func (f *fakeFinance) RegisterDeposit(_ context.Context, in client.DepositRequest) (client.DepositResult, error) {
+	f.depositCardType = in.CardType
+	f.depositTenders = in.Tenders
+	f.depositChargeIDs = in.ChargeIDs
+	f.depositReceiver = in.Receiver
+	f.depositStudent, f.depositAmount, f.depositMethod = in.StudentID, in.AmountCents, in.Method
+	f.depositKey, f.depositPaidAt = in.IdempotencyKey, in.PaidAt
+	f.depositGranted = in.GrantEarlyPayment
+	f.depositVouchers = in.Vouchers
 	if f.err != nil {
 		return client.DepositResult{}, f.err
 	}

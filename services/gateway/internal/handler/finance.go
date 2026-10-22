@@ -33,7 +33,7 @@ type FinanceService interface {
 	CancelCharge(ctx context.Context, chargeID, reason, actorUserID string) (client.Charge, error)
 	RegisterTenderedPayment(ctx context.Context, in client.TenderedPayment) ([]client.Payment, client.Charge, error)
 	GetAccount(ctx context.Context, studentID string) (client.AccountStatement, error)
-	RegisterDeposit(ctx context.Context, studentID string, amountCents int64, method, reference, idempotencyKey string, paidAt time.Time, grantEarlyPayment bool, cardType string, receiver client.Receiver, chargeIDs []string, tenders []client.Tender) (client.DepositResult, error)
+	RegisterDeposit(ctx context.Context, in client.DepositRequest) (client.DepositResult, error)
 	ExpectedToday(ctx context.Context, studentID, on string, withBalance bool) (client.Expected, error)
 	PreviewDeposit(ctx context.Context, studentID string, amountCents int64, paidAt time.Time, chargeIDs []string) (client.DepositResult, error)
 	ListDeposits(ctx context.Context, studentID string) ([]client.Deposit, error)
@@ -61,6 +61,9 @@ type FinanceHandler struct {
 	// cutFlags decides whether the cash-up may carry T10's expenses and
 	// closures (module_expenses); nil never shows them.
 	cutFlags featureflag.Checker
+	// voucherFlags decides whether a deposit may name payment vouchers
+	// (module_payment_vouchers, ADR 0040); nil never lets it.
+	voucherFlags featureflag.Checker
 }
 
 // FinanceOption configures a FinanceHandler.
@@ -80,6 +83,13 @@ func WithCutExtras(flags featureflag.Checker) FinanceOption {
 	return func(h *FinanceHandler) { h.cutFlags = flags }
 }
 
+// WithPaymentVoucherFlag lets a deposit carry voucherId / declinedVoucherIds
+// while module_payment_vouchers is on (ADR 0040). Off, or without this option,
+// a deposit that names a voucher is 404: the module is invisible.
+func WithPaymentVoucherFlag(flags featureflag.Checker) FinanceOption {
+	return func(h *FinanceHandler) { h.voucherFlags = flags }
+}
+
 // NewFinanceHandler wires the handler to a finance service.
 func NewFinanceHandler(svc FinanceService, opts ...FinanceOption) *FinanceHandler {
 	h := &FinanceHandler{svc: svc}
@@ -88,6 +98,13 @@ func NewFinanceHandler(svc FinanceService, opts ...FinanceOption) *FinanceHandle
 	}
 	return h
 }
+
+// paymentVouchersModule is ADR 0040's module flag name.
+const paymentVouchersModule = "payment_vouchers"
+
+// maxDeclinedVouchers is a pupil's pending ceiling (finance's
+// MaxPendingVouchersPerStudent): nobody declines more than can be waiting.
+const maxDeclinedVouchers = 3
 
 // maxChosenCharges bounds the counter's choice: a family has at most a year of
 // charges, far fewer than this.
@@ -550,6 +567,11 @@ type registerDepositRequest struct {
 	ChargeIDs []string `json:"chargeIds"`
 	// Tenders combine methods (T8) and replace method, reference and cardType.
 	Tenders []client.Tender `json:"tenders"`
+	// VoucherID says this money IS that payment voucher (ADR 0040);
+	// DeclinedVoucherIDs, on a payment by hand, the pending ones it is NOT.
+	// Both exist only while module_payment_vouchers is on.
+	VoucherID          string   `json:"voucherId"`
+	DeclinedVoucherIDs []string `json:"declinedVoucherIds"`
 }
 
 // The contract's bounds on a combined payment (Tender in openapi.yaml).
@@ -644,8 +666,22 @@ func (h *FinanceHandler) RegisterDeposit(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "granting the early-payment discount requires "+grantsDiscounts, http.StatusForbidden)
 		return
 	}
-	got, derr := h.svc.RegisterDeposit(r.Context(), req.StudentID, req.AmountCents,
-		req.Method, req.Reference, req.IdempotencyKey, paidAt, req.GrantEarlyPayment, req.CardType, h.receiverOf(r), req.ChargeIDs, req.Tenders)
+	if req.VoucherID != "" || len(req.DeclinedVoucherIDs) > 0 {
+		if h.voucherFlags == nil || !h.voucherFlags.Enabled(r.Context(), featureflag.Key(paymentVouchersModule)) {
+			writeNotFound(w)
+			return
+		}
+		if msg := invalidVoucherChoice(req); msg != "" {
+			http.Error(w, msg, http.StatusBadRequest)
+			return
+		}
+	}
+	got, derr := h.svc.RegisterDeposit(r.Context(), client.DepositRequest{
+		StudentID: req.StudentID, AmountCents: req.AmountCents, Method: req.Method, Reference: req.Reference,
+		IdempotencyKey: req.IdempotencyKey, PaidAt: paidAt, GrantEarlyPayment: req.GrantEarlyPayment,
+		CardType: req.CardType, Receiver: h.receiverOf(r), ChargeIDs: req.ChargeIDs, Tenders: req.Tenders,
+		Vouchers: client.VoucherChoice{VoucherID: req.VoucherID, Declined: req.DeclinedVoucherIDs},
+	})
 	if derr != nil {
 		writeConnectError(w, derr)
 		return
@@ -654,13 +690,39 @@ func (h *FinanceHandler) RegisterDeposit(w http.ResponseWriter, r *http.Request)
 	// carry no JSON tags, so serialising them directly puts Go field names
 	// ("AmountCents") on the wire where every other finance endpoint puts
 	// "amountCents". The front would read every allocation as blank.
-	writeJSON(w, http.StatusCreated, map[string]any{
+	body := map[string]any{
 		"deposit":          got.Deposit,
 		"allocations":      toPaymentResponses(got.Allocations),
 		"surcharges":       toChargeResponses(got.Surcharges),
 		"unallocatedCents": got.UnallocatedCents,
 		"replayed":         got.Replayed,
-	})
+	}
+	if got.LinkedVoucher != nil {
+		body["linkedVoucher"] = got.LinkedVoucher
+	}
+	writeJSON(w, http.StatusCreated, body)
+}
+
+// invalidVoucherChoice checks voucherId / declinedVoucherIds against the
+// contract: uuids, a bounded list, never both, and a payment by voucher takes
+// the voucher's own idempotency key. "" means it is fine.
+func invalidVoucherChoice(req registerDepositRequest) string {
+	switch {
+	case req.VoucherID != "" && len(req.DeclinedVoucherIDs) > 0:
+		return "declinedVoucherIds apply only to a payment without voucherId"
+	case req.VoucherID != "" && !uuidShape.MatchString(req.VoucherID):
+		return "voucherId must be a voucher id"
+	case req.VoucherID != "" && req.IdempotencyKey != "":
+		return "a payment by voucher takes the voucher's own idempotency key: leave idempotencyKey out"
+	case len(req.DeclinedVoucherIDs) > maxDeclinedVouchers:
+		return "declinedVoucherIds: too many vouchers"
+	}
+	for _, id := range req.DeclinedVoucherIDs {
+		if !uuidShape.MatchString(id) {
+			return "declinedVoucherIds must be voucher ids"
+		}
+	}
+	return ""
 }
 
 // PreviewDeposit handles POST /api/v1/finance/deposits/preview: what an amount
