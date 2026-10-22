@@ -115,8 +115,15 @@ func (r *Repository) ImportStudent(ctx context.Context, cmd ports.ImportCommand)
 		if err := tx.Create(&model).Error; err != nil {
 			return translateStudentWriteErr(err, "importing student")
 		}
-		if err := tx.Create(&enrollment).Error; err != nil {
-			return translateEnrollmentWriteErr(err)
+		// A draft is stored without an enrollment: it is not placed until its
+		// CURP is captured.
+		if !cmd.Student.IsDraft() {
+			if err := tx.Create(&enrollment).Error; err != nil {
+				return translateEnrollmentWriteErr(err)
+			}
+		}
+		if err := insertIssues(tx, issuesToStore(cmd, out.BankReferenceDropped)); err != nil {
+			return err
 		}
 		out.EnrollmentNumber = number
 		return nil
@@ -129,6 +136,31 @@ func (r *Repository) ImportStudent(ctx context.Context, cmd ports.ImportCommand)
 		cmd.Student.ChangeBankReference("")
 	}
 	return out, nil
+}
+
+// issuesToStore is the command's issues, plus the taken reference's when the
+// store dropped it.
+func issuesToStore(cmd ports.ImportCommand, referenceDropped bool) []domain.ImportIssue {
+	issues := append([]domain.ImportIssue(nil), cmd.Issues...)
+	if referenceDropped && cmd.ReferenceTakenIssue != nil {
+		issues = append(issues, *cmd.ReferenceTakenIssue)
+	}
+	return issues
+}
+
+// insertIssues stores the import issues of a pupil inside its transaction.
+func insertIssues(tx *gorm.DB, issues []domain.ImportIssue) error {
+	if len(issues) == 0 {
+		return nil
+	}
+	rows := make([]importIssueModel, 0, len(issues))
+	for _, i := range issues {
+		rows = append(rows, importIssueFromDomain(i))
+	}
+	if err := tx.Create(&rows).Error; err != nil {
+		return glerrors.Wrap(glerrors.KindInternal, "storing the import issues", err)
+	}
+	return nil
 }
 
 func referenceTaken(tx *gorm.DB, ref string) (bool, error) {

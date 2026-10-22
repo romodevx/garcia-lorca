@@ -22,6 +22,8 @@ func ToDomainStatus(s studentsv1.AdmissionStatus) domain.AdmissionStatus {
 		return domain.AdmissionRejected
 	case studentsv1.AdmissionStatus_ADMISSION_STATUS_WITHDRAWN:
 		return domain.AdmissionWithdrawn
+	case studentsv1.AdmissionStatus_ADMISSION_STATUS_DRAFT:
+		return domain.AdmissionDraft
 	default:
 		return domain.AdmissionUnspecified
 	}
@@ -40,6 +42,8 @@ func ToProtoStatus(s domain.AdmissionStatus) studentsv1.AdmissionStatus {
 		return studentsv1.AdmissionStatus_ADMISSION_STATUS_REJECTED
 	case domain.AdmissionWithdrawn:
 		return studentsv1.AdmissionStatus_ADMISSION_STATUS_WITHDRAWN
+	case domain.AdmissionDraft:
+		return studentsv1.AdmissionStatus_ADMISSION_STATUS_DRAFT
 	default:
 		return studentsv1.AdmissionStatus_ADMISSION_STATUS_UNSPECIFIED
 	}

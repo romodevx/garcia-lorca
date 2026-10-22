@@ -98,6 +98,10 @@ func (s *EnrollmentService) Enroll(ctx context.Context, studentID, groupID, term
 	if err != nil {
 		return domain.Enrollment{}, err // KindNotFound propagates
 	}
+	// A draft (imported without a CURP) is not placed until it has one.
+	if err := student.RequirePlaceable(); err != nil {
+		return domain.Enrollment{}, err
+	}
 
 	grp, err := groupOf(ctx, s.catalog, groupID)
 	if err != nil {
@@ -272,6 +276,9 @@ func (s *EnrollmentService) Transfer(ctx context.Context, enrollmentID, toGroupI
 	}
 	student, err := s.students.FindByID(ctx, enr.StudentID())
 	if err != nil {
+		return domain.Enrollment{}, err
+	}
+	if err := student.RequirePlaceable(); err != nil {
 		return domain.Enrollment{}, err
 	}
 	// A withdrawn or rejected file is not moved around: neither enrol path
@@ -454,6 +461,9 @@ type Placement struct {
 func (s *EnrollmentService) EnrollIntoGrade(ctx context.Context, studentID, gradeLevelID string, on time.Time) (Placement, error) {
 	student, err := s.students.FindByID(ctx, studentID)
 	if err != nil {
+		return Placement{}, err
+	}
+	if err := student.RequirePlaceable(); err != nil {
 		return Placement{}, err
 	}
 

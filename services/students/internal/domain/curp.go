@@ -39,5 +39,8 @@ func NewCURP(raw string) (CURP, error) {
 	return CURP(normalized), nil
 }
 
+// IsZero reports a pupil without a CURP: only a draft may be one.
+func (c CURP) IsZero() bool { return c == "" }
+
 // String returns the normalized CURP.
 func (c CURP) String() string { return string(c) }

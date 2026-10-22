@@ -87,6 +87,10 @@ func (s *GuardianService) LinkGuardian(ctx context.Context, guardianUserID, stud
 		}
 		return domain.GuardianLink{}, err
 	}
+	// A draft (imported without a CURP) is not handed to a family account.
+	if err := student.RequirePlaceable(); err != nil {
+		return domain.GuardianLink{}, err
+	}
 
 	if err := s.requireGuardianUser(ctx, guardianUserID); err != nil {
 		return domain.GuardianLink{}, err
@@ -255,6 +259,9 @@ func (s *GuardianService) GrantContactAccess(ctx context.Context, contactID, stu
 	if contact.StudentID() != studentID {
 		return domain.GuardianLink{}, glerrors.ErrNotFound
 	}
+	if err := s.requirePlaceable(ctx, studentID); err != nil {
+		return domain.GuardianLink{}, err
+	}
 
 	withAccount, err := contact.WithAccount(guardianUserID)
 	if err != nil {
@@ -264,6 +271,16 @@ func (s *GuardianService) GrantContactAccess(ctx context.Context, contactID, stu
 		return domain.GuardianLink{}, err
 	}
 	return withAccount, nil
+}
+
+// requirePlaceable refuses a draft pupil (domain.ErrDraftNotPlaceable): an app
+// account is not given to the family of a pupil the school cannot identify.
+func (s *GuardianService) requirePlaceable(ctx context.Context, studentID string) error {
+	student, err := s.students.FindByID(ctx, studentID)
+	if err != nil {
+		return err
+	}
+	return student.RequirePlaceable()
 }
 
 // UnlinkGuardian removes a guardian ↔ student link. An unknown link is

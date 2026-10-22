@@ -30,6 +30,22 @@ drift).
   `allowedTransitions` in `domain/admission.go`:
   `pending → accepted → enrolled`, plus `rejected` (from pending) and
   `withdrawn` (from pending/accepted/enrolled). `rejected`/`withdrawn` are terminal.
+- `draft` (PLAN-import-avisos D3): a pupil the legacy import stored without a
+  valid CURP (`curp` NULL, allowed only for a draft by migration 0022's CHECK).
+  No enrollment; `RequirePlaceable` refuses Enroll / EnrollIntoGrade / Transfer /
+  LinkGuardian / GrantContactAccess with `ErrDraftNotPlaceable` (409,
+  `X-Error-Code: STUDENT_DRAFT`). Saving a valid CURP (UpdateDetails) promotes it
+  `draft → pending`, the status of any new applicant, and answers the group the
+  import meant it for (stored on its curp issue's `intended_group_id`) so the
+  caller can offer the enrollment there. `draft → withdrawn` discards it.
+- Import issues (`student_import_issues`, D1): every value the import changed or
+  dropped — the gateway's own issues, an invalid/taken bank reference, each
+  `NewProfileLenientReport` drop, a draft's missing CURP — is stored with the
+  pupil IN the import transaction, with the file's original value (the row's
+  `original` when the gateway sends it). Saving the file closes the open issues
+  of the fields it changed as `corrected` (same transaction); AcceptImportIssue
+  closes one as `accepted` (not a draft's curp issue). `Student.open_issues` is
+  counted in the list/get read itself (one statement per page).
 - Transition methods (`Accept`/`Reject`/`Enroll`/`Withdraw`) are the only place
   admission rules live; an illegal move is `KindConflict`, surfaced by the gRPC
   adapter as `FailedPrecondition` (a duplicate CURP on create is `AlreadyExists`).
@@ -74,7 +90,9 @@ and flags are enforced by the gateway.
 > does.
 
 ## RLS-sensitive tables
-`students` — `ENABLE + FORCE ROW LEVEL SECURITY` from the first migration. All
+`students` — `ENABLE + FORCE ROW LEVEL SECURITY` from the first migration.
+`student_import_issues` — the same from its first migration (0022), one policy
+per operation. All
 access is tenant-scoped through `adapters/postgres` (SET LOCAL per transaction);
 isolation is covered by testcontainers tests as the app (non-owner) role. M03 is
 single-tenant (tenant fixed at the composition root); RLS is tenant-scoped —

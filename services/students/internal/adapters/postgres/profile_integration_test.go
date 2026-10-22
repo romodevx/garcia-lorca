@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/garcia-lorca/services/students/internal/domain"
+	"github.com/garcia-lorca/services/students/internal/ports"
 )
 
 // The file's editable half round-trips: names, CURP, birth date, sex, the
@@ -35,7 +36,7 @@ func TestUpdateDetailsRoundTrips(t *testing.T) {
 	if err := stored.UpdateDetails("Ana María", "Pérez", "López", curp, profile); err != nil {
 		t.Fatalf("UpdateDetails: %v", err)
 	}
-	if err := repo.UpdateDetails(ctx, stored); err != nil {
+	if _, err := repo.UpdateDetails(ctx, stored, ports.DetailsCorrection{}); err != nil {
 		t.Fatalf("repo.UpdateDetails: %v", err)
 	}
 

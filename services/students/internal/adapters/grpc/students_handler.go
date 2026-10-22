@@ -36,6 +36,7 @@ type StudentsHandler struct {
 	levels   *usecase.LevelArchiveService
 	imports  *usecase.ImportService
 	groups   *usecase.GroupRecordService
+	issues   *usecase.ImportIssueService
 }
 
 // NewStudentsHandler wires the handler to the student, enrollment, guardian, and
@@ -95,7 +96,7 @@ func (h *StudentsHandler) CreateApplicant(ctx context.Context, req *connect.Requ
 // UpdateStudent corrects a pupil's file (names, CURP, profile).
 func (h *StudentsHandler) UpdateStudent(ctx context.Context, req *connect.Request[studentsv1.UpdateStudentRequest]) (*connect.Response[studentsv1.UpdateStudentResponse], error) {
 	m := req.Msg
-	student, err := h.svc.UpdateDetails(ctx, usecase.UpdateDetailsInput{
+	result, err := h.svc.UpdateDetails(ctx, usecase.UpdateDetailsInput{
 		ID:               m.GetId(),
 		FirstName:        m.GetFirstName(),
 		LastName:         m.GetLastName(),
@@ -103,11 +104,16 @@ func (h *StudentsHandler) UpdateStudent(ctx context.Context, req *connect.Reques
 		CURP:             m.GetCurp(),
 		Profile:          toDomainProfileInput(m.GetProfile()),
 		BankReference:    m.BankReference, // nil keeps the stored one
+		ActorUserID:      m.GetActorUserId(),
 	})
 	if err != nil {
 		return nil, connectErr(err)
 	}
-	return connect.NewResponse(&studentsv1.UpdateStudentResponse{Student: toProtoStudent(student)}), nil
+	return connect.NewResponse(&studentsv1.UpdateStudentResponse{
+		Student:           toProtoStudent(result.Student),
+		PromotedFromDraft: result.PromotedFromDraft,
+		IntendedGroupId:   result.IntendedGroupID,
+	}), nil
 }
 
 // GetStudentMedical returns a pupil's medical record.
@@ -495,6 +501,8 @@ func toProtoStudent(s *domain.Student) *studentsv1.Student {
 		Profile:          toProtoProfile(s.Profile()),
 		EnrollmentNumber: s.EnrollmentNumber(),
 		BankReference:    s.BankReference().String(),
+		OpenIssues:       int32(s.OpenIssues()),
+		Draft:            s.IsDraft(),
 	}
 }
 
@@ -610,6 +618,9 @@ func connectErr(err error) *connect.Error {
 	}
 	if errors.Is(err, domain.ErrWithdrawnReadOnly) {
 		ce.Meta().Set(ErrorCodeMeta, domain.CodeStudentWithdrawn)
+	}
+	if errors.Is(err, domain.ErrDraftNotPlaceable) {
+		ce.Meta().Set(ErrorCodeMeta, domain.CodeStudentDraft)
 	}
 	return ce
 }

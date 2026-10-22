@@ -32,6 +32,8 @@ type fakeImportRepo struct {
 	movable  map[string]bool
 	realigns []ports.CycleStartMove
 	moveErr  error
+	// issues are the import issues stored with the pupils.
+	issues []domain.ImportIssue
 }
 
 func newImportRepo() *fakeImportRepo {
@@ -98,7 +100,15 @@ func (r *fakeImportRepo) ImportStudent(_ context.Context, cmd ports.ImportComman
 	r.seq++
 	out.EnrollmentNumber = fmt.Sprintf("2026-%05d", r.seq)
 	cmd.Student.AssignEnrollmentNumber(out.EnrollmentNumber)
-	r.existing[curp] = ports.ExistingPupil{StudentID: cmd.Student.ID(), ActiveGroupIDs: []string{cmd.Enrollment.GroupID()}}
+	if !cmd.Student.IsDraft() {
+		r.existing[curp] = ports.ExistingPupil{StudentID: cmd.Student.ID(), ActiveGroupIDs: []string{cmd.Enrollment.GroupID()}}
+	}
+	// The issues go in with the pupil, in the same transaction: the taken
+	// reference's only when the store dropped it.
+	r.issues = append(r.issues, cmd.Issues...)
+	if out.BankReferenceDropped && cmd.ReferenceTakenIssue != nil {
+		r.issues = append(r.issues, *cmd.ReferenceTakenIssue)
+	}
 	r.imported = append(r.imported, cmd)
 	return out, nil
 }

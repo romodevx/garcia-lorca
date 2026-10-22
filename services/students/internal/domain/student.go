@@ -31,7 +31,16 @@ type Student struct {
 	enrollmentNumber string
 	// bankReference is the BBVA deposit reference (ADR 0033); empty if none.
 	bankReference BankReference
+	// openIssues counts the pupil's unresolved import issues, as read. It is
+	// a read-side count, never written through the entity.
+	openIssues int
 }
+
+// AssignOpenIssues records how many import issues of the pupil are open.
+func (s *Student) AssignOpenIssues(n int) { s.openIssues = n }
+
+// OpenIssues is how many import issues of the pupil nobody resolved yet.
+func (s *Student) OpenIssues() int { return s.openIssues }
 
 // AssignEnrollmentNumber records the matrícula the store gave the pupil.
 func (s *Student) AssignEnrollmentNumber(number string) { s.enrollmentNumber = number }
@@ -132,6 +141,50 @@ func NewImported(p NewApplicantParams) (*Student, error) {
 	return s, nil
 }
 
+// ErrDraftNotPlaceable refuses to enroll, move, or link a family to a draft:
+// the school does not know who the pupil is until their CURP is captured
+// (PLAN-import-avisos D3). CodeStudentDraft is its machine code.
+var ErrDraftNotPlaceable = glerrors.New(glerrors.KindConflict,
+	"ese alumno es un borrador sin CURP: captura su CURP antes de inscribirlo, cambiarlo de grupo o ligarlo a una familia")
+
+// CodeStudentDraft is the X-Error-Code of ErrDraftNotPlaceable.
+const CodeStudentDraft = "STUDENT_DRAFT"
+
+// NewImportedDraft creates a pupil the legacy import brought without a valid
+// CURP, as a draft: stored so nothing of the file is lost, with no enrollment.
+// A pupil that has a CURP is imported, never drafted.
+func NewImportedDraft(p NewApplicantParams) (*Student, error) {
+	if !p.CURP.IsZero() {
+		return nil, glerrors.New(glerrors.KindInvalid, "a pupil with a CURP is imported, not drafted")
+	}
+	s, err := NewApplicant(p)
+	if err != nil {
+		return nil, err
+	}
+	s.status = AdmissionDraft
+	return s, nil
+}
+
+// IsDraft reports a pupil imported without a valid CURP.
+func (s *Student) IsDraft() bool { return s.status == AdmissionDraft }
+
+// RequirePlaceable is ErrDraftNotPlaceable for a draft, else nil: a draft is
+// not enrolled, transferred, or linked to a family account.
+func (s *Student) RequirePlaceable() error {
+	if s.IsDraft() {
+		return ErrDraftNotPlaceable
+	}
+	return nil
+}
+
+// Clone returns an independent copy, to compare a file before and after a
+// correction (ChangedIssueFields).
+func (s *Student) Clone() *Student {
+	cp := *s
+	cp.profile.phones = append([]Phone(nil), s.profile.phones...)
+	return &cp
+}
+
 // Rehydrate rebuilds a Student from persisted state (used by the repository; it
 // does NOT run the applicant validations, since the row was already valid).
 func Rehydrate(p NewApplicantParams, status AdmissionStatus) *Student {
@@ -216,6 +269,11 @@ func (s *Student) ChangeBankReference(ref BankReference) { s.bankReference = ref
 // the group are NOT here — a group changes by transfer, which keeps its history
 // and its seat count. The first name and the paternal surname stay required, as
 // when the pupil was created; the maternal surname is optional.
+//
+// The CURP is required except on a draft, and a draft given one is promoted to
+// pending — the status any new applicant has, from which the caller may enroll
+// them (the import's intended group rides on the draft's curp issue). Whether
+// the CURP is another pupil's is the store's to say (ErrCURPTaken).
 func (s *Student) UpdateDetails(firstName, lastName, maternalLastName string, curp CURP, profile Profile) error {
 	if err := s.RequireEditable(); err != nil {
 		return err
@@ -223,6 +281,14 @@ func (s *Student) UpdateDetails(firstName, lastName, maternalLastName string, cu
 	first, last := strings.TrimSpace(firstName), strings.TrimSpace(lastName)
 	if first == "" || last == "" {
 		return glerrors.New(glerrors.KindInvalid, "first and last name are required")
+	}
+	if curp.IsZero() && !s.IsDraft() {
+		return glerrors.New(glerrors.KindInvalid, "a CURP is required")
+	}
+	if s.IsDraft() && !curp.IsZero() {
+		if _, err := s.transition(AdmissionPending, ""); err != nil {
+			return err
+		}
 	}
 	s.firstName, s.lastName, s.curp, s.profile = first, last, curp, profile
 	s.maternalLastName = strings.TrimSpace(maternalLastName)

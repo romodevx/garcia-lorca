@@ -47,8 +47,12 @@ type StudentRepository interface {
 	// Update persists a status transition (and any mutable fields).
 	Update(ctx context.Context, s *domain.Student) error
 	// UpdateDetails persists a correction of the file: names, CURP and the
-	// profile. A CURP another pupil holds is KindConflict.
-	UpdateDetails(ctx context.Context, s *domain.Student) error
+	// profile — and a draft's promotion to pending when it was given a CURP.
+	// In the SAME transaction it closes, as corrected by c.By, the open import
+	// issues of c.Fields, and answers how many it closed and the intended
+	// group of a closed curp issue. A CURP another pupil holds is
+	// domain.ErrCURPTaken (KindConflict).
+	UpdateDetails(ctx context.Context, s *domain.Student, c DetailsCorrection) (CorrectionResult, error)
 	// GetMedical returns the pupil's medical record (empty when none was
 	// captured); SaveMedical upserts it. A pupil the tenant cannot see is
 	// KindNotFound on save.
@@ -63,6 +67,20 @@ type StudentRepository interface {
 	FindByID(ctx context.Context, id string) (*domain.Student, error)
 	// List returns students matching the filter plus the next page token ("" = last page).
 	List(ctx context.Context, f ListFilter) (students []*domain.Student, nextPageToken string, err error)
+}
+
+// DetailsCorrection is what a save of the file closes: the open import issues
+// of Fields, resolved as corrected by By (a user id, or "" when unknown).
+type DetailsCorrection struct {
+	Fields []domain.IssueField
+	By     string
+}
+
+// CorrectionResult is what closing those issues did: how many were open and
+// closed, and the group a closed curp issue meant the pupil for ("" if none).
+type CorrectionResult struct {
+	Corrected       int
+	IntendedGroupID string
 }
 
 // EventPublisher emits the module's domain events (StudentEnrolled,

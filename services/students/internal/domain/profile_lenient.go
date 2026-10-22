@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -31,6 +32,25 @@ var phonePrefixes = []string{"521", "044", "045", "52"}
 // once, in the order the fields are read. An unreadable sex is dropped without a
 // code: the import derives it from the CURP, so it is never the school's typo.
 func NewProfileLenient(in ProfileInput, today time.Time) (Profile, []string) {
+	p, drops := NewProfileLenientReport(in, today)
+	return p, WarningCodes(drops)
+}
+
+// ProfileDrop is one value NewProfileLenientReport could not keep as given:
+// the field it belongs to, the warning code, what it received, and what it
+// stored instead ("" when dropped, the cut text when truncated).
+type ProfileDrop struct {
+	Field    IssueField
+	Code     string
+	Original string
+	Stored   string
+}
+
+// NewProfileLenientReport is NewProfileLenient reporting every value it dropped
+// or cut, one ProfileDrop each, in the order the fields are read — so the
+// import stores the file's original value with the pupil instead of losing it
+// (PLAN-import-avisos D1).
+func NewProfileLenientReport(in ProfileInput, today time.Time) (Profile, []ProfileDrop) {
 	w := &warnings{}
 	var p Profile
 	p.birthDate = lenientBirthDate(in.BirthDate, today, w)
@@ -41,19 +61,26 @@ func NewProfileLenient(in ProfileInput, today time.Time) (Profile, []string) {
 	p.email = lenientEmail(in.Email, w)
 	p.phones = lenientPhones(in.Phones, w)
 	p.address = lenientAddress(in.Address, w)
-	return p, w.codes
+	return p, w.drops
 }
 
-// warnings collects codes once each, in first-seen order.
-type warnings struct{ codes []string }
+// warnings collects what the lenient profile dropped, in the order read.
+type warnings struct{ drops []ProfileDrop }
 
-func (w *warnings) add(code string) {
-	for _, c := range w.codes {
-		if c == code {
-			return
+func (w *warnings) add(field IssueField, code, original, stored string) {
+	w.drops = append(w.drops, ProfileDrop{Field: field, Code: code, Original: original, Stored: stored})
+}
+
+// WarningCodes is each drop's code once, in first-seen order: the warnings a
+// row of the import reports.
+func WarningCodes(drops []ProfileDrop) []string {
+	var codes []string
+	for _, d := range drops {
+		if !slices.Contains(codes, d.Code) {
+			codes = append(codes, d.Code)
 		}
 	}
-	w.codes = append(w.codes, code)
+	return codes
 }
 
 func lenientBirthDate(raw string, today time.Time, w *warnings) time.Time {
@@ -63,7 +90,7 @@ func lenientBirthDate(raw string, today time.Time, w *warnings) time.Time {
 	}
 	born, err := time.Parse(isoDate, raw)
 	if err != nil || born.After(today) {
-		w.add(WarnBirthDateInvalid)
+		w.add(FieldBirthDate, WarnBirthDateInvalid, raw, "")
 		return time.Time{}
 	}
 	return born
@@ -75,7 +102,7 @@ func lenientEmail(raw string, w *warnings) string {
 		return ""
 	}
 	if err := email.Validate(address); err != nil {
-		w.add(WarnEmailInvalid)
+		w.add(FieldEmail, WarnEmailInvalid, strings.TrimSpace(raw), "")
 		return ""
 	}
 	return address
@@ -92,7 +119,7 @@ func lenientPhones(in []Phone, w *warnings) []Phone {
 		}
 		number, ok := tenDigits(ph.Number)
 		if !ok || len(out) == maxPhones {
-			w.add(WarnPhoneInvalid)
+			w.add(PhoneIssueField(ph.Kind), WarnPhoneInvalid, strings.TrimSpace(ph.Number), "")
 			continue
 		}
 		if seen[number] {
@@ -135,14 +162,14 @@ func lenientAddress(a Address, w *warnings) Address {
 		if len(cp) == postalCodeLen && onlyDigits(cp) == cp {
 			out.PostalCode = cp
 		} else {
-			w.add(WarnPostalCodeInvalid)
+			w.add(FieldPostalCode, WarnPostalCodeInvalid, cp, "")
 		}
 	}
 	if raw := strings.TrimSpace(a.State); raw != "" {
 		if state, ok := MatchState(raw); ok {
 			out.State = state
 		} else {
-			w.add(WarnStateUnknown)
+			w.add(FieldState, WarnStateUnknown, raw, "")
 		}
 	}
 	return out
@@ -154,6 +181,7 @@ func truncateRunes(s string, w *warnings) string {
 	if utf8.RuneCountInString(s) <= maxAddressField {
 		return s
 	}
-	w.add(WarnAddressTruncated)
-	return strings.TrimSpace(string([]rune(s)[:maxAddressField]))
+	cut := strings.TrimSpace(string([]rune(s)[:maxAddressField]))
+	w.add(FieldAddress, WarnAddressTruncated, s, cut)
+	return cut
 }

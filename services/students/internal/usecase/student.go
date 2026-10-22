@@ -204,42 +204,83 @@ type UpdateDetailsInput struct {
 	LastName  string // the paternal surname
 	// MaternalLastName is optional (T3).
 	MaternalLastName string
-	CURP             string
-	Profile          domain.ProfileInput
+	// CURP is required, except while the pupil is a draft (empty keeps it one).
+	CURP    string
+	Profile domain.ProfileInput
 	// BankReference is the BBVA reference (ADR 0033): nil keeps the stored
 	// one, "" clears it, anything else replaces it.
 	BankReference *string
+	// ActorUserID is who saves (set by the gateway): recorded as resolved_by
+	// on the import issues the save closes. Empty is unknown.
+	ActorUserID string
+}
+
+// DetailsResult is a saved correction: the pupil as it now reads, and — when
+// the save gave a draft its CURP — that it was promoted, with the group the
+// import meant them for, so the caller can offer the enrollment there.
+type DetailsResult struct {
+	Student           *domain.Student
+	PromotedFromDraft bool
+	IntendedGroupID   string
 }
 
 // UpdateDetails validates and persists a correction of the pupil's file. A CURP
-// another pupil already holds is KindConflict.
-func (s *StudentService) UpdateDetails(ctx context.Context, in UpdateDetailsInput) (*domain.Student, error) {
+// another pupil already holds is domain.ErrCURPTaken (KindConflict). The open
+// import issues of every field the save changed are closed as corrected in the
+// same transaction (PLAN-import-avisos).
+func (s *StudentService) UpdateDetails(ctx context.Context, in UpdateDetailsInput) (DetailsResult, error) {
+	if in.ActorUserID != "" && uuid.Validate(in.ActorUserID) != nil {
+		return DetailsResult{}, glerrors.New(glerrors.KindInvalid, "the actor is not a user id")
+	}
 	student, err := s.repo.FindByID(ctx, in.ID)
 	if err != nil {
-		return nil, err
+		return DetailsResult{}, err
 	}
-	curp, err := domain.NewCURP(in.CURP)
+	curp, err := optionalCURP(in.CURP)
 	if err != nil {
-		return nil, err
+		return DetailsResult{}, err
 	}
 	profile, err := domain.NewProfile(in.Profile, s.now())
 	if err != nil {
-		return nil, err
+		return DetailsResult{}, err
 	}
-	if err := student.UpdateDetails(in.FirstName, in.LastName, in.MaternalLastName, curp, profile); err != nil {
-		return nil, err
-	}
+	var ref *domain.BankReference
 	if in.BankReference != nil {
-		ref, err := domain.NewBankReference(*in.BankReference)
+		parsed, err := domain.NewBankReference(*in.BankReference)
 		if err != nil {
-			return nil, err
+			return DetailsResult{}, err
 		}
-		student.ChangeBankReference(ref)
+		ref = &parsed
 	}
-	if err := s.repo.UpdateDetails(ctx, student); err != nil {
-		return nil, err
+
+	before, wasDraft := student.Clone(), student.IsDraft()
+	if err := student.UpdateDetails(in.FirstName, in.LastName, in.MaternalLastName, curp, profile); err != nil {
+		return DetailsResult{}, err
 	}
-	return student, nil
+	if ref != nil {
+		student.ChangeBankReference(*ref)
+	}
+	corrected, err := s.repo.UpdateDetails(ctx, student, ports.DetailsCorrection{
+		Fields: domain.ChangedIssueFields(before, student), By: in.ActorUserID,
+	})
+	if err != nil {
+		return DetailsResult{}, err
+	}
+	student.AssignOpenIssues(max(0, student.OpenIssues()-corrected.Corrected))
+	out := DetailsResult{Student: student, PromotedFromDraft: wasDraft && !student.IsDraft()}
+	if out.PromotedFromDraft {
+		out.IntendedGroupID = corrected.IntendedGroupID
+	}
+	return out, nil
+}
+
+// optionalCURP parses a CURP; empty is the zero CURP (the domain decides
+// whether the pupil may go without one).
+func optionalCURP(raw string) (domain.CURP, error) {
+	if strings.TrimSpace(raw) == "" {
+		return "", nil
+	}
+	return domain.NewCURP(raw)
 }
 
 // CreateApplicantInput is the raw input for a new applicant. CURP is validated

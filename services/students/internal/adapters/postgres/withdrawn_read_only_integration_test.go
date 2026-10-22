@@ -40,7 +40,7 @@ func TestWritesRefuseAPupilWithdrawnMeanwhile(t *testing.T) {
 		t.Fatalf("Update (withdrawal): %v", err)
 	}
 
-	if err := repo.UpdateDetails(ctx, stale); !errors.Is(err, domain.ErrWithdrawnReadOnly) {
+	if _, err := repo.UpdateDetails(ctx, stale, ports.DetailsCorrection{}); !errors.Is(err, domain.ErrWithdrawnReadOnly) {
 		t.Errorf("UpdateDetails on a withdrawn row = %v, want ErrWithdrawnReadOnly", err)
 	}
 	rec, _ := domain.NewMedicalRecord("O+", "", "")

@@ -40,7 +40,7 @@ func TestBankReferenceIsStoredAndRead(t *testing.T) {
 
 	// UpdateDetails writes it, and clears it.
 	got.ChangeBankReference("")
-	if err := repo.UpdateDetails(ctx, got); err != nil {
+	if _, err := repo.UpdateDetails(ctx, got, ports.DetailsCorrection{}); err != nil {
 		t.Fatalf("UpdateDetails (clear): %v", err)
 	}
 	cleared, _ := repo.FindByID(ctx, id)
@@ -70,7 +70,7 @@ func TestATakenBankReferenceIsItsOwnConflict(t *testing.T) {
 		t.Fatalf("Create third: %v", err)
 	}
 	withBankReference(t, third, "5500")
-	if err := repo.UpdateDetails(ctx, third); !errors.Is(err, domain.ErrBankReferenceTaken) {
+	if _, err := repo.UpdateDetails(ctx, third, ports.DetailsCorrection{}); !errors.Is(err, domain.ErrBankReferenceTaken) {
 		t.Fatalf("UpdateDetails with a taken reference: err = %v; want ErrBankReferenceTaken", err)
 	}
 

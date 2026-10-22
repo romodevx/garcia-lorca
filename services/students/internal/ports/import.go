@@ -15,11 +15,17 @@ type ExistingPupil struct {
 }
 
 // ImportCommand is one pupil of the legacy import (ADR 0033): the pupil,
-// already enrolled and placed, and their enrollment (origin import).
+// already enrolled and placed, and their enrollment (origin import) — or a
+// draft without a CURP, which has none (Enrollment is then the zero value and
+// is not stored). Issues are stored with the pupil in the same transaction;
+// ReferenceTakenIssue too, but only when the store drops the reference as
+// another pupil's.
 type ImportCommand struct {
-	Student    *domain.Student
-	Enrollment domain.Enrollment
-	BatchID    string
+	Student             *domain.Student
+	Enrollment          domain.Enrollment
+	Issues              []domain.ImportIssue
+	ReferenceTakenIssue *domain.ImportIssue
+	BatchID             string
 	// NumberYear is the year the matrícula is numbered in: the school's
 	// calendar year of the import, not the database's UTC year.
 	NumberYear int
@@ -65,4 +71,20 @@ type ImportRepository interface {
 	BankReferencesTaken(ctx context.Context, refs []string) (map[string]bool, error)
 	ImportStudent(ctx context.Context, cmd ImportCommand) (ImportedPupil, error)
 	MoveImportedToCycleStart(ctx context.Context, move CycleStartMove) ([]string, error)
+}
+
+// ImportIssueRepository reads and resolves the import issues of a pupil. All
+// access is tenant-scoped for RLS.
+//
+//   - ListImportIssues returns the pupil's issues, open first then by creation
+//     (resolved ones only with includeResolved).
+//   - ImportIssueByID returns one issue of the pupil; another pupil's (or
+//     tenant's) is glerrors.ErrNotFound.
+//   - ResolveImportIssue stores a resolution if the issue is still open (a
+//     compare-and-set on resolved_at) and returns the issue as stored — the
+//     earlier resolution when another writer won.
+type ImportIssueRepository interface {
+	ListImportIssues(ctx context.Context, studentID string, includeResolved bool) ([]domain.ImportIssue, error)
+	ImportIssueByID(ctx context.Context, studentID, issueID string) (domain.ImportIssue, error)
+	ResolveImportIssue(ctx context.Context, issue domain.ImportIssue) (domain.ImportIssue, error)
 }
