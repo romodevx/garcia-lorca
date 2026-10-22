@@ -290,3 +290,13 @@ func TestInviteRefusesADraftBeforeAskingIAM(t *testing.T) {
 		t.Errorf("iam asked (%q) or grant made (%q) for a draft", iam.invitedEmail, students.grantContactID)
 	}
 }
+
+func TestAcceptImportIssueNeedsASignedInCaller(t *testing.T) {
+	svc := &fakeIssues{issues: []client.StudentImportIssue{openIssue}}
+	mux := issuesMux(handler.NewImportIssuesHandler(svc))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/students/stu-1/import-issues/iss-1/accept", nil))
+	if rec.Code != http.StatusUnauthorized || svc.gotIssue != "" {
+		t.Errorf("status = %d, forwarded %q; want 401 and nothing asked", rec.Code, svc.gotIssue)
+	}
+}
