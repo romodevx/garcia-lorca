@@ -88,6 +88,18 @@ describe("flag ON", () => {
     expect(names()).toEqual(["Cano Ceci"]);
   });
 
+  // A draft cannot be enrolled, so it is not an application in progress: it
+  // lives under «Borradores» only, never under «Trámite».
+  it("does not count a draft under Trámite", async () => {
+    const user = userEvent.setup();
+    render(<StudentsScreen onBack={() => {}} importReview />);
+    await screen.findByText("Cano Ceci");
+    const pending = screen.getByRole("button", { name: /^Trámite/ });
+    expect(pending).toHaveTextContent("0");
+    await user.click(pending);
+    expect(names()).toEqual([]);
+  });
+
   it("offers a draft no enrollment and no app access, and says why", async () => {
     const user = userEvent.setup();
     render(<StudentsScreen onBack={() => {}} importReview />);
