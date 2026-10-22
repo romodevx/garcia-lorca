@@ -27,7 +27,10 @@ describe("ProfileScreen", () => {
     await clearTokens();
   });
 
-  it("shows the child's name, level, group and current enrollment", async () => {
+  // The school's admission status (e.g. "Trámite" while the inscription is
+  // unpaid) is not on the family profile; an "Inscrito" chip read from the
+  // group placement contradicted it (tech-lead review). Only the placement shows.
+  it("shows the child's name, level, group and since when they are in it, with no admission chip", async () => {
     mockFetch({ ...child, groupLabel: "3° PRIMARIA · A", currentEnrollment: enrollment });
 
     await renderWithProviders(<ProfileScreen />);
@@ -35,17 +38,17 @@ describe("ProfileScreen", () => {
     await waitFor(() => expect(screen.getByText("Herrera Díaz Mateo")).toBeTruthy());
     expect(screen.getByText("Primaria")).toBeTruthy();
     expect(screen.getByText("3° PRIMARIA · A")).toBeTruthy();
-    expect(screen.getByText("Inscrito")).toBeTruthy();
-    expect(screen.getByText("Desde el 24 ago 2026")).toBeTruthy();
+    expect(screen.getByText("En el grupo desde el 24 ago 2026")).toBeTruthy();
+    expect(screen.queryByText("Inscrito")).toBeNull();
   });
 
-  it("says so when the child has no current enrollment", async () => {
+  it("says so when the child is in no group this cycle", async () => {
     mockFetch({ ...child, groupLabel: "A", currentEnrollment: null });
 
     await renderWithProviders(<ProfileScreen />);
 
-    await waitFor(() => expect(screen.getByText("Sin inscripción vigente")).toBeTruthy());
-    expect(screen.queryByText("Inscrito")).toBeNull();
+    await waitFor(() => expect(screen.getByText("Sin grupo asignado")).toBeTruthy());
+    expect(screen.queryByText(/En el grupo desde/)).toBeNull();
   });
 
   it("offers a retry when the profile cannot be read", async () => {
