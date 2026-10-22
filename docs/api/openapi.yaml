@@ -505,6 +505,65 @@ paths:
         '403': { $ref: '#/components/responses/PlainForbidden' }
         '404': { $ref: '#/components/responses/PlainNotFound' }
 
+  /api/v1/family/students/{studentId}/card:
+    get:
+      tags: [family]
+      summary: A child's virtual card
+      description: >
+        Task 13. The selected child's card as the parents' app draws it:
+        name, group, cycle, matrícula, the school's public details and a QR
+        that carries only an opaque, revocable code (`GLCARD:<token>`). The
+        school's RFC, legal name and receipt legend never travel here. An
+        empty `qr` with `suspended` means the office revoked the card and has
+        not reissued it. A child that is not the caller's is 404, and so is
+        every call while `module_student_card` is off. Behind
+        `module_student_card` AND `module_students`. Requires `family:read`.
+      operationId: getFamilyCard
+      security: [{ familyBearer: [] }]
+      parameters: [{ $ref: '#/components/parameters/FamilyStudentIdPath' }]
+      responses:
+        '200':
+          description: The card.
+          headers:
+            Cache-Control: { $ref: '#/components/headers/NoStore' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FamilyCard' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
+  /api/v1/family/students/{studentId}/photo:
+    get:
+      tags: [family]
+      summary: A child's photo, for the card
+      description: >
+        Task 13. The image bytes of the caller's OWN child, read from the
+        private bucket after the ownership check (no public or signed URL).
+        A child that is not the caller's, a child without a photo and a call
+        while `module_student_card` is off are all 404. Behind
+        `module_student_card` AND `module_students`. Requires `family:read`.
+      operationId: getFamilyStudentPhoto
+      security: [{ familyBearer: [] }]
+      parameters: [{ $ref: '#/components/parameters/FamilyStudentIdPath' }]
+      responses:
+        '200':
+          description: The photo.
+          headers:
+            Cache-Control:
+              description: A child's face; no shared cache keeps it.
+              schema: { type: string, const: 'private, no-store' }
+            X-Content-Type-Options:
+              schema: { type: string, const: nosniff }
+          content:
+            image/jpeg:
+              schema: { type: string, format: binary }
+            image/png:
+              schema: { type: string, format: binary }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
   /api/v1/uniforms/items:
     get:
       tags: [uniforms-catalogue]
@@ -8646,6 +8705,46 @@ components:
         bank: BBVA México
         beneficiary: Educación García Lorca, S.C.
         reference: '1234567'
+    FamilyCard:
+      type: object
+      additionalProperties: false
+      required: [studentId, name, level, gradeGroup, groupLabel, cycle, enrollmentNumber, school, qr, suspended]
+      properties:
+        studentId: { type: string, format: uuid }
+        name: { type: string, description: 'Surnames first, as the school lists the child.' }
+        level: { type: string }
+        gradeGroup: { type: string, description: 'The bare group letter, kept for older apps.' }
+        groupLabel:
+          type: string
+          description: >
+            The group as the app's header names it ("1º PRIMARIA · A"); the
+            stored letter when the catalog has no label.
+        cycle: { type: string, description: "The active cycle's name; empty when none is active." }
+        enrollmentNumber: { type: string }
+        school: { $ref: '#/components/schemas/FamilyCardSchool' }
+        qr: { type: string, description: 'The opaque card code; empty while the card is suspended.' }
+        suspended: { type: boolean }
+      example:
+        studentId: 6f1c2a9e-1b2c-4d3e-8f90-123456789abc
+        name: Villalobos Zoe
+        level: PRIMARIA
+        gradeGroup: A
+        groupLabel: 1º PRIMARIA · A
+        cycle: 2026-2027
+        enrollmentNumber: 2026-00042
+        school: { name: COLEGIO GARCÍA LORCA, cct: 16PPR0001X, address: 'Morelia, Michoacán', phone: '4431234567' }
+        qr: 'GLCARD:<token>'
+        suspended: false
+    FamilyCardSchool:
+      type: object
+      additionalProperties: false
+      description: The school's public details only; never its RFC, legal name or receipt legend.
+      required: [name, cct, address, phone]
+      properties:
+        name: { type: string }
+        cct: { type: string, description: 'Empty while the school has not captured it.' }
+        address: { type: string }
+        phone: { type: string }
     StudentImportRequest:
       type: object
       required: [fileBase64]

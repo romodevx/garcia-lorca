@@ -13,8 +13,9 @@ type familyContract struct {
 	Paths      map[string]map[string]yaml.Node `yaml:"paths"`
 	Components struct {
 		Schemas map[string]struct {
-			Required   []string             `yaml:"required"`
-			Properties map[string]yaml.Node `yaml:"properties"`
+			Required             []string             `yaml:"required"`
+			Properties           map[string]yaml.Node `yaml:"properties"`
+			AdditionalProperties *bool                `yaml:"additionalProperties"`
 		} `yaml:"schemas"`
 	} `yaml:"components"`
 }
