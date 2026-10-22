@@ -26,7 +26,8 @@ export type FlagKey =
   | "module_config_setup"
   | "module_ui_refresh"
   | "module_announcements_view"
-  | "module_school_structure";
+  | "module_school_structure"
+  | "module_import_review";
 
 /** Map of flag key -> enabled. Absent or false means OFF (flags default OFF). */
 export type FlagSet = Partial<Record<FlagKey, boolean>>;

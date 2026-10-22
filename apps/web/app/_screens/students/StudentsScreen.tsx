@@ -19,6 +19,8 @@ import {
 } from "../../students/api";
 import { listCycles, listGradeLevels, listLabelledGroups, listLevels, type Cycle, type GradeLevel, type LabelledGroup, type Level } from "../../config/api";
 import { reissueCard, revokeCard, StudentsError } from "../../students/api";
+import { DRAFT_NOTE, DRAFT_PLACEMENT_REFUSAL, STUDENT_DRAFT, isDraft } from "../../students/importIssues";
+import { ImportIssuesBadge } from "./ImportIssuesBadge";
 import { takeStudentsNotice } from "./studentsNotice";
 import { VerifyCardDrawer } from "./VerifyCardDrawer";
 import { WithdrawPanel } from "./WithdrawDialog";
@@ -52,7 +54,8 @@ interface StatusMeta {
   dot: string;
   bg: string;
   fg: string;
-  tab: "active" | "pending" | "inactive";
+  /** "drafts": a draft cannot be enrolled, so it is not an application in progress (Trámite). */
+  tab: "active" | "pending" | "inactive" | "drafts";
 }
 const STATUS: Record<AdmissionStatus, StatusMeta> = {
   enrolled: { label: "Inscrito", dot: "var(--forest)", bg: "var(--ok-bg)", fg: "var(--ok-fg)", tab: "active" },
@@ -60,6 +63,8 @@ const STATUS: Record<AdmissionStatus, StatusMeta> = {
   pending: { label: "Trámite", dot: "var(--yellow)", bg: "var(--warn-bg)", fg: "var(--warn-fg)", tab: "pending" },
   rejected: { label: "Rechazado", dot: "var(--red)", bg: "var(--bad-bg)", fg: "var(--bad-fg)", tab: "inactive" },
   withdrawn: { label: "Baja", dot: "var(--red)", bg: "var(--bad-bg)", fg: "var(--bad-fg)", tab: "inactive" },
+  // module_import_review only: the gateway names no draft while it is off.
+  draft: { label: "Borrador · falta CURP", dot: "var(--text-faint)", bg: "var(--surface-3)", fg: "var(--text-muted)", tab: "drafts" },
 };
 const FALLBACK_STATUS: StatusMeta = { label: "—", dot: "var(--text-faint)", bg: "var(--surface-3)", fg: "var(--text-muted)", tab: "pending" };
 const statusOf = (s: AdmissionStatus): StatusMeta => STATUS[s] ?? FALLBACK_STATUS;
@@ -73,8 +78,18 @@ const groupOf = (s: Student): string => (s.gradeGroup.trim() === "" ? NO_GROUP :
 
 const AV: ColorKey[] = ["lime", "forest", "orange", "purple", "yellow"];
 
-type StatusTab = "all" | "active" | "pending" | "inactive";
-const STATUS_TABS: readonly StatusTab[] = ["all", "active", "pending", "inactive"];
+type StatusTab = "all" | "active" | "pending" | "inactive" | "issues" | "drafts";
+const STATUS_TABS: readonly StatusTab[] = ["all", "active", "pending", "inactive", "issues", "drafts"];
+/** The tabs only the import review shows (module_import_review). */
+const REVIEW_TABS: readonly StatusTab[] = ["issues", "drafts"];
+
+/** Whether a pupil belongs under a status tab. */
+function inStatusTab(s: Student, tab: StatusTab): boolean {
+  if (tab === "all") return true;
+  if (tab === "issues") return (s.openIssues ?? 0) > 0;
+  if (tab === "drafts") return isDraft(s);
+  return statusOf(s.admissionStatus).tab === tab;
+}
 /** The status tab's key in the address bar, beside the shared filter's. */
 const TAB_KEY = "estado";
 
@@ -161,6 +176,7 @@ const pager = (disabled: boolean): CSSProperties => ({
  */
 export function placementRefusal(err: unknown): string {
   if (!(err instanceof StudentsError)) return PLACEMENT_FALLBACK;
+  if (err.code === STUDENT_DRAFT) return DRAFT_PLACEMENT_REFUSAL;
   const said = SERVER_REFUSALS[err.detail];
   if (said !== undefined) return said;
   // What the server wrote in Spanish (the level check, a withdrawn file, a
@@ -202,6 +218,7 @@ function StudentSheet({
   onEdit,
   canRevokeCard = false,
   canWithdraw = false,
+  draft = false,
 }: {
   st: Student;
   groups: readonly LabelledGroup[];
@@ -216,6 +233,8 @@ function StudentSheet({
   /** module_student_card and students:update: the card can be revoked here. */
   canRevokeCard?: boolean;
   canWithdraw?: boolean;
+  /** module_import_review: a draft without a CURP is not placed nor given app access. */
+  draft?: boolean;
 }): ReactElement {
   // undefined = still reading, null = no group this cycle, "failed" = unknown.
   const [current, setCurrent] = useState<Enrollment | null | undefined | "failed">(undefined);
@@ -289,7 +308,7 @@ function StudentSheet({
     setShowOtherGrades((v) => !v);
   };
   const transferring = placed !== undefined;
-  const ready = current !== undefined && current !== "failed" && !gradeLevelsFailed;
+  const ready = current !== undefined && current !== "failed" && !gradeLevelsFailed && !draft;
 
   // A ref, not the `saving` state: a double-click fires twice before React
   // re-renders, and the second click must already see the first in flight.
@@ -360,7 +379,8 @@ function StudentSheet({
               <span style={{ fontSize: 14.5, fontWeight: 600, color: "var(--text)", textAlign: "right" }}>{v}</span>
             </div>
           ))}
-          <ContactsPanel studentId={st.id} />
+          {draft && <p role="note" style={{ margin: "18px 0 0", padding: "12px 14px", borderRadius: "var(--r-md)", background: "var(--surface-3)", color: "var(--text)", fontSize: 14, lineHeight: 1.5 }}>{DRAFT_NOTE}</p>}
+          <ContactsPanel studentId={st.id} draft={draft} />
           {canRevokeCard && <RevokeCard studentId={st.id} />}
           {current === "failed" && (
             <p role="alert" style={{ color: "var(--bad-fg)", fontSize: 13.5, padding: "18px 0 0" }}>
@@ -492,6 +512,8 @@ export interface StudentsScreenProps {
   linkedStudentId?: string;
   /** The linked ficha was closed: the address goes back to the list. */
   onLinkedSheetClosed?: () => void;
+  /** module_import_review: ⚠ import issues, drafts and their tabs. */
+  importReview?: boolean;
 }
 
 /** What the school reads in Excel, in the order the table shows it. */
@@ -506,7 +528,7 @@ const EXPORT_COLUMNS: readonly CsvColumn<Row>[] = [
   { label: "Estado", value: (r) => statusOf(r.student.admissionStatus).label },
 ];
 
-export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false, canVoidAnyNote = false, userId = "", canVerifyCard = false, canRevokeCard = false, canReadStatement = false, canCorrectPayments = false, canVoidPayments = false, onOpenImport, canWithdraw = false, linkedStudentId, onLinkedSheetClosed }: StudentsScreenProps): ReactElement {
+export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false, canVoidAnyNote = false, userId = "", canVerifyCard = false, canRevokeCard = false, canReadStatement = false, canCorrectPayments = false, canVoidPayments = false, onOpenImport, canWithdraw = false, linkedStudentId, onLinkedSheetClosed, importReview = false }: StudentsScreenProps): ReactElement {
   const [verifying, setVerifying] = useState(false);
   const [students, setStudents] = useState<Student[]>([]);
   const [cycles, setCycles] = useState<Cycle[]>([]);
@@ -522,7 +544,8 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
   const [loadFailed, setLoadFailed] = useState(false);
   const [initialView] = useState(readView);
   useEffect(() => { freshVisit = false; }, []);
-  const [tab, setTab] = useState<StatusTab>(initialView.tab);
+  // A review tab in the address bar means nothing while the review is off.
+  const [tab, setTab] = useState<StatusTab>(() => (importReview || !REVIEW_TABS.includes(initialView.tab) ? initialView.tab : "all"));
   // The cycle's enrolments place each pupil in a grade and a group (T4).
   const [enrollments, setEnrollments] = useState<Enrollment[]>([]);
   const [placement, setPlacement] = useState<PlacementState>("loading");
@@ -594,6 +617,8 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
     active: students.filter((s) => statusOf(s.admissionStatus).tab === "active").length,
     pending: students.filter((s) => statusOf(s.admissionStatus).tab === "pending").length,
     inactive: students.filter((s) => statusOf(s.admissionStatus).tab === "inactive").length,
+    issues: students.filter((s) => inStatusTab(s, "issues")).length,
+    drafts: students.filter((s) => inStatusTab(s, "drafts")).length,
   }), [students]);
   const levelsPresent = useMemo(() => Array.from(new Set(students.map(levelOf))), [students]);
 
@@ -648,7 +673,7 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
   const rooms = useMemo(() => roomLabelsOf(enrollments, groups), [enrollments, groups]);
   const roomOf = (s: Student): string => rooms.get(s.id) ?? s.gradeGroup;
   const rows = useMemo(
-    () => placedRows.filter((r) => tab === "all" || statusOf(r.student.admissionStatus).tab === tab),
+    () => placedRows.filter((r) => inStatusTab(r.student, tab)),
     [placedRows, tab],
   );
   const filter = useStudentFilter(rows, catalog, initialView.filter);
@@ -725,7 +750,7 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
     say(message);
   };
 
-  const tabs: [StatusTab, string][] = [["all", "Todos"], ["active", "Inscritos"], ["pending", "Trámite"], ["inactive", "Bajas"]];
+  const tabs: [StatusTab, string][] = [["all", "Todos"], ["active", "Inscritos"], ["pending", "Trámite"], ["inactive", "Bajas"], ...(importReview ? REVIEW_TAB_LABELS : [])];
   const stats = [
     { icon: "check" as IconName, c: "lime", label: "Inscritos", val: String(counts.active), sub: "Admisión activa" },
     { icon: "clock" as IconName, c: "yellow", label: "En trámite", val: String(counts.pending), sub: "Faltan documentos" },
@@ -863,6 +888,7 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
                 onEdit={onEdit === undefined || isWithdrawn(row.student, currentEnrollment(placementReady ? enrollments : [], row.id)) ? undefined : () => onEdit(row.id)}
                 onNotes={() => setNotesOf(row.student)}
                 onStatement={canReadStatement ? () => setStatementOf(row.student) : undefined}
+                openIssues={importReview ? row.student.openIssues ?? 0 : 0}
               />
             ))
           )}
@@ -895,7 +921,7 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
 
       {onCreate !== undefined && <button onClick={onCreate} title="Nuevo alumno" style={{ position: "fixed", right: 32, bottom: FAB_BOTTOM, zIndex: 50, height: FAB_HEIGHT, padding: "0 26px", borderRadius: 99, display: "inline-flex", alignItems: "center", gap: 10, background: "var(--primary)", color: "var(--primary-ink)", fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 16.5, cursor: "pointer", boxShadow: "var(--shadow-fab)" }}><Icon name="plus" size={22} stroke={2.6} />Nuevo alumno</button>}
 
-      {sheet !== null && <StudentSheet key={sheet.id} st={students.find((s) => s.id === sheet.id) ?? sheet} groups={groups} cycleId={groupsCycleId} gradeLevels={gradeLevels} gradeLevelsFailed={gradeLevelsFailed} onClose={closeSheet} onPlaced={onPlaced} onEdit={onEdit === undefined ? undefined : () => onEdit(sheet.id)} canRevokeCard={canRevokeCard} canWithdraw={canWithdraw} />}
+      {sheet !== null && <StudentSheet key={sheet.id} st={students.find((s) => s.id === sheet.id) ?? sheet} groups={groups} cycleId={groupsCycleId} gradeLevels={gradeLevels} gradeLevelsFailed={gradeLevelsFailed} onClose={closeSheet} onPlaced={onPlaced} onEdit={onEdit === undefined ? undefined : () => onEdit(sheet.id)} canRevokeCard={canRevokeCard} canWithdraw={canWithdraw} draft={importReview && isDraft(students.find((s) => s.id === sheet.id) ?? sheet)} />}
       {notesOf !== null && (
         <StudentNotesDialog
           studentId={notesOf.id}
@@ -1045,7 +1071,9 @@ const CHECK_CELL = 44;
 /** Statement, notes, edit and open: four 36 px round buttons and their gaps. */
 const ACTIONS_WIDTH = 162;
 
-function StuRow({ st, room, levelName, i, selected, onToggle, onOpen, onEdit, onNotes, onStatement }: {
+const REVIEW_TAB_LABELS: [StatusTab, string][] = [["issues", "Con avisos"], ["drafts", "Borradores"]];
+
+function StuRow({ st, room, levelName, i, selected, onToggle, onOpen, onEdit, onNotes, onStatement, openIssues = 0 }: {
   st: Student;
   room: string;
   levelName: string;
@@ -1056,6 +1084,8 @@ function StuRow({ st, room, levelName, i, selected, onToggle, onOpen, onEdit, on
   onEdit?: () => void;
   onNotes: () => void;
   onStatement?: () => void;
+  /** module_import_review: the ⚠ count; 0 shows none. */
+  openIssues?: number;
 }): ReactElement {
   const [hov, setHov] = useState(false);
   const s = statusOf(st.admissionStatus);
@@ -1075,7 +1105,10 @@ function StuRow({ st, room, levelName, i, selected, onToggle, onOpen, onEdit, on
       <div style={{ display: "flex", alignItems: "center", gap: 13, minWidth: 0, paddingLeft: 8 }}>
         <Avatar name={formatStudentName(st)} color={AV[i % AV.length]} size={42} />
         <div style={{ minWidth: 0 }}>
-          <div className="students-name" style={{ fontWeight: 600, fontSize: 15.5, color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{formatStudentName(st)}</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+            <div className="students-name" style={{ fontWeight: 600, fontSize: 15.5, color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{formatStudentName(st)}</div>
+            {openIssues > 0 && <ImportIssuesBadge count={openIssues} />}
+          </div>
           <div style={{ fontSize: 12.5, color: "var(--text-faint)", fontFamily: "monospace" }}>{st.curp}</div>
           {/* On a phone the level, tutor and status columns fold away; the classroom stays under the name. */}
           <div className="students-room-inline" style={{ fontSize: 12.5, color: "var(--text-muted)" }}>{room} · {s.label}</div>

@@ -31,7 +31,7 @@ const ROWS: ImportRow[] = [
 
 describe("tabs", () => {
   it("counts each tab; Nuevos includes the ones with warnings", () => {
-    expect(tabCounts(ROWS)).toEqual({ all: 5, new: 2, warning: 1, already: 1, skipped: 1, pending: 1 });
+    expect(tabCounts(ROWS)).toEqual({ all: 5, new: 2, warning: 1, already: 1, skipped: 1, pending: 1, draft: 0, omitted: 0 });
   });
 
   it("opens on the first non-empty of No se importan → Con avisos → Todos", () => {

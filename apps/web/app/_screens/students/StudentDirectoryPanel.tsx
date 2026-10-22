@@ -13,6 +13,7 @@ const STATUS_LABEL: Record<AdmissionStatus, string> = {
   enrolled: "Inscrito",
   rejected: "Rechazado",
   withdrawn: "Baja",
+  draft: "Borrador · falta CURP",
 };
 
 const STATUS_COLOR: Record<AdmissionStatus, string> = {
@@ -21,6 +22,7 @@ const STATUS_COLOR: Record<AdmissionStatus, string> = {
   enrolled: "var(--forest)",
   rejected: "var(--bad-fg)",
   withdrawn: "var(--bad-fg)",
+  draft: "var(--text-muted)",
 };
 
 export interface StudentDirectoryPanelProps {

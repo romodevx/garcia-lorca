@@ -22,7 +22,8 @@ import type { DeferredInit } from "../_lib/deferredInit";
 import { GENERIC_SERVER_FAILURE, spanishServerReason } from "../_lib/serverReason";
 import { authFetch } from "../auth/authFetch";
 
-export type AdmissionStatus = "pending" | "accepted" | "enrolled" | "rejected" | "withdrawn";
+/** `draft` only with module_import_review: imported without a valid CURP. */
+export type AdmissionStatus = "pending" | "accepted" | "enrolled" | "rejected" | "withdrawn" | "draft";
 
 export interface Student {
   id: string;
@@ -53,6 +54,14 @@ export interface Student {
   enrollmentNumber?: string;
   /** The BBVA payment reference (ADR 0033); "" or absent when the pupil has none. */
   bankReference?: string;
+  /** module_import_review (absent while off): import issues nobody resolved yet. */
+  openIssues?: number;
+  /** module_import_review (absent while off): imported without a valid CURP. */
+  draft?: boolean;
+  /** Only on PUT, module_import_review: the save gave a draft its CURP. */
+  promotedFromDraft?: boolean;
+  /** Only on PUT, with promotedFromDraft: the group the import meant the pupil for. */
+  intendedGroupId?: string;
 }
 
 /** "" means not captured. */

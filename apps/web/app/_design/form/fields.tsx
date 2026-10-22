@@ -1,6 +1,6 @@
 "use client";
 
-import type { ChangeEvent, CompositionEvent, ReactElement } from "react";
+import type { ChangeEvent, CompositionEvent, ReactElement, ReactNode } from "react";
 
 import { Field, inputStyle } from "./Field";
 import { emailShapeError } from "./emailShape";
@@ -43,6 +43,10 @@ export interface BaseFieldProps {
   readOnly?: boolean;
   /** Al salir del campo: donde la pantalla acusa un dato mal escrito. */
   onBlur?: () => void;
+  /** Un aviso que no bloquea (Field `warning`): ámbar, sin `aria-invalid`. */
+  warning?: string;
+  /** Lo que se puede hacer con el aviso, debajo de él. */
+  warningAction?: ReactNode;
 }
 
 /** Lo que todo campo comparte: id, validez, obligatoriedad y limpiar su rojo. */
@@ -79,7 +83,7 @@ export interface TextFieldProps extends BaseFieldProps {
 export function TextField(props: TextFieldProps): ReactElement {
   const { label, value, onChange, uppercase, error, onClearError, required, help } = props;
   return (
-    <Field label={label} required={required} error={error} help={help}>
+    <Field label={label} required={required} error={error} help={help} warning={props.warning} warningAction={props.warningAction}>
       {(id, describedBy) => (
         <input
           {...common(id, describedBy, props)}
@@ -117,7 +121,7 @@ export function EmailField(props: BaseFieldProps): ReactElement {
     onClearError?.();
   };
   return (
-    <Field label={label} required={required} error={shown} help={help}>
+    <Field label={label} required={required} error={shown} help={help} warning={props.warning} warningAction={props.warningAction}>
       {(id, describedBy) => (
         <input
           {...common(id, describedBy, { ...props, error: shown })}
@@ -160,7 +164,7 @@ export interface NumberFieldProps extends BaseFieldProps {
 export function NumberField(props: NumberFieldProps): ReactElement {
   const { label, value, onChange, error, onClearError, required, help, min, max, step } = props;
   return (
-    <Field label={label} required={required} error={error} help={help}>
+    <Field label={label} required={required} error={error} help={help} warning={props.warning} warningAction={props.warningAction}>
       {(id, describedBy) => (
         <input
           {...common(id, describedBy, props)}
@@ -186,7 +190,7 @@ export function NumberField(props: NumberFieldProps): ReactElement {
 export function TextArea(props: BaseFieldProps & { rows?: number }): ReactElement {
   const { label, value, onChange, error, onClearError, required, help, rows = 5 } = props;
   return (
-    <Field label={label} required={required} error={error} help={help}>
+    <Field label={label} required={required} error={error} help={help} warning={props.warning} warningAction={props.warningAction}>
       {(id, describedBy) => (
         <textarea
           {...common(id, describedBy, props)}
@@ -220,7 +224,7 @@ export function SelectField(
 ): ReactElement {
   const { label, value, onChange, error, onClearError, required, help, options } = props;
   return (
-    <Field label={label} required={required} error={error} help={help}>
+    <Field label={label} required={required} error={error} help={help} warning={props.warning} warningAction={props.warningAction}>
       {(id, describedBy) => (
         <select
           {...common(id, describedBy, props)}

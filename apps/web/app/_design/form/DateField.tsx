@@ -27,7 +27,7 @@ export interface DateFieldProps extends BaseFieldProps {
 export function DateField(props: DateFieldProps): ReactElement {
   const { label, value, onChange, required, error, onClearError, help, disabled, readOnly, min, max } = props;
   return (
-    <Field label={label} required={required} error={error} help={help}>
+    <Field label={label} required={required} error={error} help={help} warning={props.warning} warningAction={props.warningAction}>
       {(id, describedBy) => (
         <input
           id={id}

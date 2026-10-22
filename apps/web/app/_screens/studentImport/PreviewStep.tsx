@@ -6,9 +6,11 @@ import { Btn } from "../../_design/Controls";
 import type { Level } from "../../config/api";
 import type { LevelChoice, StudentImportResult } from "../../studentImport/api";
 import { PREVIEW_BANNER, allAlreadyText, confirmationText, importButtonLabel, moveButtonLabel, toMoveText } from "../../studentImport/copy";
+import { reviewCounts } from "../../studentImport/review";
 import { defaultTab, destinationNames, type ImportTab } from "../../studentImport/view";
 import { CatalogTree } from "./CatalogTree";
 import { ImportSummary } from "./ImportSummary";
+import type { PreviewReview } from "./ImportReviewRow";
 import { ImportTable } from "./ImportTable";
 import { LevelMapping } from "./LevelMapping";
 import { noteStyle } from "./parts";
@@ -24,11 +26,15 @@ export interface PreviewStepProps {
   onOpenTuition: () => void;
   /** Bumped by the screen when the server says levels are unresolved (422). */
   focusUnresolved: number;
+  /** module_import_review: correct, omit or draft each flagged row. Absent: as before. */
+  review?: PreviewReview;
 }
+
+export type { PreviewReview };
 
 /** Step 2: what the import would do. Nothing is saved until the button is pressed. */
 export function PreviewStep(props: PreviewStepProps): ReactElement {
-  const { result, levels, onChoose, onCapacity, onImport, onBack, onCancel, onOpenTuition, focusUnresolved } = props;
+  const { result, levels, onChoose, onCapacity, onImport, onBack, onCancel, onOpenTuition, focusUnresolved, review } = props;
   const [tab, setTab] = useState<ImportTab>(() => defaultTab(result.rows));
   const [asked, setAsked] = useState(0);
   const { summary } = result;
@@ -48,10 +54,10 @@ export function PreviewStep(props: PreviewStepProps): ReactElement {
   return (
     <div style={{ display: "grid", gap: 16 }}>
       <p role="note" style={{ ...noteStyle, fontWeight: 700 }}>{PREVIEW_BANNER}</p>
-      <ImportSummary summary={summary} onPick={setTab} />
+      <ImportSummary summary={summary} onPick={setTab} review={review === undefined ? undefined : reviewCounts(result.rows)} />
       <LevelMapping fileLevels={result.levels} levels={levels} onChoose={onChoose} onOpenTuition={onOpenTuition} focusRequest={focusUnresolved + asked} />
       <CatalogTree placements={result.placements} onCapacity={onCapacity} />
-      <ImportTable rows={result.rows} tab={tab} onTab={setTab} />
+      <ImportTable rows={result.rows} tab={tab} onTab={setTab} review={review} />
 
       {nothingToImport ? (
         <p role="status" style={{ ...noteStyle, fontWeight: 600 }}>

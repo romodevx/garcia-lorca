@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, type CSSProperties, type ReactElement } from "react";
+import { useId, type CSSProperties, type ReactElement, type ReactNode } from "react";
 
 import { Icon } from "../Icon";
 import { HelpTip } from "./HelpTip";
@@ -29,7 +29,44 @@ export interface FieldProps {
    * dato ya capturado.
    */
   help?: string;
+  /**
+   * A non-blocking warning (PLAN-import-avisos): amber, announced politely,
+   * tied to the field by aria-describedby and never `aria-invalid`. The error
+   * wins: while there is one, the warning is not shown.
+   */
+  warning?: string;
+  /** What can be done about the warning ("Está bien así"), after its text. */
+  warningAction?: ReactNode;
   children: (id: string, describedBy: string | undefined) => ReactElement;
+}
+
+const warningStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "flex-start",
+  gap: 6,
+  fontSize: 13,
+  fontWeight: 600,
+  lineHeight: 1.45,
+  color: "var(--warn-fg)",
+  background: "var(--warn-bg)",
+  borderRadius: "var(--r-md)",
+  padding: "8px 10px",
+  margin: 0,
+};
+
+/** The warning on its own, for a value that has no single field (a dropped phone). */
+export function FieldWarning({ id, text, action }: { id?: string; text: string; action?: ReactNode }): ReactElement {
+  return (
+    <div style={{ display: "grid", gap: 6, marginTop: 6 }}>
+      <p id={id} role="status" aria-live="polite" style={warningStyle}>
+        <span aria-hidden="true" style={{ flexShrink: 0, display: "inline-flex", paddingTop: 1 }}>
+          <Icon name="warning" size={14} stroke={2.4} />
+        </span>
+        {text}
+      </p>
+      {action}
+    </div>
+  );
 }
 
 const labelRowStyle: CSSProperties = {
@@ -45,13 +82,19 @@ const labelStyle: CSSProperties = {
   color: "var(--text-muted)",
 };
 
-export function Field({ label, required, error, help, children }: FieldProps): ReactElement {
+export function Field({ label, required, error, help, warning, warningAction, children }: FieldProps): ReactElement {
   const id = useId();
   const errorId = `${id}-error`;
   const helpId = `${id}-help`;
+  const warningId = `${id}-warning`;
   // El error gana sobre la ayuda: cuando algo está mal, lo que hay que leer es
   // qué está mal, no cómo se llenaba el campo. El (?) sigue ahí para consultarlo.
-  const describedBy = error !== undefined ? errorId : help !== undefined ? helpId : undefined;
+  // Y gana sobre el aviso: un dato inválido se corrige antes de discutirlo.
+  const warned = error === undefined && warning !== undefined;
+  const describedBy =
+    error !== undefined
+      ? errorId
+      : [warned ? warningId : undefined, help !== undefined ? helpId : undefined].filter((v) => v !== undefined).join(" ") || undefined;
 
   return (
     <div style={{ display: "block", minWidth: 0 }}>
@@ -91,6 +134,7 @@ export function Field({ label, required, error, help, children }: FieldProps): R
           {error}
         </p>
       )}
+      {warned && <FieldWarning id={warningId} text={warning} action={warningAction} />}
     </div>
   );
 }

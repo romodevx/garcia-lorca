@@ -5,6 +5,7 @@ import { Btn } from "../../_design/Controls";
 import { EmailField, SelectField, TextField, useEmailShapeOnSave, useFormatError, useRequired } from "../../_design/form";
 import { Icon } from "../../_design/Icon";
 import { InviteLink } from "../../_design/InviteLink";
+import { STUDENT_DRAFT } from "../../students/importIssues";
 import { UndoToast } from "../../_design/UndoToast";
 import { useUndoableRemoval } from "../../_design/useUndoableRemoval";
 import { spanishServerReason } from "../../_lib/serverReason";
@@ -35,6 +36,8 @@ const RELATIONSHIP_LABEL: Record<string, string> = {
 
 export interface ContactsPanelProps {
   studentId: string;
+  /** module_import_review: a draft without a CURP is not handed to a family account. */
+  draft?: boolean;
 }
 
 /**
@@ -65,7 +68,14 @@ function isStaffAddressRefusal(cause: unknown): boolean {
   return typeof cause.detail === "string" && cause.detail.includes(STAFF_ADDRESS_REASON);
 }
 
-export function ContactsPanel({ studentId }: ContactsPanelProps): ReactElement {
+/** A draft's family access, refused before it is asked (and by the server, 409 STUDENT_DRAFT). */
+const DRAFT_INVITE = "Falta la CURP del alumno para invitarle";
+
+function isDraftRefusal(cause: unknown): boolean {
+  return typeof cause === "object" && cause !== null && "code" in cause && cause.code === STUDENT_DRAFT;
+}
+
+export function ContactsPanel({ studentId, draft = false }: ContactsPanelProps): ReactElement {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -165,7 +175,7 @@ export function ContactsPanel({ studentId }: ContactsPanelProps): ReactElement {
       }
       setGrantError((prev) => ({
         ...prev,
-        [contact.id]: (cause instanceof Error ? spanishServerReason(cause.message) : undefined) ?? "No se pudo dar el acceso.",
+        [contact.id]: isDraftRefusal(cause) ? DRAFT_INVITE : (cause instanceof Error ? spanishServerReason(cause.message) : undefined) ?? "No se pudo dar el acceso.",
       }));
     } finally {
       setGranting(undefined);
@@ -207,7 +217,10 @@ export function ContactsPanel({ studentId }: ContactsPanelProps): ReactElement {
               <Icon name="check" size={13} stroke={2.6} />App
             </span>
           )}
-          {!c.hasAccount && c.email !== "" && (
+          {!c.hasAccount && draft && (
+            <span style={{ fontSize: 12.5, color: "var(--text-faint)" }}>{DRAFT_INVITE}</span>
+          )}
+          {!c.hasAccount && !draft && c.email !== "" && (
             <Btn
               kind="ghost"
               icon="mail"
@@ -218,7 +231,7 @@ export function ContactsPanel({ studentId }: ContactsPanelProps): ReactElement {
               {granting === c.id ? "Enviando…" : "Dar acceso a la app"}
             </Btn>
           )}
-          {!c.hasAccount && c.email === "" && (
+          {!c.hasAccount && !draft && c.email === "" && (
             // An action that cannot succeed should not be pressable. Saying WHY
             // is what turns a missing button into something the office can fix.
             <span style={{ fontSize: 12.5, color: "var(--text-faint)" }}>

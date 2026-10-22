@@ -29,6 +29,11 @@ const CURP_ALPHABET = "0123456789ABCDEFGHIJKLMNÑOPQRSTUVWXYZ";
 /** The official shape, the same pattern the students service enforces. */
 const CURP_SHAPE = /^[A-Z][AEIOUX][A-Z]{2}[0-9]{2}(0[1-9]|1[0-2])(0[1-9]|[12][0-9]|3[01])[HM][A-Z]{2}[B-DF-HJ-NP-TV-Z]{3}[A-Z0-9][0-9]$/;
 
+/** Whether the CURP (trimmed, upper-cased) has the official shape the students service accepts. */
+export function isCurpShape(raw: string): boolean {
+  return CURP_SHAPE.test(raw.trim().toUpperCase());
+}
+
 const CHECKED_LENGTH = 17;
 const CHECK_WEIGHT_BASE = 18;
 const CHECK_MODULUS = 10;
