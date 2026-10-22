@@ -8,6 +8,7 @@ import { useChildPaymentInfo, useChildStatement } from "../state/familyData";
 import { useRefreshHandler } from "../components/refresh";
 import { useTheme } from "../theme";
 import { Button, Card, Chip, EmptyState, ListRow, ScreenTitle, SectionLabel, TintIcon } from "../ui";
+import { accountHeadline } from "./account/accountHeadline";
 import { HowToPayCard } from "./account/HowToPayCard";
 import { MovementList } from "./account/MovementList";
 import { splitLedger } from "./account/ledgerView";
@@ -23,6 +24,13 @@ const PDF_MESSAGES = {
   storage: "No pudimos guardar el estado de cuenta en el teléfono. Libera espacio e inténtalo de nuevo.",
   not_found: "El estado de cuenta no está disponible.",
   session: "Tu sesión terminó. Vuelve a iniciar sesión para descargar el estado de cuenta.",
+};
+
+/** No statement read yet (no child selected): an unknown day and an empty balance. */
+const NO_STATEMENT = {
+  totals: { chargedCents: 0, discountCents: 0, paidCents: 0, balanceCents: 0, notYetDueCents: 0 },
+  dueTodayCents: 0,
+  asOf: "",
 };
 
 /**
@@ -99,25 +107,10 @@ export function AccountScreen(): ReactElement {
     );
   }
 
-  // What the school is asking for TODAY leads; the pending balance sits beside
-  // it. Both are true at once, and a parent shown only the balance is told a
-  // number nobody is asking them for — they are also the one person who cannot
-  // walk to the office and ask which is which.
-  //
-  // An EMPTY asOf means the day is unknown. Rendering the day's figure as $0.00
-  // there would tell a family that owes money that they are settled — the same
-  // fabricated "Al corriente" this screen refuses when the child bootstrap
-  // fails (bug_005). So the hero falls back to the balance.
-  const hasToday = (data?.asOf ?? "") !== "";
-  const balanceCents = data?.totals.balanceCents ?? 0;
-  const heroCents = hasToday ? (data?.dueTodayCents ?? 0) : balanceCents;
-  const settled = heroCents <= 0;
-  // Without the day the hero IS the balance, and a balance below zero is the
-  // school owing the family (T5): credit, in words and as a positive amount.
-  const heroIsCredit = !hasToday && balanceCents < 0;
-  // dueTodayCents is what makes the month current, early-payment reward
-  // included (ISSUE-T14-106) — not what is overdue.
-  const heroLabel = hasToday ? "Para estar al corriente" : heroIsCredit ? "Saldo a favor" : settled ? "Saldo actual" : "Saldo por pagar";
+  // Today's figure leads, the balance beside it — the same headline Inicio shows.
+  const { label: heroLabel, amountCents: heroAmountCents, settled, hasToday, balanceCents } = accountHeadline(
+    data ?? NO_STATEMENT,
+  );
   // What has happened newest first, the cycle's later months below (T14-106).
   const ledger = splitLedger(data?.movements ?? [], data?.asOf ?? "");
 
@@ -134,7 +127,7 @@ export function AccountScreen(): ReactElement {
           accessibilityLabel="Saldo"
           style={[styles.amount, { color: settled ? theme.colors.ok : theme.colors.text, fontFamily: theme.fonts.display }]}
         >
-          {pesos(heroIsCredit ? -heroCents : Math.max(heroCents, 0))}
+          {pesos(heroAmountCents)}
         </Text>
         {hasToday && (
           <>

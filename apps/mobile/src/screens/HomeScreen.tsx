@@ -12,7 +12,8 @@ import { AsyncErrorState } from "./AsyncStates";
 import { todayHeadline } from "./attendanceView";
 import { chipTint } from "./attendance/tint";
 import { useSchoolMonth } from "./attendance/useSchoolMonth";
-import { formatLongDay, pesos } from "./format";
+import { accountHeadline } from "./account/accountHeadline";
+import { formatLongDay, pesos, totalBalanceLine } from "./format";
 
 /**
  * Inicio: greeting + actionable summary cards, each routing to its detail. The
@@ -44,11 +45,11 @@ export function HomeScreen(): ReactElement {
     );
   }
 
-  const balanceCents = account.data?.totals.balanceCents ?? null;
-  const settled = balanceCents !== null && balanceCents <= 0;
-  // Below zero the school owes the family (T5): credit, as a positive amount.
-  const inCredit = balanceCents !== null && balanceCents < 0;
-  const balanceLabel = inCredit ? "Saldo a favor" : settled ? "Estado de cuenta" : "Saldo por pagar";
+  // The same headline Cuenta leads with: what is due today, the balance beside
+  // it. Judging the whole cycle's balance here called an up-to-date child
+  // "Pendiente" (QA 21-oct). Null until the statement arrives.
+  const headline = account.data === null ? null : accountHeadline(account.data);
+  const settled = headline?.settled ?? false;
 
   const today = todayHeadline(todayRecord);
   const todayTint = chipTint(theme.colors, today.kind);
@@ -97,13 +98,18 @@ export function HomeScreen(): ReactElement {
           </View>
           <View style={styles.heroMain}>
             <Text style={[styles.heroLabel, { color: theme.colors.text2, fontFamily: theme.fonts.ui }]}>
-              {balanceLabel}
+              {headline?.label ?? "Estado de cuenta"}
             </Text>
             <Text style={[styles.heroValue, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]}>
-              {balanceCents === null ? "—" : pesos(Math.abs(balanceCents))}
+              {headline === null ? "—" : pesos(headline.amountCents)}
             </Text>
+            {headline?.hasToday === true && (
+              <Text style={[styles.heroSub, { color: theme.colors.text3, fontFamily: theme.fonts.uiSemi }]}>
+                {totalBalanceLine(headline.balanceCents)}
+              </Text>
+            )}
             <View style={{ marginTop: 7 }}>
-              {balanceCents === null ? null : settled ? (
+              {headline === null ? null : settled ? (
                 <Chip kind="ok" icon="check">Al corriente</Chip>
               ) : (
                 <Chip kind="warn" icon="clock">Pendiente</Chip>
