@@ -5,7 +5,7 @@ import type { FamilyProfile } from "../api";
 import { useAppState } from "../state/AppState";
 import { useChildProfile } from "../state/familyData";
 import { useTheme } from "../theme";
-import { Card, ListRow } from "../ui";
+import { Card, EmptyState, ListRow } from "../ui";
 import { AsyncErrorState, AsyncLoading } from "./AsyncStates";
 import { formatDayWithYear } from "./format";
 
@@ -31,8 +31,9 @@ export function ProfileScreen(): ReactElement {
   if ((childLoading || loading) && data === null) {
     return <AsyncLoading />;
   }
+  // No child selected (the family has none linked): say so, never a blank page.
   if (data === null) {
-    return <></>;
+    return <EmptyState icon="user" title="Sin alumno vinculado" subtitle="Cuando la escuela vincule a tu hijo(a), aquí verás su perfil." />;
   }
   return <ProfileCard profile={data} />;
 }

@@ -6,14 +6,14 @@ import { renderWithProviders } from "../test/renderWithProviders";
 const child = { id: "s1", firstName: "Mateo", lastName: "Herrera", maternalLastName: "Díaz", level: "Primaria", levelId: "l1", gradeGroup: "A" };
 const enrollment = { id: "e1", studentId: "s1", cycleId: "c1", groupId: "g1", termId: "t1", status: "active", enrolledAt: "2026-08-24" };
 
-function mockFetch(profile: unknown | null): void {
+function mockFetch(profile: unknown | null, students: unknown[] = [child]): void {
   globalThis.fetch = jest.fn(async (url: string) => {
     const u = String(url);
     if (u.includes("/family/students/s1/profile")) {
       if (profile === null) return { ok: false, status: 500, json: async () => ({}) };
       return { ok: true, status: 200, json: async () => profile };
     }
-    if (u.includes("/family/students")) return { ok: true, status: 200, json: async () => ({ students: [child] }) };
+    if (u.includes("/family/students")) return { ok: true, status: 200, json: async () => ({ students }) };
     return { ok: true, status: 200, json: async () => ({ notifications: [] }) };
   }) as unknown as typeof fetch;
 }
@@ -49,6 +49,14 @@ describe("ProfileScreen", () => {
 
     await waitFor(() => expect(screen.getByText("Sin grupo asignado")).toBeTruthy());
     expect(screen.queryByText(/En el grupo desde/)).toBeNull();
+  });
+
+  it("shows an empty state, not a blank page, when the family has no linked child", async () => {
+    mockFetch(null, []);
+
+    await renderWithProviders(<ProfileScreen />);
+
+    await waitFor(() => expect(screen.getByText("Sin alumno vinculado")).toBeTruthy());
   });
 
   it("offers a retry when the profile cannot be read", async () => {
