@@ -27,6 +27,9 @@ import { DepositPreviewCard, DepositReceipt } from "./DepositReceipt";
 import { formatPesosInput, formatCents, pesosToCents } from "../../_lib/money";
 import { formatStudentName } from "../../_design/students/studentName";
 import { StudentNotesBeside, useNotesBeside, type NotesAccess } from "../../_design/students/StudentNotesBeside";
+import { useVoucherChoice, type CollectVouchers } from "./vouchers/useVoucherChoice";
+import { VoucherLinkNotice } from "./vouchers/VoucherLinkNotice";
+import { VoucherPanel } from "./vouchers/VoucherPanel";
 
 /**
  * What is missing, or over, against what should have been paid. Zero when the
@@ -65,6 +68,12 @@ export interface CollectDrawerProps {
    * without students:read, the counter shows no notes.
    */
   notes?: NotesAccess;
+  /**
+   * The families' payment vouchers (ADR 0040): the one this payment IS, when
+   * opened from the queue, and the pupil's pending ones otherwise. Absent:
+   * module_payment_vouchers is off and the counter never mentions them.
+   */
+  vouchers?: CollectVouchers;
 }
 
 /** The server's answer when the account changed under the cashier (CC-202). */
@@ -176,15 +185,20 @@ export function paymentDateError(paidOn: string, day: string): string | undefine
  * arithmetic the system already knows how to do. Here the split is previewed
  * while they type and taken when they press Enter.
  */
-export function CollectDrawer({ student, onClose, onCollected, today, canGrantDiscounts = false, notes }: CollectDrawerProps): ReactElement {
+export function CollectDrawer({ student, onClose, onCollected, today, canGrantDiscounts = false, notes, vouchers }: CollectDrawerProps): ReactElement {
   // The pupil's notes on the left of the counter (T6): what the office must
   // remember about this family while it takes their money.
   const beside = useNotesBeside(student.id, notes);
   const day = today ?? localISODate();
+  // Opened on a family's voucher: what it claims prefills the counter — the
+  // day it says it paid, the amount, a transfer. The cashier confirms it.
+  const byVoucher = vouchers?.byVoucher;
+  const claimedCents = byVoucher?.claimedAmountCents;
+  const voucherChoice = useVoucherChoice(student.id, vouchers);
   // The day the family paid, which is not always the day it is keyed: a
   // cashier catching up on Monday records Friday. Every rule reads it — the
   // surcharge, the early-payment window, the inscription's price (task 7).
-  const [paidOn, setPaidOn] = useState(day);
+  const [paidOn, setPaidOn] = useState(() => claimedDay(byVoucher?.claimedPaidOn, day));
   const [dateError, setDateError] = useState<string | undefined>(undefined);
   const dateOk = paymentDateError(paidOn, day) === undefined;
   // Today is not sent: the server stamps its own clock and keeps the hour of
@@ -196,8 +210,9 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
   const cutClosed = useClosedCut(sentDate, dateOk);
   // Once the cashier types another amount, a new quote (a new date) does not
   // overwrite it. Reformatting the prefilled amount on blur is not that.
-  const amountEdited = useRef(false);
-  const prefilledCents = useRef<number | undefined>(undefined);
+  // The family's own figure counts as typed: a quote does not overwrite it.
+  const amountEdited = useRef(claimedCents !== undefined);
+  const prefilledCents = useRef<number | undefined>(claimedCents);
   // The day the quote ON SCREEN is for ("" = today). The label follows the
   // quote, not the field: a date that brought no quote does not relabel it.
   const [expectedFor, setExpectedFor] = useState("");
@@ -209,7 +224,7 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
   const [owed, setOwed] = useState<number | null>(null);
   const [credit, setCredit] = useState(0);
   const [expected, setExpected] = useState<Expected | null>(null);
-  const [amount, setAmount] = useState("");
+  const [amount, setAmount] = useState(() => (claimedCents === undefined ? "" : formatPesosInput(claimedCents)));
   // The school honouring the early-payment reward after the window closed. A
   // decision somebody makes, which is why it is a switch and not a default.
   const [grantEarly, setGrantEarly] = useState(false);
@@ -219,6 +234,8 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
   // A ref and not the state: two presses inside one render both read `saving` as false.
   const inFlight = useRef(false);
   const [error, setError] = useState<string | undefined>(undefined);
+  // A voucher refused the payment (ADR 0040): said at the top, nothing taken.
+  const [voucherAlert, setVoucherAlert] = useState<string | undefined>(undefined);
   // Bumped to read the account and the quote again: after a 409 (CC-202) the
   // money was taken by another cashier, and the screen must show what is left.
   const [reloads, setReloads] = useState(0);
@@ -263,7 +280,7 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
     [capCents, balance, byChoice, capDiscountCents],
   );
   // How the amount is paid, method by method (T8): it must add up to it.
-  const tenders = useTenders(cents);
+  const tenders = useTenders(cents, byVoucher === undefined ? undefined : [{ method: "transfer", amountCents: claimedCents ?? 0 }]);
   const toggle = (chargeId: string): void => {
     const next = new Set(chosen);
     if (next.has(chargeId)) next.delete(chargeId);
@@ -345,13 +362,15 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
     setDateError(wrongDate);
     setAmountError(wrongAmount);
     const tendersOk = wrongAmount === undefined && tenders.validate();
-    if (wrongDate !== undefined || !tendersOk) {
+    const voucherParts = voucherChoice.parts();
+    if (wrongDate !== undefined || !tendersOk || voucherParts === undefined) {
       focusFirstInvalid();
       return;
     }
     inFlight.current = true;
     setSaving(true);
     setError(undefined);
+    setVoucherAlert(undefined);
     setConflict(null);
     try {
       const result = await registerDeposit(API_URL, depositRequest({
@@ -362,12 +381,17 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
         paidOn: sentDate,
         ...(choice !== undefined ? { chargeIds: choice } : {}),
         grantEarlyPayment: grantEarly,
+        ...voucherParts,
       }));
       setReceipt(result);
+      if (result.linkedVoucher !== undefined || byVoucher !== undefined) vouchers?.onChanged();
       onCollected();
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "No se pudo registrar el cobro.";
-      if (cause instanceof HttpError && cause.status === HTTP_CONFLICT) {
+      const refusal = voucherChoice.refuse(cause);
+      if (refusal !== undefined) {
+        setVoucherAlert(refusal.message);
+      } else if (cause instanceof HttpError && cause.status === HTTP_CONFLICT) {
         // The account moved under the cashier (CC-202): read it again, by
         // itself, with nothing chosen and nothing filled, and say so at the
         // top where focus goes (CC-402).
@@ -386,7 +410,7 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
       inFlight.current = false;
       setSaving(false);
     }
-  }, [student.id, cents, cap, tenders, attemptKey, grantEarly, sentDate, paidOn, day, choice, focusFirstInvalid, onCollected]);
+  }, [student.id, cents, cap, tenders, attemptKey, grantEarly, sentDate, paidOn, day, choice, focusFirstInvalid, onCollected, byVoucher, vouchers, voucherChoice]);
 
   return (
     <DrawerShell
@@ -412,6 +436,10 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
                 style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
                 <div style={{ flex: 1, overflowY: "auto", padding: "22px 26px", display: "flex", flexDirection: "column", gap: 20 }}>
                   {conflict !== null && <ErrorSummary items={[{ field: "Monto a pagar", message: conflict.message }]} attempt={conflict.attempt} />}
+                  {voucherAlert !== undefined && <p role="alert" style={{ margin: 0, padding: "12px 16px", borderRadius: "var(--r-md)", background: "var(--bad-bg)", color: "var(--bad-fg)", fontSize: 14.5, fontWeight: 600 }}>{voucherAlert}</p>}
+                  {byVoucher !== undefined && vouchers !== undefined && (
+                    <VoucherPanel voucher={byVoucher} onChanged={vouchers.onChanged} onRejected={() => { vouchers.onChanged(); (vouchers.onRejected ?? onClose)(); }} />
+                  )}
                   <div style={{ padding: "18px 20px", borderRadius: "var(--r-md)", background: "var(--surface-3)", border: "1px solid var(--border)" }}>
                     <span style={{ fontSize: 14, color: "var(--text-muted)" }}>{expectedFor === "" ? "Monto esperado hoy" : `Monto esperado al ${shortDayLabel(expectedFor)}`}</span>
                     <div data-testid="amount-expected" style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 38, color: "var(--text)", marginTop: 4 }}>
@@ -425,6 +453,8 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
                   </div>
 
                   <DebtList lines={lines} balanceCents={balance ?? 0} onTimeCents={expected?.onTimeBalanceCents ?? balance ?? 0} chosen={chosen} selectedCents={selectedCents} onToggle={toggle} />
+
+                  {byVoucher === undefined && <VoucherLinkNotice choice={voucherChoice} />}
 
                   <MoneyField
                     label="Monto a pagar"
@@ -485,7 +515,7 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
                 <div style={{ display: "flex", gap: 12, alignItems: "center", padding: "18px 26px", borderTop: "1px solid var(--border)", background: "var(--surface-2)" }}>
                   <Btn kind="ghost" type="button" onClick={onClose}>Cancelar</Btn>
                   <div style={{ flex: 1 }} />
-                  <Btn icon="check" type="submit" busy={saving} style={{ height: 52, fontSize: 16 }}>{saving ? "Cobrando…" : "Cobrar"}</Btn>
+                  <Btn icon="check" type="submit" busy={saving} style={{ height: 52, fontSize: 16 }}>{submitLabel(byVoucher !== undefined, saving)}</Btn>
                 </div>
               </form>
             </StudentNotesBeside>
@@ -493,6 +523,17 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
       </>
     </DrawerShell>
   );
+}
+
+/** The voucher's day when it is a day the payment may carry (not after today); else today. */
+function claimedDay(claimed: string | undefined, day: string): string {
+  return claimed !== undefined && claimed <= day ? claimed : day;
+}
+
+/** "Cobrar" at the counter; "Registrar pago" on a family's voucher, where nobody hands over money. */
+function submitLabel(byVoucher: boolean, saving: boolean): string {
+  if (byVoucher) return saving ? "Registrando…" : "Registrar pago";
+  return saving ? "Cobrando…" : "Cobrar";
 }
 
 interface YearBalanceProps {
