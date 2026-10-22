@@ -1,3 +1,4 @@
+import { File } from "expo-file-system";
 import { apiFetch } from "./client";
 import { ApiError } from "./errors";
 
@@ -32,7 +33,7 @@ export interface FamilyPaymentVoucherResult {
   replayed: boolean;
 }
 
-/** A local file as React Native's FormData sends it. */
+/** A local file (file:// uri) and how to name it in the upload. */
 export interface VoucherFile {
   uri: string;
   name: string;
@@ -96,10 +97,21 @@ function refusalOf(res: Response): VoucherSendError {
   }
 }
 
+/**
+ * The file as a part expo/fetch can send. Expo SDK 56 replaces `fetch` with
+ * expo/fetch, which builds the multipart body itself and refuses React
+ * Native's `{ uri, name, type }` part ("Unsupported FormDataPart
+ * implementation") — the request then dies before leaving the phone. It takes
+ * a part with `bytes()`, and its `name` and `type` become the part's filename
+ * and Content-Type.
+ */
+function filePart({ uri, name, type }: VoucherFile): Blob {
+  return { name, type, bytes: () => new File(uri).bytes() } as unknown as Blob;
+}
+
 function formOf(upload: VoucherUpload): FormData {
   const form = new FormData();
-  // React Native's FormData streams a { uri, name, type } part from disk.
-  form.append("file", upload.file as unknown as Blob);
+  form.append("file", filePart(upload.file));
   if (upload.amountCents !== undefined) form.append("amountCents", String(upload.amountCents));
   if (upload.paidOn !== undefined) form.append("paidOn", upload.paidOn);
   return form;
