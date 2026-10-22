@@ -14,9 +14,10 @@ type ExistingPupil struct {
 	ActiveGroupIDs []string
 }
 
-// ExistingDraft is an open draft as a later upload needs to recognize it: a
-// draft has no CURP, so it is told apart by its names, birth date, bank
-// reference and the group its open curp issue names.
+// ExistingDraft is a pupil an import stored as a draft — still one, or since
+// promoted — as a later upload needs to recognize them: the row has no CURP,
+// so they are told apart by names, birth date, bank reference and the group
+// their curp issue names. StillDraft says they have no CURP yet.
 type ExistingDraft struct {
 	StudentID        string
 	FirstName        string
@@ -25,6 +26,7 @@ type ExistingDraft struct {
 	BirthDate        time.Time // zero when none was stored
 	BankReference    string
 	IntendedGroupID  string
+	StillDraft       bool
 }
 
 // ImportCommand is one pupil of the legacy import (ADR 0033): the pupil,
@@ -71,8 +73,9 @@ type CycleStartMove struct {
 //   - StudentsByCURP returns the school's pupils holding any of the CURPs,
 //     keyed by CURP (absent = new to the school).
 //   - BankReferencesTaken returns which of the references a pupil already holds.
-//   - OpenDrafts returns the school's drafts whose curp issue is still open,
-//     so a second upload of the same file does not draft them again.
+//   - DraftedPupils returns every pupil an import stored as a draft (a
+//     curp_missing/curp_invalid issue, open or resolved), whatever their
+//     status now, so no later upload of the same file drafts them again.
 //   - ImportStudent stores ONE pupil in ONE transaction: the reference is
 //     checked first and dropped if taken (so the insert never aborts on it), the
 //     matrícula is allocated, the pupil and the enrollment are inserted. A CURP
@@ -84,7 +87,7 @@ type CycleStartMove struct {
 type ImportRepository interface {
 	StudentsByCURP(ctx context.Context, curps []string) (map[string]ExistingPupil, error)
 	BankReferencesTaken(ctx context.Context, refs []string) (map[string]bool, error)
-	OpenDrafts(ctx context.Context) ([]ExistingDraft, error)
+	DraftedPupils(ctx context.Context) ([]ExistingDraft, error)
 	ImportStudent(ctx context.Context, cmd ImportCommand) (ImportedPupil, error)
 	MoveImportedToCycleStart(ctx context.Context, move CycleStartMove) ([]string, error)
 }

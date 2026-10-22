@@ -74,9 +74,11 @@ func (r *Repository) BankReferencesTaken(ctx context.Context, refs []string) (ma
 	return out, nil
 }
 
-// OpenDrafts returns the tenant's drafts whose curp issue is still open, with
-// what a later upload recognizes them by — one query for a whole import.
-func (r *Repository) OpenDrafts(ctx context.Context) ([]ports.ExistingDraft, error) {
+// DraftedPupils returns every pupil of the tenant an import stored as a draft
+// — a curp_missing/curp_invalid issue, open or resolved — whatever their
+// status now, with what a later upload recognizes them by. One query for a
+// whole import.
+func (r *Repository) DraftedPupils(ctx context.Context) ([]ports.ExistingDraft, error) {
 	var out []ports.ExistingDraft
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
 		var rows []struct {
@@ -87,17 +89,17 @@ func (r *Repository) OpenDrafts(ctx context.Context) ([]ports.ExistingDraft, err
 			BirthDate        *time.Time
 			BankReference    *string
 			IntendedGroupID  *string
+			AdmissionStatus  string
 		}
 		err := tx.Raw(`SELECT s.id, s.first_name, s.last_name, s.maternal_last_name, s.birth_date, s.bank_reference,
-		                      i.intended_group_id
+		                      s.admission_status, i.intended_group_id
 		                 FROM students s
 		                 JOIN student_import_issues i
 		                   ON i.tenant_id = s.tenant_id AND i.student_id = s.id
-		                  AND i.field = ? AND i.resolved_at IS NULL
-		                WHERE s.admission_status = ?`,
-			string(domain.FieldCURP), domain.AdmissionDraft.String()).Scan(&rows).Error
+		                  AND i.field = ? AND i.code IN ?`,
+			string(domain.FieldCURP), []string{domain.IssueCURPMissing, domain.IssueCURPInvalid}).Scan(&rows).Error
 		if err != nil {
-			return glerrors.Wrap(glerrors.KindInternal, "reading the open drafts", err)
+			return glerrors.Wrap(glerrors.KindInternal, "reading the drafted pupils", err)
 		}
 		out = make([]ports.ExistingDraft, 0, len(rows))
 		for _, row := range rows {
@@ -105,6 +107,7 @@ func (r *Repository) OpenDrafts(ctx context.Context) ([]ports.ExistingDraft, err
 				StudentID: row.ID, FirstName: row.FirstName, LastName: row.LastName,
 				MaternalLastName: derefOrEmpty(row.MaternalLastName), BankReference: derefOrEmpty(row.BankReference),
 				IntendedGroupID: derefOrEmpty(row.IntendedGroupID),
+				StillDraft:      row.AdmissionStatus == domain.AdmissionDraft.String(),
 			}
 			if row.BirthDate != nil {
 				d.BirthDate = *row.BirthDate

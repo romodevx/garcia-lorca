@@ -362,18 +362,24 @@ func newDraftKey(first, last, maternal string, born time.Time, group string) dra
 
 // markExistingDrafts settles the draft rows a previous upload already stored
 // (same names, birth date, intended group and — when both have one — bank
-// reference) as ALREADY_IMPORTED: re-uploading a file never duplicates its
-// drafts. Read once per request, and only when the request has a draft row.
+// reference) as ALREADY_IMPORTED, even when the office has promoted that
+// pupil since: re-uploading a file never duplicates its drafts. A stored
+// draft without a birth date never matches — a name and a group are not
+// enough to say two rows are one child. Read once per request, and only when
+// the request has a draft row.
 func (s *ImportService) markExistingDrafts(ctx context.Context, rows []ImportRow, pending []pendingRow, results []ImportResult) ([]pendingRow, error) {
 	if !slices.ContainsFunc(pending, func(p pendingRow) bool { return p.draft }) {
 		return pending, nil
 	}
-	drafts, err := s.repo.OpenDrafts(ctx)
+	drafts, err := s.repo.DraftedPupils(ctx)
 	if err != nil {
 		return nil, err
 	}
 	byKey := make(map[draftKey][]ports.ExistingDraft, len(drafts))
 	for _, d := range drafts {
+		if d.BirthDate.IsZero() {
+			continue
+		}
 		k := newDraftKey(d.FirstName, d.LastName, d.MaternalLastName, d.BirthDate, d.IntendedGroupID)
 		byKey[k] = append(byKey[k], d)
 	}
@@ -386,7 +392,7 @@ func (s *ImportService) markExistingDrafts(ctx context.Context, rows []ImportRow
 		}
 		results[p.index].Outcome = ImportAlreadyImported
 		results[p.index].StudentID = match.StudentID
-		results[p.index].Draft = true
+		results[p.index].Draft = match.StillDraft
 		results[p.index].Warnings = nil
 	}
 	return left, nil
