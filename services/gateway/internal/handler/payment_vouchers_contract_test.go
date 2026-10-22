@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -63,19 +62,6 @@ func pvOp(t *testing.T, paths map[string]map[string]yaml.Node, method, path stri
 		t.Fatalf("%s %s: %v", method, path, err)
 	}
 	return op
-}
-
-func jsonFields(v any) []string {
-	var out []string
-	rt := reflect.TypeOf(v)
-	for i := range rt.NumField() {
-		name, _, _ := strings.Cut(rt.Field(i).Tag.Get("json"), ",")
-		if name != "" && name != "-" {
-			out = append(out, name)
-		}
-	}
-	slices.Sort(out)
-	return out
 }
 
 func schemaFields(s pvSchema) []string {
