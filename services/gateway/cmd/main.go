@@ -338,7 +338,8 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	// no config:read) reads "3° PRIMARIA · B" without being handed the catalog
 	// (CC-211, CC-313).
 	studentsH := handler.NewStudentsHandler(studentsClient,
-		handler.WithStudentRoomLabels(handler.NewCycleRoomLabels(configClient, studentsClient)))
+		handler.WithStudentRoomLabels(handler.NewCycleRoomLabels(configClient, studentsClient)),
+		handler.WithImportReview(importReviewOn))
 	studentsRead := func(h http.HandlerFunc) http.Handler {
 		return guard.Protect("students", requireAuthChanged(middleware.RequirePermission("students:read")(http.HandlerFunc(h))))
 	}
@@ -380,6 +381,17 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	// Correcting the file (task 5) needs students:update.
 	mux.Handle("PUT /api/v1/students/{id}", guard.Protect("students", requireAuthChanged(
 		middleware.RequirePermission("students:update")(http.HandlerFunc(studentsH.Update)))))
+	// PLAN-import-avisos: a pupil's import issues live under module_students
+	// AND module_import_review. Reading them is reading the pupil
+	// (students:read); «Está bien así» changes the file's record, so it is
+	// students:update, like the correction itself.
+	importIssuesH := handler.NewImportIssuesHandler(studentsClient)
+	importReview := func(perm string, h http.HandlerFunc) http.Handler {
+		return guard.Protect("students", guard.Protect("import_review", requireAuthChanged(
+			middleware.RequirePermission(perm)(h))))
+	}
+	mux.Handle("GET /api/v1/students/{id}/import-issues", importReview("students:read", importIssuesH.List))
+	mux.Handle("POST /api/v1/students/{id}/import-issues/{issueId}/accept", importReview("students:update", importIssuesH.Accept))
 
 	// M03 enrollments (Phase 4): place a student into a group of a cycle and
 	// transfer/withdraw them. Flag-guarded (module_students), authenticated +
