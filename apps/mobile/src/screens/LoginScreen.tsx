@@ -1,5 +1,5 @@
-import { useRef, useState, type ReactElement } from "react";
-import { Image, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { useEffect, useRef, useState, type ReactElement } from "react";
+import { AccessibilityInfo, Image, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { ApiError, requestPasswordReset } from "../api";
 import { Icon } from "../icons";
 import { useTheme } from "../theme";
@@ -103,6 +103,15 @@ export function LoginScreen({ onSubmit, notice }: LoginScreenProps): ReactElemen
     }
   };
 
+  // Said aloud on both platforms: accessibilityLiveRegion only exists on
+  // Android, so on iOS the answer appeared in silence. One announcement, no
+  // live region as well, or Android reads it twice.
+  useEffect(() => {
+    if (reset !== null) {
+      AccessibilityInfo.announceForAccessibility(reset.text);
+    }
+  }, [reset]);
+
   const forgotPassword = async (): Promise<void> => {
     if (resetting) {
       return;
@@ -196,7 +205,6 @@ export function LoginScreen({ onSubmit, notice }: LoginScreenProps): ReactElemen
 
       {reset ? (
         <Text
-          accessibilityLiveRegion="polite"
           accessibilityRole={reset.kind === "error" ? "alert" : undefined}
           style={[styles.error, { color: reset.kind === "error" ? theme.colors.bad : theme.colors.text2, fontFamily: theme.fonts.uiSemi }]}
         >

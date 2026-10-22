@@ -1,4 +1,4 @@
-import { Platform, TextInput } from "react-native";
+import { AccessibilityInfo, Platform, TextInput } from "react-native";
 import { act, fireEvent, screen } from "@testing-library/react-native";
 import { LoginScreen } from "./LoginScreen";
 import { renderWithProviders } from "../test/renderWithProviders";
@@ -243,6 +243,23 @@ describe("LoginScreen", () => {
       });
 
       expect(screen.queryByText(NEUTRAL)).toBeNull();
+    });
+
+    // accessibilityLiveRegion is Android-only: on iOS VoiceOver said nothing.
+    it.each(["android", "ios"] as const)("announces the answer to a screen reader on %s", async (platform) => {
+      setPlatform(platform);
+      gatewayAnswers(204);
+      const announce = jest.spyOn(AccessibilityInfo, "announceForAccessibility").mockImplementation(() => undefined);
+      await renderWithProviders(<LoginScreen onSubmit={async () => undefined} />);
+      await drainMount();
+      // The preset's AccessibilityInfo is already a mock: drop earlier tests' calls.
+      announce.mockClear();
+
+      await typeEmailAndAsk("laura@correo.com");
+
+      expect(announce).toHaveBeenCalledTimes(1);
+      expect(announce).toHaveBeenCalledWith(NEUTRAL);
+      announce.mockRestore();
     });
 
     it("says to wait a few minutes when the gateway rate-limits", async () => {
