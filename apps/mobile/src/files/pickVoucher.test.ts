@@ -9,6 +9,16 @@ jest.mock("expo-image-picker", () => ({
   UIImagePickerPreferredAssetRepresentationMode: { Automatic: "automatic", Compatible: "compatible", Current: "current" },
 }));
 jest.mock("expo-document-picker", () => ({ getDocumentAsync: jest.fn() }));
+/** What the disk says each file weighs, for a picker that does not say. */
+const mockDiskSizes = new Map<string, number>();
+jest.mock("expo-file-system", () => ({
+  File: class {
+    size: number;
+    constructor(path: string) {
+      this.size = mockDiskSizes.get(path) ?? 0;
+    }
+  },
+}));
 
 const camera = jest.mocked(ImagePicker.launchCameraAsync);
 const library = jest.mocked(ImagePicker.launchImageLibraryAsync);
@@ -25,7 +35,10 @@ function photo(extra: object = {}): ImagePicker.ImagePickerResult {
 }
 
 describe("pickVoucherFile", () => {
-  afterEach(() => jest.clearAllMocks());
+  afterEach(() => {
+    jest.clearAllMocks();
+    mockDiskSizes.clear();
+  });
 
   it("takes a compressed photo from the gallery, as a JPEG part", async () => {
     library.mockResolvedValue(photo());
@@ -105,6 +118,24 @@ describe("pickVoucherFile", () => {
     });
 
     await expect(pickVoucherFile("pdf")).resolves.toEqual({ kind: "too_large" });
+  });
+
+  // Some pickers leave the size out; the 5 MB cap must not be skipped then.
+  it("weighs on disk a photo whose size the picker did not give, and refuses it over 5 MB", async () => {
+    library.mockResolvedValue(photo({ fileSize: undefined }));
+    mockDiskSizes.set("file:///cache/IMG_0004.jpg", 6 * MB);
+
+    await expect(pickVoucherFile("library")).resolves.toEqual({ kind: "too_large" });
+  });
+
+  it("accepts a sizeless PDF that weighs under 5 MB on disk", async () => {
+    documents.mockResolvedValue({
+      canceled: false,
+      assets: [{ uri: "file:///cache/pago.pdf", name: "pago.pdf", mimeType: "application/pdf", lastModified: 0 }],
+    });
+    mockDiskSizes.set("file:///cache/pago.pdf", MB);
+
+    await expect(pickVoucherFile("pdf")).resolves.toMatchObject({ kind: "picked" });
   });
 
   it("reports a cancelled picker as nothing picked", async () => {

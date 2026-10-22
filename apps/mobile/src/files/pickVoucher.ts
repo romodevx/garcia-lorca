@@ -1,4 +1,5 @@
 import * as DocumentPicker from "expo-document-picker";
+import { File } from "expo-file-system";
 import * as ImagePicker from "expo-image-picker";
 import type { VoucherFile } from "../api";
 
@@ -54,7 +55,9 @@ function typeFromName(name: string, fallback: string): string | null {
 
 function checked(uri: string, name: string, type: string | null, size: number | null | undefined): VoucherPick {
   if (type === null) return { kind: "unsupported" };
-  return (size ?? 0) > MAX_VOUCHER_BYTES ? { kind: "too_large" } : { kind: "picked", file: { uri, name, type } };
+  // A picker may leave the size out; the disk then says it, so the cap holds.
+  const bytes = size ?? new File(uri).size;
+  return bytes > MAX_VOUCHER_BYTES ? { kind: "too_large" } : { kind: "picked", file: { uri, name, type } };
 }
 
 async function pickPhoto(source: "camera" | "library"): Promise<VoucherPick> {
