@@ -258,6 +258,8 @@ export function AppShell(): ReactElement {
   // The enrollment surface is gated by module_students (UX-only; the gateway is
   // the boundary). The "students" module (Estudiantes) opens this surface.
   const studentsEnabled = useFlag("module_students");
+  // PLAN-import-avisos: the import's per-row review, ⚠ on the list, warnings on the file.
+  const importReview = useFlag("module_import_review");
   // The virtual card (task 13): verified and revoked from Alumnos.
   const cardEnabled = useFlag("module_student_card");
   // The grade-capture surface is gated by module_grades (UX-only; the gateway is
@@ -704,6 +706,7 @@ export function AppShell(): ReactElement {
           onBack={() => go({ screen: "config" })}
           onOpenTuition={() => go({ screen: "config" })}
           onViewStudents={(levelId) => router.push(levelId === undefined ? "/alumnos" : `/alumnos?nivel=${encodeURIComponent(levelId)}`)}
+          importReview={importReview}
         />
       )}
       {(view.screen === "config" ||
@@ -731,6 +734,7 @@ export function AppShell(): ReactElement {
           onBack={backToStudents}
           // A withdrawn pupil's file is read-only: their ficha, not a form.
           onWithdrawn={() => router.replace(viewToPath({ screen: "studentSheet", studentId: view.studentId }))}
+          importReview={importReview}
         />
       )}
       {view.screen === "studentNew" && studentsEnabled && canCreateStudents && (
@@ -762,6 +766,7 @@ export function AppShell(): ReactElement {
             onOpenImport={openStudentImport}
             linkedStudentId={view.screen === "studentSheet" ? view.studentId : undefined}
             onLinkedSheetClosed={leaveStudentSheet}
+            importReview={importReview}
           />
         ) : (
           // Flag OFF: never render the enrollment surface; show the friendly stub
