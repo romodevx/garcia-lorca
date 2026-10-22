@@ -24,6 +24,70 @@ export interface StudentImportRequest {
   capacities?: Record<string, number>;
   /** The preview's planHash; required by the commit. */
   planHash?: string;
+  /**
+   * module_import_review: the office's decision per row (only rows that differ
+   * from a plain import). The commit must carry the same as its preview.
+   */
+  rows?: RowDecision[];
+}
+
+/** What the office does with one row of the file. */
+export type RowAction = "import" | "omit" | "draft";
+
+/** Corrections to a row's values, validated on the server like the file's own. */
+export interface RowOverrides {
+  curp?: string;
+  /** dd/mm/yyyy or yyyy-mm-dd. */
+  birthDate?: string;
+  homePhone?: string;
+  mobilePhone?: string;
+  email?: string;
+  postalCode?: string;
+  state?: string;
+  bankReference?: string;
+  municipality?: string;
+  street?: string;
+  /** "APELLIDOS, NOMBRES", as the previous system writes it. */
+  fullName?: string;
+}
+
+export type OverrideName = keyof RowOverrides;
+
+export interface RowDecision {
+  row: number;
+  action?: RowAction;
+  overrides?: RowOverrides;
+}
+
+/** The part of a pupil's file an import issue is about. */
+export type IssueField =
+  | "birth_date"
+  | "phone_home"
+  | "phone_mobile"
+  | "email"
+  | "postal_code"
+  | "state"
+  | "bank_reference"
+  | "surnames"
+  | "first_name"
+  | "address"
+  | "curp";
+
+/** One value of a preview row the import changes or drops. */
+export interface ImportRowIssue {
+  field: IssueField;
+  code: string;
+  /** What the file said. */
+  original: string;
+  /** What would be stored; "" when dropped. */
+  stored: string;
+}
+
+/** One refused decision (422 IMPORT_ROWS_INVALID): the row, the override (or "action"/"row") and why. */
+export interface RowFieldError {
+  row: number;
+  field: string;
+  code: string;
 }
 
 export type LevelStatus = "matched" | "chosen" | "create" | "unresolved";
@@ -64,6 +128,12 @@ export interface ImportRow {
   reason?: string;
   warnings?: string[];
   enrollmentNumber?: string;
+  /** module_import_review: per field, what the import changes or drops. */
+  issues?: ImportRowIssue[];
+  /** module_import_review: the CURP is missing or invalid, so it may go in as a draft. */
+  canDraft?: boolean;
+  /** module_import_review: the row is (or would be) stored as a draft. */
+  draft?: boolean;
 }
 
 export interface ImportSummary {
@@ -98,7 +168,10 @@ export type StudentImportCode =
   | "FILE_TOO_LARGE"
   | "NO_ACTIVE_CYCLE"
   | "PREVIEW_STALE"
-  | "LEVELS_UNRESOLVED";
+  | "LEVELS_UNRESOLVED"
+  | "IMPORT_ROWS_INVALID";
+
+const ROWS_INVALID = "IMPORT_ROWS_INVALID";
 
 /** A refusal the screen can act on: the status, the machine code and the body's words. */
 export class StudentImportError extends Error {
@@ -106,13 +179,26 @@ export class StudentImportError extends Error {
   readonly code: string | undefined;
   /** The body: for FILE_MISSING_COLUMN, the missing column's name. */
   readonly detail: string;
+  /** IMPORT_ROWS_INVALID: each refused decision; empty otherwise. */
+  readonly rows: readonly RowFieldError[];
 
-  constructor(status: number, detail: string, code: string | undefined) {
+  constructor(status: number, detail: string, code: string | undefined, rows: readonly RowFieldError[] = []) {
     super(detail !== "" ? detail : `HTTP ${status}`);
     this.name = "StudentImportError";
     this.status = status;
     this.detail = detail;
     this.code = code;
+    this.rows = rows;
+  }
+}
+
+/** The refused decisions of a 422 IMPORT_ROWS_INVALID envelope; [] when unreadable. */
+function refusedRows(body: string): RowFieldError[] {
+  try {
+    const parsed = JSON.parse(body) as { error?: { details?: { rows?: RowFieldError[] } } };
+    return parsed.error?.details?.rows ?? [];
+  } catch {
+    return [];
   }
 }
 
@@ -125,7 +211,8 @@ async function post(baseURL: string, action: "preview" | "commit", body: Student
   });
   if (!res.ok) {
     const detail = (await res.text().catch(() => "")).trim();
-    throw new StudentImportError(res.status, detail, res.headers.get("X-Error-Code") ?? undefined);
+    const code = res.headers.get("X-Error-Code") ?? undefined;
+    throw new StudentImportError(res.status, detail, code, code === ROWS_INVALID ? refusedRows(detail) : []);
   }
   return (await res.json()) as StudentImportResult;
 }

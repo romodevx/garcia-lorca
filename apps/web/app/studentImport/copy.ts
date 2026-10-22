@@ -4,7 +4,7 @@
  * screen words them here, once, so a new code shows a Spanish fallback and
  * never a raw `snake_case` token.
  */
-import { StudentImportError, type ImportRow } from "./api";
+import { StudentImportError, type ImportRow, type ImportRowIssue, type IssueField, type OverrideName, type RowFieldError } from "./api";
 
 /** Codes → Spanish. Skip reasons first, then the warnings an imported row can carry. */
 export const REASON_TEXT: Readonly<Record<string, string>> = {
@@ -44,6 +44,8 @@ export const REASON_TEXT: Readonly<Record<string, string>> = {
   state_unknown: "Estado del domicilio no reconocido",
   postal_code_invalid: "Código postal inválido",
   address_truncated: "Domicilio recortado por largo",
+  // the office's own decision (module_import_review)
+  omitted: "Omitida en la revisión",
 };
 
 /** For a code this screen does not know yet. */
@@ -89,6 +91,8 @@ export function failureText(err: unknown): string {
       return "Ya hay una importación en curso para la escuela. Espera a que termine y vuelve a intentarlo.";
     case "LEVELS_UNRESOLVED":
       return "Falta elegir a dónde van algunos niveles.";
+    case "IMPORT_ROWS_INVALID":
+      return ROWS_INVALID;
     default:
       break;
   }
@@ -154,3 +158,104 @@ export function cutWithCount(imported: number, expected: number): string {
 export function migratedText(levelNames: readonly string[]): string {
   return `${joinNames(levelNames)} quedó migrada.`;
 }
+
+// --- the import review (module_import_review, PLAN-import-avisos) ------------
+
+/** What the import changes or drops in a value, per issue code. */
+export const ISSUE_TEXT: Readonly<Record<string, string>> = {
+  birth_date_from_curp: "La fecha no coincide con la CURP; se usará la de la CURP",
+  birth_date_invalid: "Fecha de nacimiento ilegible",
+  phone_invalid: "Teléfono incompleto",
+  curp_missing: "Sin CURP",
+  curp_invalid: "CURP inválida",
+  email_invalid: "Correo inválido",
+  postal_code_invalid: "Código postal inválido",
+  state_unknown: "Estado no reconocido",
+  bank_reference_invalid: "Referencia BBVA inválida",
+  bank_reference_taken: "Referencia BBVA de otro alumno",
+  surnames_curp_mismatch: "Los apellidos no coinciden con la CURP",
+  surnames_ambiguous: "No está claro cuál es cada apellido",
+  name_without_comma: "Nombre sin coma: el orden se dedujo con la CURP",
+  first_name_curp_mismatch: "El nombre no coincide con la CURP",
+  address_truncated: "Domicilio demasiado largo; se recortó",
+};
+
+export const GENERIC_ISSUE = "Revisa este dato";
+
+export function issueText(code: string): string {
+  return ISSUE_TEXT[code] ?? GENERIC_ISSUE;
+}
+
+/** The value an issue is about, as the office calls it. */
+export const ISSUE_FIELD_LABEL: Readonly<Record<IssueField, string>> = {
+  birth_date: "Fecha de nacimiento",
+  phone_home: "Teléfono de casa",
+  phone_mobile: "Celular",
+  email: "Correo",
+  postal_code: "Código postal",
+  state: "Estado",
+  bank_reference: "Referencia BBVA",
+  surnames: "Apellidos",
+  first_name: "Nombre",
+  address: "Domicilio",
+  curp: "CURP",
+};
+
+/** "Celular: Teléfono incompleto (en el Excel: «55 12»)". */
+export function issueLine(issue: ImportRowIssue): string {
+  const said = issue.original !== "" ? ` (en el Excel: «${issue.original}»)` : "";
+  return `${ISSUE_FIELD_LABEL[issue.field] ?? issue.field}: ${issueText(issue.code)}${said}`;
+}
+
+/** On the pupil's file: what the Excel said and what was kept; "" when the file said nothing. */
+export function issueOutcome(original: string, stored: string): string {
+  if (original === "") return "";
+  return stored !== "" ? `En el Excel decía «${original}»; se guardó «${stored}».` : `En el Excel decía «${original}»; no se guardó.`;
+}
+
+/** The label of each correction field in the preview's inline editor. */
+export const OVERRIDE_LABEL: Readonly<Record<OverrideName, string>> = {
+  curp: "CURP",
+  birthDate: "Fecha de nacimiento",
+  homePhone: "Teléfono de casa",
+  mobilePhone: "Celular",
+  email: "Correo",
+  postalCode: "Código postal",
+  state: "Estado",
+  bankReference: "Referencia BBVA",
+  municipality: "Municipio",
+  street: "Calle y número",
+  fullName: "Nombre completo",
+};
+
+/** Why the server refused a correction (422 IMPORT_ROWS_INVALID). */
+const ROW_ERROR_TEXT: Readonly<Record<string, string>> = {
+  curp_invalid: "la CURP no es válida",
+  birth_date_invalid: "la fecha no es válida o es futura",
+  phone_invalid: "el teléfono lleva 10 dígitos",
+  postal_code_invalid: "el código postal lleva 5 dígitos",
+  email_invalid: "el correo no es válido",
+  state_unknown: "elige un estado de la lista",
+  bank_reference_invalid: "sólo dígitos, hasta 20",
+  bank_reference_taken: "esa referencia ya es de otro alumno",
+  address_too_long: "máximo 120 caracteres",
+  name_unreadable: "escríbelo como APELLIDOS, NOMBRES",
+  curp_duplicated: "esa CURP ya la tiene otra fila u otro alumno",
+};
+
+/** Refusals about the row itself rather than one of its values. */
+const ROW_LEVEL_ERROR_TEXT: Readonly<Record<string, string>> = {
+  draft_has_curp: "Con una CURP válida no puede ir como borrador",
+  action_unknown: "Vuelve a elegir qué hacer con esta fila",
+  row_unknown: "Esta fila ya no está en el archivo; vuelve a subirlo",
+  row_repeated: "Esta fila se decidió dos veces; vuelve a subir el archivo",
+};
+
+export function rowErrorText(err: RowFieldError): string {
+  const rowLevel = ROW_LEVEL_ERROR_TEXT[err.code];
+  if (rowLevel !== undefined) return rowLevel;
+  const label = OVERRIDE_LABEL[err.field as OverrideName] ?? err.field;
+  return `${label}: ${ROW_ERROR_TEXT[err.code] ?? "revisa este dato"}`;
+}
+
+export const ROWS_INVALID = "Algunas correcciones no se aceptaron. Revísalas en la tabla.";
