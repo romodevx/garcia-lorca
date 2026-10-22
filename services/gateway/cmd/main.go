@@ -700,7 +700,10 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	// (/charges/generate, /charges/{id}/discount, /charges/{id}/cancel) win over
 	// /charges under ServeMux's specificity rule.
 	// Who takes the money is named from iam's directory (task 7).
-	financeH := handler.NewFinanceHandler(financeClient, handler.WithNames(authClient), handler.WithCutExtras(flags))
+	financeH := handler.NewFinanceHandler(financeClient, handler.WithNames(authClient), handler.WithCutExtras(flags),
+		// ADR 0040: voucherId / declinedVoucherIds on a deposit exist only
+		// while module_payment_vouchers is on (404 otherwise).
+		handler.WithPaymentVoucherFlag(flags))
 	financeWrite := func(h http.HandlerFunc) http.Handler {
 		return guard.Protect("finance", requireAuthChanged(middleware.RequirePermission("finance:write")(http.HandlerFunc(h))))
 	}
@@ -756,6 +759,18 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 		return guard.Protect("finance", requireAuthChanged(middleware.RequirePermission("payments:edit")(h)))
 	}
 	mux.Handle("POST /api/v1/finance/deposits/{id}/correct", paymentsEdit(financeH.CorrectDeposit))
+	// Payment vouchers, the office's side (ADR 0040): behind
+	// module_payment_vouchers AND module_finance. The queue and the file are a
+	// school-wide read of financial data, on purpose under collections:read like
+	// /finance/overdue (ADR 0015); rejecting is taking a decision on money,
+	// payments:write. Applying one is POST /finance/deposits with voucherId.
+	vouchersH := handler.NewPaymentVouchersHandler(financeClient, studentsClient, authClient)
+	vouchersStaff := func(gate func(http.Handler) http.Handler, h http.HandlerFunc) http.Handler {
+		return guard.Protect("payment_vouchers", gate(h))
+	}
+	mux.Handle("GET /api/v1/finance/payment-vouchers", vouchersStaff(collectionsRead, vouchersH.Queue))
+	mux.Handle("GET /api/v1/finance/payment-vouchers/{id}/file", vouchersStaff(collectionsRead, vouchersH.File))
+	mux.Handle("POST /api/v1/finance/payment-vouchers/{id}/reject", vouchersStaff(paymentsWrite, vouchersH.Reject))
 	mux.Handle("GET /api/v1/finance/deposits/{id}/corrections", guard.Protect("finance",
 		requireAuthChanged(middleware.RequireAnyPermission("payments:edit", "finance:read")(http.HandlerFunc(financeH.DepositCorrections)))))
 	mux.Handle("GET /api/v1/finance/accounts/{studentId}", collectionsRead(http.HandlerFunc(financeH.GetAccount)))
@@ -1126,6 +1141,25 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	mux.Handle("GET /api/v1/family/students/{studentId}/attendance",
 		familyReadModules([]string{"attendance", "students"}, familyH.Attendance))
 
+	// Payment vouchers, the family's side (ADR 0040): the SECOND guardian
+	// write (vouchers_own:write, iam 0033), for the caller's own child only
+	// (404 otherwise, checked by the handler). Behind module_payment_vouchers,
+	// module_finance (where they live) and module_students (the ownership
+	// check). The upload has its OWN per-guardian budget: the login limiter is
+	// per IP, and behind Cloud Run every request comes from one front end.
+	familyVouchers := func(permission string, h http.Handler) http.Handler {
+		wrapped := requireAuthChanged(middleware.RequirePermission(permission)(h))
+		for _, module := range []string{"students", "finance", "payment_vouchers"} {
+			wrapped = guard.Protect(module, wrapped)
+		}
+		return wrapped
+	}
+	voucherLimiter := middleware.NewRateLimiter(voucherUploadBurst, voucherUploadRefillPerSec, time.Now)
+	mux.Handle("POST /api/v1/family/students/{studentId}/payment-vouchers",
+		familyVouchers("vouchers_own:write", voucherLimiter.PerPrincipalMiddleware(http.HandlerFunc(vouchersH.FamilyUpload))))
+	mux.Handle("GET /api/v1/family/students/{studentId}/payment-vouchers",
+		familyVouchers("family:read", http.HandlerFunc(vouchersH.FamilyList)))
+
 	// The virtual card (task 13), behind module_student_card (default OFF): the
 	// family reads its own child's card and photo; staff verify a scanned code
 	// (students:read) and revoke a card (students:update).
@@ -1190,3 +1224,12 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 		middleware.RequireAllPermissions("teachers:write", "users:write")(http.HandlerFunc(teacherAccessH.GrantAccess))))))
 	return mux
 }
+
+// The family's payment-voucher upload budget, per guardian (ADR 0040): a
+// handful in a burst (a month and its arrears, a retry), then about one every
+// six minutes. Finance holds the real ceiling (three pending per child); this
+// only stops a loop from filling the bucket.
+const (
+	voucherUploadBurst        = 10
+	voucherUploadRefillPerSec = 1.0 / 360
+)

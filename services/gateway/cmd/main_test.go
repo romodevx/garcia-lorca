@@ -101,6 +101,8 @@ func (stubIAM) ValidateToken(_ context.Context, req *connect.Request[iamv1.Valid
 		"guardian-writer": {"guardians:write", "guardians:read"},
 		"guardian-reader": {"guardians:read"},
 		"family-reader":   {"family:read"},
+		// ADR 0040: the guardian role as iam 0033 leaves it.
+		"family-voucher": {"family:read", "vouchers_own:write"},
 		// Task 5: health data answers to its own permission, not students:read.
 		"medical-reader": {"medical:read", "students:read"},
 		// Task 6: writing a note is its own permission, beside reading the pupil.
