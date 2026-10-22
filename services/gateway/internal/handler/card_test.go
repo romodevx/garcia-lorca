@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"connectrpc.com/connect"
 
@@ -203,5 +204,87 @@ func TestStaffReissueACard(t *testing.T) {
 	cardHandler(f).Reissue(rec, req)
 	if rec.Code != http.StatusNoContent || f.reissued != "stu-1" {
 		t.Errorf("reissue: %d, reissued %q", rec.Code, f.reissued)
+	}
+}
+
+// The card shows the school's public details only. The RFC and legal name are
+// for receipts: a school registered under a person's RFC would hand every
+// family that person's name and birthdate. The legend is the receipt's footer
+// ("Gracias por su pago."), not something a card says.
+func TestTheCardCarriesOnlyTheSchoolsPublicDetails(t *testing.T) {
+	f := &fakeCards{
+		links:   []client.GuardianLink{{StudentID: "stu-1"}},
+		student: client.StudentResult{ID: "stu-1", FirstName: "Zoe", LastName: "Villalobos"},
+		code:    "GLCARD:x",
+		profile: client.SchoolProfile{
+			Name: "COLEGIO GARCÍA LORCA", LegalName: "CENTRO EDUCATIVO GL SC", RFC: "CEG850101AB1",
+			CCT: "16PPR0001X", Address: "Morelia", Phone: "4431234567", Legend: "Incorporada a la SEP",
+		},
+	}
+	rec := httptest.NewRecorder()
+	cardHandler(f).FamilyCard(rec, asGuardian(httptest.NewRequest(http.MethodGet, "/api/v1/family/students/stu-1/card", nil), "stu-1"))
+
+	var got struct {
+		School map[string]any `json:"school"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	want := map[string]any{
+		"name": "COLEGIO GARCÍA LORCA", "cct": "16PPR0001X", "address": "Morelia",
+		"phone": "4431234567",
+	}
+	if len(got.School) != len(want) {
+		t.Errorf("school keys = %v, want exactly %v", got.School, want)
+	}
+	for key, value := range want {
+		if got.School[key] != value {
+			t.Errorf("school.%s = %v, want %q", key, got.School[key], value)
+		}
+	}
+}
+
+// The card names the group as the header and receipts do ("1º PRIMARIA · A"),
+// not the bare level and letter; with no labeler it is the stored letter.
+func TestTheCardNamesTheGroupInFull(t *testing.T) {
+	zone, err := time.LoadLocation("America/Mexico_City")
+	if err != nil {
+		t.Fatalf("zone: %v", err)
+	}
+	for name, tc := range map[string]struct {
+		labeler *fakeGroupLabeler
+		want    string
+	}{
+		"labeled":    {labeler: &fakeGroupLabeler{label: "1º PRIMARIA · A", found: true}, want: "1º PRIMARIA · A"},
+		"no label":   {labeler: &fakeGroupLabeler{}, want: "A"},
+		"no labeler": {want: "A"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := &fakeCards{
+				links:   []client.GuardianLink{{StudentID: "stu-1"}},
+				student: client.StudentResult{ID: "stu-1", FirstName: "Zoe", LastName: "Villalobos", Level: "PRIMARIA", GradeGroup: "A"},
+				code:    "GLCARD:x",
+			}
+			opts := []handler.CardOption{handler.WithCardClock(func() time.Time { return lateEveningInMorelia })}
+			if tc.labeler != nil {
+				opts = append(opts, handler.WithCardGroupLabeler(tc.labeler, zone))
+			}
+			rec := httptest.NewRecorder()
+			handler.NewCardHandler(f, f, f, f, f, opts...).
+				FamilyCard(rec, asGuardian(httptest.NewRequest(http.MethodGet, "/api/v1/family/students/stu-1/card", nil), "stu-1"))
+
+			var got struct {
+				GroupLabel string `json:"groupLabel"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+				t.Fatalf("decode %s: %v", rec.Body.String(), err)
+			}
+			if got.GroupLabel != tc.want {
+				t.Errorf("groupLabel = %q, want %q", got.GroupLabel, tc.want)
+			}
+			if tc.labeler != nil && tc.labeler.day != "2026-10-16" {
+				t.Errorf("labeled for %q, want the school's day 2026-10-16", tc.labeler.day)
+			}
+		})
 	}
 }

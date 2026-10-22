@@ -15,13 +15,21 @@ jest.mock("react-native-qrcode-svg", () => {
 const child = { id: "s1", firstName: "Zoe", lastName: "Villalobos", level: "Primaria", gradeGroup: "1° A" };
 const card = {
   studentId: "s1", name: "Zoe Villalobos", level: "Primaria", gradeGroup: "1° A", cycle: "2026-2027",
-  enrollmentNumber: "2026-00042", school: { name: "COLEGIO GARCÍA LORCA", legalName: "", rfc: "", cct: "", address: "", phone: "", legend: "" },
+  enrollmentNumber: "2026-00042", school: { name: "COLEGIO GARCÍA LORCA", cct: "", address: "", phone: "" },
   qr: "GLCARD:AQAAAAAAAAAAAAAAAAAAAA",
 };
 
-function mockFetch(cardBody: unknown | null): void {
+const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0]);
+
+function mockFetch(cardBody: unknown | null, photoStatus = 200): void {
   globalThis.fetch = jest.fn(async (url: string) => {
     const u = String(url);
+    if (u.includes("/family/students/s1/photo")) {
+      return {
+        ok: photoStatus === 200, status: photoStatus,
+        headers: { get: () => "image/jpeg" }, arrayBuffer: async () => JPEG.buffer, json: async () => ({}),
+      };
+    }
     if (u.includes("/family/students/s1/card")) {
       if (cardBody === null) return { ok: false, status: 500, json: async () => ({}) };
       return { ok: true, status: 200, json: async () => cardBody };
@@ -51,12 +59,43 @@ describe("CardScreen (tarea 13)", () => {
     expect(screen.getByTestId("card-qr")).toHaveTextContent("GLCARD:AQAAAAAAAAAAAAAAAAAAAA");
   });
 
-  it("shows the initials when the child has no photo", async () => {
+  // ISSUE: the card said "PRIMARIA · A" while the header said "1º PRIMARIA · A".
+  it("names the group as the header does", async () => {
+    mockFetch({ ...card, level: "PRIMARIA", gradeGroup: "A", groupLabel: "1º PRIMARIA · A" });
+    await renderWithProviders(<CardScreen />);
+
+    expect(await screen.findByText("1º PRIMARIA · A")).toBeTruthy();
+    expect(screen.queryByText("PRIMARIA · A")).toBeNull();
+  });
+
+  it("falls back to level and letter when the gateway sends no group label", async () => {
+    mockFetch({ ...card, level: "PRIMARIA", gradeGroup: "A", groupLabel: "" });
+    await renderWithProviders(<CardScreen />);
+
+    expect(await screen.findByText("PRIMARIA · A")).toBeTruthy();
+  });
+
+  it("draws the photo the app downloaded with its session", async () => {
     mockFetch(card);
     await renderWithProviders(<CardScreen />);
 
     const photo = await screen.findByTestId("card-photo");
-    fireEvent(photo, "error");
+    expect(photo.props.source).toEqual({ uri: "data:image/jpeg;base64,/9j/4A==" });
+  });
+
+  it("shows the initials when the child has no photo", async () => {
+    mockFetch(card, 404);
+    await renderWithProviders(<CardScreen />);
+
+    expect(await screen.findByText("ZV")).toBeTruthy();
+    expect(screen.queryByTestId("card-photo")).toBeNull();
+  });
+
+  it("shows the initials when the photo cannot be drawn", async () => {
+    mockFetch(card);
+    await renderWithProviders(<CardScreen />);
+
+    fireEvent(await screen.findByTestId("card-photo"), "error");
     await waitFor(() => expect(screen.queryByTestId("card-photo")).toBeNull());
     expect(screen.getByText("ZV")).toBeTruthy();
   });
@@ -76,5 +115,36 @@ describe("CardScreen (tarea 13)", () => {
 
     expect(await screen.findByText(/Credencial suspendida/)).toBeTruthy();
     expect(screen.queryByTestId("card-qr")).toBeNull();
+  });
+
+  it("shows the school's logo and contact data, never its RFC, legal name or receipt legend", async () => {
+    mockFetch({
+      ...card,
+      school: {
+        name: "COLEGIO GARCÍA LORCA", legalName: "CENTRO EDUCATIVO GL SC", rfc: "CEG010101AB1",
+        cct: "16PPR0123X", address: "Av. Madero 100, Morelia", phone: "443 123 4567", legend: "Gracias por su pago.",
+      },
+    });
+    await renderWithProviders(<CardScreen />);
+
+    expect(await screen.findByTestId("card-school-logo")).toBeTruthy();
+    expect(screen.getByText(/16PPR0123X/)).toBeTruthy();
+    expect(screen.getByText("Av. Madero 100, Morelia")).toBeTruthy();
+    expect(screen.getByText(/443 123 4567/)).toBeTruthy();
+    // The legend is the receipt's footer, not the card's.
+    expect(screen.queryByText("Gracias por su pago.")).toBeNull();
+    expect(screen.queryByText(/CEG010101AB1/)).toBeNull();
+    expect(screen.queryByText(/CENTRO EDUCATIVO GL SC/)).toBeNull();
+    expect(screen.queryByLabelText(/CENTRO EDUCATIVO GL SC/)).toBeNull();
+  });
+
+  it("leaves out the school data the school has not filled in", async () => {
+    mockFetch(card);
+    await renderWithProviders(<CardScreen />);
+
+    expect(await screen.findByText("Zoe Villalobos")).toBeTruthy();
+    expect(screen.queryByText(/CCT/)).toBeNull();
+    expect(screen.queryByText(/Tel\./)).toBeNull();
+    expect(screen.queryByTestId("card-school-footer")).toBeNull();
   });
 });

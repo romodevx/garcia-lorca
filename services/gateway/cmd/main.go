@@ -1130,7 +1130,7 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	// family reads its own child's card and photo; staff verify a scanned code
 	// (students:read) and revoke a card (students:update).
 	cardH := handler.NewCardHandler(studentsClient, studentsClient, studentsClient, configClient, configClient,
-		handler.WithCardImportReview(importReviewOn))
+		handler.WithCardImportReview(importReviewOn), handler.WithCardGroupLabeler(groupLabeler, receiptZone))
 	mux.Handle("GET /api/v1/family/students/{studentId}/card",
 		familyReadModules([]string{"student_card", "students"}, cardH.FamilyCard))
 	mux.Handle("GET /api/v1/family/students/{studentId}/photo",

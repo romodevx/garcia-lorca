@@ -1,7 +1,8 @@
 import { Tabs } from "expo-router";
-import { type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { View } from "react-native";
 import { AppHeader } from "@/src/components/AppHeader";
+import { CardFab } from "@/src/components/CardFab";
 import { TabBar } from "@/src/components/TabBar";
 import { useTheme } from "@/src/theme";
 
@@ -11,16 +12,19 @@ import { useTheme } from "@/src/theme";
  * child-context header sits above the tab content; the bar itself is the custom
  * Moderno bottom bar (TabBar).
  *
+ * The credencial shortcut floats over every tab, just above the measured bar.
+ *
  * Module tabs are UX-gated by their flag in the screen bodies; the backend
  * gateway remains the security boundary.
  */
 export default function TabsLayout(): ReactNode {
   const theme = useTheme();
+  const [tabBarHeight, setTabBarHeight] = useState(0);
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
       <AppHeader />
       <Tabs
-        tabBar={(props) => <TabBar {...props} />}
+        tabBar={(props) => <TabBar {...props} onHeight={setTabBarHeight} />}
         screenOptions={{ headerShown: false, sceneStyle: { backgroundColor: theme.colors.bg } }}
       >
         <Tabs.Screen name="inicio" options={{ title: "Inicio" }} />
@@ -29,6 +33,7 @@ export default function TabsLayout(): ReactNode {
         <Tabs.Screen name="cuenta" options={{ title: "Cuenta" }} />
         <Tabs.Screen name="avisos" options={{ title: "Avisos" }} />
       </Tabs>
+      <CardFab bottom={tabBarHeight} />
     </View>
   );
 }

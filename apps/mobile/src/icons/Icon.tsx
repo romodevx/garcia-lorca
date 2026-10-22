@@ -50,6 +50,7 @@ export type IconName =
   | "minus"
   | "download"
   | "credit-card"
+  | "id-card"
   | "flame"
   | "leaf";
 
@@ -321,6 +322,14 @@ function shapes(name: IconName, { strokeWidth, color }: Common): ReactElement {
         <>
           <Rect x={3.5} y={5.5} width={17} height={13} rx={3} {...s} />
           <Path d="M3.5 10h17M7 15h3" {...s} />
+        </>
+      );
+    case "id-card":
+      return (
+        <>
+          <Rect x={3} y={5} width={18} height={14} rx={3} {...s} />
+          <Circle cx={8.5} cy={10.5} r={2} {...s} />
+          <Path d="M5.8 15.5a2.8 2.8 0 0 1 5.4 0M13.5 10h4M13.5 13.5h3" {...s} />
         </>
       );
     case "flame":

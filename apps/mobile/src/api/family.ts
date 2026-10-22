@@ -1,3 +1,4 @@
+import { Buffer } from "buffer";
 import { apiFetch } from "./client";
 import { ApiError } from "./errors";
 
@@ -235,12 +236,9 @@ export async function markNotificationRead(notificationId: string): Promise<void
 /** The school's details as the card prints them (task 12's profile). */
 export interface CardSchool {
   name: string;
-  legalName: string;
-  rfc: string;
   cct: string;
   address: string;
   phone: string;
-  legend: string;
 }
 
 /**
@@ -252,6 +250,8 @@ export interface FamilyCard {
   name: string;
   level: string;
   gradeGroup: string;
+  /** The group as the header names it ("1º PRIMARIA · A"); absent from older gateways. */
+  groupLabel?: string;
   cycle: string;
   enrollmentNumber: string;
   school: CardSchool;
@@ -266,7 +266,19 @@ export async function getCard(studentId: string): Promise<FamilyCard> {
   return unwrap<FamilyCard>(await apiFetch(`/api/v1/family/students/${encodeURIComponent(studentId)}/card`), "card");
 }
 
-/** Where the child's photo is served; it needs the Bearer token like any read. */
-export function cardPhotoPath(studentId: string): string {
-  return `/api/v1/family/students/${encodeURIComponent(studentId)}/photo`;
+const DEFAULT_PHOTO_TYPE = "image/jpeg";
+
+/**
+ * Downloads one child's photo through the authenticated client (so an expired
+ * token is refreshed like any read) as a data URI an <Image> can draw. RN
+ * Image's own `headers` never reached the gateway on Android release builds.
+ * Null when the school has no photo of the child (404).
+ */
+export async function getCardPhoto(studentId: string): Promise<string | null> {
+  const res = await apiFetch(`/api/v1/family/students/${encodeURIComponent(studentId)}/photo`);
+  if (res.status === 404) return null;
+  if (!res.ok) throw new ApiError(res.status, "photo request failed");
+  const contentType = res.headers.get("content-type") ?? DEFAULT_PHOTO_TYPE;
+  const base64 = Buffer.from(await res.arrayBuffer()).toString("base64");
+  return `data:${contentType};base64,${base64}`;
 }

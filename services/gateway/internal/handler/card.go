@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/garcia-lorca/services/gateway/internal/client"
 	"github.com/garcia-lorca/services/gateway/internal/middleware"
@@ -40,6 +41,10 @@ type CardHandler struct {
 	cycles   CycleLister
 	// review is module_import_review: a draft's status is named only with it.
 	review importReview
+	// groups names the child's group in full on the school's day (zone).
+	groups FamilyGroupLabeler
+	zone   *time.Location
+	now    func() time.Time
 }
 
 // CardOption configures optional behavior of the card endpoints.
@@ -51,9 +56,25 @@ func WithCardImportReview(enabled func(context.Context) bool) CardOption {
 	return func(h *CardHandler) { h.review = enabled }
 }
 
+// WithCardGroupLabeler names the child's group in full on the card, as the
+// family list does, for the school's day in zone (nil reads as UTC).
+func WithCardGroupLabeler(groups FamilyGroupLabeler, zone *time.Location) CardOption {
+	return func(h *CardHandler) {
+		h.groups = groups
+		if zone != nil {
+			h.zone = zone
+		}
+	}
+}
+
+// WithCardClock replaces the wall clock the card's "today" is read from (tests).
+func WithCardClock(now func() time.Time) CardOption {
+	return func(h *CardHandler) { h.now = now }
+}
+
 // NewCardHandler wires the handler.
 func NewCardHandler(links GuardianLinkReader, students CardStudents, photos StudentPhotoReader, profiles SchoolProfileReader, cycles CycleLister, opts ...CardOption) *CardHandler {
-	h := &CardHandler{links: links, students: students, photos: photos, profiles: profiles, cycles: cycles}
+	h := &CardHandler{links: links, students: students, photos: photos, profiles: profiles, cycles: cycles, zone: time.UTC, now: time.Now}
 	for _, opt := range opts {
 		opt(h)
 	}
@@ -63,16 +84,34 @@ func NewCardHandler(links GuardianLinkReader, students CardStudents, photos Stud
 // cardResponse is the card as the parents' app draws it. The QR carries only
 // the opaque code; everything a person reads is beside it.
 type cardResponse struct {
-	StudentID        string               `json:"studentId"`
-	Name             string               `json:"name"`
-	Level            string               `json:"level"`
-	GradeGroup       string               `json:"gradeGroup"`
-	Cycle            string               `json:"cycle"`
-	EnrollmentNumber string               `json:"enrollmentNumber"`
-	School           client.SchoolProfile `json:"school"`
+	StudentID  string `json:"studentId"`
+	Name       string `json:"name"`
+	Level      string `json:"level"`
+	GradeGroup string `json:"gradeGroup"`
+	// GroupLabel is the group as the header names it, "1º PRIMARIA · A"; the
+	// stored letter when the catalog has no label.
+	GroupLabel       string     `json:"groupLabel"`
+	Cycle            string     `json:"cycle"`
+	EnrollmentNumber string     `json:"enrollmentNumber"`
+	School           cardSchool `json:"school"`
 	// QR is empty while the office has the card suspended.
 	QR        string `json:"qr"`
 	Suspended bool   `json:"suspended"`
+}
+
+// cardSchool is what the card prints about the school. The RFC and legal name
+// stay on receipts: a school registered under a person's RFC would otherwise
+// hand every family that person's name and birthdate. So does the legend, the
+// receipt's footer ("Gracias por su pago.").
+type cardSchool struct {
+	Name    string `json:"name"`
+	CCT     string `json:"cct"`
+	Address string `json:"address"`
+	Phone   string `json:"phone"`
+}
+
+func toCardSchool(p client.SchoolProfile) cardSchool {
+	return cardSchool{Name: p.Name, CCT: p.CCT, Address: p.Address, Phone: p.Phone}
 }
 
 // FamilyCard handles GET /api/v1/family/students/{studentId}/card. Another
@@ -107,7 +146,8 @@ func (h *CardHandler) FamilyCard(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, cardResponse{
 		StudentID: pupil.ID, Name: fullName(pupil), Level: pupil.Level, GradeGroup: pupil.GradeGroup,
-		Cycle: cycle, EnrollmentNumber: pupil.EnrollmentNumber, School: school, QR: code, Suspended: suspended,
+		GroupLabel: labelGroupToday(ctx, h.groups, h.now(), h.zone, pupil),
+		Cycle:      cycle, EnrollmentNumber: pupil.EnrollmentNumber, School: toCardSchool(school), QR: code, Suspended: suspended,
 	})
 }
 
