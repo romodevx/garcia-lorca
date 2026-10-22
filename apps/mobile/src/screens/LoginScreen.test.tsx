@@ -220,6 +220,31 @@ describe("LoginScreen", () => {
       expect(screen.getByText(NEUTRAL)).toBeTruthy();
     });
 
+    // The answer is about the address it was asked for; once the parent has
+    // typed another one, a late answer must not land under it.
+    it("drops an answer that arrives after the address was edited", async () => {
+      let answer: (value: unknown) => void = () => undefined;
+      globalThis.fetch = jest.fn((url: string) =>
+        String(url).includes("/auth/password-reset")
+          ? new Promise((resolve) => {
+              answer = resolve;
+            })
+          : Promise.resolve({ ok: true, status: 200, json: async () => ({ notifications: [] }) }),
+      ) as unknown as typeof fetch;
+      await renderWithProviders(<LoginScreen onSubmit={async () => undefined} />);
+      await drainMount();
+
+      await typeEmailAndAsk("laura@correo.com");
+      await act(async () => {
+        fireEvent.changeText(screen.getByLabelText("Correo electrónico"), "mario@correo.com");
+      });
+      await act(async () => {
+        answer({ ok: true, status: 204 });
+      });
+
+      expect(screen.queryByText(NEUTRAL)).toBeNull();
+    });
+
     it("says to wait a few minutes when the gateway rate-limits", async () => {
       gatewayAnswers(429);
       await renderWithProviders(<LoginScreen onSubmit={async () => undefined} />);

@@ -84,6 +84,9 @@ export function LoginScreen({ onSubmit, notice }: LoginScreenProps): ReactElemen
   const [reset, setReset] = useState<ResetMessage | null>(null);
   const [resetting, setResetting] = useState(false);
   const emailInput = useRef<TextInput>(null);
+  // What the field holds now, normalized, so a late reset answer can tell it
+  // is about an address the parent has since edited away.
+  const currentAddress = useRef("");
 
   const submit = async (): Promise<void> => {
     if (submitting) {
@@ -111,8 +114,11 @@ export function LoginScreen({ onSubmit, notice }: LoginScreenProps): ReactElemen
       return;
     }
     setResetting(true);
-    setReset(await askForResetLink(address));
+    const answer = await askForResetLink(address);
     setResetting(false);
+    if (currentAddress.current === address) {
+      setReset(answer);
+    }
   };
 
   const fieldStyle = [styles.field, { backgroundColor: theme.colors.surface2 }];
@@ -146,6 +152,7 @@ export function LoginScreen({ onSubmit, notice }: LoginScreenProps): ReactElemen
           value={email}
           onChangeText={(typed) => {
             setEmail(typed);
+            currentAddress.current = normalizeEmail(typed);
             // The answer was about the previous address.
             setReset(null);
           }}
