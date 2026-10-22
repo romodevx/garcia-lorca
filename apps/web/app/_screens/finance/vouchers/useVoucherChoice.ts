@@ -27,6 +27,12 @@ export const READ_FAILED = "No pudimos revisar si hay comprobantes; si cobras, e
  * A refusal the server answered without storing anything (4xx: a voucher's
  * state, CC-202, validation). Anything else — no answer, a 5xx — may have
  * stored the deposit, so the retry must be the same request.
+ *
+ * CONTRACT this rests on: on POST /finance/deposits a 4xx means the server
+ * stored nothing (the whole write is one transaction, refused before commit).
+ * A writer that answered a 4xx AFTER committing would break this lock: the
+ * counter would free the choice and a retry with another voucher (or none)
+ * could store a second deposit for the same money.
  */
 function nothingStored(err: unknown): boolean {
   return err instanceof HttpError && err.status >= 400 && err.status < 500;
