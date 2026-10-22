@@ -103,6 +103,9 @@ func (stubIAM) ValidateToken(_ context.Context, req *connect.Request[iamv1.Valid
 		"family-reader":   {"family:read"},
 		// ADR 0040: the guardian role as iam 0033 leaves it.
 		"family-voucher": {"family:read", "vouchers_own:write"},
+		// The owner as iam 0033 leaves it: it holds vouchers_own:write to
+		// delegate it, never to send for a child it is not linked to.
+		"owner-vouchers": {"finance:read", "finance:write", "students:read", "family:read", "vouchers_own:write"},
 		// Task 5: health data answers to its own permission, not students:read.
 		"medical-reader": {"medical:read", "students:read"},
 		// Task 6: writing a note is its own permission, beside reading the pupil.

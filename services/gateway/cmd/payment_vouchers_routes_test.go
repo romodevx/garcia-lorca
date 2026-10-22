@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"mime/multipart"
 	"net/http"
+	"strings"
 	"testing"
 
 	connect "connectrpc.com/connect"
@@ -104,6 +105,7 @@ func TestFamilyPaymentVoucherRoutes(t *testing.T) {
 		{"family:read alone cannot send", own, "family-reader", vouchersAll, http.StatusForbidden},
 		{"staff cannot use the family's door", own, "cobranza", vouchersAll, http.StatusForbidden},
 		{"another family's child", "/api/v1/family/students/stu-999/payment-vouchers", "family-voucher", vouchersAll, http.StatusNotFound},
+		{"the owner on a child it is not linked to", "/api/v1/family/students/stu-999/payment-vouchers", "owner-vouchers", vouchersAll, http.StatusNotFound},
 		{"no token", own, "", vouchersAll, http.StatusUnauthorized},
 		{"module off hides it", own, "family-voucher", vouchersOff, http.StatusNotFound},
 		{"module off hides it before auth", own, "", vouchersOff, http.StatusNotFound},
@@ -191,8 +193,10 @@ func TestStaffPaymentVoucherRoutes(t *testing.T) {
 				t.Fatalf("status = %d, want %d", res.StatusCode, tc.want)
 			}
 			if tc.path == file && res.StatusCode == http.StatusOK &&
-				(res.Header.Get("Cache-Control") != "private, no-store" || res.Header.Get("X-Content-Type-Options") != "nosniff") {
-				t.Fatalf("file headers = %v", res.Header)
+				(res.Header.Get("Cache-Control") != "private, no-store" || res.Header.Get("X-Content-Type-Options") != "nosniff" ||
+					!strings.HasPrefix(res.Header.Get("Content-Security-Policy"), "sandbox") ||
+					!strings.HasPrefix(res.Header.Get("Content-Disposition"), "attachment")) {
+				t.Fatalf("file headers through the mux = %v", res.Header)
 			}
 		})
 	}
