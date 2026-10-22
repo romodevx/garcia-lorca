@@ -55,7 +55,7 @@ export function MoreScreen({ onLogout }: { onLogout: () => void }): ReactElement
           </View>
           <Icon name="chevron-right" size={20} stroke={2.4} color={theme.colors.text3} />
         </ListRow>
-        <ListRow divider onPress={() => router.push("/(tabs)/avisos")} accessibilityLabel="Notificaciones">
+        <ListRow divider onPress={() => router.dismissTo("/(tabs)/avisos")} accessibilityLabel="Notificaciones">
           <TintIcon name="bell" tint="forest" />
           <View style={{ flex: 1 }}>
             <Text style={[styles.itemText, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]}>Notificaciones</Text>

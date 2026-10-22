@@ -73,10 +73,13 @@ describe("MoreScreen account rows", () => {
     expect(router.push).toHaveBeenCalledWith("/perfil");
   });
 
-  it("opens the Avisos tab from Notificaciones", async () => {
+  // Más is a root-stack screen over the tabs: pushing a tab route stacked a
+  // SECOND tabs navigator (Back → a duplicate Inicio). It pops back to the tabs.
+  it("returns to the Avisos tab from Notificaciones, without stacking a second set of tabs", async () => {
     await renderWithProviders(<MoreScreen onLogout={() => undefined} />);
     fireEvent.press(screen.getByLabelText("Notificaciones"));
-    expect(router.push).toHaveBeenCalledWith("/(tabs)/avisos");
+    expect(router.dismissTo).toHaveBeenCalledWith("/(tabs)/avisos");
+    expect(router.push).not.toHaveBeenCalled();
   });
 
   // No family read carries a school contact outside the flag-gated card, so a
