@@ -30,6 +30,7 @@ import { StudentNotesBeside, useNotesBeside, type NotesAccess } from "../../_des
 import { useVoucherChoice, type CollectVouchers } from "./vouchers/useVoucherChoice";
 import { VoucherLinkNotice } from "./vouchers/VoucherLinkNotice";
 import { VoucherPanel } from "./vouchers/VoucherPanel";
+import { VoucherAlert, type VoucherAlertState } from "./vouchers/VoucherAlert";
 
 /**
  * What is missing, or over, against what should have been paid. Zero when the
@@ -235,7 +236,7 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
   const inFlight = useRef(false);
   const [error, setError] = useState<string | undefined>(undefined);
   // A voucher refused the payment (ADR 0040): said at the top, nothing taken.
-  const [voucherAlert, setVoucherAlert] = useState<string | undefined>(undefined);
+  const [voucherAlert, setVoucherAlert] = useState<VoucherAlertState | undefined>(undefined);
   // Bumped to read the account and the quote again: after a 409 (CC-202) the
   // money was taken by another cashier, and the screen must show what is left.
   const [reloads, setReloads] = useState(0);
@@ -372,6 +373,7 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
     setError(undefined);
     setVoucherAlert(undefined);
     setConflict(null);
+    voucherChoice.sending(voucherParts);
     try {
       const result = await registerDeposit(API_URL, depositRequest({
         studentId: student.id,
@@ -390,7 +392,7 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
       const message = cause instanceof Error ? cause.message : "No se pudo registrar el cobro.";
       const refusal = voucherChoice.refuse(cause);
       if (refusal !== undefined) {
-        setVoucherAlert(refusal.message);
+        setVoucherAlert((a) => ({ message: refusal.message, attempt: (a?.attempt ?? 0) + 1 }));
       } else if (cause instanceof HttpError && cause.status === HTTP_CONFLICT) {
         // The account moved under the cashier (CC-202): read it again, by
         // itself, with nothing chosen and nothing filled, and say so at the
@@ -436,7 +438,7 @@ export function CollectDrawer({ student, onClose, onCollected, today, canGrantDi
                 style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
                 <div style={{ flex: 1, overflowY: "auto", padding: "22px 26px", display: "flex", flexDirection: "column", gap: 20 }}>
                   {conflict !== null && <ErrorSummary items={[{ field: "Monto a pagar", message: conflict.message }]} attempt={conflict.attempt} />}
-                  {voucherAlert !== undefined && <p role="alert" style={{ margin: 0, padding: "12px 16px", borderRadius: "var(--r-md)", background: "var(--bad-bg)", color: "var(--bad-fg)", fontSize: 14.5, fontWeight: 600 }}>{voucherAlert}</p>}
+                  {voucherAlert !== undefined && <VoucherAlert alert={voucherAlert} />}
                   {byVoucher !== undefined && vouchers !== undefined && (
                     <VoucherPanel voucher={byVoucher} onChanged={vouchers.onChanged} onRejected={() => { vouchers.onChanged(); (vouchers.onRejected ?? onClose)(); }} />
                   )}

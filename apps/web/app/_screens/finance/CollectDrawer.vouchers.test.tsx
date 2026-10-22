@@ -273,6 +273,87 @@ describe("CollectDrawer · cobro a mano con comprobantes pendientes (ADR 0040)",
     expect(sent().idempotencyKey).toBeUndefined();
   });
 
+  // Tech-lead B1 (double payment): v1 is sent, the answer never arrives — the
+  // deposit may be stored. Switching to "ninguno" (or v2) and retrying would
+  // be a different key: a second deposit. The retry repeats the first choice.
+  it("after an answer that never came, the retry repeats the first choice and the selector stays locked", async () => {
+    const user = userEvent.setup();
+    vouchers.listPendingVouchers.mockResolvedValue([voucher("v1", { claimedAmountCents: 320000 }), voucher("v2")]);
+    finance.registerDeposit.mockRejectedValueOnce(new TypeError("Failed to fetch")).mockResolvedValue(result());
+    open();
+    await screen.findByTestId("amount-expected");
+    const group = await screen.findByRole("radiogroup", { name: /¿Cuál comprobante es este pago\?/ });
+
+    await user.click(within(group).getByRole("radio", { name: /20 oct.*\$3,200\.00/ }));
+    await user.click(screen.getByRole("button", { name: "Cobrar" }));
+    await waitFor(() => expect(finance.registerDeposit).toHaveBeenCalledTimes(1));
+
+    const none = within(group).getByRole("radio", { name: /Ninguno: es otro pago/ });
+    expect(none).toBeDisabled();
+    expect(group).toHaveTextContent(/el primer intento pudo haber quedado registrado/);
+    await user.click(none);
+    await user.click(screen.getByRole("button", { name: "Cobrar" }));
+
+    await waitFor(() => expect(finance.registerDeposit).toHaveBeenCalledTimes(2));
+    expect(sent().voucherId).toBe("v1");
+    expect(sent().declinedVoucherIds).toBeUndefined();
+  });
+
+  it("a 5xx locks the choice too: the server may have stored it", async () => {
+    const user = userEvent.setup();
+    vouchers.listPendingVouchers.mockResolvedValue([voucher("v1")]);
+    finance.registerDeposit.mockRejectedValueOnce(new financeApi.FinanceError(503, "unavailable")).mockResolvedValue(result());
+    open();
+    await screen.findByTestId("amount-expected");
+    const box = await screen.findByRole("checkbox", { name: /Es otro pago/ });
+
+    await user.click(screen.getByRole("button", { name: "Cobrar" }));
+    await waitFor(() => expect(finance.registerDeposit).toHaveBeenCalledTimes(1));
+
+    expect(box).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Cobrar" }));
+    await waitFor(() => expect(finance.registerDeposit).toHaveBeenCalledTimes(2));
+    expect(sent().declinedVoucherIds).toBeUndefined();
+  });
+
+  it("a refusal where nothing was stored frees the choice again", async () => {
+    const user = userEvent.setup();
+    vouchers.listPendingVouchers.mockResolvedValue([voucher("v1")]);
+    finance.registerDeposit.mockRejectedValueOnce(new financeApi.FinanceError(400, "monto inválido")).mockResolvedValue(result());
+    open();
+    await screen.findByTestId("amount-expected");
+    const box = await screen.findByRole("checkbox", { name: /Es otro pago/ });
+
+    await user.click(screen.getByRole("button", { name: "Cobrar" }));
+    await waitFor(() => expect(finance.registerDeposit).toHaveBeenCalledTimes(1));
+
+    expect(box).toBeEnabled();
+    await user.click(box);
+    await user.click(screen.getByRole("button", { name: "Cobrar" }));
+    await waitFor(() => expect(finance.registerDeposit).toHaveBeenCalledTimes(2));
+    expect(sent().declinedVoucherIds).toEqual(["v1"]);
+  });
+
+  it("says so when the pupil's vouchers could not be read", async () => {
+    vouchers.listPendingVouchers.mockRejectedValue(new Error("down"));
+    open();
+
+    expect(await screen.findByText("No pudimos revisar si hay comprobantes; si cobras, el sistema lo ligará solo.")).toBeInTheDocument();
+  });
+
+  it("moves focus to a voucher's refusal when it appears", async () => {
+    const user = userEvent.setup();
+    finance.registerDeposit.mockRejectedValue(conflict("VOUCHER_CHOICE_REQUIRED", "elige"));
+    vouchers.listPendingVouchers.mockResolvedValueOnce([]).mockResolvedValue([voucher("v1"), voucher("v2")]);
+    open();
+    await screen.findByTestId("amount-expected");
+
+    await user.click(screen.getByRole("button", { name: "Cobrar" }));
+
+    const alert = await screen.findByText(/^Este alumno tiene varios comprobantes por revisar/);
+    await waitFor(() => expect(alert).toHaveFocus());
+  });
+
   it("with two waiting, 'ninguno' declines them all", async () => {
     const user = userEvent.setup();
     vouchers.listPendingVouchers.mockResolvedValue([voucher("v1"), voucher("v2")]);
