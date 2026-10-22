@@ -466,7 +466,7 @@ paths:
               example: Too Many Requests
     get:
       tags: [family]
-      summary: A child's payment vouchers, oldest first
+      summary: A child's payment vouchers, newest first
       description: >
         What the family sent and what the office did with it: pending,
         applied (with the receipt's folio) or rejected (with the reason). A
@@ -5536,7 +5536,7 @@ paths:
   /api/v1/finance/payment-vouchers:
     get:
       tags: [finance-payments]
-      summary: The school's payment vouchers, oldest first
+      summary: The school's payment vouchers, newest first
       description: >
         The office's queue (ADR 0040): what families sent from the app, for one
         pupil or the whole school. A school-wide read of financial data, on

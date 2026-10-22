@@ -91,7 +91,7 @@ func (f *fakeVoucherRepo) ListPaymentVouchers(_ context.Context, filter ports.Vo
 		}
 		out = append(out, v)
 	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].CreatedAt().Before(out[j].CreatedAt()) })
+	sort.SliceStable(out, func(i, j int) bool { return out[i].CreatedAt().After(out[j].CreatedAt()) })
 	return out, nil
 }
 

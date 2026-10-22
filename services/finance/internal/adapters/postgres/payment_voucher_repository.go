@@ -312,7 +312,8 @@ func (r *Repository) LivePaymentVoucherByFile(ctx context.Context, studentID str
 	return out, found, err
 }
 
-// ListPaymentVouchers reads vouchers oldest first, capped.
+// ListPaymentVouchers reads vouchers newest first, capped: the cap cuts the
+// oldest, never today's.
 func (r *Repository) ListPaymentVouchers(ctx context.Context, f ports.VoucherFilter) ([]domain.PaymentVoucher, error) {
 	students := make([]string, 0, len(f.StudentIDs))
 	for _, id := range f.StudentIDs {
@@ -338,7 +339,7 @@ func (r *Repository) ListPaymentVouchers(ctx context.Context, f ports.VoucherFil
 		if f.Status != "" {
 			q = q.Where("v.status = ?", f.Status)
 		}
-		if err := q.Order("v.created_at, v.id").Limit(limit).Find(&rows).Error; err != nil {
+		if err := q.Order("v.created_at DESC, v.id DESC").Limit(limit).Find(&rows).Error; err != nil {
 			return glerrors.Wrap(glerrors.KindInternal, "listing payment vouchers", err)
 		}
 		return nil

@@ -365,11 +365,12 @@ func TestPaymentVoucherListFilters(t *testing.T) {
 		return out
 	}
 	mine, err := repo.ListPaymentVouchers(ctx, ports.VoucherFilter{StudentIDs: []string{s1}})
-	if err != nil || fmt.Sprint(ids(mine)) != fmt.Sprint([]string{a.ID(), c.ID()}) {
-		t.Fatalf("s1's vouchers oldest first = %v, %v", ids(mine), err)
+	// Newest first (review): the 500 cap must cut the oldest, never today's.
+	if err != nil || fmt.Sprint(ids(mine)) != fmt.Sprint([]string{c.ID(), a.ID()}) {
+		t.Fatalf("s1's vouchers newest first = %v, %v", ids(mine), err)
 	}
 	pending, err := repo.ListPaymentVouchers(ctx, ports.VoucherFilter{Status: domain.VoucherPending, StudentIDs: []string{s1, s2}})
-	if err != nil || fmt.Sprint(ids(pending)) != fmt.Sprint([]string{a.ID(), b.ID()}) {
+	if err != nil || fmt.Sprint(ids(pending)) != fmt.Sprint([]string{b.ID(), a.ID()}) {
 		t.Fatalf("pending of both = %v, %v", ids(pending), err)
 	}
 	queue, err := repo.ListPaymentVouchers(ctx, ports.VoucherFilter{Status: domain.VoucherPending})
@@ -377,7 +378,7 @@ func TestPaymentVoucherListFilters(t *testing.T) {
 		t.Fatalf("the school's queue = %v, %v", ids(queue), err)
 	}
 	one, err := repo.ListPaymentVouchers(ctx, ports.VoucherFilter{StudentIDs: []string{s1, s2}, Limit: 1})
-	if err != nil || len(one) != 1 {
+	if err != nil || len(one) != 1 || one[0].ID() != c.ID() {
 		t.Fatalf("limit 1 = %v, %v", ids(one), err)
 	}
 	if bad, err := repo.ListPaymentVouchers(ctx, ports.VoucherFilter{StudentIDs: []string{"not-a-uuid"}}); err != nil || len(bad) != 0 {

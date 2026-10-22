@@ -64,7 +64,7 @@ func (c *FinanceClient) CreatePaymentVoucher(ctx context.Context, in VoucherUplo
 	return toPaymentVoucher(res.Msg.GetVoucher()), res.Msg.GetReplayed(), nil
 }
 
-// ListPaymentVouchers reads vouchers within scope, oldest first.
+// ListPaymentVouchers reads vouchers within scope, newest first.
 func (c *FinanceClient) ListPaymentVouchers(ctx context.Context, scope VoucherScope, status string, limit int) ([]PaymentVoucher, error) {
 	res, err := c.rpc.ListPaymentVouchers(ctx, connect.NewRequest(&financev1.ListPaymentVouchersRequest{
 		Scope: toProtoVoucherScope(scope), Status: status, Limit: int32(limit), //nolint:gosec // bounded to 500 at the edge

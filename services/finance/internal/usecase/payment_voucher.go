@@ -137,7 +137,7 @@ func (s *PaymentVoucherService) Upload(ctx context.Context, in VoucherUpload) (d
 	return stored, replayed, nil
 }
 
-// List reads vouchers within scope, oldest first, optionally by status.
+// List reads vouchers within scope, newest first, optionally by status.
 func (s *PaymentVoucherService) List(ctx context.Context, scope VoucherScope, status string, limit int) ([]domain.PaymentVoucher, error) {
 	if err := scope.validate(); err != nil {
 		return nil, err

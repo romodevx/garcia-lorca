@@ -37,7 +37,7 @@ type PaymentVoucherRepository interface {
 	LivePaymentVoucherByFile(ctx context.Context, studentID string, sha256 []byte) (domain.PaymentVoucher, bool, error)
 	// GetPaymentVoucher reads one voucher, or KindNotFound.
 	GetPaymentVoucher(ctx context.Context, id string) (domain.PaymentVoucher, error)
-	// ListPaymentVouchers reads vouchers oldest first.
+	// ListPaymentVouchers reads vouchers newest first (the cap cuts the oldest).
 	ListPaymentVouchers(ctx context.Context, f VoucherFilter) ([]domain.PaymentVoucher, error)
 	// UpdatePaymentVoucher runs change on the voucher under its row lock and
 	// stores what it returns with its event. An event with no Kind means

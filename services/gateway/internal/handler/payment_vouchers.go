@@ -248,7 +248,7 @@ func (h *PaymentVouchersHandler) FamilyList(w http.ResponseWriter, r *http.Reque
 // --- the office ------------------------------------------------------------
 
 // Queue handles GET /api/v1/finance/payment-vouchers?status&studentId&limit:
-// the school's queue, oldest first.
+// the school's queue, newest first (the 500 cap cuts the oldest).
 func (h *PaymentVouchersHandler) Queue(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	status := q.Get("status")

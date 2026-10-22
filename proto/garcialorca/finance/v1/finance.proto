@@ -154,7 +154,7 @@ service FinanceService {
   // (replayed = true); a fourth pending voucher is AlreadyExists with
   // X-Error-Code VOUCHER_LIMIT.
   rpc CreatePaymentVoucher(CreatePaymentVoucherRequest) returns (CreatePaymentVoucherResponse);
-  // ListPaymentVouchers reads vouchers oldest first within a scope the
+  // ListPaymentVouchers reads vouchers newest first within a scope the
   // SERVICE enforces: the family's children, or the school's queue.
   rpc ListPaymentVouchers(ListPaymentVouchersRequest) returns (ListPaymentVouchersResponse);
   // GetPaymentVoucherFile returns a voucher's bytes within the same scope; a
