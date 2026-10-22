@@ -47,9 +47,9 @@ func TestPaymentVoucherRequestsCarryEveryField(t *testing.T) {
 	}
 	d := toRegisterDepositRequest(DepositRequest{
 		StudentID: "st-1", AmountCents: 1000, Method: "transfer",
-		Vouchers: VoucherChoice{VoucherID: "v-1", Declined: []string{"v-2"}},
+		Vouchers: VoucherChoice{VoucherID: "v-1", Declined: []string{"v-2"}, Aware: true},
 	})
-	if d.GetVoucherId() != "v-1" || len(d.GetDeclinedVoucherIds()) != 1 || d.GetDeclinedVoucherIds()[0] != "v-2" || d.GetStudentId() != "st-1" {
+	if !d.GetVoucherAware() || d.GetVoucherId() != "v-1" || len(d.GetDeclinedVoucherIds()) != 1 || d.GetDeclinedVoucherIds()[0] != "v-2" || d.GetStudentId() != "st-1" {
 		t.Errorf("deposit = %+v", d)
 	}
 	res := toDepositResult(&financev1.RegisterDepositResponse{LinkedVoucher: &financev1.PaymentVoucher{Id: "v-1"}})

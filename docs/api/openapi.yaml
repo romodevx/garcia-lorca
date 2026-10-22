@@ -5367,8 +5367,9 @@ paths:
                   items: { type: string, format: uuid }
                   description: >
                     Pending vouchers this payment registered by hand is NOT.
-                    Without voucherId, the pupil's only other pending voucher
-                    links itself to the deposit (`linkedVoucher`); two or more
+                    While `module_payment_vouchers` is on (and only then), a
+                    payment without voucherId links the pupil's only other
+                    pending voucher to itself (`linkedVoucher`); two or more
                     are 409 `VOUCHER_CHOICE_REQUIRED` and nothing is taken.
                     Only without voucherId (400 otherwise). With
                     `module_payment_vouchers` off, sending it is 404.
@@ -5580,8 +5581,10 @@ paths:
       description: >
         The file's bytes, read from the private bucket and served only after
         the permission check. Served with the type its bytes proved to be,
-        nosniff, `private, no-store` and a sandboxing Content-Security-Policy:
-        it is a family's upload, shown from the app's own origin. Behind
+        nosniff, `private, no-store`, a sandboxing Content-Security-Policy and
+        `Content-Disposition: attachment`: it is a family's upload and is never
+        rendered as a page of the app's origin (the web previews the Blob it
+        fetched). Behind
         `module_payment_vouchers` AND `module_finance`. Requires `finance:read`
         or `collections:read`.
       operationId: getPaymentVoucherFile
@@ -5594,6 +5597,7 @@ paths:
             Cache-Control: { schema: { type: string, const: 'private, no-store' } }
             X-Content-Type-Options: { schema: { type: string, const: nosniff } }
             Content-Security-Policy: { schema: { type: string } }
+            Content-Disposition: { schema: { type: string, example: 'attachment; filename="comprobante-pago.pdf"' } }
           content:
             image/jpeg: { schema: { type: string, format: binary } }
             image/png: { schema: { type: string, format: binary } }

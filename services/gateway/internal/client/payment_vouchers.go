@@ -28,10 +28,13 @@ type PaymentVoucher struct {
 }
 
 // VoucherChoice is what the counter says about vouchers on a deposit: this
-// money IS VoucherID, or (by hand) it is NOT any of Declined.
+// money IS VoucherID, or (by hand) it is NOT any of Declined. Aware says the
+// counter shows vouchers (module_payment_vouchers on): only then does a
+// payment by hand link one or ask to choose.
 type VoucherChoice struct {
 	VoucherID string
 	Declined  []string
+	Aware     bool
 }
 
 // VoucherScope is whose vouchers a read may see: the family's children, or

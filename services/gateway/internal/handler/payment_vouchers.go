@@ -297,7 +297,7 @@ func voucherIDOf(w http.ResponseWriter, r *http.Request) (string, bool) {
 
 // File handles GET /api/v1/finance/payment-vouchers/{id}/file: the family's
 // upload with the type its bytes proved to be, never sniffed, never cached,
-// sandboxed — served from the app's own origin, as an expense receipt is.
+// sandboxed, and as an attachment — never rendered as a page of the origin.
 func (h *PaymentVouchersHandler) File(w http.ResponseWriter, r *http.Request) {
 	id, ok := voucherIDOf(w, r)
 	if !ok {
@@ -310,7 +310,9 @@ func (h *PaymentVouchersHandler) File(w http.ResponseWriter, r *http.Request) {
 	}
 	extension := map[string]string{"application/pdf": "pdf", "image/png": "png", "image/jpeg": "jpg"}[contentType]
 	w.Header().Set("Content-Type", contentType)
-	w.Header().Set("Content-Disposition", fmt.Sprintf("inline; filename=%q", "comprobante-pago."+extension))
+	// attachment, not inline: a family's upload is never rendered as a page of
+	// the app's origin; the web previews it from the Blob it fetched.
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", "comprobante-pago."+extension))
 	w.Header().Set("Cache-Control", "private, no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Content-Security-Policy", receiptSandboxCSP)

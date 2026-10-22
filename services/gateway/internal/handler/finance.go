@@ -666,8 +666,11 @@ func (h *FinanceHandler) RegisterDeposit(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "granting the early-payment discount requires "+grantsDiscounts, http.StatusForbidden)
 		return
 	}
+	// The counter shows vouchers exactly while their module is on; only then
+	// may a payment by hand link one or stop to ask which (ADR 0040).
+	vouchersOn := h.voucherFlags != nil && h.voucherFlags.Enabled(r.Context(), featureflag.Key(paymentVouchersModule))
 	if req.VoucherID != "" || len(req.DeclinedVoucherIDs) > 0 {
-		if h.voucherFlags == nil || !h.voucherFlags.Enabled(r.Context(), featureflag.Key(paymentVouchersModule)) {
+		if !vouchersOn {
 			writeNotFound(w)
 			return
 		}
@@ -680,7 +683,7 @@ func (h *FinanceHandler) RegisterDeposit(w http.ResponseWriter, r *http.Request)
 		StudentID: req.StudentID, AmountCents: req.AmountCents, Method: req.Method, Reference: req.Reference,
 		IdempotencyKey: req.IdempotencyKey, PaidAt: paidAt, GrantEarlyPayment: req.GrantEarlyPayment,
 		CardType: req.CardType, Receiver: h.receiverOf(r), ChargeIDs: req.ChargeIDs, Tenders: req.Tenders,
-		Vouchers: client.VoucherChoice{VoucherID: req.VoucherID, Declined: req.DeclinedVoucherIDs},
+		Vouchers: client.VoucherChoice{VoucherID: req.VoucherID, Declined: req.DeclinedVoucherIDs, Aware: vouchersOn},
 	})
 	if derr != nil {
 		writeConnectError(w, derr)

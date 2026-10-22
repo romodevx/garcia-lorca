@@ -273,7 +273,9 @@ func TestStaffReadsTheFileSandboxed(t *testing.T) {
 	if csp := rec.Header().Get("Content-Security-Policy"); !strings.HasPrefix(csp, "sandbox") {
 		t.Errorf("CSP = %q", csp)
 	}
-	if !strings.HasPrefix(rec.Header().Get("Content-Disposition"), "inline") {
+	// Review: a family's upload is never rendered as a page of the app's
+	// origin — the web previews it from a Blob it fetched.
+	if !strings.HasPrefix(rec.Header().Get("Content-Disposition"), "attachment") {
 		t.Errorf("disposition = %q", rec.Header().Get("Content-Disposition"))
 	}
 

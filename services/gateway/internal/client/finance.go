@@ -576,6 +576,7 @@ func toRegisterDepositRequest(in DepositRequest) *financev1.RegisterDepositReque
 		Tenders:            toProtoTenders(in.Tenders),
 		VoucherId:          in.Vouchers.VoucherID,
 		DeclinedVoucherIds: in.Vouchers.Declined,
+		VoucherAware:       in.Vouchers.Aware,
 	}
 	if !in.PaidAt.IsZero() {
 		req.PaidAt = timestamppb.New(in.PaidAt)

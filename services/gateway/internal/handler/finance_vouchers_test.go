@@ -110,3 +110,24 @@ func TestDepositVoucherFieldsAreValidatedAtTheEdge(t *testing.T) {
 		}
 	}
 }
+
+// Review (MEDIUM): the counter is voucher-aware exactly while the module is
+// on — only then may a payment by hand link a voucher or ask to choose.
+func TestDepositIsVoucherAwareOnlyWithTheFlagOn(t *testing.T) {
+	plain := `{"studentId":"stu-1","amountCents":1000,"method":"cash"}`
+	for name, tc := range map[string]struct {
+		opts []handler.FinanceOption
+		want bool
+	}{
+		"flag on":  {[]handler.FinanceOption{handler.WithPaymentVoucherFlag(vouchersOn())}, true},
+		"flag off": {[]handler.FinanceOption{handler.WithPaymentVoucherFlag(featureflag.NewInMemory(nil))}, false},
+		"no flag":  {nil, false},
+	} {
+		svc := &fakeFinance{depositResult: client.DepositResult{Deposit: client.Deposit{ID: "dep-1"}}}
+		rec := httptest.NewRecorder()
+		handler.NewFinanceHandler(svc, tc.opts...).RegisterDeposit(rec, notesRequest(http.MethodPost, "/api/v1/finance/deposits", plain, "payments:write"))
+		if rec.Code != http.StatusCreated || svc.depositVouchers.Aware != tc.want {
+			t.Errorf("%s: status %d, aware %v, want %v", name, rec.Code, svc.depositVouchers.Aware, tc.want)
+		}
+	}
+}
