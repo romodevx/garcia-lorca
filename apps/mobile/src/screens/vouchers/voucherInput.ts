@@ -30,8 +30,9 @@ export function parseAmountCents(typed: string): number | null | "invalid" {
   if (clean === "") return null;
   const match = POINT_DECIMALS.exec(clean) ?? COMMA_DECIMALS.exec(clean);
   if (match === null) return "invalid";
-  const pesos = Number.parseInt(match[1].replace(/,/g, ""), 10);
-  const cents = Number.parseInt((match[2] ?? "").padEnd(2, "0"), 10);
+  const [, whole = "", fraction = ""] = match;
+  const pesos = Number.parseInt(whole.replace(/,/g, ""), 10);
+  const cents = Number.parseInt(fraction.padEnd(2, "0"), 10);
   const total = pesos * CENTS_PER_PESO + cents;
   return total > 0 ? total : "invalid";
 }
@@ -56,7 +57,7 @@ export function parseDayInput(typed: string, today: string): string | null | "in
   if (clean === "") return null;
   const match = DAY_INPUT.exec(clean);
   if (match === null) return "invalid";
-  const [day, month, year] = (match[1] !== undefined ? match.slice(1, 4) : match.slice(4, 7)).map(Number);
+  const [day = 0, month = 0, year = 0] = (match[1] !== undefined ? match.slice(1, 4) : match.slice(4, 7)).map(Number);
   const date = new Date(Date.UTC(year, month - 1, day));
   if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return "invalid";
   const iso = date.toISOString().slice(0, 10);

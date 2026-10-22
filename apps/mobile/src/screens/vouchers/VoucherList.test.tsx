@@ -23,17 +23,18 @@ describe("VoucherList (Mis comprobantes)", () => {
     );
 
     const rows = screen.getAllByLabelText(/^Comprobante /);
+    const [newest, middle, oldest] = rows as [(typeof rows)[0], (typeof rows)[0], (typeof rows)[0]];
     expect(rows.map((r) => r.props.accessibilityLabel)).toEqual([
       "Comprobante pendiente",
       "Comprobante rechazado",
       "Comprobante aplicado",
     ]);
-    expect(within(rows[0]).getByText("Pendiente")).toBeTruthy();
-    expect(within(rows[0]).getByText("$2,500.00 · pagado el 20 oct 2026")).toBeTruthy();
-    expect(within(rows[1]).getByText("Rechazado")).toBeTruthy();
-    expect(within(rows[1]).getByText("Motivo: La foto no se lee")).toBeTruthy();
-    expect(within(rows[2]).getByText("Aplicado")).toBeTruthy();
-    expect(within(rows[2]).getByText("Recibo P-2026-000042")).toBeTruthy();
+    expect(within(newest).getByText("Pendiente")).toBeTruthy();
+    expect(within(newest).getByText("$2,500.00 · pagado el 20 oct 2026")).toBeTruthy();
+    expect(within(middle).getByText("Rechazado")).toBeTruthy();
+    expect(within(middle).getByText("Motivo: La foto no se lee")).toBeTruthy();
+    expect(within(oldest).getByText("Aplicado")).toBeTruthy();
+    expect(within(oldest).getByText("Recibo P-2026-000042")).toBeTruthy();
   });
 
   it("dates a voucher by the school's day it was sent", async () => {

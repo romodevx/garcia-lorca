@@ -35,7 +35,7 @@ describe("pickVoucherFile", () => {
     });
     // quality < 1 re-encodes as JPEG: no HEIC, and far under 5 MB.
     expect(library).toHaveBeenCalledWith(expect.objectContaining({ mediaTypes: ["images"], quality: expect.any(Number) }));
-    expect(library.mock.calls[0][0]?.quality).toBeLessThan(1);
+    expect(library.mock.calls[0]?.[0]?.quality).toBeLessThan(1);
   });
 
   it("names a photo the platform did not name", async () => {

@@ -36,12 +36,13 @@ function partsOf(init: RequestInit): Record<string, unknown> {
   return Object.fromEntries((init.body as unknown as RecordingFormData).appended);
 }
 
-const NativeFormData = globalThis.FormData;
+const scope = globalThis as unknown as { FormData: unknown };
+const NativeFormData = scope.FormData;
 beforeAll(() => {
-  globalThis.FormData = RecordingFormData as unknown as typeof FormData;
+  scope.FormData = RecordingFormData;
 });
 afterAll(() => {
-  globalThis.FormData = NativeFormData;
+  scope.FormData = NativeFormData;
 });
 
 describe("payment vouchers API (ADR 0040)", () => {
