@@ -69,7 +69,7 @@ describe("listPendingVouchers", () => {
 
 describe("getVoucherFile", () => {
   it("reads the file with the session and types it only as one of the three allowed kinds", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(new Blob(["%PDF"]), { status: 200, headers: { "Content-Type": "text/html" } }));
+    const fetchMock = vi.fn().mockResolvedValue(new Response("%PDF", { status: 200, headers: { "Content-Type": "text/html" } }));
     vi.stubGlobal("fetch", fetchMock);
 
     const blob = await getVoucherFile(BASE, { id: "v1", fileContentType: "application/pdf" });
