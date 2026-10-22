@@ -6,13 +6,16 @@ import { Card, ListRow, TintIcon } from "../../ui";
 
 const TITLE = "¿Ya pagaste? Sube tu comprobante";
 
-function pendingLine(pending: number): string {
-  if (pending === 0) return "Envía la foto o el PDF de tu transferencia.";
+function pendingLine(pending: number | undefined): string {
+  if (pending === undefined || pending === 0) return "Envía la foto o el PDF de tu transferencia.";
   return pending === 1 ? "1 comprobante por revisar" : `${pending} comprobantes por revisar`;
 }
 
-/** Cuenta's way to the voucher screen (ADR 0040), right below "Cómo pagar". */
-export function VoucherEntryCard({ pending }: { pending: number }): ReactElement {
+/**
+ * Cuenta's way to the voucher screen (ADR 0040), right below "Cómo pagar".
+ * `pending` undefined (the list failed) shows the invitation, not a count.
+ */
+export function VoucherEntryCard({ pending }: { pending?: number }): ReactElement {
   const theme = useTheme();
   return (
     <Card onPress={() => router.push("/comprobante")} accessibilityLabel={TITLE} style={styles.card}>

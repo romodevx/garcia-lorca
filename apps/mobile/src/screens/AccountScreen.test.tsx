@@ -495,6 +495,25 @@ describe("AccountScreen voucher entry (¿Ya pagaste?)", () => {
     expect(await screen.findByText("1 comprobante por revisar")).toBeTruthy();
   });
 
+  it.each([[500], [503]])("keeps the entry, without a count, when the list fails with %d", async (status) => {
+    mockWithVouchers(status, []);
+    await renderWithProviders(<AccountScreen />, { flags: { ...demoFlags, module_payment_vouchers: true } });
+
+    expect(await screen.findByLabelText("¿Ya pagaste? Sube tu comprobante")).toBeTruthy();
+    expect(screen.getByText("Envía la foto o el PDF de tu transferencia.")).toBeTruthy();
+  });
+
+  it("keeps the entry when the list cannot be reached at all", async () => {
+    const base = mockFetch(SETTLED);
+    globalThis.fetch = jest.fn(async (url: string, init?: RequestInit) => {
+      if (String(url).endsWith("/payment-vouchers")) throw new TypeError("Network request failed");
+      return base(url, init);
+    }) as unknown as typeof fetch;
+    await renderWithProviders(<AccountScreen />, { flags: { ...demoFlags, module_payment_vouchers: true } });
+
+    expect(await screen.findByLabelText("¿Ya pagaste? Sube tu comprobante")).toBeTruthy();
+  });
+
   it("is absent, and asks nothing, with the flag off", async () => {
     const fetchMock = mockWithVouchers(200, []);
     await renderWithProviders(<AccountScreen />, { flags: { ...demoFlags, module_payment_vouchers: false } });

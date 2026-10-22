@@ -19,6 +19,8 @@ import { usePdfDownload } from "./grades/usePdfDownload";
 import { PdfStatus } from "./account/PdfStatus";
 import { formatDayWithYear, pesos, totalBalanceLine } from "./format";
 
+const NOT_FOUND = 404;
+
 const PDF_MESSAGES = {
   network: "No pudimos descargar el estado de cuenta. Revisa tu conexión e inténtalo de nuevo.",
   server: "La escuela no pudo entregar el estado de cuenta en este momento. Inténtalo más tarde.",
@@ -159,9 +161,10 @@ export function AccountScreen(): ReactElement {
       </Card>
 
       {payment.data !== null ? <HowToPayCard info={payment.data} /> : null}
-      {/* Only once the list answered: while loading, a gateway with it off would flash it. */}
-      {vouchersEnabled && vouchers.data !== null ? (
-        <VoucherEntryCard pending={vouchers.data.filter((v) => v.status === "pending").length} />
+      {/* Not while loading (a gateway with it off would flash it), never on its 404;
+          any other failure keeps the way in, just without a count. */}
+      {vouchersEnabled && (vouchers.data !== null || (vouchers.error && vouchers.errorStatus !== NOT_FOUND)) ? (
+        <VoucherEntryCard pending={vouchers.data?.filter((v) => v.status === "pending").length} />
       ) : null}
 
       {cardEnabled && (
