@@ -63,16 +63,31 @@ func NewCardHandler(links GuardianLinkReader, students CardStudents, photos Stud
 // cardResponse is the card as the parents' app draws it. The QR carries only
 // the opaque code; everything a person reads is beside it.
 type cardResponse struct {
-	StudentID        string               `json:"studentId"`
-	Name             string               `json:"name"`
-	Level            string               `json:"level"`
-	GradeGroup       string               `json:"gradeGroup"`
-	Cycle            string               `json:"cycle"`
-	EnrollmentNumber string               `json:"enrollmentNumber"`
-	School           client.SchoolProfile `json:"school"`
+	StudentID        string     `json:"studentId"`
+	Name             string     `json:"name"`
+	Level            string     `json:"level"`
+	GradeGroup       string     `json:"gradeGroup"`
+	Cycle            string     `json:"cycle"`
+	EnrollmentNumber string     `json:"enrollmentNumber"`
+	School           cardSchool `json:"school"`
 	// QR is empty while the office has the card suspended.
 	QR        string `json:"qr"`
 	Suspended bool   `json:"suspended"`
+}
+
+// cardSchool is what the card prints about the school. The RFC and legal name
+// stay on receipts: a school registered under a person's RFC would otherwise
+// hand every family that person's name and birthdate.
+type cardSchool struct {
+	Name    string `json:"name"`
+	CCT     string `json:"cct"`
+	Address string `json:"address"`
+	Phone   string `json:"phone"`
+	Legend  string `json:"legend"`
+}
+
+func toCardSchool(p client.SchoolProfile) cardSchool {
+	return cardSchool{Name: p.Name, CCT: p.CCT, Address: p.Address, Phone: p.Phone, Legend: p.Legend}
 }
 
 // FamilyCard handles GET /api/v1/family/students/{studentId}/card. Another
@@ -107,7 +122,7 @@ func (h *CardHandler) FamilyCard(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, cardResponse{
 		StudentID: pupil.ID, Name: fullName(pupil), Level: pupil.Level, GradeGroup: pupil.GradeGroup,
-		Cycle: cycle, EnrollmentNumber: pupil.EnrollmentNumber, School: school, QR: code, Suspended: suspended,
+		Cycle: cycle, EnrollmentNumber: pupil.EnrollmentNumber, School: toCardSchool(school), QR: code, Suspended: suspended,
 	})
 }
 

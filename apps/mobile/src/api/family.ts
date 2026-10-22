@@ -235,8 +235,6 @@ export async function markNotificationRead(notificationId: string): Promise<void
 /** The school's details as the card prints them (task 12's profile). */
 export interface CardSchool {
   name: string;
-  legalName: string;
-  rfc: string;
   cct: string;
   address: string;
   phone: string;

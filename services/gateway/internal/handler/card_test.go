@@ -205,3 +205,39 @@ func TestStaffReissueACard(t *testing.T) {
 		t.Errorf("reissue: %d, reissued %q", rec.Code, f.reissued)
 	}
 }
+
+// The card shows the school's public details only. The RFC and legal name are
+// for receipts: a school registered under a person's RFC would hand every
+// family that person's name and birthdate.
+func TestTheCardCarriesOnlyTheSchoolsPublicDetails(t *testing.T) {
+	f := &fakeCards{
+		links:   []client.GuardianLink{{StudentID: "stu-1"}},
+		student: client.StudentResult{ID: "stu-1", FirstName: "Zoe", LastName: "Villalobos"},
+		code:    "GLCARD:x",
+		profile: client.SchoolProfile{
+			Name: "COLEGIO GARCÍA LORCA", LegalName: "CENTRO EDUCATIVO GL SC", RFC: "CEG850101AB1",
+			CCT: "16PPR0001X", Address: "Morelia", Phone: "4431234567", Legend: "Incorporada a la SEP",
+		},
+	}
+	rec := httptest.NewRecorder()
+	cardHandler(f).FamilyCard(rec, asGuardian(httptest.NewRequest(http.MethodGet, "/api/v1/family/students/stu-1/card", nil), "stu-1"))
+
+	var got struct {
+		School map[string]any `json:"school"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	want := map[string]any{
+		"name": "COLEGIO GARCÍA LORCA", "cct": "16PPR0001X", "address": "Morelia",
+		"phone": "4431234567", "legend": "Incorporada a la SEP",
+	}
+	if len(got.School) != len(want) {
+		t.Errorf("school keys = %v, want exactly %v", got.School, want)
+	}
+	for key, value := range want {
+		if got.School[key] != value {
+			t.Errorf("school.%s = %v, want %q", key, got.School[key], value)
+		}
+	}
+}
