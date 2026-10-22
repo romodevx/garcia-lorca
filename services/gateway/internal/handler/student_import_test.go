@@ -105,9 +105,27 @@ func (f *fakeImportRoster) ImportStudents(_ context.Context, rows []client.Impor
 		if !validate {
 			res.EnrollmentNumber = "2026-00001"
 		}
+		res.Draft = r.Action == client.ImportActionDraft
+		res.Warnings = fakeProfileWarnings(r.Profile)
 		out = append(out, res)
 	}
 	return out, nil
+}
+
+// fakeProfileWarnings answers like students' lenient profile for the values
+// the tests use: a phone that is not ten digits, an unknown state.
+func fakeProfileWarnings(p client.StudentProfile) []string {
+	var out []string
+	for _, ph := range p.Phones {
+		if len(ph.Number) != 10 {
+			out = append(out, "phone_invalid")
+			break
+		}
+	}
+	if p.Address.State == "Atlántida" {
+		out = append(out, "state_unknown")
+	}
+	return out
 }
 
 type fakeImportPricing struct {
