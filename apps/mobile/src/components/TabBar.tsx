@@ -26,12 +26,17 @@ const TABS: TabMeta[] = [
   { name: "avisos", label: "Avisos", icon: "megaphone" },
 ];
 
+export interface TabBarProps extends BottomTabBarProps {
+  /** Reports the bar's laid-out height, so overlays can float clear of it. */
+  onHeight?: (height: number) => void;
+}
+
 /**
  * Moderno-skin bottom bar: flat with a hairline top border, an active-tab lime
  * pill behind the icon, and an unread badge on Avisos. "Más" sits at the end and
  * navigates to the module grid.
  */
-export function TabBar({ state, navigation }: BottomTabBarProps): ReactElement {
+export function TabBar({ state, navigation, onHeight }: TabBarProps): ReactElement {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const { unreadCount } = useAppState();
@@ -39,6 +44,8 @@ export function TabBar({ state, navigation }: BottomTabBarProps): ReactElement {
 
   return (
     <View
+      testID="tab-bar"
+      onLayout={(e) => onHeight?.(e.nativeEvent.layout.height)}
       style={[
         styles.bar,
         {

@@ -10,6 +10,9 @@ import { AsyncErrorState, AsyncLoading } from "./AsyncStates";
 
 const QR_SIZE = 200;
 const PHOTO_SIZE = 96;
+const LOGO_HEIGHT = 48;
+/** assets/logo.png is 299×168 px. */
+const LOGO_ASPECT = 299 / 168;
 
 /**
  * Credencial (task 13): the selected child's virtual card — photo, name, group,
@@ -45,6 +48,14 @@ function StudentCard({ card }: { card: FamilyCard }): ReactElement {
   const muted = { color: theme.colors.text2, fontFamily: theme.fonts.ui };
   return (
     <Card padded style={styles.card} accessibilityLabel={`Credencial de ${card.name}`}>
+      <Image
+        testID="card-school-logo"
+        // eslint-disable-next-line @typescript-eslint/no-require-imports -- Metro resolves static image assets via require()
+        source={require("../../assets/logo.png")}
+        style={styles.logo}
+        resizeMode="contain"
+        accessibilityLabel="Centro Educativo García Lorca"
+      />
       {card.school.name !== "" && (
         <Text style={[styles.school, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]}>{card.school.name}</Text>
       )}
@@ -65,7 +76,33 @@ function StudentCard({ card }: { card: FamilyCard }): ReactElement {
           <QRCode value={card.qr} size={QR_SIZE} color="#000000" backgroundColor="#FFFFFF" />
         </View>
       )}
+      <SchoolFooter school={card.school} />
     </Card>
+  );
+}
+
+/**
+ * How to reach the school, under the code: CCT, address, phone and legend,
+ * each only when the school filled it in. The RFC and legal name are fiscal
+ * data and stay off a card that is shown at the door.
+ */
+function SchoolFooter({ school }: { school: FamilyCard["school"] }): ReactElement | null {
+  const theme = useTheme();
+  const lines = [
+    { key: "cct", text: school.cct !== "" ? `CCT ${school.cct}` : "" },
+    { key: "address", text: school.address },
+    { key: "phone", text: school.phone !== "" ? `Tel. ${school.phone}` : "" },
+    { key: "legend", text: school.legend },
+  ].filter((line) => line.text !== "");
+  if (lines.length === 0) return null;
+  return (
+    <View testID="card-school-footer" style={[styles.footer, { borderTopColor: theme.colors.line }]}>
+      {lines.map((line) => (
+        <Text key={line.key} style={[styles.footerLine, { color: theme.colors.text2, fontFamily: theme.fonts.ui }]}>
+          {line.text}
+        </Text>
+      ))}
+    </View>
   );
 }
 
@@ -104,6 +141,7 @@ function initialsOf(name: string): string {
 
 const styles = StyleSheet.create({
   card: { alignItems: "center", gap: 6 },
+  logo: { width: LOGO_HEIGHT * LOGO_ASPECT, height: LOGO_HEIGHT },
   school: { fontSize: 14, textAlign: "center", marginBottom: 8 },
   photo: { width: PHOTO_SIZE, height: PHOTO_SIZE, borderRadius: PHOTO_SIZE / 2, marginBottom: 8 },
   initials: { alignItems: "center", justifyContent: "center" },
@@ -114,4 +152,6 @@ const styles = StyleSheet.create({
   number: { fontSize: 20, letterSpacing: 1 },
   qrPlate: { marginTop: 14, padding: 12, borderRadius: 12, backgroundColor: "#FFFFFF" },
   suspended: { marginTop: 14, fontSize: 15, textAlign: "center" },
+  footer: { alignSelf: "stretch", alignItems: "center", gap: 2, marginTop: 14, paddingTop: 12, borderTopWidth: StyleSheet.hairlineWidth },
+  footerLine: { fontSize: 13, textAlign: "center" },
 });

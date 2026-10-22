@@ -77,4 +77,34 @@ describe("CardScreen (tarea 13)", () => {
     expect(await screen.findByText(/Credencial suspendida/)).toBeTruthy();
     expect(screen.queryByTestId("card-qr")).toBeNull();
   });
+
+  it("shows the school's logo and contact data, never its RFC or legal name", async () => {
+    mockFetch({
+      ...card,
+      school: {
+        name: "COLEGIO GARCÍA LORCA", legalName: "CENTRO EDUCATIVO GL SC", rfc: "CEG010101AB1",
+        cct: "16PPR0123X", address: "Av. Madero 100, Morelia", phone: "443 123 4567", legend: "Válida durante el ciclo escolar",
+      },
+    });
+    await renderWithProviders(<CardScreen />);
+
+    expect(await screen.findByTestId("card-school-logo")).toBeTruthy();
+    expect(screen.getByText(/16PPR0123X/)).toBeTruthy();
+    expect(screen.getByText("Av. Madero 100, Morelia")).toBeTruthy();
+    expect(screen.getByText(/443 123 4567/)).toBeTruthy();
+    expect(screen.getByText("Válida durante el ciclo escolar")).toBeTruthy();
+    expect(screen.queryByText(/CEG010101AB1/)).toBeNull();
+    expect(screen.queryByText(/CENTRO EDUCATIVO GL SC/)).toBeNull();
+    expect(screen.queryByLabelText(/CENTRO EDUCATIVO GL SC/)).toBeNull();
+  });
+
+  it("leaves out the school data the school has not filled in", async () => {
+    mockFetch(card);
+    await renderWithProviders(<CardScreen />);
+
+    expect(await screen.findByText("Zoe Villalobos")).toBeTruthy();
+    expect(screen.queryByText(/CCT/)).toBeNull();
+    expect(screen.queryByText(/Tel\./)).toBeNull();
+    expect(screen.queryByTestId("card-school-footer")).toBeNull();
+  });
 });

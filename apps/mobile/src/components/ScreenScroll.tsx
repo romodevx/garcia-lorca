@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState, type ReactElement, type ReactNode } from "react";
 import { RefreshControl, ScrollView, StyleSheet } from "react-native";
 import { useTheme } from "../theme";
+import { FAB_CLEARANCE, useCardFabVisible } from "./CardFab";
 import { RefreshRegistryContext, type RefreshHandler } from "./refresh";
 
 export interface ScreenScrollProps {
@@ -13,13 +14,14 @@ export interface ScreenScrollProps {
 
 /**
  * Standard scrollable screen body: horizontal padding, generous bottom inset so
- * content clears the tab bar + toast, and a REAL pull-to-refresh: the spinner
+ * content clears the tab bar + toast (and the credencial button when it shows), and a REAL pull-to-refresh: the spinner
  * stays up exactly as long as the reloads take. With nothing to reload there is
  * no pull at all — a spinner that reloads nothing would tell the parent the data
  * is fresh when it is not.
  */
 export function ScreenScroll({ children, refreshable = true, onRefresh }: ScreenScrollProps): ReactElement {
   const theme = useTheme();
+  const fabVisible = useCardFabVisible();
   const [refreshing, setRefreshing] = useState(false);
   const handlers = useRef(new Set<RefreshHandler>());
   const [handlerCount, setHandlerCount] = useState(0);
@@ -47,7 +49,7 @@ export function ScreenScroll({ children, refreshable = true, onRefresh }: Screen
       <ScrollView
         testID="screen-scroll"
         style={{ backgroundColor: theme.colors.bg }}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, { paddingBottom: fabVisible ? FAB_CLEARANCE : BOTTOM_INSET }]}
         showsVerticalScrollIndicator={false}
         refreshControl={
           canRefresh ? (
@@ -66,6 +68,9 @@ export function ScreenScroll({ children, refreshable = true, onRefresh }: Screen
   );
 }
 
+/** Clears the tab bar + toast when no floating button sits over the content. */
+const BOTTOM_INSET = 40;
+
 const styles = StyleSheet.create({
-  content: { paddingHorizontal: 16, paddingTop: 2, paddingBottom: 40 },
+  content: { paddingHorizontal: 16, paddingTop: 2 },
 });
