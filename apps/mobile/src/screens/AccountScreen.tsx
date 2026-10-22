@@ -49,8 +49,7 @@ export function AccountScreen(): ReactElement {
   // How to pay is a companion read: when it fails the card is simply absent,
   // never a reason to hide the account.
   const payment = useChildPaymentInfo(selectedChildId);
-  // Vouchers (ADR 0040): the flag is UX; the entry shows only once the list
-  // answered OK, so the gateway's 404 hides it too.
+  // Vouchers (ADR 0040): the flag is UX; the gateway's 404 hides the entry too.
   const vouchersEnabled = useFlag("module_payment_vouchers");
   const vouchers = useChildPaymentVouchers(selectedChildId, vouchersEnabled);
   useRefreshHandler(async () => {
