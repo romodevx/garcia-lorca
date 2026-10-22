@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import {
   getCard,
   getPaymentInfo,
@@ -118,11 +118,31 @@ export function useChildCard(childId: string | null): AsyncResource<FamilyCard> 
   return useAsyncResource(load);
 }
 
+/** Every mounted voucher list, so a send on one screen recounts the others (Cuenta). */
+const voucherListeners = new Set<() => void>();
+
+/** Tells every mounted voucher list that the family just sent one. */
+export function announceVoucherSent(): void {
+  for (const listener of voucherListeners) listener();
+}
+
 /**
  * The selected child's payment vouchers (ADR 0040). `enabled` false (the
- * module's flag off) fires no request, like a null child.
+ * module's flag off) fires no request, like a null child. It reloads when a
+ * voucher is sent from any screen ({@link announceVoucherSent}).
  */
 export function useChildPaymentVouchers(childId: string | null, enabled = true): AsyncResource<FamilyPaymentVoucher[]> {
   const load = useMemo(() => (childId && enabled ? () => listPaymentVouchers(childId) : null), [childId, enabled]);
-  return useAsyncResource(load);
+  const resource = useAsyncResource(load);
+  const reload = useRef(resource.reload);
+  reload.current = resource.reload;
+  useEffect(() => {
+    if (load === null) return undefined;
+    const listener = (): void => void reload.current();
+    voucherListeners.add(listener);
+    return () => {
+      voucherListeners.delete(listener);
+    };
+  }, [load]);
+  return resource;
 }

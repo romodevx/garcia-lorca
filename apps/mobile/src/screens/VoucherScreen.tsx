@@ -1,7 +1,7 @@
 import { type ReactElement } from "react";
 import { StyleSheet, Text } from "react-native";
 import { useAppState } from "../state/AppState";
-import { useChildPaymentVouchers } from "../state/familyData";
+import { announceVoucherSent, useChildPaymentVouchers } from "../state/familyData";
 import { useRefreshHandler } from "../components/refresh";
 import { useTheme } from "../theme";
 import { EmptyState, SectionLabel } from "../ui";
@@ -27,7 +27,8 @@ export function VoucherScreen({ today = schoolToday() }: VoucherScreenProps): Re
   const theme = useTheme();
   const { selectedChildId } = useAppState();
   const vouchers = useChildPaymentVouchers(selectedChildId);
-  const form = useVoucherForm(selectedChildId, today, () => void vouchers.reload());
+  // A send recounts this list and Cuenta's alike.
+  const form = useVoucherForm(selectedChildId, today, announceVoucherSent);
   useRefreshHandler(vouchers.reload);
 
   // The gateway's 404 is the boundary: the module is off for this family.

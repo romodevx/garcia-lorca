@@ -19,8 +19,6 @@ import { usePdfDownload } from "./grades/usePdfDownload";
 import { PdfStatus } from "./account/PdfStatus";
 import { formatDayWithYear, pesos, totalBalanceLine } from "./format";
 
-const NOT_FOUND = 404;
-
 const PDF_MESSAGES = {
   network: "No pudimos descargar el estado de cuenta. Revisa tu conexión e inténtalo de nuevo.",
   server: "La escuela no pudo entregar el estado de cuenta en este momento. Inténtalo más tarde.",
@@ -49,7 +47,8 @@ export function AccountScreen(): ReactElement {
   // How to pay is a companion read: when it fails the card is simply absent,
   // never a reason to hide the account.
   const payment = useChildPaymentInfo(selectedChildId);
-  // Vouchers (ADR 0040): the flag is UX; the gateway's 404 hides the entry too.
+  // Vouchers (ADR 0040): the flag is UX; the entry shows only once the list
+  // answered OK, so the gateway's 404 hides it too.
   const vouchersEnabled = useFlag("module_payment_vouchers");
   const vouchers = useChildPaymentVouchers(selectedChildId, vouchersEnabled);
   useRefreshHandler(async () => {
@@ -160,8 +159,9 @@ export function AccountScreen(): ReactElement {
       </Card>
 
       {payment.data !== null ? <HowToPayCard info={payment.data} /> : null}
-      {vouchersEnabled && vouchers.errorStatus !== NOT_FOUND ? (
-        <VoucherEntryCard pending={(vouchers.data ?? []).filter((v) => v.status === "pending").length} />
+      {/* Only once the list answered: while loading, a gateway with it off would flash it. */}
+      {vouchersEnabled && vouchers.data !== null ? (
+        <VoucherEntryCard pending={vouchers.data.filter((v) => v.status === "pending").length} />
       ) : null}
 
       {cardEnabled && (
