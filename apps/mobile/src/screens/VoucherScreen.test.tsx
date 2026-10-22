@@ -177,6 +177,18 @@ describe("VoucherScreen (¿Ya pagaste? Sube tu comprobante)", () => {
     expect(screen.getByText("Permite el acceso a la cámara en Ajustes para tomar la foto.")).toBeTruthy();
   });
 
+  it("refuses a format the school does not take, in words", async () => {
+    const gateway = mockGateway({ status: 201 });
+    await renderScreen();
+    pick.mockResolvedValue({ kind: "unsupported" });
+
+    await fireEvent.press(screen.getByLabelText("Elegir de la galería"));
+    await send();
+
+    expect(screen.getAllByText("Ese formato no se puede enviar. Usa una foto JPG o PNG, o un PDF.").length).toBeGreaterThan(0);
+    expect(gateway.posts()).toHaveLength(0);
+  });
+
   it("says the feature is off when the gateway answers 404", async () => {
     mockGateway({ status: 404 }, [[]], 404);
     await renderWithProviders(<VoucherScreen today={TODAY} />);

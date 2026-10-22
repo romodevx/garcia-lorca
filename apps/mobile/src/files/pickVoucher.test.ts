@@ -6,6 +6,7 @@ jest.mock("expo-image-picker", () => ({
   requestCameraPermissionsAsync: jest.fn(),
   launchCameraAsync: jest.fn(),
   launchImageLibraryAsync: jest.fn(),
+  UIImagePickerPreferredAssetRepresentationMode: { Automatic: "automatic", Compatible: "compatible", Current: "current" },
 }));
 jest.mock("expo-document-picker", () => ({ getDocumentAsync: jest.fn() }));
 
@@ -36,6 +37,38 @@ describe("pickVoucherFile", () => {
     // quality < 1 re-encodes as JPEG: no HEIC, and far under 5 MB.
     expect(library).toHaveBeenCalledWith(expect.objectContaining({ mediaTypes: ["images"], quality: expect.any(Number) }));
     expect(library.mock.calls[0]?.[0]?.quality).toBeLessThan(1);
+  });
+
+  // iOS's PHPicker hands over the HEIC as it is, quality or not, unless asked
+  // for the most compatible representation.
+  it("asks iOS's gallery for a compatible (JPEG) representation", async () => {
+    library.mockResolvedValue(photo());
+
+    await pickVoucherFile("library");
+
+    expect(library.mock.calls[0]?.[0]?.preferredAssetRepresentationMode).toBe("compatible");
+  });
+
+  it.each([["image/heic"], ["image/webp"], ["image/gif"]])("refuses a %s photo with its own reason", async (mimeType) => {
+    library.mockResolvedValue(photo({ mimeType, fileName: "IMG_0004.x" }));
+
+    await expect(pickVoucherFile("library")).resolves.toEqual({ kind: "unsupported" });
+  });
+
+  it.each([
+    ["captura.PNG", "image/png"],
+    ["foto.jpeg", "image/jpeg"],
+    ["foto.jpg", "image/jpeg"],
+  ])("deduces the type of %s from its extension when the platform gives none", async (fileName, type) => {
+    library.mockResolvedValue(photo({ mimeType: undefined, fileName }));
+
+    await expect(pickVoucherFile("library")).resolves.toMatchObject({ kind: "picked", file: { type } });
+  });
+
+  it("refuses a nameless, typeless file whose extension says HEIC", async () => {
+    library.mockResolvedValue(photo({ mimeType: undefined, fileName: "IMG_0004.HEIC" }));
+
+    await expect(pickVoucherFile("library")).resolves.toEqual({ kind: "unsupported" });
   });
 
   it("names a photo the platform did not name", async () => {

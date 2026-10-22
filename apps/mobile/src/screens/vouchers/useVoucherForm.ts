@@ -7,9 +7,16 @@ const MESSAGES = {
   fileMissing: "Elige la foto o el PDF del comprobante",
   fileTooLarge: "El archivo pesa más de 5 MB. Elige una foto más ligera o un PDF más pequeño.",
   cameraDenied: "Permite el acceso a la cámara en Ajustes para tomar la foto.",
+  fileUnsupported: "Ese formato no se puede enviar. Usa una foto JPG o PNG, o un PDF.",
   amount: "Escribe el importe en pesos, por ejemplo 2,500.00",
   dayInvalid: "Escribe la fecha como 21/10/2026",
   dayFuture: "La fecha no puede ser después de hoy",
+};
+
+const PICK_REFUSALS: Record<"denied" | "too_large" | "unsupported", string> = {
+  denied: MESSAGES.cameraDenied,
+  too_large: MESSAGES.fileTooLarge,
+  unsupported: MESSAGES.fileUnsupported,
 };
 
 export interface FieldErrors {
@@ -59,7 +66,7 @@ export function useVoucherForm(studentId: string | null, today: string, onSent: 
       setError("file", null);
       return;
     }
-    setError("file", picked.kind === "denied" ? MESSAGES.cameraDenied : MESSAGES.fileTooLarge);
+    setError("file", PICK_REFUSALS[picked.kind]);
   };
 
   const changeAmount = (text: string): void => {
@@ -75,7 +82,7 @@ export function useVoucherForm(studentId: string | null, today: string, onSent: 
 
   const submit = async (): Promise<void> => {
     if (sending.current || studentId === null) return;
-    const checked: FieldErrors = { file: file === null ? MESSAGES.fileMissing : null, amount: amountError(amountText), day: dayError(dayText, today) };
+    const checked: FieldErrors = { file: file === null ? (errors.file ?? MESSAGES.fileMissing) : null, amount: amountError(amountText), day: dayError(dayText, today) };
     setErrors(checked);
     setSendError(null);
     setSent(null);
