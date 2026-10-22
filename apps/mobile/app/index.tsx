@@ -3,8 +3,9 @@ import { useEffect, type ReactNode } from "react";
 import { ScrollView } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { getAccessToken, signIn } from "@/src/api";
+import { destinationAfterSignIn } from "@/src/navigation/returnTo";
 import {
-  HOME_ROUTE,
+  RETURN_TO_PARAM,
   SESSION_ENDED_NOTICE,
   SESSION_ENDED_REASON,
   SIGN_IN_REASON_PARAM,
@@ -17,7 +18,8 @@ import { useTheme } from "@/src/theme";
  * App entry: the parent login. `signIn` decides which door the credentials go
  * through — our own password route, or the identity provider when this build is
  * configured for it — and either way ends with OUR token pair stored (Bearer
- * posture, no cookies). Only then does it route into the tab navigator. A failed
+ * posture, no cookies). Only then does it route on: to the route a deep link
+ * was opening, or into the tab navigator. A failed
  * sign-in rejects so the LoginScreen shows an inline error and nothing
  * navigates.
  */
@@ -25,16 +27,18 @@ export default function IndexRoute(): ReactNode {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const { refreshNotifications, refreshChildren } = useAppState();
-  const params = useLocalSearchParams<{ [SIGN_IN_REASON_PARAM]?: string }>();
+  const params = useLocalSearchParams<{ [SIGN_IN_REASON_PARAM]?: string; [RETURN_TO_PARAM]?: string }>();
   const notice = params[SIGN_IN_REASON_PARAM] === SESSION_ENDED_REASON ? SESSION_ENDED_NOTICE : undefined;
+  // Where a deep link was taking the family before this screen stopped them.
+  const destination = destinationAfterSignIn(params[RETURN_TO_PARAM]);
 
   // RootLayout has hydrated SecureStore before providers and routes mount. A
   // saved guardian session can therefore resume without showing the login form.
   useEffect(() => {
     if (getAccessToken() !== null) {
-      router.replace(HOME_ROUTE);
+      router.replace(destination);
     }
-  }, []);
+  }, [destination]);
 
   const onSubmit = async (email: string, password: string): Promise<void> => {
     const { mustChangePassword } = await signIn(email, password);
@@ -49,7 +53,7 @@ export default function IndexRoute(): ReactNode {
     // notifications, not a stuck empty/error state.
     void refreshChildren();
     void refreshNotifications();
-    router.replace(HOME_ROUTE);
+    router.replace(destination);
   };
 
   return (

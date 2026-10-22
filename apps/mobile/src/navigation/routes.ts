@@ -10,6 +10,12 @@
 export const LOGIN_ROUTE = "/";
 export const HOME_ROUTE = "/inicio";
 
+/**
+ * Where a family was going when the login screen interrupted them (a deep link
+ * opened without a session). Read only through destinationAfterSignIn.
+ */
+export const RETURN_TO_PARAM = "destino";
+
 /** Why the login screen is showing, when it was not the family's own choice. */
 export const SIGN_IN_REASON_PARAM = "motivo";
 export const SESSION_ENDED_REASON = "sesion";
