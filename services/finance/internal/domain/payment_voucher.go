@@ -154,6 +154,7 @@ type PaymentVoucher struct {
 	decidedAt       time.Time
 	rejectionReason string
 	releases        int
+	depositFolio    string
 	createdAt       time.Time
 	updatedAt       time.Time
 }
@@ -211,6 +212,7 @@ func (v PaymentVoucher) Apply(depositID string, by Receiver, at time.Time) (Paym
 		return PaymentVoucher{}, glerrors.New(glerrors.KindInvalid, "an applied voucher needs its deposit")
 	}
 	v.status, v.depositID, v.decidedBy, v.decidedAt, v.updatedAt = VoucherApplied, depositID, by, at, at
+	v.depositFolio = ""
 	return v, nil
 }
 
@@ -244,7 +246,7 @@ func (v PaymentVoucher) Release(at time.Time) (PaymentVoucher, error) {
 	if v.status != VoucherApplied {
 		return PaymentVoucher{}, ErrVoucherNotApplied
 	}
-	v.status, v.depositID, v.decidedBy, v.decidedAt = VoucherPending, "", Receiver{}, time.Time{}
+	v.status, v.depositID, v.decidedBy, v.decidedAt, v.depositFolio = VoucherPending, "", Receiver{}, time.Time{}, ""
 	v.releases++
 	v.updatedAt = at
 	return v, nil
@@ -260,7 +262,7 @@ func (v PaymentVoucher) MoveTo(depositID string, at time.Time) (PaymentVoucher, 
 	if depositID == "" || depositID == v.depositID {
 		return PaymentVoucher{}, glerrors.New(glerrors.KindInvalid, "a moved voucher needs another deposit")
 	}
-	v.depositID, v.updatedAt = depositID, at
+	v.depositID, v.depositFolio, v.updatedAt = depositID, "", at
 	return v, nil
 }
 
@@ -272,8 +274,10 @@ type VoucherState struct {
 	DecidedAt       time.Time
 	RejectionReason string
 	Releases        int
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	// DepositFolio is the receipt number of DepositID, read with the row.
+	DepositFolio string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 // RehydratePaymentVoucher rebuilds a stored voucher. For the repository only:
@@ -287,7 +291,7 @@ func RehydratePaymentVoucher(id string, d VoucherDraft, file VoucherFile, by Rec
 		id: id, studentID: d.StudentID, uploadedBy: by,
 		claimedAmount: Cents(d.ClaimedAmountCents), claimedPaidOn: paidOn, file: file,
 		status: st.Status, depositID: st.DepositID, decidedBy: st.DecidedBy, decidedAt: st.DecidedAt,
-		rejectionReason: st.RejectionReason, releases: st.Releases,
+		rejectionReason: st.RejectionReason, releases: st.Releases, depositFolio: st.DepositFolio,
 		createdAt: st.CreatedAt, updatedAt: st.UpdatedAt,
 	}
 }
@@ -320,6 +324,10 @@ func (v PaymentVoucher) Pending() bool { return v.status == VoucherPending }
 
 // DepositID is the deposit it paid; empty unless applied.
 func (v PaymentVoucher) DepositID() string { return v.depositID }
+
+// DepositFolio is the receipt number of the deposit it paid, as read with
+// the voucher; empty when it was built rather than read, or is not applied.
+func (v PaymentVoucher) DepositFolio() string { return v.depositFolio }
 
 // DecidedBy is who applied or rejected it.
 func (v PaymentVoucher) DecidedBy() Receiver { return v.decidedBy }
