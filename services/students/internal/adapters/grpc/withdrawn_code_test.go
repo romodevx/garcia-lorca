@@ -19,3 +19,12 @@ func TestAWithdrawnRefusalCarriesItsOwnCode(t *testing.T) {
 		t.Errorf("message = %q", got)
 	}
 }
+
+// A draft refused a placement, a family link or its curp issue's acceptance
+// is a 409 the screen tells apart by STUDENT_DRAFT.
+func TestADraftRefusalCarriesItsOwnCode(t *testing.T) {
+	err := connectErr(fmt.Errorf("enrolling: %w", domain.ErrDraftNotPlaceable))
+	if got := err.Meta().Get(ErrorCodeMeta); got != domain.CodeStudentDraft {
+		t.Errorf("X-Error-Code = %q, want %q", got, domain.CodeStudentDraft)
+	}
+}

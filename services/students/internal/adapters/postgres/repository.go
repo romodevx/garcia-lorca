@@ -128,19 +128,30 @@ func (r *Repository) Update(ctx context.Context, s *domain.Student) error {
 }
 
 // UpdateDetails persists a correction of the file: names, CURP and profile. A
-// CURP another pupil holds is KindConflict (the (tenant, curp) UNIQUE).
-func (r *Repository) UpdateDetails(ctx context.Context, s *domain.Student) error {
+// CURP another pupil holds is domain.ErrCURPTaken (the (tenant, curp) UNIQUE).
+//
+// A pupil that is no longer a draft in the domain is promoted in the same
+// statement (draft → pending, only from draft); one still a draft keeps its
+// status, and the CHECK of migration 0022 refuses a NULL CURP on anyone else.
+// The open import issues of c.Fields are closed as corrected in the same
+// transaction (closeCorrectedIssues).
+func (r *Repository) UpdateDetails(ctx context.Context, s *domain.Student, c ports.DetailsCorrection) (ports.CorrectionResult, error) {
 	cols, err := profileColumns(s.Profile())
 	if err != nil {
-		return err
+		return ports.CorrectionResult{}, err
 	}
 	cols["first_name"] = s.FirstName()
 	cols["last_name"] = s.LastName()
 	cols["maternal_last_name"] = nullableText(s.MaternalLastName())
-	cols["curp"] = s.CURP().String()
+	cols["curp"] = nullableText(s.CURP().String())
 	cols["bank_reference"] = nullableText(s.BankReference().String())
 	cols["updated_at"] = gorm.Expr("now()")
-	return r.withTenant(ctx, func(tx *gorm.DB) error {
+	if !s.IsDraft() {
+		cols["admission_status"] = gorm.Expr("CASE WHEN admission_status = ? THEN ? ELSE admission_status END",
+			domain.AdmissionDraft.String(), domain.AdmissionPending.String())
+	}
+	var out ports.CorrectionResult
+	err = r.withTenant(ctx, func(tx *gorm.DB) error {
 		// The guard rides in the WHERE: a withdrawal committed after the use
 		// case read the pupil still wins (T14-009).
 		res := tx.Model(&studentModel{}).
@@ -152,9 +163,52 @@ func (r *Repository) UpdateDetails(ctx context.Context, s *domain.Student) error
 		if res.RowsAffected == 0 {
 			return lockEditable(tx, s.ID())
 		}
-		return nil
+		var err error
+		out, err = closeCorrectedIssues(tx, s.ID(), c)
+		return err
 	})
+	if err != nil {
+		return ports.CorrectionResult{}, err
+	}
+	return out, nil
 }
+
+// closeCorrectedIssues resolves, as corrected by c.By, the pupil's open import
+// issues of c.Fields, and reports how many it closed and the group a closed
+// curp issue was meant for.
+func closeCorrectedIssues(tx *gorm.DB, studentID string, c ports.DetailsCorrection) (ports.CorrectionResult, error) {
+	if len(c.Fields) == 0 {
+		return ports.CorrectionResult{}, nil
+	}
+	fields := make([]string, 0, len(c.Fields))
+	for _, f := range c.Fields {
+		fields = append(fields, string(f))
+	}
+	var closed []struct {
+		Field           string
+		IntendedGroupID *string
+	}
+	err := tx.Raw(`UPDATE student_import_issues
+	                  SET resolved_at = now(), resolved_by = ?, resolution = ?
+	                WHERE student_id = ? AND resolved_at IS NULL AND field IN ?
+	            RETURNING field, intended_group_id`,
+		nullableID(c.By), string(domain.ResolutionCorrected), studentID, fields).Scan(&closed).Error
+	if err != nil {
+		return ports.CorrectionResult{}, glerrors.Wrap(glerrors.KindInternal, "closing the corrected import issues", err)
+	}
+	out := ports.CorrectionResult{Corrected: len(closed)}
+	for _, row := range closed {
+		if row.Field == string(domain.FieldCURP) && row.IntendedGroupID != nil {
+			out.IntendedGroupID = *row.IntendedGroupID
+		}
+	}
+	return out, nil
+}
+
+// openIssuesColumn counts a pupil's open import issues in the read itself — one
+// statement for a whole page, on the partial index of migration 0022.
+const openIssuesColumn = `students.*, (SELECT count(*) FROM student_import_issues i
+	WHERE i.tenant_id = students.tenant_id AND i.student_id = students.id AND i.resolved_at IS NULL) AS open_issues`
 
 // lockEditable holds the pupil's row FOR SHARE until the transaction ends, so
 // no withdrawal can commit under a write to their medical record or photo.
@@ -181,7 +235,7 @@ func (r *Repository) FindByID(ctx context.Context, id string) (*domain.Student, 
 	var out *domain.Student
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
 		var m studentModel
-		if err := tx.Where("id = ?", id).First(&m).Error; err != nil {
+		if err := tx.Select(openIssuesColumn).Where("id = ?", id).First(&m).Error; err != nil {
 			return translateFindErr(err)
 		}
 		student, err := toDomain(m)
@@ -263,7 +317,7 @@ func (r *Repository) List(ctx context.Context, f ports.ListFilter) ([]*domain.St
 		next     string
 	)
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
-		q := tx.Model(&studentModel{}).Order(surnameOrder).Limit(size + 1)
+		q := tx.Model(&studentModel{}).Select(openIssuesColumn).Order(surnameOrder).Limit(size + 1)
 		if f.LevelID != "" {
 			q = q.Where("level_id = ?", f.LevelID)
 		}

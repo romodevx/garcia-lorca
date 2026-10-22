@@ -47,6 +47,9 @@ func (h *StudentsHandler) ImportStudents(
 			GroupID:          r.GetGroupId(),
 			BankReference:    r.GetBankReference(),
 			Profile:          toDomainProfileInput(r.GetProfile()),
+			Action:           importActions[r.GetAction()],
+			Issues:           toImportIssueInputs(r.GetIssues()),
+			Original:         toImportOriginal(r.GetOriginal()),
 		})
 	}
 	results, err := h.imports.ImportStudents(ctx, rows, m.GetValidateOnly(), m.GetBatchId())
@@ -63,9 +66,34 @@ func (h *StudentsHandler) ImportStudents(
 			Warnings:          r.Warnings,
 			Reason:            r.Reason,
 			MovedToCycleStart: r.MovedToCycleStart,
+			Draft:             r.Draft,
 		})
 	}
 	return connect.NewResponse(&studentsv1.ImportStudentsResponse{Results: out}), nil
+}
+
+// importActions maps the wire action; UNSPECIFIED (and any value this
+// service does not know) imports.
+var importActions = map[studentsv1.ImportRowAction]usecase.ImportAction{
+	studentsv1.ImportRowAction_IMPORT_ROW_ACTION_DRAFT: usecase.ImportActionDraft,
+}
+
+func toImportIssueInputs(src []*studentsv1.ImportIssue) []usecase.ImportIssueInput {
+	out := make([]usecase.ImportIssueInput, 0, len(src))
+	for _, i := range src {
+		out = append(out, usecase.ImportIssueInput{
+			Field: i.GetField(), Code: i.GetCode(), OriginalValue: i.GetOriginalValue(), StoredValue: i.GetStoredValue(),
+		})
+	}
+	return out
+}
+
+func toImportOriginal(o *studentsv1.ImportOriginalValues) usecase.ImportOriginal {
+	return usecase.ImportOriginal{
+		CURP: o.GetCurp(), BirthDate: o.GetBirthDate(), PhoneHome: o.GetPhoneHome(), PhoneMobile: o.GetPhoneMobile(),
+		Email: o.GetEmail(), PostalCode: o.GetPostalCode(), State: o.GetState(),
+		BankReference: o.GetBankReference(), Address: o.GetAddress(),
+	}
 }
 
 var importOutcomes = map[usecase.ImportOutcome]studentsv1.ImportRowOutcome{

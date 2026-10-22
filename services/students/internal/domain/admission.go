@@ -14,6 +14,11 @@ import (
 //	 reject/withdraw   withdraw             withdraw
 //	   ▼                   ▼                    ▼
 //	rejected           withdrawn            withdrawn   (rejected/withdrawn = terminal)
+//
+//	draft ──a valid CURP (UpdateDetails)──> pending      draft ──withdraw──> withdrawn
+//
+// A draft is an imported pupil without a valid CURP (PLAN-import-avisos D3):
+// it holds no enrollment and cannot be placed or linked until promoted.
 type AdmissionStatus uint8
 
 const (
@@ -24,6 +29,9 @@ const (
 	AdmissionEnrolled
 	AdmissionRejected
 	AdmissionWithdrawn
+	// AdmissionDraft is appended, never inserted: the value is not stored as a
+	// number, but the order of this list is not worth a doubt.
+	AdmissionDraft
 )
 
 var admissionNames = map[AdmissionStatus]string{
@@ -32,6 +40,7 @@ var admissionNames = map[AdmissionStatus]string{
 	AdmissionEnrolled:  "enrolled",
 	AdmissionRejected:  "rejected",
 	AdmissionWithdrawn: "withdrawn",
+	AdmissionDraft:     "draft",
 }
 
 // allowedTransitions is the single source of truth for the state machine.
@@ -39,6 +48,9 @@ var allowedTransitions = map[AdmissionStatus]map[AdmissionStatus]bool{
 	AdmissionPending:  {AdmissionAccepted: true, AdmissionRejected: true, AdmissionWithdrawn: true},
 	AdmissionAccepted: {AdmissionEnrolled: true, AdmissionWithdrawn: true},
 	AdmissionEnrolled: {AdmissionWithdrawn: true},
+	// Only UpdateDetails promotes a draft (it needs the CURP); ChangeAdmissionStatus
+	// offers no pending target.
+	AdmissionDraft: {AdmissionPending: true, AdmissionWithdrawn: true},
 	// rejected and withdrawn are terminal (no outgoing transitions).
 }
 

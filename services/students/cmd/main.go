@@ -273,9 +273,11 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 	// The legacy import (ADR 0033): no publisher on purpose — an import
 	// announces nothing, and its enrollments carry origin=import for finance.
 	imports := usecase.NewImportService(repo, catalog, catalog, tenantID, newID, time.Now).WithSchoolZone(zone)
+	// What the import could not keep as written, per pupil (PLAN-import-avisos).
+	issues := usecase.NewImportIssueService(repo, repo, time.Now)
 	handler := grpcadapter.NewStudentsHandler(svc, enroll, guardians, health).
 		WithNotes(notes).WithCards(cards).WithLevelArchive(levels).WithImports(imports).
-		WithGroupRecords(usecase.NewGroupRecordService(repo))
+		WithGroupRecords(usecase.NewGroupRecordService(repo)).WithImportIssues(issues)
 
 	mux := http.NewServeMux()
 	path, h := studentsv1connect.NewStudentsServiceHandler(handler, connect.WithRecover(recoverFn))

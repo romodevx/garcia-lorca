@@ -8,11 +8,12 @@ import "time"
 
 // studentModel is the GORM row for `students`.
 type studentModel struct {
-	ID        string `gorm:"column:id;primaryKey"`
-	TenantID  string `gorm:"column:tenant_id"`
-	CURP      string `gorm:"column:curp"`
-	FirstName string `gorm:"column:first_name"`
-	LastName  string `gorm:"column:last_name"` // the paternal surname
+	ID       string `gorm:"column:id;primaryKey"`
+	TenantID string `gorm:"column:tenant_id"`
+	// CURP is NULL only for a draft (migration 0022).
+	CURP      *string `gorm:"column:curp"`
+	FirstName string  `gorm:"column:first_name"`
+	LastName  string  `gorm:"column:last_name"` // the paternal surname
 	// MaternalLastName is NULL when not captured (migration 0017, T3).
 	MaternalLastName *string `gorm:"column:maternal_last_name"`
 	LevelID          *string `gorm:"column:level_id"`
@@ -42,11 +43,34 @@ type studentModel struct {
 	// ImportBatchID names the legacy import that brought the pupil; NULL for
 	// every pupil captured by hand (migration 0019).
 	ImportBatchID *string `gorm:"column:import_batch_id"`
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	// OpenIssues is read-only: the count of open import issues, selected by
+	// the reads that fill it (openIssuesColumn), never written.
+	OpenIssues int `gorm:"column:open_issues;->"`
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 func (studentModel) TableName() string { return "students" }
+
+// importIssueModel is the GORM row for `student_import_issues` (migration
+// 0022). The resolution columns are NULL while the issue is open.
+type importIssueModel struct {
+	ID              string     `gorm:"column:id;primaryKey"`
+	TenantID        string     `gorm:"column:tenant_id"`
+	StudentID       string     `gorm:"column:student_id"`
+	Field           string     `gorm:"column:field"`
+	Code            string     `gorm:"column:code"`
+	OriginalValue   string     `gorm:"column:original_value"`
+	StoredValue     string     `gorm:"column:stored_value"`
+	ImportBatchID   *string    `gorm:"column:import_batch_id"`
+	IntendedGroupID *string    `gorm:"column:intended_group_id"`
+	CreatedAt       time.Time  `gorm:"column:created_at"`
+	ResolvedAt      *time.Time `gorm:"column:resolved_at"`
+	ResolvedBy      *string    `gorm:"column:resolved_by"`
+	Resolution      *string    `gorm:"column:resolution"`
+}
+
+func (importIssueModel) TableName() string { return "student_import_issues" }
 
 // enrollmentModel is the GORM row for `enrollments`. term_id is a nullable
 // cross-service reference, so it maps to *string ("" domain value ↔ SQL NULL via

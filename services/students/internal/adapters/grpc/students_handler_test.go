@@ -44,6 +44,9 @@ type fakeRepo struct {
 	byCURP     map[string]bool
 	lastFilter ports.ListFilter
 	nextToken  string
+	// corrections records each UpdateDetails; correction is the store's answer.
+	corrections []ports.DetailsCorrection
+	correction  ports.CorrectionResult
 }
 
 func newFakeRepo() *fakeRepo {
@@ -92,9 +95,10 @@ func (r *fakeRepo) SaveMedical(_ context.Context, _ string, rec domain.MedicalRe
 	return nil
 }
 
-func (r *fakeRepo) UpdateDetails(_ context.Context, s *domain.Student) error {
+func (r *fakeRepo) UpdateDetails(_ context.Context, s *domain.Student, c ports.DetailsCorrection) (ports.CorrectionResult, error) {
 	r.byID[s.ID()] = s
-	return nil
+	r.corrections = append(r.corrections, c)
+	return r.correction, nil
 }
 
 func (r *fakeRepo) FindByID(_ context.Context, id string) (*domain.Student, error) {

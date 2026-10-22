@@ -28,6 +28,10 @@ type fakeRepo struct {
 	numberYears []int
 	createErr   error
 	updateErr   error
+	// corrections records what each UpdateDetails was asked to close;
+	// correction is what the store answers.
+	corrections []ports.DetailsCorrection
+	correction  ports.CorrectionResult
 }
 
 func newRepo() *fakeRepo {
@@ -58,13 +62,14 @@ func (r *fakeRepo) Update(_ context.Context, s *domain.Student) error {
 	return nil
 }
 
-func (r *fakeRepo) UpdateDetails(_ context.Context, s *domain.Student) error {
+func (r *fakeRepo) UpdateDetails(_ context.Context, s *domain.Student, c ports.DetailsCorrection) (ports.CorrectionResult, error) {
 	if r.updateErr != nil {
-		return r.updateErr
+		return ports.CorrectionResult{}, r.updateErr
 	}
 	r.byID[s.ID()] = s
 	r.updated = append(r.updated, s)
-	return nil
+	r.corrections = append(r.corrections, c)
+	return r.correction, nil
 }
 
 func (r *fakeRepo) PhotoRef(_ context.Context, id string) (ports.PhotoRef, error) {
@@ -399,7 +404,7 @@ func TestUpdateDetailsCorrectsTheFile(t *testing.T) {
 		t.Fatalf("CreateApplicant: %v", err)
 	}
 
-	updated, err := svc.UpdateDetails(context.Background(), usecase.UpdateDetailsInput{
+	result, err := svc.UpdateDetails(context.Background(), usecase.UpdateDetailsInput{
 		ID: created.ID(), FirstName: "Ana María", LastName: "Hernández", MaternalLastName: "Cruz", CURP: "HEGA050312MDFRNN09",
 		Profile: domain.ProfileInput{BirthDate: "2019-03-12", Sex: "F", Email: "Ana@Correo.mx",
 			Phones: []domain.Phone{{Kind: "celular", Number: "5512345678"}}},
@@ -407,6 +412,7 @@ func TestUpdateDetailsCorrectsTheFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpdateDetails: %v", err)
 	}
+	updated := result.Student
 	if updated.MaternalLastName() != "Cruz" {
 		t.Errorf("maternal surname = %q, want Cruz", updated.MaternalLastName())
 	}

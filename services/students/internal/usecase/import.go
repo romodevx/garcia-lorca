@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
@@ -60,6 +61,59 @@ type ImportRow struct {
 	GroupID       string
 	BankReference string
 	Profile       domain.ProfileInput
+	// Action is the school's choice in the preview (PLAN-import-avisos D2).
+	Action ImportAction
+	// Issues are what the gateway changed or dropped while reading the file;
+	// each is stored with the pupil.
+	Issues []ImportIssueInput
+	// Original is the spreadsheet's raw text, reported by the issues students
+	// raises instead of the value received when it is set.
+	Original ImportOriginal
+}
+
+// ImportAction is what the school chose for a row.
+type ImportAction uint8
+
+// The actions. The zero value imports.
+const (
+	ImportActionImport ImportAction = iota
+	// ImportActionDraft stores a row whose CURP is missing or invalid as a
+	// draft pupil, with no enrollment. A row with a valid CURP imports.
+	ImportActionDraft
+)
+
+// ImportIssueInput is one issue the gateway raised on a row.
+type ImportIssueInput struct {
+	Field         string
+	Code          string
+	OriginalValue string
+	StoredValue   string
+}
+
+// ImportOriginal is the spreadsheet's raw text per field; "" is unknown.
+type ImportOriginal struct {
+	CURP          string
+	BirthDate     string
+	PhoneHome     string
+	PhoneMobile   string
+	Email         string
+	PostalCode    string
+	State         string
+	BankReference string
+	Address       string
+}
+
+// of returns the raw text of a field, or `received` when the gateway sent none.
+func (o ImportOriginal) of(field domain.IssueField, received string) string {
+	raw := map[domain.IssueField]string{
+		domain.FieldCURP: o.CURP, domain.FieldBirthDate: o.BirthDate, domain.FieldPhoneHome: o.PhoneHome,
+		domain.FieldPhoneMobile: o.PhoneMobile, domain.FieldEmail: o.Email, domain.FieldPostalCode: o.PostalCode,
+		domain.FieldState: o.State, domain.FieldBankReference: o.BankReference, domain.FieldAddress: o.Address,
+	}[field]
+	if raw == "" {
+		return received
+	}
+	return raw
 }
 
 // ImportResult is the outcome of one row.
@@ -74,6 +128,8 @@ type ImportResult struct {
 	// dated after the cycle's first day, and their enrollment was moved back to
 	// it (or, validating, would be).
 	MovedToCycleStart bool
+	// Draft says the row was (or, validating, would be) stored as a draft.
+	Draft bool
 }
 
 // ImportService brings the pupils of the previous system in (ADR 0033,
@@ -129,11 +185,16 @@ type placement struct {
 	ok    bool
 }
 
-// pendingRow is a row that passed the row-local checks.
+// pendingRow is a row that passed the row-local checks. A draft has no CURP;
+// curpCode says why (curp_missing or curp_invalid). refInvalid is a reference
+// the row brought that is not one.
 type pendingRow struct {
-	index int
-	curp  domain.CURP
-	ref   domain.BankReference
+	index      int
+	curp       domain.CURP
+	ref        domain.BankReference
+	draft      bool
+	curpCode   string
+	refInvalid bool
 }
 
 // ImportStudents imports (or, with validateOnly, only judges) up to
@@ -153,6 +214,9 @@ func (s *ImportService) ImportStudents(ctx context.Context, rows []ImportRow, va
 			return nil, glerrors.New(glerrors.KindInvalid, "an import needs its batch id")
 		}
 	}
+	if err := checkGatewayIssues(rows); err != nil {
+		return nil, err
+	}
 
 	results := make([]ImportResult, len(rows))
 	pending := s.checkRows(rows, results)
@@ -162,6 +226,9 @@ func (s *ImportService) ImportStudents(ctx context.Context, rows []ImportRow, va
 		return nil, err
 	}
 	pending = markExisting(rows, pending, existing, results)
+	if pending, err = s.markExistingDrafts(ctx, rows, pending, results); err != nil {
+		return nil, err
+	}
 
 	placements, err := s.resolveGroups(ctx, rows, pending, results)
 	if err != nil {
@@ -182,31 +249,67 @@ func (s *ImportService) ImportStudents(ctx context.Context, rows []ImportRow, va
 	return results, nil
 }
 
+// checkGatewayIssues refuses, before anything is stored, a request carrying
+// an issue students could not store — the gateway's bug, never the school's
+// row. It applies every rule NewImportIssue will (field, code, sizes after the
+// same clipping attachIssues does), so the commit can never stop half way on
+// one.
+func checkGatewayIssues(rows []ImportRow) error {
+	for _, r := range rows {
+		for _, in := range r.Issues {
+			_, err := domain.NewImportIssue(domain.ImportIssueParams{
+				ID: "check", StudentID: "check", Field: in.Field, Code: in.Code,
+				OriginalValue: domain.ClipIssueValue(in.OriginalValue), StoredValue: domain.ClipIssueValue(in.StoredValue),
+				CreatedAt: time.Unix(0, 0),
+			})
+			if err != nil {
+				return fmt.Errorf("row %d: %w", r.RowNumber, err)
+			}
+		}
+	}
+	return nil
+}
+
 // checkRows applies the checks that need no I/O: the CURP, its repetition in
 // the request, and the names. The bank reference is judged here too: an
-// invalid one only costs a warning.
+// invalid one only costs a warning. A row without a valid CURP is rejected,
+// unless the school chose to keep it as a draft.
 func (s *ImportService) checkRows(rows []ImportRow, results []ImportResult) []pendingRow {
 	pending := make([]pendingRow, 0, len(rows))
 	seen := make(map[domain.CURP]bool, len(rows))
 	for i, r := range rows {
 		results[i] = ImportResult{RowNumber: r.RowNumber}
+		p := pendingRow{index: i}
 		curp, err := domain.NewCURP(r.CURP)
-		if err != nil {
+		switch {
+		case err != nil && r.Action != ImportActionDraft:
 			reject(&results[i], ReasonCURPInvalid)
 			continue
-		}
-		if seen[curp] {
+		case err != nil:
+			p.draft, p.curpCode = true, curpIssueCode(r.CURP)
+		case seen[curp]:
 			reject(&results[i], ReasonCURPDuplicated)
 			continue
+		default:
+			seen[curp], p.curp = true, curp
 		}
-		seen[curp] = true
 		ref, err := domain.NewBankReference(r.BankReference)
 		if err != nil {
 			results[i].Warnings = append(results[i].Warnings, WarnBankReferenceInvalid)
+			p.refInvalid = true
 		}
-		pending = append(pending, pendingRow{index: i, curp: curp, ref: ref})
+		p.ref = ref
+		pending = append(pending, p)
 	}
 	return pending
+}
+
+// curpIssueCode is why a draft has no CURP.
+func curpIssueCode(raw string) string {
+	if strings.TrimSpace(raw) == "" {
+		return domain.IssueCURPMissing
+	}
+	return domain.IssueCURPInvalid
 }
 
 // markExisting settles the rows whose CURP the school already has (O4): they
@@ -215,6 +318,10 @@ func (s *ImportService) checkRows(rows []ImportRow, results []ImportResult) []pe
 func markExisting(rows []ImportRow, pending []pendingRow, existing map[string]ports.ExistingPupil, results []ImportResult) []pendingRow {
 	left := pending[:0]
 	for _, p := range pending {
+		if p.draft {
+			left = append(left, p)
+			continue
+		}
 		pupil, ok := existing[p.curp.String()]
 		if !ok {
 			left = append(left, p)
@@ -235,6 +342,75 @@ func settleExisting(result *ImportResult, pupil ports.ExistingPupil, groupID str
 			return
 		}
 	}
+}
+
+// draftKey recognizes a draft without a CURP: its names (case and spacing
+// folded), birth date and intended group. The bank reference is compared
+// apart, only when both sides have one.
+type draftKey struct {
+	name, born, group string
+}
+
+func newDraftKey(first, last, maternal string, born time.Time, group string) draftKey {
+	name := strings.ToUpper(strings.Join(strings.Fields(last+" "+maternal+" "+first), " "))
+	day := ""
+	if !born.IsZero() {
+		day = born.Format(time.DateOnly)
+	}
+	return draftKey{name: name, born: day, group: group}
+}
+
+// markExistingDrafts settles the draft rows a previous upload already stored
+// (same names, birth date, intended group and — when both have one — bank
+// reference) as ALREADY_IMPORTED, even when the office has promoted that
+// pupil since: re-uploading a file never duplicates its drafts. A stored
+// draft without a birth date never matches — a name and a group are not
+// enough to say two rows are one child. Read once per request, and only when
+// the request has a draft row.
+func (s *ImportService) markExistingDrafts(ctx context.Context, rows []ImportRow, pending []pendingRow, results []ImportResult) ([]pendingRow, error) {
+	if !slices.ContainsFunc(pending, func(p pendingRow) bool { return p.draft }) {
+		return pending, nil
+	}
+	drafts, err := s.repo.DraftedPupils(ctx)
+	if err != nil {
+		return nil, err
+	}
+	byKey := make(map[draftKey][]ports.ExistingDraft, len(drafts))
+	for _, d := range drafts {
+		if d.BirthDate.IsZero() {
+			continue
+		}
+		k := newDraftKey(d.FirstName, d.LastName, d.MaternalLastName, d.BirthDate, d.IntendedGroupID)
+		byKey[k] = append(byKey[k], d)
+	}
+	left := pending[:0]
+	for _, p := range pending {
+		match, ok := s.draftOf(rows[p.index], p, byKey)
+		if !ok {
+			left = append(left, p)
+			continue
+		}
+		results[p.index].Outcome = ImportAlreadyImported
+		results[p.index].StudentID = match.StudentID
+		results[p.index].Draft = match.StillDraft
+		results[p.index].Warnings = nil
+	}
+	return left, nil
+}
+
+// draftOf finds the stored draft a draft row is, if any.
+func (s *ImportService) draftOf(r ImportRow, p pendingRow, byKey map[draftKey][]ports.ExistingDraft) (ports.ExistingDraft, bool) {
+	if !p.draft {
+		return ports.ExistingDraft{}, false
+	}
+	profile, _ := domain.NewProfileLenient(r.Profile, s.now())
+	k := newDraftKey(r.FirstName, r.LastName, r.MaternalLastName, profile.BirthDate(), r.GroupID)
+	for _, d := range byKey[k] {
+		if p.ref.IsZero() || d.BankReference == "" || d.BankReference == p.ref.String() {
+			return d, true
+		}
+	}
+	return ports.ExistingDraft{}, false
 }
 
 // resolveGroups asks config about each distinct group ONCE (an import of 570
@@ -350,7 +526,7 @@ func (s *ImportService) moveToCycleStart(ctx context.Context, rows []ImportRow, 
 	moves := map[string]*ports.CycleStartMove{}
 	for i, r := range results {
 		where := placements[rows[i].GroupID]
-		if !isExisting(r) || !where.ok {
+		if !isExisting(r) || r.Draft || !where.ok {
 			continue
 		}
 		move, ok := moves[where.group.CycleID]
@@ -411,6 +587,7 @@ func (s *ImportService) judge(ctx context.Context, rows []ImportRow, pending []p
 		_, warnings := domain.NewProfileLenient(r.Profile, s.now())
 		result.Warnings = append(result.Warnings, warnings...)
 		result.Outcome = ImportImported
+		result.Draft = p.draft
 	}
 	return nil
 }
@@ -441,15 +618,22 @@ func (s *ImportService) importOne(ctx context.Context, r ImportRow, p pendingRow
 		return nil
 	}
 	where := placements[r.GroupID]
-	profile, warnings := domain.NewProfileLenient(r.Profile, s.now())
+	profile, drops := domain.NewProfileLenientReport(r.Profile, s.now())
 	cmd, err := s.command(r, p, where, profile, batchID)
 	if err != nil {
+		return err
+	}
+	if err := s.attachIssues(&cmd, r, p, drops, batchID); err != nil {
 		return err
 	}
 
 	stored, err := s.repo.ImportStudent(ctx, cmd)
 	if errors.Is(err, domain.ErrBankReferenceTaken) {
 		cmd.Student.ChangeBankReference("")
+		if cmd.ReferenceTakenIssue != nil {
+			cmd.Issues = append(cmd.Issues, *cmd.ReferenceTakenIssue)
+			cmd.ReferenceTakenIssue = nil
+		}
 		stored, err = s.repo.ImportStudent(ctx, cmd)
 		stored.BankReferenceDropped = true
 	}
@@ -463,17 +647,71 @@ func (s *ImportService) importOne(ctx context.Context, r ImportRow, p pendingRow
 	if stored.BankReferenceDropped {
 		result.Warnings = append(result.Warnings, WarnBankReferenceTaken)
 	}
-	result.Warnings = append(result.Warnings, warnings...)
+	result.Warnings = append(result.Warnings, domain.WarningCodes(drops)...)
 	result.Outcome = ImportImported
 	result.StudentID = cmd.Student.ID()
 	result.EnrollmentNumber = stored.EnrollmentNumber
+	result.Draft = p.draft
+	return nil
+}
+
+// attachIssues turns everything the row could not keep as written into the
+// issues stored with the pupil (PLAN-import-avisos D1), in order: the draft's
+// missing CURP (with the group it was meant for), the gateway's own, an
+// invalid bank reference, the profile's drops. A reference the store may find
+// taken is prepared too, stored only if it is.
+func (s *ImportService) attachIssues(cmd *ports.ImportCommand, r ImportRow, p pendingRow, drops []domain.ProfileDrop, batchID string) error {
+	studentID := cmd.Student.ID()
+	issue := func(in domain.ImportIssueParams) (domain.ImportIssue, error) {
+		in.ID, in.TenantID, in.StudentID, in.BatchID, in.CreatedAt = s.newID(), s.tenant, studentID, batchID, s.now()
+		in.OriginalValue, in.StoredValue = domain.ClipIssueValue(in.OriginalValue), domain.ClipIssueValue(in.StoredValue)
+		return domain.NewImportIssue(in)
+	}
+	var params []domain.ImportIssueParams
+	if p.draft {
+		params = append(params, domain.ImportIssueParams{Field: string(domain.FieldCURP), Code: p.curpCode,
+			OriginalValue: r.Original.of(domain.FieldCURP, r.CURP), IntendedGroupID: r.GroupID})
+	}
+	for _, in := range r.Issues {
+		params = append(params, domain.ImportIssueParams{Field: in.Field, Code: in.Code, OriginalValue: in.OriginalValue, StoredValue: in.StoredValue})
+	}
+	if p.refInvalid {
+		params = append(params, domain.ImportIssueParams{Field: string(domain.FieldBankReference), Code: WarnBankReferenceInvalid,
+			OriginalValue: r.Original.of(domain.FieldBankReference, r.BankReference)})
+	}
+	for _, d := range drops {
+		params = append(params, domain.ImportIssueParams{Field: string(d.Field), Code: d.Code,
+			OriginalValue: r.Original.of(d.Field, d.Original), StoredValue: d.Stored})
+	}
+	for _, in := range params {
+		built, err := issue(in)
+		if err != nil {
+			return fmt.Errorf("row %d: %w", r.RowNumber, err)
+		}
+		cmd.Issues = append(cmd.Issues, built)
+	}
+	if p.ref.IsZero() {
+		return nil
+	}
+	taken, err := issue(domain.ImportIssueParams{Field: string(domain.FieldBankReference), Code: WarnBankReferenceTaken,
+		OriginalValue: r.Original.of(domain.FieldBankReference, p.ref.String())})
+	if err != nil {
+		return fmt.Errorf("row %d: %w", r.RowNumber, err)
+	}
+	cmd.ReferenceTakenIssue = &taken
 	return nil
 }
 
 // command builds the pupil (enrolled, filed under the group's level, named in
 // it) and their import enrollment, dated from the cycle's first day (entryOf;
 // replaces ADR 0033's "dated the day of the import", owner decision 2026-10-17).
+//
+// A draft is built as one: filed under the group's level, NOT placed in it,
+// and without an enrollment — the group rides on its curp issue.
 func (s *ImportService) command(r ImportRow, p pendingRow, where placement, profile domain.Profile, batchID string) (ports.ImportCommand, error) {
+	if p.draft {
+		return s.draftCommand(r, p, where, profile, batchID)
+	}
 	student, err := domain.NewImported(domain.NewApplicantParams{
 		ID:               s.newID(),
 		TenantID:         s.tenant,
@@ -502,6 +740,23 @@ func (s *ImportService) command(r ImportRow, p pendingRow, where placement, prof
 	}, nil
 }
 
+func (s *ImportService) draftCommand(r ImportRow, p pendingRow, where placement, profile domain.Profile, batchID string) (ports.ImportCommand, error) {
+	student, err := domain.NewImportedDraft(domain.NewApplicantParams{
+		ID:               s.newID(),
+		TenantID:         s.tenant,
+		FirstName:        r.FirstName,
+		LastName:         r.LastName,
+		MaternalLastName: r.MaternalLastName,
+		Level:            where.level,
+		Profile:          profile,
+		BankReference:    p.ref,
+	})
+	if err != nil {
+		return ports.ImportCommand{}, err
+	}
+	return ports.ImportCommand{Student: student, BatchID: batchID, NumberYear: s.now().In(s.zone).Year()}, nil
+}
+
 // settleRace answers a row whose CURP another writer stored after this
 // import's read: the pupil that won is read back and reported.
 func (s *ImportService) settleRace(ctx context.Context, curp domain.CURP, groupID string, result *ImportResult) error {
@@ -526,7 +781,9 @@ func reject(result *ImportResult, reason string) {
 func curpsOf(pending []pendingRow) []string {
 	out := make([]string, 0, len(pending))
 	for _, p := range pending {
-		out = append(out, p.curp.String())
+		if !p.draft {
+			out = append(out, p.curp.String())
+		}
 	}
 	return out
 }

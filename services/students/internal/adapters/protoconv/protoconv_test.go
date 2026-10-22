@@ -18,6 +18,7 @@ func TestAdmissionStatusRoundTrip(t *testing.T) {
 		{domain.AdmissionEnrolled, studentsv1.AdmissionStatus_ADMISSION_STATUS_ENROLLED},
 		{domain.AdmissionRejected, studentsv1.AdmissionStatus_ADMISSION_STATUS_REJECTED},
 		{domain.AdmissionWithdrawn, studentsv1.AdmissionStatus_ADMISSION_STATUS_WITHDRAWN},
+		{domain.AdmissionDraft, studentsv1.AdmissionStatus_ADMISSION_STATUS_DRAFT},
 		{domain.AdmissionUnspecified, studentsv1.AdmissionStatus_ADMISSION_STATUS_UNSPECIFIED},
 	}
 	for _, c := range cases {

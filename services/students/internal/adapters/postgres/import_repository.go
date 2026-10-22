@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -73,6 +74,54 @@ func (r *Repository) BankReferencesTaken(ctx context.Context, refs []string) (ma
 	return out, nil
 }
 
+// DraftedPupils returns every pupil of the tenant an import stored as a draft
+// — a curp_missing/curp_invalid issue, open or resolved — whatever their
+// status now, with what a later upload recognizes them by. One query for a
+// whole import.
+func (r *Repository) DraftedPupils(ctx context.Context) ([]ports.ExistingDraft, error) {
+	var out []ports.ExistingDraft
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		var rows []struct {
+			ID               string
+			FirstName        string
+			LastName         string
+			MaternalLastName *string
+			BirthDate        *time.Time
+			BankReference    *string
+			IntendedGroupID  *string
+			AdmissionStatus  string
+		}
+		err := tx.Raw(`SELECT s.id, s.first_name, s.last_name, s.maternal_last_name, s.birth_date, s.bank_reference,
+		                      s.admission_status, i.intended_group_id
+		                 FROM students s
+		                 JOIN student_import_issues i
+		                   ON i.tenant_id = s.tenant_id AND i.student_id = s.id
+		                  AND i.field = ? AND i.code IN ?`,
+			string(domain.FieldCURP), []string{domain.IssueCURPMissing, domain.IssueCURPInvalid}).Scan(&rows).Error
+		if err != nil {
+			return glerrors.Wrap(glerrors.KindInternal, "reading the drafted pupils", err)
+		}
+		out = make([]ports.ExistingDraft, 0, len(rows))
+		for _, row := range rows {
+			d := ports.ExistingDraft{
+				StudentID: row.ID, FirstName: row.FirstName, LastName: row.LastName,
+				MaternalLastName: derefOrEmpty(row.MaternalLastName), BankReference: derefOrEmpty(row.BankReference),
+				IntendedGroupID: derefOrEmpty(row.IntendedGroupID),
+				StillDraft:      row.AdmissionStatus == domain.AdmissionDraft.String(),
+			}
+			if row.BirthDate != nil {
+				d.BirthDate = *row.BirthDate
+			}
+			out = append(out, d)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ImportStudent stores one imported pupil and their enrollment in ONE
 // transaction (ADR 0033).
 //
@@ -115,8 +164,15 @@ func (r *Repository) ImportStudent(ctx context.Context, cmd ports.ImportCommand)
 		if err := tx.Create(&model).Error; err != nil {
 			return translateStudentWriteErr(err, "importing student")
 		}
-		if err := tx.Create(&enrollment).Error; err != nil {
-			return translateEnrollmentWriteErr(err)
+		// A draft is stored without an enrollment: it is not placed until its
+		// CURP is captured.
+		if !cmd.Student.IsDraft() {
+			if err := tx.Create(&enrollment).Error; err != nil {
+				return translateEnrollmentWriteErr(err)
+			}
+		}
+		if err := insertIssues(tx, issuesToStore(cmd, out.BankReferenceDropped)); err != nil {
+			return err
 		}
 		out.EnrollmentNumber = number
 		return nil
@@ -129,6 +185,31 @@ func (r *Repository) ImportStudent(ctx context.Context, cmd ports.ImportCommand)
 		cmd.Student.ChangeBankReference("")
 	}
 	return out, nil
+}
+
+// issuesToStore is the command's issues, plus the taken reference's when the
+// store dropped it.
+func issuesToStore(cmd ports.ImportCommand, referenceDropped bool) []domain.ImportIssue {
+	issues := append([]domain.ImportIssue(nil), cmd.Issues...)
+	if referenceDropped && cmd.ReferenceTakenIssue != nil {
+		issues = append(issues, *cmd.ReferenceTakenIssue)
+	}
+	return issues
+}
+
+// insertIssues stores the import issues of a pupil inside its transaction.
+func insertIssues(tx *gorm.DB, issues []domain.ImportIssue) error {
+	if len(issues) == 0 {
+		return nil
+	}
+	rows := make([]importIssueModel, 0, len(issues))
+	for _, i := range issues {
+		rows = append(rows, importIssueFromDomain(i))
+	}
+	if err := tx.Create(&rows).Error; err != nil {
+		return glerrors.Wrap(glerrors.KindInternal, "storing the import issues", err)
+	}
+	return nil
 }
 
 func referenceTaken(tx *gorm.DB, ref string) (bool, error) {

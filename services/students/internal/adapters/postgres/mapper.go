@@ -14,9 +14,14 @@ import (
 
 // toDomain rebuilds a domain Student from its row.
 func toDomain(m studentModel) (*domain.Student, error) {
-	curp, err := domain.NewCURP(m.CURP)
-	if err != nil {
-		return nil, err
+	// A draft has no CURP (migration 0022); every other row has a valid one.
+	var curp domain.CURP
+	if m.CURP != nil {
+		parsed, err := domain.NewCURP(*m.CURP)
+		if err != nil {
+			return nil, err
+		}
+		curp = parsed
 	}
 	// Restored, not re-judged: a legacy pupil whose old level matched no config
 	// level has a name and no id, and must stay readable (migration 0007).
@@ -47,6 +52,7 @@ func toDomain(m studentModel) (*domain.Student, error) {
 		BankReference:    domain.BankReference(derefOrEmpty(m.BankReference)),
 	}, status)
 	s.AssignEnrollmentNumber(m.EnrollmentNumber)
+	s.AssignOpenIssues(m.OpenIssues)
 	return s, nil
 }
 
@@ -128,7 +134,7 @@ func fromDomain(s *domain.Student) studentModel {
 	return studentModel{
 		ID:               s.ID(),
 		TenantID:         s.TenantID(),
-		CURP:             s.CURP().String(),
+		CURP:             nullableText(s.CURP().String()),
 		FirstName:        s.FirstName(),
 		LastName:         s.LastName(),
 		MaternalLastName: nullableText(s.MaternalLastName()),
@@ -151,6 +157,39 @@ func birthDateOrNil(born time.Time) *time.Time {
 		return nil
 	}
 	return &born
+}
+
+// importIssueFromDomain projects an import issue into its row.
+func importIssueFromDomain(i domain.ImportIssue) importIssueModel {
+	m := importIssueModel{
+		ID: i.ID(), TenantID: i.TenantID(), StudentID: i.StudentID(), Field: string(i.Field()), Code: i.Code(),
+		OriginalValue: i.OriginalValue(), StoredValue: i.StoredValue(), ImportBatchID: nullableID(i.BatchID()),
+		IntendedGroupID: nullableID(i.IntendedGroupID()), CreatedAt: i.CreatedAt(),
+		ResolvedAt: timePtrOrNil(i.ResolvedAt()), ResolvedBy: nullableID(i.ResolvedBy()),
+	}
+	if !i.IsOpen() {
+		resolution := string(i.Resolution())
+		m.Resolution = &resolution
+	}
+	return m
+}
+
+// importIssueToDomain rebuilds an import issue from its row.
+func importIssueToDomain(m importIssueModel) (domain.ImportIssue, error) {
+	var resolvedAt time.Time
+	if m.ResolvedAt != nil {
+		resolvedAt = *m.ResolvedAt
+	}
+	issue, err := domain.NewImportIssue(domain.ImportIssueParams{
+		ID: m.ID, TenantID: m.TenantID, StudentID: m.StudentID, Field: m.Field, Code: m.Code,
+		OriginalValue: m.OriginalValue, StoredValue: m.StoredValue, BatchID: derefOrEmpty(m.ImportBatchID),
+		IntendedGroupID: derefOrEmpty(m.IntendedGroupID), CreatedAt: m.CreatedAt,
+		ResolvedAt: resolvedAt, ResolvedBy: derefOrEmpty(m.ResolvedBy), Resolution: derefOrEmpty(m.Resolution),
+	})
+	if err != nil {
+		return domain.ImportIssue{}, glerrors.Wrap(glerrors.KindInternal, "unreadable import issue in db", err)
+	}
+	return issue, nil
 }
 
 // enrollmentToDomain rebuilds a domain Enrollment from its row. A NULL term_id
