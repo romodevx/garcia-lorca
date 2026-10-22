@@ -46,8 +46,13 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     let window = UIWindow(windowScene: windowScene)
     self.window = window
     appDelegate?.window = window
-    // A cold-start link travels in the launch options, where Linking.getInitialURL
-    // reads it; an event posted now would fire before JS subscribes and be lost.
+    // Without scenes iOS calls application(_:open:options:) on a cold launch too;
+    // with scenes nobody does. expo-router reads the initial URL from the registry
+    // Expo's open-URL subscriber fills there, so call it before the bundle runs.
+    if let url = connectionOptions.urlContexts.first?.url {
+      _ = appDelegate?.application(UIApplication.shared, open: url, options: [:])
+    }
+    // React Native's own Linking.getInitialURL reads the launch options instead.
     factory.startReactNative(withModuleName: "main", in: window, launchOptions: launchOptions(from: connectionOptions))
     connectionOptions.userActivities.forEach { userActivity in
       _ = appDelegate?.application(UIApplication.shared, continue: userActivity, restorationHandler: { _ in })

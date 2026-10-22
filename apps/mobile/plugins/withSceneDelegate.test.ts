@@ -111,6 +111,17 @@ describe("addSceneDelegate", () => {
     expect(scene).not.toContain("RCTLinkingManager");
   });
 
+  it("hands a cold-start link to Expo's open-URL subscriber before React Native starts", () => {
+    const scene = sceneDelegateOf(addSceneDelegate(SDK56_APP_DELEGATE));
+    const connect = scene.slice(scene.indexOf("willConnectTo"), scene.indexOf("openURLContexts"));
+
+    // expo-router reads the initial URL from expo-linking's registry, which only
+    // that subscriber fills; it must be set before the JS bundle asks for it.
+    const forward = connect.indexOf("appDelegate?.application(UIApplication.shared, open: url, options: [:])");
+    expect(forward).toBeGreaterThan(-1);
+    expect(forward).toBeLessThan(connect.indexOf("factory.startReactNative("));
+  });
+
   it("routes warm deep links through the AppDelegate so Expo's subscribers see them", () => {
     const scene = sceneDelegateOf(addSceneDelegate(SDK56_APP_DELEGATE));
 
