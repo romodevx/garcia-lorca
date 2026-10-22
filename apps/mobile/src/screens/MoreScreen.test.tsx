@@ -1,4 +1,5 @@
-import { screen } from "@testing-library/react-native";
+import { fireEvent, screen } from "@testing-library/react-native";
+import { router } from "expo-router";
 import { MoreScreen } from "./MoreScreen";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { useAppState } from "../state/AppState";
@@ -57,5 +58,31 @@ describe("MoreScreen module grid (flag-gated)", () => {
     expect(screen.getByText("Módulos")).toBeTruthy();
     // A sibling tile whose flag stays OFF is still hidden.
     expect(screen.queryByText("Becas")).toBeNull();
+  });
+});
+
+// QA 21-oct: the account rows answered a tap with nothing.
+describe("MoreScreen account rows", () => {
+  beforeEach(() => {
+    (router.push as jest.Mock).mockClear();
+  });
+
+  it("opens the child's profile from Perfil del alumno", async () => {
+    await renderWithProviders(<MoreScreen onLogout={() => undefined} />);
+    fireEvent.press(screen.getByLabelText("Perfil del alumno"));
+    expect(router.push).toHaveBeenCalledWith("/perfil");
+  });
+
+  it("opens the Avisos tab from Notificaciones", async () => {
+    await renderWithProviders(<MoreScreen onLogout={() => undefined} />);
+    fireEvent.press(screen.getByLabelText("Notificaciones"));
+    expect(router.push).toHaveBeenCalledWith("/(tabs)/avisos");
+  });
+
+  // No family read carries a school contact outside the flag-gated card, so a
+  // help row would have nowhere real to go.
+  it("does not show a dead Ayuda y soporte row", async () => {
+    await renderWithProviders(<MoreScreen onLogout={() => undefined} />);
+    expect(screen.queryByLabelText("Ayuda y soporte")).toBeNull();
   });
 });
