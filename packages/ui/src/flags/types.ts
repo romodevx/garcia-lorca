@@ -27,7 +27,8 @@ export type FlagKey =
   | "module_ui_refresh"
   | "module_announcements_view"
   | "module_school_structure"
-  | "module_import_review";
+  | "module_import_review"
+  | "module_payment_vouchers";
 
 /** Map of flag key -> enabled. Absent or false means OFF (flags default OFF). */
 export type FlagSet = Partial<Record<FlagKey, boolean>>;

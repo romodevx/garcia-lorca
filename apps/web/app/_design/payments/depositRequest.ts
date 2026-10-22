@@ -20,6 +20,10 @@ export interface DepositRequestParts {
   /** The charges the money may pay; absent means the counter's own rule. */
   chargeIds?: readonly string[];
   grantEarlyPayment?: boolean;
+  /** This money IS that family's voucher (ADR 0040): the attempt's key is then not sent. */
+  voucherId?: string;
+  /** Pending vouchers a payment by hand is NOT (ADR 0040). */
+  declinedVoucherIds?: readonly string[];
 }
 
 /**
@@ -38,7 +42,10 @@ export function depositRequest(parts: DepositRequestParts): RegisterDepositInput
     reference: first?.reference ?? "",
     ...(first?.cardType !== undefined ? { cardType: first.cardType } : {}),
     tenders: [...parts.tenders],
-    idempotencyKey: parts.attemptKey,
+    // Paying by a voucher, the server keys the attempt on the voucher itself
+    // and refuses a second key (400).
+    ...(parts.voucherId !== undefined ? { voucherId: parts.voucherId } : { idempotencyKey: parts.attemptKey }),
+    ...(parts.declinedVoucherIds !== undefined && parts.declinedVoucherIds.length > 0 ? { declinedVoucherIds: [...parts.declinedVoucherIds] } : {}),
     ...(parts.paidOn !== "" ? { paidAt: parts.paidOn } : {}),
     ...(parts.chargeIds !== undefined ? { chargeIds: [...parts.chargeIds] } : {}),
     ...(parts.grantEarlyPayment === true ? { grantEarlyPayment: true } : {}),
