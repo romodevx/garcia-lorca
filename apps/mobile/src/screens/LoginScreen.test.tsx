@@ -181,6 +181,45 @@ describe("LoginScreen", () => {
       expect(screen.getByText(NEUTRAL)).toBeTruthy();
     });
 
+    it("says the link could not be sent when the network fails, never that it was", async () => {
+      globalThis.fetch = jest.fn(async (url: string) => {
+        if (String(url).includes("/auth/password-reset")) throw new TypeError("Network request failed");
+        return { ok: true, status: 200, json: async () => ({ notifications: [] }) };
+      }) as unknown as typeof fetch;
+      await renderWithProviders(<LoginScreen onSubmit={async () => undefined} />);
+      await drainMount();
+
+      await typeEmailAndAsk("laura@correo.com");
+
+      expect(screen.getByText("No pudimos enviar el enlace. Revisa tu conexión e inténtalo de nuevo.")).toBeTruthy();
+      expect(screen.queryByText(NEUTRAL)).toBeNull();
+    });
+
+    it("sends one request however many times the link is tapped while it is on its way", async () => {
+      let answer: (value: unknown) => void = () => undefined;
+      const fetchMock = jest.fn((url: string) =>
+        String(url).includes("/auth/password-reset")
+          ? new Promise((resolve) => {
+              answer = resolve;
+            })
+          : Promise.resolve({ ok: true, status: 200, json: async () => ({ notifications: [] }) }),
+      );
+      globalThis.fetch = fetchMock as unknown as typeof fetch;
+      await renderWithProviders(<LoginScreen onSubmit={async () => undefined} />);
+      await drainMount();
+
+      await typeEmailAndAsk("laura@correo.com");
+      await act(async () => {
+        fireEvent.press(screen.getByRole("button", { name: "¿Olvidaste tu contraseña?" }));
+      });
+      await act(async () => {
+        answer({ ok: true, status: 204 });
+      });
+
+      expect(resetCalls(fetchMock)).toHaveLength(1);
+      expect(screen.getByText(NEUTRAL)).toBeTruthy();
+    });
+
     it("says to wait a few minutes when the gateway rate-limits", async () => {
       gatewayAnswers(429);
       await renderWithProviders(<LoginScreen onSubmit={async () => undefined} />);
