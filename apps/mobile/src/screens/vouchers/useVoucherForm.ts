@@ -66,6 +66,9 @@ export function useVoucherForm(studentId: string | null, today: string, onSent: 
       setError("file", null);
       return;
     }
+    // A refused pick replaces the earlier choice: sending that one instead
+    // would be a file the family no longer means.
+    setFile(null);
     setError("file", PICK_REFUSALS[picked.kind]);
   };
 

@@ -23,10 +23,15 @@ function FilePicker({ form }: { form: VoucherFormState }): ReactElement {
     <View style={styles.block}>
       <Text style={[styles.label, { color: theme.colors.text2, fontFamily: theme.fonts.uiExtra }]}>Foto o PDF del comprobante</Text>
       {form.file !== null && (
-        <ListRow>
-          <TintIcon name="document" tint="forest" />
-          <Text numberOfLines={1} style={[styles.fileName, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]}>{form.file.name}</Text>
-        </ListRow>
+        <View accessible accessibilityLabel={`Archivo a enviar: ${form.file.name}`}>
+          <ListRow>
+            <TintIcon name="document" tint="forest" />
+            <View style={styles.fileText}>
+              <Text style={[styles.label, { color: theme.colors.text2, fontFamily: theme.fonts.uiExtra }]}>Archivo a enviar</Text>
+              <Text numberOfLines={1} style={[styles.fileName, { color: theme.colors.text, fontFamily: theme.fonts.uiExtra }]}>{form.file.name}</Text>
+            </View>
+          </ListRow>
+        </View>
       )}
       <Button small variant="outline" icon="plus" label="Tomar foto" onPress={() => void form.pick("camera")} />
       <Button small variant="outline" icon="inbox" label="Elegir de la galería" onPress={() => void form.pick("library")} />
@@ -90,7 +95,8 @@ const styles = StyleSheet.create({
   card: { marginTop: 12, padding: 18, gap: 16 },
   block: { gap: 8 },
   label: { fontSize: 12.5, fontWeight: "800", marginHorizontal: 4 },
-  fileName: { fontSize: 15, marginLeft: 12, flexShrink: 1 },
+  fileText: { marginLeft: 12, flexShrink: 1, gap: 2 },
+  fileName: { fontSize: 15 },
   summary: { borderRadius: 12, padding: 12, gap: 4 },
   note: { fontSize: 14, lineHeight: 19 },
 });

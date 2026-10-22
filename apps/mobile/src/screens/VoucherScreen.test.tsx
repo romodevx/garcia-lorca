@@ -189,6 +189,20 @@ describe("VoucherScreen (¿Ya pagaste? Sube tu comprobante)", () => {
     expect(gateway.posts()).toHaveLength(0);
   });
 
+  it("drops the earlier file when a later pick is refused, so it is never sent by mistake", async () => {
+    const gateway = mockGateway({ status: 201, body: { voucher: PENDING, replayed: false } });
+    await renderScreen();
+    await choosePhoto();
+    expect(screen.getByLabelText("Archivo a enviar: IMG_0004.jpg")).toBeTruthy();
+
+    pick.mockResolvedValue({ kind: "unsupported" });
+    await fireEvent.press(screen.getByLabelText("Elegir de la galería"));
+    await send();
+
+    expect(screen.queryByLabelText(/^Archivo a enviar/)).toBeNull();
+    expect(gateway.posts()).toHaveLength(0);
+  });
+
   it("says the feature is off when the gateway answers 404", async () => {
     mockGateway({ status: 404 }, [[]], 404);
     await renderWithProviders(<VoucherScreen today={TODAY} />);
