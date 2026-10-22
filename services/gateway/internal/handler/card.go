@@ -77,17 +77,17 @@ type cardResponse struct {
 
 // cardSchool is what the card prints about the school. The RFC and legal name
 // stay on receipts: a school registered under a person's RFC would otherwise
-// hand every family that person's name and birthdate.
+// hand every family that person's name and birthdate. So does the legend, the
+// receipt's footer ("Gracias por su pago.").
 type cardSchool struct {
 	Name    string `json:"name"`
 	CCT     string `json:"cct"`
 	Address string `json:"address"`
 	Phone   string `json:"phone"`
-	Legend  string `json:"legend"`
 }
 
 func toCardSchool(p client.SchoolProfile) cardSchool {
-	return cardSchool{Name: p.Name, CCT: p.CCT, Address: p.Address, Phone: p.Phone, Legend: p.Legend}
+	return cardSchool{Name: p.Name, CCT: p.CCT, Address: p.Address, Phone: p.Phone}
 }
 
 // FamilyCard handles GET /api/v1/family/students/{studentId}/card. Another

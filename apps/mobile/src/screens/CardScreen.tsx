@@ -82,9 +82,9 @@ function StudentCard({ card }: { card: FamilyCard }): ReactElement {
 }
 
 /**
- * How to reach the school, under the code: CCT, address, phone and legend,
- * each only when the school filled it in. The RFC and legal name are fiscal
- * data and stay off a card that is shown at the door.
+ * How to reach the school, under the code: CCT, address and phone, each only
+ * when the school filled it in. The RFC and legal name are fiscal data and stay
+ * off a card that is shown at the door; the legend is the receipt's footer.
  */
 function SchoolFooter({ school }: { school: FamilyCard["school"] }): ReactElement | null {
   const theme = useTheme();
@@ -92,7 +92,6 @@ function SchoolFooter({ school }: { school: FamilyCard["school"] }): ReactElemen
     { key: "cct", text: school.cct !== "" ? `CCT ${school.cct}` : "" },
     { key: "address", text: school.address },
     { key: "phone", text: school.phone !== "" ? `Tel. ${school.phone}` : "" },
-    { key: "legend", text: school.legend },
   ].filter((line) => line.text !== "");
   if (lines.length === 0) return null;
   return (

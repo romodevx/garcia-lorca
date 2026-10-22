@@ -208,7 +208,8 @@ func TestStaffReissueACard(t *testing.T) {
 
 // The card shows the school's public details only. The RFC and legal name are
 // for receipts: a school registered under a person's RFC would hand every
-// family that person's name and birthdate.
+// family that person's name and birthdate. The legend is the receipt's footer
+// ("Gracias por su pago."), not something a card says.
 func TestTheCardCarriesOnlyTheSchoolsPublicDetails(t *testing.T) {
 	f := &fakeCards{
 		links:   []client.GuardianLink{{StudentID: "stu-1"}},
@@ -230,7 +231,7 @@ func TestTheCardCarriesOnlyTheSchoolsPublicDetails(t *testing.T) {
 	}
 	want := map[string]any{
 		"name": "COLEGIO GARCÍA LORCA", "cct": "16PPR0001X", "address": "Morelia",
-		"phone": "4431234567", "legend": "Incorporada a la SEP",
+		"phone": "4431234567",
 	}
 	if len(got.School) != len(want) {
 		t.Errorf("school keys = %v, want exactly %v", got.School, want)

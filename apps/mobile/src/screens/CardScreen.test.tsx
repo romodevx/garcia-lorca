@@ -15,7 +15,7 @@ jest.mock("react-native-qrcode-svg", () => {
 const child = { id: "s1", firstName: "Zoe", lastName: "Villalobos", level: "Primaria", gradeGroup: "1° A" };
 const card = {
   studentId: "s1", name: "Zoe Villalobos", level: "Primaria", gradeGroup: "1° A", cycle: "2026-2027",
-  enrollmentNumber: "2026-00042", school: { name: "COLEGIO GARCÍA LORCA", legalName: "", rfc: "", cct: "", address: "", phone: "", legend: "" },
+  enrollmentNumber: "2026-00042", school: { name: "COLEGIO GARCÍA LORCA", cct: "", address: "", phone: "" },
   qr: "GLCARD:AQAAAAAAAAAAAAAAAAAAAA",
 };
 
@@ -78,12 +78,12 @@ describe("CardScreen (tarea 13)", () => {
     expect(screen.queryByTestId("card-qr")).toBeNull();
   });
 
-  it("shows the school's logo and contact data, never its RFC or legal name", async () => {
+  it("shows the school's logo and contact data, never its RFC, legal name or receipt legend", async () => {
     mockFetch({
       ...card,
       school: {
         name: "COLEGIO GARCÍA LORCA", legalName: "CENTRO EDUCATIVO GL SC", rfc: "CEG010101AB1",
-        cct: "16PPR0123X", address: "Av. Madero 100, Morelia", phone: "443 123 4567", legend: "Válida durante el ciclo escolar",
+        cct: "16PPR0123X", address: "Av. Madero 100, Morelia", phone: "443 123 4567", legend: "Gracias por su pago.",
       },
     });
     await renderWithProviders(<CardScreen />);
@@ -92,7 +92,8 @@ describe("CardScreen (tarea 13)", () => {
     expect(screen.getByText(/16PPR0123X/)).toBeTruthy();
     expect(screen.getByText("Av. Madero 100, Morelia")).toBeTruthy();
     expect(screen.getByText(/443 123 4567/)).toBeTruthy();
-    expect(screen.getByText("Válida durante el ciclo escolar")).toBeTruthy();
+    // The legend is the receipt's footer, not the card's.
+    expect(screen.queryByText("Gracias por su pago.")).toBeNull();
     expect(screen.queryByText(/CEG010101AB1/)).toBeNull();
     expect(screen.queryByText(/CENTRO EDUCATIVO GL SC/)).toBeNull();
     expect(screen.queryByLabelText(/CENTRO EDUCATIVO GL SC/)).toBeNull();

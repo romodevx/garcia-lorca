@@ -238,7 +238,6 @@ export interface CardSchool {
   cct: string;
   address: string;
   phone: string;
-  legend: string;
 }
 
 /**
