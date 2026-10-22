@@ -85,66 +85,28 @@ plist="ios/$scheme/Info.plist"
 [ "$("$PLIST_BUDDY" -c "Print :NSAppTransportSecurity:NSAllowsLocalNetworking" "$plist")" = "true" ] \
   || die "could not allow local networking in $plist"
 
-# UIScene lifecycle: on the iOS 27 runtime, an app linked against the iOS 27
-# SDK that still uses the AppDelegate-only lifecycle is killed at launch
-# (EXC_BREAKPOINT in _UIApplicationEvaluateRuntimeIssueForNoSceneLifecycleAdoption).
-# Expo SDK 56's template has no scene delegate, so move the window into one.
+# UIScene lifecycle and the pods' minimum iOS are applied by the app's own
+# config plugins (apps/mobile/plugins/), so EAS builds get them too. Here we
+# only check that prebuild ran them.
 appdelegate="ios/$scheme/AppDelegate.swift"
-[ -f "$appdelegate" ] || die "prebuild produced no $appdelegate"
-grep -q 'window = UIWindow(frame: UIScreen.main.bounds)' "$appdelegate" \
-  || die "$appdelegate no longer matches the SDK 56 template; revisit the scene patch"
-# Launch builds only the factory; SceneDelegate creates the window and starts React Native in it.
-perl -0pi -e 's/#if os\(iOS\) \|\| os\(tvOS\)\n\s*window = UIWindow\(frame: UIScreen\.main\.bounds\)\n\s*factory\.startReactNative\(\n.*?launchOptions: launchOptions\)\n#endif\n//s' "$appdelegate"
-! grep -q 'UIScreen.main.bounds' "$appdelegate" || die "could not move the window out of $appdelegate"
-cat >> "$appdelegate" <<'SWIFT'
-
-class SceneDelegate: UIResponder, UIWindowSceneDelegate {
-  var window: UIWindow?
-
-  func scene(
-    _ scene: UIScene,
-    willConnectTo session: UISceneSession,
-    options connectionOptions: UIScene.ConnectionOptions
-  ) {
-    guard let windowScene = scene as? UIWindowScene,
-          let appDelegate = UIApplication.shared.delegate as? AppDelegate,
-          let factory = appDelegate.reactNativeFactory else { return }
-    let window = UIWindow(windowScene: windowScene)
-    self.window = window
-    appDelegate.window = window
-    factory.startReactNative(withModuleName: "main", in: window, launchOptions: nil)
-    if let url = connectionOptions.urlContexts.first?.url {
-      RCTLinkingManager.application(UIApplication.shared, open: url, options: [:])
-    }
-  }
-
-  func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {
-    guard let url = URLContexts.first?.url else { return }
-    RCTLinkingManager.application(UIApplication.shared, open: url, options: [:])
-  }
-}
-SWIFT
-"$PLIST_BUDDY" -c "Delete :UIApplicationSceneManifest" "$plist" 2>/dev/null || true
-"$PLIST_BUDDY" \
-  -c "Add :UIApplicationSceneManifest dict" \
-  -c "Add :UIApplicationSceneManifest:UIApplicationSupportsMultipleScenes bool false" \
-  -c "Add :UIApplicationSceneManifest:UISceneConfigurations dict" \
-  -c "Add :UIApplicationSceneManifest:UISceneConfigurations:UIWindowSceneSessionRoleApplication array" \
-  -c "Add :UIApplicationSceneManifest:UISceneConfigurations:UIWindowSceneSessionRoleApplication:0 dict" \
-  -c "Add :UIApplicationSceneManifest:UISceneConfigurations:UIWindowSceneSessionRoleApplication:0:UISceneConfigurationName string Default" \
-  -c "Add :UIApplicationSceneManifest:UISceneConfigurations:UIWindowSceneSessionRoleApplication:0:UISceneDelegateClassName string \$(PRODUCT_MODULE_NAME).SceneDelegate" \
-  "$plist"
+grep -q 'class SceneDelegate: UIResponder, UIWindowSceneDelegate' "$appdelegate" \
+  || die "$appdelegate has no SceneDelegate: is plugins/withSceneDelegate.ts registered in app.json?"
+"$PLIST_BUDDY" -c "Print :UIApplicationSceneManifest:UISceneConfigurations:UIWindowSceneSessionRoleApplication:0:UISceneDelegateClassName" "$plist" 2>/dev/null \
+  | grep -q 'SceneDelegate$' || die "$plist declares no scene manifest (withSceneDelegate plugin)"
+grep -q 'with-pods-deployment-target' ios/Podfile \
+  || die "ios/Podfile lacks the pods deployment target step: is plugins/withPodsDeploymentTarget.ts registered?"
 
 say "pod install"
 (cd ios && pod install)
 [ -d "ios/$scheme.xcworkspace" ] || die "pod install produced no ios/$scheme.xcworkspace"
 
 # ---- build ------------------------------------------------------------------
-# Some pods' resource-bundle targets still declare iOS 12.4/13.4, below the
-# floor of recent Xcode (15.0), which fails the build. Build every target for
-# the app's own minimum, read from the generated project.
 deployment_target=$(grep -m1 -oE 'IPHONEOS_DEPLOYMENT_TARGET = [0-9.]+' "$project/project.pbxproj" | grep -oE '[0-9.]+$')
 [ -n "$deployment_target" ] || die "no IPHONEOS_DEPLOYMENT_TARGET in $project"
+lowest_pod_target=$(grep -oE 'IPHONEOS_DEPLOYMENT_TARGET = [0-9.]+' ios/Pods/Pods.xcodeproj/project.pbxproj \
+  | grep -oE '[0-9.]+$' | sort -V | head -1)
+[ "$(printf '%s\n%s\n' "$lowest_pod_target" "$deployment_target" | sort -V | head -1)" = "$deployment_target" ] \
+  || die "a pod still targets iOS $lowest_pod_target, below the app's $deployment_target (withPodsDeploymentTarget plugin)"
 say "xcodebuild Release ($scheme, iphonesimulator, iOS >= $deployment_target)"
 (cd ios && xcodebuild \
   -workspace "$scheme.xcworkspace" \
@@ -154,7 +116,6 @@ say "xcodebuild Release ($scheme, iphonesimulator, iOS >= $deployment_target)"
   -destination 'generic/platform=iOS Simulator' \
   -derivedDataPath build \
   CODE_SIGNING_ALLOWED=NO \
-  IPHONEOS_DEPLOYMENT_TARGET="$deployment_target" \
   build)
 
 app="ios/build/Build/Products/Release-iphonesimulator/$scheme.app"
