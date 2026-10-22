@@ -19,19 +19,28 @@ import { type ConfigPlugin, withDangerousMod } from "expo/config-plugins";
 
 const BEGIN = "# @generated begin garcia-lorca with-pods-deployment-target";
 const END = "# @generated end garcia-lorca with-pods-deployment-target";
-const POST_INSTALL = /^(\s*)post_install do \|installer\|\n/m;
+const POST_INSTALL = /^([ \t]*)post_install do \|installer\|\n/m;
 
-const RAISE_POD_TARGETS = `${BEGIN}
-    app_minimum = installer.aggregate_targets.first.platform.deployment_target.to_s
-    installer.pods_project.targets.each do |pod_target|
-      pod_target.build_configurations.each do |build_config|
-        current = build_config.build_settings['IPHONEOS_DEPLOYMENT_TARGET']
-        next unless current && Gem::Version.new(current) < Gem::Version.new(app_minimum)
-        build_config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = app_minimum
-      end
-    end
-    ${END}
-`;
+// Indented relative to the post_install body; see indentUnder().
+const RAISE_POD_TARGETS = [
+  BEGIN,
+  "app_minimum = installer.aggregate_targets.first.platform.deployment_target.to_s",
+  "installer.pods_project.targets.each do |pod_target|",
+  "  pod_target.build_configurations.each do |build_config|",
+  "    current = build_config.build_settings['IPHONEOS_DEPLOYMENT_TARGET']",
+  "    next unless current && Gem::Version.new(current) < Gem::Version.new(app_minimum)",
+  "    build_config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = app_minimum",
+  "  end",
+  "end",
+  END,
+];
+
+const RUBY_INDENT = "  ";
+
+/** The step's lines, one level deeper than the post_install line's own indent. */
+function indentUnder(hookIndent: string): string {
+  return RAISE_POD_TARGETS.map((line) => `${hookIndent}${RUBY_INDENT}${line}\n`).join("");
+}
 
 /** Inserts the raise-pod-targets step at the start of the Podfile's post_install hook. */
 export function addPodsDeploymentTarget(podfile: string): string {
@@ -39,7 +48,7 @@ export function addPodsDeploymentTarget(podfile: string): string {
   if (!POST_INSTALL.test(podfile)) {
     throw new Error("withPodsDeploymentTarget: the Podfile has no post_install hook to extend");
   }
-  return podfile.replace(POST_INSTALL, (hook, indent: string) => `${hook}${indent}  ${RAISE_POD_TARGETS}`);
+  return podfile.replace(POST_INSTALL, (hook, indent: string) => `${hook}${indentUnder(indent)}`);
 }
 
 const withPodsDeploymentTarget: ConfigPlugin = (config) =>

@@ -26,6 +26,23 @@ describe("addPodsDeploymentTarget", () => {
     expect(result).toContain("installer.aggregate_targets");
   });
 
+  it("indents the step relative to the post_install hook it extends", () => {
+    const nested = "abstract_target 'All' do\n  target 'App' do\n    post_install do |installer|\n      react_native_post_install(installer)\n    end\n  end\nend\n";
+    const lines = addPodsDeploymentTarget(nested).split("\n");
+
+    expect(lines).toContain("      app_minimum = installer.aggregate_targets.first.platform.deployment_target.to_s");
+    expect(lines).toContain("        pod_target.build_configurations.each do |build_config|");
+    expect(lines.filter((line) => line.includes("@generated")).every((line) => line.startsWith("      #"))).toBe(true);
+  });
+
+  it("captures only the hook's own indent, not a blank line above it", () => {
+    const withBlankLine = "target 'App' do\n  use_expo_modules!\n\n  post_install do |installer|\n    react_native_post_install(installer)\n  end\nend\n";
+
+    expect(addPodsDeploymentTarget(withBlankLine)).toContain(
+      "\n\n  post_install do |installer|\n    # @generated begin garcia-lorca with-pods-deployment-target\n    app_minimum =",
+    );
+  });
+
   it("is idempotent", () => {
     const once = addPodsDeploymentTarget(SDK56_PODFILE);
     expect(addPodsDeploymentTarget(once)).toBe(once);
