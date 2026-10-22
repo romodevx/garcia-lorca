@@ -82,6 +82,37 @@ type ImportRowInput struct {
 	GroupID          string // "" only when validating, for a group not created yet
 	BankReference    string
 	Profile          StudentProfile
+	// The import review (PLAN-import-avisos); all zero while it is off, and a
+	// zero row travels exactly as before. Action is "" (import) or
+	// ImportActionDraft; Original is the file's text per field; Issues are
+	// what the gateway itself changed or dropped.
+	Action   string
+	Original ImportOriginal
+	Issues   []ImportIssue
+}
+
+// ImportActionDraft stores a row without a valid CURP as a draft pupil.
+const ImportActionDraft = "draft"
+
+// ImportOriginal is the spreadsheet's text per field; "" is unknown.
+type ImportOriginal struct {
+	CURP          string
+	BirthDate     string
+	PhoneHome     string
+	PhoneMobile   string
+	Email         string
+	PostalCode    string
+	State         string
+	BankReference string
+	Address       string
+}
+
+// ImportIssue is one value the gateway did not keep as the file wrote it.
+type ImportIssue struct {
+	Field    string
+	Code     string
+	Original string
+	Stored   string
 }
 
 // Import row outcomes, as the edge names them.
@@ -103,6 +134,8 @@ type ImportRowResult struct {
 	// MovedToCycleStart: an earlier import of this pupil was moved back to the
 	// cycle's first day (validating: would be).
 	MovedToCycleStart bool
+	// Draft: the row was (validating: would be) stored as a draft pupil.
+	Draft bool
 }
 
 // ImportStudents creates (or, validating, judges) the pupils of a legacy file.
@@ -120,10 +153,41 @@ func toImportStudentsRequest(rows []ImportRowInput, validateOnly bool, batchID s
 		req.Rows = append(req.Rows, &studentsv1.ImportStudentRow{
 			RowNumber: int32(r.RowNumber), Curp: r.CURP, FirstName: r.FirstName, LastName: r.LastName,
 			MaternalLastName: r.MaternalLastName, GroupId: r.GroupID, BankReference: r.BankReference,
-			Profile: toProtoProfile(r.Profile),
+			Profile: toProtoProfile(r.Profile), Action: importAction(r.Action),
+			Original: toProtoOriginal(r.Original), Issues: toProtoIssues(r.Issues),
 		})
 	}
 	return req
+}
+
+func importAction(action string) studentsv1.ImportRowAction {
+	if action == ImportActionDraft {
+		return studentsv1.ImportRowAction_IMPORT_ROW_ACTION_DRAFT
+	}
+	return studentsv1.ImportRowAction_IMPORT_ROW_ACTION_UNSPECIFIED
+}
+
+// toProtoOriginal is nil for a row without original values, so a row of the
+// import without the review travels as it always did.
+func toProtoOriginal(o ImportOriginal) *studentsv1.ImportOriginalValues {
+	if o == (ImportOriginal{}) {
+		return nil
+	}
+	return &studentsv1.ImportOriginalValues{
+		Curp: o.CURP, BirthDate: o.BirthDate, PhoneHome: o.PhoneHome, PhoneMobile: o.PhoneMobile, Email: o.Email,
+		PostalCode: o.PostalCode, State: o.State, BankReference: o.BankReference, Address: o.Address,
+	}
+}
+
+func toProtoIssues(issues []ImportIssue) []*studentsv1.ImportIssue {
+	if len(issues) == 0 {
+		return nil
+	}
+	out := make([]*studentsv1.ImportIssue, 0, len(issues))
+	for _, i := range issues {
+		out = append(out, &studentsv1.ImportIssue{Field: i.Field, Code: i.Code, OriginalValue: i.Original, StoredValue: i.Stored})
+	}
+	return out
 }
 
 func fromImportResults(src []*studentsv1.ImportRowResult) []ImportRowResult {
@@ -133,7 +197,7 @@ func fromImportResults(src []*studentsv1.ImportRowResult) []ImportRowResult {
 			RowNumber: int(r.GetRowNumber()), Outcome: importOutcomeName(r.GetOutcome()),
 			StudentID: r.GetStudentId(), EnrollmentNumber: r.GetEnrollmentNumber(),
 			Warnings: r.GetWarnings(), Reason: r.GetReason(),
-			MovedToCycleStart: r.GetMovedToCycleStart(),
+			MovedToCycleStart: r.GetMovedToCycleStart(), Draft: r.GetDraft(),
 		})
 	}
 	return out

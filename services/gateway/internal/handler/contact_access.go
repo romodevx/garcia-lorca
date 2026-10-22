@@ -25,6 +25,7 @@ type ContactAccountIssuer interface {
 // ContactGranter is the students surface: the pupil's contact list, and
 // attaching an account to one of them.
 type ContactGranter interface {
+	GetStudent(ctx context.Context, id string) (client.StudentResult, error)
 	ListGuardiansForStudent(ctx context.Context, studentID string) ([]client.GuardianLink, error)
 	GrantContactAccess(ctx context.Context, contactID, studentID, guardianUserID string) (client.GuardianLink, error)
 }
@@ -113,6 +114,9 @@ func (h *ContactAccessHandler) Invite(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "this contact has no email to send the invitation to", http.StatusBadRequest)
 		return
 	}
+	if !h.placeable(w, r.Context(), studentID) {
+		return
+	}
 
 	// A deployment missing migrations/iam/0010_guardians.sql has no guardian
 	// role; iam refuses that as a server fault (5xx), before writing anything.
@@ -132,6 +136,28 @@ func (h *ContactAccessHandler) Invite(w http.ResponseWriter, r *http.Request) {
 		Contact:    toGuardianLinkResponse(granted),
 		Invitation: invitation,
 	})
+}
+
+// codeStudentDraft is students' code for a draft pupil (PLAN-import-avisos).
+const codeStudentDraft = "STUDENT_DRAFT"
+
+// placeable refuses a draft pupil (imported without a CURP) BEFORE iam is
+// asked. iam does not know the pupils, and students refuses the grant only
+// after iam has minted the account and mailed the link — so the edge, which
+// composes both, is where the refusal has to be. It holds with or without
+// module_import_review: a draft is a state of the data, not of the screen.
+func (h *ContactAccessHandler) placeable(w http.ResponseWriter, ctx context.Context, studentID string) bool {
+	pupil, err := h.students.GetStudent(ctx, studentID)
+	if err != nil {
+		writeConnectError(w, err)
+		return false
+	}
+	if pupil.Draft || pupil.AdmissionStatus == admissionDraft {
+		writeCodedError(w, http.StatusConflict, codeStudentDraft,
+			"ese alumno es un borrador sin CURP: captura su CURP antes de invitar a su familia")
+		return false
+	}
+	return true
 }
 
 // findContact returns the pupil's contact with this id, or nil when the pupil

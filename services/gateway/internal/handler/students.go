@@ -33,6 +33,8 @@ type StudentsHandler struct {
 	svc StudentsService
 	// rooms names each pupil's classroom in the list; nil leaves it out.
 	rooms RoomLabelSource
+	// review says whether module_import_review is on; nil is off.
+	review importReview
 }
 
 // StudentsOption configures optional behavior of the students endpoints.
@@ -43,6 +45,50 @@ type StudentsOption func(*StudentsHandler)
 // classroom with its grade (CC-211, CC-313).
 func WithStudentRoomLabels(rooms RoomLabelSource) StudentsOption {
 	return func(h *StudentsHandler) { h.rooms = rooms }
+}
+
+// WithImportReview makes the students JSON carry openIssues and draft (and a
+// draft's status by its name) when module_import_review is on
+// (PLAN-import-avisos). Off, the JSON is as it was before the review.
+func WithImportReview(enabled func(context.Context) bool) StudentsOption {
+	return func(h *StudentsHandler) { h.review = enabled }
+}
+
+func (h *StudentsHandler) reviewOn(ctx context.Context) bool { return h.review.on(ctx) }
+
+// admissionDraft is the status of a pupil imported without a valid CURP.
+const admissionDraft = "draft"
+
+// importReview says whether module_import_review is on for a request; nil is
+// off. Every JSON that shows a pupil's admission status goes through
+// visibleAdmission, so a draft is named only with the review.
+type importReview func(context.Context) bool
+
+func (f importReview) on(ctx context.Context) bool { return f != nil && f(ctx) }
+
+// visibleAdmission is the status as the JSON shows it: off, a draft reads ""
+// — as it did before the review existed, when that status had no name.
+func (f importReview) visibleAdmission(ctx context.Context, status string) string {
+	if status == admissionDraft && !f.on(ctx) {
+		return ""
+	}
+	return status
+}
+
+// withReview adds the import review's fields to a pupil's JSON (off: none,
+// and the status through visibleAdmission). With promotion it also says
+// whether the save promoted a draft (PUT only).
+func (h *StudentsHandler) withReview(ctx context.Context, out *studentResponse, s client.StudentResult, promotion bool) {
+	out.AdmissionStatus = h.review.visibleAdmission(ctx, out.AdmissionStatus)
+	if !h.reviewOn(ctx) {
+		return
+	}
+	issues, draft := s.OpenIssues, s.Draft
+	out.OpenIssues, out.Draft = &issues, &draft
+	if promotion {
+		promoted := s.PromotedFromDraft
+		out.PromotedFromDraft, out.IntendedGroupID = &promoted, s.IntendedGroupID
+	}
 }
 
 // NewStudentsHandler wires the handler to a students service.
@@ -90,6 +136,13 @@ type studentResponse struct {
 	Profile *client.StudentProfile `json:"profile,omitempty"`
 	// HasPhoto is only on the single file (T13); absent means unknown.
 	HasPhoto *bool `json:"hasPhoto,omitempty"`
+	// The import review (module_import_review; absent while off): unresolved
+	// import issues, the draft state, and — on PUT only — whether the save
+	// promoted a draft and the group the import meant it for.
+	OpenIssues        *int   `json:"openIssues,omitempty"`
+	Draft             *bool  `json:"draft,omitempty"`
+	PromotedFromDraft *bool  `json:"promotedFromDraft,omitempty"`
+	IntendedGroupID   string `json:"intendedGroupId,omitempty"`
 }
 
 func toStudentResponse(s client.StudentResult) studentResponse {
@@ -143,16 +196,19 @@ func (h *StudentsHandler) Update(w http.ResponseWriter, r *http.Request) {
 		writeConnectError(w, err)
 		return
 	}
+	who, _ := middleware.PrincipalFrom(r.Context())
 	res, err := h.svc.UpdateStudent(r.Context(), client.UpdateStudentInput{
 		ID: r.PathValue("id"), FirstName: req.FirstName, LastName: req.LastName,
 		MaternalLastName: maternal, CURP: req.CURP, Profile: req.Profile,
-		BankReference: req.BankReference,
+		BankReference: req.BankReference, ActorUserID: who.UserID,
 	})
 	if err != nil {
 		writeConnectError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, toStudentResponse(res))
+	out := toStudentResponse(res)
+	h.withReview(r.Context(), &out, res, true)
+	writeJSON(w, http.StatusOK, out)
 }
 
 // maternalOrStored is the maternal surname an update sends, or — when the
@@ -195,7 +251,11 @@ func (h *StudentsHandler) Create(w http.ResponseWriter, r *http.Request) {
 // List handles GET /api/v1/students?status=... : lists students, optionally
 // filtered by admission status (empty = all).
 func (h *StudentsHandler) List(w http.ResponseWriter, r *http.Request) {
-	res, err := h.svc.ListStudents(r.Context(), r.URL.Query().Get("status"))
+	status := r.URL.Query().Get("status")
+	if status == admissionDraft && !h.reviewOn(r.Context()) {
+		status = "" // an unknown status never filtered; off, draft is unknown
+	}
+	res, err := h.svc.ListStudents(r.Context(), status)
 	if err != nil {
 		writeConnectError(w, err)
 		return
@@ -208,6 +268,7 @@ func (h *StudentsHandler) List(w http.ResponseWriter, r *http.Request) {
 	for _, s := range res {
 		summary := toStudentSummary(s)
 		summary.GroupLabel = rooms[s.ID]
+		h.withReview(r.Context(), &summary, s, false)
 		out = append(out, summary)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"students": out})
@@ -251,6 +312,7 @@ func (h *StudentsHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 	out := toStudentResponse(res)
 	out.HasPhoto = res.HasPhoto
+	h.withReview(r.Context(), &out, res, false)
 	writeJSON(w, http.StatusOK, out)
 }
 

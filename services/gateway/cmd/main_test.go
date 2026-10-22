@@ -67,8 +67,10 @@ func (stubIAM) ValidateToken(_ context.Context, req *connect.Request[iamv1.Valid
 		"student-enroller":           {"students:enroll"},
 		"student-collections-reader": {"students:enroll", "collections:read"},
 		"student-reader":             {"students:read"},
-		"grades-writer":              {"grades:write", "grades:read"},
-		"grades-reader":              {"grades:read"},
+		// PLAN-import-avisos: «Está bien así» needs students:update.
+		"student-updater": {"students:update", "students:read"},
+		"grades-writer":   {"grades:write", "grades:read"},
+		"grades-reader":   {"grades:read"},
 		// T7: closing a period is the owner.s alone (iam 0023); grades:write is not enough.
 		"grades-closer":   {"grades:close", "grades:read"},
 		"teaching-writer": {"teaching:write", "teaching:read"},

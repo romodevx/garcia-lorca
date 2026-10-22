@@ -67,6 +67,9 @@ type StudentImportDeps struct {
 	Pricing     ImportPricing
 	NewID       func() string
 	WriteBudget time.Duration
+	// ReviewEnabled says whether module_import_review is on for a request
+	// (nil: off). Off, the request's row decisions are ignored.
+	ReviewEnabled func(context.Context) bool
 }
 
 // StudentImportHandler serves /api/v1/imports/students/{preview,commit}.
@@ -149,6 +152,8 @@ type importRequest struct {
 	// Capacities sizes the groups the import creates, keyed "level|ordinal|group".
 	Capacities map[string]int `json:"capacities,omitempty"`
 	PlanHash   string         `json:"planHash,omitempty"`
+	// Rows are the office's decisions per row (module_import_review only).
+	Rows []rowDecision `json:"rows,omitempty"`
 }
 
 type importCycle struct {
@@ -187,6 +192,10 @@ type importRow struct {
 	Reason           string   `json:"reason,omitempty"`
 	Warnings         []string `json:"warnings,omitempty"`
 	EnrollmentNumber string   `json:"enrollmentNumber,omitempty"`
+	// The import review's view (module_import_review only; absent while off).
+	Issues   []importIssue `json:"issues,omitempty"`
+	CanDraft bool          `json:"canDraft,omitempty"`
+	Draft    bool          `json:"draft,omitempty"`
 }
 
 type importSummary struct {
@@ -222,6 +231,7 @@ type importRun struct {
 	inputs     []client.PlacementInput
 	placements map[legacyimport.PlacementKey]client.PlacementResult
 	levelOf    map[string]importLevel // by the file's level name
+	review     review                 // the office's row decisions; zero when off
 }
 
 // Preview: POST /api/v1/imports/students/preview — writes nothing.
@@ -314,7 +324,15 @@ func (h *StudentImportHandler) plan(w http.ResponseWriter, ctx context.Context, 
 	if !ok {
 		return importRun{}, false
 	}
-	run := importRun{planned: legacyimport.Plan(rows), fileDigest: digest}
+	var decided review
+	if h.reviewOn(ctx) {
+		var refused []rowError
+		if decided, refused = applyDecisions(rows, req.Rows); len(refused) > 0 {
+			writeRowErrors(w, refused)
+			return importRun{}, false
+		}
+	}
+	run := importRun{planned: legacyimport.Plan(rows), fileDigest: digest, review: decided}
 	cycle, err := h.activeCycle(ctx)
 	if err != nil {
 		writeConnectError(w, err)
@@ -338,8 +356,12 @@ func (h *StudentImportHandler) plan(w http.ResponseWriter, ctx context.Context, 
 		writeConnectError(w, err)
 		return importRun{}, false
 	}
+	if refused := run.review.refusedByStudents(run.planned, results); len(refused) > 0 {
+		writeRowErrors(w, refused)
+		return importRun{}, false
+	}
 	run.resp.Rows, run.resp.Summary = h.rows(&run, results)
-	run.resp.PlanHash = planHash(run.resp, run.fileDigest)
+	run.resp.PlanHash = planHash(run.resp, run.fileDigest, run.review.digest)
 	return run, true
 }
 
@@ -526,6 +548,7 @@ func (h *StudentImportHandler) judgeRows(ctx context.Context, run *importRun,
 			continue
 		}
 		in := importRowInput(c)
+		run.review.annotate(&in, c)
 		in.GroupID = run.placements[key].GroupID
 		if groups != nil {
 			in.GroupID = groups[key]
@@ -647,6 +670,9 @@ func (h *StudentImportHandler) rows(run *importRun, results map[int]client.Impor
 				sum.MovedToCycleStart++
 			}
 		}
+		if c.Skip == "" {
+			run.review.dress(&row, c, sendable, res)
+		}
 		tally(&sum, row.Status)
 		out = append(out, row)
 	}
@@ -755,7 +781,12 @@ func (run *importRun) adoptRealPlacements(keys []legacyimport.PlacementKey, resu
 // fate. Warnings and the tuition advice are left out — they do not change what
 // is written, and finance answering at preview but not at commit must not read
 // as a changed plan.
-func planHash(r importResponse, fileDigest string) string {
+//
+// decisions is the import review's canonical digest of the office's row
+// decisions ("" without the review or without decisions); it is left out of
+// the hashed value when empty, so a plan without decisions hashes as it always
+// did.
+func planHash(r importResponse, fileDigest, decisions string) string {
 	type rowFate struct {
 		Row                 int
 		Status, Reason, Dst string
@@ -776,7 +807,8 @@ func planHash(r importResponse, fileDigest string) string {
 		Levels     []importLevel
 		Placements []importPlacement
 		Rows       []rowFate
-	}{fileDigest, r.Cycle.ID, levels, r.Placements, fates})
+		Decisions  string `json:",omitempty"`
+	}{fileDigest, r.Cycle.ID, levels, r.Placements, fates, decisions})
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:])
 }

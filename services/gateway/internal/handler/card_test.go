@@ -146,6 +146,29 @@ func TestStaffVerifyACard(t *testing.T) {
 	}
 }
 
+// PLAN-import-avisos: a draft's status is named only with module_import_review;
+// off, the card reads it as it did before the review existed.
+func TestVerifyNamesADraftOnlyWithTheReview(t *testing.T) {
+	for _, tc := range []struct {
+		on   bool
+		want string
+	}{{false, `"admissionStatus":""`}, {true, `"admissionStatus":"draft"`}} {
+		f := &fakeCards{verified: client.StudentResult{ID: "stu-1", AdmissionStatus: "draft", Draft: true}, valid: true}
+		h := handler.NewCardHandler(f, f, f, f, f, handler.WithCardImportReview(func(context.Context) bool { return tc.on }))
+		rec := httptest.NewRecorder()
+		h.Verify(rec, httptest.NewRequest(http.MethodPost, "/api/v1/students/card/verify", strings.NewReader(`{"code":"GLCARD:AQAAAAAAAAAAAAAAAAAAAA"}`)))
+		if !strings.Contains(rec.Body.String(), tc.want) {
+			t.Errorf("on=%v: body %s, want %s", tc.on, rec.Body.String(), tc.want)
+		}
+	}
+	f := &fakeCards{verified: client.StudentResult{ID: "stu-1", AdmissionStatus: "draft"}, valid: true}
+	rec := httptest.NewRecorder()
+	cardHandler(f).Verify(rec, httptest.NewRequest(http.MethodPost, "/api/v1/students/card/verify", strings.NewReader(`{"code":"GLCARD:AQAAAAAAAAAAAAAAAAAAAA"}`)))
+	if !strings.Contains(rec.Body.String(), `"admissionStatus":""`) {
+		t.Errorf("unwired review must read as off: %s", rec.Body.String())
+	}
+}
+
 func TestStaffRevokeACard(t *testing.T) {
 	f := &fakeCards{}
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/students/stu-1/card/revoke", nil)

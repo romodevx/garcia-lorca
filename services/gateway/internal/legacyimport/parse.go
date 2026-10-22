@@ -73,6 +73,12 @@ type Row struct {
 	State        string // the address's "Estado"
 	Municipality string
 	PostalCode   string
+
+	// The office's decisions (PLAN-import-avisos), set by the gateway before
+	// Plan, never by Parse: Omitted leaves the row out, and Corrected marks
+	// the fields a correction settled — they raise no warning.
+	Omitted   bool
+	Corrected FieldSet
 }
 
 type field int

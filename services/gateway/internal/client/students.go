@@ -58,6 +58,14 @@ type StudentResult struct {
 	// HasPhoto says whether the pupil has a photo; only GetStudent sets it,
 	// and nil means unknown (T13).
 	HasPhoto *bool
+	// OpenIssues counts the pupil's unresolved import issues; Draft is a pupil
+	// imported without a valid CURP (PLAN-import-avisos).
+	OpenIssues int
+	Draft      bool
+	// PromotedFromDraft and IntendedGroupID are set by UpdateStudent only: the
+	// save gave a draft its CURP, and the group the import meant it for.
+	PromotedFromDraft bool
+	IntendedGroupID   string
 }
 
 // NameParts are the pieces studentname orders by.
@@ -106,6 +114,9 @@ type UpdateStudentInput struct {
 	Profile          StudentProfile
 	// BankReference: nil keeps the stored one; "" clears it (ADR 0033).
 	BankReference *string
+	// ActorUserID is the signed-in caller; students records it on the import
+	// issues the correction closes.
+	ActorUserID string
 }
 
 // Enrollment is the edge's view of a student's placement in a group of a cycle,
@@ -597,6 +608,8 @@ func toStudentResult(s *studentsv1.Student) StudentResult {
 		EnrollmentNumber: s.GetEnrollmentNumber(),
 		BankReference:    s.GetBankReference(),
 		Profile:          fromProtoProfile(s.GetProfile()),
+		OpenIssues:       int(s.GetOpenIssues()),
+		Draft:            s.GetDraft(),
 	}
 }
 
@@ -692,14 +705,24 @@ func (c *StudentsClient) DeleteStudentPhoto(ctx context.Context, studentID strin
 // UpdateStudent corrects a pupil's file. InvalidArgument (a malformed field)
 // and AlreadyExists (a CURP another pupil holds) propagate for the handler.
 func (c *StudentsClient) UpdateStudent(ctx context.Context, in UpdateStudentInput) (StudentResult, error) {
-	res, err := c.rpc.UpdateStudent(ctx, connect.NewRequest(&studentsv1.UpdateStudentRequest{
-		Id: in.ID, FirstName: in.FirstName, LastName: in.LastName, MaternalLastName: in.MaternalLastName, Curp: in.CURP,
-		Profile: toProtoProfile(in.Profile), BankReference: in.BankReference,
-	}))
+	res, err := c.rpc.UpdateStudent(ctx, connect.NewRequest(toUpdateStudentRequest(in)))
 	if err != nil {
 		return StudentResult{}, err
 	}
-	return toStudentResult(res.Msg.GetStudent()), nil
+	return fromUpdateStudentResponse(res.Msg), nil
+}
+
+func toUpdateStudentRequest(in UpdateStudentInput) *studentsv1.UpdateStudentRequest {
+	return &studentsv1.UpdateStudentRequest{
+		Id: in.ID, FirstName: in.FirstName, LastName: in.LastName, MaternalLastName: in.MaternalLastName, Curp: in.CURP,
+		Profile: toProtoProfile(in.Profile), BankReference: in.BankReference, ActorUserId: in.ActorUserID,
+	}
+}
+
+func fromUpdateStudentResponse(res *studentsv1.UpdateStudentResponse) StudentResult {
+	out := toStudentResult(res.GetStudent())
+	out.PromotedFromDraft, out.IntendedGroupID = res.GetPromotedFromDraft(), res.GetIntendedGroupId()
+	return out
 }
 
 var admissionNames = map[studentsv1.AdmissionStatus]string{
@@ -708,6 +731,7 @@ var admissionNames = map[studentsv1.AdmissionStatus]string{
 	studentsv1.AdmissionStatus_ADMISSION_STATUS_ENROLLED:  "enrolled",
 	studentsv1.AdmissionStatus_ADMISSION_STATUS_REJECTED:  "rejected",
 	studentsv1.AdmissionStatus_ADMISSION_STATUS_WITHDRAWN: "withdrawn",
+	studentsv1.AdmissionStatus_ADMISSION_STATUS_DRAFT:     "draft",
 }
 
 func admissionName(s studentsv1.AdmissionStatus) string { return admissionNames[s] }
