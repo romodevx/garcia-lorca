@@ -42,6 +42,19 @@ export function androidPackageConfig(androidPackage: string | undefined, config:
   return { android: { ...config.android, package: trimmed } };
 }
 
+/**
+ * iOS bundle identifier from the build environment (IOS_BUNDLE_ID).
+ *
+ * Same reasoning as androidPackageConfig: `expo prebuild --platform ios` needs
+ * one to run non-interactively, and the store id is the owner's call. A local
+ * simulator build (scripts/mobile-release-ios.sh) passes a local-only id.
+ */
+export function iosBundleConfig(bundleId: string | undefined, config: Partial<ExpoConfig>): Pick<ExpoConfig, "ios"> | Record<string, never> {
+  const trimmed = bundleId?.trim();
+  if (!trimmed) return {};
+  return { ios: { ...config.ios, bundleIdentifier: trimmed } };
+}
+
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
   name: config.name ?? "García Lorca",
@@ -54,4 +67,5 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   // nothing to add here; this comment documents the deliberate omission.)
   ...easProjectConfig(process.env.EAS_PROJECT_ID, config),
   ...androidPackageConfig(process.env.ANDROID_PACKAGE, config),
+  ...iosBundleConfig(process.env.IOS_BUNDLE_ID, config),
 });

@@ -1,4 +1,4 @@
-import { androidPackageConfig, easProjectConfig } from "./app.config";
+import { androidPackageConfig, easProjectConfig, iosBundleConfig } from "./app.config";
 import type { ExpoConfig } from "expo/config";
 
 describe("easProjectConfig", () => {
@@ -28,5 +28,17 @@ describe("androidPackageConfig", () => {
   it("adds nothing when no application id is given, so EAS keeps owning it", () => {
     expect(androidPackageConfig(undefined, { android: { jsEngine: "hermes" } } as Partial<ExpoConfig>)).toEqual({});
     expect(androidPackageConfig("  ", {} as Partial<ExpoConfig>)).toEqual({});
+  });
+});
+
+describe("iosBundleConfig", () => {
+  it("sets the iOS bundle identifier from the build environment, keeping the rest of ios", () => {
+    const result = iosBundleConfig(" mx.example.family ", { ios: { jsEngine: "hermes", supportsTablet: true } } as Partial<ExpoConfig>);
+    expect(result).toEqual({ ios: { jsEngine: "hermes", supportsTablet: true, bundleIdentifier: "mx.example.family" } });
+  });
+
+  it("adds nothing when no bundle identifier is given, so EAS keeps owning it", () => {
+    expect(iosBundleConfig(undefined, { ios: { jsEngine: "hermes" } } as Partial<ExpoConfig>)).toEqual({});
+    expect(iosBundleConfig("  ", {} as Partial<ExpoConfig>)).toEqual({});
   });
 });
