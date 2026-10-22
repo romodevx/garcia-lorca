@@ -2,7 +2,6 @@ package usecase
 
 import (
 	"context"
-	"strings"
 
 	"github.com/google/uuid"
 
@@ -32,11 +31,9 @@ func (s *FinanceService) WithPaymentVouchers(repo ports.PaymentVoucherRepository
 // when it was linked by hand — under the transaction's locks.
 func (s *FinanceService) voucherChoice(ctx context.Context, in DepositInput) (DepositInput, domain.VoucherChoice, error) {
 	if in.VoucherID == "" {
-		// A voucher's key belongs to its application alone: a payment by hand
-		// stored under it would be what that application later "replays".
-		if strings.HasPrefix(in.IdempotencyKey, domain.VoucherKeyPrefix) {
-			return DepositInput{}, domain.VoucherChoice{}, glerrors.New(glerrors.KindInvalid,
-				"that idempotency key is reserved for payments by voucher")
+		// A voucher's key belongs to its application alone.
+		if err := domain.ValidateClientIdempotencyKey(in.IdempotencyKey); err != nil {
+			return DepositInput{}, domain.VoucherChoice{}, err
 		}
 		if !in.VoucherAware {
 			if len(in.DeclinedVoucherIDs) > 0 {

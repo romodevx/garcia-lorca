@@ -94,6 +94,22 @@ func VoucherCodeOf(err error) string {
 	}
 }
 
+// ErrVoucherKeyReserved: a client sent an idempotency key that only a
+// voucher's application may carry.
+var ErrVoucherKeyReserved = glerrors.New(glerrors.KindInvalid, "that idempotency key is reserved for payments by voucher")
+
+// ValidateClientIdempotencyKey refuses a key a client chose that starts with
+// VoucherKeyPrefix. Every writer of a deposit (a payment by hand, a
+// correction) checks it: a deposit stored under a voucher's key would be what
+// that voucher's application later "replays", and the voucher would never
+// be taken.
+func ValidateClientIdempotencyKey(key string) error {
+	if strings.HasPrefix(key, VoucherKeyPrefix) {
+		return ErrVoucherKeyReserved
+	}
+	return nil
+}
+
 // VoucherIdempotencyKey is the deposit idempotency key of a voucher's
 // application. releases counts how many times a void handed the voucher back:
 // the voided deposit keeps the key it was stored under, so the next

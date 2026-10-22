@@ -244,6 +244,27 @@ func TestVoucherIdempotencyKey(t *testing.T) {
 	}
 }
 
+// A key a client sends may never be a voucher's: a payment stored under it
+// would be what that voucher's application later "replays".
+func TestValidateClientIdempotencyKey(t *testing.T) {
+	tests := []struct {
+		key     string
+		invalid bool
+	}{
+		{"", false},
+		{"k-1", false},
+		{"corr-voucher:1", false},
+		{"voucher:v-1", true},
+		{"voucher:", true},
+	}
+	for _, tc := range tests {
+		err := domain.ValidateClientIdempotencyKey(tc.key)
+		if got := glerrors.KindOf(err) == glerrors.KindInvalid; got != tc.invalid {
+			t.Errorf("ValidateClientIdempotencyKey(%q) = %v, want invalid=%v", tc.key, err, tc.invalid)
+		}
+	}
+}
+
 func TestVoucherErrorsCarryTheirCodes(t *testing.T) {
 	tests := []struct {
 		err  error

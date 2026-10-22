@@ -144,6 +144,26 @@ func TestACorrectionNeedsAReasonAndChangesNothingWithout(t *testing.T) {
 	}
 }
 
+// Security LOW-1: the voucher key prefix is reserved for both writers of a
+// deposit. A correction stored under "voucher:<id>" would be answered as the
+// replay of that voucher's application, which then would never be taken.
+func TestACorrectionCannotTakeAVoucherKey(t *testing.T) {
+	f := depositFixture(t)
+	wrong := deposit(t, f, 50000, "2026-10-10")
+
+	_, err := f.svc.CorrectDeposit(context.Background(), usecase.CorrectionInput{
+		DepositID: wrong.Deposit.ID(), AmountCents: 670000, Tenders: cashTender(670000),
+		Reason: "Se capturó mal el monto", IdempotencyKey: domain.VoucherIdempotencyKey("v-1", 0), By: director,
+	})
+	if glerrors.KindOf(err) != glerrors.KindInvalid {
+		t.Fatalf("err = %v, want invalid", err)
+	}
+	stored, err := f.repo.GetDeposit(context.Background(), wrong.Deposit.ID())
+	if err != nil || stored.Superseded() {
+		t.Errorf("the original was superseded under a voucher's key: %v %v", stored.Superseded(), err)
+	}
+}
+
 func TestACorrectionsTendersMustAddUp(t *testing.T) {
 	f := depositFixture(t)
 	wrong := deposit(t, f, 50000, "2026-10-10")

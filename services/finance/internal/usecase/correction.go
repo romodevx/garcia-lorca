@@ -51,6 +51,10 @@ func (s *FinanceService) CorrectDeposit(ctx context.Context, in CorrectionInput)
 	if err := domain.ValidateCorrectionReason(in.Reason); err != nil {
 		return CorrectionResult{}, err
 	}
+	// The voucher prefix is reserved here as in RegisterDeposit (security LOW-1).
+	if err := domain.ValidateClientIdempotencyKey(in.IdempotencyKey); err != nil {
+		return CorrectionResult{}, err
+	}
 	if len(in.Tenders) == 0 {
 		// Always explicit: a correction states how the money came in, it does
 		// not inherit a single method from the deposit it replaces.
