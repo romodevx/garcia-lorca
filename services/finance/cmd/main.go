@@ -282,6 +282,11 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 	// service only manages them and who holds them.
 	svc.WithScholarships(repo)
 	scholarships := usecase.NewScholarshipService(repo, svc, repo, repo, studentsClient, tenantID, newID, clock)
+	// ADR 0040: a deposit may be registered by a family's payment voucher, and
+	// one registered by hand links the pupil's only pending voucher. Always on
+	// in finance (finance reads no flags): the link is what keeps a voucher
+	// from being paid twice while the gateway hides the module.
+	svc.WithPaymentVouchers(repo)
 	handler := grpcadapter.NewFinanceHandler(svc, health).WithLevelArchive(levels).WithExpenses(expenses).
 		WithActivities(activities).WithScholarships(scholarships)
 	consumer := pubsubadapter.NewConsumer(svc, log)

@@ -98,8 +98,11 @@ type FinanceService struct {
 	activities ports.ActivityRepository
 	// scholarships is T18's (WithScholarships); nil prices no scholarship.
 	scholarships ports.ScholarshipRepository
-	tenantID     string
-	newID        func() string
+	// vouchers is ADR 0040's (WithPaymentVouchers); nil takes no payment by
+	// voucher.
+	vouchers ports.PaymentVoucherRepository
+	tenantID string
+	newID    func() string
 	// clock is the one source of time (ADR 0035): Now stamps, Today decides.
 	clock SchoolClock
 }

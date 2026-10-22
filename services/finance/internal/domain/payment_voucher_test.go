@@ -264,3 +264,28 @@ func TestVoucherErrorsCarryTheirCodes(t *testing.T) {
 		t.Fatalf("the folio rides the message and the sentinel still matches: %q", glerrors.SafeMessage(withFolio))
 	}
 }
+
+// The office's word on vouchers rides the deposit into its transaction. The
+// declined list is copied: a caller reusing its slice cannot change a deposit
+// already built.
+func TestDepositVoucherChoice(t *testing.T) {
+	d, err := domain.NewDeposit("dep-1", "tenant", "student-1", 1000, domain.MethodTransfer, "", voucherAt, "k", "cal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := d.VoucherChoice(); c.VoucherID != "" || len(c.Declined) != 0 || c.Any() {
+		t.Fatalf("a plain deposit says nothing about vouchers: %+v", c)
+	}
+	declined := []string{"v-2", "v-3"}
+	with := d.WithVoucherChoice(domain.VoucherChoice{Declined: declined})
+	declined[0] = "changed"
+	if got := with.VoucherChoice().Declined; len(got) != 2 || got[0] != "v-2" {
+		t.Fatalf("declined = %v", got)
+	}
+	if !with.VoucherChoice().Any() || d.VoucherChoice().Any() {
+		t.Fatal("WithVoucherChoice returns a copy")
+	}
+	if !d.WithVoucherChoice(domain.VoucherChoice{VoucherID: "v-1"}).VoucherChoice().Any() {
+		t.Fatal("a chosen voucher is a choice")
+	}
+}
