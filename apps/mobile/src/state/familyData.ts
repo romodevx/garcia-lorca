@@ -9,6 +9,7 @@ import {
   type FamilyProfile,
   type FamilyStatement,
 } from "../api";
+import { listPaymentVouchers, type FamilyPaymentVoucher } from "../api/paymentVouchers";
 import { getAttendanceMonth, type AttendanceMonth } from "../api/attendance";
 import { getPeriodGrades, type PeriodGrades } from "../api/grades";
 import { getReportCard, listReportCards, type ReportCard, type ReportCardSummary } from "../api/reportCards";
@@ -114,5 +115,14 @@ export function useChildReportCard(childId: string | null, reportCardId: string 
 /** The selected child's virtual card (task 13). */
 export function useChildCard(childId: string | null): AsyncResource<FamilyCard> {
   const load = useMemo(() => (childId ? () => getCard(childId) : null), [childId]);
+  return useAsyncResource(load);
+}
+
+/**
+ * The selected child's payment vouchers (ADR 0040). `enabled` false (the
+ * module's flag off) fires no request, like a null child.
+ */
+export function useChildPaymentVouchers(childId: string | null, enabled = true): AsyncResource<FamilyPaymentVoucher[]> {
+  const load = useMemo(() => (childId && enabled ? () => listPaymentVouchers(childId) : null), [childId, enabled]);
   return useAsyncResource(load);
 }
