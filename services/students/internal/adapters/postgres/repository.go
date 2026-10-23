@@ -330,6 +330,9 @@ func (r *Repository) List(ctx context.Context, f ports.ListFilter) ([]*domain.St
 		if len(f.IDs) > 0 {
 			q = q.Where("id IN ?", f.IDs)
 		}
+		if f.FamilyID != "" {
+			q = q.Where("family_id = ?", f.FamilyID)
+		}
 		if f.Birthday != nil {
 			q = whereBornOn(q, *f.Birthday)
 		}

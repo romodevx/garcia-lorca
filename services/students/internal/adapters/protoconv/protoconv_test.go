@@ -36,3 +36,28 @@ func TestUnknownWireStatusIsUnspecified(t *testing.T) {
 		t.Errorf("ToDomainStatus(99) = %v, want Unspecified", got)
 	}
 }
+
+func TestSuggestionEnumsToProto(t *testing.T) {
+	reasons := map[domain.SuggestionReason]studentsv1.FamilySuggestionReason{
+		domain.ReasonUnspecified:        studentsv1.FamilySuggestionReason_FAMILY_SUGGESTION_REASON_UNSPECIFIED,
+		domain.ReasonSameSurnames:       studentsv1.FamilySuggestionReason_FAMILY_SUGGESTION_REASON_SAME_SURNAMES,
+		domain.ReasonSharedContactEmail: studentsv1.FamilySuggestionReason_FAMILY_SUGGESTION_REASON_SHARED_CONTACT_EMAIL,
+		domain.ReasonSharedContactPhone: studentsv1.FamilySuggestionReason_FAMILY_SUGGESTION_REASON_SHARED_CONTACT_PHONE,
+		domain.ReasonSharedAccount:      studentsv1.FamilySuggestionReason_FAMILY_SUGGESTION_REASON_SHARED_ACCOUNT,
+	}
+	for dom, wire := range reasons {
+		if got := protoconv.ToProtoSuggestionReason(dom); got != wire {
+			t.Errorf("reason %d → %v, want %v", dom, got, wire)
+		}
+	}
+	confidences := map[domain.SuggestionConfidence]studentsv1.FamilySuggestionConfidence{
+		domain.ConfidenceUnspecified: studentsv1.FamilySuggestionConfidence_FAMILY_SUGGESTION_CONFIDENCE_UNSPECIFIED,
+		domain.ConfidenceMedium:      studentsv1.FamilySuggestionConfidence_FAMILY_SUGGESTION_CONFIDENCE_MEDIUM,
+		domain.ConfidenceHigh:        studentsv1.FamilySuggestionConfidence_FAMILY_SUGGESTION_CONFIDENCE_HIGH,
+	}
+	for dom, wire := range confidences {
+		if got := protoconv.ToProtoSuggestionConfidence(dom); got != wire {
+			t.Errorf("confidence %d → %v, want %v", dom, got, wire)
+		}
+	}
+}

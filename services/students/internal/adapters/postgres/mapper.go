@@ -53,6 +53,7 @@ func toDomain(m studentModel) (*domain.Student, error) {
 	}, status)
 	s.AssignEnrollmentNumber(m.EnrollmentNumber)
 	s.AssignOpenIssues(m.OpenIssues)
+	s.AssignFamily(derefOrEmpty(m.FamilyID))
 	return s, nil
 }
 

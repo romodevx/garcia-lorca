@@ -22,6 +22,8 @@
 
 - **Sincronía.** Toda cuenta ligada a un hijo de la familia queda ligada a **todos** sus hijos colocables (un borrador sin CURP no recibe cuenta). Se ejecuta al confirmar una familia, al agregar un hijo, al dar acceso en la familia y al dar acceso a un contacto de un hijo que ya está en una familia. El contacto que se crea en el hermano copia nombre, teléfono, correo y parentesco del contacto de origen; si el hermano ya tiene un contacto con ese correo, se le pega la cuenta a ese (no se duplica a la persona).
 - **Tope de 2.** Cuentas distintas ligadas a los hijos de la familia, contadas en la misma transacción que escribe, con la fila de `families` bloqueada (`SELECT … FOR UPDATE`): dos invitaciones simultáneas no pueden pasar las dos. Una tercera es `KindConflict` (409) y no escribe nada. Juntar hijos cuyas cuentas suman más de 2 también se rechaza.
+- **Orden de candados (obligatorio para el tope).** Toda escritura de cuenta sobre un alumno de familia: leer `family_id` sin candado → `families … FOR UPDATE` → releer el alumno `FOR SHARE` → reintentar si `family_id` cambió. Crear y agregar bloquean a los alumnos en orden de id. Un interbloqueo (40P01/40001) es 409, nunca 500.
+- **Un hijo dado de baja sigue en su familia** y sus cuentas cuentan para el tope: son los mismos papás que los de sus hermanos.
 - **Quitar un hijo de la familia no le quita accesos:** sus papás siguen siendo sus papás. Quitar el acceso de un adulto **en la familia** lo desliga de todos los hijos de la familia.
 - **Disolver** deja a los hijos sin familia y no toca ningún vínculo.
 - **Descartes.** Firma = SHA-256 de los ids ordenados del grupo sugerido. Un hermano nuevo cambia la firma y la sugerencia vuelve con él.

@@ -37,6 +37,7 @@ type StudentsHandler struct {
 	imports  *usecase.ImportService
 	groups   *usecase.GroupRecordService
 	issues   *usecase.ImportIssueService
+	families *usecase.FamilyService
 }
 
 // NewStudentsHandler wires the handler to the student, enrollment, guardian, and
@@ -192,6 +193,7 @@ func (h *StudentsHandler) ListStudents(ctx context.Context, req *connect.Request
 		PageToken:        m.GetPageToken(),
 		Birthday:         toBirthdayFilter(m.GetBirthday()),
 		ActiveEnrollment: m.GetActiveEnrollment(),
+		FamilyID:         m.GetFamilyId(),
 	})
 	if err != nil {
 		return nil, connectErr(err)
@@ -503,6 +505,7 @@ func toProtoStudent(s *domain.Student) *studentsv1.Student {
 		BankReference:    s.BankReference().String(),
 		OpenIssues:       int32(s.OpenIssues()),
 		Draft:            s.IsDraft(),
+		FamilyId:         s.FamilyID(),
 	}
 }
 

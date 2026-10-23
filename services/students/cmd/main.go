@@ -277,7 +277,9 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 	issues := usecase.NewImportIssueService(repo, repo, time.Now)
 	handler := grpcadapter.NewStudentsHandler(svc, enroll, guardians, health).
 		WithNotes(notes).WithCards(cards).WithLevelArchive(levels).WithImports(imports).
-		WithGroupRecords(usecase.NewGroupRecordService(repo)).WithImportIssues(issues)
+		WithGroupRecords(usecase.NewGroupRecordService(repo)).WithImportIssues(issues).
+		// Families (ADR 0041): siblings grouped by the office from suggestions.
+		WithFamilies(usecase.NewFamilyService(repo, repo, tenantID, newID, time.Now))
 
 	mux := http.NewServeMux()
 	path, h := studentsv1connect.NewStudentsServiceHandler(handler, connect.WithRecover(recoverFn))
