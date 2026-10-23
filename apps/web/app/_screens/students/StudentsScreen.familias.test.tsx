@@ -28,6 +28,9 @@ vi.mock("../../families/api", async (importOriginal) => ({
   listFamilySuggestions: vi.fn(),
   getFamily: vi.fn(),
   listFamilyContacts: vi.fn(),
+  removeStudentFromFamily: vi.fn(),
+  addStudentsToFamily: vi.fn(),
+  createFamily: vi.fn(),
 }));
 const students = vi.mocked(studentsApi);
 const config = vi.mocked(configApi);
@@ -102,6 +105,7 @@ describe("StudentsScreen — Familias on", () => {
     render(<StudentsScreen onBack={() => {}} families={OWNER} />);
     const links = await screen.findAllByRole("button", { name: "Familia GARCÍA LÓPEZ" });
     expect(links).toHaveLength(2);
+    expect((links[0] as HTMLElement).style.color).toBe("var(--link)");
     await user.click(links[0] as HTMLElement);
     expect(await screen.findByRole("dialog", { name: "Familia GARCÍA LÓPEZ" })).toBeInTheDocument();
     expect(window.location.search).toContain("familia=f1");
@@ -111,7 +115,8 @@ describe("StudentsScreen — Familias on", () => {
     const user = userEvent.setup();
     render(<StudentsScreen onBack={() => {}} families={OWNER} />);
     await screen.findAllByRole("button", { name: "Familia GARCÍA LÓPEZ" });
-    await user.click(screen.getByRole("button", { name: /Sin familia/ }));
+    // QA-2: with the other filter chips, not alone on a row of its own.
+    await user.click(within(screen.getByRole("group", { name: "Nivel" })).getByRole("button", { name: /Sin familia/ }));
     expect(rows()).toEqual(["SOTO LÓPEZ IAN"]);
     expect(window.location.search).toContain("sinfamilia=1");
   });
@@ -137,5 +142,58 @@ describe("StudentsScreen — Familias on", () => {
     await user.click(await within(dialog).findByRole("button", { name: "GARCÍA LÓPEZ ANA" }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Familia GARCÍA LÓPEZ" })).toBeNull());
     expect(screen.getAllByText("CURPs1").length).toBeGreaterThan(0);
+  });
+});
+
+describe("StudentsScreen — the undo of a removed child outlives the drawer", () => {
+  const ANA: familiesApi.FamilyMember = { id: "s1", firstName: "ANA", lastName: "GARCÍA", maternalLastName: "LÓPEZ", level: "Primaria", gradeGroup: "A", admissionStatus: "enrolled", draft: false };
+
+  async function removeAnaAndClose(): Promise<ReturnType<typeof userEvent.setup>> {
+    const user = userEvent.setup();
+    families.getFamily.mockResolvedValue({ id: "f1", name: "GARCÍA LÓPEZ", studentIds: ["s1"], createdAt: "", members: [ANA] });
+    window.history.replaceState(null, "", "/alumnos?vista=familias&familia=f1");
+    render(<StudentsScreen onBack={() => {}} families={OWNER} />);
+    const dialog = await screen.findByRole("dialog", { name: "Familia GARCÍA LÓPEZ" });
+    await user.click(await within(dialog).findByRole("button", { name: "Quitar a GARCÍA LÓPEZ ANA de la familia" }));
+    await screen.findByRole("button", { name: "Deshacer" });
+    await user.click(within(screen.getByRole("dialog", { name: "Familia GARCÍA LÓPEZ" })).getByRole("button", { name: "Cerrar" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    return user;
+  }
+
+  it("rebuilds a family dissolved by removing its last child", async () => {
+    families.removeStudentFromFamily.mockResolvedValue(null);
+    families.createFamily.mockResolvedValue({ id: "f2", name: "GARCÍA LÓPEZ", studentIds: ["s1"], createdAt: "" });
+    const user = await removeAnaAndClose();
+    await user.click(screen.getByRole("button", { name: "Deshacer" }));
+    await waitFor(() => expect(families.createFamily).toHaveBeenCalledWith(expect.any(String), { name: "GARCÍA LÓPEZ", studentIds: ["s1"] }));
+    await waitFor(() => expect(families.listFamilies.mock.calls.length).toBeGreaterThanOrEqual(3));
+  });
+
+  it("puts the child back in a family that still exists", async () => {
+    families.removeStudentFromFamily.mockResolvedValue({ id: "f1", name: "GARCÍA LÓPEZ", studentIds: ["s2"], createdAt: "" });
+    families.addStudentsToFamily.mockResolvedValue({ id: "f1", name: "GARCÍA LÓPEZ", studentIds: ["s1", "s2"], createdAt: "" });
+    const user = await removeAnaAndClose();
+    await user.click(screen.getByRole("button", { name: "Deshacer" }));
+    await waitFor(() => expect(families.addStudentsToFamily).toHaveBeenCalledWith(expect.any(String), "f1", ["s1"]));
+    expect(screen.queryByRole("button", { name: "Deshacer" })).toBeNull();
+  });
+});
+
+describe("StudentsScreen — the directory before the families are known", () => {
+  it("failed: says so once, no 'Sin familia' chip and no '—' per pupil", async () => {
+    families.listFamilies.mockRejectedValue(new Error("down"));
+    render(<StudentsScreen onBack={() => {}} families={OWNER} />);
+    expect(await screen.findByText("No pudimos leer las familias; la columna Familia no está disponible.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Sin familia/ })).toBeNull();
+    expect(screen.queryByText("—")).toBeNull();
+  });
+
+  it("loading: no chip yet", async () => {
+    families.listFamilies.mockReturnValue(new Promise(() => {}));
+    render(<StudentsScreen onBack={() => {}} families={OWNER} />);
+    await screen.findByText("GARCÍA LÓPEZ ANA");
+    expect(screen.queryByRole("button", { name: /Sin familia/ })).toBeNull();
+    expect(screen.queryByText("—")).toBeNull();
   });
 });

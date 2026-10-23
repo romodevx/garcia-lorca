@@ -55,7 +55,9 @@ export function FamilyCreateDrawer({ candidates, draft, onClose, onCreated }: {
   };
 
   return (
-    <SlideOver title="Nueva familia" subtitle="Hermanos que comparten papás" icon="students" submitLabel="Crear familia" pending={pending} error={error} onClose={onClose} onSubmit={() => void submit()}>
+    // Esc and the veil close it only while nothing was picked: a family half
+    // put together is not thrown away by a stray key (Cancel still closes).
+    <SlideOver title="Nueva familia" subtitle="Hermanos que comparten papás" icon="students" submitLabel="Crear familia" pending={pending} error={error} onClose={onClose} onSubmit={() => void submit()} dismissible={chosen.length === 0}>
       <div style={{ display: "grid", gap: 16 }}>
         <PupilSearch
           label="Buscar alumno sin familia"

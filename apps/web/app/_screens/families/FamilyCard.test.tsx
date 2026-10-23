@@ -42,6 +42,7 @@ describe("FamilyCard", () => {
     const props = renderCard();
     expect(await screen.findByText("GARCÍA LÓPEZ")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "GARCÍA LÓPEZ ANA" })).toBeNull();
+    expect(screen.getByRole("button", { name: "GARCÍA LÓPEZ LUIS" }).style.color).toBe("var(--link)");
     await user.click(screen.getByRole("button", { name: "GARCÍA LÓPEZ LUIS" }));
     expect(props.onOpenStudent).toHaveBeenCalledWith("s2");
     await user.click(screen.getByRole("button", { name: "Ver familia" }));
@@ -90,5 +91,11 @@ describe("FamilyCard", () => {
     expect(screen.getByText("Sin familia.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Agregar a una familia" })).toBeNull();
     expect(api.listFamilies).not.toHaveBeenCalled();
+  });
+  it("tells the file what it read, so the contacts know the family is full", async () => {
+    const onFamilyRead = vi.fn();
+    api.getFamily.mockResolvedValue({ ...DETAIL, accountCount: 2 });
+    renderCard({ onFamilyRead });
+    await waitFor(() => expect(onFamilyRead).toHaveBeenCalledWith(expect.objectContaining({ id: "f1", accountCount: 2 })));
   });
 });

@@ -4,13 +4,14 @@ import { useEffect, useRef, useState, type ReactElement } from "react";
 
 import { ConfirmDialog } from "../../_design/ConfirmDialog";
 import { DrawerShell } from "../../_design/DrawerShell";
-import { UndoToast } from "../../_design/UndoToast";
 import { API_URL } from "../../api-url";
 import { dissolveFamily, familyRefusal, revokeFamilyAccess, type FamilyPerson } from "../../families/api";
 import type { FamiliesAccess } from "../../families/model";
+import { DiscardPrompt } from "./DiscardPrompt";
 import { FamilyDrawerBody } from "./FamilyDrawerBody";
 import type { FamilyPupil } from "./familyPupil";
 import { useFamilyDetail } from "./useFamilyDetail";
+import type { RemovedChild } from "./useFamilyUndo";
 import { useMemberChanges } from "./useMemberChanges";
 
 export interface FamilyDrawerProps {
@@ -22,8 +23,8 @@ export interface FamilyDrawerProps {
   onClose: () => void;
   /** The family changed on the server: the list re-reads the families. */
   onChanged: () => void;
-  /** Undo rebuilt a dissolved family under another id: show that one. */
-  onReplaced: (familyId: string) => void;
+  /** A child was taken out: the screen offers the Undo (it outlives this drawer). */
+  onRemoved: (removed: RemovedChild) => void;
   onOpenStudent: (studentId: string) => void;
   say: (message: string) => void;
 }
@@ -42,12 +43,19 @@ export function FamilyDrawer(props: FamilyDrawerProps): ReactElement {
   const [confirming, setConfirming] = useState<Confirming | undefined>(undefined);
   const [failure, setFailure] = useState<string | undefined>(undefined);
   const [renamed, setRenamed] = useState<string | undefined>(undefined);
+  // A half-written adult: closing the drawer asks first (✕, Esc, the veil).
+  const [adultDirty, setAdultDirty] = useState(false);
+  const [askingDiscard, setAskingDiscard] = useState(false);
+  const close = (): void => {
+    if (adultDirty) setAskingDiscard(true);
+    else onClose();
+  };
   const name = renamed ?? state.detail?.name ?? "";
   const changed = (): void => {
     state.reload();
     props.onChanged();
   };
-  const members = useMemberChanges(familyId, { familyName: name, onChanged: changed, onReplaced: props.onReplaced, say });
+  const members = useMemberChanges(familyId, { familyName: name, onChanged: changed, onRemoved: props.onRemoved, say });
 
   const revoke = async (person: FamilyPerson): Promise<void> => {
     setConfirming(undefined);
@@ -74,39 +82,38 @@ export function FamilyDrawer(props: FamilyDrawerProps): ReactElement {
 
   if (confirming?.kind === "revoke") {
     return (
-      <ConfirmDialog title="Quitar el acceso a la app" confirmLabel="Quitar acceso" onConfirm={() => void revoke(confirming.person)} onCancel={() => setConfirming(undefined)}>
+      <ConfirmDialog title="Quitar el acceso a la app" confirmLabel="Quitar acceso" danger onConfirm={() => void revoke(confirming.person)} onCancel={() => setConfirming(undefined)}>
         {confirming.person.fullName} ya no podrá entrar a la app para ninguno de los hijos de esta familia. Sus datos de contacto se quedan.
       </ConfirmDialog>
     );
   }
   if (confirming?.kind === "dissolve") {
     return (
-      <ConfirmDialog title="Disolver la familia" confirmLabel="Disolver" onConfirm={() => void dissolve()} onCancel={() => setConfirming(undefined)}>
+      <ConfirmDialog title="Disolver la familia" confirmLabel="Disolver" danger onConfirm={() => void dissolve()} onCancel={() => setConfirming(undefined)}>
         Se disuelve la familia {name}: los hijos se quedan sin familia; nadie pierde acceso a la app.
       </ConfirmDialog>
     );
   }
 
-  const undoMessage = members.removed === undefined ? "" : members.removed.dissolved
-    ? `Se quitó a ${members.removed.name}; la familia se quedó sin hijos y se disolvió`
-    : `Se quitó a ${members.removed.name} de la familia`;
-
   return (
-    <>
-      <DrawerShell title={name !== "" ? `Familia ${name}` : "Familia"} icon="students" size="lg" onClose={onClose}>
-        <FamilyDrawerBody
-          drawer={props}
-          state={state}
-          name={name}
-          members={members}
-          failure={failure}
-          onRenamed={(next) => { setRenamed(next); props.onChanged(); }}
-          onAskRevoke={(person) => setConfirming({ kind: "revoke", person })}
-          onAskDissolve={() => setConfirming({ kind: "dissolve" })}
-        />
-      </DrawerShell>
-      {members.removed !== undefined && <UndoToast message={undoMessage} onUndo={() => void members.undo()} onDismiss={members.dismissUndo} />}
-    </>
+    <DrawerShell title={name !== "" ? `Familia ${name}` : "Familia"} icon="students" size="lg" onClose={close}>
+      {askingDiscard && (
+        <div style={{ marginBottom: 16 }}>
+          <DiscardPrompt question="¿Descartar a este adulto?" onDiscard={onClose} onKeep={() => setAskingDiscard(false)} />
+        </div>
+      )}
+      <FamilyDrawerBody
+        drawer={props}
+        state={state}
+        name={name}
+        members={members}
+        failure={failure}
+        onRenamed={(next) => { setRenamed(next); props.onChanged(); }}
+        onAskRevoke={(person) => setConfirming({ kind: "revoke", person })}
+        onAskDissolve={() => setConfirming({ kind: "dissolve" })}
+        onAdultDirty={setAdultDirty}
+      />
+    </DrawerShell>
   );
 }
 

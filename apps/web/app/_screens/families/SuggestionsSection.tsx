@@ -37,7 +37,7 @@ export function SuggestionsSection({ state, pupils, access, onAdjust, onBuilt, o
     <section aria-labelledby="families-suggestions-title" style={{ display: "grid", gap: 12 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
         <h2 id="families-suggestions-title" style={{ fontSize: 18, fontWeight: 800, color: "var(--text)", flex: 1, minWidth: 0 }}>Sugerencias por revisar</h2>
-        {canBuild && high > 0 && <Btn icon="check" onClick={() => void acceptAll()}>{`Aceptar las muy probables (${high})`}</Btn>}
+        {canBuild && high > 0 && <Btn icon="check" busy={state.bulkRunning} onClick={() => void acceptAll()}>{`Aceptar las muy probables (${high})`}</Btn>}
       </div>
       {!canBuild && <p style={{ fontSize: 14, color: "var(--text-muted)", margin: 0 }}>{READ_ONLY}</p>}
       <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 300px), 1fr))" }}>

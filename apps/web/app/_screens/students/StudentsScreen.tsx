@@ -47,6 +47,8 @@ import { FamiliesView } from "../families/FamiliesView";
 import { FamilyDrawer } from "../families/FamilyDrawer";
 import type { FamilyPupil } from "../families/familyPupil";
 import { useFamilyDirectory } from "../families/useFamilyDirectory";
+import { removedMessage, useFamilyUndo, type RemovedChild } from "../families/useFamilyUndo";
+import { UndoToast } from "../../_design/UndoToast";
 import { ViewSwitch, type StudentsVista } from "../families/ViewSwitch";
 
 /** The floating "Nuevo alumno": its height, its distance from the bottom, and
@@ -587,6 +589,17 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
   const familyDir = useFamilyDirectory(familiesOn);
   const [familiesView, setFamiliesView] = useState<FamiliesViewState>(() => (familiesOn ? initialView.families : NO_FAMILIES_VIEW));
   const patchFamiliesView = (patch: Partial<FamiliesViewState>): void => setFamiliesView((prev) => ({ ...prev, ...patch }));
+  // A family drawer re-reads (remounts) when an Undo changed the family it shows.
+  const [drawerRevision, setDrawerRevision] = useState(0);
+  // The Undo of "Quitar de la familia" lives here, so closing the drawer keeps it.
+  const familyUndo = useFamilyUndo((back: RemovedChild, familyId: string) => {
+    familyDir.reload();
+    if (familiesView.familyId !== back.familyId) return;
+    if (back.dissolved) patchFamiliesView({ familyId });
+    else setDrawerRevision((v) => v + 1);
+  });
+  // Until the families are read, nobody is "without a family" and no cell says "—".
+  const familiesKnown = familyDir.loaded && !familyDir.failed;
   // A review tab in the address bar means nothing while the review is off.
   const [tab, setTab] = useState<StatusTab>(() => (importReview || !REVIEW_TABS.includes(initialView.tab) ? initialView.tab : "all"));
   // The cycle's enrolments place each pupil in a grade and a group (T4).
@@ -716,7 +729,8 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
   const rooms = useMemo(() => roomLabelsOf(enrollments, groups), [enrollments, groups]);
   const roomOf = (s: Student): string => rooms.get(s.id) ?? s.gradeGroup;
   const { membership } = familyDir;
-  const noFamily = familiesView.noFamily;
+  // The chip filters only once the families are known; before, everybody would pass.
+  const noFamily = familiesView.noFamily && familiesKnown;
   const rows = useMemo(
     () => placedRows.filter((r) => inStatusTab(r.student, tab) && (!noFamily || !membership.has(r.id))),
     [placedRows, tab, noFamily, membership],
@@ -869,6 +883,11 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
           focusSearch={intent === "search"}
           extraActive={tab !== "all" || noFamily}
           onClear={() => { setTab("all"); patchFamiliesView({ noFamily: false }); }}
+          extraChips={familiesOn && familiesKnown && (
+            <button type="button" aria-pressed={noFamily} onClick={() => patchFamiliesView({ noFamily: !noFamily })} style={filterChip(noFamily)}>
+              Sin familia
+            </button>
+          )}
           leading={
             <div style={{ display: "flex", gap: 6, padding: 5, maxWidth: "100%", overflowX: "auto", background: "var(--surface-3)", borderRadius: "var(--r-pill)", border: "1px solid var(--border)" }}>
               {tabs.map(([id, label]) => {
@@ -883,12 +902,8 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
             </div>
           }
         />
-        {familiesOn && (
-          <div style={{ marginTop: 12 }}>
-            <button type="button" aria-pressed={noFamily} onClick={() => patchFamiliesView({ noFamily: !noFamily })} style={filterChip(noFamily)}>
-              Sin familia
-            </button>
-          </div>
+        {familiesOn && familyDir.failed && (
+          <p role="alert" style={{ color: "var(--bad-fg)", fontSize: 13.5, margin: "10px 0 0" }}>No pudimos leer las familias; la columna Familia no está disponible.</p>
         )}
         <LinkMissedNotice shown={linkMissed} onDismiss={() => setLinkMissed(false)} />
         {placementStatus === "failed" && (
@@ -965,7 +980,7 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
                 onNotes={() => setNotesOf(row.student)}
                 onStatement={canReadStatement ? () => setStatementOf(row.student) : undefined}
                 openIssues={importReview ? row.student.openIssues ?? 0 : 0}
-                family={familiesOn ? { of: membership.get(row.id), onOpen: (familyId) => patchFamiliesView({ familyId }) } : undefined}
+                family={familiesOn ? { known: familiesKnown, of: membership.get(row.id), onOpen: (familyId) => patchFamiliesView({ familyId }) } : undefined}
               />
             ))
           )}
@@ -1025,14 +1040,14 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
       {verifying && <VerifyCardDrawer onClose={() => setVerifying(false)} />}
       {families !== undefined && familiesView.familyId !== undefined && (
         <FamilyDrawer
-          key={familiesView.familyId}
+          key={`${familiesView.familyId}-${drawerRevision}`}
           familyId={familiesView.familyId}
           access={families}
           pupils={familyPupils}
           candidates={familyCandidates}
           onClose={() => patchFamiliesView({ familyId: undefined })}
           onChanged={familyDir.reload}
-          onReplaced={(familyId) => patchFamiliesView({ familyId })}
+          onRemoved={familyUndo.offer}
           onOpenStudent={(studentId) => {
             patchFamiliesView({ familyId: undefined });
             const found = students.find((s) => s.id === studentId);
@@ -1040,6 +1055,12 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
           }}
           say={say}
         />
+      )}
+      {familyUndo.pending !== undefined && (
+        <UndoToast message={removedMessage(familyUndo.pending)} onUndo={() => void familyUndo.undo()} onDismiss={familyUndo.dismiss} />
+      )}
+      {familyUndo.error !== undefined && (
+        <p role="alert" style={{ position: "fixed", bottom: 28, left: "50%", transform: "translateX(-50%)", zIndex: 80, margin: 0, padding: "12px 20px", borderRadius: "var(--r-pill)", background: "var(--bad-bg)", color: "var(--bad-fg)", fontWeight: 600, boxShadow: "var(--shadow-pop)" }}>{familyUndo.error}</p>
       )}
       {/* ONE live region, always mounted and empty until a message is set into
           it, so every message is announced (ISSUE-T14-013, T14-202 gate nit).
@@ -1184,7 +1205,7 @@ function StuRow({ st, room, levelName, i, selected, onToggle, onOpen, onEdit, on
   /** module_import_review: the ⚠ count; 0 shows none. */
   openIssues?: number;
   /** module_families: the pupil's family (or none) and how to open it. Absent: no column. */
-  family?: { of: Family | undefined; onOpen: (familyId: string) => void };
+  family?: { known: boolean; of: Family | undefined; onOpen: (familyId: string) => void };
 }): ReactElement {
   const [hov, setHov] = useState(false);
   const s = statusOf(st.admissionStatus);
@@ -1215,7 +1236,7 @@ function StuRow({ st, room, levelName, i, selected, onToggle, onOpen, onEdit, on
       </div>
       <div className="students-col-wide" style={{ fontSize: 14, color: "var(--text-muted)", textTransform: "capitalize" }}>{levelName}<div style={{ fontSize: 12.5, color: "var(--text-faint)", textTransform: "none" }}>{room}</div></div>
       <div className="students-col-wide" style={{ minWidth: 0, fontSize: 14, color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{st.guardianName}</div>
-      {family !== undefined && <FamilyCell family={family.of} onOpen={family.onOpen} />}
+      {family !== undefined && <FamilyCell known={family.known} family={family.of} onOpen={family.onOpen} />}
       <div className="students-col-wide"><StatusPill status={st.admissionStatus} /></div>
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, width: ACTIONS_WIDTH }}>
         {onStatement !== undefined && (
@@ -1232,7 +1253,9 @@ function StuRow({ st, room, levelName, i, selected, onToggle, onOpen, onEdit, on
 }
 
 /** The pupil's family in the directory: its name opens it; none says so quietly. */
-function FamilyCell({ family, onOpen }: { family: Family | undefined; onOpen: (familyId: string) => void }): ReactElement {
+function FamilyCell({ known, family, onOpen }: { known: boolean; family: Family | undefined; onOpen: (familyId: string) => void }): ReactElement {
+  // Not read (yet, or at all): an empty cell, never a "—" that would claim "no family".
+  if (!known) return <div className="students-col-wide" />;
   if (family === undefined) return <div className="students-col-wide" style={{ fontSize: 13.5, color: "var(--text-faint)" }}>—</div>;
   return (
     <div className="students-col-wide" style={{ minWidth: 0 }}>
@@ -1240,7 +1263,7 @@ function FamilyCell({ family, onOpen }: { family: Family | undefined; onOpen: (f
         type="button"
         aria-label={`Familia ${family.name}`}
         onClick={(ev) => { ev.stopPropagation(); onOpen(family.id); }}
-        style={{ minHeight: 44, maxWidth: "100%", fontSize: 14, fontWeight: 600, color: "var(--forest)", textDecoration: "underline", textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: "pointer", background: "transparent" }}
+        style={{ minHeight: 44, maxWidth: "100%", fontSize: 14, fontWeight: 600, color: "var(--link)", textDecoration: "underline", textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: "pointer", background: "transparent" }}
       >
         {family.name}
       </button>

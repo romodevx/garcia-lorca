@@ -49,7 +49,7 @@ function renderDrawer(over: Partial<FamilyDrawerProps> = {}): FamilyDrawerProps 
     candidates: [PUPILS[2] as FamilyPupil],
     onClose: vi.fn(),
     onChanged: vi.fn(),
-    onReplaced: vi.fn(),
+    onRemoved: vi.fn(),
     onOpenStudent: vi.fn(),
     say: vi.fn(),
     ...over,
@@ -83,7 +83,10 @@ describe("FamilyDrawer — the family", () => {
   it("each child opens their own file", async () => {
     const user = userEvent.setup();
     const props = renderDrawer();
-    await user.click(await screen.findByRole("button", { name: "GARCÍA LÓPEZ LUIS" }));
+    const link = await screen.findByRole("button", { name: "GARCÍA LÓPEZ LUIS" });
+    // QA-1: --forest has no dark value; --link holds 4.5:1 in both themes.
+    expect(link.style.color).toBe("var(--link)");
+    await user.click(link);
     expect(props.onOpenStudent).toHaveBeenCalledWith("s2");
   });
 
@@ -107,28 +110,37 @@ describe("FamilyDrawer — the family", () => {
 });
 
 describe("FamilyDrawer — children", () => {
-  it("removes a child at once and offers to undo it", async () => {
+  it("removes a child at once and hands the undo to the screen", async () => {
     const user = userEvent.setup();
-    renderDrawer();
+    const props = renderDrawer();
     await user.click(await screen.findByRole("button", { name: "Quitar a GARCÍA LÓPEZ ANA de la familia" }));
     await waitFor(() => expect(api.removeStudentFromFamily).toHaveBeenCalledWith(expect.any(String), "f1", "s1"));
-    expect(await screen.findByText("Se quitó a GARCÍA LÓPEZ ANA de la familia")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Deshacer" }));
-    await waitFor(() => expect(api.addStudentsToFamily).toHaveBeenCalledWith(expect.any(String), "f1", ["s1"]));
+    expect(props.onRemoved).toHaveBeenCalledWith({ familyId: "f1", familyName: "GARCÍA LÓPEZ", id: "s1", name: "GARCÍA LÓPEZ ANA", dissolved: false });
   });
 
-  it("removing the last child says the family is gone; undo builds it again", async () => {
+  it("removing the last child says the family is gone", async () => {
     const user = userEvent.setup();
     api.getFamily.mockResolvedValue(detail({ studentIds: ["s1"], members: [member("s1", "ANA", "A")] }));
     api.removeStudentFromFamily.mockResolvedValue(null);
-    api.createFamily.mockResolvedValue({ id: "f2", name: "GARCÍA LÓPEZ", studentIds: ["s1"], createdAt: "" });
     const props = renderDrawer();
     await user.click(await screen.findByRole("button", { name: "Quitar a GARCÍA LÓPEZ ANA de la familia" }));
-    expect(await screen.findByText("Se quitó a GARCÍA LÓPEZ ANA; la familia se quedó sin hijos y se disolvió")).toBeInTheDocument();
+    expect(await screen.findByText(/La familia ya no existe/)).toBeInTheDocument();
+    expect(props.onRemoved).toHaveBeenCalledWith(expect.objectContaining({ id: "s1", dissolved: true }));
     expect(props.onChanged).toHaveBeenCalled();
-    await user.click(screen.getByRole("button", { name: "Deshacer" }));
-    await waitFor(() => expect(api.createFamily).toHaveBeenCalledWith(expect.any(String), { name: "GARCÍA LÓPEZ", studentIds: ["s1"] }));
-    expect(props.onReplaced).toHaveBeenCalledWith("f2");
+  });
+
+  it("a second press while the removal travels does not send it twice", async () => {
+    const user = userEvent.setup();
+    let finish: (f: familiesApi.Family | null) => void = () => {};
+    api.removeStudentFromFamily.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+    renderDrawer();
+    const button = await screen.findByRole("button", { name: "Quitar a GARCÍA LÓPEZ ANA de la familia" });
+    await user.click(button);
+    expect(button).toHaveAttribute("aria-busy", "true");
+    expect(button).toBeEnabled();
+    await user.click(button);
+    expect(api.removeStudentFromFamily).toHaveBeenCalledTimes(1);
+    finish({ id: "f1", name: "GARCÍA LÓPEZ", studentIds: ["s2"], createdAt: "" });
   });
 
   it("adds a child without a family", async () => {
@@ -216,6 +228,7 @@ describe("FamilyDrawer — adults", () => {
     await user.click(within(mother).getByRole("button", { name: "Quitar acceso" }));
     const confirm = await screen.findByRole("dialog", { name: "Quitar el acceso a la app" });
     expect(within(confirm).getByText(/MARÍA LÓPEZ ya no podrá entrar a la app/)).toBeInTheDocument();
+    expect(within(confirm).getByRole("button", { name: "Quitar acceso" }).style.background).toBe("var(--red)");
     await user.click(within(confirm).getByRole("button", { name: "Quitar acceso" }));
     await waitFor(() => expect(api.revokeFamilyAccess).toHaveBeenCalledWith(expect.any(String), "f1", "u1"));
     expect(props.say).toHaveBeenCalledWith("MARÍA LÓPEZ ya no tiene acceso a la app");
@@ -234,7 +247,7 @@ describe("FamilyDrawer — adults", () => {
     expect(screen.getByText("Elige el parentesco")).toBeInTheDocument();
     expect(api.addFamilyContact).not.toHaveBeenCalled();
 
-    await user.click(screen.getByRole("button", { name: "Mamá" }));
+    await user.click(screen.getByRole("button", { name: "Madre" }));
     await user.type(screen.getByRole("textbox", { name: /Nombre del adulto/ }), "ROSA PÉREZ");
     await user.type(screen.getByRole("textbox", { name: /Correo del adulto/ }), "rosa@example.com");
     await user.click(screen.getByRole("checkbox", { name: "Contacto de emergencia" }));
@@ -242,6 +255,76 @@ describe("FamilyDrawer — adults", () => {
     await waitFor(() => expect(api.addFamilyContact).toHaveBeenCalledWith(expect.any(String), "f1", {
       relationship: "mother", fullName: "ROSA PÉREZ", phone: "", email: "rosa@example.com", isEmergency: true,
     }));
+  });
+
+  it.each([
+    ["sent", { url: "https://x", expiresAt: "", sent: true, via: "smtp" }, /Le enviamos la liga a/],
+    ["not sent: the link to copy", { url: "https://liga.example/abc", expiresAt: "", sent: false, sendError: "smtp caído" }, /No se pudo enviar/],
+  ])("keeps the invite's outcome after the re-read gives the person an account (%s)", async (_label, invitation, said) => {
+    const user = userEvent.setup();
+    students.inviteContactToApp.mockResolvedValue({
+      contact: { id: "c2", studentId: "s2", guardianUserId: "u2", relationship: "father", fullName: "JUAN GARCÍA", phone: "", email: "juan@example.com", hasAccount: true },
+      invitation,
+    });
+    api.listFamilyContacts.mockResolvedValueOnce([MOTHER, FATHER]).mockResolvedValue([MOTHER, { ...FATHER, guardianUserId: "u2", hasApp: true }]);
+    renderDrawer();
+    const father = await screen.findByRole("listitem", { name: "JUAN GARCÍA" });
+    await user.click(within(father).getByRole("button", { name: "Dar acceso a la app" }));
+    await waitFor(() => expect(api.listFamilyContacts).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(within(screen.getByRole("listitem", { name: "JUAN GARCÍA" })).getByText("App")).toBeInTheDocument());
+    expect(within(screen.getByRole("listitem", { name: "JUAN GARCÍA" })).getByText(said)).toBeInTheDocument();
+    if (!invitation.sent) expect(screen.getByDisplayValue("https://liga.example/abc")).toBeInTheDocument();
+  });
+
+  it("Esc on an untouched adult form closes the form, not the drawer", async () => {
+    const user = userEvent.setup();
+    const props = renderDrawer();
+    await user.click(await screen.findByRole("button", { name: "Agregar adulto" }));
+    await user.click(screen.getByRole("textbox", { name: /Nombre del adulto/ }));
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("button", { name: "Guardar adulto" })).toBeNull();
+    expect(props.onClose).not.toHaveBeenCalled();
+  });
+
+  it("Esc on a half-written adult asks before discarding it", async () => {
+    const user = userEvent.setup();
+    const props = renderDrawer();
+    await user.click(await screen.findByRole("button", { name: "Agregar adulto" }));
+    const field = screen.getByRole("textbox", { name: /Nombre del adulto/ });
+    await user.type(field, "ROSA");
+    await user.keyboard("{Escape}");
+    expect(props.onClose).not.toHaveBeenCalled();
+    expect(screen.getByText("¿Descartar a este adulto?")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Seguir editando" }));
+    expect(screen.getByRole("textbox", { name: /Nombre del adulto/ })).toHaveValue("ROSA");
+    await user.click(screen.getByRole("textbox", { name: /Nombre del adulto/ }));
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: "Descartar" }));
+    expect(screen.queryByRole("button", { name: "Guardar adulto" })).toBeNull();
+    expect(props.onClose).not.toHaveBeenCalled();
+  });
+
+  it("closing the drawer with a half-written adult asks the same", async () => {
+    const user = userEvent.setup();
+    const props = renderDrawer();
+    await user.click(await screen.findByRole("button", { name: "Agregar adulto" }));
+    await user.type(screen.getByRole("textbox", { name: /Nombre del adulto/ }), "ROSA");
+    await user.click(screen.getByRole("button", { name: "Cerrar" }));
+    expect(props.onClose).not.toHaveBeenCalled();
+    expect(screen.getByText("¿Descartar a este adulto?")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Descartar" }));
+    expect(props.onClose).toHaveBeenCalled();
+  });
+
+  it("a missing relationship is tied to its buttons and takes the focus", async () => {
+    const user = userEvent.setup();
+    renderDrawer();
+    await user.click(await screen.findByRole("button", { name: "Agregar adulto" }));
+    await user.type(screen.getByRole("textbox", { name: /Nombre del adulto/ }), "ROSA");
+    await user.click(screen.getByRole("button", { name: "Guardar adulto" }));
+    const mother = screen.getByRole("button", { name: "Madre" });
+    expect(mother).toHaveAccessibleDescription("Elige el parentesco");
+    await waitFor(() => expect(mother).toHaveFocus());
   });
 
   it("without guardians:read there are no adults and no read of them", async () => {
@@ -259,6 +342,7 @@ describe("FamilyDrawer — dissolving and permissions", () => {
     await user.click(await screen.findByRole("button", { name: "Disolver familia" }));
     const confirm = await screen.findByRole("dialog", { name: "Disolver la familia" });
     expect(within(confirm).getByText(/los hijos se quedan sin familia; nadie pierde acceso/)).toBeInTheDocument();
+    expect(within(confirm).getByRole("button", { name: "Disolver" }).style.background).toBe("var(--red)");
     await user.click(within(confirm).getByRole("button", { name: "Disolver" }));
     await waitFor(() => expect(api.dissolveFamily).toHaveBeenCalledWith(expect.any(String), "f1"));
     expect(props.onChanged).toHaveBeenCalled();
@@ -285,7 +369,7 @@ function Harness(): ReactElement {
       <button type="button" onClick={() => setOpen(true)}>Abrir familia</button>
       {open && (
         <FamilyDrawer familyId="f1" access={OWNER} pupils={PUPILS} candidates={[]} onClose={() => setOpen(false)}
-          onChanged={vi.fn()} onReplaced={vi.fn()} onOpenStudent={vi.fn()} say={vi.fn()} />
+          onChanged={vi.fn()} onRemoved={vi.fn()} onOpenStudent={vi.fn()} say={vi.fn()} />
       )}
     </>
   );

@@ -157,6 +157,18 @@ describe("ContactsPanel — dar acceso a la app", () => {
     expect(await screen.findByText("Esta familia ya tiene 2 cuentas de la app")).toBeInTheDocument();
   });
 
+  // QA-3: the family's two accounts are known on the pupil's file: say so
+  // instead of a button the server would refuse (409 stays the authority).
+  it("a full family says so instead of offering a third account", async () => {
+    students.listContacts.mockResolvedValue([
+      { id: "gl-2", studentId: "st-1", guardianUserId: "", relationship: "father", fullName: "Mateo Contreras", phone: "", email: "mateo@example.com", hasAccount: false },
+    ]);
+    render(<ContactsPanel studentId="st-1" familyFull />);
+    await screen.findByText("Mateo Contreras");
+    expect(screen.queryByRole("button", { name: /Dar acceso a la app/ })).toBeNull();
+    expect(screen.getByText("Ya tiene 2 cuentas de la app")).toBeInTheDocument();
+  });
+
   // C2-003 (decisión del dueño, opción C): an address that belongs to a staff
   // account is asked about, not merged. Confirming sends the same request with
   // the confirmation; it is the director who knows it is the same person.

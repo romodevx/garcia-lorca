@@ -16,7 +16,7 @@ const SECTION_TITLE = { fontSize: 13.5, fontWeight: 700, color: "var(--text-mute
  * children carry them. Access goes through the contact invite the pupil's
  * file already uses; the server keeps the cap of two and says so on a 409.
  */
-export function FamilyAdults({ familyId, people, failed, accountCount, canWrite, onChanged, onAskRevoke, say }: {
+export function FamilyAdults({ familyId, people, failed, accountCount, canWrite, onChanged, onAskRevoke, say, onDirtyChange }: {
   familyId: string;
   people: readonly FamilyPerson[];
   failed: boolean;
@@ -26,9 +26,14 @@ export function FamilyAdults({ familyId, people, failed, accountCount, canWrite,
   onChanged: () => void;
   onAskRevoke: (person: FamilyPerson) => void;
   say: (message: string) => void;
+  onDirtyChange: (dirty: boolean) => void;
 }): ReactElement {
   const invite = useContactInvite(onChanged);
   const [adding, setAdding] = useState(false);
+  const stopAdding = (): void => {
+    setAdding(false);
+    onDirtyChange(false);
+  };
   const full = familyIsFull(accountCount);
 
   return (
@@ -45,9 +50,10 @@ export function FamilyAdults({ familyId, people, failed, accountCount, canWrite,
       {canWrite && adding && (
         <AddAdultForm
           familyId={familyId}
-          onCancel={() => setAdding(false)}
+          onCancel={stopAdding}
+          onDirtyChange={onDirtyChange}
           onAdded={(name) => {
-            setAdding(false);
+            stopAdding();
             say(`${name} quedó como contacto de cada hijo`);
             onChanged();
           }}

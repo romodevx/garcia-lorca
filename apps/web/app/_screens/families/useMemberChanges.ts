@@ -1,25 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { API_URL } from "../../api-url";
-import { addStudentsToFamily, createFamily, familyRefusal, removeStudentFromFamily } from "../../families/api";
-
-/** A child just taken out, still undoable. `dissolved`: it was the last one. */
-export interface RemovedChild {
-  id: string;
-  name: string;
-  dissolved: boolean;
-}
+import { addStudentsToFamily, familyRefusal, removeStudentFromFamily } from "../../families/api";
+import type { RemovedChild } from "./useFamilyUndo";
 
 export interface MemberChanges {
-  removed: RemovedChild | undefined;
-  /** The family is gone (its last child was removed); undo builds it again. */
+  /** The family is gone (its last child was removed); the screen's Undo builds it again. */
   gone: boolean;
   error: string | undefined;
+  /** Children whose removal is in flight: their button says so and ignores presses. */
+  removing: ReadonlySet<string>;
   remove: (id: string, name: string) => Promise<void>;
-  undo: () => Promise<void>;
-  dismissUndo: () => void;
   add: (id: string, name: string) => Promise<void>;
 }
 
@@ -27,48 +20,37 @@ export interface MemberChangeHooks {
   familyName: string;
   /** The family or the list changed on the server. */
   onChanged: () => void;
-  /** Undo rebuilt a dissolved family under a new id. */
-  onReplaced: (familyId: string) => void;
+  /** A child was taken out: the screen offers the Undo, which outlives this drawer. */
+  onRemoved: (removed: RemovedChild) => void;
   say: (message: string) => void;
 }
 
 /**
- * Taking a child out is done at once (the server keeps their parents'
- * links, ADR 0041) and offered back with Undo, which re-adds them — or, when
- * that was the last child and the family dissolved, builds it again.
+ * Taking a child out is done at once (the server keeps their parents' links,
+ * ADR 0041); the Undo lives on the screen, not here, so closing the drawer
+ * does not take it away.
  */
 export function useMemberChanges(familyId: string, hooks: MemberChangeHooks): MemberChanges {
-  const [removed, setRemoved] = useState<RemovedChild | undefined>(undefined);
   const [gone, setGone] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
+  const inFlight = useRef(new Set<string>());
+  const [removing, setRemoving] = useState<ReadonlySet<string>>(new Set());
 
   const remove = async (id: string, name: string): Promise<void> => {
+    if (inFlight.current.has(id)) return;
+    inFlight.current.add(id);
+    setRemoving(new Set(inFlight.current));
     setError(undefined);
     try {
       const left = await removeStudentFromFamily(API_URL, familyId, id);
-      setRemoved({ id, name, dissolved: left === null });
       if (left === null) setGone(true);
+      hooks.onRemoved({ familyId, familyName: hooks.familyName, id, name, dissolved: left === null });
       hooks.onChanged();
     } catch (cause) {
       setError(familyRefusal(cause, `No se pudo quitar a ${name} de la familia.`));
-    }
-  };
-
-  const undo = async (): Promise<void> => {
-    const back = removed;
-    if (back === undefined) return;
-    setRemoved(undefined);
-    try {
-      if (back.dissolved) {
-        const rebuilt = await createFamily(API_URL, { name: hooks.familyName, studentIds: [back.id] });
-        setGone(false);
-        hooks.onReplaced(rebuilt.id);
-      } else {
-        await addStudentsToFamily(API_URL, familyId, [back.id]);
-      }
-      hooks.onChanged();
-    } catch (cause) {
-      setError(familyRefusal(cause, `No se pudo regresar a ${back.name} a la familia.`));
+    } finally {
+      inFlight.current.delete(id);
+      setRemoving(new Set(inFlight.current));
     }
   };
 
@@ -83,5 +65,5 @@ export function useMemberChanges(familyId: string, hooks: MemberChangeHooks): Me
     }
   };
 
-  return { removed, gone, error, remove, undo, dismissUndo: () => setRemoved(undefined), add };
+  return { gone, error, removing, remove, add };
 }

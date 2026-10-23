@@ -94,8 +94,9 @@ describe("FamiliesView — suggestions", () => {
     expect(within(suggestionCard("GARCÍA LÓPEZ")).getByText("Posible")).toBeInTheDocument();
   });
 
-  it("'Es familia' builds it in one click", async () => {
+  it("'Es familia' builds it in one click, then re-reads the suggestions", async () => {
     const user = userEvent.setup();
+    api.listFamilySuggestions.mockResolvedValueOnce([HIGH, MEDIUM]).mockResolvedValue([MEDIUM]);
     const props = renderView();
     const card = await screen.findByRole("article", { name: "Sugerencia PÉREZ RUIZ" });
     await user.click(within(card).getByRole("button", { name: "Es familia" }));
@@ -103,6 +104,7 @@ describe("FamiliesView — suggestions", () => {
     expect(props.say).toHaveBeenCalledWith("Familia PÉREZ RUIZ creada");
     expect(props.onFamiliesChanged).toHaveBeenCalled();
     await waitFor(() => expect(screen.queryByRole("article", { name: "Sugerencia PÉREZ RUIZ" })).toBeNull());
+    await waitFor(() => expect(api.listFamilySuggestions).toHaveBeenCalledTimes(2));
   });
 
   it("'No es familia' dismisses it", async () => {
@@ -123,6 +125,35 @@ describe("FamiliesView — suggestions", () => {
     expect(api.createFamily).toHaveBeenCalledWith(expect.any(String), { name: "PÉREZ RUIZ", studentIds: ["s3", "s4"] });
     expect(props.say).toHaveBeenCalledWith("1 familia creada");
     expect(screen.getByRole("article", { name: "Sugerencia GARCÍA LÓPEZ" })).toBeInTheDocument();
+  });
+
+  it("a refused 'muy probable' keeps its card and its reason; the next one is still built", async () => {
+    const user = userEvent.setup();
+    const OTHER: familiesApi.FamilySuggestion = { signature: "sig-3", proposedName: "SOTO MORA", studentIds: ["s1", "s2"], reasons: ["shared_account"], confidence: "high" };
+    api.listFamilySuggestions.mockResolvedValueOnce([HIGH, OTHER]).mockResolvedValue([HIGH]);
+    api.createFamily
+      .mockRejectedValueOnce(new familiesApi.FamiliesError(409, "x", "FAMILY_ACCOUNT_LIMIT"))
+      .mockImplementationOnce(async (_b, input) => ({ id: "n2", name: input.name, studentIds: [...input.studentIds], createdAt: "" }));
+    const props = renderView();
+    await user.click(await screen.findByRole("button", { name: "Aceptar las muy probables (2)" }));
+    await waitFor(() => expect(api.createFamily).toHaveBeenCalledTimes(2));
+    expect(api.createFamily).toHaveBeenLastCalledWith(expect.any(String), { name: "SOTO MORA", studentIds: ["s1", "s2"] });
+    await waitFor(() => expect(props.say).toHaveBeenCalledWith("1 familia creada"));
+    expect(await within(suggestionCard("PÉREZ RUIZ")).findByText("Esta familia ya tiene 2 cuentas de la app")).toBeInTheDocument();
+  });
+
+  it("a second press of the bulk button while it runs builds nothing twice", async () => {
+    const user = userEvent.setup();
+    let finish: () => void = () => {};
+    api.createFamily.mockImplementation((_b, input) => new Promise((resolve) => { finish = () => resolve({ id: "new", name: input.name, studentIds: [...input.studentIds], createdAt: "" }); }));
+    renderView();
+    const bulk = await screen.findByRole("button", { name: "Aceptar las muy probables (1)" });
+    await user.click(bulk);
+    expect(bulk).toHaveAttribute("aria-busy", "true");
+    expect(bulk).toBeEnabled();
+    await user.click(bulk);
+    expect(api.createFamily).toHaveBeenCalledTimes(1);
+    finish();
   });
 
   it("says why a suggestion could not become a family", async () => {
@@ -211,6 +242,22 @@ describe("FamiliesView — Nueva familia", () => {
     expect(within(drawer).getByRole("textbox", { name: /Nombre de la familia/ })).toHaveValue("GARCÍA LÓPEZ");
     await user.click(within(drawer).getByRole("button", { name: "Crear familia" }));
     await waitFor(() => expect(api.createFamily).toHaveBeenCalledWith(expect.any(String), { name: "GARCÍA LÓPEZ", studentIds: ["s2"] }));
+  });
+
+  it("Esc closes an empty new family, but not one with pupils picked", async () => {
+    const user = userEvent.setup();
+    renderView();
+    await user.click(await screen.findByRole("button", { name: "Nueva familia" }));
+    await screen.findByRole("dialog", { name: "Nueva familia" });
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Nueva familia" })).toBeNull());
+
+    await user.click(screen.getByRole("button", { name: "Nueva familia" }));
+    const drawer = await screen.findByRole("dialog", { name: "Nueva familia" });
+    await user.type(within(drawer).getByRole("searchbox", { name: "Buscar alumno sin familia" }), "garc");
+    await user.click(within(drawer).getByRole("button", { name: "Agregar a GARCÍA LÓPEZ LUIS" }));
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("dialog", { name: "Nueva familia" })).toBeInTheDocument();
   });
 
   it("asks for a pupil on save instead of a dead button", async () => {

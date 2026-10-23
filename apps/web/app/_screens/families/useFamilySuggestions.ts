@@ -19,6 +19,10 @@ export interface FamilySuggestions {
   acceptAllHigh: () => Promise<number>;
   /** A suggestion was taken care of elsewhere ("Ajustar"): it leaves the list. */
   drop: (signature: string) => void;
+  /** A family was built: the others may have changed (a pupil is no longer free). */
+  reload: () => void;
+  /** The bulk acceptance is running: its button says so and ignores presses. */
+  bulkRunning: boolean;
 }
 
 /**
@@ -32,14 +36,18 @@ export function useFamilySuggestions(): FamilySuggestions {
   const [busy, setBusy] = useState<ReadonlySet<string>>(new Set());
   const [errors, setErrors] = useState<Record<string, string>>({});
   const inFlight = useRef(new Set<string>());
+  const bulk = useRef(false);
+  const [bulkRunning, setBulkRunning] = useState(false);
+  const [version, setVersion] = useState(0);
 
   useEffect(() => {
     let alive = true;
     listFamilySuggestions(API_URL)
-      .then((rows) => { if (alive) setSuggestions(rows); })
+      .then((rows) => { if (alive) { setSuggestions(rows); setFailed(false); } })
       .catch(() => { if (alive) setFailed(true); });
     return () => { alive = false; };
-  }, []);
+  }, [version]);
+  const reload = useCallback(() => setVersion((v) => v + 1), []);
 
   const drop = useCallback((signature: string) => setSuggestions((prev) => prev.filter((s) => s.signature !== signature)), []);
 
@@ -61,21 +69,35 @@ export function useFamilySuggestions(): FamilySuggestions {
     }
   }, [drop]);
 
-  const accept = useCallback(
+  const build = useCallback(
     (s: FamilySuggestion) => run(s, () => createFamily(API_URL, { name: s.proposedName, studentIds: s.studentIds }), "No se pudo crear la familia."),
     [run],
   );
+  const accept = useCallback(async (s: FamilySuggestion): Promise<boolean> => {
+    const ok = await build(s);
+    if (ok) reload();
+    return ok;
+  }, [build, reload]);
   const dismiss = useCallback(
     (s: FamilySuggestion) => run(s, () => dismissFamilySuggestion(API_URL, s.studentIds), "No se pudo descartar la sugerencia."),
     [run],
   );
   const acceptAllHigh = useCallback(async (): Promise<number> => {
+    if (bulk.current) return 0;
+    bulk.current = true;
+    setBulkRunning(true);
     let built = 0;
-    for (const s of suggestions.filter((x) => x.confidence === "high")) {
-      if (await accept(s)) built += 1;
+    try {
+      for (const s of suggestions.filter((x) => x.confidence === "high")) {
+        if (await build(s)) built += 1;
+      }
+    } finally {
+      bulk.current = false;
+      setBulkRunning(false);
     }
+    if (built > 0) reload();
     return built;
-  }, [accept, suggestions]);
+  }, [build, reload, suggestions]);
 
-  return { suggestions, failed, busy, errors, accept, dismiss, acceptAllHigh, drop };
+  return { suggestions, failed, busy, errors, accept, dismiss, acceptAllHigh, drop, reload, bulkRunning };
 }

@@ -16,6 +16,8 @@ export interface MemberActions {
   /** Pupils without a family, offered by "Agregar hijo". */
   candidates: readonly FamilyPupil[];
   addError?: string;
+  /** Children whose removal is in flight. */
+  removing: ReadonlySet<string>;
 }
 
 /** The children: each opens their own file; guardians:write may take one out or add one. */
@@ -35,14 +37,14 @@ export function FamilyMembers({ members, pupils, onOpenStudent, actions }: {
           return (
             <li key={m.id} style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "8px 0", borderBottom: "1px solid var(--border)" }}>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <button type="button" onClick={() => onOpenStudent(m.id)} style={{ minHeight: 44, fontSize: 15, fontWeight: 600, color: "var(--forest)", textDecoration: "underline", textAlign: "left", cursor: "pointer", background: "transparent" }}>{name}</button>
+                <button type="button" onClick={() => onOpenStudent(m.id)} style={{ minHeight: 44, fontSize: 15, fontWeight: 600, color: "var(--link)", textDecoration: "underline", textAlign: "left", cursor: "pointer", background: "transparent" }}>{name}</button>
                 <div style={{ fontSize: 13, color: "var(--text-muted)" }}>
                   {pupils.get(m.id)?.room ?? `${m.level} · ${m.gradeGroup}`}
                   {m.draft && " · Borrador: no recibe las cuentas de la familia"}
                 </div>
               </div>
               {actions !== undefined && (
-                <Btn kind="ghost" onClick={() => actions.onRemove(m)} aria-label={`Quitar a ${name} de la familia`} style={{ height: 44, padding: "0 14px", fontSize: 14 }}>Quitar</Btn>
+                <Btn kind="ghost" busy={actions.removing.has(m.id)} onClick={() => actions.onRemove(m)} aria-label={`Quitar a ${name} de la familia`} style={{ height: 44, padding: "0 14px", fontSize: 14 }}>Quitar</Btn>
               )}
             </li>
           );

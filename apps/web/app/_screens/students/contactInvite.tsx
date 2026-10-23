@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactElement, type ReactNode } from "react";
+import { useRef, useState, type ReactElement, type ReactNode } from "react";
 
 import { Btn } from "../../_design/Controls";
 import { InviteLink } from "../../_design/InviteLink";
@@ -62,12 +62,16 @@ export interface ContactInvite {
  */
 export function useContactInvite(onSettled: () => void): ContactInvite {
   const [granting, setGranting] = useState<string | undefined>(undefined);
+  // The guard reads a ref: a second press in the same tick sees the first one's
+  // state before React re-renders, which a closure over `granting` would not.
+  const inFlight = useRef(false);
   const [granted, setGranted] = useState<Record<string, ContactAccessResult>>({});
   const [grantError, setGrantError] = useState<Record<string, string>>({});
   const [staffAddress, setStaffAddress] = useState<Record<string, boolean>>({});
 
   const give = async (key: string, target: InviteTarget, confirmStaffAccount = false): Promise<void> => {
-    if (granting !== undefined) return;
+    if (inFlight.current) return;
+    inFlight.current = true;
     setGranting(key);
     setGrantError((prev) => ({ ...prev, [key]: "" }));
     setStaffAddress((prev) => ({ ...prev, [key]: false }));
@@ -83,6 +87,7 @@ export function useContactInvite(onSettled: () => void): ContactInvite {
       setGrantError((prev) => ({ ...prev, [key]: isDraftRefusal(cause) ? DRAFT_INVITE : familyRefusal(cause, "No se pudo dar el acceso.") }));
       onSettled();
     } finally {
+      inFlight.current = false;
       setGranting(undefined);
     }
   };

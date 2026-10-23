@@ -18,10 +18,12 @@ vi.mock("../../students/api", async (importOriginal) => {
     deletePhoto: vi.fn(),
   };
 });
-vi.mock("./ContactsPanel", () => ({ ContactsPanel: () => <div>contactos</div> }));
+vi.mock("./ContactsPanel", () => ({ ContactsPanel: ({ familyFull }: { familyFull?: boolean }) => <div>{`contactos:${familyFull === true ? "llena" : "con-lugar"}`}</div> }));
 vi.mock("../../_design/students/useStudentNotes", () => ({ useStudentNotes: () => ({ notes: [] }) }));
 vi.mock("../families/FamilyCard", () => ({
-  FamilyCard: ({ familyId }: { familyId?: string }) => <div>{`familia:${familyId ?? "ninguna"}`}</div>,
+  FamilyCard: ({ familyId, onFamilyRead }: { familyId?: string; onFamilyRead?: (f: { id: string; accountCount?: number }) => void }) => (
+    <button type="button" onClick={() => onFamilyRead?.({ id: familyId ?? "", accountCount: 2 })}>{`familia:${familyId ?? "ninguna"}`}</button>
+  ),
 }));
 vi.mock("../../_design/students/StudentNotesPanel", () => ({ StudentNotesPanel: () => <div>notas</div> }));
 
@@ -64,5 +66,11 @@ describe("StudentEditScreen — Familia (ADR 0041)", () => {
     const card = await screen.findByRole("region", { name: "Familia" });
     expect(card).toHaveTextContent("familia:f1");
     expect(screen.getByRole("button", { name: "Familia" })).toBeInTheDocument();
+  });
+  it("a family with two accounts reaches the contacts (QA-3)", async () => {
+    render(<StudentEditScreen studentId="st1" userId="u" permissions={["students:read", "students:update"]} onBack={vi.fn()} today="2026-10-06" families={OWNER} onOpenFamily={vi.fn()} onOpenStudent={vi.fn()} />);
+    expect(await screen.findByText("contactos:con-lugar")).toBeInTheDocument();
+    (await screen.findByRole("button", { name: "familia:f1" })).click();
+    expect(await screen.findByText("contactos:llena")).toBeInTheDocument();
   });
 });

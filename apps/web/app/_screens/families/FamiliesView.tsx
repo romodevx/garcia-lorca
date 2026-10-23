@@ -80,6 +80,7 @@ export function FamiliesView({ access, families, familiesFailed, pupils, onOpenF
           onClose={() => setCreating(undefined)}
           onCreated={(family) => {
             if (creating.signature !== undefined) suggestions.drop(creating.signature);
+            suggestions.reload();
             setCreating(undefined);
             built(`Familia ${family.name} creada`);
           }}

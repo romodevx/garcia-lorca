@@ -25,6 +25,12 @@ export interface ContactsPanelProps {
   studentId: string;
   /** module_import_review: a draft without a CURP is not handed to a family account. */
   draft?: boolean;
+  /**
+   * module_families: the pupil's family already holds its two app accounts
+   * (ADR 0041), so nobody else is offered one. Unknown counts as not full —
+   * the server's 409 stays the authority.
+   */
+  familyFull?: boolean;
 }
 
 /**
@@ -42,7 +48,7 @@ const NOTHING_REQUIRED = [] as const;
 /** Fuera del componente: useFormatError lo toma como dependencia. */
 const PHONE_RULES = { phone: phoneError } as const;
 
-export function ContactsPanel({ studentId, draft = false }: ContactsPanelProps): ReactElement {
+export function ContactsPanel({ studentId, draft = false, familyFull = false }: ContactsPanelProps): ReactElement {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -160,7 +166,10 @@ export function ContactsPanel({ studentId, draft = false }: ContactsPanelProps):
           {!c.hasAccount && draft && (
             <span style={{ fontSize: 12.5, color: "var(--text-faint)" }}>{DRAFT_INVITE}</span>
           )}
-          {!c.hasAccount && !draft && c.email !== "" && (
+          {!c.hasAccount && !draft && familyFull && (
+            <span style={{ fontSize: 12.5, color: "var(--text-faint)" }}>Ya tiene 2 cuentas de la app</span>
+          )}
+          {!c.hasAccount && !draft && !familyFull && c.email !== "" && (
             <Btn
               kind="ghost"
               icon="mail"
@@ -171,7 +180,7 @@ export function ContactsPanel({ studentId, draft = false }: ContactsPanelProps):
               {invite.granting === c.id ? "Enviando…" : "Dar acceso a la app"}
             </Btn>
           )}
-          {!c.hasAccount && !draft && c.email === "" && (
+          {!c.hasAccount && !draft && !familyFull && c.email === "" && (
             // An action that cannot succeed should not be pressable. Saying WHY
             // is what turns a missing button into something the office can fix.
             <span style={{ fontSize: 12.5, color: "var(--text-faint)" }}>

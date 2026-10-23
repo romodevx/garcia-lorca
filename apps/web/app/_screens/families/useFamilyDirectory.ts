@@ -11,6 +11,8 @@ export interface FamilyDirectory {
   /** Each pupil's family, by pupil id. */
   membership: ReadonlyMap<string, Family>;
   failed: boolean;
+  /** Whether the list was read at least once: until then nobody is "without a family". */
+  loaded: boolean;
   reload: () => void;
 }
 
@@ -26,18 +28,19 @@ const NONE: readonly Family[] = [];
 export function useFamilyDirectory(enabled: boolean): FamilyDirectory {
   const [families, setFamilies] = useState<readonly Family[]>(NONE);
   const [failed, setFailed] = useState(false);
+  const [loaded, setLoaded] = useState(false);
   const [version, setVersion] = useState(0);
 
   useEffect(() => {
     if (!enabled) return;
     let alive = true;
     listFamilies(API_URL)
-      .then((rows) => { if (alive) { setFamilies(rows); setFailed(false); } })
+      .then((rows) => { if (alive) { setFamilies(rows); setFailed(false); setLoaded(true); } })
       .catch(() => { if (alive) setFailed(true); });
     return () => { alive = false; };
   }, [enabled, version]);
 
   const reload = useCallback(() => setVersion((v) => v + 1), []);
   const membership = useMemo(() => membershipOf(families), [families]);
-  return { families, membership, failed, reload };
+  return { families, membership, failed, loaded, reload };
 }

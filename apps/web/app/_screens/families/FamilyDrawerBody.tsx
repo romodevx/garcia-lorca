@@ -16,7 +16,7 @@ import type { MemberChanges } from "./useMemberChanges";
 const MUTED = { fontSize: 14.5, color: "var(--text-muted)", margin: 0 } as const;
 
 /** What the family drawer shows, once the family was read. */
-export function FamilyDrawerBody({ drawer, state, name, members, failure, onRenamed, onAskRevoke, onAskDissolve }: {
+export function FamilyDrawerBody({ drawer, state, name, members, failure, onRenamed, onAskRevoke, onAskDissolve, onAdultDirty }: {
   drawer: FamilyDrawerProps;
   state: FamilyDetailState;
   name: string;
@@ -25,6 +25,8 @@ export function FamilyDrawerBody({ drawer, state, name, members, failure, onRena
   onRenamed: (name: string) => void;
   onAskRevoke: (person: FamilyPerson) => void;
   onAskDissolve: () => void;
+  /** The adult form holds unsaved text (the drawer asks before closing). */
+  onAdultDirty: (dirty: boolean) => void;
 }): ReactElement {
   const { access, familyId } = drawer;
   const byId = useMemo(() => pupilsById(drawer.pupils), [drawer.pupils]);
@@ -33,7 +35,7 @@ export function FamilyDrawerBody({ drawer, state, name, members, failure, onRena
     drawer.onChanged();
   };
 
-  if (members.gone) return <p style={MUTED}>La familia ya no existe: quitaste a su último hijo. Usa «Deshacer» si fue un error.</p>;
+  if (members.gone) return <p style={MUTED}>La familia ya no existe: quitaste a su último hijo. Usa «Deshacer» si fue un error, aunque cierres esta ventana.</p>;
   if (state.status === "loading") return <p style={MUTED}>Cargando…</p>;
   if (state.status === "failed" || state.detail === undefined) return <p role="alert" style={{ ...MUTED, color: "var(--bad-fg)" }}>No pudimos leer esta familia.</p>;
   const { detail } = state;
@@ -53,6 +55,7 @@ export function FamilyDrawerBody({ drawer, state, name, members, failure, onRena
         actions={access.canWriteGuardians ? {
           candidates,
           addError: members.error,
+          removing: members.removing,
           onRemove: (m) => void members.remove(m.id, byId.get(m.id)?.name ?? `${m.lastName} ${m.firstName}`),
           onAdd: (p) => void members.add(p.id, p.name),
         } : undefined}
@@ -67,6 +70,7 @@ export function FamilyDrawerBody({ drawer, state, name, members, failure, onRena
           onChanged={changed}
           onAskRevoke={onAskRevoke}
           say={drawer.say}
+          onDirtyChange={onAdultDirty}
         />
       )}
       {failure !== undefined && <p role="alert" style={{ color: "var(--bad-fg)", fontSize: 14, margin: 0 }}>{failure}</p>}
