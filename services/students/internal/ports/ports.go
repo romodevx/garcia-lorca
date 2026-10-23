@@ -268,11 +268,9 @@ type GuardianRepository interface {
 	UpdateContact(ctx context.Context, l domain.GuardianLink) error
 	// RemoveContact deletes a contact by id. Unknown is KindNotFound.
 	RemoveContact(ctx context.Context, id string) error
-	// AttachAccount sets the iam account on a contact that has none, keeping the
-	// row (and the person on it) as it is. The write is conditional on the
-	// contact STILL having no account: two grants racing must not let the second
-	// overwrite the first, so a contact that already has one is KindConflict.
-	AttachAccount(ctx context.Context, l domain.GuardianLink) error
+	// There is deliberately no account write here: attaching an account, or
+	// inserting a link that carries one, goes through FamilyAccessRepository
+	// under the family locking rule that keeps the account cap (ADR 0041).
 	// ListByStudent returns the links of one student (its guardians).
 	ListByStudent(ctx context.Context, studentID string) ([]domain.GuardianLink, error)
 	// ListByGuardian returns the links of one guardian (their students).
@@ -403,7 +401,9 @@ type GroupRecordRepository interface {
 //     FOR UPDATE → re-read the students row FOR SHARE → retry if family_id
 //     changed in between. Only then count the family's accounts and write.
 //     That is what makes the "at most two accounts" cap hold under concurrency.
+//     FamilyAccessRepository.OnPupil is that rule; OnFamily the family side.
 type FamilyRepository interface {
+	FamilyAccessRepository
 	// ListFamilies returns every family, ordered by name, each with its members
 	// (in display order) and its account count.
 	ListFamilies(ctx context.Context) ([]domain.Family, error)
@@ -411,14 +411,16 @@ type FamilyRepository interface {
 	FamilyByID(ctx context.Context, id string) (domain.Family, error)
 	// CreateFamily stores f and points its pupils at it in ONE transaction. A
 	// pupil that meanwhile joined a family (or left the school) is
-	// KindConflict and nothing is written.
-	CreateFamily(ctx context.Context, f domain.Family) error
+	// KindConflict and nothing is written. sync (nil: none) runs last in the
+	// same transaction over the new membership; its error rolls all back.
+	CreateFamily(ctx context.Context, f domain.Family, sync FamilyAccessFunc) error
 	// RenameFamily sets a family's name; unknown is KindNotFound.
 	RenameFamily(ctx context.Context, id, name string) error
 	// AddStudentsToFamily points pupils without a family at an existing one,
 	// atomically: a pupil already in one is KindConflict and nothing is
-	// written; growing past domain.MaxFamilyPupils is KindInvalid.
-	AddStudentsToFamily(ctx context.Context, familyID string, studentIDs []string) error
+	// written; growing past domain.MaxFamilyPupils is KindInvalid. sync (nil:
+	// none) runs last in the same transaction, under the family's lock.
+	AddStudentsToFamily(ctx context.Context, familyID string, studentIDs []string, sync FamilyAccessFunc) error
 	// RemoveStudentFromFamily takes one pupil out; the last one out deletes the
 	// family (dissolved = true). A pupil not in that family is KindNotFound.
 	RemoveStudentFromFamily(ctx context.Context, familyID, studentID string) (dissolved bool, err error)
@@ -450,4 +452,48 @@ type FamilyDismissal struct {
 	ID          string
 	Signature   string
 	DismissedBy string
+}
+
+// FamilyAccessRepository runs the account writes of a pupil or a family in ONE
+// tenant-bound transaction that holds the family locking rule's locks (see
+// FamilyRepository), so a FamilyAccessFunc counts a family's accounts and
+// writes knowing no other account write on that family runs meanwhile.
+type FamilyAccessRepository interface {
+	// OnPupil runs fn over studentID's family, or over the pupil alone when it
+	// has none: family_id read unlocked → that families row FOR UPDATE → the
+	// students row FOR SHARE → retried (bounded) when family_id changed in
+	// between; still changing is KindConflict. An unknown pupil is KindNotFound.
+	// The pupil's row lock also serialises a family-less pupil's account write
+	// with a CreateFamily claiming it (FOR UPDATE).
+	OnPupil(ctx context.Context, studentID string, fn FamilyAccessFunc) error
+	// OnFamily runs fn over a family, its row locked FOR UPDATE. Unknown (or
+	// another tenant's) family is KindNotFound.
+	OnFamily(ctx context.Context, familyID string, fn FamilyAccessFunc) error
+}
+
+// FamilyAccessFunc is the work done inside a FamilyAccessRepository
+// transaction. Returning an error rolls back everything it wrote.
+type FamilyAccessFunc func(ctx context.Context, a FamilyAccess) error
+
+// FamilyAccess is the transaction a FamilyAccessFunc runs in. Its scope is the
+// family whose row is locked (FamilyID), or the single pupil OnPupil was
+// called for when that pupil has no family.
+type FamilyAccess interface {
+	// FamilyID is the locked family, "" when the scope is a family-less pupil.
+	FamilyID() string
+	// Members reads the scope's pupils in student id order, with their status
+	// and every contact (in id order), as the transaction sees them now.
+	Members(ctx context.Context) ([]domain.FamilyMember, error)
+	// AttachAccount sets the account on a contact of the scope that has none.
+	// Conditional: a contact that already has one, or an account already
+	// linked to that pupil, is KindConflict; a missing contact KindNotFound.
+	AttachAccount(ctx context.Context, l domain.GuardianLink) error
+	// InsertContact inserts a contact (with or without an account) on a pupil
+	// of the scope. A duplicate (account, pupil) is KindConflict.
+	InsertContact(ctx context.Context, l domain.GuardianLink) error
+	// DetachAccount takes guardianUserID off every contact of the scope's
+	// pupils: the contact stays without it, except one that would then be
+	// nobody (no name: a link from before contacts existed), which is deleted.
+	// Returns how many contacts lost the account.
+	DetachAccount(ctx context.Context, guardianUserID string) (int, error)
 }

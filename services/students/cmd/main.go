@@ -256,7 +256,9 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 	// role). Server-to-server and network-private, like the config client.
 	iamBaseURL := envOr("IAM_BASE_URL", defaultIAMBaseURL)
 	users := iamclient.New(iamBaseURL, gcpauth.HTTPClient(ctx, iamBaseURL))
-	guardians := usecase.NewGuardianService(repo, repo, users, tenantID, newID)
+	// repo is also the FamilyAccessRepository: every account write takes the
+	// family locks and keeps the cap of two accounts per family (ADR 0041).
+	guardians := usecase.NewGuardianService(repo, repo, repo, users, tenantID, newID)
 
 	// A pupil is en trámite until their inscription is PAID, and finance is what
 	// knows that. The consumer is how the two facts meet.

@@ -28,6 +28,7 @@ var wireFamilyAt = time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC)
 
 // memFamilies is an in-memory FamilyRepository over the handler's pupils.
 type memFamilies struct {
+	*stubAccess
 	pupils    *fakeRepo
 	byID      map[string]domain.Family
 	inputs    ports.SuggestionInputs
@@ -52,7 +53,10 @@ func (m *memFamilies) FamilyByID(_ context.Context, id string) (domain.Family, e
 	}), nil
 }
 
-func (m *memFamilies) CreateFamily(_ context.Context, f domain.Family) error {
+func (m *memFamilies) CreateFamily(ctx context.Context, f domain.Family, sync ports.FamilyAccessFunc) error {
+	if err := m.runSync(ctx, f.ID(), sync); err != nil {
+		return err
+	}
 	m.byID[f.ID()] = f
 	for _, id := range f.StudentIDs() {
 		m.pupils.byID[id].AssignFamily(f.ID())
@@ -67,7 +71,7 @@ func (m *memFamilies) RenameFamily(_ context.Context, id, name string) error {
 	return err
 }
 
-func (m *memFamilies) AddStudentsToFamily(context.Context, string, []string) error {
+func (m *memFamilies) AddStudentsToFamily(context.Context, string, []string, ports.FamilyAccessFunc) error {
 	return glerrors.New(glerrors.KindConflict, "a pupil is already in a family")
 }
 
@@ -104,7 +108,7 @@ func familiesHandler(t *testing.T) (*grpcadapter.StudentsHandler, *fakeRepo, *me
 			ID: id, TenantID: testTenant, FirstName: "Ana", LastName: "García", MaternalLastName: "López",
 		}, domain.AdmissionEnrolled)
 	}
-	families := &memFamilies{pupils: repo, byID: map[string]domain.Family{}}
+	families := &memFamilies{stubAccess: &stubAccess{store: newFakeGuardianStore()}, pupils: repo, byID: map[string]domain.Family{}}
 	svc := usecase.NewStudentService(repo, &fakePublisher{}, testLevels, testTenant, func() string { return "stu-1" })
 	fam := usecase.NewFamilyService(repo, families, testTenant, func() string { return wireFamily }, func() time.Time { return wireFamilyAt })
 	h := grpcadapter.NewStudentsHandler(svc, nil, nil, usecase.NewHealthService("students")).WithFamilies(fam)

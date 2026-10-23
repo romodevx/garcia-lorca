@@ -28,6 +28,9 @@ var errFamiliesNotServed = connect.NewError(connect.CodeUnimplemented, errors.Ne
 // familyErr maps a family use-case error. A conflict (a pupil already in a
 // family) is FailedPrecondition, as the contract says; the rest as usual.
 func familyErr(err error) *connect.Error {
+	if errors.Is(err, domain.ErrFamilyAccountLimit) {
+		return connectErr(err) // FailedPrecondition + FAMILY_ACCOUNT_LIMIT
+	}
 	if glerrors.KindOf(err) == glerrors.KindConflict {
 		return connect.NewError(connect.CodeFailedPrecondition, errors.New(glerrors.SafeMessage(err)))
 	}
@@ -151,6 +154,35 @@ func (h *StudentsHandler) DismissFamilySuggestion(ctx context.Context, req *conn
 		return nil, familyErr(err)
 	}
 	return connect.NewResponse(&studentsv1.DismissFamilySuggestionResponse{}), nil
+}
+
+// AddFamilyContact records one adult on every pupil of the family still at
+// school; a pupil that already has them (same email or phone) keeps its own.
+func (h *StudentsHandler) AddFamilyContact(ctx context.Context, req *connect.Request[studentsv1.AddFamilyContactRequest]) (*connect.Response[studentsv1.AddFamilyContactResponse], error) {
+	if h.families == nil {
+		return nil, errFamiliesNotServed
+	}
+	m := req.Msg
+	contacts, err := h.families.AddFamilyContact(ctx, m.GetFamilyId(), m.GetRelationship(), domain.ContactPerson{
+		FullName: m.GetFullName(), Phone: m.GetPhone(), Email: m.GetEmail(), Emergency: m.GetIsEmergency(),
+	})
+	if err != nil {
+		return nil, familyErr(err)
+	}
+	return connect.NewResponse(&studentsv1.AddFamilyContactResponse{Contacts: toProtoGuardianLinks(contacts)}), nil
+}
+
+// RevokeFamilyAccess takes an account off every pupil of the family; the
+// contacts stay. An account no pupil of the family carries is NotFound.
+func (h *StudentsHandler) RevokeFamilyAccess(ctx context.Context, req *connect.Request[studentsv1.RevokeFamilyAccessRequest]) (*connect.Response[studentsv1.RevokeFamilyAccessResponse], error) {
+	if h.families == nil {
+		return nil, errFamiliesNotServed
+	}
+	n, err := h.families.RevokeFamilyAccess(ctx, req.Msg.GetFamilyId(), req.Msg.GetGuardianUserId())
+	if err != nil {
+		return nil, familyErr(err)
+	}
+	return connect.NewResponse(&studentsv1.RevokeFamilyAccessResponse{Contacts: int32(n)}), nil
 }
 
 func toProtoFamily(f domain.Family) *studentsv1.Family {

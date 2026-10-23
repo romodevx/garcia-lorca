@@ -41,9 +41,15 @@ var linkableUserStatuses = []string{"USER_STATUS_ACTIVE", "USER_STATUS_INVITED"}
 //	Link: student exists (local) ─> guardian user exists, holds the guardian
 //	      role, and its account is in a linkable state (RPC) ─> persist the link
 //	      (unique per pair)
+//
+// Every account write (LinkGuardian, GrantContactAccess) runs through
+// ports.FamilyAccessRepository.OnPupil: one transaction under the family
+// locking rule, where a pupil in a family also gets the cap of
+// domain.MaxFamilyAccounts and the sync to its siblings (ADR 0041).
 type GuardianService struct {
 	students  ports.StudentRepository
 	guardians ports.GuardianRepository
+	access    ports.FamilyAccessRepository
 	users     ports.UserReader
 	tenant    string
 	newID     func() string
@@ -54,6 +60,7 @@ type GuardianService struct {
 func NewGuardianService(
 	students ports.StudentRepository,
 	guardians ports.GuardianRepository,
+	access ports.FamilyAccessRepository,
 	users ports.UserReader,
 	tenant string,
 	newID func() string,
@@ -61,6 +68,7 @@ func NewGuardianService(
 	return &GuardianService{
 		students:  students,
 		guardians: guardians,
+		access:    access,
 		users:     users,
 		tenant:    tenant,
 		newID:     newID,
@@ -72,7 +80,9 @@ func NewGuardianService(
 // relationship, a user that does not hold the guardian role, or a user whose iam
 // account is not active are all KindInvalid (bad arguments, not missing
 // resources); a duplicate link is KindConflict. A transport failure from iam
-// propagates unchanged.
+// propagates unchanged. On a pupil in a family the link is synced to the
+// siblings, and a third account in the family is domain.ErrFamilyAccountLimit
+// with nothing written.
 func (s *GuardianService) LinkGuardian(ctx context.Context, guardianUserID, studentID, relationship string) (domain.GuardianLink, error) {
 	// Parsed first: a malformed relationship is decidable without any I/O.
 	rel, err := domain.ParseRelationship(relationship)
@@ -100,8 +110,14 @@ func (s *GuardianService) LinkGuardian(ctx context.Context, guardianUserID, stud
 	if err != nil {
 		return domain.GuardianLink{}, err
 	}
-	if err := s.guardians.Link(ctx, link); err != nil {
-		return domain.GuardianLink{}, err // KindConflict on a duplicate propagates
+	err = s.access.OnPupil(ctx, student.ID(), func(ctx context.Context, a ports.FamilyAccess) error {
+		if err := a.InsertContact(ctx, link); err != nil {
+			return err // KindConflict on a duplicate propagates
+		}
+		return syncFamilyAccess(ctx, a, s.tenant, s.newID)
+	})
+	if err != nil {
+		return domain.GuardianLink{}, err
 	}
 	return link, nil
 }
@@ -247,6 +263,9 @@ func (s *GuardianService) contactOf(ctx context.Context, contactID, studentID st
 // contact that belongs to another pupil answers KindNotFound rather than a
 // conflict or a refusal, so the answer does not confirm that the contact exists
 // (the same posture as ADR 0004 and ADR 0010).
+//
+// On a pupil in a family the account is synced to the siblings and capped
+// (domain.ErrFamilyAccountLimit, nothing written), as in LinkGuardian.
 func (s *GuardianService) GrantContactAccess(ctx context.Context, contactID, studentID, guardianUserID string) (domain.GuardianLink, error) {
 	if err := s.requireGuardianUser(ctx, guardianUserID); err != nil {
 		return domain.GuardianLink{}, err
@@ -267,7 +286,13 @@ func (s *GuardianService) GrantContactAccess(ctx context.Context, contactID, stu
 	if err != nil {
 		return domain.GuardianLink{}, err
 	}
-	if err := s.guardians.AttachAccount(ctx, withAccount); err != nil {
+	err = s.access.OnPupil(ctx, studentID, func(ctx context.Context, a ports.FamilyAccess) error {
+		if err := a.AttachAccount(ctx, withAccount); err != nil {
+			return err
+		}
+		return syncFamilyAccess(ctx, a, s.tenant, s.newID)
+	})
+	if err != nil {
 		return domain.GuardianLink{}, err
 	}
 	return withAccount, nil

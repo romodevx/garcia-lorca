@@ -146,26 +146,35 @@ func (r *Repository) RemoveContact(ctx context.Context, id string) error {
 // Both are answered as a conflict EXCEPT when the row is genuinely absent,
 // which we distinguish with a follow-up read so an unknown contact is not
 // reported as a duplicate.
+//
+// It takes NO family lock: the use case attaches accounts only through
+// OnPupil (FamilyAccess.AttachAccount, the same conditional write), which
+// keeps the family cap. This entry point stays for the adapter's own tests.
 func (r *Repository) AttachAccount(ctx context.Context, l domain.GuardianLink) error {
 	return r.withTenant(ctx, func(tx *gorm.DB) error {
-		res := tx.Model(&guardianStudentModel{}).
-			Where("id = ? AND guardian_user_id IS NULL", l.ID()).
-			Update("guardian_user_id", l.GuardianUserID())
-		if res.Error != nil {
-			return translateGuardianWriteErr(res.Error)
-		}
-		if res.RowsAffected == 1 {
-			return nil
-		}
-		var exists int64
-		if err := tx.Model(&guardianStudentModel{}).Where("id = ?", l.ID()).Count(&exists).Error; err != nil {
-			return glerrors.Wrap(glerrors.KindInternal, "reading contact", err)
-		}
-		if exists == 0 {
-			return glerrors.ErrNotFound
-		}
-		return glerrors.New(glerrors.KindConflict, "this contact already has an account")
+		return attachAccount(tx, l)
 	})
+}
+
+// attachAccount is AttachAccount's conditional write inside tx.
+func attachAccount(tx *gorm.DB, l domain.GuardianLink) error {
+	res := tx.Model(&guardianStudentModel{}).
+		Where("id = ? AND student_id = ? AND guardian_user_id IS NULL", l.ID(), l.StudentID()).
+		Update("guardian_user_id", l.GuardianUserID())
+	if res.Error != nil {
+		return translateAccessErr(res.Error)
+	}
+	if res.RowsAffected == 1 {
+		return nil
+	}
+	var exists int64
+	if err := tx.Model(&guardianStudentModel{}).Where("id = ? AND student_id = ?", l.ID(), l.StudentID()).Count(&exists).Error; err != nil {
+		return glerrors.Wrap(glerrors.KindInternal, "reading contact", err)
+	}
+	if exists == 0 {
+		return glerrors.ErrNotFound
+	}
+	return glerrors.New(glerrors.KindConflict, "this contact already has an account")
 }
 
 // listGuardianLinks is the shared read for both projections: same tenant-bound

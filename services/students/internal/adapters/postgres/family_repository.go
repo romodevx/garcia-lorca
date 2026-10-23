@@ -162,15 +162,20 @@ func assembleFamilies(rows []familyRow, members []memberRow) []domain.Family {
 // CreateFamily inserts the family and claims its pupils in ONE transaction.
 // The claim is conditional (claimPupils): a pupil that joined another family
 // or left the school since the use case read it makes the whole create a
-// KindConflict, rolled back.
-func (r *Repository) CreateFamily(ctx context.Context, f domain.Family) error {
+// KindConflict, rolled back. sync then runs over the new membership in the
+// same transaction: the pupils' rows are already locked FOR UPDATE by the
+// claim, so no account write on them (FOR SHARE) runs meanwhile.
+func (r *Repository) CreateFamily(ctx context.Context, f domain.Family, sync ports.FamilyAccessFunc) error {
 	return r.withTenant(ctx, func(tx *gorm.DB) error {
 		err := tx.Exec(`INSERT INTO families (id, tenant_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, now())`,
 			f.ID(), f.TenantID(), f.Name(), f.CreatedAt()).Error
 		if err != nil {
 			return translateFamilyWriteErr(err, "creating family")
 		}
-		return claimPupils(tx, f.ID(), f.StudentIDs())
+		if err := claimPupils(tx, f.ID(), f.StudentIDs()); err != nil {
+			return err
+		}
+		return runSync(ctx, tx, f.ID(), sync)
 	})
 }
 
@@ -190,8 +195,9 @@ func (r *Repository) RenameFamily(ctx context.Context, id, name string) error {
 
 // AddStudentsToFamily claims pupils for an existing family under its row
 // lock, and refuses (rolled back) a family that would outgrow
-// domain.MaxFamilyPupils — two adds racing are serialised by the lock.
-func (r *Repository) AddStudentsToFamily(ctx context.Context, familyID string, studentIDs []string) error {
+// domain.MaxFamilyPupils — two adds racing are serialised by the lock. sync
+// then runs in the same transaction, under that lock.
+func (r *Repository) AddStudentsToFamily(ctx context.Context, familyID string, studentIDs []string, sync ports.FamilyAccessFunc) error {
 	return r.withTenant(ctx, func(tx *gorm.DB) error {
 		if err := lockFamily(tx, familyID); err != nil {
 			return err
@@ -206,7 +212,7 @@ func (r *Repository) AddStudentsToFamily(ctx context.Context, familyID string, s
 		if n > domain.MaxFamilyPupils {
 			return glerrors.New(glerrors.KindInvalid, "a family has 1 to 20 pupils")
 		}
-		return nil
+		return runSync(ctx, tx, familyID, sync)
 	})
 }
 

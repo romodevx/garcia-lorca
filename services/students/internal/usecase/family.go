@@ -14,9 +14,11 @@ import (
 
 // FamilyService groups siblings into families (ADR 0041): confirm, rename,
 // add and remove pupils, dissolve, and the suggestions the office confirms or
-// dismisses. Who may call each operation (students:read / students:update)
-// and the module_families flag are the gateway's call. It never touches a
-// guardian link: granting app access through a family is T2.
+// dismisses, and the family's access (T2): one contact on every pupil, and
+// revoking an account from all of them. Who may call each operation
+// (students:read / students:update / guardians:write) and the module_families
+// flag are the gateway's call. Confirming or growing a family syncs its
+// accounts to every placeable pupil under the cap (syncFamilyAccess).
 type FamilyService struct {
 	students ports.StudentRepository
 	families ports.FamilyRepository
@@ -57,6 +59,8 @@ func (s *FamilyService) GetFamily(ctx context.Context, familyID string) (domain.
 // CreateFamily groups pupils that have no family yet. An empty name is the
 // first pupil's surnames. Unknown, withdrawn or rejected pupils are
 // KindInvalid; a pupil already in a family is KindConflict. A draft may join.
+// Pupils whose accounts add up to more than domain.MaxFamilyAccounts are
+// domain.ErrFamilyAccountLimit and nothing is written.
 func (s *FamilyService) CreateFamily(ctx context.Context, name string, studentIDs []string) (domain.Family, error) {
 	ids, err := canonicalIDs(studentIDs)
 	if err != nil {
@@ -74,7 +78,7 @@ func (s *FamilyService) CreateFamily(ctx context.Context, name string, studentID
 	if err != nil {
 		return domain.Family{}, err
 	}
-	if err := s.families.CreateFamily(ctx, family); err != nil {
+	if err := s.families.CreateFamily(ctx, family, s.syncAccess); err != nil {
 		return domain.Family{}, err
 	}
 	return s.families.FamilyByID(ctx, family.ID())
@@ -113,7 +117,7 @@ func (s *FamilyService) AddStudentsToFamily(ctx context.Context, familyID string
 	if _, err := family.AddStudents(ids); err != nil {
 		return domain.Family{}, err
 	}
-	if err := s.families.AddStudentsToFamily(ctx, family.ID(), ids); err != nil {
+	if err := s.families.AddStudentsToFamily(ctx, family.ID(), ids, s.syncAccess); err != nil {
 		return domain.Family{}, err
 	}
 	return s.families.FamilyByID(ctx, family.ID())
