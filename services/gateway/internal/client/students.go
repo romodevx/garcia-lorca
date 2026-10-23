@@ -62,6 +62,8 @@ type StudentResult struct {
 	// imported without a valid CURP (PLAN-import-avisos).
 	OpenIssues int
 	Draft      bool
+	// FamilyID is the pupil's family (ADR 0041); empty when it has none.
+	FamilyID string
 	// PromotedFromDraft and IntendedGroupID are set by UpdateStudent only: the
 	// save gave a draft its CURP, and the group the import meant it for.
 	PromotedFromDraft bool
@@ -194,14 +196,23 @@ const listStudentsPageSize = 200
 const listStudentsMaxPages = 100
 
 func (c *StudentsClient) ListStudents(ctx context.Context, status string) ([]StudentResult, error) {
+	return c.listStudentsWhere(ctx, &studentsv1.ListStudentsRequest{Status: admissionFromName(status)})
+}
+
+// ListStudentsInFamily lists the pupils of one family (ADR 0041), optionally
+// narrowed by admission status, draining every page like ListStudents.
+func (c *StudentsClient) ListStudentsInFamily(ctx context.Context, familyID, status string) ([]StudentResult, error) {
+	return c.listStudentsWhere(ctx, &studentsv1.ListStudentsRequest{Status: admissionFromName(status), FamilyId: familyID})
+}
+
+// listStudentsWhere drains every page of ListStudents for one filter. The
+// filter's page size and token are overwritten per page.
+func (c *StudentsClient) listStudentsWhere(ctx context.Context, filter *studentsv1.ListStudentsRequest) ([]StudentResult, error) {
 	var out []StudentResult
 	pageToken := ""
 	for page := 0; page < listStudentsMaxPages; page++ {
-		res, err := c.rpc.ListStudents(ctx, connect.NewRequest(&studentsv1.ListStudentsRequest{
-			Status:    admissionFromName(status),
-			PageSize:  listStudentsPageSize,
-			PageToken: pageToken,
-		}))
+		filter.PageSize, filter.PageToken = listStudentsPageSize, pageToken
+		res, err := c.rpc.ListStudents(ctx, connect.NewRequest(filter))
 		if err != nil {
 			return nil, err
 		}
@@ -610,6 +621,7 @@ func toStudentResult(s *studentsv1.Student) StudentResult {
 		Profile:          fromProtoProfile(s.GetProfile()),
 		OpenIssues:       int(s.GetOpenIssues()),
 		Draft:            s.GetDraft(),
+		FamilyID:         s.GetFamilyId(),
 	}
 }
 

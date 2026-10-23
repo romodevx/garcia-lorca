@@ -339,7 +339,8 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	// (CC-211, CC-313).
 	studentsH := handler.NewStudentsHandler(studentsClient,
 		handler.WithStudentRoomLabels(handler.NewCycleRoomLabels(configClient, studentsClient)),
-		handler.WithImportReview(importReviewOn))
+		handler.WithImportReview(importReviewOn),
+		handler.WithFamilyFilter(studentsClient))
 	studentsRead := func(h http.HandlerFunc) http.Handler {
 		return guard.Protect("students", requireAuthChanged(middleware.RequirePermission("students:read")(http.HandlerFunc(h))))
 	}
@@ -448,6 +449,33 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	contactAccessH := handler.NewContactAccessHandler(authClient, studentsClient)
 	mux.Handle("POST /api/v1/students/{studentId}/guardians/{contactId}/invite",
 		guardiansWrite(contactAccessH.Invite))
+
+	// Families of siblings (ADR 0041): module_students AND module_families, so
+	// either one off ⇒ 404 before auth. Reading is reading the pupils
+	// (students:read) and the family's adults are guardians:read. Renaming and
+	// dismissing a suggestion are students:update. Building the family — create,
+	// add, remove, dissolve — is guardians:write, owner-only like the adults'
+	// access: the account sync hands every account of a family to each pupil
+	// that enters it, so joining a child to the wrong family would open that
+	// child to strangers (security gate H1). /suggestions is a literal segment,
+	// so the mux prefers it over /{familyId}.
+	familiesH := handler.NewFamiliesHandler(studentsClient)
+	families := func(perm string, h http.HandlerFunc) http.Handler {
+		return guard.Protect("students", guard.Protect("families", requireAuthChanged(
+			middleware.RequirePermission(perm)(h))))
+	}
+	mux.Handle("GET /api/v1/families", families("students:read", familiesH.List))
+	mux.Handle("GET /api/v1/families/suggestions", families("students:read", familiesH.Suggestions))
+	mux.Handle("GET /api/v1/families/{familyId}", families("students:read", familiesH.Get))
+	mux.Handle("GET /api/v1/families/{familyId}/contacts", families("guardians:read", familiesH.Contacts))
+	mux.Handle("POST /api/v1/families/suggestions/dismiss", families("students:update", familiesH.DismissSuggestion))
+	mux.Handle("PATCH /api/v1/families/{familyId}", families("students:update", familiesH.Rename))
+	mux.Handle("POST /api/v1/families", families("guardians:write", familiesH.Create))
+	mux.Handle("POST /api/v1/families/{familyId}/students", families("guardians:write", familiesH.AddStudents))
+	mux.Handle("DELETE /api/v1/families/{familyId}/students/{studentId}", families("guardians:write", familiesH.RemoveStudent))
+	mux.Handle("DELETE /api/v1/families/{familyId}", families("guardians:write", familiesH.Dissolve))
+	mux.Handle("POST /api/v1/families/{familyId}/contacts", families("guardians:write", familiesH.AddContact))
+	mux.Handle("POST /api/v1/families/{familyId}/access/revoke", families("guardians:write", familiesH.RevokeAccess))
 
 	// M04 config (academic catalog): flag-guarded, authenticated + rotation-
 	// enforced, permission-gated. Writes need config:write, reads config:read;

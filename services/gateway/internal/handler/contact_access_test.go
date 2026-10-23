@@ -62,6 +62,20 @@ type fakeGranter struct {
 	listErr        error
 	// student is the pupil GetStudent answers (a non-draft by default).
 	student client.StudentResult
+	// family is what GetFamily answers for the pupil's family (ADR 0041).
+	family      client.Family
+	familyErr   error
+	familyCalls int
+}
+
+func (f *fakeGranter) GetFamily(_ context.Context, id string) (client.Family, error) {
+	f.familyCalls++
+	if f.familyErr != nil {
+		return client.Family{}, f.familyErr
+	}
+	out := f.family
+	out.ID = id
+	return out, nil
 }
 
 func (f *fakeGranter) GetStudent(_ context.Context, id string) (client.StudentResult, error) {

@@ -35,6 +35,18 @@ type StudentsHandler struct {
 	rooms RoomLabelSource
 	// review says whether module_import_review is on; nil is off.
 	review importReview
+	// families answers the directory's ?familyId= filter; nil refuses it.
+	families FamilyStudentsLister
+}
+
+// FamilyStudentsLister lists the pupils of one family (ADR 0041).
+type FamilyStudentsLister interface {
+	ListStudentsInFamily(ctx context.Context, familyID, status string) ([]client.StudentResult, error)
+}
+
+// WithFamilyFilter lets GET /api/v1/students take ?familyId=.
+func WithFamilyFilter(families FamilyStudentsLister) StudentsOption {
+	return func(h *StudentsHandler) { h.families = families }
 }
 
 // StudentsOption configures optional behavior of the students endpoints.
@@ -143,6 +155,8 @@ type studentResponse struct {
 	Draft             *bool  `json:"draft,omitempty"`
 	PromotedFromDraft *bool  `json:"promotedFromDraft,omitempty"`
 	IntendedGroupID   string `json:"intendedGroupId,omitempty"`
+	// FamilyID is the pupil's family (ADR 0041); absent when it has none.
+	FamilyID string `json:"familyId,omitempty"`
 }
 
 func toStudentResponse(s client.StudentResult) studentResponse {
@@ -160,6 +174,7 @@ func toStudentResponse(s client.StudentResult) studentResponse {
 		EnrollmentNumber: s.EnrollmentNumber,
 		BankReference:    s.BankReference,
 		Profile:          &s.Profile,
+		FamilyID:         s.FamilyID,
 	}
 }
 
@@ -248,14 +263,17 @@ func (h *StudentsHandler) Create(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, toStudentResponse(res))
 }
 
-// List handles GET /api/v1/students?status=... : lists students, optionally
-// filtered by admission status (empty = all).
+// List handles GET /api/v1/students?status=...&familyId=... : lists students,
+// optionally filtered by admission status (empty = all) and by family.
 func (h *StudentsHandler) List(w http.ResponseWriter, r *http.Request) {
 	status := r.URL.Query().Get("status")
 	if status == admissionDraft && !h.reviewOn(r.Context()) {
 		status = "" // an unknown status never filtered; off, draft is unknown
 	}
-	res, err := h.svc.ListStudents(r.Context(), status)
+	res, served, err := h.list(w, r, status)
+	if !served {
+		return // refused at the edge
+	}
 	if err != nil {
 		writeConnectError(w, err)
 		return
@@ -272,6 +290,24 @@ func (h *StudentsHandler) List(w http.ResponseWriter, r *http.Request) {
 		out = append(out, summary)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"students": out})
+}
+
+// list reads the roster for the request's filters. served is false when a
+// filter was refused (400 already written): a family filter never falls back
+// to the whole school.
+func (h *StudentsHandler) list(w http.ResponseWriter, r *http.Request, status string) (res []client.StudentResult, served bool, err error) {
+	raw := r.URL.Query().Get("familyId")
+	if raw == "" {
+		res, err = h.svc.ListStudents(r.Context(), status)
+		return res, true, err
+	}
+	familyID, ok := canonicalUUID(raw)
+	if !ok || h.families == nil {
+		http.Error(w, "familyId must be a family id", http.StatusBadRequest)
+		return nil, false, nil
+	}
+	res, err = h.families.ListStudentsInFamily(r.Context(), familyID, status)
+	return res, true, err
 }
 
 // includeGroupLabel asks the list for each pupil's classroom label: five
