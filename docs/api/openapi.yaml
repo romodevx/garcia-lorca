@@ -1471,7 +1471,10 @@ paths:
         - name: familyId
           in: query
           required: false
-          description: Only the pupils of this family (ADR 0041). Not a uuid ⇒ 400.
+          description: >
+            Only the pupils of this family (ADR 0041). Not a uuid, or
+            module_families off (`families are not enabled`) ⇒ 400: the filter
+            is refused, never ignored.
           schema: { type: string, format: uuid }
       responses:
         '200':
@@ -2194,7 +2197,8 @@ paths:
       summary: Every family of the school
       description: >
         The school's families, ordered by name, each with its pupils' ids and
-        how many app accounts it holds (at most two). Needs students:read.
+        — only for a caller holding guardians:read — how many app accounts it
+        holds (at most two). Needs students:read.
         Behind module_families and module_students.
       operationId: listFamilies
       security: [{ sessionCookie: [] }]
@@ -10407,7 +10411,7 @@ components:
         openIssues: { type: integer, minimum: 0, example: 2, description: "Behind module_import_review (absent while off): import issues of the pupil nobody resolved yet." }
         draft: { type: boolean, example: false, description: "Behind module_import_review (absent while off): imported without a valid CURP (admissionStatus draft): cannot be enrolled, moved, linked to a family or invited." }
         promotedFromDraft: { type: boolean, example: true, description: "Only on PUT: the save gave a draft its CURP, so the pupil is now pending." }
-        familyId: { type: string, format: uuid, description: "The pupil's family (ADR 0041); absent when it has none." }
+        familyId: { type: string, format: uuid, description: "The pupil's family (ADR 0041). Absent when it has none, and for every pupil while module_families is off." }
         intendedGroupId: { type: string, format: uuid, description: "Only on PUT, with promotedFromDraft: the group the import meant the pupil for, to offer the enrollment there." }
         profile: { $ref: '#/components/schemas/StudentProfile' }
 
@@ -10434,12 +10438,12 @@ components:
         bankReference: { type: string, example: "231076", description: "BBVA payment reference (ADR 0033); empty when the pupil has none." }
         openIssues: { type: integer, minimum: 0, example: 0, description: "Behind module_import_review (absent while off): import issues of the pupil nobody resolved yet." }
         draft: { type: boolean, example: false, description: "Behind module_import_review (absent while off): imported without a valid CURP (admissionStatus draft)." }
-        familyId: { type: string, format: uuid, description: "The pupil's family (ADR 0041); absent when it has none." }
+        familyId: { type: string, format: uuid, description: "The pupil's family (ADR 0041). Absent when it has none, and for every pupil while module_families is off." }
 
     Family:
       type: object
       description: Siblings grouped by the office (ADR 0041). A pupil belongs to at most one.
-      required: [id, name, studentIds, accountCount, createdAt]
+      required: [id, name, studentIds, createdAt]
       properties:
         id: { type: string, format: uuid }
         name: { type: string, maxLength: 120, example: GARCÍA LÓPEZ }
@@ -10448,7 +10452,14 @@ components:
           maxItems: 20
           description: Ordered by surname, then first name.
           items: { type: string, format: uuid }
-        accountCount: { type: integer, minimum: 0, maximum: 2, example: 1, description: Distinct app accounts linked to its pupils. }
+        accountCount:
+          type: integer
+          minimum: 0
+          maximum: 2
+          example: 1
+          description: >
+            Distinct app accounts linked to its pupils. Family-access metadata:
+            present only when the caller holds guardians:read, absent otherwise.
         createdAt: { type: string, format: date-time }
       example:
         id: e3b0c442-98fc-1c14-9afb-0000000000f1
@@ -10480,18 +10491,20 @@ components:
         draft: { type: boolean, description: Imported without a CURP; a draft never receives the family's accounts. }
     FamilyDetail:
       type: object
-      required: [id, name, studentIds, accountCount, createdAt, members]
+      required: [id, name, studentIds, createdAt, members]
       properties:
         id: { type: string, format: uuid }
         name: { type: string, maxLength: 120 }
         studentIds:
           type: array
           items: { type: string, format: uuid }
-        accountCount: { type: integer, minimum: 0, maximum: 2 }
+        accountCount: { type: integer, minimum: 0, maximum: 2, description: 'Only for a caller holding guardians:read.' }
         createdAt: { type: string, format: date-time }
         members:
           type: array
-          description: The pupils, in studentIds order.
+          description: >
+            The pupils, in studentIds order. A pupil the students service cannot
+            return is omitted, so members may be shorter than studentIds.
           items: { $ref: '#/components/schemas/FamilyMember' }
     FamilySuggestion:
       type: object

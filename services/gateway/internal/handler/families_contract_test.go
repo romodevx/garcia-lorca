@@ -13,21 +13,23 @@ import (
 type familiesRoute struct {
 	method, path string
 	write        bool
+	// success is every 2xx the handler answers.
+	success []string
 }
 
 var familiesRoutes = []familiesRoute{
-	{"get", "/api/v1/families", false},
-	{"post", "/api/v1/families", true},
-	{"get", "/api/v1/families/suggestions", false},
-	{"post", "/api/v1/families/suggestions/dismiss", true},
-	{"get", "/api/v1/families/{familyId}", false},
-	{"patch", "/api/v1/families/{familyId}", true},
-	{"delete", "/api/v1/families/{familyId}", true},
-	{"get", "/api/v1/families/{familyId}/contacts", false},
-	{"post", "/api/v1/families/{familyId}/contacts", true},
-	{"post", "/api/v1/families/{familyId}/students", true},
-	{"delete", "/api/v1/families/{familyId}/students/{studentId}", true},
-	{"post", "/api/v1/families/{familyId}/access/revoke", true},
+	{"get", "/api/v1/families", false, []string{"200"}},
+	{"post", "/api/v1/families", true, []string{"201"}},
+	{"get", "/api/v1/families/suggestions", false, []string{"200"}},
+	{"post", "/api/v1/families/suggestions/dismiss", true, []string{"204"}},
+	{"get", "/api/v1/families/{familyId}", false, []string{"200"}},
+	{"patch", "/api/v1/families/{familyId}", true, []string{"200"}},
+	{"delete", "/api/v1/families/{familyId}", true, []string{"204"}},
+	{"get", "/api/v1/families/{familyId}/contacts", false, []string{"200"}},
+	{"post", "/api/v1/families/{familyId}/contacts", true, []string{"201"}},
+	{"post", "/api/v1/families/{familyId}/students", true, []string{"200"}},
+	{"delete", "/api/v1/families/{familyId}/students/{studentId}", true, []string{"200", "204"}},
+	{"post", "/api/v1/families/{familyId}/access/revoke", true, []string{"200"}},
 }
 
 // operation decodes one documented operation; ok is false when it is missing.
@@ -76,9 +78,14 @@ func TestFamiliesRoutesAreInTheContract(t *testing.T) {
 		if r.write && !refsParameter(t, op, "CsrfToken") {
 			t.Errorf("%s: a write must require the CSRF header", name)
 		}
-		for _, code := range []string{"401", "403", "404"} {
+		for _, code := range append([]string{"401", "403", "404"}, r.success...) {
 			if _, ok := op.Responses[code]; !ok {
 				t.Errorf("%s: no %s response", name, code)
+			}
+		}
+		for code := range op.Responses {
+			if strings.HasPrefix(code, "2") && !slices.Contains(r.success, code) {
+				t.Errorf("%s: documents %s, which the handler never answers", name, code)
 			}
 		}
 		if r.write || strings.Contains(r.path, "{") {

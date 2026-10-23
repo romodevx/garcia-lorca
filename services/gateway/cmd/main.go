@@ -288,6 +288,9 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	// read and answer, not only which routes exist: the import's row
 	// decisions and the students JSON's openIssues/draft.
 	importReviewOn := func(ctx context.Context) bool { return flags.Enabled(ctx, featureflag.Key("import_review")) }
+	// module_families (ADR 0041) gates familyId on the students JSON and its
+	// filter, besides the /api/v1/families/* routes.
+	familiesOn := func(ctx context.Context) bool { return flags.Enabled(ctx, featureflag.Key("families")) }
 
 	mux.Handle("POST /api/v1/auth/login", loginLimiter.Middleware(http.HandlerFunc(authH.Login)))
 	mux.HandleFunc("POST /api/v1/auth/refresh", authH.Refresh)
@@ -340,7 +343,7 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	studentsH := handler.NewStudentsHandler(studentsClient,
 		handler.WithStudentRoomLabels(handler.NewCycleRoomLabels(configClient, studentsClient)),
 		handler.WithImportReview(importReviewOn),
-		handler.WithFamilyFilter(studentsClient))
+		handler.WithFamilies(familiesOn, studentsClient))
 	studentsRead := func(h http.HandlerFunc) http.Handler {
 		return guard.Protect("students", requireAuthChanged(middleware.RequirePermission("students:read")(http.HandlerFunc(h))))
 	}

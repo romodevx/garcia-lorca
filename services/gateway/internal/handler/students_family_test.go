@@ -51,7 +51,14 @@ func (f *familyRoster) ListStudentsInFamily(_ context.Context, familyID, status 
 
 func serveStudents(t *testing.T, roster *familyRoster, path string) *httptest.ResponseRecorder {
 	t.Helper()
-	h := handler.NewStudentsHandler(roster, handler.WithFamilyFilter(roster))
+	return serveStudentsWith(t, roster, path, true)
+}
+
+// serveStudentsWith serves with module_families on or off.
+func serveStudentsWith(t *testing.T, roster *familyRoster, path string, familiesOn bool) *httptest.ResponseRecorder {
+	t.Helper()
+	on := func(context.Context) bool { return familiesOn }
+	h := handler.NewStudentsHandler(roster, handler.WithFamilies(on, roster))
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/students", h.List)
 	mux.HandleFunc("GET /api/v1/students/{id}", h.Get)
@@ -98,12 +105,34 @@ func TestStudentsListRefusesAMalformedFamilyId(t *testing.T) {
 	assert.Zero(t, roster.familyCalls+roster.listCalls)
 }
 
-// Without the filter wired, asking for one must not answer the whole school.
-func TestStudentsListWithoutAFamilySourceRefusesTheFilter(t *testing.T) {
-	roster := &familyRoster{}
+// Security L2: with module_families off the students JSON says nothing about
+// families, and the filter is refused rather than ignored — ignoring it would
+// answer the whole school to a screen that asked for one family.
+func TestStudentsFamilyFieldsHideWhileFamiliesIsOff(t *testing.T) {
+	roster := &familyRoster{all: []client.StudentResult{{ID: stuA, FamilyID: famID}}}
+
+	for _, path := range []string{"/api/v1/students", "/api/v1/students/" + stuA} {
+		rec := serveStudentsWith(t, roster, path, false)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		assert.NotContains(t, rec.Body.String(), "familyId", path)
+	}
+
+	rec := serveStudentsWith(t, roster, "/api/v1/students?familyId="+famID, false)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "families are not enabled")
+	assert.Zero(t, roster.familyCalls)
+}
+
+// A handler built without the families option behaves as module_families off.
+func TestStudentsWithoutTheFamiliesOptionIsFamiliesOff(t *testing.T) {
+	roster := &familyRoster{all: []client.StudentResult{{ID: stuA, FamilyID: famID}}}
 	h := handler.NewStudentsHandler(roster)
 	rec := httptest.NewRecorder()
+	h.List(rec, httptest.NewRequest(http.MethodGet, "/api/v1/students", nil))
+	assert.NotContains(t, rec.Body.String(), "familyId")
+
+	rec = httptest.NewRecorder()
 	h.List(rec, httptest.NewRequest(http.MethodGet, "/api/v1/students?familyId="+famID, nil))
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
-	assert.Zero(t, roster.listCalls)
+	assert.Equal(t, 1, roster.listCalls, "only the unfiltered list read the roster")
 }

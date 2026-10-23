@@ -193,6 +193,9 @@ func (h *ContactAccessHandler) familyHasRoom(w http.ResponseWriter, ctx context.
 		return true
 	}
 	if err != nil {
+		// Fail safe: when the cap cannot be checked, the invitation is NOT
+		// sent. Asking iam anyway could mail a link for a grant students
+		// would then refuse; a retry once students answers costs nothing.
 		writeConnectError(w, err)
 		return false
 	}

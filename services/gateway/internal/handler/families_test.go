@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -174,7 +175,7 @@ func decodeBody(t *testing.T, rec *httptest.ResponseRecorder, dst any) {
 
 func TestListFamiliesAnswersEachFamily(t *testing.T) {
 	svc := &fakeFamilies{families: []client.Family{twoPupilFamily()}}
-	rec := serveFamilies(t, svc, http.MethodGet, "/api/v1/families", "", nil)
+	rec := serveFamilies(t, svc, http.MethodGet, "/api/v1/families", "", guardiansReader())
 
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	var out struct {
@@ -186,6 +187,43 @@ func TestListFamiliesAnswersEachFamily(t *testing.T) {
 		"id": famID, "name": "GARCÍA LÓPEZ", "studentIds": []any{stuA, stuB},
 		"accountCount": float64(1), "createdAt": "2026-10-20T15:04:05Z",
 	}, out.Families[0])
+}
+
+// guardiansReader is a caller who may see the family's access metadata.
+func guardiansReader() *middleware.Principal {
+	return &middleware.Principal{UserID: userID, Permissions: []string{"students:read", "guardians:read"}}
+}
+
+// studentsReader reads families but not who may open the app.
+func studentsReader() *middleware.Principal {
+	return &middleware.Principal{UserID: userID, Permissions: []string{"students:read", "guardians:write"}}
+}
+
+// Security L1: how many app accounts a family holds is access metadata. It
+// travels only to a caller holding guardians:read, on every family answer.
+func TestFamilyAccountCountNeedsGuardiansRead(t *testing.T) {
+	calls := map[string]struct{ method, path, body string }{
+		"list":   {http.MethodGet, "/api/v1/families", ""},
+		"get":    {http.MethodGet, "/api/v1/families/" + famID, ""},
+		"create": {http.MethodPost, "/api/v1/families", `{"studentIds":["` + stuA + `"]}`},
+		"rename": {http.MethodPatch, "/api/v1/families/" + famID, `{"name":"X"}`},
+		"add":    {http.MethodPost, "/api/v1/families/" + famID + "/students", `{"studentIds":["` + stuC + `"]}`},
+		"remove": {http.MethodDelete, "/api/v1/families/" + famID + "/students/" + stuB, ""},
+	}
+	for name, c := range calls {
+		t.Run(name, func(t *testing.T) {
+			for _, who := range []struct {
+				principal *middleware.Principal
+				sees      bool
+			}{{guardiansReader(), true}, {studentsReader(), false}, {nil, false}} {
+				svc := &fakeFamilies{family: twoPupilFamily(), families: []client.Family{twoPupilFamily()}}
+				rec := serveFamilies(t, svc, c.method, c.path, c.body, who.principal)
+				require.Less(t, rec.Code, http.StatusMultipleChoices, rec.Body.String())
+				body := rec.Body.String()
+				assert.Equal(t, who.sees, strings.Contains(body, `"accountCount"`), body)
+			}
+		})
+	}
 }
 
 // An empty school answers an empty list, never null.
@@ -450,5 +488,100 @@ func TestFamilyRefusalsForwardTheirCode(t *testing.T) {
 			assert.Equal(t, code, rec.Header().Get("X-Error-Code"))
 			assert.Contains(t, rec.Body.String(), "como máximo dos cuentas")
 		})
+	}
+}
+
+// rowsFor builds the three pupils' contacts in a given pupil order, each list
+// optionally reversed, so the same rows reach the grouping in many orders.
+func groupingFixture() map[string][]client.GuardianLink {
+	return map[string][]client.GuardianLink{
+		stuA: {
+			{ID: "a-father", StudentID: stuA, FullName: "LUIS GARCÍA", Relationship: "father", Email: "luis@example.com", Phone: "5599990000"},
+			{ID: "a-grandma", StudentID: stuA, FullName: "ROSA", Relationship: "other", Phone: "55 1234 5678"},
+			// The home phone of BOTH the father and the aunt: ambiguous.
+			{ID: "a-home", StudentID: stuA, FullName: "CASA", Relationship: "other", Phone: "5599990000"},
+		},
+		stuB: {
+			{ID: "b-aunt", StudentID: stuB, FullName: "EVA", Relationship: "other", Email: "eva@example.com", Phone: "(55) 9999-0000"},
+			{ID: "b-mother", StudentID: stuB, FullName: "ANA LÓPEZ", Relationship: "mother", Email: "ana@example.com", GuardianUserID: userID},
+			// Only the mother's mobile: it belongs to the mother, through c-mother.
+			{ID: "b-mother-phone", StudentID: stuB, FullName: "ANA", Relationship: "mother", Phone: "5511112222"},
+		},
+		stuC: {
+			{ID: "c-mother", StudentID: stuC, FullName: "ANA LOPEZ", Relationship: "mother", Email: "Ana@Example.com", Phone: "5511112222"},
+			{ID: "c-grandma", StudentID: stuC, FullName: "ROSA M.", Relationship: "other", Phone: "5512345678"},
+		},
+	}
+}
+
+func reversed(links []client.GuardianLink) []client.GuardianLink {
+	out := make([]client.GuardianLink, len(links))
+	for i, l := range links {
+		out[len(links)-1-i] = l
+	}
+	return out
+}
+
+// groupingOf answers the grouping as sorted sets of contact ids, plus the
+// mother's filled-in phone, so two orders can be compared.
+func groupingOf(t *testing.T, order []string, reverse bool) ([]string, string) {
+	t.Helper()
+	links := groupingFixture()
+	if reverse {
+		for id := range links {
+			links[id] = reversed(links[id])
+		}
+	}
+	family := twoPupilFamily()
+	family.StudentIDs = order
+	rec := serveFamilies(t, &fakeFamilies{family: family, links: links}, http.MethodGet, "/api/v1/families/"+famID+"/contacts", "", nil)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var out struct {
+		People []struct {
+			Phone    string `json:"phone"`
+			HasApp   bool   `json:"hasApp"`
+			Contacts []struct {
+				ContactID string `json:"contactId"`
+			} `json:"contacts"`
+		} `json:"people"`
+	}
+	decodeBody(t, rec, &out)
+	require.True(t, out.People[0].HasApp, "the adult with the app comes first")
+	groups := make([]string, 0, len(out.People))
+	for _, p := range out.People {
+		ids := make([]string, 0, len(p.Contacts))
+		for _, c := range p.Contacts {
+			ids = append(ids, c.ContactID)
+		}
+		slices.Sort(ids)
+		groups = append(groups, strings.Join(ids, "+"))
+	}
+	slices.Sort(groups)
+	return groups, out.People[0].Phone
+}
+
+// TL: the grouping does not depend on the order the rows arrive in. Account
+// rows, then rows with an email, then phone-only rows: every person with an
+// email exists before a bare phone looks for its match, and a phone shared by
+// two people stays its own entry instead of being guessed.
+func TestFamilyContactsGroupingIgnoresInputOrder(t *testing.T) {
+	want := []string{
+		"a-father",
+		"a-grandma+c-grandma",
+		"a-home",
+		"b-aunt",
+		"b-mother+b-mother-phone+c-mother",
+	}
+	orders := [][]string{
+		{stuA, stuB, stuC}, {stuA, stuC, stuB}, {stuB, stuA, stuC},
+		{stuB, stuC, stuA}, {stuC, stuA, stuB}, {stuC, stuB, stuA},
+	}
+	for _, order := range orders {
+		for _, reverse := range []bool{false, true} {
+			got, motherPhone := groupingOf(t, order, reverse)
+			assert.Equal(t, want, got, "order %v reversed=%v", order, reverse)
+			// The account row had no phone: the person takes it from a later row.
+			assert.Equal(t, "5511112222", motherPhone, "order %v reversed=%v", order, reverse)
+		}
 	}
 }

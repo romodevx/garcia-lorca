@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -64,11 +65,12 @@ const (
 )
 
 type familyResponse struct {
-	ID           string   `json:"id"`
-	Name         string   `json:"name"`
-	StudentIDs   []string `json:"studentIds"`
-	AccountCount int      `json:"accountCount"`
-	CreatedAt    string   `json:"createdAt"`
+	ID         string   `json:"id"`
+	Name       string   `json:"name"`
+	StudentIDs []string `json:"studentIds"`
+	// AccountCount is family-access metadata: only for guardians:read.
+	AccountCount *int   `json:"accountCount,omitempty"`
+	CreatedAt    string `json:"createdAt"`
 }
 
 type familyMemberResponse struct {
@@ -88,7 +90,7 @@ type familyDetailResponse struct {
 	ID           string                 `json:"id"`
 	Name         string                 `json:"name"`
 	StudentIDs   []string               `json:"studentIds"`
-	AccountCount int                    `json:"accountCount"`
+	AccountCount *int                   `json:"accountCount,omitempty"`
 	CreatedAt    string                 `json:"createdAt"`
 	Members      []familyMemberResponse `json:"members"`
 }
@@ -120,12 +122,26 @@ type familyPersonResponse struct {
 	Contacts       []familyContactRef `json:"contacts"`
 }
 
-func toFamilyResponse(f client.Family) familyResponse {
+// toFamilyResponse is the family as r's caller may see it: how many app
+// accounts it holds is access metadata, shown only to a holder of
+// guardians:read (security L1).
+func toFamilyResponse(r *http.Request, f client.Family) familyResponse {
 	ids := f.StudentIDs
 	if ids == nil {
 		ids = []string{}
 	}
-	return familyResponse{ID: f.ID, Name: f.Name, StudentIDs: ids, AccountCount: f.AccountCount, CreatedAt: f.CreatedAt}
+	out := familyResponse{ID: f.ID, Name: f.Name, StudentIDs: ids, CreatedAt: f.CreatedAt}
+	if seesFamilyAccess(r) {
+		count := f.AccountCount
+		out.AccountCount = &count
+	}
+	return out
+}
+
+// seesFamilyAccess reports whether the caller holds guardians:read.
+func seesFamilyAccess(r *http.Request) bool {
+	who, ok := middleware.PrincipalFrom(r.Context())
+	return ok && middleware.HasPermission(who, "guardians:read")
 }
 
 // --- reads -----------------------------------------------------------------
@@ -139,7 +155,7 @@ func (h *FamiliesHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]familyResponse, 0, len(families))
 	for _, f := range families {
-		out = append(out, toFamilyResponse(f))
+		out = append(out, toFamilyResponse(r, f))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"families": out})
 }
@@ -161,7 +177,7 @@ func (h *FamiliesHandler) Get(w http.ResponseWriter, r *http.Request) {
 		writeConnectError(w, err)
 		return
 	}
-	base := toFamilyResponse(family)
+	base := toFamilyResponse(r, family)
 	writeJSON(w, http.StatusOK, familyDetailResponse{
 		ID: base.ID, Name: base.Name, StudentIDs: base.StudentIDs, AccountCount: base.AccountCount,
 		CreatedAt: base.CreatedAt, Members: orderedMembers(family.StudentIDs, pupils),
@@ -238,32 +254,50 @@ type familyPerson struct {
 	phones map[string]bool
 }
 
-// groupFamilyPeople folds contact rows into people. Two rows are the same
-// person when they carry the same account; otherwise when they carry the same
-// email; otherwise — only when one of them has no email — the same phone. Two
-// accounts are never folded, and two different emails sharing a home phone
-// stay two people (the father and an aunt). Rows with an account are placed
-// first, so every person with the app exists before a bare contact looks for
-// its match.
+// groupFamilyPeople folds contact rows into people, in three tiers so the
+// result does not depend on the order the rows arrive in:
+//
+//  1. rows with an account: one person per account (two accounts never fold);
+//  2. rows with an email: joined to the person carrying that email, else a
+//     new person — so every person with an email exists before tier 3;
+//  3. phone-only rows: joined to THE person carrying that phone. A phone
+//     carried by several people (the father and an aunt share the home
+//     line) is ambiguous: the row stays its own person rather than guess.
+//
+// Adults with the app come first.
 func groupFamilyPeople(perPupil [][]client.GuardianLink) []familyPersonResponse {
-	var withApp, without []client.GuardianLink
+	var accounts, withEmail, phoneOnly []client.GuardianLink
 	for _, links := range perPupil {
 		for _, l := range links {
-			if l.GuardianUserID != "" {
-				withApp = append(withApp, l)
-			} else {
-				without = append(without, l)
+			switch {
+			case l.GuardianUserID != "":
+				accounts = append(accounts, l)
+			case normalEmail(l.Email) != "":
+				withEmail = append(withEmail, l)
+			default:
+				phoneOnly = append(phoneOnly, l)
 			}
 		}
 	}
 	var people []*familyPerson
-	for _, l := range append(withApp, without...) {
-		p := findPerson(people, l)
+	fold := func(l client.GuardianLink, match func(*familyPerson) bool) {
+		p := soleMatch(people, match)
 		if p == nil {
 			p = newFamilyPerson(l)
 			people = append(people, p)
 		}
 		p.add(l)
+	}
+	for _, l := range accounts {
+		fold(l, func(p *familyPerson) bool { return p.resp.GuardianUserID == l.GuardianUserID })
+	}
+	for _, l := range withEmail {
+		email := normalEmail(l.Email)
+		fold(l, func(p *familyPerson) bool { return p.emails[email] })
+	}
+	for _, l := range phoneOnly {
+		phone := normalPhone(l.Phone)
+		fold(l, func(p *familyPerson) bool { return phone != "" && p.phones[phone] })
 	}
 	out := make([]familyPersonResponse, 0, len(people))
 	for _, p := range people {
@@ -272,10 +306,25 @@ func groupFamilyPeople(perPupil [][]client.GuardianLink) []familyPersonResponse 
 	return out
 }
 
+// soleMatch is the one person match accepts; nil when none or several do.
+func soleMatch(people []*familyPerson, match func(*familyPerson) bool) *familyPerson {
+	var found *familyPerson
+	for _, p := range people {
+		if !match(p) {
+			continue
+		}
+		if found != nil {
+			return nil
+		}
+		found = p
+	}
+	return found
+}
+
 func newFamilyPerson(l client.GuardianLink) *familyPerson {
 	return &familyPerson{
 		resp: familyPersonResponse{
-			FullName: l.FullName, Relationship: l.Relationship, Phone: l.Phone, Email: l.Email,
+			FullName: l.FullName, Relationship: l.Relationship,
 			GuardianUserID: l.GuardianUserID, HasApp: l.GuardianUserID != "",
 			Contacts: []familyContactRef{},
 		},
@@ -284,35 +333,22 @@ func newFamilyPerson(l client.GuardianLink) *familyPerson {
 	}
 }
 
+// add joins a row to the person; a blank phone or email of the person is
+// filled from the row.
 func (p *familyPerson) add(l client.GuardianLink) {
 	p.resp.Contacts = append(p.resp.Contacts, familyContactRef{StudentID: l.StudentID, ContactID: l.ID})
 	if e := normalEmail(l.Email); e != "" {
 		p.emails[e] = true
+		if p.resp.Email == "" {
+			p.resp.Email = strings.TrimSpace(l.Email)
+		}
 	}
 	if ph := normalPhone(l.Phone); ph != "" {
 		p.phones[ph] = true
-	}
-}
-
-func findPerson(people []*familyPerson, l client.GuardianLink) *familyPerson {
-	for _, p := range people {
-		if p.matches(l) {
-			return p
+		if p.resp.Phone == "" {
+			p.resp.Phone = strings.TrimSpace(l.Phone)
 		}
 	}
-	return nil
-}
-
-func (p *familyPerson) matches(l client.GuardianLink) bool {
-	if l.GuardianUserID != "" {
-		return p.resp.GuardianUserID == l.GuardianUserID
-	}
-	email := normalEmail(l.Email)
-	if email != "" && len(p.emails) > 0 {
-		return p.emails[email]
-	}
-	phone := normalPhone(l.Phone)
-	return phone != "" && p.phones[phone]
 }
 
 func normalEmail(email string) string { return strings.ToLower(strings.TrimSpace(email)) }
@@ -383,7 +419,7 @@ func (h *FamiliesHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeConnectError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, toFamilyResponse(family))
+	writeJSON(w, http.StatusCreated, toFamilyResponse(r, family))
 }
 
 // Rename handles PATCH /api/v1/families/{familyId}.
@@ -404,7 +440,7 @@ func (h *FamiliesHandler) Rename(w http.ResponseWriter, r *http.Request) {
 		writeConnectError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, toFamilyResponse(family))
+	writeJSON(w, http.StatusOK, toFamilyResponse(r, family))
 }
 
 // AddStudents handles POST /api/v1/families/{familyId}/students.
@@ -422,7 +458,7 @@ func (h *FamiliesHandler) AddStudents(w http.ResponseWriter, r *http.Request) {
 		writeConnectError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, toFamilyResponse(family))
+	writeJSON(w, http.StatusOK, toFamilyResponse(r, family))
 }
 
 // RemoveStudent handles DELETE /api/v1/families/{familyId}/students/{studentId}.
@@ -445,7 +481,7 @@ func (h *FamiliesHandler) RemoveStudent(w http.ResponseWriter, r *http.Request) 
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	writeJSON(w, http.StatusOK, toFamilyResponse(family))
+	writeJSON(w, http.StatusOK, toFamilyResponse(r, family))
 }
 
 // Dissolve handles DELETE /api/v1/families/{familyId}.
@@ -541,7 +577,7 @@ func decodeStudentIDs(w http.ResponseWriter, r *http.Request, minIDs int) (famil
 		return req, false
 	}
 	if len(req.StudentIDs) < minIDs || len(req.StudentIDs) > maxFamilyPupils {
-		http.Error(w, "studentIds must hold between 1 and 20 pupils (2 to dismiss a suggestion)", http.StatusBadRequest)
+		http.Error(w, fmt.Sprintf("studentIds must hold between %d and %d pupils", minIDs, maxFamilyPupils), http.StatusBadRequest)
 		return req, false
 	}
 	for i, raw := range req.StudentIDs {
