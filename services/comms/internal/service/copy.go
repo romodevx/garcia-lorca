@@ -16,7 +16,10 @@ const fallbackStudentName = "Tu hijo(a)"
 const (
 	dataType      = "type"
 	dataStudentID = "studentId"
-	dataDate      = "date"
+	// dataStudentIDs lists, comma separated, every child one announcement push
+	// stands for: a parent is buzzed once for all of them (ADR 0041 D4).
+	dataStudentIDs = "studentIds"
+	dataDate       = "date"
 	// dataReportCardID opens the issued report card (T7).
 	dataReportCardID = "reportCardId"
 )

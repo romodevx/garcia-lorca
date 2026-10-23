@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
@@ -51,6 +52,7 @@ func (s *CommsService) Announce(ctx context.Context, a Announcement) (int, error
 	}
 
 	created := 0
+	var reached []Notification
 	for _, studentID := range a.StudentIDs {
 		n := Notification{
 			ID:        s.newID(),
@@ -65,15 +67,101 @@ func (s *CommsService) Announce(ctx context.Context, a Announcement) (int, error
 		// still hear it.
 		stored, isNew, err := s.repo.RecordEvent(ctx, announcementKey(a.Key, studentID), n)
 		if err != nil {
+			s.pushAnnouncement(ctx, reached)
 			return created, err
 		}
 		if !isNew {
 			continue
 		}
 		created++
-		s.push(ctx, stored, map[string]string{dataType: typeAnnouncement, dataStudentID: studentID})
+		reached = append(reached, stored)
 	}
+	s.pushAnnouncement(ctx, reached)
 	return created, nil
+}
+
+// pushAnnouncement buzzes each guardian of the newly notified pupils ONCE, no
+// matter how many of their children the announcement reached (ADR 0041 D4): a
+// parent with three children must not hear the same junta three times.
+//
+// It only sees the pupils THIS call recorded. A send cut off halfway and
+// resumed later therefore pushes again for the children the first attempt did
+// not reach, which can buzz a parent a second time; ADR 0041 accepts that,
+// because losing the announcement is worse than hearing it twice.
+//
+// Guardians are resolved per pupil (students exposes no batched read; the call
+// is bounded by the audience the gateway capped), devices in ONE batched read.
+// Best-effort throughout: a failed lookup skips that pupil loudly and never
+// widens the audience, and a failed push never fails the announcement.
+func (s *CommsService) pushAnnouncement(ctx context.Context, reached []Notification) {
+	if s.sender == nil || len(reached) == 0 {
+		return
+	}
+	if s.guardians == nil {
+		s.log.Warn("comms cannot target a push without a guardian reader",
+			slog.String("notification_id", reached[0].ID))
+		return
+	}
+	order, children := s.guardiansOf(ctx, reached)
+	if len(order) == 0 {
+		return
+	}
+	devices, err := s.repo.DevicesForUsers(ctx, order)
+	if err != nil {
+		s.log.Warn("comms could not resolve push targets",
+			slog.String("notification_id", reached[0].ID),
+			slog.Any("error", err))
+		return
+	}
+	tokens := make(map[string][]string, len(order))
+	for _, d := range devices {
+		tokens[d.UserID] = append(tokens[d.UserID], d.FCMToken)
+	}
+	for _, guardianID := range order {
+		kids := children[guardianID]
+		if len(tokens[guardianID]) == 0 {
+			continue
+		}
+		data := map[string]string{
+			dataType:       typeAnnouncement,
+			dataStudentID:  kids[0].StudentID,
+			dataStudentIDs: joinStudentIDs(kids),
+		}
+		s.deliver(ctx, kids[0], tokens[guardianID], data)
+	}
+}
+
+// guardiansOf maps each guardian of the reached pupils to the notifications of
+// their children, both in audience order so the push payload is deterministic.
+func (s *CommsService) guardiansOf(ctx context.Context, reached []Notification) ([]string, map[string][]Notification) {
+	var order []string
+	children := map[string][]Notification{}
+	for _, n := range reached {
+		guardianIDs, err := s.guardians.GuardiansForStudent(ctx, n.StudentID)
+		if err != nil {
+			s.log.Warn("comms could not resolve the student's guardians",
+				slog.String("notification_id", n.ID),
+				slog.String("student_id", n.StudentID),
+				slog.Any("error", err))
+			continue
+		}
+		for _, g := range guardianIDs {
+			if _, seen := children[g]; !seen {
+				order = append(order, g)
+			}
+			children[g] = append(children[g], n)
+		}
+	}
+	return order, children
+}
+
+// joinStudentIDs is the comma list of the pupils one push stands for.
+func joinStudentIDs(ns []Notification) string {
+	ids := make([]string, len(ns))
+	for i, n := range ns {
+		ids[i] = n.StudentID
+	}
+	return strings.Join(ids, ",")
 }
 
 // announcementKey is the ledger key for one pupil's copy of an announcement.

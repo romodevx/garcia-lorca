@@ -496,6 +496,13 @@ func (s *CommsService) pushTo(ctx context.Context, n Notification, guardianIDs [
 	for _, d := range devices {
 		tokens = append(tokens, d.FCMToken)
 	}
+	s.deliver(ctx, n, tokens, data)
+}
+
+// deliver sends n to tokens and books what the provider answered: dead devices
+// deactivated, accepted tickets stored for the receipt sweep. Best-effort like
+// push: every failure is logged, never returned.
+func (s *CommsService) deliver(ctx context.Context, n Notification, tokens []string, data map[string]string) {
 	report, err := s.sender.Push(ctx, PushMessage{Tokens: tokens, Title: n.Title, Body: n.Body, Data: data})
 	if err != nil {
 		s.log.Warn("comms push not delivered",

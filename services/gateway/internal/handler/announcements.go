@@ -2,8 +2,12 @@ package handler
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"strings"
+
+	"connectrpc.com/connect"
 
 	"github.com/garcia-lorca/services/gateway/internal/client"
 )
@@ -17,6 +21,20 @@ const (
 	// scopeStudent is one pupil: the note that goes to one family and nobody
 	// else. A school sends more of these than it sends circulars.
 	scopeStudent = "student"
+	// scopeFamily is every current pupil of the named families (ADR 0041), only
+	// while module_families is on.
+	scopeFamily = "family"
+)
+
+// maxAnnouncementFamilies bounds one family announcement: each family is one
+// students read, and fifty is far more than the office picks by hand.
+const maxAnnouncementFamilies = 50
+
+// The admission statuses that take a pupil out of a family audience: one who
+// left, or was never admitted, is not a family's child at this school any more.
+const (
+	admissionWithdrawn = "withdrawn"
+	admissionRejected  = "rejected"
 )
 
 // Announcer sends one message to many families. The audience is a list of
@@ -47,16 +65,42 @@ type AnnouncementHandler struct {
 	comms       Announcer
 	enrollments EnrollmentReader
 	groups      GroupReader
+	families    familyAudience
+}
+
+// AnnouncementOption configures optional audiences of the announcement edge.
+type AnnouncementOption func(*AnnouncementHandler)
+
+// familyAudience resolves the "family" scope while enabled says
+// module_families is on. The zero value is off.
+type familyAudience struct {
+	enabled func(context.Context) bool
+	pupils  FamilyStudentsLister
+}
+
+func (f familyAudience) on(ctx context.Context) bool {
+	return f.enabled != nil && f.pupils != nil && f.enabled(ctx)
+}
+
+// WithFamilyAudience lets an announcement address families (ADR 0041) while
+// enabled reports module_families on. Off, the scope is refused with 400 and
+// every other scope is unchanged.
+func WithFamilyAudience(enabled func(context.Context) bool, pupils FamilyStudentsLister) AnnouncementOption {
+	return func(h *AnnouncementHandler) { h.families = familyAudience{enabled: enabled, pupils: pupils} }
 }
 
 // NewAnnouncementHandler wires the edge to comms plus the two readers it needs
 // to work out an audience.
-func NewAnnouncementHandler(comms Announcer, enrollments EnrollmentReader, groups GroupReader) *AnnouncementHandler {
-	return &AnnouncementHandler{comms: comms, enrollments: enrollments, groups: groups}
+func NewAnnouncementHandler(comms Announcer, enrollments EnrollmentReader, groups GroupReader, opts ...AnnouncementOption) *AnnouncementHandler {
+	h := &AnnouncementHandler{comms: comms, enrollments: enrollments, groups: groups}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h
 }
 
 type announceRequest struct {
-	// Scope is group | level | cycle.
+	// Scope is student | group | level | cycle | family.
 	Scope string `json:"scope"`
 	// TargetID is the group, level or pupil. Unused for a whole-cycle
 	// announcement, and ignored when TargetIDs carries a list.
@@ -89,7 +133,7 @@ func (h *AnnouncementHandler) Announce(w http.ResponseWriter, r *http.Request) {
 
 	audience, err := h.audienceOf(r.Context(), req)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeAudienceError(w, err)
 		return
 	}
 	if len(audience) == 0 {
@@ -108,6 +152,17 @@ func (h *AnnouncementHandler) Announce(w http.ResponseWriter, r *http.Request) {
 		"created":  created,
 		"audience": len(audience),
 	})
+}
+
+// writeAudienceError answers an audience the request got wrong with 400 and
+// its sentence; a service that did not answer is a downstream failure.
+func writeAudienceError(w http.ResponseWriter, err error) {
+	var connectErr *connect.Error
+	if errors.As(err, &connectErr) {
+		writeConnectError(w, err)
+		return
+	}
+	http.Error(w, err.Error(), http.StatusBadRequest)
 }
 
 // audienceOf turns a scope into the pupils it names.
@@ -131,6 +186,8 @@ func (h *AnnouncementHandler) audienceOf(ctx context.Context, req announceReques
 			groupIDs = append(groupIDs, ids...)
 		}
 		return h.studentsOfGroups(ctx, req.CycleID, groupIDs)
+	case scopeFamily:
+		return h.studentsOfFamilies(ctx, targets(req))
 	default:
 		return nil, errUnknownScope
 	}
@@ -206,10 +263,65 @@ func (h *AnnouncementHandler) studentsOfGroups(ctx context.Context, cycleID stri
 	return out, nil
 }
 
+// studentsOfFamilies collects the current pupils of the given families, each
+// once, in the order the families were named and, inside one, in the family's
+// own order. A withdrawn or rejected pupil is left out, exactly as a group
+// leaves out the pupil who left mid-year.
+func (h *AnnouncementHandler) studentsOfFamilies(ctx context.Context, rawIDs []string) ([]string, error) {
+	if !h.families.on(ctx) {
+		return nil, errAudience("families are not enabled")
+	}
+	familyIDs, err := familyTargets(rawIDs)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, familyID := range familyIDs {
+		pupils, lerr := h.families.pupils.ListStudentsInFamily(ctx, familyID, "")
+		if lerr != nil {
+			return nil, lerr
+		}
+		for _, p := range pupils {
+			if p.AdmissionStatus == admissionWithdrawn || p.AdmissionStatus == admissionRejected || seen[p.ID] {
+				continue
+			}
+			seen[p.ID] = true
+			out = append(out, p.ID)
+		}
+	}
+	return out, nil
+}
+
+// familyTargets validates and canonicalises the family ids before any read:
+// at least one, at most maxAnnouncementFamilies, each a uuid.
+func familyTargets(rawIDs []string) ([]string, error) {
+	if len(rawIDs) == 0 {
+		return nil, errAudience("targetIds must name at least one family")
+	}
+	if len(rawIDs) > maxAnnouncementFamilies {
+		return nil, errAudience(fmt.Sprintf("an announcement addresses at most %d families", maxAnnouncementFamilies))
+	}
+	ids := make([]string, 0, len(rawIDs))
+	for _, raw := range rawIDs {
+		id, ok := canonicalUUID(strings.TrimSpace(raw))
+		if !ok {
+			return nil, errAudience("targetIds must be family ids")
+		}
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
+// errAudience is a request whose audience cannot be resolved as written.
+type errAudience string
+
+func (e errAudience) Error() string { return string(e) }
+
 // errUnknownScope is a typo at the call site. It matters that it is refused:
 // a scope nobody recognises must never fall through to "everybody".
 var errUnknownScope = &scopeError{}
 
 type scopeError struct{}
 
-func (*scopeError) Error() string { return "scope must be group, level or cycle" }
+func (*scopeError) Error() string { return "scope must be student, group, level, cycle or family" }

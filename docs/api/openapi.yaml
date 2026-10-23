@@ -2576,6 +2576,14 @@ paths:
         does not know who its pupils are.
 
 
+        With scope `family` (ADR 0041, only while module_families is on;
+        otherwise 400 "families are not enabled") the audience is every pupil of
+        the named families (at most 50) who has not been withdrawn or rejected,
+        each once. Every child's feed shows the announcement, but a guardian's
+        phone is pushed once per announcement, however many of their children
+        it reached.
+
+
         The audience is resolved here at the edge, because config and students
         already answer "who is in 1° A". Comms receives a list of pupils and does
         not know what a group is.
@@ -2595,25 +2603,45 @@ paths:
               type: object
               required: [scope, cycleId, title, body, idempotencyKey]
               properties:
-                scope: { type: string, enum: [student, group, level, cycle] }
+                scope: { type: string, enum: [student, group, level, cycle, family] }
                 targetId:
                   type: string
                   format: uuid
                   description: >
-                    The pupil, group or level. Unused for a whole-cycle
+                    The pupil, group, level or family. Unused for a whole-cycle
                     announcement, and ignored when targetIds carries a list.
                 targetIds:
                   type: array
                   items: { type: string, format: uuid }
                   description: >
-                    Several groups (or levels) at once — "1° A y 1° B" is one
-                    message the school writes once, not two it writes twice and
-                    sends at different times. A pupil in two of them hears it
-                    once.
+                    Several groups (or levels, or families) at once — "1° A y
+                    1° B" is one message the school writes once, not two it
+                    writes twice and sends at different times. A pupil in two of
+                    them hears it once. A family announcement names 1 to 50
+                    families.
                 cycleId: { type: string, format: uuid }
                 title: { type: string, minLength: 1 }
                 body: { type: string, minLength: 1 }
                 idempotencyKey: { type: string, minLength: 1 }
+            examples:
+              group:
+                summary: Two groups
+                value:
+                  scope: group
+                  targetIds: [3f1c2a9e-5b7d-4c11-9e2a-6d8f0b4a1c21, 3f1c2a9e-5b7d-4c11-9e2a-6d8f0b4a1c22]
+                  cycleId: 7a2b4c6d-8e0f-4a1b-9c3d-5e7f9a1b3c5d
+                  title: Junta de padres
+                  body: Jueves 8:00 en el auditorio.
+                  idempotencyKey: junta-2026-10-23
+              family:
+                summary: Two families (module_families on)
+                value:
+                  scope: family
+                  targetIds: [0b1e5f0a-2c4d-4e6f-8a0b-1c3d5e7f9a01, 0b1e5f0a-2c4d-4e6f-8a0b-1c3d5e7f9a02]
+                  cycleId: 7a2b4c6d-8e0f-4a1b-9c3d-5e7f9a1b3c5d
+                  title: Entrega de boletas
+                  body: El viernes se entregan las boletas del primer periodo.
+                  idempotencyKey: boletas-familias-2026-10-23
       responses:
         '201':
           description: Sent.
@@ -2633,7 +2661,9 @@ paths:
                     description: How many pupils the scope named.
         '400':
           description: >
-            A malformed body, an unknown scope, or an audience of nobody. An
+            A malformed body, an unknown scope, a family scope while
+            module_families is off, a family id that is not a uuid, more than
+            50 families, or an audience of nobody. An
             empty audience is refused rather than reported as sent — otherwise
             the office believes a message went out that never did.
         '401': { $ref: '#/components/responses/Unauthorized' }

@@ -214,12 +214,22 @@ type spySender struct {
 	data   map[string]string
 	report service.PushReport // what the provider "answers"
 	err    error
+	// messages keeps every push in order, for the paths that send more than one.
+	messages []service.PushMessage
+	// failFor makes only the push carrying this token fail.
+	failFor string
 }
 
 func (s *spySender) Push(_ context.Context, m service.PushMessage) (service.PushReport, error) {
 	s.calls++
 	s.tokens = append([]string(nil), m.Tokens...)
 	s.title, s.body, s.data = m.Title, m.Body, m.Data
+	s.messages = append(s.messages, m)
+	for _, tok := range m.Tokens {
+		if s.failFor != "" && tok == s.failFor {
+			return service.PushReport{}, errors.New("provider refused this batch")
+		}
+	}
 	return s.report, s.err
 }
 
