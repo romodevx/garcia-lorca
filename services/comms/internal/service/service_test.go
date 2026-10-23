@@ -58,6 +58,7 @@ type fakeRepo struct {
 	deviceCalls   int
 	lastListArgs  [2]string // studentID, "unread"|"all"
 	lastDeviceIDs []string  // the user ids the last device lookup was scoped to
+	maxDeviceIDs  int       // the most user ids any one device lookup asked for
 
 	recordErr  error
 	devicesErr error
@@ -165,6 +166,7 @@ func (f *fakeRepo) UpsertDevice(_ context.Context, d service.Device) (service.De
 func (f *fakeRepo) DevicesForUsers(_ context.Context, userIDs []string) ([]service.Device, error) {
 	f.deviceCalls++
 	f.lastDeviceIDs = append([]string(nil), userIDs...)
+	f.maxDeviceIDs = max(f.maxDeviceIDs, len(userIDs))
 	if f.devicesErr != nil {
 		return nil, f.devicesErr
 	}
@@ -174,12 +176,16 @@ func (f *fakeRepo) DevicesForUsers(_ context.Context, userIDs []string) ([]servi
 	}
 	out := make([]service.Device, 0, len(userIDs))
 	for _, d := range f.devices {
-		if wanted[d.UserID] {
+		if wanted[d.UserID] && len(out) < fakeDeviceReadCap {
 			out = append(out, d)
 		}
 	}
 	return out, nil
 }
+
+// fakeDeviceReadCap mirrors the real repo's silent maxListLimit on
+// DevicesForUsers: a caller asking for more devices than this loses the rest.
+const fakeDeviceReadCap = 500
 
 // fakeGuardians is the students bounded context as comms sees it: which users are
 // a given student's guardians. It records how often it was asked and can be made

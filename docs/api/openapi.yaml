@@ -2578,8 +2578,10 @@ paths:
 
         With scope `family` (ADR 0041, only while module_families is on;
         otherwise 400 "families are not enabled") the audience is every pupil of
-        the named families (at most 50) who has not been withdrawn or rejected,
-        each once. Every child's feed shows the announcement, but a guardian's
+        the named families (at most 50) whose admission is pending, accepted or
+        enrolled, each once: withdrawn and rejected pupils are left out, and so
+        are drafts (unconfirmed imports, which have no accounts and are not
+        attending). Every child's feed shows the announcement, but a guardian's
         phone is pushed once per announcement, however many of their children
         it reached.
 

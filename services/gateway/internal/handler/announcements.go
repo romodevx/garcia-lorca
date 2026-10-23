@@ -30,12 +30,12 @@ const (
 // students read, and fifty is far more than the office picks by hand.
 const maxAnnouncementFamilies = 50
 
-// The admission statuses that take a pupil out of a family audience: one who
-// left, or was never admitted, is not a family's child at this school any more.
-const (
-	admissionWithdrawn = "withdrawn"
-	admissionRejected  = "rejected"
-)
+// familyAudienceStatuses are the admission statuses a family announcement
+// reaches: pupils on their way in or attending. Withdrawn and rejected pupils
+// are not the school's any more, and a draft is an unconfirmed import that has
+// no accounts and is not attending. An allow-list, so a status added later is
+// left out until someone decides it belongs.
+var familyAudienceStatuses = map[string]bool{"pending": true, "accepted": true, "enrolled": true}
 
 // Announcer sends one message to many families. The audience is a list of
 // pupils: comms does not know what a group is, on purpose.
@@ -154,15 +154,23 @@ func (h *AnnouncementHandler) Announce(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// writeAudienceError answers an audience the request got wrong with 400 and
-// its sentence; a service that did not answer is a downstream failure.
+// writeAudienceError answers an audience the request got wrong (this file's
+// own sentences) with 400, a downstream Connect failure as that service
+// answered it, and anything else as a generic 500: its wording is internal.
 func writeAudienceError(w http.ResponseWriter, err error) {
-	var connectErr *connect.Error
-	if errors.As(err, &connectErr) {
+	var (
+		audienceErr errAudience
+		scopeErr    *scopeError
+		connectErr  *connect.Error
+	)
+	switch {
+	case errors.As(err, &audienceErr), errors.As(err, &scopeErr):
+		http.Error(w, err.Error(), http.StatusBadRequest)
+	case errors.As(err, &connectErr):
 		writeConnectError(w, err)
-		return
+	default:
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 	}
-	http.Error(w, err.Error(), http.StatusBadRequest)
 }
 
 // audienceOf turns a scope into the pupils it names.
@@ -265,8 +273,8 @@ func (h *AnnouncementHandler) studentsOfGroups(ctx context.Context, cycleID stri
 
 // studentsOfFamilies collects the current pupils of the given families, each
 // once, in the order the families were named and, inside one, in the family's
-// own order. A withdrawn or rejected pupil is left out, exactly as a group
-// leaves out the pupil who left mid-year.
+// own order. Only familyAudienceStatuses are kept, exactly as a group leaves
+// out the pupil who left mid-year.
 func (h *AnnouncementHandler) studentsOfFamilies(ctx context.Context, rawIDs []string) ([]string, error) {
 	if !h.families.on(ctx) {
 		return nil, errAudience("families are not enabled")
@@ -283,7 +291,7 @@ func (h *AnnouncementHandler) studentsOfFamilies(ctx context.Context, rawIDs []s
 			return nil, lerr
 		}
 		for _, p := range pupils {
-			if p.AdmissionStatus == admissionWithdrawn || p.AdmissionStatus == admissionRejected || seen[p.ID] {
+			if !familyAudienceStatuses[p.AdmissionStatus] || p.Draft || seen[p.ID] {
 				continue
 			}
 			seen[p.ID] = true

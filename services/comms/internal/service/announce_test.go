@@ -3,6 +3,7 @@ package service_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -348,4 +349,82 @@ func (f *failOnNthRecord) RecordEvent(ctx context.Context, key string, n service
 		return service.Notification{}, false, errors.New("store unavailable")
 	}
 	return f.fakeRepo.RecordEvent(ctx, key, n)
+}
+
+// A whole-cycle send reaches more guardians than one device read returns (the
+// repo caps it at 500 rows): every guardian must still be pushed.
+func TestAnnouncePushesEveryGuardianBeyondOneDeviceRead(t *testing.T) {
+	const families = 600
+	repo := newFakeRepo()
+	links := map[string][]string{}
+	pupils := make([]string, 0, families)
+	for i := range families {
+		pupil, guardian := fmt.Sprintf("pupil-%03d", i), fmt.Sprintf("guardian-%03d", i)
+		pupils = append(pupils, pupil)
+		links[pupil] = []string{guardian}
+		repo.devices = append(repo.devices, service.Device{ID: "dev-" + guardian, UserID: guardian, FCMToken: "tok-" + guardian})
+	}
+	sender := &spySender{}
+	svc, _ := newService(t, repo, &fakeGuardians{links: links}, sender)
+
+	if _, err := svc.Announce(context.Background(), service.Announcement{
+		StudentIDs: pupils, Title: "Junta", Body: "Jueves.", Key: "ann-1",
+	}); err != nil {
+		t.Fatalf("Announce: %v", err)
+	}
+	if sender.calls != families {
+		t.Errorf("pushed %d guardians, want all %d", sender.calls, families)
+	}
+	if repo.maxDeviceIDs > 100 {
+		t.Errorf("one device read asked for %d guardians, want chunks of at most 100", repo.maxDeviceIDs)
+	}
+}
+
+// deadlineRepo fails the n-th claim the way a request past its deadline does.
+type deadlineRepo struct {
+	*fakeRepo
+	n, calls int
+	cancel   context.CancelFunc
+}
+
+func (f *deadlineRepo) RecordEvent(ctx context.Context, key string, n service.Notification) (service.Notification, bool, error) {
+	f.calls++
+	if f.calls == f.n {
+		f.cancel()
+		return service.Notification{}, false, context.DeadlineExceeded
+	}
+	return f.fakeRepo.RecordEvent(ctx, key, n)
+}
+
+// ctxCheckingSender refuses to push on a dead context, like a real HTTP client.
+type ctxCheckingSender struct{ spySender }
+
+func (s *ctxCheckingSender) Push(ctx context.Context, m service.PushMessage) (service.PushReport, error) {
+	if err := ctx.Err(); err != nil {
+		return service.PushReport{}, err
+	}
+	return s.spySender.Push(ctx, m)
+}
+
+// The request dying mid-send must not take the pushes of the pupils already
+// recorded with it: their keys are claimed, so the retry will never push them.
+func TestAnnounceDeadlineMidSendStillPushesThoseRecorded(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	repo := &deadlineRepo{fakeRepo: newFakeRepo(), n: 2, cancel: cancel}
+	repo.devices = []service.Device{{ID: "dev-1", UserID: userID, FCMToken: "tok-1"}}
+	sender := &ctxCheckingSender{}
+	svc, _ := newService(t, repo, &fakeGuardians{links: map[string][]string{
+		studentID: {userID}, secondStudentID: {userID},
+	}}, sender)
+
+	_, err := svc.Announce(ctx, service.Announcement{
+		StudentIDs: []string{studentID, secondStudentID}, Title: "Junta", Body: "Jueves.", Key: "ann-1",
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v, want the deadline", err)
+	}
+	if sender.calls != 1 || sender.messages[0].Data["studentIds"] != studentID {
+		t.Errorf("pushes = %+v, want one for the pupil recorded before the deadline", sender.messages)
+	}
 }

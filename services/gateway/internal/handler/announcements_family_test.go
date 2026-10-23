@@ -185,3 +185,66 @@ func TestAnnounceToFamilyReportsAnOutageAsAnOutage(t *testing.T) {
 		t.Errorf("sent to %v during an outage", comms.studentIDs)
 	}
 }
+
+// Drafts are imported records the school has not confirmed: they have no
+// accounts and are not attending, so a family announcement leaves them out.
+func TestAnnounceToFamilyLeavesOutDrafts(t *testing.T) {
+	comms := &fakeAnnouncer{created: 1}
+	audience := &fakeAudience{}
+	pupils := &familyPupils{byFamily: map[string][]client.StudentResult{annFamA: {
+		{ID: "s1", AdmissionStatus: "pending"},
+		{ID: "s2", AdmissionStatus: "draft"},
+		{ID: "s3", AdmissionStatus: "accepted"},
+		{ID: "s4", AdmissionStatus: "enrolled"},
+		{ID: "s5", AdmissionStatus: ""},
+	}}}
+	on := func(context.Context) bool { return true }
+	h := handler.NewAnnouncementHandler(comms, audience, audience, handler.WithFamilyAudience(on, pupils))
+
+	rec := doReq(t, h.Announce, http.MethodPost, "/api/v1/comms/announcements", familyBody(annFamA))
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if want := []string{"s1", "s3", "s4"}; !slices.Equal(comms.studentIDs, want) {
+		t.Errorf("audience = %v, want only pending/accepted/enrolled %v", comms.studentIDs, want)
+	}
+}
+
+// plainFailure is a reader failing with an error that is neither a downstream
+// Connect error nor an audience sentence (e.g. the client's page cap).
+type plainFailure struct{}
+
+func (plainFailure) ListStudentsInFamily(context.Context, string, string) ([]client.StudentResult, error) {
+	return nil, errors.New("students list exceeded 40 pages for family 0b1e…")
+}
+
+// Only the handler's own audience sentences are a 400. Any other failure is a
+// 500 with a generic text: its wording is internal, not the office's mistake.
+func TestAnnounceInternalFailureIsA500WithoutItsText(t *testing.T) {
+	comms := &fakeAnnouncer{created: 1}
+	audience := &fakeAudience{}
+	on := func(context.Context) bool { return true }
+	h := handler.NewAnnouncementHandler(comms, audience, audience, handler.WithFamilyAudience(on, plainFailure{}))
+
+	rec := doReq(t, h.Announce, http.MethodPost, "/api/v1/comms/announcements", familyBody(annFamA))
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), "pages") {
+		t.Errorf("body leaks the internal error: %s", rec.Body.String())
+	}
+}
+
+// An unknown scope is still the caller's mistake, answered 400 with its sentence.
+func TestAnnounceUnknownScopeStaysA400(t *testing.T) {
+	h, _, _ := newFamilyAnnouncementHandler(true)
+
+	rec := doReq(t, h.Announce, http.MethodPost, "/api/v1/comms/announcements",
+		`{"scope":"everybody","cycleId":"c1","title":"Junta","body":"Jueves","idempotencyKey":"k1"}`)
+
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "scope must be") {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+}

@@ -4,9 +4,22 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
+	"time"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
+)
+
+const (
+	// guardianChunk is how many guardians one device read asks for. It keeps the
+	// read far below the repository's 500-row cap even when a parent has a few
+	// phones; a larger chunk would silently drop the guardians past the cap.
+	guardianChunk = 100
+	// pushBudget bounds the announcement pushes once they are detached from the
+	// request that started them. The pushes run one after another, so it must
+	// cover a whole-cycle send (hundreds of guardians), not one push.
+	pushBudget = 2 * time.Minute
 )
 
 // typeAnnouncement is what the client switches on to draw an announcement: a
@@ -89,14 +102,25 @@ func (s *CommsService) Announce(ctx context.Context, a Announcement) (int, error
 // not reach, which can buzz a parent a second time; ADR 0041 accepts that,
 // because losing the announcement is worse than hearing it twice.
 //
-// Guardians are resolved per pupil (students exposes no batched read; the call
-// is bounded by the audience the gateway capped), devices in ONE batched read.
-// Best-effort throughout: a failed lookup skips that pupil loudly and never
-// widens the audience, and a failed push never fails the announcement.
+// Guardians are resolved one students call per newly notified pupil (students
+// exposes no batched read), so the bound is the audience size: a whole-cycle
+// send is one call per enrolled pupil; only the family scope is capped at the
+// edge. Devices are read in chunks of guardianChunk users, because the device
+// read silently stops at the repository's row cap (500) and a whole-cycle send
+// reaches more guardians than that.
+//
+// The pushes run on their own pushBudget, detached from the request: when the
+// loop stopped because the request's deadline passed, the pupils it had
+// already recorded are claimed, a retry skips them, and this is their only push.
+//
+// Best-effort throughout: a failed lookup skips that pupil (or chunk) loudly and
+// never widens the audience, and a failed push never fails the announcement.
 func (s *CommsService) pushAnnouncement(ctx context.Context, reached []Notification) {
 	if s.sender == nil || len(reached) == 0 {
 		return
 	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), pushBudget)
+	defer cancel()
 	if s.guardians == nil {
 		s.log.Warn("comms cannot target a push without a guardian reader",
 			slog.String("notification_id", reached[0].ID))
@@ -106,18 +130,27 @@ func (s *CommsService) pushAnnouncement(ctx context.Context, reached []Notificat
 	if len(order) == 0 {
 		return
 	}
-	devices, err := s.repo.DevicesForUsers(ctx, order)
+	for chunk := range slices.Chunk(order, guardianChunk) {
+		s.pushGuardians(ctx, chunk, children)
+	}
+}
+
+// pushGuardians reads the devices of one chunk of guardians and pushes each of
+// them once, naming the children of theirs the announcement reached.
+func (s *CommsService) pushGuardians(ctx context.Context, guardianIDs []string, children map[string][]Notification) {
+	devices, err := s.repo.DevicesForUsers(ctx, guardianIDs)
 	if err != nil {
 		s.log.Warn("comms could not resolve push targets",
-			slog.String("notification_id", reached[0].ID),
+			slog.String("notification_id", children[guardianIDs[0]][0].ID),
+			slog.Int("guardian_count", len(guardianIDs)),
 			slog.Any("error", err))
 		return
 	}
-	tokens := make(map[string][]string, len(order))
+	tokens := make(map[string][]string, len(guardianIDs))
 	for _, d := range devices {
 		tokens[d.UserID] = append(tokens[d.UserID], d.FCMToken)
 	}
-	for _, guardianID := range order {
+	for _, guardianID := range guardianIDs {
 		kids := children[guardianID]
 		if len(tokens[guardianID]) == 0 {
 			continue
