@@ -58,6 +58,7 @@ type fakeRepo struct {
 	deviceCalls   int
 	lastListArgs  [2]string // studentID, "unread"|"all"
 	lastDeviceIDs []string  // the user ids the last device lookup was scoped to
+	maxDeviceIDs  int       // the most user ids any one device lookup asked for
 
 	recordErr  error
 	devicesErr error
@@ -165,6 +166,7 @@ func (f *fakeRepo) UpsertDevice(_ context.Context, d service.Device) (service.De
 func (f *fakeRepo) DevicesForUsers(_ context.Context, userIDs []string) ([]service.Device, error) {
 	f.deviceCalls++
 	f.lastDeviceIDs = append([]string(nil), userIDs...)
+	f.maxDeviceIDs = max(f.maxDeviceIDs, len(userIDs))
 	if f.devicesErr != nil {
 		return nil, f.devicesErr
 	}
@@ -174,12 +176,16 @@ func (f *fakeRepo) DevicesForUsers(_ context.Context, userIDs []string) ([]servi
 	}
 	out := make([]service.Device, 0, len(userIDs))
 	for _, d := range f.devices {
-		if wanted[d.UserID] {
+		if wanted[d.UserID] && len(out) < fakeDeviceReadCap {
 			out = append(out, d)
 		}
 	}
 	return out, nil
 }
+
+// fakeDeviceReadCap mirrors the real repo's silent maxListLimit on
+// DevicesForUsers: a caller asking for more devices than this loses the rest.
+const fakeDeviceReadCap = 500
 
 // fakeGuardians is the students bounded context as comms sees it: which users are
 // a given student's guardians. It records how often it was asked and can be made
@@ -214,12 +220,22 @@ type spySender struct {
 	data   map[string]string
 	report service.PushReport // what the provider "answers"
 	err    error
+	// messages keeps every push in order, for the paths that send more than one.
+	messages []service.PushMessage
+	// failFor makes only the push carrying this token fail.
+	failFor string
 }
 
 func (s *spySender) Push(_ context.Context, m service.PushMessage) (service.PushReport, error) {
 	s.calls++
 	s.tokens = append([]string(nil), m.Tokens...)
 	s.title, s.body, s.data = m.Title, m.Body, m.Data
+	s.messages = append(s.messages, m)
+	for _, tok := range m.Tokens {
+		if s.failFor != "" && tok == s.failFor {
+			return service.PushReport{}, errors.New("provider refused this batch")
+		}
+	}
 	return s.report, s.err
 }
 

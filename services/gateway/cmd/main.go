@@ -979,7 +979,13 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	// An announcement is a comms write, but the audience is resolved here at the
 	// edge: config and students already answer "who is in 1° A", and comms
 	// deliberately does not know what a group is.
-	announcementsH := handler.NewAnnouncementHandler(commsClient, studentsClient, configClient)
+	// ADR 0041 (T5): scope "family" reads students, so it needs module_students
+	// as well as module_families; either off ⇒ that scope is refused with 400.
+	familyAudienceOn := func(ctx context.Context) bool {
+		return flags.Enabled(ctx, featureflag.Key("students")) && familiesOn(ctx)
+	}
+	announcementsH := handler.NewAnnouncementHandler(commsClient, studentsClient, configClient,
+		handler.WithFamilyAudience(familyAudienceOn, studentsClient))
 	mux.Handle("POST /api/v1/comms/announcements", commsWrite(announcementsH.Announce))
 	// T11: the school's birthday greeting. Editing it answers to comms:write —
 	// the permission that already sends announcements, held by the owner and
