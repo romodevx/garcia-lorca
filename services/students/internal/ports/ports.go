@@ -27,6 +27,8 @@ type ListFilter struct {
 	// whatever their admission status except withdrawn or rejected (owner
 	// decision D4).
 	ActiveEnrollment bool
+	// FamilyID narrows the list to the pupils of one family (ADR 0041).
+	FamilyID string
 }
 
 // BirthdayFilter is a calendar day without a year. IncludeFeb29 also matches
@@ -386,4 +388,66 @@ type GroupUsage struct {
 type GroupRecordRepository interface {
 	GroupUsage(ctx context.Context, groupID string) (GroupUsage, error)
 	RefreshGroupName(ctx context.Context, groupID, name string) (int64, error)
+}
+
+// FamilyRepository keeps the families (ADR 0041) and each pupil's membership
+// (students.family_id). All access is tenant-scoped for RLS.
+//
+// LOCKING RULE (T1 writes it, T2 relies on it):
+//   - Every write that changes a family's members locks the family row
+//     (SELECT ... FOR UPDATE) first; Create and Add also lock the pupils' rows
+//     FOR UPDATE, in id order, before the conditional UPDATE of family_id (a
+//     fixed order, so overlapping writes cannot deadlock).
+//   - Every ACCOUNT write on a pupil who may be in a family (T2: grant, revoke,
+//     link) must: read the pupil's family_id unlocked → lock that families row
+//     FOR UPDATE → re-read the students row FOR SHARE → retry if family_id
+//     changed in between. Only then count the family's accounts and write.
+//     That is what makes the "at most two accounts" cap hold under concurrency.
+type FamilyRepository interface {
+	// ListFamilies returns every family, ordered by name, each with its members
+	// (in display order) and its account count.
+	ListFamilies(ctx context.Context) ([]domain.Family, error)
+	// FamilyByID returns one family, or KindNotFound.
+	FamilyByID(ctx context.Context, id string) (domain.Family, error)
+	// CreateFamily stores f and points its pupils at it in ONE transaction. A
+	// pupil that meanwhile joined a family (or left the school) is
+	// KindConflict and nothing is written.
+	CreateFamily(ctx context.Context, f domain.Family) error
+	// RenameFamily sets a family's name; unknown is KindNotFound.
+	RenameFamily(ctx context.Context, id, name string) error
+	// AddStudentsToFamily points pupils without a family at an existing one,
+	// atomically: a pupil already in one is KindConflict and nothing is
+	// written; growing past domain.MaxFamilyPupils is KindInvalid.
+	AddStudentsToFamily(ctx context.Context, familyID string, studentIDs []string) error
+	// RemoveStudentFromFamily takes one pupil out; the last one out deletes the
+	// family (dissolved = true). A pupil not in that family is KindNotFound.
+	RemoveStudentFromFamily(ctx context.Context, familyID, studentID string) (dissolved bool, err error)
+	// DissolveFamily clears every member and deletes the family, one
+	// transaction. Unknown is KindNotFound.
+	DissolveFamily(ctx context.Context, id string) error
+	// SuggestionInputs reads, in one transaction, the pupils without a family
+	// that may join one (neither rejected nor withdrawn) in display order,
+	// their contacts, the dismissed signatures, and the contact values too
+	// common across the whole school to link anyone.
+	SuggestionInputs(ctx context.Context) (SuggestionInputs, error)
+	// DismissSuggestion records "not a family" for a signature. Idempotent: a
+	// signature already dismissed keeps its first record.
+	DismissSuggestion(ctx context.Context, d FamilyDismissal) error
+}
+
+// SuggestionInputs is what domain.SuggestFamilies works on. Common is counted
+// over every pupil still at school, with a family or without.
+type SuggestionInputs struct {
+	Pupils    []domain.SuggestionPupil
+	Contacts  []domain.SuggestionContact
+	Dismissed map[string]bool
+	Common    domain.CommonContactValues
+}
+
+// FamilyDismissal is one "these pupils are not a family" decision.
+// DismissedBy is the deciding user ("" when unknown).
+type FamilyDismissal struct {
+	ID          string
+	Signature   string
+	DismissedBy string
 }

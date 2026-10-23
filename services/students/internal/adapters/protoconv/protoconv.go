@@ -78,3 +78,31 @@ func ToProtoEnrollmentStatus(s domain.EnrollmentStatus) studentsv1.EnrollmentSta
 		return studentsv1.EnrollmentStatus_ENROLLMENT_STATUS_UNSPECIFIED
 	}
 }
+
+// ToProtoSuggestionReason maps a domain family-suggestion reason to the wire.
+func ToProtoSuggestionReason(r domain.SuggestionReason) studentsv1.FamilySuggestionReason {
+	switch r {
+	case domain.ReasonSameSurnames:
+		return studentsv1.FamilySuggestionReason_FAMILY_SUGGESTION_REASON_SAME_SURNAMES
+	case domain.ReasonSharedContactEmail:
+		return studentsv1.FamilySuggestionReason_FAMILY_SUGGESTION_REASON_SHARED_CONTACT_EMAIL
+	case domain.ReasonSharedContactPhone:
+		return studentsv1.FamilySuggestionReason_FAMILY_SUGGESTION_REASON_SHARED_CONTACT_PHONE
+	case domain.ReasonSharedAccount:
+		return studentsv1.FamilySuggestionReason_FAMILY_SUGGESTION_REASON_SHARED_ACCOUNT
+	default:
+		return studentsv1.FamilySuggestionReason_FAMILY_SUGGESTION_REASON_UNSPECIFIED
+	}
+}
+
+// ToProtoSuggestionConfidence maps a domain suggestion confidence to the wire.
+func ToProtoSuggestionConfidence(c domain.SuggestionConfidence) studentsv1.FamilySuggestionConfidence {
+	switch c {
+	case domain.ConfidenceMedium:
+		return studentsv1.FamilySuggestionConfidence_FAMILY_SUGGESTION_CONFIDENCE_MEDIUM
+	case domain.ConfidenceHigh:
+		return studentsv1.FamilySuggestionConfidence_FAMILY_SUGGESTION_CONFIDENCE_HIGH
+	default:
+		return studentsv1.FamilySuggestionConfidence_FAMILY_SUGGESTION_CONFIDENCE_UNSPECIFIED
+	}
+}

@@ -34,7 +34,16 @@ type Student struct {
 	// openIssues counts the pupil's unresolved import issues, as read. It is
 	// a read-side count, never written through the entity.
 	openIssues int
+	// familyID is the pupil's family (ADR 0041), as read; "" when none. Only
+	// the family repository writes the membership, never this entity.
+	familyID string
 }
+
+// AssignFamily records the family the pupil belongs to, as read.
+func (s *Student) AssignFamily(familyID string) { s.familyID = familyID }
+
+// FamilyID is the pupil's family; empty when it has none.
+func (s *Student) FamilyID() string { return s.familyID }
 
 // AssignOpenIssues records how many import issues of the pupil are open.
 func (s *Student) AssignOpenIssues(n int) { s.openIssues = n }

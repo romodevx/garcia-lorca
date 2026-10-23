@@ -448,6 +448,13 @@ func (s *StudentService) ListStudents(ctx context.Context, f ports.ListFilter) (
 	if err := validateStudentIDs(f.IDs); err != nil {
 		return nil, "", err
 	}
+	if f.FamilyID != "" {
+		id, err := canonicalID(f.FamilyID, "family id")
+		if err != nil {
+			return nil, "", err
+		}
+		f.FamilyID = id
+	}
 	if f.Birthday != nil && !isCalendarDay(f.Birthday.Month, f.Birthday.Day) {
 		return nil, "", glerrors.New(glerrors.KindInvalid, "birthday is not a day of the year")
 	}

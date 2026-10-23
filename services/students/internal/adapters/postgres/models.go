@@ -46,8 +46,11 @@ type studentModel struct {
 	// OpenIssues is read-only: the count of open import issues, selected by
 	// the reads that fill it (openIssuesColumn), never written.
 	OpenIssues int `gorm:"column:open_issues;->"`
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	// FamilyID is the pupil's family (migration 0023, ADR 0041), NULL when
+	// none. Read-only here: only family_repository.go writes it, by raw SQL.
+	FamilyID  *string `gorm:"column:family_id;->"`
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 func (studentModel) TableName() string { return "students" }

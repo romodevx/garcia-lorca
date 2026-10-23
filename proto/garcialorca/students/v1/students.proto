@@ -202,6 +202,32 @@ service StudentsService {
   // RefreshGroupName rewrites the group label on the files of the pupils
   // actively enrolled in the group, after config renamed it. Idempotent.
   rpc RefreshGroupName(RefreshGroupNameRequest) returns (RefreshGroupNameResponse);
+
+  // --- families (ADR 0041) ---
+  // A family groups siblings; a pupil belongs to at most one. The family is the
+  // layer that WRITES guardian links consistently (T2); guardian_students stays
+  // the only answer to "which child does this account see".
+  rpc ListFamilies(ListFamiliesRequest) returns (ListFamiliesResponse);
+  // GetFamily answers NotFound for an unknown id.
+  rpc GetFamily(GetFamilyRequest) returns (GetFamilyResponse);
+  // CreateFamily groups pupils that have no family yet (a pupil already in one
+  // is FailedPrecondition). It is how a suggestion is accepted, adjusted or not.
+  rpc CreateFamily(CreateFamilyRequest) returns (CreateFamilyResponse);
+  rpc RenameFamily(RenameFamilyRequest) returns (RenameFamilyResponse);
+  // AddStudentsToFamily adds pupils without a family to an existing one.
+  rpc AddStudentsToFamily(AddStudentsToFamilyRequest) returns (AddStudentsToFamilyResponse);
+  // RemoveStudentFromFamily takes one pupil out. Its guardian links stay: its
+  // parents are still its parents. Removing the last pupil dissolves the family.
+  rpc RemoveStudentFromFamily(RemoveStudentFromFamilyRequest) returns (RemoveStudentFromFamilyResponse);
+  // DissolveFamily leaves every member without a family and touches no link.
+  rpc DissolveFamily(DissolveFamilyRequest) returns (DissolveFamilyResponse);
+  // SuggestFamilies proposes groups of pupils without a family that look like
+  // siblings: same paternal + maternal surname, or a contact in common. A
+  // dismissed group is not proposed again until its members change.
+  rpc SuggestFamilies(SuggestFamiliesRequest) returns (SuggestFamiliesResponse);
+  // DismissFamilySuggestion records "not a family" for exactly these pupils.
+  // Idempotent.
+  rpc DismissFamilySuggestion(DismissFamilySuggestionRequest) returns (DismissFamilySuggestionResponse);
 }
 
 // --- Health ---------------------------------------------------------------
@@ -281,6 +307,8 @@ message Student {
   // draft is admission_status == DRAFT: imported without a valid CURP (curp is
   // then empty).
   bool draft = 19;
+  // family_id is the pupil's family (ADR 0041); empty when it has none.
+  string family_id = 20;
 }
 
 // StudentProfile is what the office keeps up to date by hand.
@@ -505,6 +533,8 @@ message ListStudentsRequest {
   // D4: the birthday greeting reaches every pupil attending, "en trámite"
   // included). false = any.
   bool active_enrollment = 9;
+  // family_id narrows the list to the pupils of one family (empty = any).
+  string family_id = 10;
 }
 
 // BirthdayFilter is a calendar day, without a year. include_feb_29 also matches
@@ -1089,3 +1119,124 @@ message RefreshGroupNameResponse {
   // students is how many pupils' files changed (0 on a repeat).
   int64 students = 1;
 }
+
+// --- families (ADR 0041) ----------------------------------------------------
+
+// Family groups siblings. student_ids is ordered by surname then first name;
+// account_count is how many distinct app accounts are linked to its pupils
+// (at most 2, enforced by the service from T2).
+message Family {
+  string id = 1;
+  string tenant_id = 2;
+  string name = 3;
+  repeated string student_ids = 4;
+  int32 account_count = 5;
+  string created_at = 6;  // RFC 3339
+}
+
+message ListFamiliesRequest {}
+
+message ListFamiliesResponse {
+  // Every family of the school, ordered by name. A school has a few hundred.
+  repeated Family families = 1;
+}
+
+message GetFamilyRequest {
+  string family_id = 1;
+}
+
+message GetFamilyResponse {
+  Family family = 1;
+}
+
+message CreateFamilyRequest {
+  // name is how the office calls the family ("García López"). Empty = the
+  // first pupil's surnames.
+  string name = 1;
+  // At least one pupil, none already in a family, at most 20.
+  repeated string student_ids = 2;
+}
+
+message CreateFamilyResponse {
+  Family family = 1;
+}
+
+message RenameFamilyRequest {
+  string family_id = 1;
+  string name = 2;
+}
+
+message RenameFamilyResponse {
+  Family family = 1;
+}
+
+message AddStudentsToFamilyRequest {
+  string family_id = 1;
+  repeated string student_ids = 2;
+}
+
+message AddStudentsToFamilyResponse {
+  Family family = 1;
+}
+
+message RemoveStudentFromFamilyRequest {
+  string family_id = 1;
+  string student_id = 2;
+}
+
+message RemoveStudentFromFamilyResponse {
+  // family is empty when the last pupil left and the family was dissolved.
+  Family family = 1;
+}
+
+message DissolveFamilyRequest {
+  string family_id = 1;
+}
+
+message DissolveFamilyResponse {}
+
+// FamilySuggestionReason is why a group of pupils looks like one family.
+enum FamilySuggestionReason {
+  FAMILY_SUGGESTION_REASON_UNSPECIFIED = 0;
+  // Same paternal and maternal surname, ignoring accents, case and spaces.
+  FAMILY_SUGGESTION_REASON_SAME_SURNAMES = 1;
+  // A contact of each pupil carries the same email.
+  FAMILY_SUGGESTION_REASON_SHARED_CONTACT_EMAIL = 2;
+  // A contact of each pupil carries the same phone.
+  FAMILY_SUGGESTION_REASON_SHARED_CONTACT_PHONE = 3;
+  // The same app account is already linked to each pupil.
+  FAMILY_SUGGESTION_REASON_SHARED_ACCOUNT = 4;
+}
+
+// FamilySuggestionConfidence: a contact in common is HIGH; surnames alone are
+// MEDIUM (cousins and unrelated families share common surnames).
+enum FamilySuggestionConfidence {
+  FAMILY_SUGGESTION_CONFIDENCE_UNSPECIFIED = 0;
+  FAMILY_SUGGESTION_CONFIDENCE_MEDIUM = 1;
+  FAMILY_SUGGESTION_CONFIDENCE_HIGH = 2;
+}
+
+message FamilySuggestion {
+  // signature identifies exactly these pupils (SHA-256 of the sorted ids, hex).
+  string signature = 1;
+  string proposed_name = 2;
+  repeated string student_ids = 3;
+  repeated FamilySuggestionReason reasons = 4;
+  FamilySuggestionConfidence confidence = 5;
+}
+
+message SuggestFamiliesRequest {}
+
+message SuggestFamiliesResponse {
+  // HIGH first, then by proposed name.
+  repeated FamilySuggestion suggestions = 1;
+}
+
+message DismissFamilySuggestionRequest {
+  // The pupils of the dismissed group; the service computes the signature.
+  repeated string student_ids = 1;
+  // The authenticated caller, set by the gateway — never by a client.
+  string user_id = 2;
+}
+
+message DismissFamilySuggestionResponse {}
