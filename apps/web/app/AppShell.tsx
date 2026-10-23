@@ -697,7 +697,7 @@ export function AppShell(): ReactElement {
         ))}
       {view.screen === "announcements" &&
         (commsEnabled ? (
-          announcementsView ? <AnnouncementsCompose onBack={home} /> : <AnnouncementsScreen onBack={home} />
+          announcementsView ? <AnnouncementsCompose onBack={home} families={familiesEnabled && principal?.permissions?.includes("students:read") === true} /> : <AnnouncementsScreen onBack={home} />
         ) : (
           // Flag OFF: never render the send surface; the friendly stub keeps
           // navigation from dead-ending. (Backend 404 is authoritative.)

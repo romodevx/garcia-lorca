@@ -3,7 +3,7 @@
 import { Fragment, useEffect, useRef, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
 import type { AnnouncementScope } from "../../comms/api";
-import { summarizeRecipients } from "./audience";
+import { familiesCount, summarizeRecipients } from "./audience";
 import { sentMessage, type SendResult } from "./useAnnouncementComposer";
 
 /** D7: the busy look while sending; the button stays pressable. */
@@ -57,6 +57,8 @@ function Addressee({ scope, recipients, hideHint }: AddresseeProps): ReactElemen
   if (recipients.length === 0) {
     return <p className="announce-for announce-for--hint">{hideHint ? "" : "Todavía no eliges destinatarios"}</p>;
   }
+  // Families' names are long, and fifty of them are not a sentence: one is named, more are counted.
+  if (scope === "family" && recipients.length > 1) return <p className="announce-for">Para <strong>{familiesCount(recipients.length)}</strong></p>;
   const { shown, more } = summarizeRecipients(recipients);
   return (
     <p className="announce-for">

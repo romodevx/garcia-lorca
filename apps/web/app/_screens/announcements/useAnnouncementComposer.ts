@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { announce, type AnnouncementScope } from "../../comms/api";
 import { listCycles, listLabelledGroups, listLevels, type Cycle, type LabelledGroup, type Level } from "../../config/api";
+import { listFamilies, type Family } from "../../families/api";
 import { listStudentsWithRooms, type Student } from "../../students/api";
+import { FAMILY_LIMIT } from "./audience";
 import { API_URL } from "../../api-url";
 
 /** One key per attempt: a retry must not buzz four hundred phones twice. */
@@ -28,6 +30,16 @@ export interface ListsLoaded {
   groups: boolean;
   levels: boolean;
   students: boolean;
+  /** Read on first choosing "Familias"; false until that read settles. */
+  families: boolean;
+}
+
+/** ADR 0041: the families' list, read the first time "Familias" is chosen and never again. */
+export interface FamiliesAudience {
+  families: Family[];
+  failed: boolean;
+  /** FAMILY_LIMIT are picked: another one is refused, and the screen says why. */
+  atLimit: boolean;
 }
 
 /** Everything a view of /avisos needs: the data, the draft and the rules. */
@@ -37,6 +49,7 @@ export interface AnnouncementComposer {
   groups: LabelledGroup[];
   students: Student[];
   loaded: ListsLoaded;
+  familiesAudience: FamiliesAudience;
   scope: AnnouncementScope;
   picked: string[];
   title: string;
@@ -79,6 +92,11 @@ export function useAnnouncementComposer(): AnnouncementComposer {
   const [levelsSettled, setLevelsSettled] = useState(false);
   const [studentsSettled, setStudentsSettled] = useState(false);
   const [groupsSettled, setGroupsSettled] = useState(false);
+  const [families, setFamilies] = useState<Family[]>([]);
+  const [familiesSettled, setFamiliesSettled] = useState(false);
+  const [familiesFailed, setFamiliesFailed] = useState(false);
+  // Once per screen, like every other list (A0): choosing it again reads nothing.
+  const familiesRequested = useRef(false);
 
   const cycle = cycles.find((c) => c.status === "active") ?? cycles[0];
 
@@ -98,6 +116,10 @@ export function useAnnouncementComposer(): AnnouncementComposer {
   const chooseScope = (next: AnnouncementScope): void => {
     setScope(next);
     setPicked([]);
+    if (next === "family" && !familiesRequested.current) {
+      familiesRequested.current = true;
+      listFamilies(API_URL).then(setFamilies).catch(() => setFamiliesFailed(true)).finally(() => setFamiliesSettled(true));
+    }
   };
 
   const toggle = (id: string): void => {
@@ -107,6 +129,7 @@ export function useAnnouncementComposer(): AnnouncementComposer {
       }
       // One pupil at a time: a note to a family is not a circular, and picking
       // several would be a group announcement wearing the wrong label.
+      if (scope === "family" && prev.length >= FAMILY_LIMIT) return prev;
       return scope === "student" ? [id] : [...prev, id];
     });
   };
@@ -155,10 +178,12 @@ export function useAnnouncementComposer(): AnnouncementComposer {
     groups: groupsSettled || (cyclesSettled && cycle === undefined),
     levels: levelsSettled,
     students: studentsSettled,
+    families: familiesSettled,
   };
+  const familiesAudience: FamiliesAudience = { families, failed: familiesFailed, atLimit: scope === "family" && picked.length >= FAMILY_LIMIT };
 
   return {
-    cycle, levels, groups, students, loaded, scope, picked, title, body, sending, sent, error,
+    cycle, levels, groups, students, loaded, familiesAudience, scope, picked, title, body, sending, sent, error,
     chooseScope, toggle, setTitle, setBody, submit,
   };
 }
