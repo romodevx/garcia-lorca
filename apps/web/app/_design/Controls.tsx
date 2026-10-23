@@ -101,7 +101,7 @@ export function Btn({
     ghost: { background: "var(--surface-3)", color: "var(--text)", border: "1px solid var(--border)" },
     outline: { background: "transparent", color: "var(--text)", border: "1.5px solid var(--border-strong)" }
   };
-  const k: CSSProperties = danger ? { background: "var(--red)", color: "var(--on-color-ink)" } : kinds[kind];
+  const k: CSSProperties = danger ? { background: "var(--red)", color: "var(--on-danger)" } : kinds[kind];
   return (
     <button
       type={type}
