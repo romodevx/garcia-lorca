@@ -3,7 +3,7 @@
 - **Origen:** pedido del dueño, 2026-10-23: papá y mamá (o tutor) entran a la app con
   su propia cuenta y ven a todos sus hijos. La oficina necesita **identificar familias**,
   filtrar alumnos por familia y mandar avisos por familia.
-- **Estado:** APROBADO por el dueño el 2026-10-23 (las 4 decisiones de abajo).
+- **Estado:** APROBADO por el dueño el 2026-10-23 (las 4 decisiones de abajo). **Bloque completo en `dev`** (#183–#188); QA visible en `.gstack/qa-reports/qa-report-familias-2026-10-23.md`.
 - **ADR:** `adr/0041-families.md`.
 
 ## Lo que ya existía
@@ -52,6 +52,6 @@ revisión (tech-lead; + security cuando toca authz) → QA visible → PR verde 
 | T1 | Contrato (`students.proto`), migración `students/0023` (families, family_id, descartes, RLS + aislamiento), dominio + repo + casos de uso: crear, renombrar, agregar/quitar hijos, disolver, listar, **sugerencias** y descartes | backend-sr, db-sr | ✅ #183 |
 | T2 | Acceso por familia: `GrantFamilyAccess` / `RevokeFamilyAccess`, sincronía al entrar un hijo, tope de 2 también en `GrantContactAccess`/`LinkGuardian` | backend-sr, security | ✅ #184 |
 | T3 | Gateway: rutas `/api/v1/families/*` detrás de `module_families`, invitación de un adulto a la familia (iam una vez + students), `familyId` en el JSON del alumno y filtro | backend-sr, security | ✅ #185 |
-| T4 | Web: pestaña Familias (sugerencias, lista, detalle con hijos y hasta 2 adultos), columna + filtro en el directorio, tarjeta en la ficha | frontend-sr | 🔄 PR |
-| T5 | Avisos: destinatario "Familias" + un solo push por papá por aviso (comms) | backend-sr, frontend-sr | backend ✅ #186 · UI ⏳ |
-| T6 | QA visible completo, compuertas, FLAGS/MODULES/docs, flag en dev | qa-sr, tech-lead, security, doc-writer | ⏳ |
+| T4 | Web: pestaña Familias (sugerencias, lista, detalle con hijos y hasta 2 adultos), columna + filtro en el directorio, tarjeta en la ficha | frontend-sr | ✅ #187 |
+| T5 | Avisos: destinatario "Familias" + un solo push por papá por aviso (comms) | backend-sr, frontend-sr | ✅ #186 + #188 |
+| T6 | QA visible completo, compuertas, FLAGS/MODULES/docs, flag en dev | qa-sr, tech-lead, security, doc-writer | ✅ (flag ON en dev 23-oct, gateway-00105-lvd) |
