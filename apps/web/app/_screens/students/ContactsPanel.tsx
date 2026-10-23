@@ -4,40 +4,33 @@ import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactEle
 import { Btn } from "../../_design/Controls";
 import { EmailField, SelectField, TextField, useEmailShapeOnSave, useFormatError, useRequired } from "../../_design/form";
 import { Icon } from "../../_design/Icon";
-import { InviteLink } from "../../_design/InviteLink";
-import { STUDENT_DRAFT } from "../../students/importIssues";
 import { UndoToast } from "../../_design/UndoToast";
 import { useUndoableRemoval } from "../../_design/useUndoableRemoval";
 import { spanishServerReason } from "../../_lib/serverReason";
 import {
   addContact,
-  inviteContactToApp,
   listContacts,
   removeContact,
   updateContact,
   type Contact,
-  type ContactAccessResult,
   type ContactEdit,
   type Relationship,
 } from "../../students/api";
 import { phoneDigits, phoneError } from "../../students/profileRules";
 import { API_URL } from "../../api-url";
-
-const RELATIONSHIPS: { value: Relationship; label: string }[] = [
-  { value: "mother", label: "Madre" },
-  { value: "father", label: "Padre" },
-  { value: "guardian", label: "Tutor" },
-  { value: "other", label: "Otro" },
-];
-
-const RELATIONSHIP_LABEL: Record<string, string> = {
-  mother: "Madre", father: "Padre", guardian: "Tutor", other: "Otro",
-};
+import { RELATIONSHIPS, relationshipLabel } from "../../students/relationship";
+import { DRAFT_INVITE, InviteResult, StaffAddressPrompt, useContactInvite } from "./contactInvite";
 
 export interface ContactsPanelProps {
   studentId: string;
   /** module_import_review: a draft without a CURP is not handed to a family account. */
   draft?: boolean;
+  /**
+   * module_families: the pupil's family already holds its two app accounts
+   * (ADR 0041), so nobody else is offered one. Unknown counts as not full —
+   * the server's 409 stays the authority.
+   */
+  familyFull?: boolean;
 }
 
 /**
@@ -55,27 +48,7 @@ const NOTHING_REQUIRED = [] as const;
 /** Fuera del componente: useFormatError lo toma como dependencia. */
 const PHONE_RULES = { phone: phoneError } as const;
 
-/** iam's refusal of a staff address not yet confirmed (C2-003). */
-const STAFF_ADDRESS_REASON = "belongs to a staff account";
-
-/**
- * Whether the refusal is iam asking about a staff address. It reads the
- * server's own words (`detail`), never `message`: StudentsError puts the
- * Spanish sentence for the screen there, and a 409's is a generic one.
- */
-function isStaffAddressRefusal(cause: unknown): boolean {
-  if (typeof cause !== "object" || cause === null || !("detail" in cause)) return false;
-  return typeof cause.detail === "string" && cause.detail.includes(STAFF_ADDRESS_REASON);
-}
-
-/** A draft's family access, refused before it is asked (and by the server, 409 STUDENT_DRAFT). */
-const DRAFT_INVITE = "Falta la CURP del alumno para invitarle";
-
-function isDraftRefusal(cause: unknown): boolean {
-  return typeof cause === "object" && cause !== null && "code" in cause && cause.code === STUDENT_DRAFT;
-}
-
-export function ContactsPanel({ studentId, draft = false }: ContactsPanelProps): ReactElement {
+export function ContactsPanel({ studentId, draft = false, familyFull = false }: ContactsPanelProps): ReactElement {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -94,15 +67,6 @@ export function ContactsPanel({ studentId, draft = false }: ContactsPanelProps):
   // correo: se revisa aquí, al guardar, porque Enter guarda sin salir del campo.
   const emailShape = useEmailShapeOnSave();
   const [saving, setSaving] = useState(false);
-  // Which contact is being given access, and what came of it. Keyed by contact
-  // so a second press elsewhere never shows the first one's outcome.
-  const [granting, setGranting] = useState<string | undefined>(undefined);
-  const [granted, setGranted] = useState<Record<string, ContactAccessResult>>({});
-  const [grantError, setGrantError] = useState<Record<string, string>>({});
-  // C2-003: contacts whose address iam said belongs to a staff account, waiting
-  // for the director to say whether it is the same person.
-  const [staffAddress, setStaffAddress] = useState<Record<string, boolean>>({});
-
   const reload = useCallback(() => {
     listContacts(API_URL, studentId)
       .then((rows) => setContacts(rows.filter((r) => !pendingRemoval.current.some((p) => p.id === r.id))))
@@ -110,6 +74,7 @@ export function ContactsPanel({ studentId, draft = false }: ContactsPanelProps):
   }, [studentId]);
 
   useEffect(reload, [reload]);
+  const invite = useContactInvite(reload);
 
   const add = async (e: FormEvent): Promise<void> => {
     e.preventDefault();
@@ -160,27 +125,8 @@ export function ContactsPanel({ studentId, draft = false }: ContactsPanelProps):
     });
   };
 
-  const giveAccess = async (contact: Contact, confirmStaffAccount = false): Promise<void> => {
-    setGranting(contact.id);
-    setGrantError((prev) => ({ ...prev, [contact.id]: "" }));
-    setStaffAddress((prev) => ({ ...prev, [contact.id]: false }));
-    try {
-      const result = await inviteContactToApp(API_URL, studentId, contact.id, confirmStaffAccount ? { confirmStaffAccount: true } : {});
-      setGranted((prev) => ({ ...prev, [contact.id]: result }));
-      reload();
-    } catch (cause) {
-      if (isStaffAddressRefusal(cause)) {
-        setStaffAddress((prev) => ({ ...prev, [contact.id]: true }));
-        return;
-      }
-      setGrantError((prev) => ({
-        ...prev,
-        [contact.id]: isDraftRefusal(cause) ? DRAFT_INVITE : (cause instanceof Error ? spanishServerReason(cause.message) : undefined) ?? "No se pudo dar el acceso.",
-      }));
-    } finally {
-      setGranting(undefined);
-    }
-  };
+  const giveAccess = (contact: Contact, confirmStaffAccount = false): Promise<void> =>
+    invite.give(contact.id, { studentId, contactId: contact.id }, confirmStaffAccount);
 
   return (
     <div style={{ padding: "18px 0" }}>
@@ -200,7 +146,7 @@ export function ContactsPanel({ studentId, draft = false }: ContactsPanelProps):
               {displayName(c)}
             </div>
             <div style={{ fontSize: 13, color: "var(--text-muted)" }}>
-              {RELATIONSHIP_LABEL[c.relationship] ?? c.relationship}
+              {relationshipLabel(c.relationship)}
               {c.phone !== "" && ` · ${c.phone}`}
               {c.email !== "" && ` · ${c.email}`}
             </div>
@@ -220,18 +166,21 @@ export function ContactsPanel({ studentId, draft = false }: ContactsPanelProps):
           {!c.hasAccount && draft && (
             <span style={{ fontSize: 12.5, color: "var(--text-faint)" }}>{DRAFT_INVITE}</span>
           )}
-          {!c.hasAccount && !draft && c.email !== "" && (
+          {!c.hasAccount && !draft && familyFull && (
+            <span style={{ fontSize: 12.5, color: "var(--text-faint)" }}>Ya tiene 2 cuentas de la app</span>
+          )}
+          {!c.hasAccount && !draft && !familyFull && c.email !== "" && (
             <Btn
               kind="ghost"
               icon="mail"
               onClick={() => void giveAccess(c)}
-              disabled={granting === c.id}
+              disabled={invite.granting === c.id}
               style={{ height: 36, padding: "0 14px", fontSize: 13.5, gap: 7 }}
             >
-              {granting === c.id ? "Enviando…" : "Dar acceso a la app"}
+              {invite.granting === c.id ? "Enviando…" : "Dar acceso a la app"}
             </Btn>
           )}
-          {!c.hasAccount && !draft && c.email === "" && (
+          {!c.hasAccount && !draft && !familyFull && c.email === "" && (
             // An action that cannot succeed should not be pressable. Saying WHY
             // is what turns a missing button into something the office can fix.
             <span style={{ fontSize: 12.5, color: "var(--text-faint)" }}>
@@ -246,32 +195,17 @@ export function ContactsPanel({ studentId, draft = false }: ContactsPanelProps):
           )}
         </div>
       ))}
-      {contacts.map((c) => staffAddress[c.id] === true && (
-        <div key={`${c.id}-staff`} role="status" style={{ margin: "8px 0 0", padding: "10px 12px", borderRadius: 10, background: "var(--surface-2)", fontSize: 13.5, color: "var(--text)", display: "grid", gap: 8 }}>
-          <span>
-            <strong>{c.email}</strong> es la cuenta de alguien del personal. Si es la misma persona —por ejemplo,
-            un maestro que también es papá o mamá—, usará esa misma cuenta para entrar a la app. Si no, corrige el correo del contacto.
-          </span>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <Btn onClick={() => void giveAccess(c, true)}>Sí, es la misma persona</Btn>
-            <Btn kind="ghost" onClick={() => { setStaffAddress((prev) => ({ ...prev, [c.id]: false })); setEditing(c.id); }}>No, corregir el correo</Btn>
-          </div>
-        </div>
+      {contacts.map((c) => invite.staffAddress[c.id] === true && (
+        <StaffAddressPrompt
+          key={`${c.id}-staff`}
+          email={c.email}
+          onConfirm={() => void giveAccess(c, true)}
+          onCorrect={() => { invite.forgetStaff(c.id); setEditing(c.id); }}
+        />
       ))}
-      {contacts.map((c) => {
-        const outcome = granted[c.id];
-        const failure = grantError[c.id];
-        if (outcome === undefined && (failure === undefined || failure === "")) return null;
-        return (
-          <div key={`${c.id}-outcome`} role="status" style={{ margin: "8px 0 0", padding: "10px 12px", borderRadius: 10, background: "var(--surface-2)", fontSize: 13.5, color: "var(--text)" }}>
-            {failure !== undefined && failure !== "" ? (
-              <span style={{ color: "var(--bad-fg)" }}>{failure}</span>
-            ) : (
-              <AccessOutcome name={c.fullName} result={outcome as ContactAccessResult} />
-            )}
-          </div>
-        );
-      })}
+      {contacts.map((c) => (
+        <InviteResult key={`${c.id}-outcome`} name={c.fullName} outcome={invite.granted[c.id]} failure={invite.grantError[c.id]} />
+      ))}
 
       <form onSubmit={(e) => void add(e)} style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 14 }}>
         <div style={{ flex: "2 1 150px", minWidth: 0 }}>
@@ -446,61 +380,5 @@ function ContactEditRow({
       <Btn kind="ghost" onClick={onCancel}>Cancelar</Btn>
       {failure !== undefined && <p role="alert" style={{ flexBasis: "100%", color: "var(--bad-fg)", fontSize: 13.5, margin: 0 }}>{failure}</p>}
     </form>
-  );
-}
-
-/**
- * What to tell the office after it pressed the button.
- *
- * Every branch here exists because the wrong words cost somebody a week. "Correo
- * enviado" about a message that never left is how a family waits for a link that
- * was never sent; the same phrase about Google's message is how they wait for one
- * sitting in their spam folder. So each channel says what it actually did, and
- * the only case that can promise delivery is the school's own mail server.
- */
-function AccessOutcome({ name, result }: { name: string; result: ContactAccessResult }): ReactElement {
-  const { contact, invitation } = result;
-  const who = name !== "" ? name : "El contacto";
-
-  // Nothing was sent, and nothing needed to be: a parent with two children at
-  // the school signs in once. Saying "invitación enviada" would have the office
-  // waiting for a message nobody wrote.
-  if (invitation === null) {
-    return (
-      <span>
-        <strong>{who}</strong> ya tenía cuenta con ese correo. Quedó vinculado — entra con la
-        contraseña que ya usa.
-      </span>
-    );
-  }
-
-  if (!invitation.sent) {
-    return (
-      <div style={{ display: "grid", gap: 8 }}>
-        <span style={{ color: "var(--warn-fg)" }}>
-          <strong>No se pudo enviar</strong> el correo{invitation.sendError !== undefined && invitation.sendError !== "" ? ` (${invitation.sendError})` : ""}.
-          La cuenta sí quedó creada: copia esta liga y entrégasela a {who}.
-        </span>
-        <InviteLink url={invitation.url} />
-      </div>
-    );
-  }
-
-  // The provider's channel: Google mails its own link from a shared sender that
-  // Gmail files as spam, and answers 200 even for an address with no account —
-  // so "sent" here means accepted, never delivered. The office has to know.
-  if (invitation.via === "provider") {
-    return (
-      <span>
-        Le pedimos a Google que le mande la liga a <strong>{contact.email}</strong>. Suele caer
-        en <strong>spam</strong> — pídele a {who} que la busque ahí, y que la abra dentro de una hora.
-      </span>
-    );
-  }
-
-  return (
-    <span>
-      Le enviamos la liga a <strong>{contact.email}</strong>. {who} la abre y elige su contraseña.
-    </span>
   );
 }

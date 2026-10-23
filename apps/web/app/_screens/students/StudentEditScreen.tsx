@@ -47,6 +47,9 @@ import { resizeToJpeg } from "../../students/photoResize";
 import { bankReferenceError, birthDateError, MEXICAN_STATES, phoneDigits, phoneError, postalCodeError } from "../../students/profileRules";
 import { isDraft } from "../../students/importIssues";
 import { ContactsPanel } from "./ContactsPanel";
+import { FamilyCard } from "../families/FamilyCard";
+import type { Family } from "../../families/api";
+import { familyIsFull, type FamiliesAccess } from "../../families/model";
 import { DRAFT_CURP_WARNING, StandaloneWarnings, fieldWarning } from "./ImportIssueWarnings";
 import { PromotedNotice } from "./PromotedNotice";
 import { useImportIssues, type ImportIssuesState } from "./useImportIssues";
@@ -78,6 +81,12 @@ export interface StudentEditScreenProps {
   today?: string;
   /** module_import_review: the import's warnings under each field, and a draft's missing CURP. */
   importReview?: boolean;
+  /** module_families and what the caller may do there (ADR 0041). Absent: no Familia card. */
+  families?: FamiliesAccess;
+  /** Opens a family in Alumnos › Familias. */
+  onOpenFamily?: (familyId: string) => void;
+  /** Opens a sibling's file. */
+  onOpenStudent?: (studentId: string) => void;
 }
 
 const MAX_PHONES = 3;
@@ -118,6 +127,7 @@ const SECTIONS = [
   { id: "ficha-foto", title: "Foto" },
   { id: "ficha-contacto", title: "Contacto y domicilio" },
   { id: "ficha-medicos", title: "Datos médicos" },
+  { id: "ficha-familia", title: "Familia" },
   { id: "ficha-contactos", title: "Tutores y emergencias" },
   { id: "ficha-notas", title: "Notas" },
 ] as const;
@@ -161,10 +171,13 @@ function failureMessage(cause: unknown): string {
   return "No se pudo guardar la ficha. Intenta de nuevo.";
 }
 
-export function StudentEditScreen({ studentId, userId, permissions, onBack, onWithdrawn, today, importReview = false }: StudentEditScreenProps): ReactElement {
+export function StudentEditScreen({ studentId, userId, permissions, onBack, onWithdrawn, today, importReview = false, families, onOpenFamily, onOpenStudent }: StudentEditScreenProps): ReactElement {
   const day = today ?? localToday();
   const canReadMedical = permissions?.includes("medical:read") === true;
   const canWriteMedical = canReadMedical && permissions?.includes("medical:write") === true;
+  // module_families: the pupil's family's app accounts, as the Familia card read them (QA-3).
+  const [familyAccounts, setFamilyAccounts] = useState<number | undefined>(undefined);
+  const rememberFamilyAccounts = useCallback((family: Family) => setFamilyAccounts(family.accountCount), []);
   // The pupil's notes: the same source the list's modal and the payment counter read (T6).
   const notes = useStudentNotes(studentId);
 
@@ -364,7 +377,7 @@ export function StudentEditScreen({ studentId, userId, permissions, onBack, onWi
     <CreatePage
       breadcrumb={["Alumnos", formatStudentName(student)]}
       title="Editar ficha"
-      aside={<SectionIndex showMedical={canReadMedical} />}
+      aside={<SectionIndex showMedical={canReadMedical} showFamily={families !== undefined} />}
       footer={
         // Wraps on a phone: at 360 px the three do not fit on one line, and
         // "Guardar ficha" was pushed off the screen.
@@ -487,9 +500,15 @@ export function StudentEditScreen({ studentId, userId, permissions, onBack, onWi
         )}
       </form>
 
+      {families !== undefined && (
+        <Section id="ficha-familia" title="Familia">
+          <FamilyCard studentId={studentId} familyId={student.familyId} access={families} onOpenFamily={(id) => onOpenFamily?.(id)} onOpenStudent={(id) => onOpenStudent?.(id)} onFamilyRead={rememberFamilyAccounts} />
+        </Section>
+      )}
+
       {/* Outside the form: each contact is its own record with its own save. */}
       <Section id="ficha-contactos" title="Tutores y emergencias">
-        <ContactsPanel studentId={studentId} />
+        <ContactsPanel studentId={studentId} familyFull={families !== undefined && familyIsFull(familyAccounts)} />
       </Section>
 
       {/* Each note is its own record with its own save, like the contacts. */}
@@ -527,10 +546,10 @@ function Section({ id, title, children }: { id: string; title: string; children:
 }
 
 /** Jumps to a section; buttons, not links, so the route never changes. */
-function SectionIndex({ showMedical }: { showMedical: boolean }): ReactElement {
+function SectionIndex({ showMedical, showFamily }: { showMedical: boolean; showFamily: boolean }): ReactElement {
   return (
     <nav aria-label="Secciones de la ficha" style={{ display: "grid", gap: 4 }}>
-      {SECTIONS.filter((s) => showMedical || s.id !== "ficha-medicos").map((s) => (
+      {SECTIONS.filter((s) => (showMedical || s.id !== "ficha-medicos") && (showFamily || s.id !== "ficha-familia")).map((s) => (
         <button
           key={s.id}
           type="button"

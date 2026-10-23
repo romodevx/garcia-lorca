@@ -12,6 +12,8 @@ export interface ConfirmDialogProps {
   icon?: IconName;
   onConfirm: () => void;
   onCancel: () => void;
+  /** It cuts or removes something (an app access, a family): the red tone, no check. */
+  danger?: boolean;
   children: ReactNode;
 }
 
@@ -21,7 +23,7 @@ export interface ConfirmDialogProps {
  * trapped, Esc cancels, focus returns to the trigger. Here the confirm button
  * takes the first focus so Enter confirms, as the person just asked for it.
  */
-export function ConfirmDialog({ title, confirmLabel, icon = "warning", onConfirm, onCancel, children }: ConfirmDialogProps): ReactElement {
+export function ConfirmDialog({ title, confirmLabel, icon = "warning", onConfirm, onCancel, danger = false, children }: ConfirmDialogProps): ReactElement {
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(timer.current), []);
 
@@ -43,7 +45,7 @@ export function ConfirmDialog({ title, confirmLabel, icon = "warning", onConfirm
         <div ref={footerRef} style={{ display: "flex", alignItems: "center", gap: 12, width: "100%" }}>
           <Btn kind="ghost" onClick={onCancel}>Cancelar</Btn>
           <div style={{ flex: 1 }} />
-          <Btn type="submit" icon="check" style={{ height: 52 }}>{confirmLabel}</Btn>
+          <Btn type="submit" icon={danger ? undefined : "check"} danger={danger} style={{ height: 52 }}>{confirmLabel}</Btn>
         </div>
       }>
       <div style={{ fontSize: 15, lineHeight: 1.55, color: "var(--text)" }}>{children}</div>

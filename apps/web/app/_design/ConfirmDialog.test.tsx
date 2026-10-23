@@ -69,3 +69,11 @@ describe("ConfirmDialog", () => {
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("ConfirmDialog — destructive", () => {
+  it("a confirmation that cuts something wears the danger tone, not the lime check", async () => {
+    render(<ConfirmDialog title="Quitar el acceso" confirmLabel="Quitar acceso" danger onConfirm={vi.fn()} onCancel={vi.fn()}>Se corta.</ConfirmDialog>);
+    const confirm = await screen.findByRole("button", { name: "Quitar acceso" });
+    expect(confirm.style.background).toBe("var(--red)");
+  });
+});

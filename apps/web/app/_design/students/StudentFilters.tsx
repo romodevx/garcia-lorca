@@ -9,7 +9,8 @@ import type { StudentFilter } from "./useStudentFilter";
 /** Design system: a target is at least 44 px tall. */
 const CHIP_HEIGHT = 44;
 
-const chip = (on: boolean): CSSProperties => ({
+/** A filter chip, on or off: shared by every chip that narrows a list. */
+export const filterChip = (on: boolean): CSSProperties => ({
   display: "inline-flex", alignItems: "center", gap: 8, height: CHIP_HEIGHT, padding: "0 15px", borderRadius: 99,
   fontSize: 13.5, fontWeight: 600, fontFamily: "var(--font-display)", cursor: "pointer",
   border: `1.5px solid ${on ? "var(--forest)" : "var(--border)"}`,
@@ -41,7 +42,7 @@ export function ChipRow({ label, options, chosen, onChoose, trailing, showCounts
       {options.map((o) => {
         const on = chosen === o.id;
         return (
-          <button key={o.id} type="button" aria-pressed={on} onClick={() => onChoose(o.id)} style={chip(on)}>
+          <button key={o.id} type="button" aria-pressed={on} onClick={() => onChoose(o.id)} style={filterChip(on)}>
             {o.label}
             {showCounts && <span style={badge}>{o.count}</span>}
           </button>
@@ -66,6 +67,8 @@ export interface StudentFiltersProps<T extends FilterableStudent> {
   leading?: ReactNode;
   /** Start with the cursor in the search ("Buscar alumno" shortcut). */
   focusSearch?: boolean;
+  /** The screen's own chips (e.g. "Sin familia"), on the Nivel row before "Limpiar". */
+  extraChips?: ReactNode;
 }
 
 /**
@@ -82,6 +85,7 @@ export function StudentFilters<T extends FilterableStudent>({
   onClear,
   leading,
   focusSearch = false,
+  extraChips,
 }: StudentFiltersProps<T>): ReactElement {
   const { facets, state } = filter;
   const clearable = filter.active || extraActive;
@@ -114,11 +118,11 @@ export function StudentFilters<T extends FilterableStudent>({
         options={facets.levels}
         chosen={state.levelId}
         onChoose={filter.chooseLevel}
-        trailing={clearable && (
+        trailing={<>{extraChips}{clearable && (
           <button type="button" onClick={clear} style={{ height: CHIP_HEIGHT, padding: "0 14px", borderRadius: 99, display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 600, color: "var(--text-muted)", background: "var(--surface-3)", border: "1px solid var(--border)", cursor: "pointer" }}>
             <Icon name="close" size={15} />Limpiar
           </button>
-        )}
+        )}</>}
       />
       {facets.grades.length > 0 && <ChipRow label="Grado" options={facets.grades} chosen={state.gradeId} onChoose={filter.chooseGrade} />}
       {facets.groups.length > 0 && <ChipRow label="Grupo" options={facets.groups} chosen={state.groupId} onChoose={filter.chooseGroup} />}
@@ -129,7 +133,7 @@ export function StudentFilters<T extends FilterableStudent>({
             type="button"
             aria-pressed={filter.allSelected}
             onClick={filter.selectAll}
-            style={{ ...chip(filter.allSelected), borderColor: filter.allSelected ? "var(--lime)" : "var(--border)", color: filter.allSelected ? "var(--text)" : "var(--text-muted)", background: filter.allSelected ? "color-mix(in oklab, var(--lime) 18%, var(--surface))" : "var(--surface)" }}
+            style={{ ...filterChip(filter.allSelected), borderColor: filter.allSelected ? "var(--lime)" : "var(--border)", color: filter.allSelected ? "var(--text)" : "var(--text-muted)", background: filter.allSelected ? "color-mix(in oklab, var(--lime) 18%, var(--surface))" : "var(--surface)" }}
           >
             <Checkmark on={filter.allSelected} />
             Seleccionar todos ({filter.filtered.length})

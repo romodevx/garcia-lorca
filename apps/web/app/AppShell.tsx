@@ -38,6 +38,7 @@ import { StudentAltaPage } from "./_screens/students/StudentAltaPage";
 import { leaveStudentsNotice } from "./_screens/students/studentsNotice";
 import type { NotesAccess } from "./_design/students/StudentNotesBeside";
 import { StudentsScreen, markStudentsVisit, studentsListPath } from "./_screens/students/StudentsScreen";
+import { familiesAccess } from "./families/model";
 import { GradesScreen } from "./_screens/grades/GradesScreen";
 import { Login } from "./_screens/Login";
 import { ChangePassword } from "./_screens/ChangePassword";
@@ -260,6 +261,8 @@ export function AppShell(): ReactElement {
   const studentsEnabled = useFlag("module_students");
   // PLAN-import-avisos: the import's per-row review, ⚠ on the list, warnings on the file.
   const importReview = useFlag("module_import_review");
+  // ADR 0041: Familias lives inside Alumnos, so it needs module_students too.
+  const familiesEnabled = useFlag("module_families") && studentsEnabled;
   // The virtual card (task 13): verified and revoked from Alumnos.
   const cardEnabled = useFlag("module_student_card");
   // The grade-capture surface is gated by module_grades (UX-only; the gateway is
@@ -504,6 +507,9 @@ export function AppShell(): ReactElement {
   const newStudent = (): void => go({ screen: "studentNew" });
   // Back to the list as it was left; a saved alta leaves its toast for it.
   const backToStudents = (): void => router.push(studentsListPath());
+  // What the caller may do in Familias (UX only); undefined while the module is off.
+  const families = familiesEnabled ? familiesAccess(principal?.permissions) : undefined;
+  const openFamily = (familyId: string): void => router.push(`${viewToPath({ screen: "students" })}?vista=familias&familia=${encodeURIComponent(familyId)}`);
   // A ficha opened from /alumnos/{id} leaves the list's own address when it
   // closes, filters kept; no history entry, "atrás" still leaves the list.
   const leaveStudentSheet = (): void => {
@@ -737,6 +743,9 @@ export function AppShell(): ReactElement {
           // A withdrawn pupil's file is read-only: their ficha, not a form.
           onWithdrawn={() => router.replace(viewToPath({ screen: "studentSheet", studentId: view.studentId }))}
           importReview={importReview}
+          families={families}
+          onOpenFamily={openFamily}
+          onOpenStudent={editStudent}
         />
       )}
       {view.screen === "studentNew" && studentsEnabled && canCreateStudents && (
@@ -769,6 +778,7 @@ export function AppShell(): ReactElement {
             linkedStudentId={view.screen === "studentSheet" ? view.studentId : undefined}
             onLinkedSheetClosed={leaveStudentSheet}
             importReview={importReview}
+            families={families}
           />
         ) : (
           // Flag OFF: never render the enrollment surface; show the friendly stub
