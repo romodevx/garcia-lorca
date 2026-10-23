@@ -642,6 +642,7 @@ func connectErr(err error) *connect.Error {
 var familyPreconditions = map[error]string{
 	domain.ErrFamilyAccountLimit:  domain.CodeFamilyAccountLimit,
 	domain.ErrFamilyManagedAccess: domain.CodeFamilyManagedAccess,
+	domain.ErrFamilyBusy:          domain.CodeFamilyBusy,
 }
 
 // ErrorCodeMeta is the error-metadata key a refusal's machine code rides in

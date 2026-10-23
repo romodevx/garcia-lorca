@@ -11,6 +11,7 @@ import (
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
 	"github.com/garcia-lorca/services/students/internal/domain"
+	"github.com/garcia-lorca/services/students/internal/ports"
 	"github.com/garcia-lorca/services/students/internal/usecase"
 )
 
@@ -46,7 +47,7 @@ func newAccWorld() *accWorld {
 		famWorld:  w,
 		users:     users,
 		guardians: usecase.NewGuardianService(w, w.links, w, users, famTenant, newID),
-		families:  usecase.NewFamilyService(w, w, famTenant, newID, func() time.Time { return famNow }),
+		families:  usecase.NewFamilyService(w, w, users, famTenant, newID, func() time.Time { return famNow }),
 	}
 }
 
@@ -359,7 +360,9 @@ func TestUpdateDetailsPromotionSyncsTheFamily(t *testing.T) {
 	svc, repo, _ := newService(t)
 	links := newGuardianRepo()
 	access := &memAccess{pupils: repo.byID, links: links, familyExists: func(id string) bool { return id == famID }}
-	svc = svc.WithFamilyAccess(access)
+	users := newUsers()
+	seedGuardianUser(users, accMom, "guardian")
+	svc = svc.WithFamilyAccess(access, users)
 	seedDraft(t, repo, "stu-d")
 	seedStudent(t, repo, "stu-sib")
 	repo.byID["stu-d"].AssignFamily(famID)
@@ -389,5 +392,92 @@ func TestUpdateDetailsPromotionSyncsTheFamily(t *testing.T) {
 	}
 	if access.onPupilCalls != 1 {
 		t.Errorf("OnPupil calls = %d after a plain correction, want still 1", access.onPupilCalls)
+	}
+}
+
+// iam is asked again before an account is handed to another pupil: one that
+// was suspended (or lost the guardian role) since it was linked stays where
+// it is, though it still counts toward the cap.
+func TestSyncNeverPropagatesAnAccountIamNoLongerAllows(t *testing.T) {
+	ctx := context.Background()
+	t.Run("adding a pupil", func(t *testing.T) {
+		w := newAccWorld()
+		w.group(t, pupilA)
+		w.link(t, "l-mom", accMom, pupilA, rosaPerson)
+		seedUserWithStatus(w.users, accMom, "USER_STATUS_SUSPENDED", "guardian")
+		if _, err := w.families.AddStudentsToFamily(ctx, famID, []string{pupilB}); err != nil {
+			t.Fatal(err)
+		}
+		if got := w.accountsOf(pupilB); len(got) != 0 {
+			t.Errorf("B got %v from a suspended account", got)
+		}
+	})
+	t.Run("confirming a family", func(t *testing.T) {
+		w := newAccWorld()
+		w.link(t, "l-mom", accMom, pupilA, rosaPerson)
+		seedGuardianUser(w.users, accMom, "teacher") // the guardian role was taken away
+		if _, err := w.families.CreateFamily(ctx, "", []string{pupilA, pupilB}); err != nil {
+			t.Fatal(err)
+		}
+		if got := w.accountsOf(pupilB); len(got) != 0 {
+			t.Errorf("B got %v from an account without the guardian role", got)
+		}
+	})
+	t.Run("granting a sibling", func(t *testing.T) {
+		w := newAccWorld()
+		w.group(t, pupilA, pupilB)
+		w.link(t, "l-dad", accDad, pupilA, luisPerson)
+		delete(w.users.byID, accDad) // gone from iam
+		w.contact(t, "c-b", pupilB, rosaPerson)
+		if _, err := w.guardians.GrantContactAccess(ctx, "c-b", pupilB, accMom); err != nil {
+			t.Fatal(err)
+		}
+		if got := w.accountsOf(pupilA); !slices.Equal(got, []string{accMom, accDad}) {
+			t.Errorf("A accounts = %v, want mom synced next to dad", got)
+		}
+		if got := w.accountsOf(pupilB); !slices.Equal(got, []string{accMom}) {
+			t.Errorf("B accounts = %v, want only mom (dad is unknown to iam)", got)
+		}
+	})
+	t.Run("an ineligible account still counts", func(t *testing.T) {
+		w := newAccWorld()
+		w.group(t, pupilA, pupilB)
+		w.link(t, "l-mom", accMom, pupilA, rosaPerson)
+		w.link(t, "l-dad", accDad, pupilA, luisPerson)
+		seedUserWithStatus(w.users, accDad, "USER_STATUS_SUSPENDED", "guardian")
+		w.contact(t, "c-b", pupilB, domain.ContactPerson{FullName: "Tía"})
+		if _, err := w.guardians.GrantContactAccess(ctx, "c-b", pupilB, accThird); !errors.Is(err, domain.ErrFamilyAccountLimit) {
+			t.Errorf("err = %v, want the suspended account counted", err)
+		}
+	})
+	t.Run("an iam outage fails the write", func(t *testing.T) {
+		w := newAccWorld()
+		w.link(t, "l-mom", accMom, pupilA, rosaPerson)
+		w.users.err = errors.New("iam down")
+		if _, err := w.families.CreateFamily(ctx, "", []string{pupilA, pupilB}); err == nil {
+			t.Error("a family was confirmed without asking iam")
+		}
+	})
+}
+
+// failingAccess answers every family transaction with an error.
+type failingAccess struct{ memAccess }
+
+func (failingAccess) OnPupil(context.Context, string, ports.FamilyAccessFunc) error {
+	return errors.New("database unavailable")
+}
+
+// The promotion is already stored when its sync runs: a failing sync is
+// logged and the save still succeeds, as the promotion event does.
+func TestUpdateDetailsPromotionSucceedsWhenTheSyncFails(t *testing.T) {
+	svc, repo, _ := newService(t)
+	access := &failingAccess{memAccess{pupils: repo.byID, links: newGuardianRepo(), familyExists: func(string) bool { return true }}}
+	svc = svc.WithFamilyAccess(access, newUsers())
+	seedDraft(t, repo, "stu-d")
+	repo.byID["stu-d"].AssignFamily(famID)
+
+	got, err := svc.UpdateDetails(context.Background(), detailsOf("stu-d", draftCURP))
+	if err != nil || !got.PromotedFromDraft {
+		t.Fatalf("UpdateDetails = promoted %v, %v; want the save to succeed", got.PromotedFromDraft, err)
 	}
 }

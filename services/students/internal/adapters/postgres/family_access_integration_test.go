@@ -24,12 +24,17 @@ import (
 	"github.com/garcia-lorca/services/students/internal/usecase"
 )
 
-// anyGuardian is an iam that knows every id as an active guardian: the iam
-// check is the use case's (tested there); these tests are about the database.
-type anyGuardian struct{}
+// anyGuardian is an iam that knows every id as an active guardian, except the
+// ids in suspended: the iam check is the use case's (tested there); these
+// tests are about the database.
+type anyGuardian struct{ suspended map[string]bool }
 
-func (anyGuardian) ByID(_ context.Context, id string) (ports.UserRef, error) {
-	return ports.UserRef{ID: id, Status: "USER_STATUS_ACTIVE", Roles: []string{"guardian"}}, nil
+func (g anyGuardian) ByID(_ context.Context, id string) (ports.UserRef, error) {
+	status := "USER_STATUS_ACTIVE"
+	if g.suspended[id] {
+		status = "USER_STATUS_SUSPENDED"
+	}
+	return ports.UserRef{ID: id, Status: status, Roles: []string{"guardian"}}, nil
 }
 
 // accessServices wires the guardian and family use cases over one app-role
@@ -38,8 +43,23 @@ func accessServices(t *testing.T, tenant string) (*usecase.GuardianService, *use
 	t.Helper()
 	repo := appRepo(t, tenant)
 	return usecase.NewGuardianService(repo, repo, repo, anyGuardian{}, tenant, uuid.NewString),
-		usecase.NewFamilyService(repo, repo, tenant, uuid.NewString, time.Now),
+		usecase.NewFamilyService(repo, repo, anyGuardian{}, tenant, uuid.NewString, time.Now),
 		repo
+}
+
+// attachOnPupil attaches an account the only way the adapter offers: inside
+// OnPupil, under the family locking rule.
+func attachOnPupil(ctx context.Context, repo *pgadapter.Repository, l domain.GuardianLink) error {
+	return repo.OnPupil(ctx, l.StudentID(), func(ctx context.Context, a ports.FamilyAccess) error {
+		return a.AttachAccount(ctx, l)
+	})
+}
+
+// unlinkOnPupil deletes a link the only way the adapter offers: inside OnPupil.
+func unlinkOnPupil(ctx context.Context, repo *pgadapter.Repository, guardianUserID, studentID string) error {
+	return repo.OnPupil(ctx, studentID, func(ctx context.Context, a ports.FamilyAccess) error {
+		return a.RemoveLink(ctx, guardianUserID, studentID)
+	})
 }
 
 // seedContact stores an account-less contact on a pupil and returns its id.
@@ -151,12 +171,10 @@ func raceAgainstPaused(t *testing.T, pause *pausingAccess, first, rival func() e
 	awaitWaiterOrDone(t, rivalDone)
 	close(pause.resume)
 	firstErr = <-firstDone
-	if rivalErr == nil {
-		select {
-		case rivalErr = <-rivalDone:
-		case <-time.After(10 * time.Second):
-			t.Fatal("the rival never finished")
-		}
+	select {
+	case rivalErr = <-rivalDone:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the rival never finished")
 	}
 	return firstErr, rivalErr
 }
@@ -205,7 +223,11 @@ func TestFamilyGrantSyncsTheAccountToSiblingsInTheDB(t *testing.T) {
 	}
 	withdrawRaw(t, gone)
 	onA := seedContact(t, repo, famTenantA, a, famRosa)
-	onB := seedContact(t, repo, famTenantA, b, domain.ContactPerson{FullName: "Rosa", Email: "Rosa@Example.com"})
+	// The same Rosa as on A, email in another case. The sync copies the
+	// contact of the LOWEST-id member carrying the account, and the ids are
+	// random: both contacts carry the same person so the copy is the same
+	// whichever member is the source.
+	onB := seedContact(t, repo, famTenantA, b, domain.ContactPerson{FullName: famRosa.FullName, Phone: famRosa.Phone, Email: "Rosa@Example.com"})
 	mom := uuid.NewString()
 
 	if _, err := guardians.GrantContactAccess(ctx, onA, a, mom); err != nil {
@@ -478,7 +500,7 @@ func TestFamilyDraftPromotedGetsTheFamilysAccounts(t *testing.T) {
 		t.Fatalf("the draft got %v before its CURP", got)
 	}
 
-	students := usecase.NewStudentService(repo, quietEvents{}, nil, famTenantA, uuid.NewString).WithFamilyAccess(repo)
+	students := usecase.NewStudentService(repo, quietEvents{}, nil, famTenantA, uuid.NewString).WithFamilyAccess(repo, anyGuardian{})
 	got, err := students.UpdateDetails(ctx, usecase.UpdateDetailsInput{
 		ID: draft, FirstName: "Lucía", LastName: "Borrador", MaternalLastName: "Uno", CURP: famCURP(),
 	})
@@ -514,5 +536,29 @@ func TestFamilyPupilUnlinkIsRefused(t *testing.T) {
 	}
 	if got := accountsOf(t, b); len(got) != 0 {
 		t.Errorf("accounts = %v after unlink", got)
+	}
+}
+
+// iam is asked again before a family hands an account on: a sibling's account
+// suspended since it was linked stays where it is (and still counts).
+func TestFamilySuspendedAccountIsNotPropagated(t *testing.T) {
+	ctx := context.Background()
+	repo := appRepo(t, famTenantA)
+	mom := uuid.NewString()
+	families := usecase.NewFamilyService(repo, repo, anyGuardian{suspended: map[string]bool{mom: true}}, famTenantA, uuid.NewString, time.Now)
+	a, b := seedPupil(t, famTenantA, "Suspendida", "Uno"), seedPupil(t, famTenantA, "Suspendida", "Uno")
+	seedAccount(t, repo, famTenantA, mom, a, famRosa)
+	f, err := families.CreateFamily(ctx, "Suspendida", []string{a})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := families.AddStudentsToFamily(ctx, f.ID(), []string{b}); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if got := accountsOf(t, b); len(got) != 0 {
+		t.Errorf("the new member got %v from a suspended account", got)
+	}
+	if got, _ := repo.FamilyByID(ctx, f.ID()); got.AccountCount() != 1 {
+		t.Errorf("account count = %d, want the suspended account still counted", got.AccountCount())
 	}
 }

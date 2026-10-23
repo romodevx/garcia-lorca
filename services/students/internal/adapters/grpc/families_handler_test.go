@@ -110,7 +110,7 @@ func familiesHandler(t *testing.T) (*grpcadapter.StudentsHandler, *fakeRepo, *me
 	}
 	families := &memFamilies{stubAccess: &stubAccess{store: newFakeGuardianStore()}, pupils: repo, byID: map[string]domain.Family{}}
 	svc := usecase.NewStudentService(repo, &fakePublisher{}, testLevels, testTenant, func() string { return "stu-1" })
-	fam := usecase.NewFamilyService(repo, families, testTenant, func() string { return wireFamily }, func() time.Time { return wireFamilyAt })
+	fam := usecase.NewFamilyService(repo, families, &fakeUserReader{}, testTenant, func() string { return wireFamily }, func() time.Time { return wireFamilyAt })
 	h := grpcadapter.NewStudentsHandler(svc, nil, nil, usecase.NewHealthService("students")).WithFamilies(fam)
 	return h, repo, families
 }

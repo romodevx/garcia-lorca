@@ -49,6 +49,9 @@ func member(id string, status domain.AdmissionStatus, contacts ...domain.Guardia
 	return domain.FamilyMember{StudentID: id, Status: status, Contacts: contacts}
 }
 
+// everyAccount: every account the family holds may still be propagated.
+func everyAccount(string) bool { return true }
+
 var rosa = domain.ContactPerson{FullName: "Rosa Pérez", Phone: "4431112233", Email: "rosa@example.com", Emergency: true}
 
 func TestPlanFamilyAccessCapsTheFamilyAtTwoAccounts(t *testing.T) {
@@ -83,7 +86,7 @@ func TestPlanFamilyAccessCapsTheFamilyAtTwoAccounts(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := domain.PlanFamilyAccess(accTenant, tc.members, seqIDs())
+			_, err := domain.PlanFamilyAccess(accTenant, tc.members, seqIDs(), everyAccount)
 			if tc.wantErr {
 				if !errors.Is(err, domain.ErrFamilyAccountLimit) {
 					t.Fatalf("err = %v, want ErrFamilyAccountLimit", err)
@@ -111,7 +114,7 @@ func TestPlanFamilyAccessCopiesTheSourceContactOntoASibling(t *testing.T) {
 		member(accPupil1, domain.AdmissionEnrolled, accountLink(t, "l1", accMom, accPupil1, domain.RelationshipMother, rosa)),
 		member(accPupil2, domain.AdmissionPending),
 	}
-	plan, err := domain.PlanFamilyAccess(accTenant, members, seqIDs())
+	plan, err := domain.PlanFamilyAccess(accTenant, members, seqIDs(), everyAccount)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +136,7 @@ func TestPlanFamilyAccessAttachesToTheSiblingsContactWithTheSameEmail(t *testing
 		member(accPupil1, domain.AdmissionEnrolled, accountLink(t, "l1", accMom, accPupil1, domain.RelationshipMother, rosa)),
 		member(accPupil2, domain.AdmissionAccepted, other, sameEmail),
 	}
-	plan, err := domain.PlanFamilyAccess(accTenant, members, seqIDs())
+	plan, err := domain.PlanFamilyAccess(accTenant, members, seqIDs(), everyAccount)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +153,7 @@ func TestPlanFamilyAccessLeavesAlreadyLinkedSiblingsAlone(t *testing.T) {
 		member(accPupil1, domain.AdmissionEnrolled, accountLink(t, "l1", accMom, accPupil1, domain.RelationshipMother, rosa)),
 		member(accPupil2, domain.AdmissionEnrolled, accountLink(t, "l2", accMom, accPupil2, domain.RelationshipMother, rosa)),
 	}
-	plan, err := domain.PlanFamilyAccess(accTenant, members, seqIDs())
+	plan, err := domain.PlanFamilyAccess(accTenant, members, seqIDs(), everyAccount)
 	if err != nil || len(plan.Attach)+len(plan.Insert) != 0 {
 		t.Fatalf("plan = %+v, %v; want nothing to do", plan, err)
 	}
@@ -163,7 +166,7 @@ func TestPlanFamilyAccessGivesNoAccountToDraftsNorPupilsWhoLeft(t *testing.T) {
 		member(accPupil3, domain.AdmissionWithdrawn, plainContact(t, "c3", accPupil3, rosa)),
 		member(accPupil4, domain.AdmissionRejected),
 	}
-	plan, err := domain.PlanFamilyAccess(accTenant, members, seqIDs())
+	plan, err := domain.PlanFamilyAccess(accTenant, members, seqIDs(), everyAccount)
 	if err != nil || len(plan.Attach)+len(plan.Insert) != 0 {
 		t.Fatalf("plan = %+v, %v; want nothing for a draft, a withdrawn or a rejected pupil", plan, err)
 	}
@@ -176,7 +179,7 @@ func TestPlanFamilyAccessSyncsEveryAccountToEverySibling(t *testing.T) {
 		member(accPupil2, domain.AdmissionEnrolled, accountLink(t, "l2", accDad, accPupil2, domain.RelationshipFather, dad)),
 		member(accPupil3, domain.AdmissionEnrolled),
 	}
-	plan, err := domain.PlanFamilyAccess(accTenant, members, seqIDs())
+	plan, err := domain.PlanFamilyAccess(accTenant, members, seqIDs(), everyAccount)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +204,7 @@ func TestPlanFamilyAccessNeverAttachesTwoAccountsToOneContact(t *testing.T) {
 			accountLink(t, "l2", accDad, accPupil1, domain.RelationshipFather, shared)),
 		member(accPupil2, domain.AdmissionEnrolled, plainContact(t, "c2", accPupil2, shared)),
 	}
-	plan, err := domain.PlanFamilyAccess(accTenant, members, seqIDs())
+	plan, err := domain.PlanFamilyAccess(accTenant, members, seqIDs(), everyAccount)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,5 +258,55 @@ func TestPlanFamilyContactJudgesThePerson(t *testing.T) {
 	// Judged even when every member already has this person.
 	if _, err := domain.PlanFamilyContact(accTenant, nil, domain.RelationshipMother, domain.ContactPerson{}, seqIDs()); glerrors.KindOf(err) != glerrors.KindInvalid {
 		t.Errorf("empty family: err = %v, want KindInvalid", err)
+	}
+}
+
+// An account iam no longer allows (suspended, role taken away) still counts
+// toward the cap but is never handed to another pupil.
+func TestPlanFamilyAccessNeverPropagatesAnIneligibleAccount(t *testing.T) {
+	suspended := func(account string) bool { return account != accMom }
+	members := []domain.FamilyMember{
+		member(accPupil1, domain.AdmissionEnrolled, accountLink(t, "l1", accMom, accPupil1, domain.RelationshipMother, rosa)),
+		member(accPupil2, domain.AdmissionEnrolled, plainContact(t, "c2", accPupil2, rosa)),
+		member(accPupil3, domain.AdmissionEnrolled),
+	}
+	plan, err := domain.PlanFamilyAccess(accTenant, members, seqIDs(), suspended)
+	if err != nil || len(plan.Attach)+len(plan.Insert) != 0 {
+		t.Fatalf("plan = %+v, %v; want the suspended account propagated nowhere", plan, err)
+	}
+
+	overCap := []domain.FamilyMember{
+		member(accPupil1, domain.AdmissionEnrolled,
+			accountLink(t, "l1", accMom, accPupil1, domain.RelationshipMother, rosa),
+			accountLink(t, "l2", accDad, accPupil1, domain.RelationshipFather, domain.ContactPerson{})),
+		member(accPupil2, domain.AdmissionEnrolled, accountLink(t, "l3", accThird, accPupil2, domain.RelationshipOther, domain.ContactPerson{})),
+	}
+	if _, err := domain.PlanFamilyAccess(accTenant, overCap, seqIDs(), suspended); !errors.Is(err, domain.ErrFamilyAccountLimit) {
+		t.Errorf("a suspended account must still count: err = %v", err)
+	}
+}
+
+// A sibling's account-less contact that is the same person by phone takes
+// the account; when one contact matches by email and another by phone, the
+// email match wins.
+func TestPlanFamilyAccessReusesTheSamePersonByPhoneOrEmail(t *testing.T) {
+	byPhone := plainContact(t, "c1", accPupil2, domain.ContactPerson{FullName: "Rosa", Phone: "443 111 2233"})
+	byEmail := plainContact(t, "c3", accPupil3, domain.ContactPerson{FullName: "R.", Email: "rosa@example.com"})
+	phoneToo := plainContact(t, "c2", accPupil3, domain.ContactPerson{FullName: "Rosa P.", Phone: rosa.Phone})
+	members := []domain.FamilyMember{
+		member(accPupil1, domain.AdmissionEnrolled, accountLink(t, "l1", accMom, accPupil1, domain.RelationshipMother, rosa)),
+		member(accPupil2, domain.AdmissionEnrolled, byPhone),
+		member(accPupil3, domain.AdmissionEnrolled, phoneToo, byEmail),
+	}
+	plan, err := domain.PlanFamilyAccess(accTenant, members, seqIDs(), everyAccount)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var attached []string
+	for _, l := range plan.Attach {
+		attached = append(attached, l.ID())
+	}
+	if !slices.Equal(attached, []string{"c1", "c3"}) || len(plan.Insert) != 0 {
+		t.Errorf("attached %v, inserts %d; want c1 (phone) and c3 (email beats phone), no inserts", attached, len(plan.Insert))
 	}
 }

@@ -467,6 +467,11 @@ type FamilyAccessRepository interface {
 	// OnFamily runs fn over a family, its row locked FOR UPDATE. Unknown (or
 	// another tenant's) family is KindNotFound.
 	OnFamily(ctx context.Context, familyID string, fn FamilyAccessFunc) error
+	// AccountIDs reads, WITHOUT locks, the distinct accounts linked to the
+	// pupils, to familyID's members ("" for none) and to the members of the
+	// pupils' families: what the use case asks iam about before the locked
+	// write. Sorted.
+	AccountIDs(ctx context.Context, familyID string, studentIDs []string) ([]string, error)
 }
 
 // FamilyAccessFunc is the work done inside a FamilyAccessRepository

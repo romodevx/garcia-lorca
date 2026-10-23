@@ -24,9 +24,15 @@ type stubAccess struct {
 	families map[string]bool
 	members  []domain.FamilyMember
 	detached int
+	// onPupilErr, when set, is what OnPupil answers.
+	onPupilErr  error
+	accountsErr error
 }
 
 func (s *stubAccess) OnPupil(ctx context.Context, _ string, fn ports.FamilyAccessFunc) error {
+	if s.onPupilErr != nil {
+		return s.onPupilErr
+	}
 	return fn(ctx, &stubAccessTx{s: s})
 }
 
@@ -35,6 +41,11 @@ func (s *stubAccess) OnFamily(ctx context.Context, familyID string, fn ports.Fam
 		return glerrors.ErrNotFound
 	}
 	return fn(ctx, &stubAccessTx{s: s, familyID: familyID})
+}
+
+// AccountIDs: the wire tests never need iam to vet a sibling's account.
+func (s *stubAccess) AccountIDs(context.Context, string, []string) ([]string, error) {
+	return nil, s.accountsErr
 }
 
 func (s *stubAccess) runSync(ctx context.Context, familyID string, sync ports.FamilyAccessFunc) error {
@@ -54,13 +65,13 @@ func (t *stubAccessTx) Members(context.Context) ([]domain.FamilyMember, error) {
 	return t.s.members, nil
 }
 func (t *stubAccessTx) AttachAccount(ctx context.Context, l domain.GuardianLink) error {
-	return t.s.store.AttachAccount(ctx, l)
+	return t.s.store.attach(l)
 }
 func (t *stubAccessTx) InsertContact(ctx context.Context, l domain.GuardianLink) error {
 	return t.s.store.Link(ctx, l)
 }
 func (t *stubAccessTx) RemoveLink(ctx context.Context, guardianUserID, studentID string) error {
-	return t.s.store.Unlink(ctx, guardianUserID, studentID)
+	return t.s.store.unlink(guardianUserID, studentID)
 }
 func (t *stubAccessTx) DetachAccount(context.Context, string) (int, error) { return t.s.detached, nil }
 
@@ -209,5 +220,24 @@ func TestUnlinkGuardianOnAFamilyPupilOnTheWire(t *testing.T) {
 	if familyRPCCode(err) != connect.CodeFailedPrecondition || errorCode(err) != domain.CodeFamilyManagedAccess {
 		t.Errorf("unlink in a family: code=%v meta=%q (%v); want FailedPrecondition + %s",
 			familyRPCCode(err), errorCode(err), err, domain.CodeFamilyManagedAccess)
+	}
+}
+
+// A pupil whose family kept changing while its locks were taken is a state to
+// retry, not a duplicate: FailedPrecondition with FAMILY_BUSY.
+func TestFamilyBusyOnTheWire(t *testing.T) {
+	studentRepo := newFakeRepo()
+	student := seedApplicant(t, studentRepo)
+	store := newFakeGuardianStore()
+	access := &stubAccess{store: store, onPupilErr: domain.ErrFamilyBusy}
+	guardians := usecase.NewGuardianService(studentRepo, store, access, &fakeUserReader{}, testTenant, func() string { return "gl-1" })
+	stu := usecase.NewStudentService(studentRepo, &fakePublisher{}, testLevels, testTenant, func() string { return "stu-x" })
+	h := grpcadapter.NewStudentsHandler(stu, nil, guardians, usecase.NewHealthService("students"))
+
+	_, err := h.UnlinkGuardian(context.Background(), connect.NewRequest(&studentsv1.UnlinkGuardianRequest{
+		GuardianUserId: guardianUser, StudentId: student.ID(),
+	}))
+	if familyRPCCode(err) != connect.CodeFailedPrecondition || errorCode(err) != domain.CodeFamilyBusy {
+		t.Errorf("code=%v meta=%q (%v); want FailedPrecondition + %s", familyRPCCode(err), errorCode(err), err, domain.CodeFamilyBusy)
 	}
 }

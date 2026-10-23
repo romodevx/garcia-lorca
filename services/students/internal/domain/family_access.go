@@ -33,6 +33,15 @@ const CodeFamilyManagedAccess = "FAMILY_MANAGED_ACCESS"
 var ErrFamilyManagedAccess = glerrors.New(glerrors.KindConflict,
 	"este alumno está en una familia: quita el acceso desde la familia")
 
+// CodeFamilyBusy is the X-Error-Code of ErrFamilyBusy.
+const CodeFamilyBusy = "FAMILY_BUSY"
+
+// ErrFamilyBusy: the pupil's family kept changing while an account write took
+// its locks (another clerk moving this very pupil). Nothing was written; the
+// write can be retried.
+var ErrFamilyBusy = glerrors.New(glerrors.KindConflict,
+	"la familia de este alumno está cambiando en este momento: intenta de nuevo")
+
 // FamilyMember is one pupil of a family as an account write sees it, read
 // under the family's lock: its admission status and every contact it has.
 type FamilyMember struct {
@@ -62,16 +71,18 @@ type FamilyAccessPlan struct {
 //
 // Every distinct account on any member counts, withdrawn members included
 // (they are the same parents); more than MaxFamilyAccounts is
-// ErrFamilyAccountLimit. Then each account U is linked to every member that
-// receives accounts and has no link with U: on the member's account-less
-// contact with the same email as U's source contact when there is one, else on
-// a new contact copying the source's relationship, name, phone and email
-// (never the emergency mark, which is the office's call per pupil). U's source
-// is its contact on the lowest-id member carrying it.
+// ErrFamilyAccountLimit. Then each account U that propagates(U) allows is
+// linked to every member that receives accounts and has no link with U: on
+// the member's account-less contact that is the same person as U's source
+// contact (same email, else same phone) when there is one, else on a new
+// contact copying the source's relationship, name, phone and email (never the
+// emergency mark, which is the office's call per pupil). U's source is its
+// contact on the lowest-id member carrying it. An account propagates refuses
+// (iam no longer lets it be linked) still counts toward the cap.
 //
 // Pure and deterministic: accounts in id order, then members in id order.
 // O(m·c) for m members and c contacts per member (m ≤ 20, c small).
-func PlanFamilyAccess(tenantID string, members []FamilyMember, newID func() string) (FamilyAccessPlan, error) {
+func PlanFamilyAccess(tenantID string, members []FamilyMember, newID func() string, propagates func(account string) bool) (FamilyAccessPlan, error) {
 	sorted := sortedMembers(members)
 	sources := accountSources(sorted)
 	if len(sources) > MaxFamilyAccounts {
@@ -86,12 +97,15 @@ func PlanFamilyAccess(tenantID string, members []FamilyMember, newID func() stri
 	var plan FamilyAccessPlan
 	taken := map[string]bool{} // contacts this plan already gives an account
 	for _, account := range accounts {
+		if !propagates(account) {
+			continue
+		}
 		source := sources[account]
 		for _, m := range sorted {
 			if !m.receivesAccounts() || hasAccount(m, account) {
 				continue
 			}
-			if c, ok := contactWithEmail(m, source.Email(), taken); ok {
+			if c, ok := samePersonFree(m, source, taken); ok {
 				taken[c.ID()] = true
 				withAccount, err := c.WithAccount(account)
 				if err != nil {
@@ -184,30 +198,34 @@ func hasAccount(m FamilyMember, account string) bool {
 	return slices.ContainsFunc(m.Contacts, func(c GuardianLink) bool { return c.GuardianUserID() == account })
 }
 
-// contactWithEmail is the member's first account-less contact, not already
-// taken by this plan, whose email matches (case-insensitive, non-empty).
-func contactWithEmail(m FamilyMember, email string, taken map[string]bool) (GuardianLink, bool) {
-	key := ContactEmailKey(email)
-	if key == "" {
-		return GuardianLink{}, false
-	}
+// samePersonFree is the member's account-less contact, not already taken by
+// this plan, that is the same person as source (samePerson).
+func samePersonFree(m FamilyMember, source GuardianLink, taken map[string]bool) (GuardianLink, bool) {
+	free := FamilyMember{StudentID: m.StudentID, Status: m.Status}
 	for _, c := range m.Contacts {
-		if !c.HasAccount() && !taken[c.ID()] && ContactEmailKey(c.Email()) == key {
-			return c, true
+		if !c.HasAccount() && !taken[c.ID()] {
+			free.Contacts = append(free.Contacts, c)
 		}
 	}
-	return GuardianLink{}, false
+	return samePerson(free, ContactEmailKey(source.Email()), onlyDigits(source.Phone()))
 }
 
-// samePerson is the member's first contact with this email key or these phone
-// digits (each only when non-empty).
+// samePerson is the member's first contact (id order) with this email key,
+// else its first with these phone digits; each only when non-empty. An email
+// is a better identity than a phone a whole household shares.
 func samePerson(m FamilyMember, emailKey, phone string) (GuardianLink, bool) {
-	for _, c := range m.Contacts {
-		if emailKey != "" && ContactEmailKey(c.Email()) == emailKey {
-			return c, true
+	if emailKey != "" {
+		for _, c := range m.Contacts {
+			if ContactEmailKey(c.Email()) == emailKey {
+				return c, true
+			}
 		}
-		if phone != "" && onlyDigits(c.Phone()) == phone {
-			return c, true
+	}
+	if phone != "" {
+		for _, c := range m.Contacts {
+			if onlyDigits(c.Phone()) == phone {
+				return c, true
+			}
 		}
 	}
 	return GuardianLink{}, false

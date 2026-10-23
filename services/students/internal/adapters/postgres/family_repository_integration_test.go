@@ -30,8 +30,6 @@ import (
 const (
 	famTenantA = "fa1a0000-0000-0000-0000-00000000000a"
 	famTenantB = "fa1b0000-0000-0000-0000-00000000000b"
-	// famTenantS holds only the suggestion fixtures.
-	famTenantS = "fa1c0000-0000-0000-0000-00000000000c"
 )
 
 var (
@@ -424,7 +422,9 @@ func TestFamilyRaceRemoveLastVersusAdd(t *testing.T) {
 // still common: confirming families must not let it start chaining the rest.
 // A value on exactly six pupils is not common.
 func TestFamilySuggestionCommonValuesCountTheWholeSchool(t *testing.T) {
-	const tenant = "fa1d0000-0000-0000-0000-00000000000d"
+	// A tenant of its own per run: the suggestion reads see the whole school,
+	// so a fixed tenant would read the pupils an earlier run (-count>1) left.
+	tenant := uuid.NewString()
 	const reception, six = "4437770000", "seis@x.mx"
 	ctx := context.Background()
 	repo := appRepo(t, tenant)
@@ -510,11 +510,13 @@ func TestFamilyAccountCount(t *testing.T) {
 
 func TestFamilySuggestionInputs(t *testing.T) {
 	ctx := context.Background()
-	repo := appRepo(t, famTenantS)
-	free := seedPupil(t, famTenantS, "Ortiz", "Lara")
-	member := seedPupil(t, famTenantS, "Ortiz", "Lara")
-	gone := seedPupil(t, famTenantS, "Ortiz", "Lara")
-	createFamily(t, repo, famTenantS, "Ortiz", member)
+	// A tenant of its own per run, as above: these reads see the whole school.
+	tenant := uuid.NewString()
+	repo := appRepo(t, tenant)
+	free := seedPupil(t, tenant, "Ortiz", "Lara")
+	member := seedPupil(t, tenant, "Ortiz", "Lara")
+	gone := seedPupil(t, tenant, "Ortiz", "Lara")
+	createFamily(t, repo, tenant, "Ortiz", member)
 	s, _ := repo.FindByID(ctx, gone)
 	if _, err := s.Withdraw("baja"); err != nil {
 		t.Fatal(err)
@@ -524,7 +526,7 @@ func TestFamilySuggestionInputs(t *testing.T) {
 	}
 	user := uuid.NewString()
 	for _, sid := range []string{free, member} {
-		link, err := domain.NewGuardianLink(uuid.NewString(), famTenantS, user, sid, domain.RelationshipFather)
+		link, err := domain.NewGuardianLink(uuid.NewString(), tenant, user, sid, domain.RelationshipFather)
 		if err != nil {
 			t.Fatal(err)
 		}

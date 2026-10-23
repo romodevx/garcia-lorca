@@ -200,7 +200,7 @@ func (w *famWorld) DismissSuggestion(_ context.Context, d ports.FamilyDismissal)
 }
 
 func famService(w *famWorld) *usecase.FamilyService {
-	return usecase.NewFamilyService(w, w, famTenant, func() string { return famID }, func() time.Time { return famNow })
+	return usecase.NewFamilyService(w, w, newUsers(), famTenant, func() string { return famID }, func() time.Time { return famNow })
 }
 
 func TestCreateFamily(t *testing.T) {

@@ -110,11 +110,15 @@ func (s *GuardianService) LinkGuardian(ctx context.Context, guardianUserID, stud
 	if err != nil {
 		return domain.GuardianLink{}, err
 	}
+	eligible, err := s.eligibleFor(ctx, student, guardianUserID)
+	if err != nil {
+		return domain.GuardianLink{}, err
+	}
 	err = s.access.OnPupil(ctx, student.ID(), func(ctx context.Context, a ports.FamilyAccess) error {
 		if err := a.InsertContact(ctx, link); err != nil {
 			return err // KindConflict on a duplicate propagates
 		}
-		return syncFamilyAccess(ctx, a, s.tenant, s.newID)
+		return s.sync().run(ctx, a, eligible)
 	})
 	if err != nil {
 		return domain.GuardianLink{}, err
@@ -138,10 +142,26 @@ func (s *GuardianService) requireGuardianUser(ctx context.Context, guardianUserI
 	if !slices.Contains(user.Roles, guardianRoleName) {
 		return glerrors.New(glerrors.KindInvalid, "user is not a guardian")
 	}
-	if !slices.Contains(linkableUserStatuses, user.Status) {
+	if !isLinkable(user) {
 		return glerrors.New(glerrors.KindInvalid, "guardian account cannot be linked in its current state")
 	}
 	return nil
+}
+
+func (s *GuardianService) sync() familySync {
+	return familySync{access: s.access, users: s.users, tenant: s.tenant, newID: s.newID}
+}
+
+// eligibleFor is which accounts the sync may hand on after an account write on
+// student: the account just validated (vetted) and, when the pupil is in a
+// family, the family's accounts iam still allows. A pupil read without a
+// family has no siblings to hand anything to; should a family claim it before
+// the lock, its other accounts stay ineligible (fail closed).
+func (s *GuardianService) eligibleFor(ctx context.Context, student *domain.Student, vetted string) (map[string]bool, error) {
+	if student.FamilyID() == "" {
+		return map[string]bool{vetted: true}, nil
+	}
+	return s.sync().eligible(ctx, "", []string{student.ID()}, vetted)
 }
 
 // ContactInput is a person the school can reach about a pupil. Most of them
@@ -278,7 +298,8 @@ func (s *GuardianService) GrantContactAccess(ctx context.Context, contactID, stu
 	if contact.StudentID() != studentID {
 		return domain.GuardianLink{}, glerrors.ErrNotFound
 	}
-	if err := s.requirePlaceable(ctx, studentID); err != nil {
+	student, err := s.placeable(ctx, studentID)
+	if err != nil {
 		return domain.GuardianLink{}, err
 	}
 
@@ -286,11 +307,15 @@ func (s *GuardianService) GrantContactAccess(ctx context.Context, contactID, stu
 	if err != nil {
 		return domain.GuardianLink{}, err
 	}
+	eligible, err := s.eligibleFor(ctx, student, guardianUserID)
+	if err != nil {
+		return domain.GuardianLink{}, err
+	}
 	err = s.access.OnPupil(ctx, studentID, func(ctx context.Context, a ports.FamilyAccess) error {
 		if err := a.AttachAccount(ctx, withAccount); err != nil {
 			return err
 		}
-		return syncFamilyAccess(ctx, a, s.tenant, s.newID)
+		return s.sync().run(ctx, a, eligible)
 	})
 	if err != nil {
 		return domain.GuardianLink{}, err
@@ -298,14 +323,18 @@ func (s *GuardianService) GrantContactAccess(ctx context.Context, contactID, stu
 	return withAccount, nil
 }
 
-// requirePlaceable refuses a draft pupil (domain.ErrDraftNotPlaceable): an app
-// account is not given to the family of a pupil the school cannot identify.
-func (s *GuardianService) requirePlaceable(ctx context.Context, studentID string) error {
+// placeable loads the pupil and refuses a draft (domain.ErrDraftNotPlaceable):
+// an app account is not given to the family of a pupil the school cannot
+// identify.
+func (s *GuardianService) placeable(ctx context.Context, studentID string) (*domain.Student, error) {
 	student, err := s.students.FindByID(ctx, studentID)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return student.RequirePlaceable()
+	if err := student.RequirePlaceable(); err != nil {
+		return nil, err
+	}
+	return student, nil
 }
 
 // UnlinkGuardian removes a guardian ↔ student link. An unknown link is

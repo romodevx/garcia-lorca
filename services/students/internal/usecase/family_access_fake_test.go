@@ -48,6 +48,34 @@ func (m *memAccess) run(ctx context.Context, tx *memAccessTx, fn ports.FamilyAcc
 	return nil
 }
 
+// AccountIDs is the distinct accounts on the pupils, on familyID's members
+// and on the members of the pupils' families.
+func (m *memAccess) AccountIDs(_ context.Context, familyID string, studentIDs []string) ([]string, error) {
+	families := map[string]bool{}
+	if familyID != "" {
+		families[familyID] = true
+	}
+	for _, id := range studentIDs {
+		if s, ok := m.pupils[id]; ok && s.FamilyID() != "" {
+			families[s.FamilyID()] = true
+		}
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, l := range m.links.links {
+		s, ok := m.pupils[l.StudentID()]
+		if !l.HasAccount() || !ok || seen[l.GuardianUserID()] {
+			continue
+		}
+		if slices.Contains(studentIDs, l.StudentID()) || families[s.FamilyID()] {
+			seen[l.GuardianUserID()] = true
+			out = append(out, l.GuardianUserID())
+		}
+	}
+	slices.Sort(out)
+	return out, nil
+}
+
 type memAccessTx struct {
 	m         *memAccess
 	familyID  string

@@ -30,20 +30,10 @@ func (r *Repository) Link(ctx context.Context, l domain.GuardianLink) error {
 	})
 }
 
-// Unlink removes a link by its (guardian, student) pair. A link the bound tenant
-// cannot see is KindNotFound, so RLS makes a cross-tenant delete indistinguishable
-// from a missing link.
-//
-// It takes NO family lock: the use case unlinks only through OnPupil
-// (FamilyAccess.RemoveLink), which refuses a pupil in a family. This entry
-// point stays for the adapter's own tests.
-func (r *Repository) Unlink(ctx context.Context, guardianUserID, studentID string) error {
-	return r.withTenant(ctx, func(tx *gorm.DB) error {
-		return unlink(tx, guardianUserID, studentID)
-	})
-}
-
-// unlink is Unlink's delete inside tx.
+// unlink removes a link by its (guardian, student) pair inside tx; only
+// FamilyAccess.RemoveLink calls it, under the family locking rule. A link the
+// bound tenant cannot see is KindNotFound, so RLS makes a cross-tenant delete
+// indistinguishable from a missing link.
 func unlink(tx *gorm.DB, guardianUserID, studentID string) error {
 	res := tx.Where("guardian_user_id = ? AND student_id = ?", guardianUserID, studentID).
 		Delete(&guardianStudentModel{})
@@ -142,7 +132,9 @@ func (r *Repository) RemoveContact(ctx context.Context, id string) error {
 	})
 }
 
-// AttachAccount sets the iam account on a contact that has none.
+// attachAccount sets the iam account on a contact that has none, inside tx;
+// only FamilyAccess.AttachAccount calls it, under the family locking rule
+// that keeps the account cap (there is no unlocked entry point).
 //
 // The UPDATE is CONDITIONAL — `guardian_user_id IS NULL` rides in the WHERE, not
 // in an `if` above it. Two clerks granting access at the same time both read a
@@ -155,17 +147,6 @@ func (r *Repository) RemoveContact(ctx context.Context, id string) error {
 // Both are answered as a conflict EXCEPT when the row is genuinely absent,
 // which we distinguish with a follow-up read so an unknown contact is not
 // reported as a duplicate.
-//
-// It takes NO family lock: the use case attaches accounts only through
-// OnPupil (FamilyAccess.AttachAccount, the same conditional write), which
-// keeps the family cap. This entry point stays for the adapter's own tests.
-func (r *Repository) AttachAccount(ctx context.Context, l domain.GuardianLink) error {
-	return r.withTenant(ctx, func(tx *gorm.DB) error {
-		return attachAccount(tx, l)
-	})
-}
-
-// attachAccount is AttachAccount's conditional write inside tx.
 func attachAccount(tx *gorm.DB, l domain.GuardianLink) error {
 	res := tx.Model(&guardianStudentModel{}).
 		Where("id = ? AND student_id = ? AND guardian_user_id IS NULL", l.ID(), l.StudentID()).

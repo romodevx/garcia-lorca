@@ -2,19 +2,60 @@ package usecase
 
 import (
 	"context"
+	"slices"
 
 	glerrors "github.com/garcia-lorca/pkg/errors"
 	"github.com/garcia-lorca/services/students/internal/domain"
 	"github.com/garcia-lorca/services/students/internal/ports"
 )
 
-// syncFamilyAccess is the last step of every account or membership write on a
-// family (ADR 0041), inside the write's own transaction: it reads the members
-// as they now are, refuses a family past domain.MaxFamilyAccounts
-// (domain.ErrFamilyAccountLimit, which rolls the whole write back) and links
-// every account to every placeable member. A pupil without a family has
-// neither cap nor siblings: nothing to do.
-func syncFamilyAccess(ctx context.Context, a ports.FamilyAccess, tenant string, newID func() string) error {
+// familySync links a family's accounts to every placeable member (ADR 0041).
+// iam is asked again BEFORE the locked step: an account suspended, deleted or
+// stripped of the guardian role since it was linked still counts toward the
+// cap but is never handed to another pupil — a sync must not do what
+// LinkGuardian would refuse.
+type familySync struct {
+	access ports.FamilyAccessRepository
+	users  ports.UserReader
+	tenant string
+	newID  func() string
+}
+
+// eligible resolves through iam every account already on the pupils, on
+// familyID's members and on the pupils' families (an unlocked read: one iam
+// call per distinct account, at most MaxFamilyAccounts + 1 in practice).
+// vetted accounts were just validated by the caller and are not asked again.
+// An account iam does not know is ineligible; an iam failure fails the write.
+// An account that reaches the family only after this read is ineligible too:
+// the sync never propagates what nobody checked.
+func (f familySync) eligible(ctx context.Context, familyID string, studentIDs []string, vetted ...string) (map[string]bool, error) {
+	known, err := f.access.AccountIDs(ctx, familyID, studentIDs)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]bool, len(known)+len(vetted))
+	for _, id := range vetted {
+		out[id] = true
+	}
+	for _, id := range known {
+		if _, seen := out[id]; seen {
+			continue
+		}
+		ok, err := linkableAccount(ctx, f.users, id)
+		if err != nil {
+			return nil, err
+		}
+		out[id] = ok
+	}
+	return out, nil
+}
+
+// run is the last step of every account or membership write on a family,
+// inside the write's own transaction: it reads the members as they now are,
+// refuses a family past domain.MaxFamilyAccounts (domain.ErrFamilyAccountLimit,
+// which rolls the whole write back) and links every eligible account to every
+// placeable member. A pupil without a family has neither cap nor siblings.
+func (f familySync) run(ctx context.Context, a ports.FamilyAccess, eligible map[string]bool) error {
 	if a.FamilyID() == "" {
 		return nil
 	}
@@ -22,7 +63,7 @@ func syncFamilyAccess(ctx context.Context, a ports.FamilyAccess, tenant string, 
 	if err != nil {
 		return err
 	}
-	plan, err := domain.PlanFamilyAccess(tenant, members, newID)
+	plan, err := domain.PlanFamilyAccess(f.tenant, members, f.newID, func(account string) bool { return eligible[account] })
 	if err != nil {
 		return err
 	}
@@ -39,10 +80,32 @@ func syncFamilyAccess(ctx context.Context, a ports.FamilyAccess, tenant string, 
 	return nil
 }
 
-// syncAccess is syncFamilyAccess bound to this service, the hook CreateFamily
-// and AddStudentsToFamily hand the repository.
-func (s *FamilyService) syncAccess(ctx context.Context, a ports.FamilyAccess) error {
-	return syncFamilyAccess(ctx, a, s.tenant, s.newID)
+// hook is run bound to eligible: what CreateFamily and AddStudentsToFamily
+// hand the repository.
+func (f familySync) hook(eligible map[string]bool) ports.FamilyAccessFunc {
+	return func(ctx context.Context, a ports.FamilyAccess) error { return f.run(ctx, a, eligible) }
+}
+
+// linkableAccount asks iam whether an account may still be linked to a pupil:
+// it holds the guardian role and is in a linkable status. Not found is false;
+// any other failure is returned.
+func linkableAccount(ctx context.Context, users ports.UserReader, id string) (bool, error) {
+	user, err := users.ByID(ctx, id)
+	if glerrors.KindOf(err) == glerrors.KindNotFound {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return isLinkable(user), nil
+}
+
+func isLinkable(user ports.UserRef) bool {
+	return slices.Contains(user.Roles, guardianRoleName) && slices.Contains(linkableUserStatuses, user.Status)
+}
+
+func (s *FamilyService) sync() familySync {
+	return familySync{access: s.families, users: s.users, tenant: s.tenant, newID: s.newID}
 }
 
 // AddFamilyContact records one adult (no account) on every pupil of the family

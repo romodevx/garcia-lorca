@@ -33,6 +33,7 @@ type StudentService struct {
 	// access syncs a family's accounts onto a draft promoted inside it
 	// (ADR 0041). Nil: no sync (WithFamilyAccess).
 	access ports.FamilyAccessRepository
+	users  ports.UserReader
 	// zone is the school's time zone: a matrícula is numbered under the
 	// school's calendar year (T5b). UTC until WithSchoolZone.
 	zone *time.Location
@@ -46,10 +47,12 @@ func NewStudentService(repo ports.StudentRepository, pub ports.EventPublisher, l
 }
 
 // WithFamilyAccess returns the service that, when UpdateDetails promotes a
-// draft in a family, links the family's accounts to it right away.
-func (s *StudentService) WithFamilyAccess(access ports.FamilyAccessRepository) *StudentService {
+// draft in a family, links the family's accounts that iam (users) still
+// allows to it right away.
+func (s *StudentService) WithFamilyAccess(access ports.FamilyAccessRepository, users ports.UserReader) *StudentService {
 	cp := *s
 	cp.access = access
+	cp.users = users
 	return &cp
 }
 
@@ -291,29 +294,32 @@ func (s *StudentService) UpdateDetails(ctx context.Context, in UpdateDetailsInpu
 		if err := s.pub.PublishAdmissionChanged(ctx, *promotion); err != nil {
 			slog.WarnContext(ctx, "draft promotion not published", "student_id", student.ID(), "error", err)
 		}
-		if err := s.syncPromotedDraft(ctx, student.ID()); err != nil {
-			return DetailsResult{}, err
-		}
+		s.syncPromotedDraft(ctx, student)
 	}
 	return out, nil
 }
 
 // syncPromotedDraft links the family's accounts to a draft just promoted
 // (a draft never receives one), in its own transaction under the family
-// locking rule. The promotion is already stored: a failure is logged and
-// returned so the office retries, and a retry re-runs the sync through the
-// family's next write anyway. A pupil without a family has nothing to sync.
-func (s *StudentService) syncPromotedDraft(ctx context.Context, studentID string) error {
-	if s.access == nil {
-		return nil
+// locking rule. Best-effort, like the promotion event: the promotion is
+// already stored, and failing the save would only make the office repeat a
+// save that worked. A failure is logged; the pupil then receives the accounts
+// at the family's next account or membership write. A pupil without a family
+// has nothing to sync.
+func (s *StudentService) syncPromotedDraft(ctx context.Context, student *domain.Student) {
+	if s.access == nil || student.FamilyID() == "" {
+		return
 	}
-	err := s.access.OnPupil(ctx, studentID, func(ctx context.Context, a ports.FamilyAccess) error {
-		return syncFamilyAccess(ctx, a, s.tenant, s.newID)
-	})
+	sync := familySync{access: s.access, users: s.users, tenant: s.tenant, newID: s.newID}
+	eligible, err := sync.eligible(ctx, "", []string{student.ID()})
+	if err == nil {
+		err = s.access.OnPupil(ctx, student.ID(), func(ctx context.Context, a ports.FamilyAccess) error {
+			return sync.run(ctx, a, eligible)
+		})
+	}
 	if err != nil {
-		slog.ErrorContext(ctx, "family accounts not synced to a promoted draft", "student_id", studentID, "error", err)
+		slog.ErrorContext(ctx, "family accounts not synced to a promoted draft", "student_id", student.ID(), "error", err)
 	}
-	return err
 }
 
 // optionalCURP parses a CURP; empty is the zero CURP (the domain decides

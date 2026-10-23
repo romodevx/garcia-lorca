@@ -57,7 +57,7 @@ func (r *Repository) OnPupil(ctx context.Context, studentID string, fn ports.Fam
 			return err
 		}
 	}
-	return glerrors.New(glerrors.KindConflict, "the pupil's family kept changing; try again")
+	return domain.ErrFamilyBusy
 }
 
 // OnFamily runs fn with the family's row locked FOR UPDATE. Unknown (or
@@ -69,6 +69,30 @@ func (r *Repository) OnFamily(ctx context.Context, familyID string, fn ports.Fam
 		}
 		return fn(ctx, &familyAccessTx{tx: tx, familyID: familyID})
 	})
+}
+
+// AccountIDs reads the distinct accounts on the pupils, on familyID's members
+// and on the members of the pupils' families, in one unlocked statement.
+func (r *Repository) AccountIDs(ctx context.Context, familyID string, studentIDs []string) ([]string, error) {
+	var out []string
+	err := r.withTenant(ctx, func(tx *gorm.DB) error {
+		err := tx.Raw(`SELECT DISTINCT g.guardian_user_id::text
+		                 FROM guardian_students g
+		                 JOIN students s ON s.id = g.student_id AND s.tenant_id = g.tenant_id
+		                WHERE g.guardian_user_id IS NOT NULL
+		                  AND (s.id IN ?
+		                       OR s.family_id = NULLIF(?, '')::uuid
+		                       OR s.family_id IN (SELECT family_id FROM students WHERE id IN ? AND family_id IS NOT NULL))
+		                ORDER BY 1`, studentIDs, familyID, studentIDs).Scan(&out).Error
+		if err != nil {
+			return translateFamilyWriteErr(err, "reading the family's accounts")
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // runSync runs a membership write's sync over the family inside its tx.
@@ -95,6 +119,10 @@ func pupilFamily(tx *gorm.DB, studentID, lock string) (string, error) {
 
 // familyAccessTx is ports.FamilyAccess over one transaction. Its scope is the
 // family (familyID) or, when that is empty, the single pupil studentID.
+//
+// Its methods ignore their ctx: tx was opened with the caller's context
+// (withTenant → db.WithContext(ctx).Transaction), so every statement already
+// runs under it and honours its cancellation.
 type familyAccessTx struct {
 	tx        *gorm.DB
 	familyID  string
@@ -111,15 +139,18 @@ func (a *familyAccessTx) scope() (string, string) {
 	return "id = ?", a.studentID
 }
 
-// Members reads the scope's pupils (id order) and all their contacts (id
-// order) in two statements.
+// Members reads the scope's pupils (id order) FOR SHARE and all their contacts
+// (id order) in two statements. The share locks keep a sibling's status from
+// changing (a withdrawal, a draft's promotion) between this read and the
+// sync's writes; they are taken in id order, after the family lock, as every
+// other family write orders its locks.
 func (a *familyAccessTx) Members(context.Context) ([]domain.FamilyMember, error) {
 	where, value := a.scope()
 	var pupils []struct {
 		ID              string
 		AdmissionStatus string
 	}
-	err := a.tx.Raw(`SELECT id, admission_status FROM students WHERE `+where+` ORDER BY id`, value).Scan(&pupils).Error
+	err := a.tx.Raw(`SELECT id, admission_status FROM students WHERE `+where+` ORDER BY id FOR SHARE`, value).Scan(&pupils).Error
 	if err != nil {
 		return nil, translateFamilyWriteErr(err, "reading the family's pupils")
 	}
