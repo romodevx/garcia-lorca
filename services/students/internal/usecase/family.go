@@ -14,15 +14,20 @@ import (
 
 // FamilyService groups siblings into families (ADR 0041): confirm, rename,
 // add and remove pupils, dissolve, and the suggestions the office confirms or
-// dismisses. Who may call each operation (students:read / students:update)
-// and the module_families flag are the gateway's call. It never touches a
-// guardian link: granting app access through a family is T2.
+// dismisses, and the family's access (T2): one contact on every pupil, and
+// revoking an account from all of them. Who may call each operation
+// (students:read / students:update / guardians:write) and the module_families
+// flag are the gateway's call. Confirming or growing a family syncs its
+// accounts to every placeable pupil under the cap (familySync).
 type FamilyService struct {
 	students ports.StudentRepository
 	families ports.FamilyRepository
-	tenant   string
-	newID    func() string
-	now      func() time.Time
+	// users is iam: an account is asked again before the family's sync hands
+	// it to another pupil.
+	users  ports.UserReader
+	tenant string
+	newID  func() string
+	now    func() time.Time
 }
 
 // NewFamilyService wires the use case. newID and now are injectable for
@@ -30,11 +35,12 @@ type FamilyService struct {
 func NewFamilyService(
 	students ports.StudentRepository,
 	families ports.FamilyRepository,
+	users ports.UserReader,
 	tenant string,
 	newID func() string,
 	now func() time.Time,
 ) *FamilyService {
-	return &FamilyService{students: students, families: families, tenant: tenant, newID: newID, now: now}
+	return &FamilyService{students: students, families: families, users: users, tenant: tenant, newID: newID, now: now}
 }
 
 // minSuggestionPupils: a single pupil is never suggested, so never dismissed.
@@ -57,6 +63,8 @@ func (s *FamilyService) GetFamily(ctx context.Context, familyID string) (domain.
 // CreateFamily groups pupils that have no family yet. An empty name is the
 // first pupil's surnames. Unknown, withdrawn or rejected pupils are
 // KindInvalid; a pupil already in a family is KindConflict. A draft may join.
+// Pupils whose accounts add up to more than domain.MaxFamilyAccounts are
+// domain.ErrFamilyAccountLimit and nothing is written.
 func (s *FamilyService) CreateFamily(ctx context.Context, name string, studentIDs []string) (domain.Family, error) {
 	ids, err := canonicalIDs(studentIDs)
 	if err != nil {
@@ -74,7 +82,11 @@ func (s *FamilyService) CreateFamily(ctx context.Context, name string, studentID
 	if err != nil {
 		return domain.Family{}, err
 	}
-	if err := s.families.CreateFamily(ctx, family); err != nil {
+	eligible, err := s.sync().eligible(ctx, "", ids)
+	if err != nil {
+		return domain.Family{}, err
+	}
+	if err := s.families.CreateFamily(ctx, family, s.sync().hook(eligible)); err != nil {
 		return domain.Family{}, err
 	}
 	return s.families.FamilyByID(ctx, family.ID())
@@ -113,7 +125,11 @@ func (s *FamilyService) AddStudentsToFamily(ctx context.Context, familyID string
 	if _, err := family.AddStudents(ids); err != nil {
 		return domain.Family{}, err
 	}
-	if err := s.families.AddStudentsToFamily(ctx, family.ID(), ids); err != nil {
+	eligible, err := s.sync().eligible(ctx, family.ID(), ids)
+	if err != nil {
+		return domain.Family{}, err
+	}
+	if err := s.families.AddStudentsToFamily(ctx, family.ID(), ids, s.sync().hook(eligible)); err != nil {
 		return domain.Family{}, err
 	}
 	return s.families.FamilyByID(ctx, family.ID())

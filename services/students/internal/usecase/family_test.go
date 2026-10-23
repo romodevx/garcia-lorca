@@ -34,8 +34,10 @@ var famNow = time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC)
 // (the rest of the port is never called by FamilyService) and the whole
 // FamilyRepository, sharing the membership the way students.family_id does.
 type famWorld struct {
-	ports.StudentRepository // nil: FamilyService only lists
+	ports.StudentRepository // nil: FamilyService only lists (and FindByID)
+	*memAccess              // the account writes, over pupils and links
 	pupils                  map[string]*domain.Student
+	links                   *fakeGuardianRepo
 	families                map[string]domain.Family
 	dismissals              map[string]ports.FamilyDismissal
 	inputs                  ports.SuggestionInputs
@@ -46,7 +48,12 @@ func newFamWorld() *famWorld {
 		pupils:     map[string]*domain.Student{},
 		families:   map[string]domain.Family{},
 		dismissals: map[string]ports.FamilyDismissal{},
+		links:      newGuardianRepo(),
 	}
+	w.memAccess = &memAccess{pupils: w.pupils, links: w.links, familyExists: func(id string) bool {
+		_, ok := w.families[id]
+		return ok
+	}}
 	w.put(pupilA, "García", "López", domain.AdmissionEnrolled)
 	w.put(pupilB, "García", "López", domain.AdmissionPending)
 	w.put(pupilC, "Ruiz", "", domain.AdmissionAccepted)
@@ -87,12 +94,35 @@ func (w *famWorld) FamilyByID(_ context.Context, id string) (domain.Family, erro
 	return f, nil
 }
 
-func (w *famWorld) CreateFamily(_ context.Context, f domain.Family) error {
+func (w *famWorld) FindByID(_ context.Context, id string) (*domain.Student, error) {
+	if s, ok := w.pupils[id]; ok {
+		return s, nil
+	}
+	return nil, glerrors.ErrNotFound
+}
+
+func (w *famWorld) CreateFamily(ctx context.Context, f domain.Family, sync ports.FamilyAccessFunc) error {
 	w.families[f.ID()] = f
 	for _, id := range f.StudentIDs() {
 		w.pupils[id].AssignFamily(f.ID())
 	}
+	if err := w.syncFamily(ctx, f.ID(), sync); err != nil {
+		for _, id := range f.StudentIDs() {
+			w.pupils[id].AssignFamily("")
+		}
+		delete(w.families, f.ID())
+		return err
+	}
 	return nil
+}
+
+// syncFamily runs a write's sync in the family's "transaction" (links roll
+// back on error; the caller reverts the membership).
+func (w *famWorld) syncFamily(ctx context.Context, familyID string, sync ports.FamilyAccessFunc) error {
+	if sync == nil {
+		return nil
+	}
+	return w.run(ctx, &memAccessTx{m: w.memAccess, familyID: familyID}, sync)
 }
 
 func (w *famWorld) RenameFamily(_ context.Context, id, name string) error {
@@ -108,7 +138,7 @@ func (w *famWorld) RenameFamily(_ context.Context, id, name string) error {
 	return nil
 }
 
-func (w *famWorld) AddStudentsToFamily(_ context.Context, familyID string, ids []string) error {
+func (w *famWorld) AddStudentsToFamily(ctx context.Context, familyID string, ids []string, sync ports.FamilyAccessFunc) error {
 	f, ok := w.families[familyID]
 	if !ok {
 		return glerrors.ErrNotFound
@@ -120,6 +150,13 @@ func (w *famWorld) AddStudentsToFamily(_ context.Context, familyID string, ids [
 	w.families[familyID] = grown
 	for _, id := range ids {
 		w.pupils[id].AssignFamily(familyID)
+	}
+	if err := w.syncFamily(ctx, familyID, sync); err != nil {
+		for _, id := range ids {
+			w.pupils[id].AssignFamily("")
+		}
+		w.families[familyID] = f
+		return err
 	}
 	return nil
 }
@@ -163,7 +200,7 @@ func (w *famWorld) DismissSuggestion(_ context.Context, d ports.FamilyDismissal)
 }
 
 func famService(w *famWorld) *usecase.FamilyService {
-	return usecase.NewFamilyService(w, w, famTenant, func() string { return famID }, func() time.Time { return famNow })
+	return usecase.NewFamilyService(w, w, newUsers(), famTenant, func() string { return famID }, func() time.Time { return famNow })
 }
 
 func TestCreateFamily(t *testing.T) {

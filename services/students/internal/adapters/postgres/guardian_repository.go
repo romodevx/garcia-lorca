@@ -30,21 +30,20 @@ func (r *Repository) Link(ctx context.Context, l domain.GuardianLink) error {
 	})
 }
 
-// Unlink removes a link by its (guardian, student) pair. A link the bound tenant
-// cannot see is KindNotFound, so RLS makes a cross-tenant delete indistinguishable
-// from a missing link.
-func (r *Repository) Unlink(ctx context.Context, guardianUserID, studentID string) error {
-	return r.withTenant(ctx, func(tx *gorm.DB) error {
-		res := tx.Where("guardian_user_id = ? AND student_id = ?", guardianUserID, studentID).
-			Delete(&guardianStudentModel{})
-		if res.Error != nil {
-			return glerrors.Wrap(glerrors.KindInternal, "unlinking guardian", res.Error)
-		}
-		if res.RowsAffected == 0 {
-			return glerrors.ErrNotFound
-		}
-		return nil
-	})
+// unlink removes a link by its (guardian, student) pair inside tx; only
+// FamilyAccess.RemoveLink calls it, under the family locking rule. A link the
+// bound tenant cannot see is KindNotFound, so RLS makes a cross-tenant delete
+// indistinguishable from a missing link.
+func unlink(tx *gorm.DB, guardianUserID, studentID string) error {
+	res := tx.Where("guardian_user_id = ? AND student_id = ?", guardianUserID, studentID).
+		Delete(&guardianStudentModel{})
+	if res.Error != nil {
+		return translateAccessErr(res.Error)
+	}
+	if res.RowsAffected == 0 {
+		return glerrors.ErrNotFound
+	}
+	return nil
 }
 
 // ListByStudent returns the links of one student (its guardians), ordered by id
@@ -133,7 +132,9 @@ func (r *Repository) RemoveContact(ctx context.Context, id string) error {
 	})
 }
 
-// AttachAccount sets the iam account on a contact that has none.
+// attachAccount sets the iam account on a contact that has none, inside tx;
+// only FamilyAccess.AttachAccount calls it, under the family locking rule
+// that keeps the account cap (there is no unlocked entry point).
 //
 // The UPDATE is CONDITIONAL — `guardian_user_id IS NULL` rides in the WHERE, not
 // in an `if` above it. Two clerks granting access at the same time both read a
@@ -146,26 +147,24 @@ func (r *Repository) RemoveContact(ctx context.Context, id string) error {
 // Both are answered as a conflict EXCEPT when the row is genuinely absent,
 // which we distinguish with a follow-up read so an unknown contact is not
 // reported as a duplicate.
-func (r *Repository) AttachAccount(ctx context.Context, l domain.GuardianLink) error {
-	return r.withTenant(ctx, func(tx *gorm.DB) error {
-		res := tx.Model(&guardianStudentModel{}).
-			Where("id = ? AND guardian_user_id IS NULL", l.ID()).
-			Update("guardian_user_id", l.GuardianUserID())
-		if res.Error != nil {
-			return translateGuardianWriteErr(res.Error)
-		}
-		if res.RowsAffected == 1 {
-			return nil
-		}
-		var exists int64
-		if err := tx.Model(&guardianStudentModel{}).Where("id = ?", l.ID()).Count(&exists).Error; err != nil {
-			return glerrors.Wrap(glerrors.KindInternal, "reading contact", err)
-		}
-		if exists == 0 {
-			return glerrors.ErrNotFound
-		}
-		return glerrors.New(glerrors.KindConflict, "this contact already has an account")
-	})
+func attachAccount(tx *gorm.DB, l domain.GuardianLink) error {
+	res := tx.Model(&guardianStudentModel{}).
+		Where("id = ? AND student_id = ? AND guardian_user_id IS NULL", l.ID(), l.StudentID()).
+		Update("guardian_user_id", l.GuardianUserID())
+	if res.Error != nil {
+		return translateAccessErr(res.Error)
+	}
+	if res.RowsAffected == 1 {
+		return nil
+	}
+	var exists int64
+	if err := tx.Model(&guardianStudentModel{}).Where("id = ? AND student_id = ?", l.ID(), l.StudentID()).Count(&exists).Error; err != nil {
+		return glerrors.Wrap(glerrors.KindInternal, "reading contact", err)
+	}
+	if exists == 0 {
+		return glerrors.ErrNotFound
+	}
+	return glerrors.New(glerrors.KindConflict, "this contact already has an account")
 }
 
 // listGuardianLinks is the shared read for both projections: same tenant-bound

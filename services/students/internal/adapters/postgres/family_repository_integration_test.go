@@ -30,8 +30,6 @@ import (
 const (
 	famTenantA = "fa1a0000-0000-0000-0000-00000000000a"
 	famTenantB = "fa1b0000-0000-0000-0000-00000000000b"
-	// famTenantS holds only the suggestion fixtures.
-	famTenantS = "fa1c0000-0000-0000-0000-00000000000c"
 )
 
 var (
@@ -78,7 +76,7 @@ func newFamily(t *testing.T, tenant, name string, ids ...string) domain.Family {
 func createFamily(t *testing.T, repo *pgadapter.Repository, tenant, name string, ids ...string) domain.Family {
 	t.Helper()
 	f := newFamily(t, tenant, name, ids...)
-	if err := repo.CreateFamily(context.Background(), f); err != nil {
+	if err := repo.CreateFamily(context.Background(), f, nil); err != nil {
 		t.Fatalf("CreateFamily: %v", err)
 	}
 	return f
@@ -198,7 +196,7 @@ func TestFamilyCRUD(t *testing.T) {
 		t.Fatalf("RenameFamily: %v", err)
 	}
 	third := seedPupil(t, famTenantA, "Mora", "Ríos")
-	if err := repo.AddStudentsToFamily(ctx, f.ID(), []string{third}); err != nil {
+	if err := repo.AddStudentsToFamily(ctx, f.ID(), []string{third}, nil); err != nil {
 		t.Fatalf("AddStudentsToFamily: %v", err)
 	}
 	got, _ = repo.FamilyByID(ctx, f.ID())
@@ -242,7 +240,7 @@ func TestFamilyUnknownIsNotFound(t *testing.T) {
 	if err := repo.RenameFamily(ctx, unknown, "X"); glerrors.KindOf(err) != glerrors.KindNotFound {
 		t.Errorf("RenameFamily: %v", err)
 	}
-	if err := repo.AddStudentsToFamily(ctx, unknown, []string{uuid.NewString()}); glerrors.KindOf(err) != glerrors.KindNotFound {
+	if err := repo.AddStudentsToFamily(ctx, unknown, []string{uuid.NewString()}, nil); glerrors.KindOf(err) != glerrors.KindNotFound {
 		t.Errorf("AddStudentsToFamily: %v", err)
 	}
 	if err := repo.DissolveFamily(ctx, unknown); glerrors.KindOf(err) != glerrors.KindNotFound {
@@ -275,7 +273,7 @@ func TestFamilyRefusesAPupilAlreadyInOne(t *testing.T) {
 	first := createFamily(t, repo, famTenantA, "Cruz", a)
 
 	second := newFamily(t, famTenantA, "Cruz bis", b, a)
-	if err := repo.CreateFamily(ctx, second); glerrors.KindOf(err) != glerrors.KindConflict {
+	if err := repo.CreateFamily(ctx, second, nil); glerrors.KindOf(err) != glerrors.KindConflict {
 		t.Fatalf("create over a member: want conflict, got %v", err)
 	}
 	// Nothing of the refused create was written: no family, b still free.
@@ -287,7 +285,7 @@ func TestFamilyRefusesAPupilAlreadyInOne(t *testing.T) {
 	}
 
 	other := createFamily(t, repo, famTenantA, "Otra", c)
-	if err := repo.AddStudentsToFamily(ctx, other.ID(), []string{b, a}); glerrors.KindOf(err) != glerrors.KindConflict {
+	if err := repo.AddStudentsToFamily(ctx, other.ID(), []string{b, a}, nil); glerrors.KindOf(err) != glerrors.KindConflict {
 		t.Fatalf("add a member of another family: want conflict, got %v", err)
 	}
 	if s, _ := repo.FindByID(ctx, b); s.FamilyID() != "" {
@@ -309,7 +307,7 @@ func TestFamilyRefusesAWithdrawnPupil(t *testing.T) {
 	if err := repo.Update(ctx, s); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.CreateFamily(ctx, newFamily(t, famTenantA, "Vera", gone)); glerrors.KindOf(err) != glerrors.KindConflict {
+	if err := repo.CreateFamily(ctx, newFamily(t, famTenantA, "Vera", gone), nil); glerrors.KindOf(err) != glerrors.KindConflict {
 		t.Errorf("a withdrawn pupil joined a family: %v", err)
 	}
 }
@@ -325,8 +323,8 @@ func TestFamilyConcurrentCreatesOverOnePupil(t *testing.T) {
 	}
 	repos := []*pgadapter.Repository{appRepo(t, famTenantA), appRepo(t, famTenantA)}
 	errs := race(t, "students", shared,
-		func() error { return repos[0].CreateFamily(ctx, families[0]) },
-		func() error { return repos[1].CreateFamily(ctx, families[1]) },
+		func() error { return repos[0].CreateFamily(ctx, families[0], nil) },
+		func() error { return repos[1].CreateFamily(ctx, families[1], nil) },
 	)
 
 	wins, conflicts := 0, 0
@@ -364,7 +362,7 @@ func TestFamilyRaceAddVersusDissolve(t *testing.T) {
 	f := createFamily(t, repo, famTenantA, "Toro", a)
 	other := appRepo(t, famTenantA)
 	errs := race(t, "families", f.ID(),
-		func() error { return repo.AddStudentsToFamily(ctx, f.ID(), []string{b}) },
+		func() error { return repo.AddStudentsToFamily(ctx, f.ID(), []string{b}, nil) },
 		func() error { return other.DissolveFamily(ctx, f.ID()) },
 	)
 	if errs[0] != nil && glerrors.KindOf(errs[0]) != glerrors.KindNotFound {
@@ -399,7 +397,7 @@ func TestFamilyRaceRemoveLastVersusAdd(t *testing.T) {
 			dissolved, err = repo.RemoveStudentFromFamily(ctx, f.ID(), a)
 			return err
 		},
-		func() error { return other.AddStudentsToFamily(ctx, f.ID(), []string{b}) },
+		func() error { return other.AddStudentsToFamily(ctx, f.ID(), []string{b}, nil) },
 	)
 	if errs[0] != nil {
 		t.Fatalf("Remove: %v", errs[0])
@@ -424,7 +422,9 @@ func TestFamilyRaceRemoveLastVersusAdd(t *testing.T) {
 // still common: confirming families must not let it start chaining the rest.
 // A value on exactly six pupils is not common.
 func TestFamilySuggestionCommonValuesCountTheWholeSchool(t *testing.T) {
-	const tenant = "fa1d0000-0000-0000-0000-00000000000d"
+	// A tenant of its own per run: the suggestion reads see the whole school,
+	// so a fixed tenant would read the pupils an earlier run (-count>1) left.
+	tenant := uuid.NewString()
 	const reception, six = "4437770000", "seis@x.mx"
 	ctx := context.Background()
 	repo := appRepo(t, tenant)
@@ -510,11 +510,13 @@ func TestFamilyAccountCount(t *testing.T) {
 
 func TestFamilySuggestionInputs(t *testing.T) {
 	ctx := context.Background()
-	repo := appRepo(t, famTenantS)
-	free := seedPupil(t, famTenantS, "Ortiz", "Lara")
-	member := seedPupil(t, famTenantS, "Ortiz", "Lara")
-	gone := seedPupil(t, famTenantS, "Ortiz", "Lara")
-	createFamily(t, repo, famTenantS, "Ortiz", member)
+	// A tenant of its own per run, as above: these reads see the whole school.
+	tenant := uuid.NewString()
+	repo := appRepo(t, tenant)
+	free := seedPupil(t, tenant, "Ortiz", "Lara")
+	member := seedPupil(t, tenant, "Ortiz", "Lara")
+	gone := seedPupil(t, tenant, "Ortiz", "Lara")
+	createFamily(t, repo, tenant, "Ortiz", member)
 	s, _ := repo.FindByID(ctx, gone)
 	if _, err := s.Withdraw("baja"); err != nil {
 		t.Fatal(err)
@@ -524,7 +526,7 @@ func TestFamilySuggestionInputs(t *testing.T) {
 	}
 	user := uuid.NewString()
 	for _, sid := range []string{free, member} {
-		link, err := domain.NewGuardianLink(uuid.NewString(), famTenantS, user, sid, domain.RelationshipFather)
+		link, err := domain.NewGuardianLink(uuid.NewString(), tenant, user, sid, domain.RelationshipFather)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -595,7 +597,7 @@ func TestRLSIsolatesFamilies(t *testing.T) {
 	if err := repoB.RenameFamily(ctx, famA.ID(), "Robada"); glerrors.KindOf(err) != glerrors.KindNotFound {
 		t.Errorf("B renamed A's family: %v", err)
 	}
-	if err := repoB.AddStudentsToFamily(ctx, famA.ID(), []string{pupilB}); glerrors.KindOf(err) != glerrors.KindNotFound {
+	if err := repoB.AddStudentsToFamily(ctx, famA.ID(), []string{pupilB}, nil); glerrors.KindOf(err) != glerrors.KindNotFound {
 		t.Errorf("B added to A's family: %v", err)
 	}
 	if _, err := repoB.RemoveStudentFromFamily(ctx, famA.ID(), pupilA); glerrors.KindOf(err) != glerrors.KindNotFound {

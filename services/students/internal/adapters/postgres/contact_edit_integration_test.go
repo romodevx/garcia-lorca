@@ -70,7 +70,7 @@ func TestRemoveContactRefusesAContactThatGainedAnAccount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WithAccount: %v", err)
 	}
-	if err := repo.AttachAccount(ctx, granted); err != nil {
+	if err := attachOnPupil(ctx, repo, granted); err != nil {
 		t.Fatalf("AttachAccount: %v", err)
 	}
 

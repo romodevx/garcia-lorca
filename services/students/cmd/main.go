@@ -243,7 +243,14 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 	// pupil's level against the school's own catalog (ADR 0014).
 	configBaseURL := envOr("CONFIG_BASE_URL", defaultConfigBaseURL)
 	catalog := configclient.New(configBaseURL, gcpauth.HTTPClient(ctx, configBaseURL))
-	svc := usecase.NewStudentService(repo, events, catalog, tenantID, newID).WithSchoolZone(zone)
+	// Guardian links reference iam users, so the use case validates them against
+	// the iam bounded context by RPC (the user must exist AND hold the guardian
+	// role), and again before a family hands an account to
+	// another pupil. Server-to-server and network-private, like the config client.
+	iamBaseURL := envOr("IAM_BASE_URL", defaultIAMBaseURL)
+	users := iamclient.New(iamBaseURL, gcpauth.HTTPClient(ctx, iamBaseURL))
+	// WithFamilyAccess: a draft promoted inside a family gets its accounts at once.
+	svc := usecase.NewStudentService(repo, events, catalog, tenantID, newID).WithSchoolZone(zone).WithFamilyAccess(repo, users)
 	if photos, err := openPhotoStore(ctx, log); err != nil {
 		return nil, nil, nil, nil, err
 	} else if photos != nil {
@@ -251,12 +258,9 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 	}
 	enroll := usecase.NewEnrollmentService(repo, repo, catalog, events, tenantID, newID, time.Now).WithSchoolZone(zone)
 
-	// Guardian links reference iam users, so the use case validates them against
-	// the iam bounded context by RPC (the user must exist AND hold the guardian
-	// role). Server-to-server and network-private, like the config client.
-	iamBaseURL := envOr("IAM_BASE_URL", defaultIAMBaseURL)
-	users := iamclient.New(iamBaseURL, gcpauth.HTTPClient(ctx, iamBaseURL))
-	guardians := usecase.NewGuardianService(repo, repo, users, tenantID, newID)
+	// repo is also the FamilyAccessRepository: every account write takes the
+	// family locks and keeps the cap of two accounts per family (ADR 0041).
+	guardians := usecase.NewGuardianService(repo, repo, repo, users, tenantID, newID)
 
 	// A pupil is en trámite until their inscription is PAID, and finance is what
 	// knows that. The consumer is how the two facts meet.
@@ -279,7 +283,7 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 		WithNotes(notes).WithCards(cards).WithLevelArchive(levels).WithImports(imports).
 		WithGroupRecords(usecase.NewGroupRecordService(repo)).WithImportIssues(issues).
 		// Families (ADR 0041): siblings grouped by the office from suggestions.
-		WithFamilies(usecase.NewFamilyService(repo, repo, tenantID, newID, time.Now))
+		WithFamilies(usecase.NewFamilyService(repo, repo, users, tenantID, newID, time.Now))
 
 	mux := http.NewServeMux()
 	path, h := studentsv1connect.NewStudentsServiceHandler(handler, connect.WithRecover(recoverFn))

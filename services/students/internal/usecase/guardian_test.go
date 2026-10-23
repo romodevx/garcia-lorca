@@ -155,7 +155,8 @@ func newGuardianService(t *testing.T) (*usecase.GuardianService, *fakeRepo, *fak
 	guardians := newGuardianRepo()
 	users := newUsers()
 	ids := 0
-	svc := usecase.NewGuardianService(students, guardians, users, tenant,
+	access := &memAccess{pupils: students.byID, links: guardians, familyExists: func(string) bool { return false }}
+	svc := usecase.NewGuardianService(students, guardians, access, users, tenant,
 		func() string { ids++; return "gl-" + string(rune('0'+ids)) })
 	return svc, students, guardians, users
 }

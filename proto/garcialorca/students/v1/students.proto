@@ -228,6 +228,22 @@ service StudentsService {
   // DismissFamilySuggestion records "not a family" for exactly these pupils.
   // Idempotent.
   rpc DismissFamilySuggestion(DismissFamilySuggestionRequest) returns (DismissFamilySuggestionResponse);
+
+  // --- family access (T2, ADR 0041) ---
+  // Every app account linked to a pupil of a family is linked to EVERY placeable
+  // pupil of it, and a family holds at most two distinct accounts. That sync and
+  // that cap also run inside GrantContactAccess, LinkGuardian, CreateFamily and
+  // AddStudentsToFamily; a third account is FailedPrecondition with reason
+  // FAMILY_ACCOUNT_LIMIT and writes nothing.
+  //
+  // AddFamilyContact records one adult on every pupil of the family at once
+  // (no account). A pupil that already has a contact with the same email or
+  // phone keeps it and gets no second one.
+  rpc AddFamilyContact(AddFamilyContactRequest) returns (AddFamilyContactResponse);
+  // RevokeFamilyAccess takes one account away from every pupil of the family.
+  // The contacts stay — name and phone are still who to call — without the
+  // account. An account no pupil of the family carries is NotFound.
+  rpc RevokeFamilyAccess(RevokeFamilyAccessRequest) returns (RevokeFamilyAccessResponse);
 }
 
 // --- Health ---------------------------------------------------------------
@@ -1240,3 +1256,28 @@ message DismissFamilySuggestionRequest {
 }
 
 message DismissFamilySuggestionResponse {}
+
+message AddFamilyContactRequest {
+  string family_id = 1;
+  string relationship = 2;  // mother | father | guardian | other
+  string full_name = 3;
+  string phone = 4;
+  string email = 5;
+  bool is_emergency = 6;
+}
+
+message AddFamilyContactResponse {
+  // One per pupil of the family: the new contact, or the one that already
+  // carried this email or phone.
+  repeated GuardianLink contacts = 1;
+}
+
+message RevokeFamilyAccessRequest {
+  string family_id = 1;
+  string guardian_user_id = 2;
+}
+
+message RevokeFamilyAccessResponse {
+  // contacts is how many contacts lost the account.
+  int32 contacts = 1;
+}

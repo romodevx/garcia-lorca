@@ -72,7 +72,9 @@ func (s *fakeGuardianStore) ByID(_ context.Context, id string) (domain.GuardianL
 	return domain.GuardianLink{}, glerrors.ErrNotFound
 }
 
-func (s *fakeGuardianStore) AttachAccount(_ context.Context, l domain.GuardianLink) error {
+// attach and unlink are the in-memory account writes stubAccessTx makes (the
+// repository port has none: they go through FamilyAccess).
+func (s *fakeGuardianStore) attach(l domain.GuardianLink) error {
 	for key, stored := range s.links {
 		if stored.ID() != l.ID() {
 			continue
@@ -87,7 +89,7 @@ func (s *fakeGuardianStore) AttachAccount(_ context.Context, l domain.GuardianLi
 	return glerrors.ErrNotFound
 }
 
-func (s *fakeGuardianStore) Unlink(_ context.Context, guardianUserID, studentID string) error {
+func (s *fakeGuardianStore) unlink(guardianUserID, studentID string) error {
 	key := guardianUserID + "|" + studentID
 	if _, ok := s.links[key]; !ok {
 		return glerrors.ErrNotFound
@@ -141,7 +143,8 @@ func guardianHandler(t *testing.T) (*grpcadapter.StudentsHandler, string) {
 		nonGuardianUser: {ID: nonGuardianUser, Status: "USER_STATUS_ACTIVE", Roles: []string{"teacher"}},
 	}}
 	ids := 0
-	guardians := usecase.NewGuardianService(studentRepo, newFakeGuardianStore(), users, testTenant,
+	store := newFakeGuardianStore()
+	guardians := usecase.NewGuardianService(studentRepo, store, &stubAccess{store: store}, users, testTenant,
 		func() string { ids++; return "gl-1" })
 	stu := usecase.NewStudentService(studentRepo, &fakePublisher{}, testLevels, testTenant, func() string { return "stu-x" })
 	h := grpcadapter.NewStudentsHandler(stu, nil, guardians, usecase.NewHealthService("students"))

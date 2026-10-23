@@ -30,6 +30,10 @@ type StudentService struct {
 	newID  func() string
 	now    func() time.Time
 	photos ports.PhotoStore
+	// access syncs a family's accounts onto a draft promoted inside it
+	// (ADR 0041). Nil: no sync (WithFamilyAccess).
+	access ports.FamilyAccessRepository
+	users  ports.UserReader
 	// zone is the school's time zone: a matrícula is numbered under the
 	// school's calendar year (T5b). UTC until WithSchoolZone.
 	zone *time.Location
@@ -40,6 +44,16 @@ type StudentService struct {
 // (injectable for deterministic tests).
 func NewStudentService(repo ports.StudentRepository, pub ports.EventPublisher, levels ports.LevelCatalog, tenant string, newID func() string) *StudentService {
 	return &StudentService{repo: repo, pub: pub, levels: levels, tenant: tenant, newID: newID, now: time.Now, zone: time.UTC}
+}
+
+// WithFamilyAccess returns the service that, when UpdateDetails promotes a
+// draft in a family, links the family's accounts that iam (users) still
+// allows to it right away.
+func (s *StudentService) WithFamilyAccess(access ports.FamilyAccessRepository, users ports.UserReader) *StudentService {
+	cp := *s
+	cp.access = access
+	cp.users = users
+	return &cp
 }
 
 // WithSchoolZone returns the service numbering matrículas in the school's
@@ -280,8 +294,32 @@ func (s *StudentService) UpdateDetails(ctx context.Context, in UpdateDetailsInpu
 		if err := s.pub.PublishAdmissionChanged(ctx, *promotion); err != nil {
 			slog.WarnContext(ctx, "draft promotion not published", "student_id", student.ID(), "error", err)
 		}
+		s.syncPromotedDraft(ctx, student)
 	}
 	return out, nil
+}
+
+// syncPromotedDraft links the family's accounts to a draft just promoted
+// (a draft never receives one), in its own transaction under the family
+// locking rule. Best-effort, like the promotion event: the promotion is
+// already stored, and failing the save would only make the office repeat a
+// save that worked. A failure is logged; the pupil then receives the accounts
+// at the family's next account or membership write. A pupil without a family
+// has nothing to sync.
+func (s *StudentService) syncPromotedDraft(ctx context.Context, student *domain.Student) {
+	if s.access == nil || student.FamilyID() == "" {
+		return
+	}
+	sync := familySync{access: s.access, users: s.users, tenant: s.tenant, newID: s.newID}
+	eligible, err := sync.eligible(ctx, "", []string{student.ID()})
+	if err == nil {
+		err = s.access.OnPupil(ctx, student.ID(), func(ctx context.Context, a ports.FamilyAccess) error {
+			return sync.run(ctx, a, eligible)
+		})
+	}
+	if err != nil {
+		slog.ErrorContext(ctx, "family accounts not synced to a promoted draft", "student_id", student.ID(), "error", err)
+	}
 }
 
 // optionalCURP parses a CURP; empty is the zero CURP (the domain decides

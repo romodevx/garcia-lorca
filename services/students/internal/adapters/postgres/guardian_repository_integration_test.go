@@ -69,7 +69,7 @@ func TestGuardianLinkRoundTripAndUnlink(t *testing.T) {
 		t.Errorf("ListByGuardian = %+v, want the seeded link", byGuardian)
 	}
 
-	if err := repo.Unlink(ctx, guardianOne, studentID); err != nil {
+	if err := unlinkOnPupil(ctx, repo, guardianOne, studentID); err != nil {
 		t.Fatalf("Unlink: %v", err)
 	}
 	remaining, err := repo.ListByStudent(ctx, studentID)
@@ -80,7 +80,7 @@ func TestGuardianLinkRoundTripAndUnlink(t *testing.T) {
 		t.Errorf("the link survived Unlink: %+v", remaining)
 	}
 	// Unlinking again finds nothing to delete.
-	if err := repo.Unlink(ctx, guardianOne, studentID); glerrors.KindOf(err) != glerrors.KindNotFound {
+	if err := unlinkOnPupil(ctx, repo, guardianOne, studentID); glerrors.KindOf(err) != glerrors.KindNotFound {
 		t.Errorf("second Unlink: want KindNotFound, got %v", err)
 	}
 }
@@ -178,7 +178,7 @@ func TestRLSIsolatesGuardianLinks(t *testing.T) {
 
 	// Write isolation: tenant A cannot delete tenant B's link (no visible row →
 	// NotFound), and the link survives.
-	if err := appRepo(t, tenantA).Unlink(ctx, guardianOne, studentB); glerrors.KindOf(err) != glerrors.KindNotFound {
+	if err := unlinkOnPupil(ctx, appRepo(t, tenantA), guardianOne, studentB); glerrors.KindOf(err) != glerrors.KindNotFound {
 		t.Errorf("tenant A deleted tenant B's link (RLS write breach): %v", err)
 	}
 	after, err := appRepo(t, tenantB).ListByStudent(ctx, studentB)
@@ -287,7 +287,7 @@ func TestGrantingAccessKeepsOneRow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WithAccount: %v", err)
 	}
-	if err := repo.AttachAccount(ctx, withAccount); err != nil {
+	if err := attachOnPupil(ctx, repo, withAccount); err != nil {
 		t.Fatalf("AttachAccount: %v", err)
 	}
 
@@ -346,7 +346,7 @@ func TestAttachAccountIsConditional(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WithAccount: %v", err)
 	}
-	if err := repo.AttachAccount(ctx, first); err != nil {
+	if err := attachOnPupil(ctx, repo, first); err != nil {
 		t.Fatalf("first AttachAccount: %v", err)
 	}
 
@@ -356,7 +356,7 @@ func TestAttachAccountIsConditional(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WithAccount(second): %v", err)
 	}
-	if err := repo.AttachAccount(ctx, second); glerrors.KindOf(err) != glerrors.KindConflict {
+	if err := attachOnPupil(ctx, repo, second); glerrors.KindOf(err) != glerrors.KindConflict {
 		t.Errorf("racing grant: want KindConflict, got %v", err)
 	}
 
