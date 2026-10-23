@@ -24,6 +24,15 @@ const CodeFamilyAccountLimit = "FAMILY_ACCOUNT_LIMIT"
 var ErrFamilyAccountLimit = glerrors.New(glerrors.KindConflict,
 	"una familia tiene como máximo dos cuentas de la app: quita el acceso de una antes de dar otro")
 
+// CodeFamilyManagedAccess is the X-Error-Code of ErrFamilyManagedAccess.
+const CodeFamilyManagedAccess = "FAMILY_MANAGED_ACCESS"
+
+// ErrFamilyManagedAccess refuses unlinking an account from ONE pupil of a
+// family: the family's sync would link it back on its next write. The access
+// is revoked from the whole family instead (RevokeFamilyAccess).
+var ErrFamilyManagedAccess = glerrors.New(glerrors.KindConflict,
+	"este alumno está en una familia: quita el acceso desde la familia")
+
 // FamilyMember is one pupil of a family as an account write sees it, read
 // under the family's lock: its admission status and every contact it has.
 type FamilyMember struct {

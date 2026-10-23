@@ -309,9 +309,18 @@ func (s *GuardianService) requirePlaceable(ctx context.Context, studentID string
 }
 
 // UnlinkGuardian removes a guardian ↔ student link. An unknown link is
-// KindNotFound.
+// KindNotFound. A pupil in a family is domain.ErrFamilyManagedAccess and
+// nothing is deleted: the family's sync would link the account back from a
+// sibling, so access is revoked from the family (RevokeFamilyAccess). The
+// check and the delete share OnPupil's transaction, so a family confirmed
+// over the pupil meanwhile cannot slip between them.
 func (s *GuardianService) UnlinkGuardian(ctx context.Context, guardianUserID, studentID string) error {
-	return s.guardians.Unlink(ctx, guardianUserID, studentID)
+	return s.access.OnPupil(ctx, studentID, func(ctx context.Context, a ports.FamilyAccess) error {
+		if a.FamilyID() != "" {
+			return domain.ErrFamilyManagedAccess
+		}
+		return a.RemoveLink(ctx, guardianUserID, studentID)
+	})
 }
 
 // ListGuardiansForStudent returns the links of one student (its guardians).

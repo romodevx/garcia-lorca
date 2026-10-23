@@ -615,12 +615,15 @@ func toProtoGuardianLinks(links []domain.GuardianLink) []*studentsv1.GuardianLin
 // the error straight to connect.NewError shipped Postgres constraint names and
 // SQLSTATEs — and on some constraints the conflicting value — to whoever called.
 func connectErr(err error) *connect.Error {
-	// A family past its account cap is a state the caller must change first
-	// (revoke one), not a duplicate: FailedPrecondition, with its code.
-	if errors.Is(err, domain.ErrFamilyAccountLimit) {
-		ce := connect.NewError(connect.CodeFailedPrecondition, errors.New(glerrors.SafeMessage(err)))
-		ce.Meta().Set(ErrorCodeMeta, domain.CodeFamilyAccountLimit)
-		return ce
+	// A family's access refusals are a state the caller must change first
+	// (revoke an account, or act on the family), not a duplicate:
+	// FailedPrecondition, with their code.
+	for sentinel, code := range familyPreconditions {
+		if errors.Is(err, sentinel) {
+			ce := connect.NewError(connect.CodeFailedPrecondition, errors.New(glerrors.SafeMessage(err)))
+			ce.Meta().Set(ErrorCodeMeta, code)
+			return ce
+		}
 	}
 	ce := connectErrForKind(err)
 	if code := levelarchive.CodeOf(err); code != "" {
@@ -633,6 +636,12 @@ func connectErr(err error) *connect.Error {
 		ce.Meta().Set(ErrorCodeMeta, domain.CodeStudentDraft)
 	}
 	return ce
+}
+
+// familyPreconditions are the family access refusals and their error codes.
+var familyPreconditions = map[error]string{
+	domain.ErrFamilyAccountLimit:  domain.CodeFamilyAccountLimit,
+	domain.ErrFamilyManagedAccess: domain.CodeFamilyManagedAccess,
 }
 
 // ErrorCodeMeta is the error-metadata key a refusal's machine code rides in

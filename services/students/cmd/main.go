@@ -243,7 +243,8 @@ func buildMux(ctx context.Context, log *slog.Logger) (*http.ServeMux, pubsub.Pub
 	// pupil's level against the school's own catalog (ADR 0014).
 	configBaseURL := envOr("CONFIG_BASE_URL", defaultConfigBaseURL)
 	catalog := configclient.New(configBaseURL, gcpauth.HTTPClient(ctx, configBaseURL))
-	svc := usecase.NewStudentService(repo, events, catalog, tenantID, newID).WithSchoolZone(zone)
+	// WithFamilyAccess: a draft promoted inside a family gets its accounts at once.
+	svc := usecase.NewStudentService(repo, events, catalog, tenantID, newID).WithSchoolZone(zone).WithFamilyAccess(repo)
 	if photos, err := openPhotoStore(ctx, log); err != nil {
 		return nil, nil, nil, nil, err
 	} else if photos != nil {

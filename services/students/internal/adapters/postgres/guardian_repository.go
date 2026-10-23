@@ -33,18 +33,27 @@ func (r *Repository) Link(ctx context.Context, l domain.GuardianLink) error {
 // Unlink removes a link by its (guardian, student) pair. A link the bound tenant
 // cannot see is KindNotFound, so RLS makes a cross-tenant delete indistinguishable
 // from a missing link.
+//
+// It takes NO family lock: the use case unlinks only through OnPupil
+// (FamilyAccess.RemoveLink), which refuses a pupil in a family. This entry
+// point stays for the adapter's own tests.
 func (r *Repository) Unlink(ctx context.Context, guardianUserID, studentID string) error {
 	return r.withTenant(ctx, func(tx *gorm.DB) error {
-		res := tx.Where("guardian_user_id = ? AND student_id = ?", guardianUserID, studentID).
-			Delete(&guardianStudentModel{})
-		if res.Error != nil {
-			return glerrors.Wrap(glerrors.KindInternal, "unlinking guardian", res.Error)
-		}
-		if res.RowsAffected == 0 {
-			return glerrors.ErrNotFound
-		}
-		return nil
+		return unlink(tx, guardianUserID, studentID)
 	})
+}
+
+// unlink is Unlink's delete inside tx.
+func unlink(tx *gorm.DB, guardianUserID, studentID string) error {
+	res := tx.Where("guardian_user_id = ? AND student_id = ?", guardianUserID, studentID).
+		Delete(&guardianStudentModel{})
+	if res.Error != nil {
+		return translateAccessErr(res.Error)
+	}
+	if res.RowsAffected == 0 {
+		return glerrors.ErrNotFound
+	}
+	return nil
 }
 
 // ListByStudent returns the links of one student (its guardians), ordered by id

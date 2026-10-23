@@ -334,3 +334,60 @@ func TestRevokeFamilyAccess(t *testing.T) {
 		t.Errorf("malformed account: %v", err)
 	}
 }
+
+// Unlinking one pupil of a family would be undone by the next sync: refused,
+// and the access is revoked from the family instead.
+func TestUnlinkGuardianOnAFamilyPupilIsRefused(t *testing.T) {
+	w := newAccWorld()
+	w.group(t, pupilA, pupilB)
+	w.link(t, "l-a", accMom, pupilA, rosaPerson)
+	w.link(t, "l-b", accMom, pupilB, rosaPerson)
+	before := maps.Clone(w.links.links)
+
+	err := w.guardians.UnlinkGuardian(context.Background(), accMom, pupilA)
+	if !errors.Is(err, domain.ErrFamilyManagedAccess) || glerrors.KindOf(err) != glerrors.KindConflict {
+		t.Fatalf("err = %v, want ErrFamilyManagedAccess (KindConflict)", err)
+	}
+	if len(w.links.links) != len(before) {
+		t.Error("the refused unlink deleted a link")
+	}
+}
+
+// A draft in a family promoted by a valid CURP gets the family's accounts at
+// once, not at the family's next write.
+func TestUpdateDetailsPromotionSyncsTheFamily(t *testing.T) {
+	svc, repo, _ := newService(t)
+	links := newGuardianRepo()
+	access := &memAccess{pupils: repo.byID, links: links, familyExists: func(id string) bool { return id == famID }}
+	svc = svc.WithFamilyAccess(access)
+	seedDraft(t, repo, "stu-d")
+	seedStudent(t, repo, "stu-sib")
+	repo.byID["stu-d"].AssignFamily(famID)
+	repo.byID["stu-sib"].AssignFamily(famID)
+	mom, err := domain.NewGuardianLink("l-mom", tenant, accMom, "stu-sib", domain.RelationshipMother)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := links.Link(context.Background(), mom.WithPerson(rosaPerson)); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := svc.UpdateDetails(context.Background(), detailsOf("stu-d", draftCURP)); err != nil {
+		t.Fatalf("UpdateDetails: %v", err)
+	}
+	got := links.filter(func(l domain.GuardianLink) bool { return l.StudentID() == "stu-d" })
+	if len(got) != 1 || got[0].GuardianUserID() != accMom || got[0].FullName() != rosaPerson.FullName {
+		t.Fatalf("promoted pupil links = %+v, want mom synced", got)
+	}
+	if access.onPupilCalls != 1 {
+		t.Errorf("OnPupil calls = %d, want the sync under the family lock", access.onPupilCalls)
+	}
+
+	// A correction that promotes nothing does not open a sync.
+	if _, err := svc.UpdateDetails(context.Background(), detailsOf("stu-d", draftCURP)); err != nil {
+		t.Fatal(err)
+	}
+	if access.onPupilCalls != 1 {
+		t.Errorf("OnPupil calls = %d after a plain correction, want still 1", access.onPupilCalls)
+	}
+}

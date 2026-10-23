@@ -30,6 +30,9 @@ type StudentService struct {
 	newID  func() string
 	now    func() time.Time
 	photos ports.PhotoStore
+	// access syncs a family's accounts onto a draft promoted inside it
+	// (ADR 0041). Nil: no sync (WithFamilyAccess).
+	access ports.FamilyAccessRepository
 	// zone is the school's time zone: a matrícula is numbered under the
 	// school's calendar year (T5b). UTC until WithSchoolZone.
 	zone *time.Location
@@ -40,6 +43,14 @@ type StudentService struct {
 // (injectable for deterministic tests).
 func NewStudentService(repo ports.StudentRepository, pub ports.EventPublisher, levels ports.LevelCatalog, tenant string, newID func() string) *StudentService {
 	return &StudentService{repo: repo, pub: pub, levels: levels, tenant: tenant, newID: newID, now: time.Now, zone: time.UTC}
+}
+
+// WithFamilyAccess returns the service that, when UpdateDetails promotes a
+// draft in a family, links the family's accounts to it right away.
+func (s *StudentService) WithFamilyAccess(access ports.FamilyAccessRepository) *StudentService {
+	cp := *s
+	cp.access = access
+	return &cp
 }
 
 // WithSchoolZone returns the service numbering matrículas in the school's
@@ -280,8 +291,29 @@ func (s *StudentService) UpdateDetails(ctx context.Context, in UpdateDetailsInpu
 		if err := s.pub.PublishAdmissionChanged(ctx, *promotion); err != nil {
 			slog.WarnContext(ctx, "draft promotion not published", "student_id", student.ID(), "error", err)
 		}
+		if err := s.syncPromotedDraft(ctx, student.ID()); err != nil {
+			return DetailsResult{}, err
+		}
 	}
 	return out, nil
+}
+
+// syncPromotedDraft links the family's accounts to a draft just promoted
+// (a draft never receives one), in its own transaction under the family
+// locking rule. The promotion is already stored: a failure is logged and
+// returned so the office retries, and a retry re-runs the sync through the
+// family's next write anyway. A pupil without a family has nothing to sync.
+func (s *StudentService) syncPromotedDraft(ctx context.Context, studentID string) error {
+	if s.access == nil {
+		return nil
+	}
+	err := s.access.OnPupil(ctx, studentID, func(ctx context.Context, a ports.FamilyAccess) error {
+		return syncFamilyAccess(ctx, a, s.tenant, s.newID)
+	})
+	if err != nil {
+		slog.ErrorContext(ctx, "family accounts not synced to a promoted draft", "student_id", studentID, "error", err)
+	}
+	return err
 }
 
 // optionalCURP parses a CURP; empty is the zero CURP (the domain decides

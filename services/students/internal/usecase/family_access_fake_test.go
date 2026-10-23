@@ -88,6 +88,13 @@ func (t *memAccessTx) AttachAccount(ctx context.Context, l domain.GuardianLink) 
 	return t.m.links.AttachAccount(ctx, l)
 }
 
+func (t *memAccessTx) RemoveLink(ctx context.Context, guardianUserID, studentID string) error {
+	if !t.inScope(studentID) {
+		return glerrors.ErrNotFound
+	}
+	return t.m.links.Unlink(ctx, guardianUserID, studentID)
+}
+
 func (t *memAccessTx) InsertContact(ctx context.Context, l domain.GuardianLink) error {
 	if !t.inScope(l.StudentID()) {
 		return glerrors.New(glerrors.KindInvalid, "student does not exist")

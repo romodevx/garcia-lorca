@@ -59,6 +59,9 @@ func (t *stubAccessTx) AttachAccount(ctx context.Context, l domain.GuardianLink)
 func (t *stubAccessTx) InsertContact(ctx context.Context, l domain.GuardianLink) error {
 	return t.s.store.Link(ctx, l)
 }
+func (t *stubAccessTx) RemoveLink(ctx context.Context, guardianUserID, studentID string) error {
+	return t.s.store.Unlink(ctx, guardianUserID, studentID)
+}
 func (t *stubAccessTx) DetachAccount(context.Context, string) (int, error) { return t.s.detached, nil }
 
 // overCapMembers is a family that already holds three accounts.
@@ -188,5 +191,23 @@ func TestFamilyAccessRPCsAreUnimplementedWhenNotWired(t *testing.T) {
 	}
 	if _, err := h.RevokeFamilyAccess(ctx, connect.NewRequest(&studentsv1.RevokeFamilyAccessRequest{})); familyRPCCode(err) != connect.CodeUnimplemented {
 		t.Errorf("RevokeFamilyAccess: %v", err)
+	}
+}
+
+func TestUnlinkGuardianOnAFamilyPupilOnTheWire(t *testing.T) {
+	studentRepo := newFakeRepo()
+	student := seedApplicant(t, studentRepo)
+	store := newFakeGuardianStore()
+	access := &familyStub{stubAccess{store: store}}
+	guardians := usecase.NewGuardianService(studentRepo, store, access, &fakeUserReader{}, testTenant, func() string { return "gl-1" })
+	stu := usecase.NewStudentService(studentRepo, &fakePublisher{}, testLevels, testTenant, func() string { return "stu-x" })
+	h := grpcadapter.NewStudentsHandler(stu, nil, guardians, usecase.NewHealthService("students"))
+
+	_, err := h.UnlinkGuardian(context.Background(), connect.NewRequest(&studentsv1.UnlinkGuardianRequest{
+		GuardianUserId: guardianUser, StudentId: student.ID(),
+	}))
+	if familyRPCCode(err) != connect.CodeFailedPrecondition || errorCode(err) != domain.CodeFamilyManagedAccess {
+		t.Errorf("unlink in a family: code=%v meta=%q (%v); want FailedPrecondition + %s",
+			familyRPCCode(err), errorCode(err), err, domain.CodeFamilyManagedAccess)
 	}
 }

@@ -257,8 +257,6 @@ type GuardianRepository interface {
 	// Link inserts a guardian ↔ student link. A duplicate
 	// (guardian, student) per tenant is KindConflict.
 	Link(ctx context.Context, l domain.GuardianLink) error
-	// Unlink removes a link. An unknown (or invisible) link is KindNotFound.
-	Unlink(ctx context.Context, guardianUserID, studentID string) error
 	// ByID returns one contact/link by its own id. A row the bound tenant cannot
 	// see is KindNotFound, so RLS makes a cross-tenant read indistinguishable
 	// from a missing contact.
@@ -268,9 +266,9 @@ type GuardianRepository interface {
 	UpdateContact(ctx context.Context, l domain.GuardianLink) error
 	// RemoveContact deletes a contact by id. Unknown is KindNotFound.
 	RemoveContact(ctx context.Context, id string) error
-	// There is deliberately no account write here: attaching an account, or
-	// inserting a link that carries one, goes through FamilyAccessRepository
-	// under the family locking rule that keeps the account cap (ADR 0041).
+	// There is deliberately no account write here: attaching an account,
+	// inserting a link that carries one, or unlinking one goes through
+	// FamilyAccessRepository under the family locking rule (ADR 0041).
 	// ListByStudent returns the links of one student (its guardians).
 	ListByStudent(ctx context.Context, studentID string) ([]domain.GuardianLink, error)
 	// ListByGuardian returns the links of one guardian (their students).
@@ -488,6 +486,9 @@ type FamilyAccess interface {
 	// Conditional: a contact that already has one, or an account already
 	// linked to that pupil, is KindConflict; a missing contact KindNotFound.
 	AttachAccount(ctx context.Context, l domain.GuardianLink) error
+	// RemoveLink deletes guardianUserID's link on a pupil of the scope. An
+	// unknown (or invisible) link is KindNotFound.
+	RemoveLink(ctx context.Context, guardianUserID, studentID string) error
 	// InsertContact inserts a contact (with or without an account) on a pupil
 	// of the scope. A duplicate (account, pupil) is KindConflict.
 	InsertContact(ctx context.Context, l domain.GuardianLink) error

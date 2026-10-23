@@ -175,6 +175,13 @@ func (a *familyAccessTx) AttachAccount(_ context.Context, l domain.GuardianLink)
 	return attachAccount(a.tx, l)
 }
 
+func (a *familyAccessTx) RemoveLink(_ context.Context, guardianUserID, studentID string) error {
+	if err := a.inScope(studentID); err != nil {
+		return err
+	}
+	return unlink(a.tx, guardianUserID, studentID)
+}
+
 func (a *familyAccessTx) InsertContact(_ context.Context, l domain.GuardianLink) error {
 	if err := a.inScope(l.StudentID()); err != nil {
 		return err

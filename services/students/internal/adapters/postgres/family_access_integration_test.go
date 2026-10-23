@@ -440,3 +440,79 @@ func TestRLSIsolatesFamilyAccess(t *testing.T) {
 		t.Error("tenant B changed A's links")
 	}
 }
+
+// quietEvents drops every event: the promotion's event is not under test.
+type quietEvents struct{}
+
+func (quietEvents) PublishStudentEnrolled(context.Context, domain.StudentEnrolledEvent) error {
+	return nil
+}
+func (quietEvents) PublishAdmissionChanged(context.Context, domain.AdmissionChangedEvent) error {
+	return nil
+}
+func (quietEvents) PublishOutboxEvent(context.Context, ports.OutboxEvent) error { return nil }
+
+// A draft in a family gets no account; the save that gives it a valid CURP
+// promotes it and links the family's accounts to it in the database.
+func TestFamilyDraftPromotedGetsTheFamilysAccounts(t *testing.T) {
+	ctx := context.Background()
+	_, families, repo := accessServices(t, famTenantA)
+	sibling := seedPupil(t, famTenantA, "Borrador", "Uno")
+	draft := uuid.NewString()
+	s, err := domain.NewImportedDraft(domain.NewApplicantParams{
+		ID: draft, TenantID: famTenantA, FirstName: "Lucía", LastName: "Borrador", MaternalLastName: "Uno",
+		Level: domain.RestoreLevel(primariaLevelID, "Primaria"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.ImportStudent(ctx, ports.ImportCommand{Student: s, BatchID: importBatchID, NumberYear: testNumberYear}); err != nil {
+		t.Fatalf("ImportStudent: %v", err)
+	}
+	mom := uuid.NewString()
+	seedAccount(t, repo, famTenantA, mom, sibling, famRosa)
+	if _, err := families.CreateFamily(ctx, "Borrador", []string{sibling, draft}); err != nil {
+		t.Fatal(err)
+	}
+	if got := accountsOf(t, draft); len(got) != 0 {
+		t.Fatalf("the draft got %v before its CURP", got)
+	}
+
+	students := usecase.NewStudentService(repo, quietEvents{}, nil, famTenantA, uuid.NewString).WithFamilyAccess(repo)
+	got, err := students.UpdateDetails(ctx, usecase.UpdateDetailsInput{
+		ID: draft, FirstName: "Lucía", LastName: "Borrador", MaternalLastName: "Uno", CURP: famCURP(),
+	})
+	if err != nil || !got.PromotedFromDraft {
+		t.Fatalf("UpdateDetails = promoted %v, %v", got.PromotedFromDraft, err)
+	}
+	if accounts := accountsOf(t, draft); !slices.Equal(accounts, []string{mom}) {
+		t.Errorf("promoted pupil accounts = %v, want the family's", accounts)
+	}
+}
+
+// Unlinking a family pupil is refused in the database too: the link stays.
+func TestFamilyPupilUnlinkIsRefused(t *testing.T) {
+	ctx := context.Background()
+	guardians, families, repo := accessServices(t, famTenantA)
+	a := seedPupil(t, famTenantA, "Unlink", "Uno")
+	mom := uuid.NewString()
+	seedAccount(t, repo, famTenantA, mom, a, famRosa)
+	if _, err := families.CreateFamily(ctx, "Unlink", []string{a}); err != nil {
+		t.Fatal(err)
+	}
+	if err := guardians.UnlinkGuardian(ctx, mom, a); !errors.Is(err, domain.ErrFamilyManagedAccess) {
+		t.Fatalf("err = %v, want ErrFamilyManagedAccess", err)
+	}
+	if got := accountsOf(t, a); !slices.Equal(got, []string{mom}) {
+		t.Errorf("accounts = %v, want the link kept", got)
+	}
+	// Without a family the unlink works as before.
+	b := seedPupil(t, famTenantA, "Unlink", "Dos")
+	seedAccount(t, repo, famTenantA, mom, b, famRosa)
+	if err := guardians.UnlinkGuardian(ctx, mom, b); err != nil {
+		t.Fatalf("family-less unlink: %v", err)
+	}
+	if got := accountsOf(t, b); len(got) != 0 {
+		t.Errorf("accounts = %v after unlink", got)
+	}
+}
