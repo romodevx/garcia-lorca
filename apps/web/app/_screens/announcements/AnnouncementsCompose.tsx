@@ -50,7 +50,7 @@ export function AnnouncementsCompose({ onBack, families = false }: Announcements
         <ModuleHeaderIcon icon="announcements" color="orange" shrinks />
         <div>
           <h1 className="announce-head__title">Avisos</h1>
-          <p className="announce-head__lead">Un mensaje para un alumno, un grupo, un nivel o toda la escuela</p>
+          <p className="announce-head__lead">{families ? "Un mensaje para un alumno, una familia, un grupo, un nivel o toda la escuela" : "Un mensaje para un alumno, un grupo, un nivel o toda la escuela"}</p>
         </div>
       </header>
 

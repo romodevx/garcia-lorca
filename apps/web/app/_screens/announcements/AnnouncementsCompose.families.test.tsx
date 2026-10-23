@@ -52,6 +52,14 @@ describe("AnnouncementsCompose — Familias", () => {
     expect(families.listFamilies).not.toHaveBeenCalled();
   });
 
+  it("the lead names families only when the audience is offered", async () => {
+    const { unmount } = render(<AnnouncementsCompose onBack={() => {}} />);
+    expect(await screen.findByText("Un mensaje para un alumno, un grupo, un nivel o toda la escuela")).toBeInTheDocument();
+    unmount();
+    render(<AnnouncementsCompose onBack={() => {}} families />);
+    expect(await screen.findByText("Un mensaje para un alumno, una familia, un grupo, un nivel o toda la escuela")).toBeInTheDocument();
+  });
+
   it("on: the families are read once, only when the audience is chosen", async () => {
     const user = userEvent.setup();
     render(<AnnouncementsCompose onBack={() => {}} families />);
