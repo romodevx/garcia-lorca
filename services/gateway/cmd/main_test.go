@@ -100,7 +100,9 @@ func (stubIAM) ValidateToken(_ context.Context, req *connect.Request[iamv1.Valid
 		"roles-reader":    {"roles:read"},
 		"guardian-writer": {"guardians:write", "guardians:read"},
 		"guardian-reader": {"guardians:read"},
-		"family-reader":   {"family:read"},
+		// ADR 0041: every families permission at once (the owner's subset).
+		"guardian-student-admin": {"guardians:write", "guardians:read", "students:read", "students:update"},
+		"family-reader":          {"family:read"},
 		// ADR 0040: the guardian role as iam 0033 leaves it.
 		"family-voucher": {"family:read", "vouchers_own:write"},
 		// The owner as iam 0033 leaves it: it holds vouchers_own:write to

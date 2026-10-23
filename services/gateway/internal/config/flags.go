@@ -63,6 +63,10 @@ var AllModuleFlags = []string{
 	// declinedVoucherIds on the counter's deposit. Its routes also need
 	// module_finance (and module_students on the family side).
 	featureflag.Key("payment_vouchers"),
+	// Families of siblings (ADR 0041): the /api/v1/families/* routes, which also
+	// need module_students. Off, they are 404; the two-account cap and the
+	// account sync are data rules and hold whatever the flag says.
+	featureflag.Key("families"),
 }
 
 // ParseEnabledModules turns a comma-separated list of module names (or full

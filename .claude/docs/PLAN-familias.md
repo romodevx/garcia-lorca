@@ -50,8 +50,8 @@ revisión (tech-lead; + security cuando toca authz) → QA visible → PR verde 
 | # | Tarea | Rol | Estado |
 |---|---|---|---|
 | T1 | Contrato (`students.proto`), migración `students/0023` (families, family_id, descartes, RLS + aislamiento), dominio + repo + casos de uso: crear, renombrar, agregar/quitar hijos, disolver, listar, **sugerencias** y descartes | backend-sr, db-sr | ✅ #183 |
-| T2 | Acceso por familia: `GrantFamilyAccess` / `RevokeFamilyAccess`, sincronía al entrar un hijo, tope de 2 también en `GrantContactAccess`/`LinkGuardian` | backend-sr, security | 🔄 PR |
-| T3 | Gateway: rutas `/api/v1/families/*` detrás de `module_families`, invitación de un adulto a la familia (iam una vez + students), `familyId` en el JSON del alumno y filtro | backend-sr, security | ⏳ |
+| T2 | Acceso por familia: `GrantFamilyAccess` / `RevokeFamilyAccess`, sincronía al entrar un hijo, tope de 2 también en `GrantContactAccess`/`LinkGuardian` | backend-sr, security | ✅ #184 |
+| T3 | Gateway: rutas `/api/v1/families/*` detrás de `module_families`, invitación de un adulto a la familia (iam una vez + students), `familyId` en el JSON del alumno y filtro | backend-sr, security | 🔄 PR |
 | T4 | Web: pestaña Familias (sugerencias, lista, detalle con hijos y hasta 2 adultos), columna + filtro en el directorio, tarjeta en la ficha | frontend-sr | ⏳ |
 | T5 | Avisos: destinatario "Familias" + un solo push por papá por aviso (comms) | backend-sr, frontend-sr | ⏳ |
 | T6 | QA visible completo, compuertas, FLAGS/MODULES/docs, flag en dev | qa-sr, tech-lead, security, doc-writer | ⏳ |

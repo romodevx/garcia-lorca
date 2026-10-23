@@ -27,7 +27,7 @@ openapi: 3.1.0
 
 info:
   title: García Lorca API
-  version: 0.18.0
+  version: 0.19.0
   license:
     name: Proprietary
     url: https://garcialorca.edu.mx/legal
@@ -42,6 +42,16 @@ servers:
     description: Production
 
 tags:
+  - name: families
+    description: >
+      ADR 0041 — Familias. Siblings grouped by the office; a pupil belongs to
+      at most one family, and a family holds at most two app accounts. Every
+      account linked to a pupil of a family is linked to every placeable
+      sibling, so building a family hands out access: create, add, remove,
+      dissolve and the adults' access are guardians:write (owner-only); rename
+      and dismissing a suggestion are students:update; reads are students:read
+      (the adults, guardians:read). Behind `module_families` AND
+      `module_students`: either off, every route answers 404 before auth.
   - name: activities
     description: >
       T17 — Actividades (extracurriculares) with their own charge. An activity
@@ -1406,9 +1416,11 @@ paths:
             confirm it (`that email belongs to a staff account; confirm it is
             the same person`). Nothing was written; resend with
             `confirmStaffAccount: true` once the director confirms. Or the
-            pupil is a draft without a CURP (`X-Error-Code: STUDENT_DRAFT`):
-            the gateway refuses it before iam is asked, so no account is
-            created and no invitation is sent.
+            pupil is a draft without a CURP (`X-Error-Code: STUDENT_DRAFT`), or
+            its family already holds two app accounts and this address is not
+            one of them (`X-Error-Code: FAMILY_ACCOUNT_LIMIT`, ADR 0041, whatever
+            module_families says): the gateway refuses both before iam is
+            asked, so no account is created and no invitation is sent.
           headers:
             X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
           content:
@@ -1456,6 +1468,14 @@ paths:
           required: false
           description: Comma-separated extras; groupLabel is the only one. Unknown values are ignored.
           schema: { type: string, example: "groupLabel" }
+        - name: familyId
+          in: query
+          required: false
+          description: >
+            Only the pupils of this family (ADR 0041). Not a uuid, or
+            module_families off (`families are not enabled`) ⇒ 400: the filter
+            is refused, never ignored.
+          schema: { type: string, format: uuid }
       responses:
         '200':
           description: The pupils.
@@ -1468,6 +1488,7 @@ paths:
                   students:
                     type: array
                     items: { $ref: '#/components/schemas/StudentSummary' }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/ModuleDisabled' }
@@ -2169,6 +2190,380 @@ paths:
             text/plain:
               schema: { type: string }
               example: "ese alumno es un borrador sin CURP: captura su CURP"
+
+  /api/v1/families:
+    get:
+      tags: [families]
+      summary: Every family of the school
+      description: >
+        The school's families, ordered by name, each with its pupils' ids and
+        — only for a caller holding guardians:read — how many app accounts it
+        holds (at most two). Needs students:read.
+        Behind module_families and module_students.
+      operationId: listFamilies
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200':
+          description: The families.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [families]
+                properties:
+                  families:
+                    type: array
+                    items: { $ref: '#/components/schemas/Family' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+    post:
+      tags: [families]
+      summary: Group siblings into a family
+      description: >
+        Creates a family from pupils that have none yet (1 to 20). An empty
+        name takes the first pupil's surnames. Every app account already linked
+        to one of the pupils is linked to every placeable pupil of the new
+        family, so this hands out access: it needs guardians:write (owner-only,
+        ADR 0041). Pupils whose accounts add up to more than two are refused
+        (409 `FAMILY_ACCOUNT_LIMIT`) and nothing is stored.
+      operationId: createFamily
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FamilyStudentsRequest' }
+            example:
+              name: GARCÍA LÓPEZ
+              studentIds: [e3b0c442-98fc-1c14-9afb-000000000003, e3b0c442-98fc-1c14-9afb-000000000004]
+      responses:
+        '201':
+          description: The new family.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Family' }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409': { $ref: '#/components/responses/FamilyConflict' }
+
+  /api/v1/families/suggestions:
+    get:
+      tags: [families]
+      summary: Groups of pupils that look like one family
+      description: >
+        Pupils without a family that share both surnames, a contact's email or
+        phone, or an app account. A contact in common is `high`; surnames alone
+        are `medium`. High first, then by proposed name; dismissed groups are
+        left out. Needs students:read.
+      operationId: suggestFamilies
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200':
+          description: The suggestions.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [suggestions]
+                properties:
+                  suggestions:
+                    type: array
+                    items: { $ref: '#/components/schemas/FamilySuggestion' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
+  /api/v1/families/suggestions/dismiss:
+    post:
+      tags: [families]
+      summary: Say a suggested group is not a family
+      description: >
+        Records "not a family" for exactly these pupils (2 to 20), by the
+        signed-in caller; the body never names who dismissed it. Idempotent.
+        Needs students:update.
+      operationId: dismissFamilySuggestion
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [studentIds]
+              properties:
+                studentIds:
+                  type: array
+                  minItems: 2
+                  maxItems: 20
+                  items: { type: string, format: uuid }
+            example:
+              studentIds: [e3b0c442-98fc-1c14-9afb-000000000003, e3b0c442-98fc-1c14-9afb-000000000004]
+      responses:
+        '204': { description: Dismissed. }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+
+  /api/v1/families/{familyId}:
+    get:
+      tags: [families]
+      summary: A family and its pupils
+      description: >
+        The family with its members (names, group, admission status, and
+        whether each is a draft without a CURP — a draft never receives the
+        family's accounts), in the family's order. Needs students:read.
+      operationId: getFamily
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/FamilyIdPath' }]
+      responses:
+        '200':
+          description: The family.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FamilyDetail' }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+    patch:
+      tags: [families]
+      summary: Rename a family
+      description: How the office calls the family (1 to 120 characters). Needs students:update.
+      operationId: renameFamily
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+        - $ref: '#/components/parameters/FamilyIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 120 }
+            example: { name: LOS GARCÍA }
+      responses:
+        '200':
+          description: The renamed family.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Family' }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+    delete:
+      tags: [families]
+      summary: Dissolve a family
+      description: >
+        Leaves every member without a family. No guardian link is touched: the
+        parents are still each child's parents. Needs guardians:write.
+      operationId: dissolveFamily
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+        - $ref: '#/components/parameters/FamilyIdPath'
+      responses:
+        '204': { description: Dissolved. }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409': { $ref: '#/components/responses/FamilyConflict' }
+
+  /api/v1/families/{familyId}/contacts:
+    get:
+      tags: [families]
+      summary: The family's adults
+      description: >
+        Every contact of every pupil of the family, folded into people: rows
+        that carry the same app account, else the same email (any case), else
+        — when one of them has no email — the same phone (digits only), are one
+        person. Two accounts are never folded. Adults with the app come first.
+        Each person lists its (studentId, contactId) pairs: inviting one to the
+        app is `POST /api/v1/students/{studentId}/guardians/{contactId}/invite`
+        with any of them. Needs guardians:read.
+      operationId: listFamilyContacts
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/FamilyIdPath' }]
+      responses:
+        '200':
+          description: The family's adults.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [people]
+                properties:
+                  people:
+                    type: array
+                    items: { $ref: '#/components/schemas/FamilyPerson' }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+    post:
+      tags: [families]
+      summary: Record one adult on every pupil of the family
+      description: >
+        Writes the contact on each pupil at once; a pupil that already carries
+        this email or phone keeps that contact. One contact per pupil comes
+        back. Needs guardians:write.
+      operationId: addFamilyContact
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+        - $ref: '#/components/parameters/FamilyIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [relationship, fullName]
+              properties:
+                relationship: { type: string, enum: [mother, father, guardian, other] }
+                fullName: { type: string, minLength: 1 }
+                phone: { type: string }
+                email: { type: string, format: email }
+                isEmergency: { type: boolean, default: false }
+            example:
+              relationship: mother
+              fullName: ANA LÓPEZ
+              phone: '5512345678'
+              email: ana@example.com
+              isEmergency: true
+      responses:
+        '201':
+          description: One contact per pupil.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [contacts]
+                properties:
+                  contacts:
+                    type: array
+                    items: { $ref: '#/components/schemas/Contact' }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409': { $ref: '#/components/responses/FamilyConflict' }
+
+  /api/v1/families/{familyId}/students:
+    post:
+      tags: [families]
+      summary: Add pupils to a family
+      description: >
+        Adds pupils without a family (1 to 20; the family holds at most 20).
+        Each receives the family's accounts, so this needs guardians:write.
+        Accounts adding up to more than two are refused (409
+        `FAMILY_ACCOUNT_LIMIT`) and nothing is stored.
+      operationId: addStudentsToFamily
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+        - $ref: '#/components/parameters/FamilyIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [studentIds]
+              properties:
+                studentIds:
+                  type: array
+                  minItems: 1
+                  maxItems: 20
+                  items: { type: string, format: uuid }
+            example: { studentIds: [e3b0c442-98fc-1c14-9afb-000000000005] }
+      responses:
+        '200':
+          description: The family.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Family' }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409': { $ref: '#/components/responses/FamilyConflict' }
+
+  /api/v1/families/{familyId}/students/{studentId}:
+    delete:
+      tags: [families]
+      summary: Take one pupil out of a family
+      description: >
+        Its guardian links stay. Removing the last pupil dissolves the family
+        (204). Needs guardians:write.
+      operationId: removeStudentFromFamily
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+        - $ref: '#/components/parameters/FamilyIdPath'
+        - { name: studentId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The family without the pupil.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Family' }
+        '204': { description: That was the last pupil; the family was dissolved. }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409': { $ref: '#/components/responses/FamilyConflict' }
+
+  /api/v1/families/{familyId}/access/revoke:
+    post:
+      tags: [families]
+      summary: Take one app account away from the whole family
+      description: >
+        Unlinks the account from every pupil of the family (unlinking it from
+        one pupil is refused with 409 `FAMILY_MANAGED_ACCESS`: the sync would
+        link it back). An account no pupil of the family carries is 404.
+        Needs guardians:write.
+      operationId: revokeFamilyAccess
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+        - $ref: '#/components/parameters/FamilyIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [guardianUserId]
+              properties:
+                guardianUserId: { type: string, format: uuid }
+            example: { guardianUserId: e3b0c442-98fc-1c14-9afb-0000000000e1 }
+      responses:
+        '200':
+          description: How many contacts lost the account.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [contacts]
+                properties:
+                  contacts: { type: integer, minimum: 0, example: 2 }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '409': { $ref: '#/components/responses/FamilyConflict' }
 
   /api/v1/comms/announcements:
     post:
@@ -8411,6 +8806,10 @@ components:
         issue).
         Payment vouchers (ADR 0040, 409): VOUCHER_ALREADY_APPLIED,
         VOUCHER_REJECTED, VOUCHER_CHOICE_REQUIRED, VOUCHER_LIMIT.
+        Families (ADR 0041, 409): FAMILY_ACCOUNT_LIMIT (a third app account,
+        also on the contact invite, before iam is asked), FAMILY_MANAGED_ACCESS
+        (unlinking one pupil of a family: revoke from the family),
+        FAMILY_BUSY (retry).
         Absent on a refusal without a code.
       schema:
         type: string
@@ -8512,6 +8911,12 @@ components:
       name: id
       in: path
       required: true
+      schema: { type: string, format: uuid }
+    FamilyIdPath:
+      name: familyId
+      in: path
+      required: true
+      description: A family id; not a uuid ⇒ 400, unknown ⇒ 404.
       schema: { type: string, format: uuid }
     FamilyStudentIdPath:
       name: studentId
@@ -8938,6 +9343,20 @@ components:
         text/plain:
           schema: { type: string }
           example: teaching assignment not found
+    FamilyConflict:
+      description: >
+        The family refuses the write (ADR 0041); the sentence is shown as is
+        and the code rides in `X-Error-Code`: FAMILY_ACCOUNT_LIMIT (the pupils'
+        accounts would add up to more than two), FAMILY_BUSY (the family was
+        changing under another clerk; retry), FAMILY_MANAGED_ACCESS, or
+        STUDENT_DRAFT. A pupil already in another family is refused without a
+        code.
+      headers:
+        X-Error-Code: { $ref: '#/components/headers/XErrorCode' }
+      content:
+        text/plain:
+          schema: { type: string }
+          example: 'una familia tiene como máximo dos cuentas de la app: quita el acceso de una antes de dar otro'
 
   schemas:
     SchoolProfile:
@@ -9992,6 +10411,7 @@ components:
         openIssues: { type: integer, minimum: 0, example: 2, description: "Behind module_import_review (absent while off): import issues of the pupil nobody resolved yet." }
         draft: { type: boolean, example: false, description: "Behind module_import_review (absent while off): imported without a valid CURP (admissionStatus draft): cannot be enrolled, moved, linked to a family or invited." }
         promotedFromDraft: { type: boolean, example: true, description: "Only on PUT: the save gave a draft its CURP, so the pupil is now pending." }
+        familyId: { type: string, format: uuid, description: "The pupil's family (ADR 0041). Absent when it has none, and for every pupil while module_families is off." }
         intendedGroupId: { type: string, format: uuid, description: "Only on PUT, with promotedFromDraft: the group the import meant the pupil for, to offer the enrollment there." }
         profile: { $ref: '#/components/schemas/StudentProfile' }
 
@@ -10018,6 +10438,114 @@ components:
         bankReference: { type: string, example: "231076", description: "BBVA payment reference (ADR 0033); empty when the pupil has none." }
         openIssues: { type: integer, minimum: 0, example: 0, description: "Behind module_import_review (absent while off): import issues of the pupil nobody resolved yet." }
         draft: { type: boolean, example: false, description: "Behind module_import_review (absent while off): imported without a valid CURP (admissionStatus draft)." }
+        familyId: { type: string, format: uuid, description: "The pupil's family (ADR 0041). Absent when it has none, and for every pupil while module_families is off." }
+
+    Family:
+      type: object
+      description: Siblings grouped by the office (ADR 0041). A pupil belongs to at most one.
+      required: [id, name, studentIds, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, maxLength: 120, example: GARCÍA LÓPEZ }
+        studentIds:
+          type: array
+          maxItems: 20
+          description: Ordered by surname, then first name.
+          items: { type: string, format: uuid }
+        accountCount:
+          type: integer
+          minimum: 0
+          maximum: 2
+          example: 1
+          description: >
+            Distinct app accounts linked to its pupils. Family-access metadata:
+            present only when the caller holds guardians:read, absent otherwise.
+        createdAt: { type: string, format: date-time }
+      example:
+        id: e3b0c442-98fc-1c14-9afb-0000000000f1
+        name: GARCÍA LÓPEZ
+        studentIds: [e3b0c442-98fc-1c14-9afb-000000000003, e3b0c442-98fc-1c14-9afb-000000000004]
+        accountCount: 1
+        createdAt: '2026-10-20T15:04:05Z'
+    FamilyStudentsRequest:
+      type: object
+      required: [studentIds]
+      properties:
+        name: { type: string, maxLength: 120, description: Empty takes the first pupil's surnames. }
+        studentIds:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items: { type: string, format: uuid }
+    FamilyMember:
+      type: object
+      required: [id, firstName, lastName, maternalLastName, level, gradeGroup, admissionStatus, draft]
+      properties:
+        id: { type: string, format: uuid }
+        firstName: { type: string, example: ANA }
+        lastName: { type: string, example: GARCÍA, description: Paternal surname. }
+        maternalLastName: { type: string, example: LÓPEZ }
+        level: { type: string, example: PRIMARIA }
+        gradeGroup: { type: string, example: B }
+        admissionStatus: { type: string, enum: [pending, accepted, enrolled, rejected, withdrawn, draft] }
+        draft: { type: boolean, description: Imported without a CURP; a draft never receives the family's accounts. }
+    FamilyDetail:
+      type: object
+      required: [id, name, studentIds, createdAt, members]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, maxLength: 120 }
+        studentIds:
+          type: array
+          items: { type: string, format: uuid }
+        accountCount: { type: integer, minimum: 0, maximum: 2, description: 'Only for a caller holding guardians:read.' }
+        createdAt: { type: string, format: date-time }
+        members:
+          type: array
+          description: >
+            The pupils, in studentIds order. A pupil the students service cannot
+            return is omitted, so members may be shorter than studentIds.
+          items: { $ref: '#/components/schemas/FamilyMember' }
+    FamilySuggestion:
+      type: object
+      required: [signature, proposedName, studentIds, reasons, confidence]
+      properties:
+        signature: { type: string, description: SHA-256 of the sorted pupil ids (hex). }
+        proposedName: { type: string, example: PÉREZ RUIZ }
+        studentIds:
+          type: array
+          items: { type: string, format: uuid }
+        reasons:
+          type: array
+          items: { type: string, enum: [same_surnames, shared_contact_email, shared_contact_phone, shared_account] }
+        confidence: { type: string, enum: [medium, high] }
+      example:
+        signature: 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+        proposedName: PÉREZ RUIZ
+        studentIds: [e3b0c442-98fc-1c14-9afb-000000000003, e3b0c442-98fc-1c14-9afb-000000000004]
+        reasons: [same_surnames, shared_contact_email]
+        confidence: high
+    FamilyContactRef:
+      type: object
+      required: [studentId, contactId]
+      description: One contact row of the person — the pair the invite route takes.
+      properties:
+        studentId: { type: string, format: uuid }
+        contactId: { type: string, format: uuid }
+    FamilyPerson:
+      type: object
+      required: [fullName, relationship, phone, email, hasApp, contacts]
+      description: One adult of the family, however many pupils carry them as a contact.
+      properties:
+        fullName: { type: string, example: ANA LÓPEZ }
+        relationship: { type: string, enum: [mother, father, guardian, other] }
+        phone: { type: string, example: '5512345678' }
+        email: { type: string, example: ana@example.com }
+        guardianUserId: { type: string, format: uuid, description: The app account; absent when the person has none. }
+        hasApp: { type: boolean }
+        contacts:
+          type: array
+          items: { $ref: '#/components/schemas/FamilyContactRef' }
 
     StudentImportRowIssue:
       type: object

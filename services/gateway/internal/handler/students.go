@@ -35,6 +35,39 @@ type StudentsHandler struct {
 	rooms RoomLabelSource
 	// review says whether module_import_review is on; nil is off.
 	review importReview
+	// families says whether module_families is on and answers the
+	// directory's ?familyId= filter; the zero value is off.
+	families familiesView
+}
+
+// familiesView is module_families as the students JSON sees it (ADR 0041,
+// security L2): off, the JSON says nothing about families and the filter is
+// refused.
+type familiesView struct {
+	enabled func(context.Context) bool
+	lister  FamilyStudentsLister
+}
+
+func (v familiesView) on(ctx context.Context) bool {
+	return v.enabled != nil && v.lister != nil && v.enabled(ctx)
+}
+
+// FamilyStudentsLister lists the pupils of one family (ADR 0041).
+type FamilyStudentsLister interface {
+	ListStudentsInFamily(ctx context.Context, familyID, status string) ([]client.StudentResult, error)
+}
+
+// WithFamilies makes the students JSON carry familyId, and GET
+// /api/v1/students take ?familyId=, while module_families is on.
+func WithFamilies(enabled func(context.Context) bool, lister FamilyStudentsLister) StudentsOption {
+	return func(h *StudentsHandler) { h.families = familiesView{enabled: enabled, lister: lister} }
+}
+
+// withFamily adds the pupil's family to its JSON while module_families is on.
+func (h *StudentsHandler) withFamily(ctx context.Context, out *studentResponse, s client.StudentResult) {
+	if h.families.on(ctx) {
+		out.FamilyID = s.FamilyID
+	}
 }
 
 // StudentsOption configures optional behavior of the students endpoints.
@@ -143,6 +176,8 @@ type studentResponse struct {
 	Draft             *bool  `json:"draft,omitempty"`
 	PromotedFromDraft *bool  `json:"promotedFromDraft,omitempty"`
 	IntendedGroupID   string `json:"intendedGroupId,omitempty"`
+	// FamilyID is the pupil's family (ADR 0041); absent when it has none.
+	FamilyID string `json:"familyId,omitempty"`
 }
 
 func toStudentResponse(s client.StudentResult) studentResponse {
@@ -208,6 +243,7 @@ func (h *StudentsHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	out := toStudentResponse(res)
 	h.withReview(r.Context(), &out, res, true)
+	h.withFamily(r.Context(), &out, res)
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -248,14 +284,18 @@ func (h *StudentsHandler) Create(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, toStudentResponse(res))
 }
 
-// List handles GET /api/v1/students?status=... : lists students, optionally
-// filtered by admission status (empty = all).
+// List handles GET /api/v1/students?status=...&familyId=... : lists students,
+// optionally filtered by admission status (empty = all) and by family.
 func (h *StudentsHandler) List(w http.ResponseWriter, r *http.Request) {
 	status := r.URL.Query().Get("status")
 	if status == admissionDraft && !h.reviewOn(r.Context()) {
 		status = "" // an unknown status never filtered; off, draft is unknown
 	}
-	res, err := h.svc.ListStudents(r.Context(), status)
+	familyID, ok := h.familyFilter(w, r)
+	if !ok {
+		return
+	}
+	res, err := h.roster(r.Context(), status, familyID)
 	if err != nil {
 		writeConnectError(w, err)
 		return
@@ -269,9 +309,37 @@ func (h *StudentsHandler) List(w http.ResponseWriter, r *http.Request) {
 		summary := toStudentSummary(s)
 		summary.GroupLabel = rooms[s.ID]
 		h.withReview(r.Context(), &summary, s, false)
+		h.withFamily(r.Context(), &summary, s)
 		out = append(out, summary)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"students": out})
+}
+
+// familyFilter reads ?familyId= (empty = none). It is refused with 400 —
+// never ignored, which would answer the whole school — when malformed or
+// while module_families is off.
+func (h *StudentsHandler) familyFilter(w http.ResponseWriter, r *http.Request) (string, bool) {
+	raw := r.URL.Query().Get("familyId")
+	if raw == "" {
+		return "", true
+	}
+	if !h.families.on(r.Context()) {
+		http.Error(w, "families are not enabled", http.StatusBadRequest)
+		return "", false
+	}
+	familyID, ok := canonicalUUID(raw)
+	if !ok {
+		http.Error(w, "familyId must be a uuid", http.StatusBadRequest)
+	}
+	return familyID, ok
+}
+
+// roster reads the pupils for a status and, when familyID is set, one family.
+func (h *StudentsHandler) roster(ctx context.Context, status, familyID string) ([]client.StudentResult, error) {
+	if familyID == "" {
+		return h.svc.ListStudents(ctx, status)
+	}
+	return h.families.lister.ListStudentsInFamily(ctx, familyID, status)
 }
 
 // includeGroupLabel asks the list for each pupil's classroom label: five
@@ -313,6 +381,7 @@ func (h *StudentsHandler) Get(w http.ResponseWriter, r *http.Request) {
 	out := toStudentResponse(res)
 	out.HasPhoto = res.HasPhoto
 	h.withReview(r.Context(), &out, res, false)
+	h.withFamily(r.Context(), &out, res)
 	writeJSON(w, http.StatusOK, out)
 }
 

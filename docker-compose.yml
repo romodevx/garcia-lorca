@@ -127,6 +127,8 @@ services:
       # (school_structure needs config_setup too: <this list>,config_setup,school_structure)
       # import_review (PLAN-import-avisos) is OFF until its tech-lead + security
       # gates pass; it needs student_import too: <this list>,import_review
+      # families (ADR 0041, /api/v1/families/*) is OFF until its tech-lead +
+      # security gates pass; it needs students too: <this list>,families
       ENABLED_MODULES: "${ENABLED_MODULES:-iam,gateway,students,config,teachers,grades,finance,attendance,comms,uniforms,expenses,schedule,activities,scholarships,student_import}"
       # Browser origin(s) allowed to call the gateway cross-origin with cookies.
       # Tracks WEB_HOST_PORT so a remapped web port stays permitted.
