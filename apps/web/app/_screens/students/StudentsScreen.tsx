@@ -40,6 +40,14 @@ import { StudentStatementDrawer } from "../../_design/students/StudentStatementD
 import { useIntent } from "../../routing/pendingIntent";
 import { fold } from "@garcia-lorca/ui/command-core";
 import { ModuleHeaderIcon } from "../../_design/ModuleHeaderIcon";
+import { filterChip } from "../../_design/students/StudentFilters";
+import { withoutFamily, type FamiliesAccess } from "../../families/model";
+import type { Family } from "../../families/api";
+import { FamiliesView } from "../families/FamiliesView";
+import { FamilyDrawer } from "../families/FamilyDrawer";
+import type { FamilyPupil } from "../families/familyPupil";
+import { useFamilyDirectory } from "../families/useFamilyDirectory";
+import { ViewSwitch, type StudentsVista } from "../families/ViewSwitch";
 
 /** The floating "Nuevo alumno": its height, its distance from the bottom, and
  * the breathing room the page leaves above it. */
@@ -92,6 +100,18 @@ function inStatusTab(s: Student, tab: StatusTab): boolean {
 }
 /** The status tab's key in the address bar, beside the shared filter's. */
 const TAB_KEY = "estado";
+/** module_families: the view (Alumnos | Familias), the open family, the "Sin familia" chip. */
+const VISTA_KEY = "vista";
+const FAMILY_KEY = "familia";
+const NO_FAMILY_KEY = "sinfamilia";
+
+/** What of the view only module_families uses; ignored while it is off. */
+interface FamiliesViewState {
+  vista: StudentsVista;
+  familyId: string | undefined;
+  noFamily: boolean;
+}
+const NO_FAMILIES_VIEW: FamiliesViewState = { vista: "alumnos", familyId: undefined, noFamily: false };
 
 /** A row of the list: the pupil, where they sit this cycle, and their classroom's name. */
 interface Row extends FilterableStudent {
@@ -127,19 +147,33 @@ export function studentsListPath(): string {
 }
 
 /** The view the address bar names: Back from a pupil's page lands on it again. */
-function readView(): { filter: StudentFilterState; tab: StatusTab } {
+function readView(): { filter: StudentFilterState; tab: StatusTab; families: FamiliesViewState } {
   // The flag is spent after mount, not here: StrictMode runs this twice.
-  if (typeof window === "undefined" || freshVisit) return { filter: EMPTY_FILTER, tab: "all" };
+  if (typeof window === "undefined" || freshVisit) return { filter: EMPTY_FILTER, tab: "all", families: NO_FAMILIES_VIEW };
   const params = new URLSearchParams(window.location.search);
   const tab = STATUS_TABS.find((t) => t === params.get(TAB_KEY)) ?? "all";
-  return { filter: filterFromParams(params), tab };
+  const families: FamiliesViewState = {
+    vista: params.get(VISTA_KEY) === "familias" ? "familias" : "alumnos",
+    familyId: params.get(FAMILY_KEY) ?? undefined,
+    noFamily: params.get(NO_FAMILY_KEY) === "1",
+  };
+  return { filter: filterFromParams(params), tab, families };
+}
+
+/** Sets or drops one key of the address. */
+function setParam(params: URLSearchParams, key: string, value: string | undefined): void {
+  if (value === undefined) params.delete(key);
+  else params.set(key, value);
 }
 
 /** Writes the view into the address bar without a new history entry per click. */
-function writeView(filter: StudentFilterState, tab: StatusTab): void {
+function writeView(filter: StudentFilterState, tab: StatusTab, families: FamiliesViewState): void {
   const base = new URLSearchParams(window.location.search);
   if (tab === "all") base.delete(TAB_KEY);
   else base.set(TAB_KEY, tab);
+  setParam(base, VISTA_KEY, families.vista === "familias" ? "familias" : undefined);
+  setParam(base, FAMILY_KEY, families.familyId);
+  setParam(base, NO_FAMILY_KEY, families.noFamily ? "1" : undefined);
   const query = filterToParams(filter, base).toString();
   const next = `${window.location.pathname}${query === "" ? "" : `?${query}`}`;
   lastListPath = next;
@@ -514,6 +548,11 @@ export interface StudentsScreenProps {
   onLinkedSheetClosed?: () => void;
   /** module_import_review: ⚠ import issues, drafts and their tabs. */
   importReview?: boolean;
+  /**
+   * module_families (with module_students) and what the caller may do there
+   * (ADR 0041). Absent: no Familias view, column, chip or request at all.
+   */
+  families?: FamiliesAccess;
 }
 
 /** What the school reads in Excel, in the order the table shows it. */
@@ -528,7 +567,7 @@ const EXPORT_COLUMNS: readonly CsvColumn<Row>[] = [
   { label: "Estado", value: (r) => statusOf(r.student.admissionStatus).label },
 ];
 
-export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false, canVoidAnyNote = false, userId = "", canVerifyCard = false, canRevokeCard = false, canReadStatement = false, canCorrectPayments = false, canVoidPayments = false, onOpenImport, canWithdraw = false, linkedStudentId, onLinkedSheetClosed, importReview = false }: StudentsScreenProps): ReactElement {
+export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false, canVoidAnyNote = false, userId = "", canVerifyCard = false, canRevokeCard = false, canReadStatement = false, canCorrectPayments = false, canVoidPayments = false, onOpenImport, canWithdraw = false, linkedStudentId, onLinkedSheetClosed, importReview = false, families }: StudentsScreenProps): ReactElement {
   const [verifying, setVerifying] = useState(false);
   const [students, setStudents] = useState<Student[]>([]);
   const [cycles, setCycles] = useState<Cycle[]>([]);
@@ -544,6 +583,10 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
   const [loadFailed, setLoadFailed] = useState(false);
   const [initialView] = useState(readView);
   useEffect(() => { freshVisit = false; }, []);
+  const familiesOn = families !== undefined;
+  const familyDir = useFamilyDirectory(familiesOn);
+  const [familiesView, setFamiliesView] = useState<FamiliesViewState>(() => (familiesOn ? initialView.families : NO_FAMILIES_VIEW));
+  const patchFamiliesView = (patch: Partial<FamiliesViewState>): void => setFamiliesView((prev) => ({ ...prev, ...patch }));
   // A review tab in the address bar means nothing while the review is off.
   const [tab, setTab] = useState<StatusTab>(() => (importReview || !REVIEW_TABS.includes(initialView.tab) ? initialView.tab : "all"));
   // The cycle's enrolments place each pupil in a grade and a group (T4).
@@ -672,14 +715,22 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
   // already made; the file's bare letter until they land (ISSUE-T14-303).
   const rooms = useMemo(() => roomLabelsOf(enrollments, groups), [enrollments, groups]);
   const roomOf = (s: Student): string => rooms.get(s.id) ?? s.gradeGroup;
+  const { membership } = familyDir;
+  const noFamily = familiesView.noFamily;
   const rows = useMemo(
-    () => placedRows.filter((r) => inStatusTab(r.student, tab)),
-    [placedRows, tab],
+    () => placedRows.filter((r) => inStatusTab(r.student, tab) && (!noFamily || !membership.has(r.id))),
+    [placedRows, tab, noFamily, membership],
   );
+  // The pupils as the families surface names and places them, from the reads already made.
+  const familyPupils = useMemo((): FamilyPupil[] => placedRows.map((r) => ({
+    id: r.id, firstName: r.student.firstName, lastName: r.student.lastName, maternalLastName: r.student.maternalLastName,
+    name: formatStudentName(r.student), room: r.room, admissionStatus: r.student.admissionStatus,
+  })), [placedRows]);
+  const familyCandidates = useMemo(() => withoutFamily(familyPupils, membership), [familyPupils, membership]);
   const filter = useStudentFilter(rows, catalog, initialView.filter);
   const filtered = filter.filtered;
 
-  useEffect(() => { writeView(filter.state, tab); }, [filter.state, tab]);
+  useEffect(() => { writeView(filter.state, tab, familiesView); }, [filter.state, tab, familiesView]);
 
   // A grade or group from the URL cannot be honoured without the cycle's
   // enrolments: drop it (the level stays) rather than show an empty list.
@@ -710,7 +761,7 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
 
   // Any filter change (or a new page size) sends the view back to the first page.
   const { levelId, gradeId, groupId, q } = filter.state;
-  useEffect(() => { setPage(0); }, [tab, levelId, gradeId, groupId, q, pageSize]);
+  useEffect(() => { setPage(0); }, [tab, levelId, gradeId, groupId, q, pageSize, noFamily]);
 
   const total = filtered.length;
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
@@ -721,7 +772,7 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
 
   const activeCycle = cycles.find((c) => c.status === "active") ?? cycles[0];
   const cycleName = activeCycle?.name ?? "—";
-  const clear = (): void => { setTab("all"); filter.clear(); };
+  const clear = (): void => { setTab("all"); patchFamiliesView({ noFamily: false }); filter.clear(); };
 
   // A direct link opens its pupil's ficha once, as soon as the roll is read;
   // following another link while one is open opens that one.
@@ -779,6 +830,24 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
         </div>
       </div>
 
+      {familiesOn && (
+        <div className="fade-up" style={{ marginBottom: 20 }}>
+          <ViewSwitch vista={familiesView.vista} onChange={(vista) => patchFamiliesView({ vista })} />
+        </div>
+      )}
+
+      {familiesView.vista === "familias" && families !== undefined ? (
+        <FamiliesView
+          access={families}
+          families={familyDir.families}
+          familiesFailed={familyDir.failed}
+          pupils={familyPupils}
+          onOpenFamily={(familyId) => patchFamiliesView({ familyId })}
+          onFamiliesChanged={familyDir.reload}
+          onShowWithoutFamily={() => { setTab("all"); patchFamiliesView({ vista: "alumnos", noFamily: true }); }}
+          say={say}
+        />
+      ) : (<>
       <div className="fade-up" style={{ display: "flex", flexWrap: "wrap", gap: 16, marginBottom: 26 }}>
         {stats.map((k, i) => (
           <div key={i} style={{ flex: "1 1 200px", minWidth: 0, display: "flex", alignItems: "center", gap: 14, padding: "18px 20px", borderRadius: "var(--r-lg)", background: "var(--surface)", border: "1px solid var(--border)", boxShadow: "var(--shadow-card)" }}>
@@ -798,8 +867,8 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
           selectable
           searchHint="Buscar alumno, CURP, tutor o referencia BBVA…"
           focusSearch={intent === "search"}
-          extraActive={tab !== "all"}
-          onClear={() => setTab("all")}
+          extraActive={tab !== "all" || noFamily}
+          onClear={() => { setTab("all"); patchFamiliesView({ noFamily: false }); }}
           leading={
             <div style={{ display: "flex", gap: 6, padding: 5, maxWidth: "100%", overflowX: "auto", background: "var(--surface-3)", borderRadius: "var(--r-pill)", border: "1px solid var(--border)" }}>
               {tabs.map(([id, label]) => {
@@ -814,6 +883,13 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
             </div>
           }
         />
+        {familiesOn && (
+          <div style={{ marginTop: 12 }}>
+            <button type="button" aria-pressed={noFamily} onClick={() => patchFamiliesView({ noFamily: !noFamily })} style={filterChip(noFamily)}>
+              Sin familia
+            </button>
+          </div>
+        )}
         <LinkMissedNotice shown={linkMissed} onDismiss={() => setLinkMissed(false)} />
         {placementStatus === "failed" && (
           <p role="alert" style={{ color: "var(--bad-fg)", fontSize: 13.5, margin: "10px 0 0" }}>
@@ -844,8 +920,8 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
       </div>
 
       <div className="fade-up" style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--r-xl)", boxShadow: "var(--shadow-card)", overflow: "hidden" }}>
-        <div className="students-grid" style={{ display: "grid", gridTemplateColumns: ROW_COLUMNS, gap: 16, padding: "14px 24px 12px", borderBottom: "1px solid var(--border)", fontSize: 12.5, fontWeight: 700, color: "var(--text-faint)", textTransform: "uppercase", letterSpacing: ".04em" }}>
-          <div style={{ width: CHECK_CELL }} /><div>Alumno</div><div className="students-col-wide">Nivel</div><div className="students-col-wide">Tutor</div><div className="students-col-wide">Estado</div><div style={{ width: ACTIONS_WIDTH }} />
+        <div className="students-grid" style={{ display: "grid", gridTemplateColumns: rowColumns(familiesOn), gap: 16, padding: "14px 24px 12px", borderBottom: "1px solid var(--border)", fontSize: 12.5, fontWeight: 700, color: "var(--text-faint)", textTransform: "uppercase", letterSpacing: ".04em" }}>
+          <div style={{ width: CHECK_CELL }} /><div>Alumno</div><div className="students-col-wide">Nivel</div><div className="students-col-wide">Tutor</div>{familiesOn && <div className="students-col-wide">Familia</div>}<div className="students-col-wide">Estado</div><div style={{ width: ACTIONS_WIDTH }} />
         </div>
         <div style={{ padding: 8 }}>
           {loading || waitingForPlacement ? (
@@ -889,6 +965,7 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
                 onNotes={() => setNotesOf(row.student)}
                 onStatement={canReadStatement ? () => setStatementOf(row.student) : undefined}
                 openIssues={importReview ? row.student.openIssues ?? 0 : 0}
+                family={familiesOn ? { of: membership.get(row.id), onOpen: (familyId) => patchFamiliesView({ familyId }) } : undefined}
               />
             ))
           )}
@@ -914,6 +991,8 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
           </div>
         )}
       </div>
+
+      </>)}
 
       {/* Room for the floating button, so the last row and the pager scroll
           clear of it instead of hiding under it (QA 2026-09-25, ISSUE-005). */}
@@ -944,6 +1023,24 @@ export function StudentsScreen({ onBack, onCreate, onEdit, canWriteNotes = false
         />
       )}
       {verifying && <VerifyCardDrawer onClose={() => setVerifying(false)} />}
+      {families !== undefined && familiesView.familyId !== undefined && (
+        <FamilyDrawer
+          key={familiesView.familyId}
+          familyId={familiesView.familyId}
+          access={families}
+          pupils={familyPupils}
+          candidates={familyCandidates}
+          onClose={() => patchFamiliesView({ familyId: undefined })}
+          onChanged={familyDir.reload}
+          onReplaced={(familyId) => patchFamiliesView({ familyId })}
+          onOpenStudent={(studentId) => {
+            patchFamiliesView({ familyId: undefined });
+            const found = students.find((s) => s.id === studentId);
+            if (found !== undefined) setSheet(found);
+          }}
+          say={say}
+        />
+      )}
       {/* ONE live region, always mounted and empty until a message is set into
           it, so every message is announced (ISSUE-T14-013, T14-202 gate nit).
           The pill and the banner below paint it; they do not announce it twice. */}
@@ -1064,8 +1161,8 @@ function RevokeCard({ studentId }: { studentId: string }): ReactElement {
   );
 }
 
-/** Checkbox, pupil, level, tutor, status, actions. */
-const ROW_COLUMNS = "auto 2.4fr 1.1fr 1.6fr 1fr auto";
+/** Checkbox, pupil, level, tutor, (family,) status, actions. */
+const rowColumns = (withFamily: boolean): string => (withFamily ? "auto 2.4fr 1.1fr 1.6fr 1.3fr 1fr auto" : "auto 2.4fr 1.1fr 1.6fr 1fr auto");
 /** The checkbox cell: a 44 px target. */
 const CHECK_CELL = 44;
 /** Statement, notes, edit and open: four 36 px round buttons and their gaps. */
@@ -1073,7 +1170,7 @@ const ACTIONS_WIDTH = 162;
 
 const REVIEW_TAB_LABELS: [StatusTab, string][] = [["issues", "Con avisos"], ["drafts", "Borradores"]];
 
-function StuRow({ st, room, levelName, i, selected, onToggle, onOpen, onEdit, onNotes, onStatement, openIssues = 0 }: {
+function StuRow({ st, room, levelName, i, selected, onToggle, onOpen, onEdit, onNotes, onStatement, openIssues = 0, family }: {
   st: Student;
   room: string;
   levelName: string;
@@ -1086,11 +1183,13 @@ function StuRow({ st, room, levelName, i, selected, onToggle, onOpen, onEdit, on
   onStatement?: () => void;
   /** module_import_review: the ⚠ count; 0 shows none. */
   openIssues?: number;
+  /** module_families: the pupil's family (or none) and how to open it. Absent: no column. */
+  family?: { of: Family | undefined; onOpen: (familyId: string) => void };
 }): ReactElement {
   const [hov, setHov] = useState(false);
   const s = statusOf(st.admissionStatus);
   return (
-    <div onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)} onClick={onOpen} className="students-grid" style={{ display: "grid", gridTemplateColumns: ROW_COLUMNS, alignItems: "center", gap: 16, padding: "13px 24px", borderRadius: "var(--r-md)", position: "relative", cursor: "pointer", background: selected ? "color-mix(in oklab, var(--lime) 10%, var(--surface))" : hov ? "var(--surface-2)" : "transparent", transition: "background .15s var(--ease)" }}>
+    <div onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)} onClick={onOpen} className="students-grid" style={{ display: "grid", gridTemplateColumns: rowColumns(family !== undefined), alignItems: "center", gap: 16, padding: "13px 24px", borderRadius: "var(--r-md)", position: "relative", cursor: "pointer", background: selected ? "color-mix(in oklab, var(--lime) 10%, var(--surface))" : hov ? "var(--surface-2)" : "transparent", transition: "background .15s var(--ease)" }}>
       <span style={{ position: "absolute", left: 4, top: 10, bottom: 10, width: 4, borderRadius: 99, background: s.dot }} />
       <button
         type="button"
@@ -1116,6 +1215,7 @@ function StuRow({ st, room, levelName, i, selected, onToggle, onOpen, onEdit, on
       </div>
       <div className="students-col-wide" style={{ fontSize: 14, color: "var(--text-muted)", textTransform: "capitalize" }}>{levelName}<div style={{ fontSize: 12.5, color: "var(--text-faint)", textTransform: "none" }}>{room}</div></div>
       <div className="students-col-wide" style={{ minWidth: 0, fontSize: 14, color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{st.guardianName}</div>
+      {family !== undefined && <FamilyCell family={family.of} onOpen={family.onOpen} />}
       <div className="students-col-wide"><StatusPill status={st.admissionStatus} /></div>
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, width: ACTIONS_WIDTH }}>
         {onStatement !== undefined && (
@@ -1127,6 +1227,23 @@ function StuRow({ st, room, levelName, i, selected, onToggle, onOpen, onEdit, on
         )}
         <button onClick={(ev) => { ev.stopPropagation(); onOpen(); }} title="Ver ficha" aria-label={`Ver ficha de ${formatStudentName(st)}`} style={qb}><Icon name="chevron" size={18} /></button>
       </div>
+    </div>
+  );
+}
+
+/** The pupil's family in the directory: its name opens it; none says so quietly. */
+function FamilyCell({ family, onOpen }: { family: Family | undefined; onOpen: (familyId: string) => void }): ReactElement {
+  if (family === undefined) return <div className="students-col-wide" style={{ fontSize: 13.5, color: "var(--text-faint)" }}>—</div>;
+  return (
+    <div className="students-col-wide" style={{ minWidth: 0 }}>
+      <button
+        type="button"
+        aria-label={`Familia ${family.name}`}
+        onClick={(ev) => { ev.stopPropagation(); onOpen(family.id); }}
+        style={{ minHeight: 44, maxWidth: "100%", fontSize: 14, fontWeight: 600, color: "var(--forest)", textDecoration: "underline", textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: "pointer", background: "transparent" }}
+      >
+        {family.name}
+      </button>
     </div>
   );
 }

@@ -62,6 +62,8 @@ export interface Student {
   promotedFromDraft?: boolean;
   /** Only on PUT, with promotedFromDraft: the group the import meant the pupil for. */
   intendedGroupId?: string;
+  /** module_families (absent while off, or when the pupil has none): the pupil's family (ADR 0041). */
+  familyId?: string;
 }
 
 /** "" means not captured. */

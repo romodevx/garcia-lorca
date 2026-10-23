@@ -9,7 +9,8 @@ import type { StudentFilter } from "./useStudentFilter";
 /** Design system: a target is at least 44 px tall. */
 const CHIP_HEIGHT = 44;
 
-const chip = (on: boolean): CSSProperties => ({
+/** A filter chip, on or off: shared by every chip that narrows a list. */
+export const filterChip = (on: boolean): CSSProperties => ({
   display: "inline-flex", alignItems: "center", gap: 8, height: CHIP_HEIGHT, padding: "0 15px", borderRadius: 99,
   fontSize: 13.5, fontWeight: 600, fontFamily: "var(--font-display)", cursor: "pointer",
   border: `1.5px solid ${on ? "var(--forest)" : "var(--border)"}`,
@@ -41,7 +42,7 @@ export function ChipRow({ label, options, chosen, onChoose, trailing, showCounts
       {options.map((o) => {
         const on = chosen === o.id;
         return (
-          <button key={o.id} type="button" aria-pressed={on} onClick={() => onChoose(o.id)} style={chip(on)}>
+          <button key={o.id} type="button" aria-pressed={on} onClick={() => onChoose(o.id)} style={filterChip(on)}>
             {o.label}
             {showCounts && <span style={badge}>{o.count}</span>}
           </button>
@@ -129,7 +130,7 @@ export function StudentFilters<T extends FilterableStudent>({
             type="button"
             aria-pressed={filter.allSelected}
             onClick={filter.selectAll}
-            style={{ ...chip(filter.allSelected), borderColor: filter.allSelected ? "var(--lime)" : "var(--border)", color: filter.allSelected ? "var(--text)" : "var(--text-muted)", background: filter.allSelected ? "color-mix(in oklab, var(--lime) 18%, var(--surface))" : "var(--surface)" }}
+            style={{ ...filterChip(filter.allSelected), borderColor: filter.allSelected ? "var(--lime)" : "var(--border)", color: filter.allSelected ? "var(--text)" : "var(--text-muted)", background: filter.allSelected ? "color-mix(in oklab, var(--lime) 18%, var(--surface))" : "var(--surface)" }}
           >
             <Checkmark on={filter.allSelected} />
             Seleccionar todos ({filter.filtered.length})
