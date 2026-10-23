@@ -6,6 +6,7 @@
 import type { AnnouncementScope } from "../../comms/api";
 import type { GradeLevel, LabelledGroup, Level } from "../../config/api";
 import { sortBySchoolOrder } from "../../config/schoolOrder";
+import type { Family } from "../../families/api";
 import type { Student } from "../../students/api";
 import { formatStudentName } from "../../_design/students/studentName";
 
@@ -16,6 +17,24 @@ export const SCOPES: readonly { value: AnnouncementScope; label: string }[] = [
   { value: "level", label: "Niveles" },
   { value: "cycle", label: "Toda la escuela" },
 ];
+
+/** ADR 0041: siblings as one audience, offered only with module_families. */
+const FAMILY_SCOPE = { value: "family", label: "Familias" } as const;
+
+/** The audiences the composer offers; "Familias" goes after the single pupil. */
+export function scopesFor(withFamilies: boolean): readonly { value: AnnouncementScope; label: string }[] {
+  if (!withFamilies) return SCOPES;
+  return [...SCOPES.slice(0, 1), FAMILY_SCOPE, ...SCOPES.slice(1)];
+}
+
+/** The gateway takes 1 to 50 family ids per announcement. */
+export const FAMILY_LIMIT = 50;
+
+/** What a family is called wherever it is a recipient. */
+export const familyName = (family: Pick<Family, "name">): string => `Familia ${family.name}`;
+
+/** "3 familias", "1 familia". */
+export const familiesCount = (n: number): string => `${n} ${n === 1 ? "familia" : "familias"}`;
 
 /** Where the groups of a level nobody can name go. */
 const OTHERS_TITLE = "Otros";
@@ -83,6 +102,8 @@ export interface AudienceCatalogue {
   groups: readonly LabelledGroup[];
   levels: readonly Level[];
   students: readonly Student[];
+  /** Read only once "Familias" was chosen; absent or empty before. */
+  families?: readonly Family[];
 }
 
 /** What each audience calls its members; the whole school has none. */
@@ -90,6 +111,7 @@ function namesById(scope: AnnouncementScope, cat: AudienceCatalogue): Map<string
   if (scope === "group") return new Map(cat.groups.map((g) => [g.id, g.label]));
   if (scope === "level") return new Map(cat.levels.map((l) => [l.id, l.name]));
   if (scope === "student") return new Map(cat.students.map((s) => [s.id, formatStudentName(s)]));
+  if (scope === "family") return new Map((cat.families ?? []).map((f) => [f.id, familyName(f)]));
   return new Map();
 }
 

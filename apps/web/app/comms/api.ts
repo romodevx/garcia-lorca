@@ -11,8 +11,8 @@ import { authFetch } from "../auth/authFetch";
 
 const BASE_PATH = "/api/v1/comms";
 
-/** Who an announcement is for. */
-export type AnnouncementScope = "student" | "group" | "level" | "cycle";
+/** Who an announcement is for. `family` only with module_families (ADR 0041): targetIds are family ids. */
+export type AnnouncementScope = "student" | "group" | "level" | "cycle" | "family";
 
 export interface AnnounceInput {
   scope: AnnouncementScope;

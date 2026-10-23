@@ -5,9 +5,10 @@ import { TextArea, TextField } from "../../_design/form";
 import { Icon } from "../../_design/Icon";
 import { ModuleHeaderIcon } from "../../_design/ModuleHeaderIcon";
 import { Page } from "../../_design/Page";
-import { groupSections, levelSections, recipientNames } from "./audience";
+import { groupSections, levelSections, recipientNames, scopesFor } from "./audience";
 import { AudiencePane } from "./AudiencePane";
 import { AutomaticMessages } from "./AutomaticMessages";
+import { FamilySearch } from "./FamilySearch";
 import { GroupedTargets } from "./GroupedTargets";
 import { SendFooter } from "./SendFooter";
 import { StudentSearch } from "./StudentSearch";
@@ -18,6 +19,11 @@ const MESSAGE_ROWS = 4;
 
 export interface AnnouncementsComposeProps {
   onBack: () => void;
+  /**
+   * module_families (with module_students) and students:read: "Familias" is
+   * offered as an audience (ADR 0041). Absent, the composer is today's.
+   */
+  families?: boolean;
 }
 
 /**
@@ -26,7 +32,7 @@ export interface AnnouncementsComposeProps {
  * calls; only the layout is new. The <form> IS the two-pane grid, so Enter in
  * Título sends (E3); the birthday greeting has its own form and sits below.
  */
-export function AnnouncementsCompose({ onBack }: AnnouncementsComposeProps): ReactElement {
+export function AnnouncementsCompose({ onBack, families = false }: AnnouncementsComposeProps): ReactElement {
   const composer = useAnnouncementComposer();
   const [attempt, setAttempt] = useState(0);
 
@@ -50,7 +56,7 @@ export function AnnouncementsCompose({ onBack }: AnnouncementsComposeProps): Rea
 
       <div className="announce fade-up">
         <form className="announce-grid" onSubmit={send}>
-          <AudiencePane scope={composer.scope} onChooseScope={composer.chooseScope} pickedCount={composer.picked.length}>
+          <AudiencePane scope={composer.scope} onChooseScope={composer.chooseScope} pickedCount={composer.picked.length} scopes={scopesFor(families)}>
             <AudienceList composer={composer} />
           </AudiencePane>
           <div className="announce-card announce-editor">
@@ -67,7 +73,7 @@ export function AnnouncementsCompose({ onBack }: AnnouncementsComposeProps): Rea
           </div>
           <SendFooter
             scope={composer.scope}
-            recipients={recipientNames(composer.scope, composer.picked, composer)}
+            recipients={recipientNames(composer.scope, composer.picked, { ...composer, families: composer.familiesAudience.families })}
             error={composer.error}
             sent={composer.sent}
             sending={composer.sending}
@@ -89,6 +95,10 @@ function AudienceList({ composer }: { composer: AnnouncementComposer }): ReactEl
   }
   if (scope === "student") {
     return <StudentSearch students={composer.students} picked={picked} onToggle={toggle} loaded={loaded.students} />;
+  }
+  if (scope === "family") {
+    const { families, failed, atLimit } = composer.familiesAudience;
+    return <FamilySearch families={families} students={composer.students} picked={picked} onToggle={toggle} loaded={loaded.families} failed={failed} atLimit={atLimit} />;
   }
   if (scope === "level") {
     return <GroupedTargets sections={levelSections(composer.levels)} picked={picked} onToggle={toggle} loaded={loaded.levels} emptyText="Todavía no hay niveles." />;
