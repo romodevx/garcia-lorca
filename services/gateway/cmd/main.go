@@ -564,6 +564,9 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 		Catalog: configClient, Roster: studentsClient, Pricing: financeClient,
 		NewID: handler.NewBatchID, WriteBudget: studentImportWriteBudget,
 		ReviewEnabled: importReviewOn,
+		// PLAN-familias-importacion: with module_families on, a commit by a
+		// guardians:write holder builds the batch's families (best effort).
+		Families: studentsClient, FamiliesEnabled: familiesOn,
 	})
 	studentImport := func(h http.Handler) http.Handler {
 		return guard.Protect("students", guard.Protect("config", guard.Protect("student_import",
@@ -571,6 +574,14 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	}
 	mux.Handle("POST /api/v1/imports/students/preview", studentImport(http.HandlerFunc(studentImportH.Preview)))
 	mux.Handle("POST /api/v1/imports/students/commit", studentImport(http.HandlerFunc(studentImportH.Commit)))
+	// Undoing an import's families is a family membership write (ADR 0041):
+	// module_students AND module_families (404 before auth), and both
+	// students:import (it is the import's) and guardians:write (it takes
+	// pupils out of families, which is handing out access).
+	mux.Handle("POST /api/v1/imports/students/{batchId}/families/undo",
+		guard.Protect("students", guard.Protect("families", requireAuthChanged(
+			middleware.RequirePermission("students:import")(middleware.RequirePermission("guardians:write")(
+				http.HandlerFunc(studentImportH.UndoFamilies)))))))
 
 	// M14 teachers (staff roster + who teaches what): the same config service
 	// answers these, but they are a MODULE of their own now, so they carry their
