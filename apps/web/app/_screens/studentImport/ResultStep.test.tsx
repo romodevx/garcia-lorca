@@ -22,7 +22,7 @@ describe("the import's result", () => {
 
 describe("the import's result — Familias (PLAN-familias-importacion I3)", () => {
   const WITH_FAMILIES = { ...MATCHED, batchId: "b1", families: { built: true, created: [{ id: "f1", name: "GARCÍA TORRES" }], joined: [], skipped: 0 } };
-  const REVIEW = { href: "/alumnos?vista=familias", onOpen: vi.fn() };
+  const REVIEW = { href: "/alumnos?vista=familias", onOpen: vi.fn(), familyHref: (id: string) => `/alumnos?vista=familias&familia=${id}`, onOpenFamily: vi.fn() };
 
   it("module_families on: shows the families the commit built", () => {
     render(<ResultStep result={WITH_FAMILIES} cut={undefined} onAnother={vi.fn()} onViewStudents={vi.fn()} familiesReview={REVIEW} />);

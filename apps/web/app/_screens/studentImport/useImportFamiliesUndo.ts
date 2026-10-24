@@ -3,8 +3,7 @@
 import { useRef, useState } from "react";
 
 import { undoStudentImportFamilies, type StudentImportFamiliesUndo } from "../../studentImport/api";
-
-export const UNDO_FAILED = "No pudimos deshacer las familias. Intenta de nuevo.";
+import { undoFailureText } from "../../studentImport/families";
 
 export interface ImportFamiliesUndo {
   busy: boolean;
@@ -19,21 +18,21 @@ export interface ImportFamiliesUndo {
  * second press while one is in flight is ignored (a ref, not the state: the
  * same tick would not see it). The server is idempotent anyway.
  */
-export function useImportFamiliesUndo(baseURL: string, batchId: string): ImportFamiliesUndo {
+export function useImportFamiliesUndo(baseURL: string, batchId: string | undefined): ImportFamiliesUndo {
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<StudentImportFamiliesUndo | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
   const inFlight = useRef(false);
 
   const undo = async (): Promise<void> => {
-    if (inFlight.current) return;
+    if (inFlight.current || batchId === undefined) return;
     inFlight.current = true;
     setBusy(true);
     setError(undefined);
     try {
       setOutcome(await undoStudentImportFamilies(baseURL, batchId));
-    } catch {
-      setError(UNDO_FAILED);
+    } catch (err) {
+      setError(undoFailureText(err));
     } finally {
       inFlight.current = false;
       setBusy(false);

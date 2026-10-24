@@ -231,7 +231,7 @@ describe("step 3 — the commit", () => {
     api.commitStudentImport.mockResolvedValue({ ...MATCHED, batchId: "b1", families: { built: true, created: [{ id: "f1" }], joined: [], skipped: 1, toReview: 2 } });
     const onOpen = vi.fn();
     const user = userEvent.setup();
-    render(<StudentImportScreen onBack={vi.fn()} onOpenTuition={vi.fn()} onViewStudents={vi.fn()} today="2026-10-06" familiesReview={{ href: "/alumnos?vista=familias", onOpen }} />);
+    render(<StudentImportScreen onBack={vi.fn()} onOpenTuition={vi.fn()} onViewStudents={vi.fn()} today="2026-10-06" familiesReview={{ href: "/alumnos?vista=familias", onOpen, familyHref: (id) => `/alumnos?vista=familias&familia=${id}`, onOpenFamily: vi.fn() }} />);
     await upload(user);
     await user.click(await screen.findByRole("button", { name: "Importar 2 alumnos a Primaria" }));
 
