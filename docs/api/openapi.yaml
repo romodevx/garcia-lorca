@@ -4688,6 +4688,16 @@ paths:
         '401': { $ref: '#/components/responses/PlainUnauthorized' }
         '403': { $ref: '#/components/responses/PlainForbidden' }
         '404': { $ref: '#/components/responses/PlainNotFound' }
+        '429':
+          description: Too many undos by this user in a row; wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              schema: { type: integer, minimum: 1 }
+              description: Seconds until the next undo is allowed.
+          content:
+            text/plain:
+              schema: { type: string }
+              example: Too Many Requests
 
   /api/v1/config/evaluation-periods:
     get:
@@ -9658,12 +9668,19 @@ components:
         Set by the commit only when module_families is on and the caller holds
         `guardians:write` (absent otherwise): the very likely families of the
         batch, built without asking (same two surnames AND an email or phone in
-        common). Best effort: when building fails the import still succeeds,
-        `built` is false and `created`/`joined` hold what was done before the
-        failure; the rest stays in the Familias tab as suggestions.
+        common). Best effort: when building fails the import still succeeds
+        and `built` is false (see `built`); the rest stays in the Familias tab
+        as suggestions.
       required: [built, created, joined, skipped]
       properties:
-        built: { type: boolean, description: False when students failed partway. }
+        built:
+          type: boolean
+          description: >
+            False in two cases. Students answered that the build stopped
+            partway: `created` and `joined` hold what was committed. Or the
+            call failed outright (transport error, deadline, or no time left
+            for it): the lists are empty, yet some families may still have been
+            built. Clients should offer the undo on any `built: false`.
         created:
           type: array
           description: The families the import created.
@@ -9676,7 +9693,10 @@ components:
         toReview:
           type: integer
           minimum: 0
-          description: Suggestions the school still has to review after the build; absent when they could not be read.
+          description: >
+            Suggestions the school still has to review after the build. Only
+            for `students:read`; absent when they could not be read or the
+            build did not run.
       example:
         built: true
         created:

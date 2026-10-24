@@ -356,7 +356,7 @@ func TestImportFamiliesAreInTheContract(t *testing.T) {
 	_, cookie := firstSecurity(op)["sessionCookie"]
 	assert.True(t, cookie, "security = %v", op.Security)
 	assert.True(t, refsParameter(t, op, "CsrfToken"), "a write must require the CSRF header")
-	for _, code := range []string{"200", "400", "401", "403", "404"} {
+	for _, code := range []string{"200", "400", "401", "403", "404", "429"} {
 		_, ok := op.Responses[code]
 		assert.True(t, ok, "no %s response", code)
 	}
