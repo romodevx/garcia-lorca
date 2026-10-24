@@ -158,6 +158,35 @@ export interface StudentImportResult {
   planHash: string;
   /** Set by the commit. */
   batchId?: string;
+  /** Set by the commit only with module_families on and guardians:write held. */
+  families?: StudentImportFamilies;
+}
+
+/** A family the import built; `name` and `studentIds` only for students:read. */
+export interface StudentImportFamily {
+  id: string;
+  name?: string;
+  studentIds?: string[];
+}
+
+/** The very likely families the commit built without asking (best effort). */
+export interface StudentImportFamilies {
+  /** False when the build was cut partway: some families may exist anyway. */
+  built: boolean;
+  created: StudentImportFamily[];
+  joined: StudentImportFamily[];
+  /** Groups left to the office as suggestions. */
+  skipped: number;
+  /** Suggestions still to review; absent when they could not be read. */
+  toReview?: number;
+}
+
+/** What undoing an import's families did. */
+export interface StudentImportFamiliesUndo {
+  removed: number;
+  dissolved: number;
+  /** Families left whole because a member has an app account. */
+  keptWithAccess: number;
 }
 
 /** The refusal codes the gateway puts in X-Error-Code for this flow. */
@@ -202,19 +231,28 @@ function refusedRows(body: string): RowFieldError[] {
   }
 }
 
-async function post(baseURL: string, action: "preview" | "commit", body: StudentImportRequest): Promise<StudentImportResult> {
-  const res = await authFetch(`${baseURL.replace(/\/+$/, "")}${BASE_PATH}/${action}`, {
+async function postJSON<T>(baseURL: string, path: string, body?: unknown): Promise<T> {
+  const res = await authFetch(`${baseURL.replace(/\/+$/, "")}${BASE_PATH}/${path}`, {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
   if (!res.ok) {
     const detail = (await res.text().catch(() => "")).trim();
     const code = res.headers.get("X-Error-Code") ?? undefined;
     throw new StudentImportError(res.status, detail, code, code === ROWS_INVALID ? refusedRows(detail) : []);
   }
-  return (await res.json()) as StudentImportResult;
+  return (await res.json()) as T;
+}
+
+function post(baseURL: string, action: "preview" | "commit", body: StudentImportRequest): Promise<StudentImportResult> {
+  return postJSON<StudentImportResult>(baseURL, action, body);
+}
+
+/** Takes back the families the commit of `batchId` built. Idempotent. */
+export function undoStudentImportFamilies(baseURL: string, batchId: string): Promise<StudentImportFamiliesUndo> {
+  return postJSON<StudentImportFamiliesUndo>(baseURL, `${encodeURIComponent(batchId)}/families/undo`);
 }
 
 /** What the commit would do, row by row. Writes nothing. */

@@ -7,6 +7,7 @@ import { csvName, downloadCsv } from "../../_lib/csv";
 import type { StudentImportResult } from "../../studentImport/api";
 import { migratedText, movedText } from "../../studentImport/copy";
 import { destinationNames, reportCsv } from "../../studentImport/view";
+import { ImportFamilies, type FamiliesReviewLink } from "./ImportFamilies";
 import { ImportSummary } from "./ImportSummary";
 import { alertStyle, noteStyle } from "./parts";
 
@@ -16,13 +17,15 @@ export interface ResultStepProps {
   cut: string | undefined;
   onAnother: () => void;
   onViewStudents: (levelId: string | undefined) => void;
+  /** module_families on: where the suggestions left to review live. Absent, no Familias block. */
+  familiesReview?: FamiliesReviewLink;
 }
 
 const CONTACTS_REMINDER =
   "Recuerda capturar los contactos de cada alumno (mamá, papá o tutor) desde su ficha: el archivo del sistema anterior no los trae.";
 
 /** Step 3: what was written, the report with every row, and what to do next. */
-export function ResultStep({ result, cut, onAnother, onViewStudents }: ResultStepProps): ReactElement {
+export function ResultStep({ result, cut, onAnother, onViewStudents, familiesReview }: ResultStepProps): ReactElement {
   const names = destinationNames(result);
   const download = (): void => downloadCsv(csvName(`migracion-${names.join("-")}`, new Date()), reportCsv(result.rows));
 
@@ -35,6 +38,9 @@ export function ResultStep({ result, cut, onAnother, onViewStudents }: ResultSte
       )}
       <ImportSummary summary={result.summary} onPick={() => undefined} />
       {result.summary.movedToCycleStart > 0 && <p style={noteStyle}>{movedText(result.summary.movedToCycleStart)}</p>}
+      {familiesReview !== undefined && result.families !== undefined && (
+        <ImportFamilies families={result.families} batchId={result.batchId} review={familiesReview} />
+      )}
       <p style={noteStyle}>{CONTACTS_REMINDER}</p>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
         <Btn icon="upload" onClick={onAnother}>Subir otro archivo</Btn>

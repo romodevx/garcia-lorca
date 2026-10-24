@@ -509,6 +509,8 @@ export function AppShell(): ReactElement {
   const backToStudents = (): void => router.push(studentsListPath());
   // What the caller may do in Familias (UX only); undefined while the module is off.
   const families = familiesEnabled ? familiesAccess(principal?.permissions) : undefined;
+  // The Familias tab of Alumnos, where an import's doubtful families wait.
+  const familiesReviewPath = `${viewToPath({ screen: "students" })}?vista=familias`;
   const openFamily = (familyId: string): void => router.push(`${viewToPath({ screen: "students" })}?vista=familias&familia=${encodeURIComponent(familyId)}`);
   // A ficha opened from /alumnos/{id} leaves the list's own address when it
   // closes, filters kept; no history entry, "atrás" still leaves the list.
@@ -715,6 +717,7 @@ export function AppShell(): ReactElement {
           onOpenTuition={() => go({ screen: "config" })}
           onViewStudents={(levelId) => router.push(levelId === undefined ? "/alumnos" : `/alumnos?nivel=${encodeURIComponent(levelId)}`)}
           importReview={importReview}
+          familiesReview={familiesEnabled ? { href: familiesReviewPath, onOpen: () => router.push(familiesReviewPath) } : undefined}
         />
       )}
       {(view.screen === "config" ||

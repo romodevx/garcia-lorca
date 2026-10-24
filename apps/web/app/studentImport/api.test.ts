@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { StudentImportError, commitStudentImport, previewStudentImport, type StudentImportResult } from "./api";
+import { StudentImportError, commitStudentImport, previewStudentImport, undoStudentImportFamilies, type StudentImportResult } from "./api";
 
 const BASE = "http://gw/";
 
@@ -103,5 +103,26 @@ describe("the import review (module_import_review)", () => {
     const err = await commitStudentImport(BASE, { fileName: "x.xlsx", fileBase64: "UEsD", planHash: "h1" }).catch((e: unknown) => e);
 
     expect(err).toMatchObject({ code: "LEVELS_UNRESOLVED", rows: [] });
+  });
+});
+
+describe("undoStudentImportFamilies", () => {
+  it("POSTs to the batch's undo route with the session cookie and answers the counts", async () => {
+    const fetchMock = stubFetch(new Response(JSON.stringify({ removed: 5, dissolved: 2, keptWithAccess: 1 }), { status: 200 }));
+
+    const out = await undoStudentImportFamilies(BASE, "0f1c0e2a-0000-4000-8000-0000000000d1");
+
+    expect(out).toEqual({ removed: 5, dissolved: 2, keptWithAccess: 1 });
+    const [target, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(target).toBe("http://gw/api/v1/imports/students/0f1c0e2a-0000-4000-8000-0000000000d1/families/undo");
+    expect(init.method).toBe("POST");
+    expect(init.credentials).toBe("include");
+  });
+
+  it("throws a StudentImportError on a refusal", async () => {
+    stubFetch(new Response("forbidden", { status: 403 }));
+    const err = await undoStudentImportFamilies(BASE, "b1").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(StudentImportError);
+    expect(err).toMatchObject({ status: 403 });
   });
 });
