@@ -65,13 +65,16 @@ func (h *StudentImportHandler) buildFamilies(ctx context.Context, who middleware
 		return nil
 	}
 	built, err := h.d.Families.BuildFamiliesFromImport(ctx, batch)
-	if err != nil {
+	switch {
+	case err != nil:
 		// The batch and the code only: students' sentence may name a pupil.
 		slog.WarnContext(ctx, "student import: families not built", "batch", batch, "code", connect.CodeOf(err).String())
+	case built.Incomplete:
+		slog.WarnContext(ctx, "student import: families built partway", "batch", batch)
 	}
 	readsPupils := middleware.HasPermission(who, permStudentsRead)
 	out := &importFamilies{
-		Built:   err == nil,
+		Built:   err == nil && !built.Incomplete,
 		Created: toImportFamilies(built.Created, readsPupils),
 		Joined:  toImportFamilies(built.Joined, readsPupils),
 		Skipped: built.Skipped,

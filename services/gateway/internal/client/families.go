@@ -159,11 +159,13 @@ func (c *StudentsClient) RevokeFamilyAccess(ctx context.Context, familyID, guard
 
 // FamilyImportBuild is what building an import's families did: the families
 // it created, the existing ones its pupils joined (as they now are), and how
-// many groups it left to the office as suggestions.
+// many groups it left to the office as suggestions. Incomplete: the build
+// failed partway and Created/Joined are what was committed before it.
 type FamilyImportBuild struct {
-	Created []Family
-	Joined  []Family
-	Skipped int
+	Created    []Family
+	Joined     []Family
+	Skipped    int
+	Incomplete bool
 }
 
 // FamilyImportUndo is what undoing an import's families did: pupils taken out,
@@ -182,9 +184,10 @@ func (c *StudentsClient) BuildFamiliesFromImport(ctx context.Context, batchID st
 		return FamilyImportBuild{}, err
 	}
 	return FamilyImportBuild{
-		Created: toFamilies(res.Msg.GetCreated()),
-		Joined:  toFamilies(res.Msg.GetJoined()),
-		Skipped: int(res.Msg.GetSkipped()),
+		Created:    toFamilies(res.Msg.GetCreated()),
+		Joined:     toFamilies(res.Msg.GetJoined()),
+		Skipped:    int(res.Msg.GetSkipped()),
+		Incomplete: res.Msg.GetIncomplete(),
 	}, nil
 }
 

@@ -355,3 +355,19 @@ func TestImportFamiliesAreInTheContract(t *testing.T) {
 		assert.True(t, ok, "no %s response", code)
 	}
 }
+
+// students answers a partial build as OK + incomplete: the summary reads it
+// like a failure that still built something.
+func TestCommitReportsAnIncompleteFamilyBuild(t *testing.T) {
+	partial := builtFamilies()
+	partial.Incomplete = true
+	families := &fakeImportFamilies{build: partial, suggestions: twoSuggestions()}
+	f := newFamilyImportFixture(families, true)
+
+	got := familiesOf(t, commitAs(t, f, familyImportOwner()))
+
+	assert.Equal(t, false, got["built"])
+	assert.Len(t, got["created"], 1)
+	assert.Len(t, got["joined"], 1)
+	assert.Equal(t, float64(2), got["skipped"])
+}
