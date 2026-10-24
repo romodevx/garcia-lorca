@@ -125,7 +125,9 @@ describe("the import's Familias block", () => {
     expect(screen.queryByRole("link", { name: "GARCÍA TORRES" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Deshacer" })).toBeNull();
     expect(screen.getByRole("status")).toHaveTextContent("Sacamos a 2 alumnos de sus familias y deshicimos 1 familia que quedó vacía.");
-    expect(screen.getByRole("link", { name: /2 posibles familias por revisar/ })).toBeInTheDocument();
+    // The count was read before the undo; the families it took apart are suggestions again.
+    expect(screen.queryByRole("link", { name: /2 posibles familias por revisar/ })).toBeNull();
+    expect(screen.getByRole("link", { name: /Revisar las sugerencias de familias/ })).toBeInTheDocument();
   });
 
   it.each([

@@ -43,6 +43,8 @@ const LINK = { display: "inline-flex", alignItems: "center", minHeight: 44, font
  * decision "Armarlas solas"), with Deshacer. Reversible, so no dialog; the
  * outcome stays on the step until the office leaves it.
  */
+const STALE_REVIEW_LINK = "Revisar las sugerencias de familias";
+
 export function ImportFamilies({ families, batchId, review }: ImportFamiliesProps): ReactElement {
   const titleId = useId();
   const undo = useImportFamiliesUndo(API_URL, batchId);
@@ -51,15 +53,17 @@ export function ImportFamilies({ families, batchId, review }: ImportFamiliesProp
   const toReview = families.toReview ?? 0;
   const undoable = !undone && batchId !== undefined && canUndoFamilies(families);
   const lines = undo.outcome === undefined ? [] : undoOutcome(undo.outcome);
+  // toReview was counted before the undo: the families it took apart are suggestions again.
+  const reviewIsStale = (undo.outcome?.removed ?? 0) > 0;
 
   return (
     <section aria-labelledby={titleId} style={cardStyle}>
       <h3 id={titleId} style={{ fontSize: 16, fontWeight: 700, color: "var(--text)", margin: 0 }}>Familias</h3>
       <p style={{ fontSize: 15, color: "var(--text)", margin: 0 }}>{undone ? UNDONE_HEADLINE : familiesHeadline(families)}</p>
       {!undone && <FamilyNames families={builtFamilyNames(families)} review={review} />}
-      {toReview > 0 && (
+      {(toReview > 0 || reviewIsStale) && (
         <InAppLink href={review.href} onOpen={review.onOpen}>
-          {reviewLinkText(toReview)}<span aria-hidden="true">&nbsp;→</span>
+          {reviewIsStale ? STALE_REVIEW_LINK : reviewLinkText(toReview)}<span aria-hidden="true">&nbsp;→</span>
         </InAppLink>
       )}
       {undoable && (
