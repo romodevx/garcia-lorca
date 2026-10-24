@@ -109,7 +109,7 @@ func lenientEmail(raw string, w *warnings) string {
 }
 
 // lenientPhones keeps the numbers that reduce to ten digits, once each, at most
-// maxPhones. An unknown kind becomes "otro": the number is what matters.
+// MaxProfilePhones. An unknown kind becomes "otro": the number is what matters.
 func lenientPhones(in []Phone, w *warnings) []Phone {
 	out := make([]Phone, 0, len(in))
 	seen := make(map[string]bool, len(in))
@@ -118,7 +118,7 @@ func lenientPhones(in []Phone, w *warnings) []Phone {
 			continue
 		}
 		number, ok := tenDigits(ph.Number)
-		if !ok || len(out) == maxPhones {
+		if !ok || len(out) == MaxProfilePhones {
 			w.add(PhoneIssueField(ph.Kind), WarnPhoneInvalid, strings.TrimSpace(ph.Number), "")
 			continue
 		}
