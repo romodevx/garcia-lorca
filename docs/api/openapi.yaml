@@ -27,7 +27,7 @@ openapi: 3.1.0
 
 info:
   title: García Lorca API
-  version: 0.19.0
+  version: 0.20.0
   license:
     name: Proprietary
     url: https://garcialorca.edu.mx/legal
@@ -4608,7 +4608,11 @@ paths:
         transaction in students: ENROLLED, enrolment origin `import`, no
         inscription charge, tuition and fees from the import month. A commit cut
         halfway is finished by sending the same file again: what went in reads
-        `already`. Requires `students:import`.
+        `already`. Requires `students:import`. With module_families on and
+        `guardians:write` held, it then builds the batch's very likely families
+        (best effort, never failing the import) and answers them under
+        `families`; `POST /api/v1/imports/students/{batchId}/families/undo`
+        takes them back.
       operationId: commitStudentImport
       security: [{ sessionCookie: [] }]
       parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
@@ -4647,6 +4651,53 @@ paths:
               example: "choose where these levels go: Preparatoria"
             application/json:
               schema: { $ref: '#/components/schemas/StudentImportRowsInvalid' }
+
+  /api/v1/imports/students/{batchId}/families/undo:
+    post:
+      tags: [student-import]
+      summary: Undo the families an import built (PLAN-familias-importacion)
+      description: >
+        Takes back what the commit's `families` did for `batchId`: every pupil
+        the import put in a family and still in it leaves it, and a family left
+        empty is dissolved (a pupil the office added stays). A family any of
+        whose members has an app account is kept whole and counted in
+        `keptWithAccess`: the office revokes that access first, then undoes
+        again. Pupils the office moved and guardian links are not touched.
+        Idempotent. Behind the import's modules (module_students,
+        module_config, module_student_import) and module_families: 404 when any
+        is off, before authentication. Requires `students:import` and
+        `guardians:write`.
+      operationId: undoStudentImportFamilies
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+        - name: batchId
+          in: path
+          required: true
+          description: The commit's `batchId`.
+          schema: { type: string, format: uuid }
+          example: 0f1c0e2a-0000-4000-8000-0000000000d1
+      responses:
+        '200':
+          description: What the undo did.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StudentImportFamiliesUndo' }
+              example: { removed: 5, dissolved: 2, keptWithAccess: 1 }
+        '400': { $ref: '#/components/responses/PlainBadRequest' }
+        '401': { $ref: '#/components/responses/PlainUnauthorized' }
+        '403': { $ref: '#/components/responses/PlainForbidden' }
+        '404': { $ref: '#/components/responses/PlainNotFound' }
+        '429':
+          description: Too many undos by this user in a row; wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              schema: { type: integer, minimum: 1 }
+              description: Seconds until the next undo is allowed.
+          content:
+            text/plain:
+              schema: { type: string }
+              example: Too Many Requests
 
   /api/v1/config/evaluation-periods:
     get:
@@ -9610,6 +9661,71 @@ components:
         unresolved: { type: array, items: { type: string }, example: [Preparatoria] }
         planHash: { type: string }
         batchId: { type: string, format: uuid, description: Set by the commit. }
+        families: { $ref: '#/components/schemas/StudentImportFamilies' }
+    StudentImportFamilies:
+      type: object
+      description: >
+        Set by the commit only when module_families is on and the caller holds
+        `guardians:write` (absent otherwise): the very likely families of the
+        batch, built without asking (same two surnames AND an email or phone in
+        common). Best effort: when building fails the import still succeeds
+        and `built` is false (see `built`); the rest stays in the Familias tab
+        as suggestions.
+      required: [built, created, joined, skipped]
+      properties:
+        built:
+          type: boolean
+          description: >
+            False in two cases. Students answered that the build stopped
+            partway: `created` and `joined` hold what was committed. Or the
+            call failed outright (transport error, deadline, or no time left
+            for it): the lists are empty, yet some families may still have been
+            built. Clients should offer the undo on any `built: false`.
+        created:
+          type: array
+          description: The families the import created.
+          items: { $ref: '#/components/schemas/StudentImportFamily' }
+        joined:
+          type: array
+          description: The existing families pupils of the import joined, as they now are.
+          items: { $ref: '#/components/schemas/StudentImportFamily' }
+        skipped: { type: integer, minimum: 0, description: Groups left to the office as suggestions. }
+        toReview:
+          type: integer
+          minimum: 0
+          description: >
+            Suggestions the school still has to review after the build. Only
+            for `students:read`; absent when they could not be read or the
+            build did not run.
+      example:
+        built: true
+        created:
+          - id: 0f1c0e2a-0000-4000-8000-0000000000f1
+            name: GARCÍA TORRES
+            studentIds: [0f1c0e2a-0000-4000-8000-0000000000a1, 0f1c0e2a-0000-4000-8000-0000000000b1]
+        joined: []
+        skipped: 1
+        toReview: 4
+    StudentImportFamily:
+      type: object
+      description: >
+        A family the import built. `name` and `studentIds` are present only for
+        a caller holding `students:read`.
+      required: [id]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, example: GARCÍA TORRES }
+        studentIds: { type: array, items: { type: string, format: uuid } }
+    StudentImportFamiliesUndo:
+      type: object
+      required: [removed, dissolved, keptWithAccess]
+      properties:
+        removed: { type: integer, minimum: 0, description: Pupils taken out of a family the import had put them in. }
+        dissolved: { type: integer, minimum: 0, description: Families dissolved because the undo emptied them. }
+        keptWithAccess:
+          type: integer
+          minimum: 0
+          description: Families left whole because a member has an app account; revoke that access, then undo again.
     ScheduleBoard:
       type: object
       description: The base timetable of a cycle and the catalog to draw it (T16).

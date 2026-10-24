@@ -3,6 +3,7 @@ package grpcadapter
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"time"
 
 	connect "connectrpc.com/connect"
@@ -187,13 +188,22 @@ func (h *StudentsHandler) BuildFamiliesFromImport(ctx context.Context, req *conn
 		return nil, errFamiliesNotServed
 	}
 	res, err := h.families.BuildFamiliesFromImport(ctx, req.Msg.GetBatchId())
-	if err != nil {
+	partial := len(res.Created)+len(res.Joined) > 0
+	if err != nil && !partial {
 		return nil, familyErr(err)
 	}
+	if err != nil {
+		// What was committed is real and the import's summary must show it
+		// (and be able to undo it). The batch and the code only: the error may
+		// name a pupil.
+		slog.WarnContext(ctx, "build families from import failed partway", "batch_id", req.Msg.GetBatchId(),
+			"code", familyErr(err).Code().String(), "created", len(res.Created), "joined", len(res.Joined))
+	}
 	return connect.NewResponse(&studentsv1.BuildFamiliesFromImportResponse{
-		Created: toProtoFamilies(res.Created),
-		Joined:  toProtoFamilies(res.Joined),
-		Skipped: int32(res.Skipped),
+		Created:    toProtoFamilies(res.Created),
+		Joined:     toProtoFamilies(res.Joined),
+		Skipped:    int32(res.Skipped),
+		Incomplete: err != nil,
 	}), nil
 }
 

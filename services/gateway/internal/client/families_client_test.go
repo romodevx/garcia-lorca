@@ -21,7 +21,11 @@ type stubFamilies struct {
 	dismiss *studentsv1.DismissFamilySuggestionRequest
 	contact *studentsv1.AddFamilyContactRequest
 	revoke  *studentsv1.RevokeFamilyAccessRequest
-	list    []*studentsv1.ListStudentsRequest
+	build   *studentsv1.BuildFamiliesFromImportRequest
+	undo    *studentsv1.UndoFamiliesFromImportRequest
+	// buildIncomplete answers BuildFamiliesFromImport as a partial build.
+	buildIncomplete bool
+	list            []*studentsv1.ListStudentsRequest
 	// dissolveOnRemove answers RemoveStudentFromFamily without a family.
 	dissolveOnRemove bool
 }
@@ -186,4 +190,54 @@ func TestListStudentsInFamilyFiltersAndPaginates(t *testing.T) {
 		assert.Equal(t, "fam-1", req.GetFamilyId())
 		assert.Equal(t, studentsv1.AdmissionStatus_ADMISSION_STATUS_ENROLLED, req.GetStatus())
 	}
+}
+
+func (s *stubFamilies) BuildFamiliesFromImport(_ context.Context, req *connect.Request[studentsv1.BuildFamiliesFromImportRequest]) (*connect.Response[studentsv1.BuildFamiliesFromImportResponse], error) {
+	s.build = req.Msg
+	return connect.NewResponse(&studentsv1.BuildFamiliesFromImportResponse{
+		Created:    []*studentsv1.Family{protoFamily()},
+		Joined:     []*studentsv1.Family{{Id: "fam-2", Name: "PÉREZ RUIZ", StudentIds: []string{"s-3", "s-4"}}},
+		Skipped:    3,
+		Incomplete: s.buildIncomplete,
+	}), nil
+}
+
+func (s *stubFamilies) UndoFamiliesFromImport(_ context.Context, req *connect.Request[studentsv1.UndoFamiliesFromImportRequest]) (*connect.Response[studentsv1.UndoFamiliesFromImportResponse], error) {
+	s.undo = req.Msg
+	return connect.NewResponse(&studentsv1.UndoFamiliesFromImportResponse{Removed: 5, Dissolved: 2, KeptWithAccess: 1}), nil
+}
+
+// PLAN-familias-importacion I2: an import's families come back mapped, and
+// undoing them reports each count.
+func TestFamiliesFromImportCarryTheBatch(t *testing.T) {
+	ctx := context.Background()
+	stub := &stubFamilies{}
+	students := familiesClient(t, stub)
+
+	built, err := students.BuildFamiliesFromImport(ctx, "batch-1")
+	require.NoError(t, err)
+	assert.Equal(t, "batch-1", stub.build.GetBatchId())
+	assert.Equal(t, client.FamilyImportBuild{
+		Created: []client.Family{{
+			ID: "fam-1", Name: "GARCÍA LÓPEZ", StudentIDs: []string{"s-1", "s-2"},
+			AccountCount: 1, CreatedAt: "2026-10-20T15:04:05Z",
+		}},
+		Joined:  []client.Family{{ID: "fam-2", Name: "PÉREZ RUIZ", StudentIDs: []string{"s-3", "s-4"}}},
+		Skipped: 3,
+	}, built)
+
+	undo, err := students.UndoFamiliesFromImport(ctx, "batch-1")
+	require.NoError(t, err)
+	assert.Equal(t, "batch-1", stub.undo.GetBatchId())
+	assert.Equal(t, client.FamilyImportUndo{Removed: 5, Dissolved: 2, KeptWithAccess: 1}, undo)
+}
+
+// A build that failed partway arrives as OK + incomplete: the client keeps
+// both the families and the flag.
+func TestBuildFamiliesFromImportKeepsIncomplete(t *testing.T) {
+	stub := &stubFamilies{buildIncomplete: true}
+	built, err := familiesClient(t, stub).BuildFamiliesFromImport(context.Background(), "batch-1")
+	require.NoError(t, err)
+	assert.True(t, built.Incomplete)
+	assert.Len(t, built.Created, 1)
 }

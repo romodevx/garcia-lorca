@@ -39,7 +39,10 @@ const (
 	// studentImportWriteBudget is the import commit route's own write deadline
 	// (set per request; the server-wide writeTimeout is too short to re-plan and
 	// write 1,000 pupils, one transaction each). The detached commit ends a few
-	// seconds before it, so the office always gets the result it started.
+	// seconds before it, so the office always gets the result it started. When
+	// the commit also builds the batch's families (module_families), the writes
+	// stop handler.familiesBudget (20 s) earlier and the build gets that slice;
+	// with under familiesMinBudget (5 s) left it is skipped (built:false).
 	studentImportWriteBudget = 2 * time.Minute
 )
 
@@ -564,6 +567,9 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 		Catalog: configClient, Roster: studentsClient, Pricing: financeClient,
 		NewID: handler.NewBatchID, WriteBudget: studentImportWriteBudget,
 		ReviewEnabled: importReviewOn,
+		// PLAN-familias-importacion: with module_families on, a commit by a
+		// guardians:write holder builds the batch's families (best effort).
+		Families: studentsClient, FamiliesEnabled: familiesOn,
 	})
 	studentImport := func(h http.Handler) http.Handler {
 		return guard.Protect("students", guard.Protect("config", guard.Protect("student_import",
@@ -571,6 +577,17 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	}
 	mux.Handle("POST /api/v1/imports/students/preview", studentImport(http.HandlerFunc(studentImportH.Preview)))
 	mux.Handle("POST /api/v1/imports/students/commit", studentImport(http.HandlerFunc(studentImportH.Commit)))
+	// Undoing an import's families belongs to the import AND is a family
+	// membership write (ADR 0041): the import's modules plus module_families
+	// (404 before auth), and both students:import and guardians:write (it
+	// takes pupils out of families, which is handing out access).
+	// It has its own small per-principal budget (security C1): each call
+	// rewrites families, and per IP would be one budget for the whole school
+	// behind Cloud Run.
+	undoFamiliesLimiter := middleware.NewRateLimiter(importFamiliesUndoBurst, importFamiliesUndoRefillPerSec, time.Now)
+	mux.Handle("POST /api/v1/imports/students/{batchId}/families/undo",
+		guard.Protect("families", studentImport(middleware.RequirePermission("guardians:write")(
+			undoFamiliesLimiter.PerPrincipalMiddleware(http.HandlerFunc(studentImportH.UndoFamilies))))))
 
 	// M14 teachers (staff roster + who teaches what): the same config service
 	// answers these, but they are a MODULE of their own now, so they carry their
@@ -1266,6 +1283,13 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 // handful in a burst (a month and its arrears, a retry), then about one every
 // six minutes. Finance holds the real ceiling (three pending per child); this
 // only stops a loop from filling the bucket.
+// The undo of an import's families is idempotent and an office does it once
+// or twice per file: five in a row, then one a minute, only stops a loop.
+const (
+	importFamiliesUndoBurst        = 5
+	importFamiliesUndoRefillPerSec = 1.0 / 60
+)
+
 const (
 	voucherUploadBurst        = 10
 	voucherUploadRefillPerSec = 1.0 / 360

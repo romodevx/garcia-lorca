@@ -57,6 +57,9 @@ func (stubIAM) ValidateToken(_ context.Context, req *connect.Request[iamv1.Valid
 		"level-deleter": {"levels:delete"},
 		// ADR 0033: the legacy import is the owner's alone (iam 0031).
 		"importer": {"students:import"},
+		// PLAN-familias-importacion I2: the owner's subset that undoes an
+		// import's families (students:import AND guardians:write).
+		"family-importer": {"students:import", "guardians:write", "students:read"},
 		// T2: deleting a user is the owner's alone (iam 0025).
 		"user-deleter": {"users:delete", "users:read"},
 		// M13: the staff roster left Configuración, so it answers to its own
@@ -209,6 +212,12 @@ func (stubIAM) ListRoles(_ context.Context, _ *connect.Request[iamv1.ListRolesRe
 // stubStudents returns a canned pending applicant for any CreateApplicant.
 type stubStudents struct {
 	studentsv1connect.UnimplementedStudentsServiceHandler
+}
+
+// UndoFamiliesFromImport answers a fixed undo for any batch
+// (PLAN-familias-importacion I2): the route tests are about who reaches it.
+func (stubStudents) UndoFamiliesFromImport(context.Context, *connect.Request[studentsv1.UndoFamiliesFromImportRequest]) (*connect.Response[studentsv1.UndoFamiliesFromImportResponse], error) {
+	return connect.NewResponse(&studentsv1.UndoFamiliesFromImportResponse{Removed: 3, Dissolved: 1}), nil
 }
 
 // VerifyCard answers every code as one valid card (task 13): the gateway tests

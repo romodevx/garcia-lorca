@@ -57,8 +57,19 @@
 | # | Tarea | Rol | Estado |
 |---|---|---|---|
 | I1 | students: contactos de la ficha en las sugerencias; dominio `PlanImportFamilies`; migración `0024_family_import_links` (RLS + aislamiento); RPCs `BuildFamiliesFromImport` / `UndoFamiliesFromImport` | backend-sr, db-sr | ⏳ |
-| I2 | gateway: el commit de la importación arma las familias (si el flag está encendido, best-effort); campo `families` en la respuesta; `POST /api/v1/imports/students/{batchId}/families/undo`; OpenAPI | backend-sr, security | ⏳ |
+| I2 | gateway: el commit de la importación arma las familias (si el flag está encendido, best-effort); campo `families` en la respuesta; `POST /api/v1/imports/students/{batchId}/families/undo`; OpenAPI | backend-sr, security | ✅ código (rama `feature/familias-import-t2`, apilada sobre I1): el commit arma solo con `module_families` + `guardians:write`; `families = {built, created[], joined[], skipped, toReview?}`, nombres y alumnos solo con `students:read`; un fallo da `built:false` con lo ya hecho y log con lote + código. Deshacer: students+families (404 antes de auth), `students:import` + `guardians:write`, lote uuid (400). OpenAPI 0.20.0. Falta: compuerta de seguridad |
 | I3 | web: bloque Familias en el resumen de la importación ("Armamos N familias" + Deshacer, "M por revisar →") | frontend-sr | ⏳ |
 | I4 | QA visible (importar 2 Excel de niveles distintos con hermanos), compuertas, ADR, docs | qa-sr, tech-lead, security | ⏳ |
 
 Ciclo por tarea igual que en `PLAN-familias.md`: rama → TDD → revisión → PR → squash a `dev`.
+
+### Notas de I2 (2026-10-23)
+
+- **Resultado parcial (resuelto).** Si falla después de armar algo, students responde OK con
+  lo ya armado e `incomplete = true`; si no armó nada, responde el error. El gateway lee
+  ambos casos como `built:false`.
+- **Deshacer** también vive detrás de los flags de la importación (`module_config`,
+  `module_student_import`), además de students y families.
+- **CSRF.** El gateway no valida `X-CSRF-Token` en ninguna ruta: el contrato lo exige y la
+  protección real es la cookie `SameSite=Strict` + la lista de orígenes del CORS. La ruta
+  de deshacer queda igual que las demás escrituras de familias.

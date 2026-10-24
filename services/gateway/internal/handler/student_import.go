@@ -70,6 +70,11 @@ type StudentImportDeps struct {
 	// ReviewEnabled says whether module_import_review is on for a request
 	// (nil: off). Off, the request's row decisions are ignored.
 	ReviewEnabled func(context.Context) bool
+	// Families builds and undoes an import's families
+	// (PLAN-familias-importacion); FamiliesEnabled says whether module_families
+	// is on for a request (nil: off). Either nil, the commit builds none.
+	Families        ImportFamilies
+	FamiliesEnabled func(context.Context) bool
 }
 
 // StudentImportHandler serves /api/v1/imports/students/{preview,commit}.
@@ -219,6 +224,9 @@ type importResponse struct {
 	Unresolved []string          `json:"unresolved"`
 	PlanHash   string            `json:"planHash"`
 	BatchID    string            `json:"batchId,omitempty"`
+	// Families is what the commit built (module_families and guardians:write
+	// only; absent otherwise and on the preview).
+	Families *importFamilies `json:"families,omitempty"`
 }
 
 // importRun is one planning pass: what the screen sees, plus what a commit
@@ -275,19 +283,30 @@ func (h *StudentImportHandler) Commit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer h.running.Delete(who.TenantID)
-	// Detached: a closed tab must not stop an import halfway through a level.
-	ctx, cancel := context.WithDeadline(context.WithoutCancel(r.Context()), deadline.Add(-commitAnswerMargin))
-	defer cancel()
+	// Detached: a closed tab must not stop an import halfway through a level,
+	// nor the families build that follows it.
+	detached := context.WithoutCancel(r.Context())
+	answerBy := deadline.Add(-commitAnswerMargin)
+	buildsFamilies := h.buildsFamilies(r.Context(), who)
+	writeCtx, cancelWrite := context.WithDeadline(detached, h.writesEnd(answerBy, buildsFamilies))
+	defer cancelWrite()
 	batch := h.d.NewID()
-	resp, err := h.write(ctx, run, batch)
+	resp, err := h.write(writeCtx, run, batch)
 	if err != nil {
 		writeConnectError(w, err)
 		return
 	}
+	if buildsFamilies {
+		familiesCtx, cancelFamilies := context.WithDeadline(detached, answerBy)
+		defer cancelFamilies()
+		resp.Families = h.buildFamilies(familiesCtx, who, batch)
+	}
+	fc := resp.Families.counts()
 	// Who waived these pupils' inscription, and when: the batch id is on every
 	// pupil it created (students.import_batch_id).
-	slog.InfoContext(ctx, "student import committed", "batch", batch, "by", who.UserID, "rows", resp.Summary.Total,
-		"new", resp.Summary.New, "already", resp.Summary.Already, "moved", resp.Summary.MovedToCycleStart, "skipped", resp.Summary.Skipped)
+	slog.InfoContext(detached, "student import committed", "batch", batch, "by", who.UserID, "rows", resp.Summary.Total,
+		"new", resp.Summary.New, "already", resp.Summary.Already, "moved", resp.Summary.MovedToCycleStart, "skipped", resp.Summary.Skipped,
+		"families_created", fc.created, "families_joined", fc.joined, "families_skipped", fc.skipped)
 	writeJSON(w, http.StatusOK, resp)
 }
 
