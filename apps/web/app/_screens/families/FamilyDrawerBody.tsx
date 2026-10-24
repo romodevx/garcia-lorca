@@ -64,6 +64,7 @@ export function FamilyDrawerBody({ drawer, state, name, members, failure, onRena
         <FamilyAdults
           familyId={familyId}
           members={detail.members}
+          studentIds={detail.studentIds}
           people={state.people}
           failed={state.peopleFailed}
           accountCount={detail.accountCount}

@@ -177,8 +177,37 @@ describe("ContactsPanel — dar acceso a la app", () => {
     ]);
     render(<ContactsPanel studentId="st-1" accessReach="Verá a ANA y LUIS" />);
     await screen.findByText("Mateo Contreras");
-    expect(screen.getByRole("button", { name: /Dar acceso a la app/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Dar acceso a la app/ })).toHaveAccessibleDescription("Verá a ANA y LUIS");
     expect(screen.getAllByText("Verá a ANA y LUIS")).toHaveLength(1);
+  });
+
+  it.each([
+    ["the family is full", { familyFull: true }],
+    ["the pupil is a draft", { draft: true }],
+  ])("no line when %s (no invite to describe)", async (_label, flags) => {
+    students.listContacts.mockResolvedValue([
+      { id: "gl-2", studentId: "st-1", guardianUserId: "", relationship: "father", fullName: "Mateo Contreras", phone: "", email: "mateo@example.com", hasAccount: false },
+    ]);
+    render(<ContactsPanel studentId="st-1" accessReach="Verá a ANA y LUIS" {...flags} />);
+    await screen.findByText("Mateo Contreras");
+    expect(screen.queryByText("Verá a ANA y LUIS")).toBeNull();
+  });
+
+  it("the invite is never disabled while sending: busy, 44 px, a second press ignored", async () => {
+    const user = userEvent.setup();
+    students.listContacts.mockResolvedValue([
+      { id: "gl-2", studentId: "st-1", guardianUserId: "", relationship: "father", fullName: "Mateo Contreras", phone: "", email: "mateo@example.com", hasAccount: false },
+    ]);
+    students.inviteContactToApp.mockImplementation(() => new Promise(() => undefined));
+    render(<ContactsPanel studentId="st-1" />);
+    await screen.findByText("Mateo Contreras");
+    await user.click(screen.getByRole("button", { name: "Dar acceso a la app" }));
+    const sending = screen.getByRole("button", { name: "Enviando…" });
+    await user.click(sending);
+    expect(sending).not.toBeDisabled();
+    expect(sending).toHaveAttribute("aria-busy", "true");
+    expect(sending.style.height).toBe("44px");
+    expect(students.inviteContactToApp).toHaveBeenCalledTimes(1);
   });
 
   // C2-003 (decisión del dueño, opción C): an address that belongs to a staff

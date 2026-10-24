@@ -84,9 +84,16 @@ describe("StudentEditScreen — Familia (ADR 0041)", () => {
 
   it("the family the card read tells the contacts which children an account sees (M2), with no request of its own", async () => {
     render(<StudentEditScreen studentId="st1" userId="u" permissions={["students:read", "students:update"]} onBack={vi.fn()} today="2026-10-06" families={OWNER} onOpenFamily={vi.fn()} onOpenStudent={vi.fn()} />);
-    expect(await screen.findByText("alcance:ninguno")).toBeInTheDocument();
+    // Until (or unless) the card reads the family, the line fails closed.
+    expect(await screen.findByText("alcance:Verá a todos los alumnos de su familia")).toBeInTheDocument();
     (await screen.findByRole("button", { name: "familia:f1" })).click();
     expect(await screen.findByText("alcance:Verá a ADA y BYRON")).toBeInTheDocument();
+  });
+
+  it("a pupil without a family: the contacts get no line", async () => {
+    api.getStudent.mockResolvedValue({ ...student, familyId: undefined });
+    render(<StudentEditScreen studentId="st1" userId="u" permissions={["students:read", "students:update"]} onBack={vi.fn()} today="2026-10-06" families={OWNER} onOpenFamily={vi.fn()} onOpenStudent={vi.fn()} />);
+    expect(await screen.findByText("alcance:ninguno")).toBeInTheDocument();
   });
 
   it("module_families off: the contacts get no line", async () => {

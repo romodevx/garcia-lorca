@@ -193,10 +193,17 @@ describe("FamilyDrawer — adults", () => {
   it("says which children an invite will reach (M2)", async () => {
     renderDrawer();
     const father = await screen.findByRole("listitem", { name: "JUAN GARCÍA" });
-    expect(within(father).getByText("Verá a ANA y LUIS")).toBeInTheDocument();
+    expect(within(father).getByRole("button", { name: "Dar acceso a la app" })).toHaveAccessibleDescription("Verá a ANA y LUIS");
     // The mother already has the app: no invite, no line.
     const mother = screen.getByRole("listitem", { name: "MARÍA LÓPEZ" });
     expect(within(mother).queryByText(/^Verá a/)).toBeNull();
+  });
+
+  it("a read that came back short fails closed (M2)", async () => {
+    api.getFamily.mockResolvedValue(detail({ studentIds: ["s1", "s2", "s3"] }));
+    renderDrawer();
+    const father = await screen.findByRole("listitem", { name: "JUAN GARCÍA" });
+    expect(within(father).getByRole("button", { name: "Dar acceso a la app" })).toHaveAccessibleDescription("Verá a 3 alumnos de su familia");
   });
 
   it("one child the account can reach: no line", async () => {

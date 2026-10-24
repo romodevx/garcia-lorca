@@ -512,7 +512,7 @@ export function StudentEditScreen({ studentId, userId, permissions, onBack, onWi
         <ContactsPanel
           studentId={studentId}
           familyFull={families !== undefined && familyIsFull(familyRead?.accountCount)}
-          accessReach={families !== undefined && familyRead !== undefined ? accessReachLine(familyRead.members) : undefined}
+          accessReach={families === undefined ? undefined : familyReach(familyRead, student.familyId)}
         />
       </Section>
 
@@ -809,4 +809,14 @@ function CameraCapture({ onCapture, onClose }: { onCapture: (video: HTMLVideoEle
       </div>
     </div>
   );
+}
+
+/**
+ * M2: who an account given from this file will see. Fails closed: a pupil in a
+ * family the card has not (or could not) read reaches "todos los alumnos de su
+ * familia"; a pupil in no family, nobody else.
+ */
+function familyReach(read: FamilyDetail | undefined, familyId: string | undefined): string | undefined {
+  if (read === undefined && familyId === undefined) return undefined;
+  return accessReachLine(read);
 }

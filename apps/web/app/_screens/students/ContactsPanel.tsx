@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactElement } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type FormEvent, type ReactElement } from "react";
 import { Btn } from "../../_design/Controls";
 import { EmailField, SelectField, TextField, useEmailShapeOnSave, useFormatError, useRequired } from "../../_design/form";
 import { Icon } from "../../_design/Icon";
@@ -19,7 +19,7 @@ import {
 import { phoneDigits, phoneError } from "../../students/profileRules";
 import { API_URL } from "../../api-url";
 import { RELATIONSHIPS, relationshipLabel } from "../../students/relationship";
-import { AccessReach, DRAFT_INVITE, InviteResult, StaffAddressPrompt, useContactInvite } from "./contactInvite";
+import { AccessReach, DRAFT_INVITE, InviteResult, StaffAddressPrompt, reachDescribedBy, useContactInvite } from "./contactInvite";
 
 export interface ContactsPanelProps {
   studentId: string;
@@ -77,6 +77,7 @@ export function ContactsPanel({ studentId, draft = false, familyFull = false, ac
 
   useEffect(reload, [reload]);
   const invite = useContactInvite(reload);
+  const reachBase = useId();
 
   const add = async (e: FormEvent): Promise<void> => {
     e.preventDefault();
@@ -176,13 +177,14 @@ export function ContactsPanel({ studentId, draft = false, familyFull = false, ac
               kind="ghost"
               icon="mail"
               onClick={() => void giveAccess(c)}
-              disabled={invite.granting === c.id}
-              style={{ height: 36, padding: "0 14px", fontSize: 13.5, gap: 7 }}
+              busy={invite.granting === c.id}
+              aria-describedby={reachDescribedBy(`${reachBase}-${c.id}`, accessReach)}
+              style={{ height: 44, padding: "0 14px", fontSize: 13.5, gap: 7 }}
             >
               {invite.granting === c.id ? "Enviando…" : "Dar acceso a la app"}
             </Btn>
           )}
-          {!c.hasAccount && !draft && !familyFull && c.email !== "" && <AccessReach line={accessReach} />}
+          {!c.hasAccount && !draft && !familyFull && c.email !== "" && <AccessReach id={`${reachBase}-${c.id}`} line={accessReach} />}
           {!c.hasAccount && !draft && !familyFull && c.email === "" && (
             // An action that cannot succeed should not be pressable. Saying WHY
             // is what turns a missing button into something the office can fix.

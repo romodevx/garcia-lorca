@@ -16,10 +16,12 @@ const SECTION_TITLE = { fontSize: 13.5, fontWeight: 700, color: "var(--text-mute
  * children carry them. Access goes through the contact invite the pupil's
  * file already uses; the server keeps the cap of two and says so on a 409.
  */
-export function FamilyAdults({ familyId, members, people, failed, accountCount, canWrite, onChanged, onAskRevoke, say, onDirtyChange }: {
+export function FamilyAdults({ familyId, members, studentIds, people, failed, accountCount, canWrite, onChanged, onAskRevoke, say, onDirtyChange }: {
   familyId: string;
   /** The family's children, as the drawer read them: who an account will see (M2). */
   members: readonly FamilyMember[];
+  /** Every child the family lists; more than `members` means the read came back short (M2 fails closed). */
+  studentIds: readonly string[];
   people: readonly FamilyPerson[];
   failed: boolean;
   accountCount: number | undefined;
@@ -37,7 +39,7 @@ export function FamilyAdults({ familyId, members, people, failed, accountCount, 
     onDirtyChange(false);
   };
   const full = familyIsFull(accountCount);
-  const accessReach = accessReachLine(members);
+  const accessReach = accessReachLine({ studentIds, members });
 
   return (
     <section aria-label="Adultos" style={{ display: "grid", gap: 10 }}>
