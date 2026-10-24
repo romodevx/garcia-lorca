@@ -19,7 +19,7 @@ import {
 import { phoneDigits, phoneError } from "../../students/profileRules";
 import { API_URL } from "../../api-url";
 import { RELATIONSHIPS, relationshipLabel } from "../../students/relationship";
-import { DRAFT_INVITE, InviteResult, StaffAddressPrompt, useContactInvite } from "./contactInvite";
+import { AccessReach, DRAFT_INVITE, InviteResult, StaffAddressPrompt, useContactInvite } from "./contactInvite";
 
 export interface ContactsPanelProps {
   studentId: string;
@@ -31,6 +31,8 @@ export interface ContactsPanelProps {
    * the server's 409 stays the authority.
    */
   familyFull?: boolean;
+  /** module_families, security gate M2: "Verá a ANA y LUIS" beside the invite; absent for one child. */
+  accessReach?: string;
 }
 
 /**
@@ -48,7 +50,7 @@ const NOTHING_REQUIRED = [] as const;
 /** Fuera del componente: useFormatError lo toma como dependencia. */
 const PHONE_RULES = { phone: phoneError } as const;
 
-export function ContactsPanel({ studentId, draft = false, familyFull = false }: ContactsPanelProps): ReactElement {
+export function ContactsPanel({ studentId, draft = false, familyFull = false, accessReach }: ContactsPanelProps): ReactElement {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -180,6 +182,7 @@ export function ContactsPanel({ studentId, draft = false, familyFull = false }: 
               {invite.granting === c.id ? "Enviando…" : "Dar acceso a la app"}
             </Btn>
           )}
+          {!c.hasAccount && !draft && !familyFull && c.email !== "" && <AccessReach line={accessReach} />}
           {!c.hasAccount && !draft && !familyFull && c.email === "" && (
             // An action that cannot succeed should not be pressable. Saying WHY
             // is what turns a missing button into something the office can fix.

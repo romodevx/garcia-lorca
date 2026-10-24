@@ -4,7 +4,7 @@
  */
 
 import type { AdmissionStatus } from "../students/api";
-import type { Family, SuggestionConfidence, SuggestionReason } from "./api";
+import type { Family, FamilyMember, SuggestionConfidence, SuggestionReason } from "./api";
 
 /** The server's cap (ADR 0041 D3): at most two app accounts per family. */
 export const FAMILY_ACCOUNT_CAP = 2;
@@ -50,7 +50,37 @@ export function withoutFamily<T extends { id: string; admissionStatus: Admission
   return pupils.filter((p) => !membership.has(p.id) && !GONE.has(p.admissionStatus));
 }
 
-export const withApp = (families: readonly Family[]): number => families.filter((f) => (f.accountCount ?? 0) > 0).length;
+/**
+ * The children a family account reaches: the server propagates an account to
+ * every member except drafts (no CURP) and pupils the school no longer has.
+ */
+export function childrenAnAccountSees(members: readonly FamilyMember[]): FamilyMember[] {
+  return members.filter((m) => !m.draft && !GONE.has(m.admissionStatus) && m.admissionStatus !== "draft");
+}
+
+/** Spanish writes «e», not «y», before a word that starts with the sound i (i-, hi-; not hie-/hia-). */
+function conjunctionBefore(word: string): string {
+  return /^h?[ií](?![ae])/iu.test(word) ? "e" : "y";
+}
+
+/** "ANA", "ANA y LUIS", "ANA, LUIS e IVÁN". */
+export function spanishList(words: readonly string[]): string {
+  if (words.length <= 1) return words[0] ?? "";
+  const last = words[words.length - 1] as string;
+  return `${words.slice(0, -1).join(", ")} ${conjunctionBefore(last)} ${last}`;
+}
+
+/**
+ * Security gate M2: before handing out an account, the owner reads which
+ * children it will see. Nothing when it reaches one child or none.
+ */
+export function accessReachLine(members: readonly FamilyMember[]): string | undefined {
+  const seen = childrenAnAccountSees(members);
+  if (seen.length < 2) return undefined;
+  return `Verá a ${spanishList(seen.map((m) => m.firstName.trim()))}`;
+}
+
+export const withApp =(families: readonly Family[]): number => families.filter((f) => (f.accountCount ?? 0) > 0).length;
 
 export const accountsLabel = (count: number): string => `${count} de ${FAMILY_ACCOUNT_CAP}`;
 

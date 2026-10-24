@@ -169,6 +169,18 @@ describe("ContactsPanel — dar acceso a la app", () => {
     expect(screen.getByText("Ya tiene 2 cuentas de la app")).toBeInTheDocument();
   });
 
+  // Security gate M2: the owner reads which children the account will see.
+  it("says which children the account will see, next to the invite", async () => {
+    students.listContacts.mockResolvedValue([
+      { id: "gl-2", studentId: "st-1", guardianUserId: "", relationship: "father", fullName: "Mateo Contreras", phone: "", email: "mateo@example.com", hasAccount: false },
+      { id: "gl-3", studentId: "st-1", guardianUserId: "u3", relationship: "mother", fullName: "Rosa Paz", phone: "", email: "rosa@example.com", hasAccount: true },
+    ]);
+    render(<ContactsPanel studentId="st-1" accessReach="Verá a ANA y LUIS" />);
+    await screen.findByText("Mateo Contreras");
+    expect(screen.getByRole("button", { name: /Dar acceso a la app/ })).toBeInTheDocument();
+    expect(screen.getAllByText("Verá a ANA y LUIS")).toHaveLength(1);
+  });
+
   // C2-003 (decisión del dueño, opción C): an address that belongs to a staff
   // account is asked about, not merged. Confirming sends the same request with
   // the confirmation; it is the director who knows it is the same person.

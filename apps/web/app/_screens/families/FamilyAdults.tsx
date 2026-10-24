@@ -3,8 +3,8 @@
 import { useState, type ReactElement } from "react";
 
 import { Btn } from "../../_design/Controls";
-import type { FamilyPerson } from "../../families/api";
-import { familyIsFull } from "../../families/model";
+import type { FamilyMember, FamilyPerson } from "../../families/api";
+import { accessReachLine, familyIsFull } from "../../families/model";
 import { useContactInvite } from "../students/contactInvite";
 import { AddAdultForm } from "./AddAdultForm";
 import { AdultRow, personKey } from "./AdultRow";
@@ -16,8 +16,10 @@ const SECTION_TITLE = { fontSize: 13.5, fontWeight: 700, color: "var(--text-mute
  * children carry them. Access goes through the contact invite the pupil's
  * file already uses; the server keeps the cap of two and says so on a 409.
  */
-export function FamilyAdults({ familyId, people, failed, accountCount, canWrite, onChanged, onAskRevoke, say, onDirtyChange }: {
+export function FamilyAdults({ familyId, members, people, failed, accountCount, canWrite, onChanged, onAskRevoke, say, onDirtyChange }: {
   familyId: string;
+  /** The family's children, as the drawer read them: who an account will see (M2). */
+  members: readonly FamilyMember[];
   people: readonly FamilyPerson[];
   failed: boolean;
   accountCount: number | undefined;
@@ -35,6 +37,7 @@ export function FamilyAdults({ familyId, people, failed, accountCount, canWrite,
     onDirtyChange(false);
   };
   const full = familyIsFull(accountCount);
+  const accessReach = accessReachLine(members);
 
   return (
     <section aria-label="Adultos" style={{ display: "grid", gap: 10 }}>
@@ -43,7 +46,7 @@ export function FamilyAdults({ familyId, people, failed, accountCount, canWrite,
       {!failed && people.length === 0 && <p style={{ fontSize: 14, color: "var(--text-faint)", margin: 0 }}>Todavía no hay adultos registrados.</p>}
       <ul style={{ display: "grid", listStyle: "none", margin: 0, padding: 0 }}>
         {people.map((p) => (
-          <AdultRow key={personKey(p)} person={p} invite={invite} full={full} canGrant={canWrite} onAskRevoke={canWrite ? () => onAskRevoke(p) : undefined} />
+          <AdultRow key={personKey(p)} person={p} invite={invite} full={full} canGrant={canWrite} accessReach={accessReach} onAskRevoke={canWrite ? () => onAskRevoke(p) : undefined} />
         ))}
       </ul>
       {canWrite && !adding && <div><Btn kind="ghost" icon="plus" onClick={() => setAdding(true)}>Agregar adulto</Btn></div>}

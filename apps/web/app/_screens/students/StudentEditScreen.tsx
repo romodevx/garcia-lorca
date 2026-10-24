@@ -48,8 +48,8 @@ import { bankReferenceError, birthDateError, MEXICAN_STATES, phoneDigits, phoneE
 import { isDraft } from "../../students/importIssues";
 import { ContactsPanel } from "./ContactsPanel";
 import { FamilyCard } from "../families/FamilyCard";
-import type { Family } from "../../families/api";
-import { familyIsFull, type FamiliesAccess } from "../../families/model";
+import type { FamilyDetail } from "../../families/api";
+import { accessReachLine, familyIsFull, type FamiliesAccess } from "../../families/model";
 import { DRAFT_CURP_WARNING, StandaloneWarnings, fieldWarning } from "./ImportIssueWarnings";
 import { PromotedNotice } from "./PromotedNotice";
 import { useImportIssues, type ImportIssuesState } from "./useImportIssues";
@@ -175,9 +175,10 @@ export function StudentEditScreen({ studentId, userId, permissions, onBack, onWi
   const day = today ?? localToday();
   const canReadMedical = permissions?.includes("medical:read") === true;
   const canWriteMedical = canReadMedical && permissions?.includes("medical:write") === true;
-  // module_families: the pupil's family's app accounts, as the Familia card read them (QA-3).
-  const [familyAccounts, setFamilyAccounts] = useState<number | undefined>(undefined);
-  const rememberFamilyAccounts = useCallback((family: Family) => setFamilyAccounts(family.accountCount), []);
+  // module_families: the pupil's family as the Familia card read it — its app
+  // accounts (QA-3) and the children an account would see (M2). No request of its own.
+  const [familyRead, setFamilyRead] = useState<FamilyDetail | undefined>(undefined);
+  const rememberFamily = useCallback((family: FamilyDetail) => setFamilyRead(family), []);
   // The pupil's notes: the same source the list's modal and the payment counter read (T6).
   const notes = useStudentNotes(studentId);
 
@@ -502,13 +503,17 @@ export function StudentEditScreen({ studentId, userId, permissions, onBack, onWi
 
       {families !== undefined && (
         <Section id="ficha-familia" title="Familia">
-          <FamilyCard studentId={studentId} familyId={student.familyId} access={families} onOpenFamily={(id) => onOpenFamily?.(id)} onOpenStudent={(id) => onOpenStudent?.(id)} onFamilyRead={rememberFamilyAccounts} />
+          <FamilyCard studentId={studentId} familyId={student.familyId} access={families} onOpenFamily={(id) => onOpenFamily?.(id)} onOpenStudent={(id) => onOpenStudent?.(id)} onFamilyRead={rememberFamily} />
         </Section>
       )}
 
       {/* Outside the form: each contact is its own record with its own save. */}
       <Section id="ficha-contactos" title="Tutores y emergencias">
-        <ContactsPanel studentId={studentId} familyFull={families !== undefined && familyIsFull(familyAccounts)} />
+        <ContactsPanel
+          studentId={studentId}
+          familyFull={families !== undefined && familyIsFull(familyRead?.accountCount)}
+          accessReach={families !== undefined && familyRead !== undefined ? accessReachLine(familyRead.members) : undefined}
+        />
       </Section>
 
       {/* Each note is its own record with its own save, like the contacts. */}
