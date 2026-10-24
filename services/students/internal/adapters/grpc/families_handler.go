@@ -46,11 +46,7 @@ func (h *StudentsHandler) ListFamilies(ctx context.Context, _ *connect.Request[s
 	if err != nil {
 		return nil, familyErr(err)
 	}
-	out := make([]*studentsv1.Family, 0, len(families))
-	for _, f := range families {
-		out = append(out, toProtoFamily(f))
-	}
-	return connect.NewResponse(&studentsv1.ListFamiliesResponse{Families: out}), nil
+	return connect.NewResponse(&studentsv1.ListFamiliesResponse{Families: toProtoFamilies(families)}), nil
 }
 
 // GetFamily returns one family; unknown is NotFound.
@@ -183,6 +179,44 @@ func (h *StudentsHandler) RevokeFamilyAccess(ctx context.Context, req *connect.R
 		return nil, familyErr(err)
 	}
 	return connect.NewResponse(&studentsv1.RevokeFamilyAccessResponse{Contacts: int32(n)}), nil
+}
+
+// BuildFamiliesFromImport builds the very likely families of an import batch.
+func (h *StudentsHandler) BuildFamiliesFromImport(ctx context.Context, req *connect.Request[studentsv1.BuildFamiliesFromImportRequest]) (*connect.Response[studentsv1.BuildFamiliesFromImportResponse], error) {
+	if h.families == nil {
+		return nil, errFamiliesNotServed
+	}
+	res, err := h.families.BuildFamiliesFromImport(ctx, req.Msg.GetBatchId())
+	if err != nil {
+		return nil, familyErr(err)
+	}
+	return connect.NewResponse(&studentsv1.BuildFamiliesFromImportResponse{
+		Created: toProtoFamilies(res.Created),
+		Joined:  toProtoFamilies(res.Joined),
+		Skipped: int32(res.Skipped),
+	}), nil
+}
+
+// UndoFamiliesFromImport takes back what BuildFamiliesFromImport did.
+func (h *StudentsHandler) UndoFamiliesFromImport(ctx context.Context, req *connect.Request[studentsv1.UndoFamiliesFromImportRequest]) (*connect.Response[studentsv1.UndoFamiliesFromImportResponse], error) {
+	if h.families == nil {
+		return nil, errFamiliesNotServed
+	}
+	removed, dissolved, err := h.families.UndoFamiliesFromImport(ctx, req.Msg.GetBatchId())
+	if err != nil {
+		return nil, familyErr(err)
+	}
+	return connect.NewResponse(&studentsv1.UndoFamiliesFromImportResponse{
+		Removed: int32(removed), Dissolved: int32(dissolved),
+	}), nil
+}
+
+func toProtoFamilies(families []domain.Family) []*studentsv1.Family {
+	out := make([]*studentsv1.Family, 0, len(families))
+	for _, f := range families {
+		out = append(out, toProtoFamily(f))
+	}
+	return out
 }
 
 func toProtoFamily(f domain.Family) *studentsv1.Family {

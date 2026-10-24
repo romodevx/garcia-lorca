@@ -149,6 +149,8 @@ func TestFamilyRPCsAreUnimplementedWhenNotWired(t *testing.T) {
 	_, calls["Dissolve"] = h.DissolveFamily(ctx, connect.NewRequest(&studentsv1.DissolveFamilyRequest{}))
 	_, calls["Suggest"] = h.SuggestFamilies(ctx, connect.NewRequest(&studentsv1.SuggestFamiliesRequest{}))
 	_, calls["Dismiss"] = h.DismissFamilySuggestion(ctx, connect.NewRequest(&studentsv1.DismissFamilySuggestionRequest{}))
+	_, calls["BuildFromImport"] = h.BuildFamiliesFromImport(ctx, connect.NewRequest(&studentsv1.BuildFamiliesFromImportRequest{}))
+	_, calls["UndoFromImport"] = h.UndoFamiliesFromImport(ctx, connect.NewRequest(&studentsv1.UndoFamiliesFromImportRequest{}))
 	for name, err := range calls {
 		if familyRPCCode(err) != connect.CodeUnimplemented {
 			t.Errorf("%s: want Unimplemented, got %v", name, err)
@@ -261,5 +263,50 @@ func TestListStudentsPassesTheFamilyFilter(t *testing.T) {
 	}
 	if repo.lastFilter.FamilyID != wireFamily {
 		t.Errorf("filter = %+v", repo.lastFilter)
+	}
+}
+
+const wireBatch = "ba000000-0000-0000-0000-000000000001"
+
+func TestBuildFamiliesFromImportOnTheWire(t *testing.T) {
+	h, _, families := familiesHandler(t)
+	families.importInput = domain.ImportFamilyInput{
+		Pupils: []domain.ImportPupil{
+			{ID: wirePupilA, LastName: "García", MaternalLastName: "López", InBatch: true},
+			{ID: wirePupilB, LastName: "García", MaternalLastName: "López", InBatch: true},
+		},
+		Contacts: []domain.SuggestionContact{{StudentID: wirePupilA, Phone: "4435550000"}, {StudentID: wirePupilB, Phone: "4435550000"}},
+	}
+	res, err := h.BuildFamiliesFromImport(context.Background(), connect.NewRequest(&studentsv1.BuildFamiliesFromImportRequest{BatchId: wireBatch}))
+	if err != nil {
+		t.Fatalf("BuildFamiliesFromImport: %v", err)
+	}
+	created := res.Msg.GetCreated()
+	if len(created) != 1 || created[0].GetId() != wireFamily || !slices.Equal(created[0].GetStudentIds(), []string{wirePupilA, wirePupilB}) ||
+		len(res.Msg.GetJoined()) != 0 || res.Msg.GetSkipped() != 0 {
+		t.Errorf("response = %+v", res.Msg)
+	}
+	if len(families.importLinks) != 2 || families.importLinks[0].BatchID != wireBatch {
+		t.Errorf("links = %+v", families.importLinks)
+	}
+	if _, err := h.BuildFamiliesFromImport(context.Background(), connect.NewRequest(&studentsv1.BuildFamiliesFromImportRequest{BatchId: "x"})); familyRPCCode(err) != connect.CodeInvalidArgument {
+		t.Errorf("malformed batch: %v", err)
+	}
+}
+
+func TestUndoFamiliesFromImportOnTheWire(t *testing.T) {
+	h, _, families := familiesHandler(t)
+	families.undo = ports.ImportUndo{Removed: 3, Dissolved: 1}
+	res, err := h.UndoFamiliesFromImport(context.Background(), connect.NewRequest(&studentsv1.UndoFamiliesFromImportRequest{BatchId: wireBatch}))
+	if err != nil || res.Msg.GetRemoved() != 3 || res.Msg.GetDissolved() != 1 {
+		t.Errorf("undo = %+v, %v", res, err)
+	}
+	if _, err := h.UndoFamiliesFromImport(context.Background(), connect.NewRequest(&studentsv1.UndoFamiliesFromImportRequest{})); familyRPCCode(err) != connect.CodeInvalidArgument {
+		t.Errorf("malformed batch: %v", err)
+	}
+	// A lost lock race is FailedPrecondition, as on every family RPC.
+	families.undoErr = glerrors.New(glerrors.KindConflict, "another change won")
+	if _, err := h.UndoFamiliesFromImport(context.Background(), connect.NewRequest(&studentsv1.UndoFamiliesFromImportRequest{BatchId: wireBatch})); familyRPCCode(err) != connect.CodeFailedPrecondition {
+		t.Errorf("conflict: %v", err)
 	}
 }
