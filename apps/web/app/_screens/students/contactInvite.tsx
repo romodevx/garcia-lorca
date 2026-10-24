@@ -96,6 +96,19 @@ export function useContactInvite(onSettled: () => void): ContactInvite {
   return { granting, granted, grantError, staffAddress, give, forgetStaff };
 }
 
+/**
+ * Security gate M2: beside "Dar acceso a la app", which children the account
+ * will see ("Verá a ANA, LUIS y EVA"). The screens compute the line from the
+ * family they already read (`accessReachLine`); nothing when it reaches one.
+ */
+export function AccessReach({ id, line }: { id: string; line: string | undefined }): ReactElement | null {
+  if (line === undefined) return null;
+  return <span id={id} style={{ fontSize: 13, color: "var(--text-muted)" }}>{line}</span>;
+}
+
+/** The invite button's aria-describedby: the reach line's id, only when there is a line. */
+export const reachDescribedBy = (id: string, line: string | undefined): string | undefined => (line === undefined ? undefined : id);
+
 const NOTICE = { margin: "8px 0 0", padding: "10px 12px", borderRadius: 10, background: "var(--surface-2)", fontSize: 13.5, color: "var(--text)" } as const;
 
 /** C2-003: the address is a staff account — same person, or a wrong address? */

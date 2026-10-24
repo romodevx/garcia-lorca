@@ -227,6 +227,19 @@ describe("step 3 — the commit", () => {
     expect(onViewStudents).toHaveBeenCalledWith("l-pri");
   });
 
+  it("module_families on: the result shows the families and links to the ones to review", async () => {
+    api.commitStudentImport.mockResolvedValue({ ...MATCHED, batchId: "b1", families: { built: true, created: [{ id: "f1" }], joined: [], skipped: 1, toReview: 2 } });
+    const onOpen = vi.fn();
+    const user = userEvent.setup();
+    render(<StudentImportScreen onBack={vi.fn()} onOpenTuition={vi.fn()} onViewStudents={vi.fn()} today="2026-10-06" familiesReview={{ href: "/alumnos?vista=familias", onOpen, familyHref: (id) => `/alumnos?vista=familias&familia=${id}`, onOpenFamily: vi.fn() }} />);
+    await upload(user);
+    await user.click(await screen.findByRole("button", { name: "Importar 2 alumnos a Primaria" }));
+
+    expect(await screen.findByText("Armamos 1 familia automáticamente.")).toBeInTheDocument();
+    await user.click(screen.getByRole("link", { name: /2 posibles familias por revisar/ }));
+    expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+
   it("on a stale preview says so and previews again", async () => {
     api.commitStudentImport.mockRejectedValue(new StudentImportError(409, "", "PREVIEW_STALE"));
     const { user } = renderScreen();

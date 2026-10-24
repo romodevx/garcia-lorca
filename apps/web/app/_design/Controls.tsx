@@ -56,6 +56,8 @@ export interface BtnProps {
   style?: CSSProperties;
   /** Only when the visible text alone is ambiguous ("Editar" on every row). */
   "aria-label"?: string;
+  /** The id of a line that says more about what the press does. */
+  "aria-describedby"?: string;
   ref?: Ref<HTMLButtonElement>;
 }
 
@@ -71,6 +73,7 @@ export function Btn({
   type = "button",
   style = {},
   "aria-label": ariaLabel,
+  "aria-describedby": ariaDescribedBy,
   ref,
 }: BtnProps): ReactElement {
   const base: CSSProperties = {
@@ -110,6 +113,7 @@ export function Btn({
       disabled={disabled}
       aria-busy={busy === true ? true : undefined}
       aria-label={ariaLabel}
+      aria-describedby={ariaDescribedBy}
       style={{ ...base, ...k }}
       onMouseEnter={(e) => {
         if (disabled) return;

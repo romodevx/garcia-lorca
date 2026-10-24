@@ -10,6 +10,7 @@ import { localISODate } from "../../_lib/localDate";
 import { listLevels, type Level } from "../../config/api";
 import { busyText } from "../../studentImport/copy";
 import { CycleStep } from "./CycleStep";
+import type { FamiliesReviewLink } from "./ImportFamilies";
 import { PreviewStep } from "./PreviewStep";
 import { ResultStep } from "./ResultStep";
 import { UploadStep } from "./UploadStep";
@@ -39,6 +40,8 @@ export interface StudentImportScreenProps {
   today?: string;
   /** module_import_review: correct, omit or draft each flagged row before importing. */
   importReview?: boolean;
+  /** module_families: the result shows the families the import built, and links here to review the rest. */
+  familiesReview?: FamiliesReviewLink;
 }
 
 /**
@@ -46,7 +49,7 @@ export interface StudentImportScreenProps {
  * stepper in forest/lime, focus on each step's heading. The gateway
  * (students:import + three flags) is the boundary; this screen is UX.
  */
-export function StudentImportScreen({ onBack, onOpenTuition, onViewStudents, today = localISODate(), importReview = false }: StudentImportScreenProps): ReactElement {
+export function StudentImportScreen({ onBack, onOpenTuition, onViewStudents, today = localISODate(), importReview = false, familiesReview }: StudentImportScreenProps): ReactElement {
   const cycle = useImportCycle(API_URL);
   const flow = useStudentImport(API_URL, cycle.reload, importReview);
   const review = importReview ? { decisions: flow.decisions, rowErrors: flow.rowErrors, onAction: flow.decide, onCorrect: flow.correct, today } : undefined;
@@ -84,7 +87,7 @@ export function StudentImportScreen({ onBack, onOpenTuition, onViewStudents, tod
         )}
         {committing && <p role="status" style={{ fontSize: 16, fontWeight: 700, color: "var(--text)" }}>{busyText((flow.preview?.summary.new ?? 0) + (flow.preview?.summary.pending ?? 0), flow.preview?.summary.movedToCycleStart ?? 0)}</p>}
         {flow.phase === "result" && flow.result !== undefined && (
-          <ResultStep result={flow.result} cut={flow.cut} onAnother={flow.startOver} onViewStudents={onViewStudents} />
+          <ResultStep result={flow.result} cut={flow.cut} onAnother={flow.startOver} onViewStudents={onViewStudents} familiesReview={familiesReview} />
         )}
       </section>
     </Page>

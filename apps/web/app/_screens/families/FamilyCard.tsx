@@ -4,7 +4,7 @@ import { useEffect, useState, type ReactElement } from "react";
 
 import { Btn } from "../../_design/Controls";
 import { formatStudentName } from "../../_design/students/studentName";
-import type { Family } from "../../families/api";
+import type { FamilyDetail } from "../../families/api";
 import type { FamiliesAccess } from "../../families/model";
 import { FamilyJoinPicker } from "./FamilyJoinPicker";
 import { useFamilyDetail } from "./useFamilyDetail";
@@ -16,8 +16,8 @@ export interface FamilyCardProps {
   access: FamiliesAccess;
   onOpenFamily: (familyId: string) => void;
   onOpenStudent: (studentId: string) => void;
-  /** The family as read (its accountCount tells the contacts whether it is full). */
-  onFamilyRead?: (family: Family) => void;
+  /** The family as read: its accountCount (full?) and members (who an account sees) reach the contacts. */
+  onFamilyRead?: (family: FamilyDetail) => void;
 }
 
 const MUTED = { fontSize: 14, color: "var(--text-muted)", margin: 0 } as const;
@@ -47,7 +47,7 @@ function FamilyOfPupil({ familyId, studentId, onOpenFamily, onOpenStudent, onRea
   studentId: string;
   onOpenFamily: (id: string) => void;
   onOpenStudent: (id: string) => void;
-  onRead?: (family: Family) => void;
+  onRead?: (family: FamilyDetail) => void;
 }): ReactElement {
   const { detail, status } = useFamilyDetail(familyId, false);
   useEffect(() => { if (detail !== undefined) onRead?.(detail); }, [detail, onRead]);

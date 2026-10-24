@@ -56,10 +56,10 @@
 
 | # | Tarea | Rol | Estado |
 |---|---|---|---|
-| I1 | students: contactos de la ficha en las sugerencias; dominio `PlanImportFamilies`; migración `0024_family_import_links` (RLS + aislamiento); RPCs `BuildFamiliesFromImport` / `UndoFamiliesFromImport` | backend-sr, db-sr | ⏳ |
-| I2 | gateway: el commit de la importación arma las familias (si el flag está encendido, best-effort); campo `families` en la respuesta; `POST /api/v1/imports/students/{batchId}/families/undo`; OpenAPI | backend-sr, security | ✅ código (rama `feature/familias-import-t2`, apilada sobre I1): el commit arma solo con `module_families` + `guardians:write`; `families = {built, created[], joined[], skipped, toReview?}`, nombres y alumnos solo con `students:read`; un fallo da `built:false` con lo ya hecho y log con lote + código. Deshacer: students+families (404 antes de auth), `students:import` + `guardians:write`, lote uuid (400). OpenAPI 0.20.0. Falta: compuerta de seguridad |
-| I3 | web: bloque Familias en el resumen de la importación ("Armamos N familias" + Deshacer, "M por revisar →") | frontend-sr | ⏳ |
-| I4 | QA visible (importar 2 Excel de niveles distintos con hermanos), compuertas, ADR, docs | qa-sr, tech-lead, security | ⏳ |
+| I1 | students: contactos de la ficha en las sugerencias; dominio `PlanImportFamilies`; migración `0024_family_import_links` (RLS + aislamiento); RPCs `BuildFamiliesFromImport` / `UndoFamiliesFromImport` | backend-sr, db-sr | ✅ #190 |
+| I2 | gateway: el commit de la importación arma las familias (si el flag está encendido, best-effort); campo `families` en la respuesta; `POST /api/v1/imports/students/{batchId}/families/undo`; OpenAPI | backend-sr, security | ✅ #191 |
+| I3 | web: bloque Familias en el resumen de la importación ("Armamos N familias" + Deshacer, "M por revisar →") | frontend-sr | ✅ #192 |
+| I4 | QA visible (importar 2 Excel de niveles distintos con hermanos), compuertas, ADR, docs | qa-sr, tech-lead, security | ✅ QA visible 23-oct (`.gstack/qa-reports/qa-report-familias-importacion-2026-10-23.md`), ADR 0041 enmendado |
 
 Ciclo por tarea igual que en `PLAN-familias.md`: rama → TDD → revisión → PR → squash a `dev`.
 

@@ -6,7 +6,7 @@ import { Btn } from "../../_design/Controls";
 import { Icon } from "../../_design/Icon";
 import type { FamilyContactRef, FamilyPerson } from "../../families/api";
 import { relationshipLabel } from "../../students/relationship";
-import { InviteResult, StaffAddressPrompt, type ContactInvite } from "../students/contactInvite";
+import { AccessReach, InviteResult, reachDescribedBy, StaffAddressPrompt, type ContactInvite } from "../students/contactInvite";
 
 const ACTION = { height: 44, padding: "0 14px", fontSize: 14, gap: 7 } as const;
 const HINT = { fontSize: 13, color: "var(--text-faint)" } as const;
@@ -40,11 +40,14 @@ export interface AdultRowProps {
   /** Absent without guardians:write. */
   onAskRevoke?: () => void;
   canGrant: boolean;
+  /** Security gate M2: which children an account given here will see; absent for one. */
+  accessReach?: string;
 }
 
 /** One adult: how to reach them, whether they have the app, and the one action that applies. */
-export function AdultRow({ person, invite, full, onAskRevoke, canGrant }: AdultRowProps): ReactElement {
+export function AdultRow({ person, invite, full, onAskRevoke, canGrant, accessReach }: AdultRowProps): ReactElement {
   const nameId = useId();
+  const reachId = useId();
   const first = person.contacts[0];
   const key = inviteKey(person, invite) ?? "";
   const reach = [relationshipLabel(person.relationship), person.phone, person.email].filter((s) => s !== "").join(" · ");
@@ -56,9 +59,12 @@ export function AdultRow({ person, invite, full, onAskRevoke, canGrant }: AdultR
     if (full) action = <span style={HINT}>Ya tiene 2 cuentas de la app</span>;
     else if (person.email === "" || first === undefined) action = <span style={HINT}>Falta el correo para invitarle</span>;
     else action = (
-      <Btn kind="ghost" icon="mail" busy={invite.granting === key} onClick={() => void invite.give(first.contactId, first)} style={ACTION}>
-        {invite.granting === key ? "Enviando…" : "Dar acceso a la app"}
-      </Btn>
+      <>
+        <Btn kind="ghost" icon="mail" busy={invite.granting === key} onClick={() => void invite.give(first.contactId, first)} style={ACTION} aria-describedby={reachDescribedBy(reachId, accessReach)}>
+          {invite.granting === key ? "Enviando…" : "Dar acceso a la app"}
+        </Btn>
+        <AccessReach id={reachId} line={accessReach} />
+      </>
     );
   }
 
