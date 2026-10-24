@@ -45,11 +45,7 @@ func (c *StudentsClient) ListFamilies(ctx context.Context) ([]Family, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := make([]Family, 0, len(res.Msg.GetFamilies()))
-	for _, f := range res.Msg.GetFamilies() {
-		out = append(out, toFamily(f))
-	}
-	return out, nil
+	return toFamilies(res.Msg.GetFamilies()), nil
 }
 
 // GetFamily reads one family; NotFound for an unknown id.
@@ -159,6 +155,59 @@ func (c *StudentsClient) RevokeFamilyAccess(ctx context.Context, familyID, guard
 		return 0, err
 	}
 	return int(res.Msg.GetContacts()), nil
+}
+
+// FamilyImportBuild is what building an import's families did: the families
+// it created, the existing ones its pupils joined (as they now are), and how
+// many groups it left to the office as suggestions.
+type FamilyImportBuild struct {
+	Created []Family
+	Joined  []Family
+	Skipped int
+}
+
+// FamilyImportUndo is what undoing an import's families did: pupils taken out,
+// families dissolved, and families kept whole because a member has app access.
+type FamilyImportUndo struct {
+	Removed        int
+	Dissolved      int
+	KeptWithAccess int
+}
+
+// BuildFamiliesFromImport builds the very likely families of an import batch
+// (PLAN-familias-importacion). Idempotent; a malformed batch is InvalidArgument.
+func (c *StudentsClient) BuildFamiliesFromImport(ctx context.Context, batchID string) (FamilyImportBuild, error) {
+	res, err := c.rpc.BuildFamiliesFromImport(ctx, connect.NewRequest(&studentsv1.BuildFamiliesFromImportRequest{BatchId: batchID}))
+	if err != nil {
+		return FamilyImportBuild{}, err
+	}
+	return FamilyImportBuild{
+		Created: toFamilies(res.Msg.GetCreated()),
+		Joined:  toFamilies(res.Msg.GetJoined()),
+		Skipped: int(res.Msg.GetSkipped()),
+	}, nil
+}
+
+// UndoFamiliesFromImport takes back what BuildFamiliesFromImport did for the
+// batch. Idempotent.
+func (c *StudentsClient) UndoFamiliesFromImport(ctx context.Context, batchID string) (FamilyImportUndo, error) {
+	res, err := c.rpc.UndoFamiliesFromImport(ctx, connect.NewRequest(&studentsv1.UndoFamiliesFromImportRequest{BatchId: batchID}))
+	if err != nil {
+		return FamilyImportUndo{}, err
+	}
+	return FamilyImportUndo{
+		Removed:        int(res.Msg.GetRemoved()),
+		Dissolved:      int(res.Msg.GetDissolved()),
+		KeptWithAccess: int(res.Msg.GetKeptWithAccess()),
+	}, nil
+}
+
+func toFamilies(families []*studentsv1.Family) []Family {
+	out := make([]Family, 0, len(families))
+	for _, f := range families {
+		out = append(out, toFamily(f))
+	}
+	return out
 }
 
 func toFamily(f *studentsv1.Family) Family {
