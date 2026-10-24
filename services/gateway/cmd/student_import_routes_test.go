@@ -54,14 +54,14 @@ func TestStudentImportRoutesReachTheHandler(t *testing.T) {
 	}
 }
 
-// PLAN-familias-importacion I2: undoing an import's families is a family
-// membership write, so it needs module_students AND module_families (404
-// before auth) and students:import AND guardians:write.
+// PLAN-familias-importacion I2: undoing an import's families belongs to the
+// import AND is a family membership write, so it needs every import module and
+// module_families (404 before auth), and students:import AND guardians:write.
 const undoImportFamilies = "/api/v1/imports/students/0f1c0e2a-0000-4000-8000-0000000000d1/families/undo"
 
 func TestUndoImportFamiliesHidesWhenAnyOfItsModulesIsOff(t *testing.T) {
-	for _, off := range []string{"module_students", "module_families"} {
-		flags := map[string]bool{"module_students": true, "module_families": true, "module_config": true, "module_student_import": true}
+	for _, off := range []string{"module_students", "module_families", "module_config", "module_student_import"} {
+		flags := undoFamiliesFlags()
 		delete(flags, off)
 		gw := newTestGateway(t, flags)
 		for _, token := range []string{"family-importer", "bogus"} {
@@ -72,7 +72,7 @@ func TestUndoImportFamiliesHidesWhenAnyOfItsModulesIsOff(t *testing.T) {
 }
 
 func TestUndoImportFamiliesNeedsImportAndGuardiansWrite(t *testing.T) {
-	gw := newTestGateway(t, map[string]bool{"module_students": true, "module_families": true})
+	gw := newTestGateway(t, undoFamiliesFlags())
 	res := doGateway(t, gw, http.MethodPost, undoImportFamilies, "", "")
 	assert.Equal(t, http.StatusUnauthorized, res.StatusCode, "no session")
 	for _, token := range []string{"importer", "guardian-writer", "guardian-student-admin"} {
@@ -82,17 +82,23 @@ func TestUndoImportFamiliesNeedsImportAndGuardiansWrite(t *testing.T) {
 }
 
 func TestUndoImportFamiliesValidatesTheBatch(t *testing.T) {
-	gw := newTestGateway(t, map[string]bool{"module_students": true, "module_families": true})
+	gw := newTestGateway(t, undoFamiliesFlags())
 	res := doGateway(t, gw, http.MethodPost, "/api/v1/imports/students/batch-1/families/undo", "family-importer", "")
 	assert.Equal(t, http.StatusBadRequest, res.StatusCode)
 }
 
 // The holder reaches students (the stub undoes a fixed result).
 func TestUndoImportFamiliesReachesStudents(t *testing.T) {
-	gw := newTestGateway(t, map[string]bool{"module_students": true, "module_families": true})
+	gw := newTestGateway(t, undoFamiliesFlags())
 	res := doGateway(t, gw, http.MethodPost, undoImportFamilies, "family-importer", "")
 	require.Equal(t, http.StatusOK, res.StatusCode)
 	var body map[string]int
 	require.NoError(t, json.NewDecoder(res.Body).Decode(&body))
 	assert.Equal(t, map[string]int{"removed": 3, "dissolved": 1, "keptWithAccess": 0}, body)
+}
+
+func undoFamiliesFlags() map[string]bool {
+	flags := importFlags("")
+	flags["module_families"] = true
+	return flags
 }

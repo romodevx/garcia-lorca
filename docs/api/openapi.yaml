@@ -4663,8 +4663,9 @@ paths:
         whose members has an app account is kept whole and counted in
         `keptWithAccess`: the office revokes that access first, then undoes
         again. Pupils the office moved and guardian links are not touched.
-        Idempotent. Behind module_students and module_families (404 when
-        either is off, before authentication). Requires `students:import` and
+        Idempotent. Behind the import's modules (module_students,
+        module_config, module_student_import) and module_families: 404 when any
+        is off, before authentication. Requires `students:import` and
         `guardians:write`.
       operationId: undoStudentImportFamilies
       security: [{ sessionCookie: [] }]
