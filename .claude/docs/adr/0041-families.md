@@ -38,3 +38,27 @@
 - La captura de los papás se hace una vez por familia, no una vez por hijo.
 - Un papá con hijos en dos familias distintas (padres separados con hijos de parejas diferentes) es posible: cada familia cuenta su tope por separado.
 - La tabla de contactos sigue siendo por alumno, así que el mismo adulto aparece en la ficha de cada hijo. Es a propósito: la ficha de un alumno muestra a quién llamar por **ese** alumno.
+
+## Enmienda (23-oct): familias desde la importación
+
+El dueño eligió **"Armarlas solas"** (`PLAN-familias-importacion.md`). Al confirmar una importación,
+las familias muy probables se arman sin confirmación y el resumen ofrece **Deshacer**. La D2
+(sugerencias a confirmar) sigue vigente en la pestaña Familias.
+
+- **Muy probable** = mismos dos apellidos **y** un correo o teléfono en común, exigido en
+  cada par. Topes de contacto iguales que en las sugerencias. Solo grupos con al menos un
+  alumno del lote. Un hermano de otro nivel (otro Excel) se suma a la familia que ya existe
+  cuando esa familia tiene 0 cuentas.
+- **H1 se mantiene:** nunca se arma ni se amplía una familia donde exista una cuenta de la
+  app. Se vuelve a revisar con la fila bloqueada, en la misma transacción (hay una prueba de
+  carrera real).
+- Las sugerencias leen también el correo y los teléfonos de la **ficha del alumno**. Es la
+  única fuente de contacto del Excel del sistema anterior.
+- **Deshacer** (`family_import_links`, RLS): saca a los alumnos del lote que siguen en esa
+  familia y disuelve la familia solo si queda vacía. Una familia que ya tiene acceso a la app
+  no se toca (`keptWithAccess`); primero se quita el acceso. Permisos `students:import` +
+  `guardians:write`, con límite por usuario.
+- **M2:** antes de dar acceso, la pantalla dice a qué hijos verá la cuenta ("Verá a ANA y
+  LUIS"). Con eso el owner ve la familia armada sola antes de que el acceso se propague.
+- Lo que falla al armar las familias no hace fallar la importación (`built:false`), y
+  Deshacer se ofrece siempre.
