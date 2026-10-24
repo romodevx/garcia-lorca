@@ -433,6 +433,41 @@ type FamilyRepository interface {
 	// DismissSuggestion records "not a family" for a signature. Idempotent: a
 	// signature already dismissed keeps its first record.
 	DismissSuggestion(ctx context.Context, d FamilyDismissal) error
+	// ImportFamilyInputs reads, in one transaction, what
+	// domain.PlanImportFamilies needs for the import batchID: every pupil
+	// still at school (display order) with its family, whether an account is
+	// linked to it and whether batchID created it; the emails and phones of
+	// their files and their contacts; every family's member and account
+	// counts; the dismissed signatures and the common values.
+	ImportFamilyInputs(ctx context.Context, batchID string) (domain.ImportFamilyInput, error)
+	// UndoImportFamilies undoes what the import batchID built, in one
+	// transaction, family by family under each family's lock. A family any of
+	// whose members has an app account is skipped whole (KeptWithAccess): its
+	// links stay. Otherwise every pupil a link says the import put in that
+	// family, and still in it, leaves it; a family left empty is dissolved;
+	// the links handled are deleted. A pupil the office moved meanwhile is not
+	// touched. The links read are bounded: those not read stay for the next
+	// call. A call that finds no links does nothing.
+	UndoImportFamilies(ctx context.Context, batchID string) (ImportUndo, error)
+}
+
+// ImportUndo is what UndoImportFamilies did: the pupils it took out of a
+// family, the families it dissolved, and the families it kept whole because
+// a member has an app account.
+type ImportUndo struct {
+	Removed        int
+	Dissolved      int
+	KeptWithAccess int
+}
+
+// FamilyImportLink records that the import BatchID put StudentID in the
+// transaction's family; CreatedFamily says the import created that family
+// (kept for the record: an undo dissolves any family it empties).
+type FamilyImportLink struct {
+	ID            string
+	BatchID       string
+	StudentID     string
+	CreatedFamily bool
 }
 
 // SuggestionInputs is what domain.SuggestFamilies works on. Common is counted
@@ -502,4 +537,8 @@ type FamilyAccess interface {
 	// nobody (no name: a link from before contacts existed), which is deleted.
 	// Returns how many contacts lost the account.
 	DetachAccount(ctx context.Context, guardianUserID string) (int, error)
+	// RecordImportLinks stores, in the transaction, which import put which of
+	// the scope's pupils in the family. A link already recorded for (batch,
+	// pupil) is kept: idempotent. A pupil outside the scope is refused.
+	RecordImportLinks(ctx context.Context, links []FamilyImportLink) error
 }

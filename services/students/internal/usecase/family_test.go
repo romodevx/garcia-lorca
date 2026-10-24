@@ -41,6 +41,19 @@ type famWorld struct {
 	families                map[string]domain.Family
 	dismissals              map[string]ports.FamilyDismissal
 	inputs                  ports.SuggestionInputs
+	// importInput/importErr answer ImportFamilyInputs; importBatch is the
+	// batch it was asked for. undo answers UndoImportFamilies; undoBatch is
+	// the batch it was asked for.
+	importInput domain.ImportFamilyInput
+	importErr   error
+	importBatch string
+	undo        ports.ImportUndo
+	undoBatch   string
+	// createFailAt, when > 0, makes that CreateFamily call (1-based) fail with
+	// createFailErr and write nothing.
+	createFailAt  int
+	createFailErr error
+	createCalls   int
 }
 
 func newFamWorld() *famWorld {
@@ -102,6 +115,10 @@ func (w *famWorld) FindByID(_ context.Context, id string) (*domain.Student, erro
 }
 
 func (w *famWorld) CreateFamily(ctx context.Context, f domain.Family, sync ports.FamilyAccessFunc) error {
+	w.createCalls++
+	if w.createCalls == w.createFailAt {
+		return w.createFailErr
+	}
 	w.families[f.ID()] = f
 	for _, id := range f.StudentIDs() {
 		w.pupils[id].AssignFamily(f.ID())
@@ -197,6 +214,16 @@ func (w *famWorld) DismissSuggestion(_ context.Context, d ports.FamilyDismissal)
 		w.dismissals[d.Signature] = d
 	}
 	return nil
+}
+
+func (w *famWorld) ImportFamilyInputs(_ context.Context, batchID string) (domain.ImportFamilyInput, error) {
+	w.importBatch = batchID
+	return w.importInput, w.importErr
+}
+
+func (w *famWorld) UndoImportFamilies(_ context.Context, batchID string) (ports.ImportUndo, error) {
+	w.undoBatch = batchID
+	return w.undo, nil
 }
 
 func famService(w *famWorld) *usecase.FamilyService {

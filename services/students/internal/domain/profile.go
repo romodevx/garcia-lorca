@@ -72,8 +72,10 @@ type ProfileInput struct {
 	Address   Address
 }
 
+// MaxProfilePhones is the most numbers a pupil's file keeps.
+const MaxProfilePhones = 3
+
 const (
-	maxPhones       = 3
 	phoneDigits     = 10
 	postalCodeLen   = 5
 	maxAddressField = 120
@@ -139,7 +141,7 @@ func RestoreProfile(birthDate time.Time, sex Sex, email string, phones []Phone, 
 }
 
 func normalizePhones(in []Phone) ([]Phone, error) {
-	if len(in) > maxPhones {
+	if len(in) > MaxProfilePhones {
 		return nil, glerrors.New(glerrors.KindInvalid, "a file keeps at most three phones")
 	}
 	out := make([]Phone, 0, len(in))

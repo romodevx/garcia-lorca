@@ -27,9 +27,12 @@ const (
 	// unbounded rows into memory. Hitting one is logged (counts only).
 	maxSuggestionPupils   = 5000
 	maxSuggestionContacts = 20000
-	maxCommonValues       = 1000
-	maxFamiliesListed     = 1000
-	maxMembersListed      = maxFamiliesListed * domain.MaxFamilyPupils
+	// maxFileContacts: a pupil's file holds one email and up to
+	// domain.MaxProfilePhones phones.
+	maxFileContacts   = maxSuggestionPupils * (1 + domain.MaxProfilePhones)
+	maxCommonValues   = 1000
+	maxFamiliesListed = 1000
+	maxMembersListed  = maxFamiliesListed * domain.MaxFamilyPupils
 
 	// Lost races between two writers: answered as a conflict to retry.
 	deadlockDetected     = "40P01"
@@ -261,9 +264,19 @@ func (r *Repository) DissolveFamily(ctx context.Context, id string) error {
 	})
 }
 
-// SuggestionInputs reads, in one transaction and four bounded statements,
+// The pupil scopes of the suggestion reads, over `students s`; each binds
+// leftSchoolStatuses once.
+const (
+	// familylessAtSchool: the pupils a suggestion may propose.
+	familylessAtSchool = `s.family_id IS NULL AND s.admission_status NOT IN ?`
+	// atSchool: every pupil still at school, with a family or without.
+	atSchool = `s.admission_status NOT IN ?`
+)
+
+// SuggestionInputs reads, in one transaction and five bounded statements,
 // the pupils without a family that may join one (display order), their
-// contacts, the dismissed signatures and the school-wide common values.
+// contacts' and their own file's emails and phones, the dismissed signatures
+// and the school-wide common values.
 func (r *Repository) SuggestionInputs(ctx context.Context) (ports.SuggestionInputs, error) {
 	var out ports.SuggestionInputs
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
@@ -271,7 +284,7 @@ func (r *Repository) SuggestionInputs(ctx context.Context) (ports.SuggestionInpu
 		if out.Pupils, err = suggestionPupils(ctx, tx); err != nil {
 			return err
 		}
-		if out.Contacts, err = suggestionContacts(ctx, tx); err != nil {
+		if out.Contacts, err = pupilContacts(ctx, tx, familylessAtSchool); err != nil {
 			return err
 		}
 		if out.Dismissed, err = dismissedSignatures(tx); err != nil {
@@ -303,12 +316,27 @@ func suggestionPupils(ctx context.Context, tx *gorm.DB) ([]domain.SuggestionPupi
 	return pupils, nil
 }
 
-func suggestionContacts(ctx context.Context, tx *gorm.DB) ([]domain.SuggestionContact, error) {
+// pupilContacts reads the emails and phones of the pupils in scope: their
+// contacts' (guardianContacts) and their own file's (fileContacts), two
+// bounded statements. Both feed the same edges and the same caps.
+func pupilContacts(ctx context.Context, tx *gorm.DB, scope string) ([]domain.SuggestionContact, error) {
+	contacts, err := guardianContacts(ctx, tx, scope)
+	if err != nil {
+		return nil, err
+	}
+	file, err := fileContacts(ctx, tx, scope)
+	if err != nil {
+		return nil, err
+	}
+	return append(contacts, file...), nil
+}
+
+func guardianContacts(ctx context.Context, tx *gorm.DB, scope string) ([]domain.SuggestionContact, error) {
 	var contacts []domain.SuggestionContact
 	err := tx.Raw(`SELECT g.student_id, g.email, g.phone, COALESCE(g.guardian_user_id::text, '') AS guardian_user_id
 	                 FROM guardian_students g
 	                 JOIN students s ON s.id = g.student_id AND s.tenant_id = g.tenant_id
-	                WHERE s.family_id IS NULL AND s.admission_status NOT IN ?
+	                WHERE `+scope+`
 	                ORDER BY g.id LIMIT ?`,
 		leftSchoolStatuses, maxSuggestionContacts+1).Scan(&contacts).Error
 	if err != nil {
@@ -317,6 +345,42 @@ func suggestionContacts(ctx context.Context, tx *gorm.DB) ([]domain.SuggestionCo
 	contacts, hit := capRows(contacts, maxSuggestionContacts)
 	if hit {
 		warnCeiling(ctx, "suggestion contacts", maxSuggestionContacts)
+	}
+	return contacts, nil
+}
+
+// pupilPhones expands students.phones (a JSON array of {kind, number}) into
+// one row per number; anything but an array expands to nothing.
+const pupilPhones = `CROSS JOIN LATERAL jsonb_array_elements(
+	CASE jsonb_typeof(s.phones) WHEN 'array' THEN s.phones ELSE '[]'::jsonb END) AS p(value)`
+
+// fileContactsSQL is each pupil's own email and phones in scope (the import
+// stores the Excel's there, not as contacts), one contact row per value. The
+// scope is one of the constants above, never input.
+func fileContactsSQL(scope string) string {
+	return `SELECT student_id, email, phone, '' AS guardian_user_id FROM (
+		SELECT s.id AS student_id, s.email AS email, '' AS phone
+		  FROM students s
+		 WHERE ` + scope + ` AND s.email <> ''
+		UNION ALL
+		SELECT s.id, '', p.value->>'number'
+		  FROM students s ` + pupilPhones + `
+		 WHERE ` + scope + ` AND COALESCE(p.value->>'number', '') <> ''
+	) file
+	ORDER BY student_id, email, phone
+	LIMIT ?`
+}
+
+func fileContacts(ctx context.Context, tx *gorm.DB, scope string) ([]domain.SuggestionContact, error) {
+	var contacts []domain.SuggestionContact
+	err := tx.Raw(fileContactsSQL(scope), leftSchoolStatuses, leftSchoolStatuses, maxFileContacts+1).
+		Scan(&contacts).Error
+	if err != nil {
+		return nil, glerrors.Wrap(glerrors.KindInternal, "reading the pupils' own contacts", err)
+	}
+	contacts, hit := capRows(contacts, maxFileContacts)
+	if hit {
+		warnCeiling(ctx, "file contacts", maxFileContacts)
 	}
 	return contacts, nil
 }
@@ -335,14 +399,24 @@ func dismissedSignatures(tx *gorm.DB) (map[string]bool, error) {
 
 // commonContactValuesSQL counts each contact value's distinct pupils over the
 // WHOLE school still attending (any family or none) and keeps the ones past
-// the cap. Its keys MUST match the domain's: lower(btrim(email)) =
-// domain.ContactEmailKey, the phone's digits with at least
-// domain.MinPhoneDigits = domain.ContactPhoneKey, the account id as text.
+// the cap. A value on a pupil's own file counts like a contact's, and a
+// pupil carrying it twice (file and contact) counts once. Its keys MUST match
+// the domain's: lower(btrim(email)) = domain.ContactEmailKey, the phone's
+// digits with at least domain.MinPhoneDigits = domain.ContactPhoneKey, the
+// account id as text.
 const commonContactValuesSQL = `
 WITH attending AS (
 	SELECT g.student_id, g.email, g.phone, g.guardian_user_id
 	  FROM guardian_students g
 	  JOIN students s ON s.id = g.student_id AND s.tenant_id = g.tenant_id
+	 WHERE s.admission_status NOT IN ?
+	UNION ALL
+	SELECT s.id, s.email, NULL, NULL
+	  FROM students s
+	 WHERE s.admission_status NOT IN ? AND s.email <> ''
+	UNION ALL
+	SELECT s.id, NULL, p.value->>'number', NULL
+	  FROM students s ` + pupilPhones + `
 	 WHERE s.admission_status NOT IN ?
 ), keyed AS (
 	SELECT student_id, 'email' AS kind, lower(btrim(email)) AS value FROM attending
@@ -363,7 +437,7 @@ func commonContactValues(ctx context.Context, tx *gorm.DB) (domain.CommonContact
 		Kind  string
 		Value string
 	}
-	err := tx.Raw(commonContactValuesSQL, leftSchoolStatuses, domain.MinPhoneDigits,
+	err := tx.Raw(commonContactValuesSQL, leftSchoolStatuses, leftSchoolStatuses, leftSchoolStatuses, domain.MinPhoneDigits,
 		domain.MaxPupilsPerSharedContact, maxCommonValues+1).Scan(&rows).Error
 	if err != nil {
 		return domain.CommonContactValues{}, glerrors.Wrap(glerrors.KindInternal, "reading common contact values", err)

@@ -244,6 +244,25 @@ service StudentsService {
   // The contacts stay — name and phone are still who to call — without the
   // account. An account no pupil of the family carries is NotFound.
   rpc RevokeFamilyAccess(RevokeFamilyAccessRequest) returns (RevokeFamilyAccessResponse);
+
+  // --- families from an import (PLAN-familias-importacion.md, ADR 0041) ---
+  // BuildFamiliesFromImport builds the very likely families of an import
+  // batch: pupils with the same two surnames AND an email or phone in common
+  // (their own file's or a contact's), pair by pair, in groups with at least
+  // one pupil of the batch. A group without a family is created, unless a
+  // member has an app account or the group was dismissed; a group touching
+  // exactly one family without accounts joins it; anything else is left to
+  // the office (skipped, it stays a suggestion). Each family goes through the
+  // same guarded write as CreateFamily / AddStudentsToFamily; one the office
+  // changed meanwhile is skipped and the rest still run. Idempotent. A
+  // malformed batch_id is InvalidArgument.
+  rpc BuildFamiliesFromImport(BuildFamiliesFromImportRequest) returns (BuildFamiliesFromImportResponse);
+  // UndoFamiliesFromImport takes back what BuildFamiliesFromImport did: every
+  // pupil the import put in a family and still in it leaves it, and a family
+  // left empty is dissolved (a pupil the office added stays). A family any of
+  // whose members has an app account is kept whole (kept_with_access). Pupils
+  // the office moved and guardian links are not touched. Idempotent.
+  rpc UndoFamiliesFromImport(UndoFamiliesFromImportRequest) returns (UndoFamiliesFromImportResponse);
 }
 
 // --- Health ---------------------------------------------------------------
@@ -1216,9 +1235,9 @@ enum FamilySuggestionReason {
   FAMILY_SUGGESTION_REASON_UNSPECIFIED = 0;
   // Same paternal and maternal surname, ignoring accents, case and spaces.
   FAMILY_SUGGESTION_REASON_SAME_SURNAMES = 1;
-  // A contact of each pupil carries the same email.
+  // A contact of each pupil, or the pupil's own file, carries the same email.
   FAMILY_SUGGESTION_REASON_SHARED_CONTACT_EMAIL = 2;
-  // A contact of each pupil carries the same phone.
+  // A contact of each pupil, or the pupil's own file, carries the same phone.
   FAMILY_SUGGESTION_REASON_SHARED_CONTACT_PHONE = 3;
   // The same app account is already linked to each pupil.
   FAMILY_SUGGESTION_REASON_SHARED_ACCOUNT = 4;
@@ -1280,4 +1299,33 @@ message RevokeFamilyAccessRequest {
 message RevokeFamilyAccessResponse {
   // contacts is how many contacts lost the account.
   int32 contacts = 1;
+}
+
+message BuildFamiliesFromImportRequest {
+  // The import's batch (students.import_batch_id of the commit).
+  string batch_id = 1;
+}
+
+message BuildFamiliesFromImportResponse {
+  // The families the import created.
+  repeated Family created = 1;
+  // The existing families pupils of the import joined, as they now are.
+  repeated Family joined = 2;
+  // Groups left to the office: they stay suggestions.
+  int32 skipped = 3;
+}
+
+message UndoFamiliesFromImportRequest {
+  string batch_id = 1;
+}
+
+message UndoFamiliesFromImportResponse {
+  // Pupils taken out of a family the import had put them in.
+  int32 removed = 1;
+  // Families dissolved: emptied by the undo.
+  int32 dissolved = 2;
+  // Families left untouched because a member has an app account: splitting
+  // them would leave that access on the pupils taken out. The office revokes
+  // the access first, then undoes again.
+  int32 kept_with_access = 3;
 }
