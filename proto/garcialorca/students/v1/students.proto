@@ -255,7 +255,8 @@ service StudentsService {
   // the office (skipped, it stays a suggestion). Each family goes through the
   // same guarded write as CreateFamily / AddStudentsToFamily; one the office
   // changed meanwhile is skipped and the rest still run. Idempotent. A
-  // malformed batch_id is InvalidArgument.
+  // malformed batch_id is InvalidArgument. A failure after some families were
+  // committed answers OK with those and incomplete = true.
   rpc BuildFamiliesFromImport(BuildFamiliesFromImportRequest) returns (BuildFamiliesFromImportResponse);
   // UndoFamiliesFromImport takes back what BuildFamiliesFromImport did: every
   // pupil the import put in a family and still in it leaves it, and a family
@@ -1313,6 +1314,10 @@ message BuildFamiliesFromImportResponse {
   repeated Family joined = 2;
   // Groups left to the office: they stay suggestions.
   int32 skipped = 3;
+  // The build failed partway: created and joined hold what was committed
+  // before the failure, and the rest stays as suggestions. A build that
+  // failed before committing any family answers the error instead.
+  bool incomplete = 4;
 }
 
 message UndoFamiliesFromImportRequest {

@@ -21,6 +21,8 @@ const (
 	wireFamily = "fa000000-0000-0000-0000-000000000001"
 	wirePupilA = "5a000000-0000-0000-0000-00000000000a"
 	wirePupilB = "5a000000-0000-0000-0000-00000000000b"
+	wirePupilC = "5a000000-0000-0000-0000-00000000000c"
+	wirePupilD = "5a000000-0000-0000-0000-00000000000d"
 	wireActor  = "a0000000-0000-0000-0000-000000000001"
 )
 
@@ -37,6 +39,9 @@ type memFamilies struct {
 	importInput domain.ImportFamilyInput
 	undo        ports.ImportUndo
 	undoErr     error
+	// createFailsFor makes CreateFamily fail (not a conflict) for a family
+	// holding this pupil.
+	createFailsFor string
 }
 
 func (m *memFamilies) ListFamilies(context.Context) ([]domain.Family, error) {
@@ -58,6 +63,9 @@ func (m *memFamilies) FamilyByID(_ context.Context, id string) (domain.Family, e
 }
 
 func (m *memFamilies) CreateFamily(ctx context.Context, f domain.Family, sync ports.FamilyAccessFunc) error {
+	if m.createFailsFor != "" && slices.Contains(f.StudentIDs(), m.createFailsFor) {
+		return glerrors.New(glerrors.KindInternal, "database unavailable")
+	}
 	if err := m.runSync(ctx, f.ID(), sync); err != nil {
 		return err
 	}
@@ -308,5 +316,52 @@ func TestUndoFamiliesFromImportOnTheWire(t *testing.T) {
 	families.undoErr = glerrors.New(glerrors.KindConflict, "another change won")
 	if _, err := h.UndoFamiliesFromImport(context.Background(), connect.NewRequest(&studentsv1.UndoFamiliesFromImportRequest{BatchId: wireBatch})); familyRPCCode(err) != connect.CodeFailedPrecondition {
 		t.Errorf("conflict: %v", err)
+	}
+}
+
+// PLAN-familias-importacion I2: a build that fails after committing some
+// families answers them, marked incomplete, so the import's summary can show
+// (and undo) what was done; one that committed nothing answers the error.
+func TestBuildFamiliesFromImportAnswersWhatWasBuiltBeforeAFailure(t *testing.T) {
+	h, repo, families := familiesHandler(t)
+	for _, id := range []string{wirePupilC, wirePupilD} {
+		repo.byID[id] = domain.Rehydrate(domain.NewApplicantParams{
+			ID: id, TenantID: testTenant, FirstName: "Luis", LastName: "Pérez", MaternalLastName: "Ruiz",
+		}, domain.AdmissionEnrolled)
+	}
+	families.importInput = domain.ImportFamilyInput{
+		Pupils: []domain.ImportPupil{
+			{ID: wirePupilA, LastName: "García", MaternalLastName: "López", InBatch: true},
+			{ID: wirePupilB, LastName: "García", MaternalLastName: "López", InBatch: true},
+			{ID: wirePupilC, LastName: "Pérez", MaternalLastName: "Ruiz", InBatch: true},
+			{ID: wirePupilD, LastName: "Pérez", MaternalLastName: "Ruiz", InBatch: true},
+		},
+		Contacts: []domain.SuggestionContact{
+			{StudentID: wirePupilA, Phone: "4435550000"}, {StudentID: wirePupilB, Phone: "4435550000"},
+			{StudentID: wirePupilC, Phone: "4435551111"}, {StudentID: wirePupilD, Phone: "4435551111"},
+		},
+	}
+	families.createFailsFor = wirePupilC
+
+	res, err := h.BuildFamiliesFromImport(context.Background(), connect.NewRequest(&studentsv1.BuildFamiliesFromImportRequest{BatchId: wireBatch}))
+	if err != nil {
+		t.Fatalf("a partial build must answer OK: %v", err)
+	}
+	created := res.Msg.GetCreated()
+	if !res.Msg.GetIncomplete() || len(created) != 1 || !slices.Equal(created[0].GetStudentIds(), []string{wirePupilA, wirePupilB}) {
+		t.Errorf("response = %+v", res.Msg)
+	}
+
+	h, _, families = familiesHandler(t)
+	families.importInput = domain.ImportFamilyInput{
+		Pupils: []domain.ImportPupil{
+			{ID: wirePupilA, LastName: "García", MaternalLastName: "López", InBatch: true},
+			{ID: wirePupilB, LastName: "García", MaternalLastName: "López", InBatch: true},
+		},
+		Contacts: []domain.SuggestionContact{{StudentID: wirePupilA, Phone: "4435550000"}, {StudentID: wirePupilB, Phone: "4435550000"}},
+	}
+	families.createFailsFor = wirePupilA
+	if _, err := h.BuildFamiliesFromImport(context.Background(), connect.NewRequest(&studentsv1.BuildFamiliesFromImportRequest{BatchId: wireBatch})); familyRPCCode(err) != connect.CodeInternal {
+		t.Errorf("nothing built: err = %v, want Internal", err)
 	}
 }
