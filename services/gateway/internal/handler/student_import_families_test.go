@@ -324,3 +324,34 @@ func TestUndoFamiliesWithoutAPrincipalIsUnauthorized(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
 	assert.Empty(t, families.undoneBatches)
 }
+
+// The contract documents exactly what the import's families answer, and the
+// undo route like every families write: session cookie, CSRF header, 400 for
+// a malformed batch, 404 when a module is off.
+func TestImportFamiliesAreInTheContract(t *testing.T) {
+	doc := readFamilyContract(t)
+	for schema, response := range map[string]any{
+		"StudentImportFamilies":     importFamilies{},
+		"StudentImportFamily":       importFamily{},
+		"StudentImportFamiliesUndo": importFamiliesUndo{},
+	} {
+		s, ok := doc.Components.Schemas[schema]
+		if !ok {
+			t.Errorf("the %s schema is not documented", schema)
+			continue
+		}
+		assert.Equal(t, jsonFields(response), propertyNames(s.Properties), schema)
+	}
+	if _, ok := doc.Components.Schemas["StudentImportResult"].Properties["families"]; !ok {
+		t.Error("StudentImportResult has no families")
+	}
+	op, ok := doc.operation(t, "post", "/api/v1/imports/students/{batchId}/families/undo")
+	require.True(t, ok, "the undo route is not documented")
+	_, cookie := firstSecurity(op)["sessionCookie"]
+	assert.True(t, cookie, "security = %v", op.Security)
+	assert.True(t, refsParameter(t, op, "CsrfToken"), "a write must require the CSRF header")
+	for _, code := range []string{"200", "400", "401", "403", "404"} {
+		_, ok := op.Responses[code]
+		assert.True(t, ok, "no %s response", code)
+	}
+}
