@@ -38,10 +38,10 @@ var errImportMeetsAccount = glerrors.New(glerrors.KindConflict,
 // The plan is read without locks, so the office may have moved a pupil
 // meanwhile: a family whose write is refused (a conflict, FAMILY_ACCOUNT_LIMIT,
 // FAMILY_BUSY, a pupil that left, a family gone or full) is skipped and
-// counted, and the rest still runs. Any other failure stops the build and is
-// returned; the families written before it stay, recorded, so the undo still
-// takes them back. Idempotent: a second call finds everyone placed and builds
-// nothing new.
+// counted, and the rest still runs. Any other failure stops the build: the
+// result is then PARTIAL and comes back with the error, holding the families
+// already committed (they stay, recorded, so the undo still takes them back).
+// Idempotent: a second call finds everyone placed and builds nothing new.
 func (s *FamilyService) BuildFamiliesFromImport(ctx context.Context, batchID string) (ImportFamiliesResult, error) {
 	batch, err := canonicalID(batchID, "batch id")
 	if err != nil {
@@ -59,7 +59,7 @@ func (s *FamilyService) BuildFamiliesFromImport(ctx context.Context, batchID str
 		case lostToTheOffice(err):
 			out.Skipped++
 		case err != nil:
-			return ImportFamiliesResult{}, err
+			return out, err
 		default:
 			out.Created = append(out.Created, f)
 		}
@@ -70,7 +70,7 @@ func (s *FamilyService) BuildFamiliesFromImport(ctx context.Context, batchID str
 		case lostToTheOffice(err):
 			out.Skipped++
 		case err != nil:
-			return ImportFamiliesResult{}, err
+			return out, err
 		default:
 			out.Joined = append(out.Joined, f)
 		}

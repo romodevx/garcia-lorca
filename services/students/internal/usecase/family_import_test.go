@@ -145,6 +145,33 @@ func TestBuildFamiliesFromImportStopsOnAFailedRead(t *testing.T) {
 	}
 }
 
+// A failure that is not the office's doing stops the build, but the families
+// already committed come back with the error: they exist, and the summary
+// must be able to show (and undo) them.
+func TestBuildFamiliesFromImportReturnsWhatItWroteOnFailure(t *testing.T) {
+	w := newAccWorld()
+	in := siblingsInput()
+	w.put(pupilC, "Luna", "Paz", domain.AdmissionAccepted)
+	in.Pupils = append(in.Pupils,
+		domain.ImportPupil{ID: pupilDraft, LastName: "Luna", MaternalLastName: "Paz", InBatch: true},
+		domain.ImportPupil{ID: pupilC, LastName: "Luna", MaternalLastName: "Paz"},
+	)
+	in.Contacts = append(in.Contacts,
+		domain.SuggestionContact{StudentID: pupilDraft, Email: "luna@x.mx"},
+		domain.SuggestionContact{StudentID: pupilC, Email: "luna@x.mx"},
+	)
+	w.importInput = in
+	w.createFailAt, w.createFailErr = 2, glerrors.New(glerrors.KindInternal, "db down")
+
+	res, err := w.families.BuildFamiliesFromImport(context.Background(), famBatch)
+	if glerrors.KindOf(err) != glerrors.KindInternal {
+		t.Fatalf("err = %v, want the internal failure", err)
+	}
+	if len(res.Created) != 1 || !slices.Equal(res.Created[0].StudentIDs(), []string{pupilA, pupilB}) {
+		t.Errorf("partial result = %+v, want the family written before the failure", res)
+	}
+}
+
 func TestFamiliesFromImportRefuseAMalformedBatch(t *testing.T) {
 	w := newAccWorld()
 	if _, err := w.families.BuildFamiliesFromImport(context.Background(), "nope"); glerrors.KindOf(err) != glerrors.KindInvalid {

@@ -49,6 +49,11 @@ type famWorld struct {
 	importBatch string
 	undo        ports.ImportUndo
 	undoBatch   string
+	// createFailAt, when > 0, makes that CreateFamily call (1-based) fail with
+	// createFailErr and write nothing.
+	createFailAt  int
+	createFailErr error
+	createCalls   int
 }
 
 func newFamWorld() *famWorld {
@@ -110,6 +115,10 @@ func (w *famWorld) FindByID(_ context.Context, id string) (*domain.Student, erro
 }
 
 func (w *famWorld) CreateFamily(ctx context.Context, f domain.Family, sync ports.FamilyAccessFunc) error {
+	w.createCalls++
+	if w.createCalls == w.createFailAt {
+		return w.createFailErr
+	}
 	w.families[f.ID()] = f
 	for _, id := range f.StudentIDs() {
 		w.pupils[id].AssignFamily(f.ID())
