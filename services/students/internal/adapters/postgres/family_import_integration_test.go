@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"sync"
 	"testing"
 
 	"github.com/google/uuid"
@@ -21,6 +22,7 @@ import (
 	glerrors "github.com/garcia-lorca/pkg/errors"
 	pgadapter "github.com/garcia-lorca/services/students/internal/adapters/postgres"
 	"github.com/garcia-lorca/services/students/internal/domain"
+	"github.com/garcia-lorca/services/students/internal/ports"
 	"github.com/garcia-lorca/services/students/internal/usecase"
 )
 
@@ -401,6 +403,72 @@ func TestUndoFamiliesFromImportInChunks(t *testing.T) {
 	}
 	if n := importLinkCount(t, batch); n != 0 {
 		t.Errorf("links after the second undo = %d", n)
+	}
+}
+
+// A real race (security H1): an account grant on a pupil is open (OnPupil
+// holds the pupil's row FOR SHARE) when the build plans the family without
+// seeing it; the build's claim queues on that row, the grant commits, and the
+// build's in-transaction re-check sees the account and skips the family —
+// nothing written, no links.
+func TestBuildFamiliesFromImportRacesAnAccountGrant(t *testing.T) {
+	tenant := uuid.NewString()
+	ctx := context.Background()
+	_, families, repo := accessServices(t, tenant)
+	batch := uuid.NewString()
+	a, b := seedPupil(t, tenant, "Rangel", "Ochoa"), seedPupil(t, tenant, "Rangel", "Ochoa")
+	setFile(t, a, "", "4434445555")
+	setFile(t, b, "", "4434445555")
+	markBatch(t, batch, a, b)
+
+	held, release := make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+	releaseGrant := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(releaseGrant) // never leave the grant's transaction hanging
+	granted := make(chan error, 1)
+	go func() {
+		granted <- repo.OnPupil(ctx, a, func(ctx context.Context, acc ports.FamilyAccess) error {
+			l, err := domain.NewGuardianLink(uuid.NewString(), tenant, uuid.NewString(), a, domain.RelationshipMother)
+			if err != nil {
+				return err
+			}
+			if err := acc.InsertContact(ctx, l); err != nil {
+				return err
+			}
+			close(held)
+			<-release
+			return nil
+		})
+	}()
+	select {
+	case <-held:
+	case err := <-granted:
+		t.Fatalf("the grant ended before holding its lock: %v", err)
+	}
+
+	type outcome struct {
+		res usecase.ImportFamiliesResult
+		err error
+	}
+	built := make(chan outcome, 1)
+	go func() {
+		res, err := families.BuildFamiliesFromImport(ctx, batch)
+		built <- outcome{res, err}
+	}()
+	awaitLockWaiters(t, 1)
+	releaseGrant()
+	if err := <-granted; err != nil {
+		t.Fatalf("grant: %v", err)
+	}
+	got := <-built
+	if got.err != nil || len(got.res.Created) != 0 || got.res.Skipped != 1 {
+		t.Fatalf("build = %+v, %v; want the family skipped", got.res, got.err)
+	}
+	if familyOf(t, repo, a) != "" || familyOf(t, repo, b) != "" {
+		t.Error("the family was built over an account")
+	}
+	if n := importLinkCount(t, batch); n != 0 {
+		t.Errorf("links = %d, want none", n)
 	}
 }
 
