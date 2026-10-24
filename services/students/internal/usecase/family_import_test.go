@@ -10,6 +10,7 @@ import (
 	glerrors "github.com/garcia-lorca/pkg/errors"
 	"github.com/garcia-lorca/services/students/internal/domain"
 	"github.com/garcia-lorca/services/students/internal/ports"
+	"github.com/garcia-lorca/services/students/internal/usecase"
 )
 
 // Families from an import (PLAN-familias-importacion.md): the plan is the
@@ -177,7 +178,7 @@ func TestFamiliesFromImportRefuseAMalformedBatch(t *testing.T) {
 	if _, err := w.families.BuildFamiliesFromImport(context.Background(), "nope"); glerrors.KindOf(err) != glerrors.KindInvalid {
 		t.Errorf("build: %v", err)
 	}
-	if _, _, err := w.families.UndoFamiliesFromImport(context.Background(), ""); glerrors.KindOf(err) != glerrors.KindInvalid {
+	if _, err := w.families.UndoFamiliesFromImport(context.Background(), ""); glerrors.KindOf(err) != glerrors.KindInvalid {
 		t.Errorf("undo: %v", err)
 	}
 	if w.importBatch != "" || w.undoBatch != "" {
@@ -187,10 +188,11 @@ func TestFamiliesFromImportRefuseAMalformedBatch(t *testing.T) {
 
 func TestUndoFamiliesFromImport(t *testing.T) {
 	w := newAccWorld()
-	w.undo = ports.ImportUndo{Removed: 3, Dissolved: 1}
-	removed, dissolved, err := w.families.UndoFamiliesFromImport(context.Background(), strings.ToUpper(famBatch))
-	if err != nil || removed != 3 || dissolved != 1 {
-		t.Errorf("undo = %d, %d, %v; want 3, 1", removed, dissolved, err)
+	w.undo = ports.ImportUndo{Removed: 3, Dissolved: 1, KeptWithAccess: 2}
+	got, err := w.families.UndoFamiliesFromImport(context.Background(), strings.ToUpper(famBatch))
+	want := usecase.ImportUndoResult{Removed: 3, Dissolved: 1, KeptWithAccess: 2}
+	if err != nil || got != want {
+		t.Errorf("undo = %+v, %v; want %+v", got, err, want)
 	}
 	if w.undoBatch != famBatch {
 		t.Errorf("undo batch = %q, want the canonical %q", w.undoBatch, famBatch)

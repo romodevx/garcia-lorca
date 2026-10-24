@@ -441,25 +441,28 @@ type FamilyRepository interface {
 	// counts; the dismissed signatures and the common values.
 	ImportFamilyInputs(ctx context.Context, batchID string) (domain.ImportFamilyInput, error)
 	// UndoImportFamilies undoes what the import batchID built, in one
-	// transaction, family by family under each family's lock: every pupil a
-	// family_import_links row says the import put in a family, and that is
-	// still in it, leaves it; a family domain.ImportUndoDissolves judges
-	// gone is dissolved (its other members leave too); then the batch's links
-	// are deleted. A pupil the office moved meanwhile is not touched. A second
-	// call finds no links and does nothing.
+	// transaction, family by family under each family's lock. A family any of
+	// whose members has an app account is skipped whole (KeptWithAccess): its
+	// links stay. Otherwise every pupil a link says the import put in that
+	// family, and still in it, leaves it; a family left empty is dissolved;
+	// the links handled are deleted. A pupil the office moved meanwhile is not
+	// touched. The links read are bounded: those not read stay for the next
+	// call. A call that finds no links does nothing.
 	UndoImportFamilies(ctx context.Context, batchID string) (ImportUndo, error)
 }
 
 // ImportUndo is what UndoImportFamilies did: the pupils it took out of a
-// family and the families it dissolved.
+// family, the families it dissolved, and the families it kept whole because
+// a member has an app account.
 type ImportUndo struct {
-	Removed   int
-	Dissolved int
+	Removed        int
+	Dissolved      int
+	KeptWithAccess int
 }
 
 // FamilyImportLink records that the import BatchID put StudentID in the
 // transaction's family; CreatedFamily says the import created that family
-// (an undo then dissolves it when fewer than two pupils remain).
+// (kept for the record: an undo dissolves any family it empties).
 type FamilyImportLink struct {
 	ID            string
 	BatchID       string

@@ -78,22 +78,32 @@ func (s *FamilyService) BuildFamiliesFromImport(ctx context.Context, batchID str
 	return out, nil
 }
 
+// ImportUndoResult is what UndoFamiliesFromImport did: the pupils it took
+// out of a family, the families it dissolved, and the families it kept whole
+// because a member has an app account (the office revokes it first).
+type ImportUndoResult struct {
+	Removed        int
+	Dissolved      int
+	KeptWithAccess int
+}
+
 // UndoFamiliesFromImport takes back what BuildFamiliesFromImport did for
 // batchID (malformed: KindInvalid): each pupil the import put in a family and
-// still in it leaves it, and a family the import created left with fewer
-// than two pupils is dissolved (domain.ImportUndoDissolves). A pupil the
-// office moved meanwhile is not touched; guardian links never are.
-// Idempotent: a second call does nothing.
-func (s *FamilyService) UndoFamiliesFromImport(ctx context.Context, batchID string) (removed, dissolved int, err error) {
+// still in it leaves it, and a family left empty is dissolved — a pupil the
+// office added stays in it. A family any of whose members has an app account
+// is kept whole: taking pupils out would leave that access on them (security
+// M1). A pupil the office moved meanwhile is not touched; guardian links never
+// are. Idempotent: a second call does nothing new.
+func (s *FamilyService) UndoFamiliesFromImport(ctx context.Context, batchID string) (ImportUndoResult, error) {
 	batch, err := canonicalID(batchID, "batch id")
 	if err != nil {
-		return 0, 0, err
+		return ImportUndoResult{}, err
 	}
 	undo, err := s.families.UndoImportFamilies(ctx, batch)
 	if err != nil {
-		return 0, 0, err
+		return ImportUndoResult{}, err
 	}
-	return undo.Removed, undo.Dissolved, nil
+	return ImportUndoResult{Removed: undo.Removed, Dissolved: undo.Dissolved, KeptWithAccess: undo.KeptWithAccess}, nil
 }
 
 // importHook runs in a family write's transaction, after its pupils are

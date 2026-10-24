@@ -263,22 +263,3 @@ func TestPlanImportFamiliesSkipsOversizedGroups(t *testing.T) {
 		t.Errorf("plan = %+v, want one skipped group", got)
 	}
 }
-
-func TestImportUndoDissolves(t *testing.T) {
-	tests := []struct {
-		created bool
-		left    int
-		want    bool
-	}{
-		{created: true, left: 0, want: true},
-		{created: true, left: 1, want: true},
-		{created: true, left: 2, want: false},
-		{created: false, left: 0, want: true},
-		{created: false, left: 1, want: false},
-	}
-	for _, tc := range tests {
-		if got := domain.ImportUndoDissolves(tc.created, tc.left); got != tc.want {
-			t.Errorf("ImportUndoDissolves(created=%v, left=%d) = %v, want %v", tc.created, tc.left, got, tc.want)
-		}
-	}
-}

@@ -14,8 +14,9 @@ import (
 
 // maxUndoLinks bounds one undo's read of a batch's links: an import brings a
 // school's level, a few hundred pupils. A larger batch is undone in more than
-// one call (each call deletes only the links it handled).
-const maxUndoLinks = maxSuggestionPupils
+// one call: each call deletes only the links it read, and the rest stay for
+// the next. A var only so a test can lower it (SetMaxUndoLinksForTest).
+var maxUndoLinks = maxSuggestionPupils
 
 // ImportFamilyInputs reads what domain.PlanImportFamilies needs for batchID in
 // one transaction and six bounded statements: every pupil still at school,
@@ -103,9 +104,8 @@ func importFamilyStates(ctx context.Context, tx *gorm.DB) (map[string]domain.Imp
 
 // importLinkRow is one family_import_links row as an undo reads it.
 type importLinkRow struct {
-	FamilyID      string
-	StudentID     string
-	CreatedFamily bool
+	FamilyID  string
+	StudentID string
 }
 
 // UndoImportFamilies undoes the batch in ONE transaction, family by family in
@@ -115,7 +115,7 @@ func (r *Repository) UndoImportFamilies(ctx context.Context, batchID string) (po
 	var out ports.ImportUndo
 	err := r.withTenant(ctx, func(tx *gorm.DB) error {
 		var links []importLinkRow
-		err := tx.Raw(`SELECT family_id, student_id, created_family FROM family_import_links
+		err := tx.Raw(`SELECT family_id, student_id FROM family_import_links
 		                WHERE batch_id = ? ORDER BY family_id, student_id LIMIT ?`,
 			batchID, maxUndoLinks+1).Scan(&links).Error
 		if err != nil {
@@ -138,11 +138,10 @@ func (r *Repository) UndoImportFamilies(ctx context.Context, batchID string) (po
 	return out, nil
 }
 
-// importFamilyLinks is one family's links of a batch.
+// importFamilyLinks is one family's links of a batch, as read.
 type importFamilyLinks struct {
 	familyID   string
 	studentIDs []string
-	created    bool
 }
 
 // linksByFamily groups links already ordered by family id.
@@ -154,20 +153,29 @@ func linksByFamily(links []importLinkRow) []importFamilyLinks {
 		}
 		last := &out[len(out)-1]
 		last.studentIDs = append(last.studentIDs, l.StudentID)
-		last.created = last.created || l.CreatedFamily
 	}
 	return out
 }
 
-// undoImportFamily takes the batch's pupils still in the family out of it,
-// dissolves it when domain.ImportUndoDissolves says so (the cascade then
-// deletes its links) and otherwise deletes the batch's links to it.
+// undoImportFamily undoes one family under its lock. A member with an app
+// account keeps the family whole (counted in KeptWithAccess, links kept):
+// taking pupils out would leave that account on them. Otherwise the batch's
+// pupils still in it leave, the family is dissolved when that empties it (the
+// cascade then deletes its links), and else the links handled are deleted.
 func undoImportFamily(tx *gorm.DB, batchID string, f importFamilyLinks, out *ports.ImportUndo) error {
 	if err := lockFamily(tx, f.familyID); err != nil {
 		if glerrors.KindOf(err) == glerrors.KindNotFound {
 			return nil // dissolved since the links were read: nothing left to undo
 		}
 		return err
+	}
+	withAccess, err := familyHasAccount(tx, f.familyID)
+	if err != nil {
+		return err
+	}
+	if withAccess {
+		out.KeptWithAccess++
+		return nil
 	}
 	res := tx.Exec(`UPDATE students SET family_id = NULL WHERE family_id = ? AND id IN ?`, f.familyID, f.studentIDs)
 	if res.Error != nil {
@@ -178,18 +186,31 @@ func undoImportFamily(tx *gorm.DB, batchID string, f importFamilyLinks, out *por
 	if err != nil {
 		return err
 	}
-	if domain.ImportUndoDissolves(f.created, int(left)) {
-		if err := tx.Exec(`UPDATE students SET family_id = NULL WHERE family_id = ?`, f.familyID).Error; err != nil {
-			return translateFamilyWriteErr(err, "clearing the family's members")
-		}
+	if left == 0 {
 		out.Dissolved++
 		return deleteFamily(tx, f.familyID)
 	}
-	err = tx.Exec(`DELETE FROM family_import_links WHERE batch_id = ? AND family_id = ?`, batchID, f.familyID).Error
+	err = tx.Exec(`DELETE FROM family_import_links WHERE batch_id = ? AND family_id = ? AND student_id IN ?`,
+		batchID, f.familyID, f.studentIDs).Error
 	if err != nil {
 		return translateFamilyWriteErr(err, "deleting the import's family links")
 	}
 	return nil
+}
+
+// familyHasAccount reports whether an app account is linked to any member of
+// the family (the notion the build's re-check uses), read under the family's
+// lock: an account write on a member takes that lock first.
+func familyHasAccount(tx *gorm.DB, familyID string) (bool, error) {
+	var found bool
+	err := tx.Raw(`SELECT EXISTS (
+	                 SELECT 1 FROM guardian_students g
+	                 JOIN students s ON s.id = g.student_id AND s.tenant_id = g.tenant_id
+	                WHERE s.family_id = ? AND g.guardian_user_id IS NOT NULL)`, familyID).Scan(&found).Error
+	if err != nil {
+		return false, translateFamilyWriteErr(err, "reading the family's accounts")
+	}
+	return found, nil
 }
 
 // RecordImportLinks inserts the links on the transaction's family, its

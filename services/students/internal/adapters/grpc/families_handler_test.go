@@ -296,9 +296,9 @@ func TestBuildFamiliesFromImportOnTheWire(t *testing.T) {
 
 func TestUndoFamiliesFromImportOnTheWire(t *testing.T) {
 	h, _, families := familiesHandler(t)
-	families.undo = ports.ImportUndo{Removed: 3, Dissolved: 1}
+	families.undo = ports.ImportUndo{Removed: 3, Dissolved: 1, KeptWithAccess: 2}
 	res, err := h.UndoFamiliesFromImport(context.Background(), connect.NewRequest(&studentsv1.UndoFamiliesFromImportRequest{BatchId: wireBatch}))
-	if err != nil || res.Msg.GetRemoved() != 3 || res.Msg.GetDissolved() != 1 {
+	if err != nil || res.Msg.GetRemoved() != 3 || res.Msg.GetDissolved() != 1 || res.Msg.GetKeptWithAccess() != 2 {
 		t.Errorf("undo = %+v, %v", res, err)
 	}
 	if _, err := h.UndoFamiliesFromImport(context.Background(), connect.NewRequest(&studentsv1.UndoFamiliesFromImportRequest{})); familyRPCCode(err) != connect.CodeInvalidArgument {

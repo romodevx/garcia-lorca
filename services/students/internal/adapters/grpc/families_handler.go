@@ -202,12 +202,12 @@ func (h *StudentsHandler) UndoFamiliesFromImport(ctx context.Context, req *conne
 	if h.families == nil {
 		return nil, errFamiliesNotServed
 	}
-	removed, dissolved, err := h.families.UndoFamiliesFromImport(ctx, req.Msg.GetBatchId())
+	undo, err := h.families.UndoFamiliesFromImport(ctx, req.Msg.GetBatchId())
 	if err != nil {
 		return nil, familyErr(err)
 	}
 	return connect.NewResponse(&studentsv1.UndoFamiliesFromImportResponse{
-		Removed: int32(removed), Dissolved: int32(dissolved),
+		Removed: int32(undo.Removed), Dissolved: int32(undo.Dissolved), KeptWithAccess: int32(undo.KeptWithAccess),
 	}), nil
 }
 

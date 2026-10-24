@@ -40,8 +40,11 @@
   a ella.
 - Toca 2 familias o más, o una familia con cuentas → no se hace nada; la oficina decide.
 - **Deshacer** quita a los alumnos que la importación puso en cada familia, y si una familia
-  queda con 1 alumno o ninguno, se disuelve. Se registra en `family_import_links` (RLS).
-  Deshacer dos veces da el mismo resultado. Si la oficina ya movió a un alumno, no se le toca.
+  queda vacía, se disuelve (un alumno que la oficina agregó se queda en ella). Se registra en
+  `family_import_links` (RLS). Deshacer dos veces da el mismo resultado. Si la oficina ya
+  movió a un alumno, no se le toca. Una familia que **ya tiene acceso a la app** (alguna
+  cuenta en cualquiera de sus alumnos) no se toca: sacar alumnos les dejaría ese acceso. La
+  oficina quita el acceso primero y vuelve a deshacer; el resumen dice cuántas quedaron así.
 - Las sugerencias de la pestaña Familias también leen la ficha del alumno (correo y
   teléfonos), así que lo que queda por revisar sale con la confianza correcta.
 - Si armar las familias falla, la importación **no falla**: el resumen dice "No pudimos armar

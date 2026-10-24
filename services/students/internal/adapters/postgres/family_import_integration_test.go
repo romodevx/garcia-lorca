@@ -21,6 +21,7 @@ import (
 	glerrors "github.com/garcia-lorca/pkg/errors"
 	pgadapter "github.com/garcia-lorca/services/students/internal/adapters/postgres"
 	"github.com/garcia-lorca/services/students/internal/domain"
+	"github.com/garcia-lorca/services/students/internal/usecase"
 )
 
 // setFile writes a pupil's own email and phones as the import stores them.
@@ -262,9 +263,9 @@ func TestBuildAndUndoFamiliesFromImport(t *testing.T) {
 		t.Errorf("links after a second build = %d, want 3", n)
 	}
 
-	removed, dissolved, err := families.UndoFamiliesFromImport(ctx, batch)
-	if err != nil || removed != 3 || dissolved != 1 {
-		t.Fatalf("undo = %d removed, %d dissolved, %v; want 3, 1", removed, dissolved, err)
+	undone, err := families.UndoFamiliesFromImport(ctx, batch)
+	if err != nil || undone != (usecase.ImportUndoResult{Removed: 3, Dissolved: 1}) {
+		t.Fatalf("undo = %+v, %v; want 3 removed, 1 dissolved", undone, err)
 	}
 	if _, err := repo.FamilyByID(ctx, built.ID()); glerrors.KindOf(err) != glerrors.KindNotFound {
 		t.Errorf("the built family survived the undo: %v", err)
@@ -281,14 +282,13 @@ func TestBuildAndUndoFamiliesFromImport(t *testing.T) {
 	if n := importLinkCount(t, batch); n != 0 {
 		t.Errorf("links after undo = %d", n)
 	}
-	removed, dissolved, err = families.UndoFamiliesFromImport(ctx, batch)
-	if err != nil || removed != 0 || dissolved != 0 {
-		t.Errorf("second undo = %d, %d, %v; want nothing", removed, dissolved, err)
+	if again, err := families.UndoFamiliesFromImport(ctx, batch); err != nil || again != (usecase.ImportUndoResult{}) {
+		t.Errorf("second undo = %+v, %v; want nothing", again, err)
 	}
 }
 
-// Undo leaves alone a pupil the office moved, and dissolves a built family
-// left with one pupil even when that pupil is one the office added.
+// Undo leaves alone a pupil the office moved, and a pupil the office added to
+// a built family stays in it: a family is dissolved only when emptied.
 func TestUndoFamiliesFromImportRespectsTheOffice(t *testing.T) {
 	tenant := uuid.NewString()
 	ctx := context.Background()
@@ -317,21 +317,96 @@ func TestUndoFamiliesFromImportRespectsTheOffice(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	removed, dissolved, err := families.UndoFamiliesFromImport(ctx, batch)
-	if err != nil || removed != 2 || dissolved != 1 {
-		t.Fatalf("undo = %d removed, %d dissolved, %v; want 2, 1", removed, dissolved, err)
+	got, err := families.UndoFamiliesFromImport(ctx, batch)
+	if err != nil || got != (usecase.ImportUndoResult{Removed: 2}) {
+		t.Fatalf("undo = %+v, %v; want 2 removed, none dissolved", got, err)
 	}
-	if familyOf(t, repo, x) != "" {
-		t.Error("the built family, left with one pupil, was not dissolved")
+	if familyOf(t, repo, x) != built {
+		t.Error("the pupil the office added lost its family")
 	}
 	if familyOf(t, repo, c) != moved.ID() {
 		t.Error("undo moved a pupil the office had moved")
 	}
 }
 
+// Undo never leaves an app account behind on pupils it would split off: a
+// family any of whose members has an account is kept whole, links and all
+// (the office revokes the access first), and the batch's other families are
+// still undone.
+func TestUndoFamiliesFromImportKeepsAFamilyWithAppAccess(t *testing.T) {
+	tenant := uuid.NewString()
+	ctx := context.Background()
+	_, families, repo := accessServices(t, tenant)
+	batch := uuid.NewString()
+	a, b := seedPupil(t, tenant, "García", "López"), seedPupil(t, tenant, "García", "López")
+	c, d := seedPupil(t, tenant, "Nava", "Ruiz"), seedPupil(t, tenant, "Nava", "Ruiz")
+	setFile(t, a, "", "4435550000")
+	setFile(t, b, "", "4435550000")
+	setFile(t, c, "nava@x.mx")
+	setFile(t, d, "nava@x.mx")
+	markBatch(t, batch, a, b, c, d)
+	res, err := families.BuildFamiliesFromImport(ctx, batch)
+	if err != nil || len(res.Created) != 2 {
+		t.Fatalf("build = %+v, %v", res, err)
+	}
+	withAccess := familyOf(t, repo, a)
+	addAccount(t, repo, tenant, b)
+
+	got, err := families.UndoFamiliesFromImport(ctx, batch)
+	if err != nil || got != (usecase.ImportUndoResult{Removed: 2, Dissolved: 1, KeptWithAccess: 1}) {
+		t.Fatalf("undo = %+v, %v; want 2 removed, 1 dissolved, 1 kept", got, err)
+	}
+	if familyOf(t, repo, a) != withAccess || familyOf(t, repo, b) != withAccess {
+		t.Error("undo split a family with an app account")
+	}
+	if familyOf(t, repo, c) != "" || familyOf(t, repo, d) != "" {
+		t.Error("the batch's other family was not undone")
+	}
+	if n := importLinkCount(t, batch); n != 2 {
+		t.Errorf("links = %d, want the kept family's two", n)
+	}
+}
+
+// An undo reads a bounded number of links; what it did not read stays for
+// the next call, and a family is dissolved only once emptied.
+func TestUndoFamiliesFromImportInChunks(t *testing.T) {
+	t.Cleanup(pgadapter.SetMaxUndoLinksForTest(2))
+	tenant := uuid.NewString()
+	ctx := context.Background()
+	_, families, repo := accessServices(t, tenant)
+	batch := uuid.NewString()
+	ids := []string{seedPupil(t, tenant, "Mora", "Lis"), seedPupil(t, tenant, "Mora", "Lis"), seedPupil(t, tenant, "Mora", "Lis")}
+	for _, id := range ids {
+		setFile(t, id, "", "4432223333")
+	}
+	markBatch(t, batch, ids...)
+	if res, err := families.BuildFamiliesFromImport(ctx, batch); err != nil || len(res.Created) != 1 {
+		t.Fatalf("build = %+v, %v", res, err)
+	}
+	built := familyOf(t, repo, ids[0])
+
+	first, err := families.UndoFamiliesFromImport(ctx, batch)
+	if err != nil || first != (usecase.ImportUndoResult{Removed: 2}) {
+		t.Fatalf("first undo = %+v, %v; want 2 removed", first, err)
+	}
+	if n := importLinkCount(t, batch); n != 1 {
+		t.Errorf("links after the first undo = %d, want the unread one", n)
+	}
+	second, err := families.UndoFamiliesFromImport(ctx, batch)
+	if err != nil || second != (usecase.ImportUndoResult{Removed: 1, Dissolved: 1}) {
+		t.Fatalf("second undo = %+v, %v; want 1 removed, 1 dissolved", second, err)
+	}
+	if _, err := repo.FamilyByID(ctx, built); glerrors.KindOf(err) != glerrors.KindNotFound {
+		t.Errorf("the emptied family survived: %v", err)
+	}
+	if n := importLinkCount(t, batch); n != 0 {
+		t.Errorf("links after the second undo = %d", n)
+	}
+}
+
 func TestUndoFamiliesFromImportRefusesAMalformedBatch(t *testing.T) {
 	_, families, _ := accessServices(t, uuid.NewString())
-	if _, _, err := families.UndoFamiliesFromImport(context.Background(), "nope"); glerrors.KindOf(err) != glerrors.KindInvalid {
+	if _, err := families.UndoFamiliesFromImport(context.Background(), "nope"); glerrors.KindOf(err) != glerrors.KindInvalid {
 		t.Errorf("malformed batch: %v", err)
 	}
 	if _, err := families.BuildFamiliesFromImport(context.Background(), "nope"); glerrors.KindOf(err) != glerrors.KindInvalid {
@@ -366,8 +441,8 @@ func TestRLSIsolatesFamilyImportLinks(t *testing.T) {
 	}); err != nil || seen != 0 {
 		t.Errorf("B saw A's links: %d, %v", seen, err)
 	}
-	if removed, dissolved, err := familiesB.UndoFamiliesFromImport(ctx, batch); err != nil || removed != 0 || dissolved != 0 {
-		t.Errorf("B undid A's batch: %d, %d, %v", removed, dissolved, err)
+	if got, err := familiesB.UndoFamiliesFromImport(ctx, batch); err != nil || got != (usecase.ImportUndoResult{}) {
+		t.Errorf("B undid A's batch: %+v, %v", got, err)
 	}
 	var deleted int64
 	if err := withAppTx(t, tenantB, func(tx *gorm.DB) error {

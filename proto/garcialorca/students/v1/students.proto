@@ -259,7 +259,8 @@ service StudentsService {
   rpc BuildFamiliesFromImport(BuildFamiliesFromImportRequest) returns (BuildFamiliesFromImportResponse);
   // UndoFamiliesFromImport takes back what BuildFamiliesFromImport did: every
   // pupil the import put in a family and still in it leaves it, and a family
-  // the import created left with fewer than two pupils is dissolved. Pupils
+  // left empty is dissolved (a pupil the office added stays). A family any of
+  // whose members has an app account is kept whole (kept_with_access). Pupils
   // the office moved and guardian links are not touched. Idempotent.
   rpc UndoFamiliesFromImport(UndoFamiliesFromImportRequest) returns (UndoFamiliesFromImportResponse);
 }
@@ -1321,6 +1322,10 @@ message UndoFamiliesFromImportRequest {
 message UndoFamiliesFromImportResponse {
   // Pupils taken out of a family the import had put them in.
   int32 removed = 1;
-  // Families dissolved (created by the import, left with fewer than two).
+  // Families dissolved: emptied by the undo.
   int32 dissolved = 2;
+  // Families left untouched because a member has an app account: splitting
+  // them would leave that access on the pupils taken out. The office revokes
+  // the access first, then undoes again.
+  int32 kept_with_access = 3;
 }

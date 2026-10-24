@@ -261,18 +261,3 @@ func importIDs(pupils []ImportPupil) []string {
 	}
 	return out
 }
-
-// minFamilyAfterUndo: a family left with fewer pupils than this by an undo is
-// no family at all.
-const minFamilyAfterUndo = 2
-
-// ImportUndoDissolves reports whether undoing an import dissolves a family
-// left with `left` pupils. A family the import created goes when fewer than
-// two remain (one pupil is not a family); one the import only joined is the
-// office's own and goes only when empty, as RemoveStudentFromFamily does.
-func ImportUndoDissolves(createdByImport bool, left int) bool {
-	if createdByImport {
-		return left < minFamilyAfterUndo
-	}
-	return left == 0
-}
