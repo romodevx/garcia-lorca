@@ -41,6 +41,14 @@ type famWorld struct {
 	families                map[string]domain.Family
 	dismissals              map[string]ports.FamilyDismissal
 	inputs                  ports.SuggestionInputs
+	// importInput/importErr answer ImportFamilyInputs; importBatch is the
+	// batch it was asked for. undo answers UndoImportFamilies; undoBatch is
+	// the batch it was asked for.
+	importInput domain.ImportFamilyInput
+	importErr   error
+	importBatch string
+	undo        ports.ImportUndo
+	undoBatch   string
 }
 
 func newFamWorld() *famWorld {
@@ -197,6 +205,16 @@ func (w *famWorld) DismissSuggestion(_ context.Context, d ports.FamilyDismissal)
 		w.dismissals[d.Signature] = d
 	}
 	return nil
+}
+
+func (w *famWorld) ImportFamilyInputs(_ context.Context, batchID string) (domain.ImportFamilyInput, error) {
+	w.importBatch = batchID
+	return w.importInput, w.importErr
+}
+
+func (w *famWorld) UndoImportFamilies(_ context.Context, batchID string) (ports.ImportUndo, error) {
+	w.undoBatch = batchID
+	return w.undo, nil
 }
 
 func famService(w *famWorld) *usecase.FamilyService {

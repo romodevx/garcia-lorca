@@ -27,6 +27,8 @@ type stubAccess struct {
 	// onPupilErr, when set, is what OnPupil answers.
 	onPupilErr  error
 	accountsErr error
+	// importLinks are the RecordImportLinks writes.
+	importLinks []ports.FamilyImportLink
 }
 
 func (s *stubAccess) OnPupil(ctx context.Context, _ string, fn ports.FamilyAccessFunc) error {
@@ -74,6 +76,10 @@ func (t *stubAccessTx) RemoveLink(ctx context.Context, guardianUserID, studentID
 	return t.s.store.unlink(guardianUserID, studentID)
 }
 func (t *stubAccessTx) DetachAccount(context.Context, string) (int, error) { return t.s.detached, nil }
+func (t *stubAccessTx) RecordImportLinks(_ context.Context, links []ports.FamilyImportLink) error {
+	t.s.importLinks = append(t.s.importLinks, links...)
+	return nil
+}
 
 // overCapMembers is a family that already holds three accounts.
 func overCapMembers(t *testing.T) []domain.FamilyMember {

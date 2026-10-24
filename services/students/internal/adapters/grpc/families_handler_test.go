@@ -33,6 +33,10 @@ type memFamilies struct {
 	byID      map[string]domain.Family
 	inputs    ports.SuggestionInputs
 	dismissed []ports.FamilyDismissal
+	// importInput answers ImportFamilyInputs; undo/undoErr UndoImportFamilies.
+	importInput domain.ImportFamilyInput
+	undo        ports.ImportUndo
+	undoErr     error
 }
 
 func (m *memFamilies) ListFamilies(context.Context) ([]domain.Family, error) {
@@ -98,6 +102,14 @@ func (m *memFamilies) SuggestionInputs(context.Context) (ports.SuggestionInputs,
 func (m *memFamilies) DismissSuggestion(_ context.Context, d ports.FamilyDismissal) error {
 	m.dismissed = append(m.dismissed, d)
 	return nil
+}
+
+func (m *memFamilies) ImportFamilyInputs(context.Context, string) (domain.ImportFamilyInput, error) {
+	return m.importInput, nil
+}
+
+func (m *memFamilies) UndoImportFamilies(context.Context, string) (ports.ImportUndo, error) {
+	return m.undo, m.undoErr
 }
 
 func familiesHandler(t *testing.T) (*grpcadapter.StudentsHandler, *fakeRepo, *memFamilies) {

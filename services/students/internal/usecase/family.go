@@ -66,6 +66,13 @@ func (s *FamilyService) GetFamily(ctx context.Context, familyID string) (domain.
 // Pupils whose accounts add up to more than domain.MaxFamilyAccounts are
 // domain.ErrFamilyAccountLimit and nothing is written.
 func (s *FamilyService) CreateFamily(ctx context.Context, name string, studentIDs []string) (domain.Family, error) {
+	return s.createFamily(ctx, name, studentIDs, nil)
+}
+
+// createFamily is CreateFamily with extra (nil: none) run first in the
+// write's transaction, before the sync: what an import adds to the same
+// guarded path.
+func (s *FamilyService) createFamily(ctx context.Context, name string, studentIDs []string, extra ports.FamilyAccessFunc) (domain.Family, error) {
 	ids, err := canonicalIDs(studentIDs)
 	if err != nil {
 		return domain.Family{}, err
@@ -86,7 +93,7 @@ func (s *FamilyService) CreateFamily(ctx context.Context, name string, studentID
 	if err != nil {
 		return domain.Family{}, err
 	}
-	if err := s.families.CreateFamily(ctx, family, s.sync().hook(eligible)); err != nil {
+	if err := s.families.CreateFamily(ctx, family, chainAccess(extra, s.sync().hook(eligible))); err != nil {
 		return domain.Family{}, err
 	}
 	return s.families.FamilyByID(ctx, family.ID())
@@ -111,6 +118,12 @@ func (s *FamilyService) RenameFamily(ctx context.Context, familyID, name string)
 // AddStudentsToFamily adds pupils without a family to an existing one, under
 // the same rules as CreateFamily.
 func (s *FamilyService) AddStudentsToFamily(ctx context.Context, familyID string, studentIDs []string) (domain.Family, error) {
+	return s.addStudentsToFamily(ctx, familyID, studentIDs, nil)
+}
+
+// addStudentsToFamily is AddStudentsToFamily with extra (nil: none) run
+// first in the write's transaction, as createFamily.
+func (s *FamilyService) addStudentsToFamily(ctx context.Context, familyID string, studentIDs []string, extra ports.FamilyAccessFunc) (domain.Family, error) {
 	family, err := s.GetFamily(ctx, familyID)
 	if err != nil {
 		return domain.Family{}, err
@@ -129,7 +142,7 @@ func (s *FamilyService) AddStudentsToFamily(ctx context.Context, familyID string
 	if err != nil {
 		return domain.Family{}, err
 	}
-	if err := s.families.AddStudentsToFamily(ctx, family.ID(), ids, s.sync().hook(eligible)); err != nil {
+	if err := s.families.AddStudentsToFamily(ctx, family.ID(), ids, chainAccess(extra, s.sync().hook(eligible))); err != nil {
 		return domain.Family{}, err
 	}
 	return s.families.FamilyByID(ctx, family.ID())

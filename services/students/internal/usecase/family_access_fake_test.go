@@ -21,7 +21,30 @@ type memAccess struct {
 	familyExists func(id string) bool
 	// onPupilCalls counts OnPupil transactions (proves the lock path is taken).
 	onPupilCalls int
+	// importLinks are the RecordImportLinks writes that committed.
+	importLinks []recordedImportLink
 }
+
+// recordedImportLink is one import link and the family it was written on.
+type recordedImportLink struct {
+	familyID string
+	link     ports.FamilyImportLink
+}
+
+// recordedLinks are the import links on a family, ids blanked (minted).
+func (m *memAccess) recordedLinks(familyID string) []ports.FamilyImportLink {
+	var out []ports.FamilyImportLink
+	for _, r := range m.importLinks {
+		if r.familyID == familyID {
+			l := r.link
+			l.ID = ""
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+func (m *memAccess) allRecordedLinks() []recordedImportLink { return m.importLinks }
 
 func (m *memAccess) OnPupil(ctx context.Context, studentID string, fn ports.FamilyAccessFunc) error {
 	m.onPupilCalls++
@@ -40,9 +63,10 @@ func (m *memAccess) OnFamily(ctx context.Context, familyID string, fn ports.Fami
 }
 
 func (m *memAccess) run(ctx context.Context, tx *memAccessTx, fn ports.FamilyAccessFunc) error {
-	saved := maps.Clone(m.links.links)
+	saved, savedImports := maps.Clone(m.links.links), len(m.importLinks)
 	if err := fn(ctx, tx); err != nil {
 		m.links.links = saved
+		m.importLinks = m.importLinks[:savedImports]
 		return err
 	}
 	return nil
@@ -150,4 +174,17 @@ func (t *memAccessTx) DetachAccount(_ context.Context, guardianUserID string) (i
 		t.m.links.links[detached.ID()] = detached
 	}
 	return n, nil
+}
+
+func (t *memAccessTx) RecordImportLinks(_ context.Context, links []ports.FamilyImportLink) error {
+	if t.familyID == "" {
+		return glerrors.New(glerrors.KindInternal, "an import link outside a family")
+	}
+	for _, l := range links {
+		if !t.inScope(l.StudentID) {
+			return glerrors.New(glerrors.KindInternal, "an import link outside the family")
+		}
+		t.m.importLinks = append(t.m.importLinks, recordedImportLink{familyID: t.familyID, link: l})
+	}
+	return nil
 }
