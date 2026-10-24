@@ -102,3 +102,17 @@ func undoFamiliesFlags() map[string]bool {
 	flags["module_families"] = true
 	return flags
 }
+
+// Security C1: the undo has its own small per-principal budget (behind Cloud
+// Run every request comes from one front end, so per IP would be per school).
+func TestUndoImportFamiliesIsRateLimitedPerPrincipal(t *testing.T) {
+	gw := newTestGateway(t, undoFamiliesFlags())
+	for i := range importFamiliesUndoBurst {
+		if res := doGateway(t, gw, http.MethodPost, undoImportFamilies, "family-importer", ""); res.StatusCode != http.StatusOK {
+			t.Fatalf("undo %d: status %d", i+1, res.StatusCode)
+		}
+	}
+	res := doGateway(t, gw, http.MethodPost, undoImportFamilies, "family-importer", "")
+	assert.Equal(t, http.StatusTooManyRequests, res.StatusCode)
+	assert.NotEmpty(t, res.Header.Get("Retry-After"))
+}

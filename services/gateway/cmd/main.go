@@ -581,9 +581,13 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 	// membership write (ADR 0041): the import's modules plus module_families
 	// (404 before auth), and both students:import and guardians:write (it
 	// takes pupils out of families, which is handing out access).
+	// It has its own small per-principal budget (security C1): each call
+	// rewrites families, and per IP would be one budget for the whole school
+	// behind Cloud Run.
+	undoFamiliesLimiter := middleware.NewRateLimiter(importFamiliesUndoBurst, importFamiliesUndoRefillPerSec, time.Now)
 	mux.Handle("POST /api/v1/imports/students/{batchId}/families/undo",
 		guard.Protect("families", studentImport(middleware.RequirePermission("guardians:write")(
-			http.HandlerFunc(studentImportH.UndoFamilies)))))
+			undoFamiliesLimiter.PerPrincipalMiddleware(http.HandlerFunc(studentImportH.UndoFamilies))))))
 
 	// M14 teachers (staff roster + who teaches what): the same config service
 	// answers these, but they are a MODULE of their own now, so they carry their
@@ -1279,6 +1283,13 @@ func newMux(iamHealth *client.IAMClient, authClient *client.AuthClient, students
 // handful in a burst (a month and its arrears, a retry), then about one every
 // six minutes. Finance holds the real ceiling (three pending per child); this
 // only stops a loop from filling the bucket.
+// The undo of an import's families is idempotent and an office does it once
+// or twice per file: five in a row, then one a minute, only stops a loop.
+const (
+	importFamiliesUndoBurst        = 5
+	importFamiliesUndoRefillPerSec = 1.0 / 60
+)
+
 const (
 	voucherUploadBurst        = 10
 	voucherUploadRefillPerSec = 1.0 / 360
