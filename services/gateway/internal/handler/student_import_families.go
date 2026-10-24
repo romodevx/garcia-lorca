@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"time"
 
 	connect "connectrpc.com/connect"
 
@@ -29,6 +30,16 @@ type ImportFamilies interface {
 const (
 	permGuardiansWrite = "guardians:write"
 	permStudentsRead   = "students:read"
+)
+
+// The families build's slice of the commit route's time (TL1). When it will
+// run, the writes end familiesBudget before the answer margin, so a large
+// file cannot eat the build's turn; the build and the suggestion count then
+// run until the margin. With less than familiesMinBudget left the build is
+// not started (built:false, everything stays a suggestion).
+const (
+	familiesBudget    = 20 * time.Second
+	familiesMinBudget = 5 * time.Second
 )
 
 // importFamilies is the commit's `families` object.
@@ -57,12 +68,32 @@ type importFamiliesUndo struct {
 	KeptWithAccess int `json:"keptWithAccess"`
 }
 
-// buildFamilies builds the batch's families for who, or answers nil when the
-// module is off or who may not write family membership. ctx is the commit's
-// detached context.
+// buildsFamilies says whether this commit builds families: the module is on
+// and who may write family membership.
+func (h *StudentImportHandler) buildsFamilies(ctx context.Context, who middleware.Principal) bool {
+	return h.familiesOn(ctx) && middleware.HasPermission(who, permGuardiansWrite)
+}
+
+// writesEnd is when the commit's writes must stop: answerBy, less the
+// families' slice when they will be built. The pupils come first: a budget too
+// short for both keeps the whole of it for the writes, and the build then
+// finds less than its floor and is skipped.
+func (h *StudentImportHandler) writesEnd(answerBy time.Time, buildsFamilies bool) time.Time {
+	if !buildsFamilies {
+		return answerBy
+	}
+	if end := answerBy.Add(-familiesBudget); end.After(time.Now()) {
+		return end
+	}
+	return answerBy
+}
+
+// buildFamilies builds the batch's families for who. ctx is detached from
+// the request and ends at the route's answer margin.
 func (h *StudentImportHandler) buildFamilies(ctx context.Context, who middleware.Principal, batch string) *importFamilies {
-	if !h.familiesOn(ctx) || !middleware.HasPermission(who, permGuardiansWrite) {
-		return nil
+	if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < familiesMinBudget {
+		slog.WarnContext(ctx, "student import: no time left to build families", "batch", batch)
+		return &importFamilies{Created: []importFamily{}, Joined: []importFamily{}}
 	}
 	built, err := h.d.Families.BuildFamiliesFromImport(ctx, batch)
 	switch {
@@ -79,13 +110,32 @@ func (h *StudentImportHandler) buildFamilies(ctx context.Context, who middleware
 		Joined:  toImportFamilies(built.Joined, readsPupils),
 		Skipped: built.Skipped,
 	}
-	if suggestions, err := h.d.Families.SuggestFamilies(ctx); err == nil {
-		n := len(suggestions)
-		out.ToReview = &n
-	} else {
-		slog.WarnContext(ctx, "student import: families to review not counted", "batch", batch, "code", connect.CodeOf(err).String())
+	if readsPupils {
+		out.ToReview = h.countToReview(ctx, batch)
 	}
 	return out
+}
+
+// countToReview counts the suggestions left after the build; nil when they
+// could not be read.
+func (h *StudentImportHandler) countToReview(ctx context.Context, batch string) *int {
+	suggestions, err := h.d.Families.SuggestFamilies(ctx)
+	if err != nil {
+		slog.WarnContext(ctx, "student import: families to review not counted", "batch", batch, "code", connect.CodeOf(err).String())
+		return nil
+	}
+	n := len(suggestions)
+	return &n
+}
+
+type familyCounts struct{ created, joined, skipped int }
+
+// counts is what the audit line records (zero when nothing was built).
+func (f *importFamilies) counts() familyCounts {
+	if f == nil {
+		return familyCounts{}
+	}
+	return familyCounts{len(f.Created), len(f.Joined), f.Skipped}
 }
 
 func (h *StudentImportHandler) familiesOn(ctx context.Context) bool {
@@ -111,6 +161,10 @@ func (h *StudentImportHandler) UndoFamilies(w http.ResponseWriter, r *http.Reque
 	who, ok := middleware.PrincipalFrom(r.Context())
 	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if h.d.Families == nil {
+		http.NotFound(w, r)
 		return
 	}
 	batch, ok := pathUUID(w, r, "batchId")

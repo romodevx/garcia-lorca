@@ -39,7 +39,10 @@ const (
 	// studentImportWriteBudget is the import commit route's own write deadline
 	// (set per request; the server-wide writeTimeout is too short to re-plan and
 	// write 1,000 pupils, one transaction each). The detached commit ends a few
-	// seconds before it, so the office always gets the result it started.
+	// seconds before it, so the office always gets the result it started. When
+	// the commit also builds the batch's families (module_families), the writes
+	// stop handler.familiesBudget (20 s) earlier and the build gets that slice;
+	// with under familiesMinBudget (5 s) left it is skipped (built:false).
 	studentImportWriteBudget = 2 * time.Minute
 )
 

@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	connect "connectrpc.com/connect"
 	"github.com/stretchr/testify/assert"
@@ -45,12 +46,16 @@ type fakeImportFamilies struct {
 	suggestErr  error
 
 	builtBatches  []string
+	buildCtxErr   error
+	buildDeadline time.Time
 	undoneBatches []string
 	suggestCalls  int
 }
 
-func (f *fakeImportFamilies) BuildFamiliesFromImport(_ context.Context, batchID string) (client.FamilyImportBuild, error) {
+func (f *fakeImportFamilies) BuildFamiliesFromImport(ctx context.Context, batchID string) (client.FamilyImportBuild, error) {
 	f.builtBatches = append(f.builtBatches, batchID)
+	f.buildCtxErr = ctx.Err()
+	f.buildDeadline, _ = ctx.Deadline()
 	return f.build, f.buildErr
 }
 
@@ -194,7 +199,7 @@ func TestCommitWithoutGuardiansWriteBuildsNothing(t *testing.T) {
 // Names and pupils are reading the pupils: without students:read the answer
 // keeps only the ids, enough to count.
 func TestCommitFamiliesNeedStudentsReadForTheirNames(t *testing.T) {
-	families := &fakeImportFamilies{build: builtFamilies()}
+	families := &fakeImportFamilies{build: builtFamilies(), suggestions: twoSuggestions()}
 	f := newFamilyImportFixture(families, true)
 	importer := familyImportOwner()
 	importer.Permissions = []string{"students:import", "guardians:write"}
@@ -206,21 +211,22 @@ func TestCommitFamiliesNeedStudentsReadForTheirNames(t *testing.T) {
 	got := familiesOf(t, rec)
 	assert.Equal(t, []any{map[string]any{"id": importFamilyID}}, got["created"])
 	assert.Equal(t, []any{map[string]any{"id": importFamilyID2}}, got["joined"])
+	_, counted := got["toReview"]
+	assert.False(t, counted, "the suggestions are a students:read view")
+	assert.Zero(t, families.suggestCalls)
 }
 
-// A failed build never fails the import: built is false, what was built
-// before the failure is still reported, and students' words stay out of the
-// answer and the log.
+// A failed build never fails the import: built is false and, like the real
+// client on a transport error, nothing came back, so the lists are empty
+// (families may still exist: the screen offers the undo on any built:false).
+// students' words stay out of the answer and the log.
 func TestCommitSurvivesAFailedFamilyBuild(t *testing.T) {
 	var logs bytes.Buffer
 	prev := slog.Default()
 	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
 	t.Cleanup(func() { slog.SetDefault(prev) })
 
-	partial := builtFamilies()
-	partial.Joined = nil
 	families := &fakeImportFamilies{
-		build:       partial,
 		buildErr:    connect.NewError(connect.CodeFailedPrecondition, errors.New(studentsLeak)),
 		suggestions: twoSuggestions(),
 	}
@@ -230,7 +236,7 @@ func TestCommitSurvivesAFailedFamilyBuild(t *testing.T) {
 
 	got := familiesOf(t, rec)
 	assert.Equal(t, false, got["built"])
-	assert.Len(t, got["created"], 1)
+	assert.Equal(t, []any{}, got["created"])
 	assert.Equal(t, []any{}, got["joined"])
 	assert.Equal(t, float64(2), got["toReview"])
 	assert.NotContains(t, rec.Body.String(), studentsLeak)
@@ -370,4 +376,94 @@ func TestCommitReportsAnIncompleteFamilyBuild(t *testing.T) {
 	assert.Len(t, got["created"], 1)
 	assert.Len(t, got["joined"], 1)
 	assert.Equal(t, float64(2), got["skipped"])
+}
+
+// deadlineRoster records the deadline the writes ran under.
+type deadlineRoster struct {
+	fakeImportRoster
+	deadline time.Time
+}
+
+func (d *deadlineRoster) ImportStudents(ctx context.Context, rows []client.ImportRowInput, validate bool, batch string) ([]client.ImportRowResult, error) {
+	if !validate {
+		d.deadline, _ = ctx.Deadline()
+	}
+	return d.fakeImportRoster.ImportStudents(ctx, rows, validate, batch)
+}
+
+// TL1: the build has its own slice of the route's time. The writes end
+// familiesBudget before the answer margin so the build always gets its turn,
+// and it runs detached: a closed tab does not stop it.
+func TestCommitGivesTheFamilyBuildItsOwnTimeSlice(t *testing.T) {
+	families := &fakeImportFamilies{build: builtFamilies()}
+	f := newFamilyImportFixture(families, true)
+	roster := &deadlineRoster{}
+	f.h.d.Roster = roster
+	req := importRequest{FileBase64: importFile(t, pupil("Primaria", "A", "Activo", "AAMI210219MJCLLRA0"))}
+	req.PlanHash = decodePreview(t, post(t, f.h.Preview, req)).PlanHash
+	raw, err := json.Marshal(req)
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(middleware.WithPrincipal(context.Background(), familyImportOwner()))
+	cancel() // the office closed the tab
+	rec := &deadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
+
+	f.h.Commit(rec, httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(raw)).WithContext(ctx))
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Len(t, families.builtBatches, 1, "the build is detached from the request")
+	assert.NoError(t, families.buildCtxErr)
+	answerBy := rec.deadline.Add(-commitAnswerMargin)
+	assert.False(t, families.buildDeadline.IsZero())
+	assert.False(t, families.buildDeadline.After(answerBy), "build deadline %s past the answer margin", rec.deadline.Sub(families.buildDeadline))
+	assert.False(t, roster.deadline.After(answerBy.Add(-familiesBudget)),
+		"writes end %s before the route deadline, want at least margin+familiesBudget", rec.deadline.Sub(roster.deadline))
+}
+
+// With less than familiesMinBudget left for the build it is not started: the
+// import answers built:false and the groups stay suggestions.
+func TestCommitSkipsTheFamilyBuildWithoutTimeLeft(t *testing.T) {
+	families := &fakeImportFamilies{build: builtFamilies(), suggestions: twoSuggestions()}
+	f := newFamilyImportFixture(families, true)
+	f.h.d.WriteBudget = commitAnswerMargin + familiesMinBudget/2
+
+	got := familiesOf(t, commitAs(t, f, familyImportOwner()))
+
+	assert.Empty(t, families.builtBatches)
+	assert.Equal(t, false, got["built"])
+	assert.Equal(t, []any{}, got["created"])
+	assert.Equal(t, []any{}, got["joined"])
+}
+
+// L2: the audit line counts what the build did.
+func TestCommitLogLineCountsTheFamilies(t *testing.T) {
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	f := newFamilyImportFixture(&fakeImportFamilies{build: builtFamilies()}, true)
+
+	commitAs(t, f, familyImportOwner())
+
+	line := ""
+	for _, l := range strings.Split(logs.String(), "\n") {
+		if strings.Contains(l, "student import committed") {
+			line = l
+		}
+	}
+	assert.Contains(t, line, "families_created=1")
+	assert.Contains(t, line, "families_joined=1")
+	assert.Contains(t, line, "families_skipped=2")
+}
+
+func TestUndoFamiliesNotWiredIsNotFound(t *testing.T) {
+	f := newImportFixture()
+	owner := familyImportOwner()
+	r := httptest.NewRequest(http.MethodPost, "/", nil)
+	r.SetPathValue("batchId", importBatchID)
+	r = r.WithContext(middleware.WithPrincipal(r.Context(), owner))
+	rec := httptest.NewRecorder()
+
+	f.h.UndoFamilies(rec, r)
+
+	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
